@@ -129,6 +129,11 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void CloseEditorButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel?.CloseEditor();
+    }
+
     private async Task<bool> ConfirmDeleteAsync(string summary)
     {
         var dialog = CreateDialog("Delete clips?", $"{summary}\n\nThis permanently deletes the selected files.", true);

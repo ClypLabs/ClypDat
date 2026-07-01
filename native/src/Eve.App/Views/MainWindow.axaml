@@ -22,25 +22,12 @@
     <Style Selector="Button.deleteButton:pointerover">
       <Setter Property="Background" Value="#E16B6D" />
     </Style>
-    <Style Selector="CheckBox.clipCheck">
-      <Setter Property="Width" Value="32" />
-      <Setter Property="Height" Value="32" />
-      <Setter Property="Padding" Value="0" />
-    </Style>
-    <Style Selector="CheckBox.clipCheck /template/ Border#NormalRectangle">
-      <Setter Property="Width" Value="24" />
-      <Setter Property="Height" Value="24" />
-      <Setter Property="CornerRadius" Value="3" />
-      <Setter Property="BorderBrush" Value="#8FA0B1" />
-      <Setter Property="BorderThickness" Value="2" />
-      <Setter Property="Background" Value="#17222C" />
-    </Style>
-    <Style Selector="CheckBox.clipCheck:checked /template/ Border#NormalRectangle">
-      <Setter Property="Background" Value="#22CFC3" />
-      <Setter Property="BorderBrush" Value="#22CFC3" />
-    </Style>
-    <Style Selector="CheckBox.clipCheck:checked /template/ Path#CheckGlyph">
-      <Setter Property="Fill" Value="#10212A" />
+    <Style Selector="Button.closeEditor">
+      <Setter Property="Background" Value="#1D2A36" />
+      <Setter Property="Foreground" Value="#D8E4F2" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="Padding" Value="12,8" />
     </Style>
   </Window.Styles>
   <Grid RowDefinitions="48,*">
@@ -56,7 +43,7 @@
           <Button Content="Clip" IsEnabled="{Binding IsReplayRecording}" />
           <TextBlock Text="Ctrl+Shift+F9" Foreground="#93A6B8" FontWeight="Bold" VerticalAlignment="Center" />
           <Border Width="1" Height="20" Background="#2A3640" />
-          <TextBlock Text="{Binding ActiveGame}" Foreground="#BDD4EE" VerticalAlignment="Center" />
+          <TextBlock Text="{Binding ActiveGame}" Foreground="#BDD4EE" VerticalAlignment="Center" IsVisible="{Binding ShowLibraryStatus}" />
           <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding HasSelection}" />
           <TextBlock Text="{Binding SelectionSummary}"
                      Foreground="#D7E2EF"
@@ -68,13 +55,26 @@
                   Classes="deleteButton"
                   Click="DeleteSelectedButton_OnClick"
                   IsVisible="{Binding HasSelection}" />
+          <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" />
+          <TextBlock Text="{Binding SelectedCreated}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" />
+          <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" />
+          <TextBlock Text="{Binding SelectedQuality}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" />
+          <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" />
+          <TextBlock Text="{Binding SelectedSize}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" />
+          <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" />
+          <TextBlock Text="{Binding SelectedVideoPath}" Foreground="#BDD4EE" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" />
         </StackPanel>
 
-        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" IsVisible="{Binding HasNoSelection}">
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" IsVisible="{Binding ShowLibraryActions}">
           <Button Content="Folder" Click="FolderButton_OnClick" />
           <Button Content="Open" Click="OpenButton_OnClick" />
           <Button Content="Refresh" Click="RefreshButton_OnClick" />
         </StackPanel>
+        <Button Grid.Column="2"
+                Content="X"
+                Classes="closeEditor"
+                Click="CloseEditorButton_OnClick"
+                IsVisible="{Binding IsEditorVisible}" />
       </Grid>
     </Border>
 
@@ -100,7 +100,7 @@
               <DataTemplate>
                 <StackPanel Margin="0,0,0,24">
                   <StackPanel Orientation="Horizontal" Spacing="10" Margin="4,0,0,12">
-                    <CheckBox Classes="clipCheck" IsChecked="{Binding IsSelected}" Click="GroupCheckBox_OnClick" Margin="0,0,6,0" />
+                    <CheckBox IsChecked="{Binding IsSelected}" Click="GroupCheckBox_OnClick" Margin="0,0,6,0" />
                     <TextBlock Text="{Binding Label}"
                                Foreground="#B8C7D8"
                                FontSize="14"
@@ -141,7 +141,6 @@
                                 <CheckBox HorizontalAlignment="Left"
                                           VerticalAlignment="Top"
                                           Margin="14"
-                                          Classes="clipCheck"
                                           IsChecked="{Binding IsSelected}"
                                           IsVisible="{Binding IsCheckVisible}"
                                           Click="ClipCheckBox_OnClick" />
@@ -185,19 +184,31 @@
           <Image Source="{Binding SelectedThumbnail}" Stretch="Uniform" />
         </Border>
         <Border Grid.Column="1" Background="#101820" BorderBrush="#1F2B34" BorderThickness="1,0,0,0">
-          <StackPanel Margin="20" Spacing="12">
+          <StackPanel Margin="20" Spacing="14">
             <TextBlock Text="CLIP DETAILS" Foreground="#C4D9F2" FontSize="13" FontWeight="Bold" />
+            <TextBlock Text="Title" Foreground="#93A6B8" FontSize="12" />
             <TextBlock Text="{Binding SelectedVideoName}" Foreground="#EDF4FB" FontSize="14" FontWeight="Bold" TextWrapping="Wrap" />
-            <TextBlock Text="{Binding SelectedMetadata}" Foreground="#93A6B8" FontSize="12" />
-            <TextBlock Text="{Binding SelectedVideoPath}" Foreground="#647181" FontSize="11" TextWrapping="Wrap" />
+            <TextBlock Text="Description" Foreground="#93A6B8" FontSize="12" />
+            <Border MinHeight="70" Background="#0D151C" CornerRadius="4" Padding="10">
+              <TextBlock Text="Type description here" Foreground="#647181" FontSize="12" />
+            </Border>
+            <Border Height="1" Background="#22303A" Margin="0,10,0,0" />
           </StackPanel>
         </Border>
       </Grid>
 
       <Border Grid.Row="1" Background="#141D24" BorderBrush="#22303A" BorderThickness="0,1,0,0">
-        <Grid ColumnDefinitions="150,*" Margin="8">
-          <StackPanel Spacing="6">
-            <TextBlock Text="0:00" Foreground="#8EB6D8" FontSize="12" />
+        <Grid RowDefinitions="42,*" ColumnDefinitions="150,*" Margin="8">
+          <StackPanel Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+            <Button Content="|&lt;" Width="34" />
+            <Button Content="&lt;" Width="34" />
+            <Button Content="▶" Width="38" />
+            <Button Content="&gt;" Width="34" />
+            <Button Content="&gt;|" Width="34" />
+          </StackPanel>
+
+          <StackPanel Grid.Row="1" Spacing="6">
+            <TextBlock Text="0:00 / 0:00" Foreground="#8EB6D8" FontSize="12" />
             <ItemsControl ItemsSource="{Binding TimelineTracks}">
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
@@ -209,7 +220,14 @@
             </ItemsControl>
           </StackPanel>
 
-          <ItemsControl Grid.Column="1" ItemsSource="{Binding TimelineTracks}" Margin="8,20,0,0">
+          <Grid Grid.Row="0" Grid.Column="1" HorizontalAlignment="Right" Margin="0,0,0,6">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Content="Save Trim" Background="#5864E8" Foreground="#FFFFFF" FontWeight="Bold" Width="110" />
+              <Button Content="Cancel" Width="110" />
+            </StackPanel>
+          </Grid>
+
+          <ItemsControl Grid.Row="1" Grid.Column="1" ItemsSource="{Binding TimelineTracks}" Margin="8,20,0,0">
             <ItemsControl.ItemTemplate>
               <DataTemplate>
                 <Border Height="32" Margin="0,0,0,6" Background="{Binding Color}" CornerRadius="2" Opacity="0.78" />

@@ -17,6 +17,9 @@ public sealed class MainWindowViewModel : ViewModelBase
     private string _selectedThumbnailPath = string.Empty;
     private Avalonia.Media.Imaging.Bitmap? _selectedThumbnail;
     private string _selectedMetadata = string.Empty;
+    private string _selectedCreated = "Created: No clip loaded";
+    private string _selectedQuality = "Video Quality: Unknown";
+    private string _selectedSize = "Size: 0 B";
     private double _cardWidth = 368;
     private double _cardImageHeight = 207;
     private int _cardColumns = 3;
@@ -45,6 +48,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     public int SelectedCount => _selectedPaths.Count;
     public bool HasSelection => SelectedCount > 0;
     public bool HasNoSelection => !HasSelection;
+    public bool ShowLibraryActions => HasNoSelection && IsLibraryVisible;
+    public bool ShowLibraryStatus => IsLibraryVisible;
 
     public string SelectionSummary
     {
@@ -98,6 +103,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             if (!SetProperty(ref _isEditorVisible, value)) return;
             OnPropertyChanged(nameof(IsLibraryVisible));
+            OnPropertyChanged(nameof(ShowLibraryActions));
+            OnPropertyChanged(nameof(ShowLibraryStatus));
         }
     }
 
@@ -131,6 +138,24 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         get => _selectedMetadata;
         private set => SetProperty(ref _selectedMetadata, value);
+    }
+
+    public string SelectedCreated
+    {
+        get => _selectedCreated;
+        private set => SetProperty(ref _selectedCreated, value);
+    }
+
+    public string SelectedQuality
+    {
+        get => _selectedQuality;
+        private set => SetProperty(ref _selectedQuality, value);
+    }
+
+    public string SelectedSize
+    {
+        get => _selectedSize;
+        private set => SetProperty(ref _selectedSize, value);
     }
 
     public async Task LoadLibraryFolderAsync(string folderPath)
@@ -235,13 +260,23 @@ public sealed class MainWindowViewModel : ViewModelBase
         return selected.Length;
     }
 
+    public void CloseEditor()
+    {
+        IsEditorVisible = false;
+    }
+
     private void OpenMedia(MediaFileInfo media)
     {
         SelectedVideoName = media.Name;
         SelectedVideoPath = media.Path;
         SelectedThumbnailPath = media.ThumbnailPath;
         SelectedThumbnail = LoadBitmap(media.ThumbnailPath);
-        SelectedMetadata = $"{media.Width}x{media.Height}, {media.Fps:0.#} FPS - {FormatBytes(media.SizeBytes)}";
+        SelectedCreated = $"Created: {media.CreatedAt.ToLocalTime():d MMM yyyy, H:mm}";
+        SelectedQuality = media.Width > 0 && media.Height > 0
+            ? $"Video Quality: {media.Width}x{media.Height}, {media.Fps:0.#} FPS"
+            : "Video Quality: Unknown";
+        SelectedSize = $"Size: {FormatBytes(media.SizeBytes)}";
+        SelectedMetadata = $"{SelectedQuality} - {SelectedSize}";
         TimelineTracks.Clear();
 
         var hasVideo = false;
@@ -296,6 +331,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(SelectedCount));
         OnPropertyChanged(nameof(HasSelection));
         OnPropertyChanged(nameof(HasNoSelection));
+        OnPropertyChanged(nameof(ShowLibraryActions));
         OnPropertyChanged(nameof(SelectionSummary));
     }
 
