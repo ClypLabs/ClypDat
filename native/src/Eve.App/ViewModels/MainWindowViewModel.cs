@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using System.Windows.Input;
 using Eve.Core.Clips;
 using Eve.Core.Settings;
 
@@ -8,7 +7,6 @@ namespace Eve.App.ViewModels;
 public sealed class MainWindowViewModel : ViewModelBase
 {
     private bool _isReplayRecording;
-    private bool _isEditorMode;
     private string _recorderStatus = "Replay Off";
     private string _activeGame = "No game detected";
 
@@ -16,12 +14,10 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         Settings = new AppSettings();
         Clips = new ObservableCollection<ClipItem>();
-        ToggleEditorModeCommand = new RelayCommand(ToggleEditorMode);
     }
 
     public AppSettings Settings { get; }
     public ObservableCollection<ClipItem> Clips { get; }
-    public ICommand ToggleEditorModeCommand { get; }
 
     public bool IsReplayRecording
     {
@@ -43,25 +39,5 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         get => _activeGame;
         set => SetProperty(ref _activeGame, value);
-    }
-
-    public bool IsEditorMode
-    {
-        get => _isEditorMode;
-        set
-        {
-            if (!SetProperty(ref _isEditorMode, value)) return;
-            OnPropertyChanged(nameof(IsLibraryMode));
-            OnPropertyChanged(nameof(EditorModeButtonText));
-        }
-    }
-
-    public bool IsLibraryMode => !IsEditorMode;
-
-    public string EditorModeButtonText => IsEditorMode ? "Library" : "Editor";
-
-    private void ToggleEditorMode()
-    {
-        IsEditorMode = !IsEditorMode;
     }
 }
