@@ -76,7 +76,7 @@
                   <ItemsControl ItemsSource="{Binding Clips}">
                     <ItemsControl.ItemsPanel>
                       <ItemsPanelTemplate>
-                        <WrapPanel />
+                        <UniformGrid Columns="3" />
                       </ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
