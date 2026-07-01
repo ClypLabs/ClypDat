@@ -1,6 +1,13 @@
 # Dependencies
 node_modules/
 
+# .NET
+bin/
+obj/
+TestResults/
+*.user
+*.suo
+
 # Build output
 dist/
 dist-portable/
