@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using Eve.Core.Clips;
 using Eve.Core.Settings;
 
 namespace Eve.App.ViewModels;
@@ -21,11 +20,21 @@ public sealed class MainWindowViewModel : ViewModelBase
     public MainWindowViewModel()
     {
         Settings = new AppSettings();
-        Clips = new ObservableCollection<ClipItem>();
+        Clips = new ObservableCollection<ClipCardViewModel>();
     }
 
     public AppSettings Settings { get; }
-    public ObservableCollection<ClipItem> Clips { get; }
+    public ObservableCollection<ClipCardViewModel> Clips { get; }
+
+    public string LibraryHeaderDate => Clips.Count > 0
+        ? Clips[0].CreatedAt.ToString("ddd, MMM d").ToUpperInvariant()
+        : "LIBRARY";
+
+    public string LibraryHeaderGame => Clips.Count > 0 ? "Videos" : "No folder selected";
+
+    public string LibraryFolderDisplay => string.IsNullOrWhiteSpace(Settings.LibraryFolder)
+        ? "Choose a folder"
+        : Settings.LibraryFolder;
 
     public bool IsReplayRecording
     {
@@ -94,13 +103,17 @@ public sealed class MainWindowViewModel : ViewModelBase
                      .OrderByDescending(File.GetCreationTimeUtc))
         {
             var info = new FileInfo(file);
-            Clips.Add(new ClipItem(
+            Clips.Add(new ClipCardViewModel(
                 Path.GetFileNameWithoutExtension(file),
                 file,
                 info.CreationTimeUtc,
                 TimeSpan.Zero,
                 info.Length));
         }
+
+        OnPropertyChanged(nameof(LibraryHeaderDate));
+        OnPropertyChanged(nameof(LibraryHeaderGame));
+        OnPropertyChanged(nameof(LibraryFolderDisplay));
     }
 
     public void OpenVideoFile(string filePath)
