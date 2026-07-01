@@ -9,7 +9,8 @@
         MinWidth="920"
         MinHeight="620"
         Background="#0D1116"
-        Icon="/Assets/eve-icon.ico">
+        Icon="/Assets/eve-icon.ico"
+        SizeChanged="Window_OnSizeChanged">
   <Grid RowDefinitions="48,*">
     <Border Grid.Row="0" Background="#171F27" BorderBrush="#1E2A33" BorderThickness="0,0,0,1">
       <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,0" VerticalAlignment="Center">
@@ -37,117 +38,147 @@
     <Border Grid.Row="1" Background="#101820" IsVisible="{Binding IsLibraryVisible}">
       <DockPanel Margin="20,18">
         <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto">
-          <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center" IsVisible="{Binding HasNoSelection}">
             <TextBlock Text="{Binding LibraryHeaderDate}" Foreground="#C4D0DF" FontSize="15" FontWeight="Bold" />
             <TextBlock Text="{Binding LibraryHeaderGame}" Foreground="#647181" FontSize="15" FontWeight="Bold" />
           </StackPanel>
-          <TextBlock Grid.Column="1" Text="{Binding LibraryFolderDisplay}" Foreground="#647181" FontSize="12" VerticalAlignment="Center" />
+          <TextBlock Grid.Column="1"
+                     Text="{Binding LibraryLocationText}"
+                     Foreground="#647181"
+                     FontSize="12"
+                     VerticalAlignment="Center"
+                     IsVisible="{Binding HasNoSelection}" />
+
+          <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center" IsVisible="{Binding HasSelection}">
+            <TextBlock Text="{Binding SelectionSummary}" Foreground="#D7E2EF" FontSize="14" FontWeight="Bold" />
+          </StackPanel>
+          <Button Grid.Column="1"
+                  Content="Delete"
+                  Classes="danger"
+                  Click="DeleteSelectedButton_OnClick"
+                  IsVisible="{Binding HasSelection}" />
         </Grid>
 
-        <ListBox ItemsSource="{Binding Clips}"
-                 Margin="-4,14,-4,0"
-                 Padding="0"
-                 Background="Transparent"
-                 BorderThickness="0">
-          <ListBox.ItemsPanel>
-            <ItemsPanelTemplate>
-              <WrapPanel />
-            </ItemsPanelTemplate>
-          </ListBox.ItemsPanel>
-          <ListBox.ItemTemplate>
-            <DataTemplate>
-              <Border Width="368"
-                      Margin="4,4,14,26"
-                      Background="#24303A"
-                      CornerRadius="4"
-                      ClipToBounds="True">
-                <Grid RowDefinitions="207,118">
-                  <Border Background="#16202A">
-                    <Grid>
-                      <Border Background="#1A2630">
-                        <TextBlock Text="{Binding Name}"
-                                   Foreground="#6F7D8B"
-                                   FontSize="18"
-                                   FontWeight="Bold"
-                                   TextWrapping="Wrap"
-                                   HorizontalAlignment="Center"
-                                   VerticalAlignment="Center"
-                                   Margin="26"
-                                   TextAlignment="Center" />
-                      </Border>
+        <ScrollViewer Margin="-4,14,-4,0">
+          <ItemsControl ItemsSource="{Binding ClipGroups}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <StackPanel Margin="0,0,0,24">
+                  <StackPanel Orientation="Horizontal" Spacing="10" Margin="4,0,0,12">
+                    <CheckBox IsChecked="{Binding IsSelected}" Click="GroupCheckBox_OnClick" />
+                    <TextBlock Text="{Binding Label}"
+                               Foreground="#B8C7D8"
+                               FontSize="14"
+                               FontWeight="Bold"
+                               VerticalAlignment="Center" />
+                  </StackPanel>
 
-                      <Border HorizontalAlignment="Right"
-                              VerticalAlignment="Top"
-                              Margin="0,12,12,0"
-                              Padding="10,6"
-                              Background="#1A2530"
-                              CornerRadius="18">
-                        <TextBlock Text="{Binding DurationLabel}" Foreground="#D8E2EE" FontSize="14" FontWeight="Bold" />
-                      </Border>
+                  <ItemsControl ItemsSource="{Binding Clips}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <WrapPanel />
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Border Width="{Binding $parent[Window].DataContext.CardWidth}"
+                                Margin="4,4,20,24"
+                                Background="#24303A"
+                                CornerRadius="4"
+                                ClipToBounds="True"
+                                PointerPressed="ClipCard_OnPointerPressed"
+                                PointerEntered="ClipCard_OnPointerEntered"
+                                PointerExited="ClipCard_OnPointerExited">
+                          <Grid RowDefinitions="*,104">
+                            <Border Background="#16202A" MinHeight="180">
+                              <Grid>
+                                <Image Source="{Binding PreviewImagePath}" Stretch="UniformToFill" />
+                                <Border HorizontalAlignment="Right"
+                                        VerticalAlignment="Top"
+                                        Margin="0,12,12,0"
+                                        Padding="10,6"
+                                        Background="#1A2530"
+                                        CornerRadius="18">
+                                  <TextBlock Text="{Binding DurationLabel}" Foreground="#D8E2EE" FontSize="14" FontWeight="Bold" />
+                                </Border>
+                                <CheckBox HorizontalAlignment="Left"
+                                          VerticalAlignment="Top"
+                                          Margin="12"
+                                          IsChecked="{Binding IsSelected}"
+                                          IsVisible="{Binding IsCheckVisible}"
+                                          Click="ClipCheckBox_OnClick" />
+                              </Grid>
+                            </Border>
 
-                      <Border HorizontalAlignment="Right"
-                              VerticalAlignment="Bottom"
-                              Margin="0,0,12,12"
-                              Width="34"
-                              Height="34"
-                              Background="#253341"
-                              CornerRadius="17">
-                        <TextBlock Text="*" Foreground="#C7D3E1" FontSize="20" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                      </Border>
-                    </Grid>
-                  </Border>
-
-                  <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="16,14">
-                    <StackPanel Spacing="6">
-                      <TextBlock Text="{Binding GameLabel}"
-                                 Foreground="#8C98A7"
-                                 FontSize="13"
-                                 FontWeight="Bold" />
-                      <TextBlock Text="{Binding Name}"
-                                 Foreground="#D2DEEC"
-                                 FontSize="15"
-                                 FontWeight="Bold"
-                                 TextTrimming="CharacterEllipsis" />
-                      <StackPanel Orientation="Horizontal" Spacing="6">
-                        <TextBlock Text="TIME" Foreground="#8C98A7" FontSize="12" FontWeight="Bold" />
-                        <TextBlock Text="{Binding DateLabel}"
-                                   Foreground="#8C98A7"
-                                   FontSize="12"
-                                   FontWeight="Bold" />
-                      </StackPanel>
-                    </StackPanel>
-
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom">
-                      <Button Content="Share" Width="58" Height="44" FontSize="12" />
-                      <Button Content="..." Width="48" Height="44" FontSize="16" />
-                    </StackPanel>
-                  </Grid>
-                </Grid>
-              </Border>
-            </DataTemplate>
-          </ListBox.ItemTemplate>
-        </ListBox>
+                            <StackPanel Grid.Row="1" Spacing="7" Margin="16,14">
+                              <TextBlock Text="{Binding GameLabel}"
+                                         Foreground="#8C98A7"
+                                         FontSize="13"
+                                         FontWeight="Bold" />
+                              <TextBlock Text="{Binding Name}"
+                                         Foreground="#D2DEEC"
+                                         FontSize="15"
+                                         FontWeight="Bold"
+                                         TextTrimming="CharacterEllipsis" />
+                              <StackPanel Orientation="Horizontal" Spacing="6">
+                                <TextBlock Text="TIME" Foreground="#8C98A7" FontSize="12" FontWeight="Bold" />
+                                <TextBlock Text="{Binding DateLabel}"
+                                           Foreground="#8C98A7"
+                                           FontSize="12"
+                                           FontWeight="Bold" />
+                              </StackPanel>
+                            </StackPanel>
+                          </Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
       </DockPanel>
     </Border>
 
     <Grid Grid.Row="1" RowDefinitions="*,220" IsVisible="{Binding IsEditorVisible}">
-      <Border Background="#0E141A">
-        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
-          <TextBlock Text="{Binding SelectedVideoName}"
-                     Foreground="#EDF4FB"
-                     FontSize="18"
-                     FontWeight="Bold"
-                     HorizontalAlignment="Center" />
-          <TextBlock Text="{Binding SelectedVideoPath}"
-                     Foreground="#93A6B8"
-                     HorizontalAlignment="Center" />
-        </StackPanel>
-      </Border>
+      <Grid Background="#0E141A" ColumnDefinitions="*,300">
+        <Border Background="#05080B">
+          <Image Source="{Binding SelectedThumbnailPath}" Stretch="Uniform" />
+        </Border>
+        <Border Grid.Column="1" Background="#101820" BorderBrush="#1F2B34" BorderThickness="1,0,0,0">
+          <StackPanel Margin="20" Spacing="12">
+            <TextBlock Text="CLIP DETAILS" Foreground="#C4D9F2" FontSize="13" FontWeight="Bold" />
+            <TextBlock Text="{Binding SelectedVideoName}" Foreground="#EDF4FB" FontSize="14" FontWeight="Bold" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding SelectedMetadata}" Foreground="#93A6B8" FontSize="12" />
+            <TextBlock Text="{Binding SelectedVideoPath}" Foreground="#647181" FontSize="11" TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+      </Grid>
+
       <Border Grid.Row="1" Background="#141D24" BorderBrush="#22303A" BorderThickness="0,1,0,0">
-        <TextBlock Text="Timeline"
-                   Foreground="#9AAABB"
-                   HorizontalAlignment="Center"
-                   VerticalAlignment="Center" />
+        <Grid ColumnDefinitions="150,*" Margin="8">
+          <StackPanel Spacing="6">
+            <TextBlock Text="0:00" Foreground="#8EB6D8" FontSize="12" />
+            <ItemsControl ItemsSource="{Binding TimelineTracks}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border Height="32" Margin="0,0,0,6" Background="#263442" CornerRadius="3">
+                    <TextBlock Text="{Binding Label}" Foreground="#D1DEEC" FontSize="12" Margin="8,0" VerticalAlignment="Center" />
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+
+          <ItemsControl Grid.Column="1" ItemsSource="{Binding TimelineTracks}" Margin="8,20,0,0">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border Height="32" Margin="0,0,0,6" Background="{Binding Color}" CornerRadius="2" Opacity="0.78" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </Grid>
       </Border>
     </Grid>
   </Grid>
