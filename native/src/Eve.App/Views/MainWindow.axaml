@@ -23,8 +23,9 @@
       <Setter Property="Background" Value="#E16B6D" />
     </Style>
     <Style Selector="CheckBox.clipCheck">
-      <Setter Property="Width" Value="28" />
-      <Setter Property="Height" Value="28" />
+      <Setter Property="Width" Value="32" />
+      <Setter Property="Height" Value="32" />
+      <Setter Property="Padding" Value="0" />
     </Style>
     <Style Selector="CheckBox.clipCheck /template/ Border#NormalRectangle">
       <Setter Property="Width" Value="24" />
@@ -56,9 +57,20 @@
           <TextBlock Text="Ctrl+Shift+F9" Foreground="#93A6B8" FontWeight="Bold" VerticalAlignment="Center" />
           <Border Width="1" Height="20" Background="#2A3640" />
           <TextBlock Text="{Binding ActiveGame}" Foreground="#BDD4EE" VerticalAlignment="Center" />
+          <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding HasSelection}" />
+          <TextBlock Text="{Binding SelectionSummary}"
+                     Foreground="#D7E2EF"
+                     FontSize="14"
+                     FontWeight="Bold"
+                     VerticalAlignment="Center"
+                     IsVisible="{Binding HasSelection}" />
+          <Button Content="Delete"
+                  Classes="deleteButton"
+                  Click="DeleteSelectedButton_OnClick"
+                  IsVisible="{Binding HasSelection}" />
         </StackPanel>
 
-        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" IsVisible="{Binding HasNoSelection}">
           <Button Content="Folder" Click="FolderButton_OnClick" />
           <Button Content="Open" Click="OpenButton_OnClick" />
           <Button Content="Refresh" Click="RefreshButton_OnClick" />
@@ -80,14 +92,6 @@
                      VerticalAlignment="Center"
                      IsVisible="{Binding HasNoSelection}" />
 
-          <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center" IsVisible="{Binding HasSelection}">
-            <TextBlock Text="{Binding SelectionSummary}" Foreground="#D7E2EF" FontSize="14" FontWeight="Bold" />
-          </StackPanel>
-          <Button Grid.Column="1"
-                  Content="Delete"
-                  Classes="deleteButton"
-                  Click="DeleteSelectedButton_OnClick"
-                  IsVisible="{Binding HasSelection}" />
         </Grid>
 
         <ScrollViewer Margin="-4,14,-4,0">
@@ -96,7 +100,7 @@
               <DataTemplate>
                 <StackPanel Margin="0,0,0,24">
                   <StackPanel Orientation="Horizontal" Spacing="10" Margin="4,0,0,12">
-                    <CheckBox Classes="clipCheck" IsChecked="{Binding IsSelected}" Click="GroupCheckBox_OnClick" />
+                    <CheckBox Classes="clipCheck" IsChecked="{Binding IsSelected}" Click="GroupCheckBox_OnClick" Margin="0,0,6,0" />
                     <TextBlock Text="{Binding Label}"
                                Foreground="#B8C7D8"
                                FontSize="14"
@@ -136,7 +140,7 @@
                                 </Border>
                                 <CheckBox HorizontalAlignment="Left"
                                           VerticalAlignment="Top"
-                                          Margin="12"
+                                          Margin="14"
                                           Classes="clipCheck"
                                           IsChecked="{Binding IsSelected}"
                                           IsVisible="{Binding IsCheckVisible}"
