@@ -1,5 +1,6 @@
 using Avalonia.Threading;
 using Avalonia.Media.Imaging;
+using Avalonia.Media;
 using Eve.App.Services;
 
 namespace Eve.App.ViewModels;
@@ -58,6 +59,8 @@ public sealed class ClipCardViewModel : ViewModelBase
         {
             if (!SetProperty(ref _isSelected, value)) return;
             OnPropertyChanged(nameof(IsCheckVisible));
+            OnPropertyChanged(nameof(SelectionBorderBrush));
+            OnPropertyChanged(nameof(SelectionBorderThickness));
         }
     }
 
@@ -72,6 +75,8 @@ public sealed class ClipCardViewModel : ViewModelBase
     }
 
     public bool IsCheckVisible => IsSelected || IsHovered;
+    public IBrush SelectionBorderBrush => IsSelected ? Brush.Parse("#22CFC3") : Brush.Parse("#24303A");
+    public Avalonia.Thickness SelectionBorderThickness => IsSelected ? new Avalonia.Thickness(2) : new Avalonia.Thickness(0);
 
     public async Task StartPreviewAsync()
     {
