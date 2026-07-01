@@ -190,7 +190,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         var contentWidth = Math.Max(320, availableWidth - 48);
         CardColumns = 3;
-        CardWidth = Math.Max(220, Math.Min(368, Math.Floor((contentWidth - 64) / 3)));
+        CardWidth = Math.Max(220, Math.Floor((contentWidth - 64) / 3));
         CardImageHeight = Math.Floor(CardWidth * 9 / 16);
     }
 
