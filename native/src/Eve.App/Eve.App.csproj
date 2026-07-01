@@ -15,4 +15,9 @@
     <ProjectReference Include="..\Eve.Core\Eve.Core.csproj" />
     <ProjectReference Include="..\Eve.Capture.Abstractions\Eve.Capture.Abstractions.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="..\..\..\assets\eve-icon*.png" Link="Assets\%(Filename)%(Extension)" />
+    <AvaloniaResource Include="..\..\..\assets\eve-icon.ico" Link="Assets\eve-icon.ico" />
+  </ItemGroup>
 </Project>
