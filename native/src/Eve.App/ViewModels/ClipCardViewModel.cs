@@ -1,4 +1,5 @@
 using Avalonia.Threading;
+using Avalonia.Media.Imaging;
 using Eve.App.Services;
 
 namespace Eve.App.ViewModels;
@@ -12,6 +13,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     private bool _isSelected;
     private bool _isHovered;
     private string _previewImagePath;
+    private Bitmap? _previewImage;
 
     public ClipCardViewModel(MediaFileInfo media, MediaProbeService mediaProbe)
     {
@@ -20,6 +22,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         _previewImagePath = media.ThumbnailPath;
         _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(420) };
         _previewTimer.Tick += (_, _) => AdvancePreview();
+        SetPreviewImage(_previewImagePath);
     }
 
     public MediaFileInfo Media { get; }
@@ -35,7 +38,17 @@ public sealed class ClipCardViewModel : ViewModelBase
     public string PreviewImagePath
     {
         get => _previewImagePath;
-        private set => SetProperty(ref _previewImagePath, value);
+        private set
+        {
+            if (!SetProperty(ref _previewImagePath, value)) return;
+            SetPreviewImage(value);
+        }
+    }
+
+    public Bitmap? PreviewImage
+    {
+        get => _previewImage;
+        private set => SetProperty(ref _previewImage, value);
     }
 
     public bool IsSelected
@@ -84,5 +97,19 @@ public sealed class ClipCardViewModel : ViewModelBase
         if (_previewFrames.Count == 0) return;
         _previewIndex = (_previewIndex + 1) % _previewFrames.Count;
         PreviewImagePath = _previewFrames[_previewIndex];
+    }
+
+    private void SetPreviewImage(string path)
+    {
+        try
+        {
+            PreviewImage = !string.IsNullOrWhiteSpace(path) && File.Exists(path)
+                ? new Bitmap(path)
+                : null;
+        }
+        catch
+        {
+            PreviewImage = null;
+        }
     }
 }

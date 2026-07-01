@@ -89,10 +89,10 @@
                                 PointerPressed="ClipCard_OnPointerPressed"
                                 PointerEntered="ClipCard_OnPointerEntered"
                                 PointerExited="ClipCard_OnPointerExited">
-                          <Grid RowDefinitions="*,104">
-                            <Border Background="#16202A" MinHeight="180">
+                          <Grid RowDefinitions="Auto,104">
+                            <Border Background="#16202A" Height="{Binding $parent[Window].DataContext.CardImageHeight}">
                               <Grid>
-                                <Image Source="{Binding PreviewImagePath}" Stretch="UniformToFill" />
+                                <Image Source="{Binding PreviewImage}" Stretch="UniformToFill" />
                                 <Border HorizontalAlignment="Right"
                                         VerticalAlignment="Top"
                                         Margin="0,12,12,0"
@@ -144,7 +144,7 @@
     <Grid Grid.Row="1" RowDefinitions="*,220" IsVisible="{Binding IsEditorVisible}">
       <Grid Background="#0E141A" ColumnDefinitions="*,300">
         <Border Background="#05080B">
-          <Image Source="{Binding SelectedThumbnailPath}" Stretch="Uniform" />
+          <Image Source="{Binding SelectedThumbnail}" Stretch="Uniform" />
         </Border>
         <Border Grid.Column="1" Background="#101820" BorderBrush="#1F2B34" BorderThickness="1,0,0,0">
           <StackPanel Margin="20" Spacing="12">

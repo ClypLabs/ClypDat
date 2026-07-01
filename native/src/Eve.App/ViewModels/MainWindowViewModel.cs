@@ -15,8 +15,10 @@ public sealed class MainWindowViewModel : ViewModelBase
     private string _selectedVideoName = "No video selected";
     private string _selectedVideoPath = string.Empty;
     private string _selectedThumbnailPath = string.Empty;
+    private Avalonia.Media.Imaging.Bitmap? _selectedThumbnail;
     private string _selectedMetadata = string.Empty;
     private double _cardWidth = 368;
+    private double _cardImageHeight = 207;
     private int _cardColumns = 3;
 
     public MainWindowViewModel()
@@ -119,6 +121,12 @@ public sealed class MainWindowViewModel : ViewModelBase
         private set => SetProperty(ref _selectedThumbnailPath, value);
     }
 
+    public Avalonia.Media.Imaging.Bitmap? SelectedThumbnail
+    {
+        get => _selectedThumbnail;
+        private set => SetProperty(ref _selectedThumbnail, value);
+    }
+
     public string SelectedMetadata
     {
         get => _selectedMetadata;
@@ -143,32 +151,20 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        var clips = new List<ClipCardViewModel>();
-        foreach (var file in _mediaProbe.EnumerateVideos(Settings.LibraryFolder))
-        {
-            try
+        var files = _mediaProbe.EnumerateVideos(Settings.LibraryFolder).ToArray();
+        var clips = new ClipCardViewModel?[files.Length];
+
+        await Parallel.ForEachAsync(
+            files.Select((path, index) => new { path, index }),
+            new ParallelOptions { MaxDegreeOfParallelism = 4 },
+            async (item, _) =>
             {
-                clips.Add(new ClipCardViewModel(await _mediaProbe.ProbeAsync(file), _mediaProbe));
-            }
-            catch
-            {
-                var info = new FileInfo(file);
-                var fallback = new MediaFileInfo(
-                    Path.GetFileNameWithoutExtension(file),
-                    file,
-                    info.CreationTimeUtc,
-                    TimeSpan.Zero,
-                    info.Length,
-                    string.Empty,
-                    Array.Empty<MediaTrackInfo>(),
-                    0,
-                    0,
-                    0);
-                clips.Add(new ClipCardViewModel(fallback, _mediaProbe));
-            }
-        }
+                clips[item.index] = await BuildClipAsync(item.path);
+            });
 
         foreach (var group in clips
+                     .Where(clip => clip is not null)
+                     .Cast<ClipCardViewModel>()
                      .GroupBy(clip => clip.CreatedAt.ToLocalTime().Date)
                      .OrderByDescending(group => group.Key))
         {
@@ -193,9 +189,15 @@ public sealed class MainWindowViewModel : ViewModelBase
     public void UpdateCardLayout(double availableWidth)
     {
         var contentWidth = Math.Max(320, availableWidth - 48);
-        var columns = contentWidth >= 1180 ? 3 : contentWidth >= 760 ? 2 : 1;
-        CardColumns = columns;
-        CardWidth = Math.Max(280, Math.Floor((contentWidth - ((columns - 1) * 24)) / columns));
+        CardColumns = 3;
+        CardWidth = Math.Max(220, Math.Min(368, Math.Floor((contentWidth - 64) / 3)));
+        CardImageHeight = Math.Floor(CardWidth * 9 / 16);
+    }
+
+    public double CardImageHeight
+    {
+        get => _cardImageHeight;
+        private set => SetProperty(ref _cardImageHeight, value);
     }
 
     public void SetClipSelected(ClipCardViewModel clip, bool selected)
@@ -238,6 +240,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         SelectedVideoName = media.Name;
         SelectedVideoPath = media.Path;
         SelectedThumbnailPath = media.ThumbnailPath;
+        SelectedThumbnail = LoadBitmap(media.ThumbnailPath);
         SelectedMetadata = $"{media.Width}x{media.Height}, {media.Fps:0.#} FPS - {FormatBytes(media.SizeBytes)}";
         TimelineTracks.Clear();
 
@@ -294,6 +297,44 @@ public sealed class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasSelection));
         OnPropertyChanged(nameof(HasNoSelection));
         OnPropertyChanged(nameof(SelectionSummary));
+    }
+
+    private async Task<ClipCardViewModel> BuildClipAsync(string file)
+    {
+        try
+        {
+            return new ClipCardViewModel(await _mediaProbe.ProbeAsync(file), _mediaProbe);
+        }
+        catch
+        {
+            var info = new FileInfo(file);
+            var fallback = new MediaFileInfo(
+                Path.GetFileNameWithoutExtension(file),
+                file,
+                info.CreationTimeUtc,
+                TimeSpan.Zero,
+                info.Length,
+                string.Empty,
+                Array.Empty<MediaTrackInfo>(),
+                0,
+                0,
+                0);
+            return new ClipCardViewModel(fallback, _mediaProbe);
+        }
+    }
+
+    private static Avalonia.Media.Imaging.Bitmap? LoadBitmap(string path)
+    {
+        try
+        {
+            return !string.IsNullOrWhiteSpace(path) && File.Exists(path)
+                ? new Avalonia.Media.Imaging.Bitmap(path)
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string FormatBytes(long bytes)
