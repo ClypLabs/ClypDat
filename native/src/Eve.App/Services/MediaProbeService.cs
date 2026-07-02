@@ -145,26 +145,27 @@ public sealed class MediaProbeService
         var folder = Path.Combine(_cacheFolder, $"{CacheKey(media.Path)}-frames");
         Directory.CreateDirectory(folder);
 
+        const int frameCount = 60;
         var existing = Directory.EnumerateFiles(folder, "*.jpg").OrderBy(path => path).ToArray();
-        if (existing.Length >= 6)
+        if (existing.Length >= frameCount)
         {
             return existing;
         }
 
         var duration = Math.Max(1, media.Duration.TotalSeconds);
-        for (var i = 0; i < 6; i++)
+        for (var i = 0; i < frameCount; i++)
         {
             var output = Path.Combine(folder, $"{i:D2}.jpg");
             if (File.Exists(output)) continue;
 
-            var seek = Math.Min(duration - 0.1, Math.Max(0, duration * (i + 1) / 7));
+            var seek = Math.Min(duration - 0.1, Math.Max(0, duration * i / frameCount));
             await RunProcessAsync("ffmpeg", new[]
             {
                 "-y",
                 "-ss", seek.ToString("0.###"),
                 "-i", media.Path,
                 "-frames:v", "1",
-                "-vf", "scale=640:-1",
+                "-vf", "scale=480:-1",
                 "-q:v", "5",
                 output
             });

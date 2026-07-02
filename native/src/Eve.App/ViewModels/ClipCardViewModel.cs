@@ -10,6 +10,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     private readonly MediaProbeService _mediaProbe;
     private readonly DispatcherTimer _previewTimer;
     private IReadOnlyList<string> _previewFrames = Array.Empty<string>();
+    private IReadOnlyList<Bitmap> _previewBitmaps = Array.Empty<Bitmap>();
     private int _previewIndex;
     private bool _isSelected;
     private bool _isHovered;
@@ -22,7 +23,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         _media = media;
         _mediaProbe = mediaProbe;
         _previewImagePath = media.ThumbnailPath;
-        _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(420) };
+        _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(17) };
         _previewTimer.Tick += (_, _) => AdvancePreview();
         SetPreviewImage(_previewImagePath);
     }
@@ -83,6 +84,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     {
         _media = media;
         _previewFrames = Array.Empty<string>();
+        _previewBitmaps = Array.Empty<Bitmap>();
         PreviewImagePath = media.ThumbnailPath;
         OnPropertyChanged(nameof(Media));
         OnPropertyChanged(nameof(Name));
@@ -98,11 +100,12 @@ public sealed class ClipCardViewModel : ViewModelBase
         if (_previewFrames.Count == 0)
         {
             _previewFrames = await _mediaProbe.EnsurePreviewFramesAsync(Media);
+            _previewBitmaps = LoadPreviewBitmaps(_previewFrames);
         }
 
-        if (_previewFrames.Count == 0) return;
+        if (_previewBitmaps.Count == 0) return;
         _previewIndex = 0;
-        PreviewImagePath = _previewFrames[_previewIndex];
+        PreviewImage = _previewBitmaps[_previewIndex];
         _previewTimer.Start();
     }
 
@@ -114,9 +117,27 @@ public sealed class ClipCardViewModel : ViewModelBase
 
     private void AdvancePreview()
     {
-        if (_previewFrames.Count == 0) return;
-        _previewIndex = (_previewIndex + 1) % _previewFrames.Count;
-        PreviewImagePath = _previewFrames[_previewIndex];
+        if (_previewBitmaps.Count == 0) return;
+        _previewIndex = (_previewIndex + 1) % _previewBitmaps.Count;
+        PreviewImage = _previewBitmaps[_previewIndex];
+    }
+
+    private static IReadOnlyList<Bitmap> LoadPreviewBitmaps(IReadOnlyList<string> framePaths)
+    {
+        var bitmaps = new List<Bitmap>(framePaths.Count);
+        foreach (var path in framePaths)
+        {
+            try
+            {
+                if (File.Exists(path)) bitmaps.Add(new Bitmap(path));
+            }
+            catch
+            {
+                // Skip corrupt preview frames.
+            }
+        }
+
+        return bitmaps;
     }
 
     private void SetPreviewImage(string path)

@@ -37,9 +37,10 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public MainWindowViewModel()
     {
-        Settings = new AppSettings();
+        Settings = AppSettingsStore.Load();
         ClipGroups = new ObservableCollection<ClipGroupViewModel>();
         TimelineTracks = new ObservableCollection<TrackLaneViewModel>();
+        _ = RefreshLibraryAsync();
     }
 
     public AppSettings Settings { get; }
@@ -264,8 +265,14 @@ public sealed class MainWindowViewModel : ViewModelBase
     public async Task LoadLibraryFolderAsync(string folderPath)
     {
         Settings.LibraryFolder = folderPath;
+        SaveSettings();
         await RefreshLibraryAsync();
         IsEditorVisible = false;
+    }
+
+    public void SaveSettings()
+    {
+        AppSettingsStore.Save(Settings);
     }
 
     public Task RefreshLibraryAsync()

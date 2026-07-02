@@ -24,6 +24,8 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         Opened += (_, _) => ViewModel?.UpdateCardLayout(Bounds.Width);
+        KeyDown += MainWindow_OnKeyDown;
+        Closing += (_, _) => ViewModel?.SaveSettings();
         Closed += (_, _) => _playback?.Dispose();
         _playbackTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _playbackTimer.Tick += (_, _) => SyncPlaybackPosition();
@@ -154,6 +156,37 @@ public sealed partial class MainWindow : Window
     {
         StopEditorPlayback();
         ViewModel?.CloseEditor();
+    }
+
+    private void MainWindow_OnKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (ViewModel is null ||
+            !ViewModel.IsEditorVisible ||
+            !ViewModel.Settings.EnableEditorKeyboardShortcuts ||
+            IsTypingInTextInput(e.Source))
+        {
+            return;
+        }
+
+        switch (e.Key)
+        {
+            case Key.Left:
+                ViewModel.SeekBySeconds(-1);
+                _playback?.Seek(ViewModel.CurrentTime);
+                SyncSmoothPlaybackClock(ViewModel.CurrentTime, _playback?.IsPlaying == true);
+                e.Handled = true;
+                break;
+            case Key.Right:
+                ViewModel.SeekBySeconds(1);
+                _playback?.Seek(ViewModel.CurrentTime);
+                SyncSmoothPlaybackClock(ViewModel.CurrentTime, _playback?.IsPlaying == true);
+                e.Handled = true;
+                break;
+            case Key.Space:
+                PlayPauseButton_OnClick(this, new RoutedEventArgs());
+                e.Handled = true;
+                break;
+        }
     }
 
     private async void PlayPauseButton_OnClick(object? sender, RoutedEventArgs e)
@@ -593,6 +626,11 @@ public sealed partial class MainWindow : Window
         };
 
         return window;
+    }
+
+    private static bool IsTypingInTextInput(object? source)
+    {
+        return source is TextBox;
     }
 
     private sealed record ProcessResult(int ExitCode, string Output, string Error);
