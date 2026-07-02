@@ -34,7 +34,11 @@ public sealed partial class MainWindow : Window
             SaveWindowBounds();
             ViewModel?.SaveSettings();
         };
-        Closed += (_, _) => _playback?.Dispose();
+        Closed += (_, _) =>
+        {
+            _playback?.Dispose();
+            ViewModel?.Dispose();
+        };
         _playbackTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _playbackTimer.Tick += (_, _) => SyncPlaybackPosition();
     }
@@ -106,6 +110,22 @@ public sealed partial class MainWindow : Window
         e.Handled = true;
         await ViewModel.OpenClipAsync(clip);
         QueueEditorPlayback();
+    }
+
+    private void ClipCard_OnPointerEntered(object? sender, PointerEventArgs e)
+    {
+        if (sender is Control { DataContext: ClipCardViewModel clip })
+        {
+            clip.IsHovered = true;
+        }
+    }
+
+    private void ClipCard_OnPointerExited(object? sender, PointerEventArgs e)
+    {
+        if (sender is Control { DataContext: ClipCardViewModel clip })
+        {
+            clip.IsHovered = false;
+        }
     }
 
     private void ClipCheckBox_OnClick(object? sender, RoutedEventArgs e)
@@ -200,6 +220,7 @@ public sealed partial class MainWindow : Window
         {
             ViewModel.CurrentTime = ViewModel.TrimStart;
             _playback.Seek(ViewModel.CurrentTime);
+            SyncSmoothPlaybackClock(ViewModel.CurrentTime, false);
         }
 
         SyncSmoothPlaybackClock(ViewModel.CurrentTime, true);
@@ -405,17 +426,14 @@ public sealed partial class MainWindow : Window
                 .Where(track => track.IsAudio)
                 .Select(track => new AudioPreviewTrack(track.StreamIndex, track.VolumePercent))
                 .ToArray();
-            await _playback.LoadAsync(ViewModel.SelectedVideoPath, audioTracks, cancellationToken);
+            _playback.LoadVideo(ViewModel.SelectedVideoPath);
             if (cancellationToken.IsCancellationRequested) return;
-            foreach (var track in ViewModel.TimelineTracks.Where(track => track.IsAudio))
-            {
-                _playback.SetTrackVolume(track.StreamIndex, track.VolumePercent);
-            }
 
             _playback.Play();
             SyncSmoothPlaybackClock(ViewModel.CurrentTime, true);
             ViewModel.IsPlaying = true;
             _playbackTimer.Start();
+            _ = LoadEditorAudioAsync(_playback, ViewModel.SelectedVideoPath, audioTracks, cancellationToken);
             await Task.Delay(200, cancellationToken);
             if (_playback.Duration > TimeSpan.Zero)
             {
@@ -427,6 +445,27 @@ public sealed partial class MainWindow : Window
         {
             StopEditorPlayback();
             await ShowMessageAsync("Playback unavailable", error.Message);
+        }
+    }
+
+    private async Task LoadEditorAudioAsync(
+        PlaybackSession playback,
+        string videoPath,
+        IReadOnlyList<AudioPreviewTrack> audioTracks,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await playback.LoadAudioAsync(videoPath, audioTracks, cancellationToken);
+            if (cancellationToken.IsCancellationRequested || _playback != playback) return;
+            playback.SyncAndPlayMixedAudio();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception error)
+        {
+            await ShowMessageAsync("Audio preview unavailable", error.Message);
         }
     }
 

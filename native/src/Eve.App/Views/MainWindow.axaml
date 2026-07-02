@@ -71,6 +71,22 @@
       <Setter Property="CornerRadius" Value="5" />
       <Setter Property="Padding" Value="12,8" />
     </Style>
+    <Style Selector="Slider.volumeSlider /template/ Thumb">
+      <Setter Property="Width" Value="14" />
+      <Setter Property="Height" Value="18" />
+      <Setter Property="CornerRadius" Value="3" />
+      <Setter Property="Background" Value="#EEF4FF" />
+      <Setter Property="BorderBrush" Value="#776CFF" />
+      <Setter Property="BorderThickness" Value="2" />
+    </Style>
+    <Style Selector="Slider.volumeSlider /template/ Thumb:pointerover">
+      <Setter Property="Background" Value="#FFFFFF" />
+      <Setter Property="BorderBrush" Value="#8B82FF" />
+    </Style>
+    <Style Selector="Slider.volumeSlider /template/ Thumb:pressed">
+      <Setter Property="Background" Value="#EAF0FF" />
+      <Setter Property="BorderBrush" Value="#6D63FF" />
+    </Style>
   </Window.Styles>
   <Grid RowDefinitions="48,*">
     <Border Grid.Row="0" Background="#171F27" BorderBrush="#1E2A33" BorderThickness="0,0,0,1">
@@ -84,7 +100,7 @@
           <Button Content="{Binding RecorderStatus}" Classes="replayButton" />
           <Button Content="Clip" IsEnabled="{Binding IsReplayRecording}" />
           <TextBlock Text="Ctrl+Shift+F9" Foreground="#93A6B8" FontWeight="Bold" VerticalAlignment="Center" />
-          <Border Width="1" Height="20" Background="#2A3640" />
+          <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding ShowLibraryStatus}" />
           <TextBlock Text="{Binding ActiveGame}" Foreground="#BDD4EE" VerticalAlignment="Center" IsVisible="{Binding ShowLibraryStatus}" />
           <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding HasSelection}" />
           <TextBlock Text="{Binding SelectionSummary}"
@@ -163,7 +179,9 @@
                                 Background="#24303A"
                                 CornerRadius="4"
                                 ClipToBounds="True"
-                                PointerPressed="ClipCard_OnPointerPressed">
+                                PointerPressed="ClipCard_OnPointerPressed"
+                                PointerEntered="ClipCard_OnPointerEntered"
+                                PointerExited="ClipCard_OnPointerExited">
                           <Grid RowDefinitions="Auto,104">
                             <Border Grid.RowSpan="2"
                                     BorderBrush="{Binding SelectionBorderBrush}"
@@ -309,11 +327,12 @@
                                   IsVisible="{Binding IsAudio}" />
                         <Slider Grid.Row="1"
                                 Grid.Column="1"
+                                Classes="volumeSlider"
                                 Minimum="0"
                                 Maximum="150"
                                 Height="34"
                                 MinHeight="34"
-                                Margin="0,-7,0,0"
+                                Margin="0,-14,0,0"
                                 Value="{Binding VolumePercent}"
                                 IsEnabled="{Binding CanAdjustVolume}"
                                 IsVisible="{Binding IsAudio}"

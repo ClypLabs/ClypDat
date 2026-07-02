@@ -5,12 +5,14 @@ using Eve.Core.Settings;
 
 namespace Eve.App.ViewModels;
 
-public sealed class MainWindowViewModel : ViewModelBase
+public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
     private readonly MediaProbeService _mediaProbe = new();
     private readonly HashSet<string> _selectedPaths = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _libraryHydrationCts;
     private CancellationTokenSource? _waveformCts;
+    private FileSystemWatcher? _libraryWatcher;
+    private readonly DispatcherTimer _libraryRefreshDebounce;
     private bool _isReplayRecording;
     private bool _isEditorVisible;
     private string _recorderStatus = "Replay Off";
@@ -40,6 +42,12 @@ public sealed class MainWindowViewModel : ViewModelBase
         Settings = AppSettingsStore.Load();
         ClipGroups = new ObservableCollection<ClipGroupViewModel>();
         TimelineTracks = new ObservableCollection<TrackLaneViewModel>();
+        _libraryRefreshDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
+        _libraryRefreshDebounce.Tick += async (_, _) =>
+        {
+            _libraryRefreshDebounce.Stop();
+            await RefreshLibraryAsync();
+        };
         _ = RefreshLibraryAsync();
     }
 
@@ -279,6 +287,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         ClipGroups.Clear();
         ClearSelection();
+        StartLibraryWatcher();
 
         if (string.IsNullOrWhiteSpace(Settings.LibraryFolder) || !Directory.Exists(Settings.LibraryFolder))
         {
@@ -301,6 +310,17 @@ public sealed class MainWindowViewModel : ViewModelBase
         NotifyLibraryChrome();
         StartLibraryHydration(clips);
         return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        CancelLibraryHydration();
+        _waveformCts?.Cancel();
+        _waveformCts?.Dispose();
+        _waveformCts = null;
+        _libraryRefreshDebounce.Stop();
+        _libraryWatcher?.Dispose();
+        _libraryWatcher = null;
     }
 
     public Task OpenVideoFileAsync(string filePath)
@@ -528,6 +548,44 @@ public sealed class MainWindowViewModel : ViewModelBase
         _libraryHydrationCts?.Cancel();
         _libraryHydrationCts?.Dispose();
         _libraryHydrationCts = null;
+    }
+
+    private void StartLibraryWatcher()
+    {
+        _libraryWatcher?.Dispose();
+        _libraryWatcher = null;
+
+        if (string.IsNullOrWhiteSpace(Settings.LibraryFolder) || !Directory.Exists(Settings.LibraryFolder)) return;
+
+        var watcher = new FileSystemWatcher(Settings.LibraryFolder)
+        {
+            IncludeSubdirectories = true,
+            EnableRaisingEvents = true,
+            NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.CreationTime | NotifyFilters.Size
+        };
+
+        watcher.Created += LibraryWatcher_OnChanged;
+        watcher.Deleted += LibraryWatcher_OnChanged;
+        watcher.Renamed += LibraryWatcher_OnRenamed;
+        _libraryWatcher = watcher;
+    }
+
+    private void LibraryWatcher_OnChanged(object sender, FileSystemEventArgs e)
+    {
+        if (!MediaProbeService.IsVideoFile(e.FullPath)) return;
+        Dispatcher.UIThread.Post(ScheduleLibraryRefresh);
+    }
+
+    private void LibraryWatcher_OnRenamed(object sender, RenamedEventArgs e)
+    {
+        if (!MediaProbeService.IsVideoFile(e.FullPath) && !MediaProbeService.IsVideoFile(e.OldFullPath)) return;
+        Dispatcher.UIThread.Post(ScheduleLibraryRefresh);
+    }
+
+    private void ScheduleLibraryRefresh()
+    {
+        _libraryRefreshDebounce.Stop();
+        _libraryRefreshDebounce.Start();
     }
 
     private void StartWaveformLoad(MediaFileInfo media)

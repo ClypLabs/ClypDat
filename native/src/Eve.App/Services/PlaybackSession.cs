@@ -1,6 +1,8 @@
 using LibVLCSharp.Shared;
 using System.Diagnostics;
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Eve.App.Services;
 
@@ -11,6 +13,7 @@ public sealed class PlaybackSession : IDisposable
     private Media? _videoMedia;
     private Media? _mixedAudioMedia;
     private string? _mixedAudioPath;
+    private bool _mixedAudioIsCached;
     private bool _disposed;
 
     public PlaybackSession()
@@ -29,16 +32,26 @@ public sealed class PlaybackSession : IDisposable
 
     public async Task LoadAsync(string path, IReadOnlyList<AudioPreviewTrack> audioTracks, CancellationToken cancellationToken)
     {
+        LoadVideo(path);
+        await LoadAudioAsync(path, audioTracks, cancellationToken);
+    }
+
+    public void LoadVideo(string path)
+    {
         Stop();
         DisposeMedia();
         DisposeMixedAudio();
         _videoMedia = new Media(_libVlc, new Uri(path));
         VideoPlayer.Media = _videoMedia;
         VideoPlayer.Mute = true;
+    }
 
+    public async Task LoadAudioAsync(string path, IReadOnlyList<AudioPreviewTrack> audioTracks, CancellationToken cancellationToken)
+    {
         if (audioTracks.Count == 0) return;
 
         _mixedAudioPath = await CreateMixedAudioPreviewAsync(path, audioTracks, cancellationToken);
+        _mixedAudioIsCached = true;
         _mixedAudioMedia = new Media(_libVlc, new Uri(_mixedAudioPath));
         _mixedAudioPlayer = new MediaPlayer(_mixedAudioMedia)
         {
@@ -52,11 +65,7 @@ public sealed class PlaybackSession : IDisposable
     public void Play()
     {
         VideoPlayer.Play();
-        if (_mixedAudioPlayer is not null)
-        {
-            _mixedAudioPlayer.Play();
-            _mixedAudioPlayer.Time = VideoPlayer.Time;
-        }
+        PlayMixedAudioIfReady();
     }
 
     public void Pause()
@@ -80,7 +89,7 @@ public sealed class PlaybackSession : IDisposable
 
     public void SetTrackVolume(int streamIndex, double percent)
     {
-        if (_mixedAudioPlayer is not null) _mixedAudioPlayer.Volume = VolumeCurve(percent);
+        // Preview audio is pre-mixed with per-track volumes to keep playback stable.
     }
 
     public void SyncAudioStreams()
@@ -120,7 +129,7 @@ public sealed class PlaybackSession : IDisposable
         {
             try
             {
-                File.Delete(_mixedAudioPath);
+                if (!_mixedAudioIsCached) File.Delete(_mixedAudioPath);
             }
             catch
             {
@@ -128,6 +137,7 @@ public sealed class PlaybackSession : IDisposable
             }
 
             _mixedAudioPath = null;
+            _mixedAudioIsCached = false;
         }
     }
 
@@ -145,13 +155,19 @@ public sealed class PlaybackSession : IDisposable
         IReadOnlyList<AudioPreviewTrack> audioTracks,
         CancellationToken cancellationToken)
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), "EVE", "preview-audio");
+        var tempDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "EVE",
+            "preview-audio");
         Directory.CreateDirectory(tempDir);
-        var outputPath = Path.Combine(tempDir, $"{Guid.NewGuid():N}.wav");
+        var outputPath = Path.Combine(tempDir, $"{AudioCacheKey(inputPath, audioTracks)}.wav");
+        if (File.Exists(outputPath)) return outputPath;
+
+        var pendingPath = Path.Combine(tempDir, $"{Guid.NewGuid():N}.wav");
         var labels = Enumerable.Range(0, audioTracks.Count).Select(index => $"[a{index}]").ToArray();
         var filters = audioTracks.Select((track, index) =>
             $"[0:a:{index}]volume={Math.Clamp(track.VolumePercent / 100, 0, 1.5).ToString("0.###", CultureInfo.InvariantCulture)}[a{index}]")
-            .Concat(new[] { $"{string.Concat(labels)}amix=inputs={audioTracks.Count}:duration=longest:normalize=0[aout]" });
+            .Concat(new[] { $"{string.Concat(labels)}amix=inputs={audioTracks.Count}:duration=longest:normalize=1,alimiter=limit=0.95[aout]" });
 
         var startInfo = new ProcessStartInfo("ffmpeg")
         {
@@ -171,7 +187,7 @@ public sealed class PlaybackSession : IDisposable
             "-ac", "2",
             "-ar", "48000",
             "-f", "wav",
-            outputPath
+            pendingPath
         })
         {
             startInfo.ArgumentList.Add(argument);
@@ -188,7 +204,52 @@ public sealed class PlaybackSession : IDisposable
         }
 
         await outputTask;
+        if (!File.Exists(outputPath))
+        {
+            File.Move(pendingPath, outputPath);
+        }
+        else
+        {
+            TryDelete(pendingPath);
+        }
+
         return outputPath;
+    }
+
+    private void PlayMixedAudioIfReady()
+    {
+        if (_mixedAudioPlayer is null) return;
+        _mixedAudioPlayer.Play();
+        _mixedAudioPlayer.Time = VideoPlayer.Time;
+    }
+
+    public void SyncAndPlayMixedAudio()
+    {
+        PlayMixedAudioIfReady();
+    }
+
+    private static string AudioCacheKey(string inputPath, IReadOnlyList<AudioPreviewTrack> audioTracks)
+    {
+        var info = new FileInfo(inputPath);
+        var input = string.Join(
+            "|",
+            inputPath,
+            info.Exists ? info.Length : 0,
+            info.Exists ? info.LastWriteTimeUtc.Ticks : 0,
+            string.Join(",", audioTracks.Select(track => $"{track.StreamIndex}:{track.VolumePercent:0.###}")));
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(input)))[..24].ToLowerInvariant();
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch
+        {
+            // Best-effort cache cleanup.
+        }
     }
 }
 
