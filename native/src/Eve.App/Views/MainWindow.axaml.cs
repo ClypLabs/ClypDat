@@ -315,8 +315,7 @@ public sealed partial class MainWindow : Window
         _playback.Play();
         ViewModel.IsPlaying = true;
         _playbackTimer.Start();
-        await Task.Delay(400);
-        _playback.SyncAudioStreams();
+        await Task.Delay(200);
         if (_playback.Duration > TimeSpan.Zero)
         {
             ViewModel.SetDuration(_playback.Duration);
