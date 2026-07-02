@@ -10,6 +10,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private readonly MediaProbeService _mediaProbe = new();
     private readonly HashSet<string> _selectedPaths = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _libraryHydrationCts;
+    private CancellationTokenSource? _waveformCts;
     private bool _isReplayRecording;
     private bool _isEditorVisible;
     private string _recorderStatus = "Replay Off";
@@ -252,6 +253,9 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string TrimStartPercent => Percent(TrimStart);
     public string TrimEndPercent => Percent(TrimEnd);
     public string PlayheadPercent => Percent(CurrentTime);
+    public double TrimStartPercentValue => PercentValue(TrimStart);
+    public double TrimEndPercentValue => PercentValue(TrimEnd);
+    public double PlayheadPercentValue => PercentValue(CurrentTime);
     public string LeftShadeWidth => TrimStartPercent;
     public string RightShadeLeft => TrimEndPercent;
     public string RightShadeWidth => $"{Math.Max(0, 100 - PercentValue(TrimEnd)):0.###}%";
@@ -365,6 +369,9 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public void CloseEditor()
     {
+        _waveformCts?.Cancel();
+        _waveformCts?.Dispose();
+        _waveformCts = null;
         IsPlaying = false;
         IsEditorVisible = false;
     }
@@ -472,6 +479,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
 
         IsEditorVisible = true;
+        StartWaveformLoad(media);
     }
 
     private void ClearSelection()
@@ -521,6 +529,41 @@ public sealed class MainWindowViewModel : ViewModelBase
         _libraryHydrationCts?.Cancel();
         _libraryHydrationCts?.Dispose();
         _libraryHydrationCts = null;
+    }
+
+    private void StartWaveformLoad(MediaFileInfo media)
+    {
+        _waveformCts?.Cancel();
+        _waveformCts?.Dispose();
+        _waveformCts = new CancellationTokenSource();
+        _ = LoadWaveformsAsync(media, _waveformCts.Token);
+    }
+
+    private async Task LoadWaveformsAsync(MediaFileInfo media, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var waveforms = await _mediaProbe.LoadWaveformsAsync(media, cancellationToken);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (!string.Equals(SelectedVideoPath, media.Path, StringComparison.OrdinalIgnoreCase)) return;
+                foreach (var track in TimelineTracks.Where(track => track.IsAudio))
+                {
+                    if (waveforms.TryGetValue(track.StreamIndex, out var peaks))
+                    {
+                        track.WaveformPeaks = peaks;
+                    }
+                }
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // Another clip replaced this waveform load.
+        }
+        catch
+        {
+            // Missing waveforms should not block editing.
+        }
     }
 
     private async Task HydrateOpenClipAsync(ClipCardViewModel clip)
@@ -616,6 +659,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(TrimStartPercent));
         OnPropertyChanged(nameof(TrimEndPercent));
         OnPropertyChanged(nameof(PlayheadPercent));
+        OnPropertyChanged(nameof(TrimStartPercentValue));
+        OnPropertyChanged(nameof(TrimEndPercentValue));
+        OnPropertyChanged(nameof(PlayheadPercentValue));
         OnPropertyChanged(nameof(LeftShadeWidth));
         OnPropertyChanged(nameof(RightShadeLeft));
         OnPropertyChanged(nameof(RightShadeWidth));

@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vlc="using:LibVLCSharp.Avalonia"
         xmlns:vm="using:Eve.App.ViewModels"
+        xmlns:controls="using:Eve.App.Controls"
         x:Class="Eve.App.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="EVE"
@@ -19,6 +20,46 @@
       <Setter Property="FontWeight" Value="Bold" />
       <Setter Property="CornerRadius" Value="5" />
       <Setter Property="Padding" Value="20,10" />
+    </Style>
+    <Style Selector="Button">
+      <Setter Property="Background" Value="#1D2A36" />
+      <Setter Property="Foreground" Value="#D8E4F2" />
+      <Setter Property="BorderBrush" Value="#2C3B48" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="Padding" Value="12,7" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button:pointerover">
+      <Setter Property="Background" Value="#263544" />
+    </Style>
+    <Style Selector="Button:disabled">
+      <Setter Property="Opacity" Value="0.48" />
+    </Style>
+    <Style Selector="Button.transportButton">
+      <Setter Property="Width" Value="34" />
+      <Setter Property="Height" Value="32" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Background" Value="#24313C" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="FontSize" Value="15" />
+    </Style>
+    <Style Selector="Button.playButton">
+      <Setter Property="Width" Value="38" />
+      <Setter Property="Height" Value="38" />
+      <Setter Property="CornerRadius" Value="19" />
+      <Setter Property="Background" Value="#2B3642" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="Button.primaryButton">
+      <Setter Property="Background" Value="#5864E8" />
+      <Setter Property="Foreground" Value="#FFFFFF" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
     </Style>
     <Style Selector="Button.deleteButton:pointerover">
       <Setter Property="Background" Value="#E16B6D" />
@@ -209,84 +250,156 @@
       </Grid>
 
       <Border Grid.Row="1" Background="#141D24" BorderBrush="#22303A" BorderThickness="0,1,0,0">
-        <Grid RowDefinitions="42,*" ColumnDefinitions="150,*" Margin="8">
-          <StackPanel Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
-            <Button Content="|&lt;" Width="34" Click="RestartButton_OnClick" />
-            <Button Content="&lt;" Width="34" Click="StepBackButton_OnClick" />
-            <Button Content="{Binding PlayPauseIcon}" Width="64" Click="PlayPauseButton_OnClick" />
-            <Button Content="&gt;" Width="34" Click="StepForwardButton_OnClick" />
-            <Button Content="&gt;|" Width="34" Click="EndButton_OnClick" />
-          </StackPanel>
+        <Grid RowDefinitions="44,*" Margin="8,0,8,8">
+          <Grid ColumnDefinitions="160,*,Auto" Height="44">
+            <TextBlock Text="{Binding TimelineStatusLabel}"
+                       Foreground="#A8CFFF"
+                       FontSize="11"
+                       VerticalAlignment="Bottom"
+                       Margin="0,0,0,7"
+                       FontFamily="Consolas" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="7">
+              <Button Content="|&lt;" Classes="transportButton" Click="RestartButton_OnClick" />
+              <Button Content="&lt;" Classes="transportButton" Click="StepBackButton_OnClick" />
+              <Button Content="{Binding PlayPauseIcon}" Classes="playButton" Click="PlayPauseButton_OnClick" />
+              <Button Content="&gt;" Classes="transportButton" Click="StepForwardButton_OnClick" />
+              <Button Content="&gt;|" Classes="transportButton" Click="EndButton_OnClick" />
+            </StackPanel>
+            <Button Grid.Column="2"
+                    Content="{Binding ExportButtonText}"
+                    Classes="primaryButton"
+                    Width="150"
+                    Height="34"
+                    IsEnabled="{Binding !IsExporting}"
+                    Click="ExportButton_OnClick" />
+          </Grid>
 
-          <StackPanel Grid.Row="1" Spacing="6">
-            <TextBlock Text="{Binding TimelineStatusLabel}" Foreground="#8EB6D8" FontSize="12" />
-            <ItemsControl ItemsSource="{Binding TimelineTracks}">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate>
-                  <Grid Height="32" Margin="0,0,0,6">
-                    <Border Background="#263442" CornerRadius="3" />
-                    <StackPanel Margin="8,0" VerticalAlignment="Center" Spacing="3">
-                      <TextBlock Text="{Binding Label}" Foreground="#D1DEEC" FontSize="12" />
-                      <Grid IsVisible="{Binding IsAudio}" ColumnDefinitions="14,*,14,34">
-                        <TextBlock Text="-" Foreground="#D1DEEC" FontSize="11" VerticalAlignment="Center" />
-                        <Slider Grid.Column="1"
+          <Grid Grid.Row="1" ColumnDefinitions="160,*" ColumnSpacing="12">
+            <Grid RowDefinitions="24,*">
+              <TextBlock Text="{Binding TimelineStatusLabel}"
+                         Foreground="#A8CFFF"
+                         FontSize="11"
+                         VerticalAlignment="Bottom"
+                         FontFamily="Consolas" />
+              <ItemsControl Grid.Row="1" ItemsSource="{Binding TimelineTracks}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Border Height="{Binding LaneHeight}"
+                            Margin="0,0,0,6"
+                            Background="#2A3540"
+                            CornerRadius="4"
+                            ClipToBounds="True">
+                      <Grid Margin="8,4" RowDefinitions="Auto,*" ColumnDefinitions="16,*,16">
+                        <TextBlock Grid.ColumnSpan="3"
+                                   Text="{Binding Label}"
+                                   Foreground="#D4E0EA"
+                                   FontSize="11"
+                                   TextTrimming="CharacterEllipsis" />
+                        <TextBlock Grid.Row="1"
+                                   Text="-"
+                                   Foreground="#C6D4E6"
+                                   FontSize="10"
+                                   VerticalAlignment="Center"
+                                   IsVisible="{Binding IsAudio}" />
+                        <Slider Grid.Row="1"
+                                Grid.Column="1"
                                 Minimum="0"
                                 Maximum="150"
                                 Value="{Binding VolumePercent}"
                                 IsEnabled="{Binding CanAdjustVolume}"
+                                IsVisible="{Binding IsAudio}"
                                 PointerPressed="TrackVolume_OnPointerPressed"
                                 PointerReleased="TrackVolume_OnPointerReleased"
                                 PropertyChanged="TrackVolume_OnPropertyChanged" />
-                        <TextBlock Grid.Column="2" Text="+" Foreground="#D1DEEC" FontSize="11" VerticalAlignment="Center" HorizontalAlignment="Right" />
-                        <TextBlock Grid.Column="3" Text="{Binding VolumeLabel}" Foreground="#D1DEEC" FontSize="10" VerticalAlignment="Center" IsVisible="{Binding ShowVolumePercent}" />
+                        <TextBlock Grid.Row="1"
+                                   Grid.Column="2"
+                                   Text="+"
+                                   Foreground="#C6D4E6"
+                                   FontSize="10"
+                                   VerticalAlignment="Center"
+                                   HorizontalAlignment="Right"
+                                   IsVisible="{Binding IsAudio}" />
+                        <Border Grid.Row="1"
+                                Grid.Column="1"
+                                Background="#E8EEF8"
+                                CornerRadius="4"
+                                Padding="5,2"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Top"
+                                IsVisible="{Binding ShowVolumePercent}">
+                          <TextBlock Text="{Binding VolumeLabel}" Foreground="#18202A" FontSize="10" FontWeight="Bold" />
+                        </Border>
                       </Grid>
-                    </StackPanel>
-                  </Grid>
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-          </StackPanel>
-
-          <Grid Grid.Row="0" Grid.Column="1" HorizontalAlignment="Right" Margin="0,0,0,6">
-            <StackPanel Orientation="Horizontal" Spacing="8">
-              <Button Content="{Binding ExportButtonText}"
-                      Background="#5864E8"
-                      Foreground="#FFFFFF"
-                      FontWeight="Bold"
-                      HorizontalContentAlignment="Center"
-                      Width="110"
-                      IsEnabled="{Binding !IsExporting}"
-                      Click="ExportButton_OnClick" />
-            </StackPanel>
-          </Grid>
-
-          <Grid Grid.Row="1" Grid.Column="1" RowDefinitions="20,24,*" Margin="8,0,0,0">
-            <Grid ColumnDefinitions="*,*,*,*">
-              <TextBlock Text="0:00" Foreground="#8EB6D8" FontSize="11" />
-              <TextBlock Grid.Column="1" Text="0:10" Foreground="#8EB6D8" FontSize="11" />
-              <TextBlock Grid.Column="2" Text="0:20" Foreground="#8EB6D8" FontSize="11" />
-              <TextBlock Grid.Column="3" Text="{Binding DurationLabel}" Foreground="#8EB6D8" FontSize="11" HorizontalAlignment="Right" />
-            </Grid>
-            <Slider x:Name="TimelineSeekSlider"
-                    Grid.Row="1"
-                    Minimum="0"
-                    Maximum="1000"
-                    Value="0"
-                    PropertyChanged="TimelineSeek_OnPropertyChanged"
-                    PointerReleased="TimelineSeek_OnPointerReleased" />
-            <Grid Grid.Row="2">
-              <ItemsControl ItemsSource="{Binding TimelineTracks}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate>
-                    <Border Height="32" Margin="0,0,0,6" Background="{Binding Color}" CornerRadius="2" Opacity="0.78" />
+                    </Border>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
-              <Border Width="3" Background="#F2F7FF" HorizontalAlignment="Center" IsHitTestVisible="False" />
-              <StackPanel VerticalAlignment="Bottom" Spacing="4">
-                <Slider x:Name="TrimStartSlider" Minimum="0" Maximum="1000" Value="0" PropertyChanged="TrimStart_OnPropertyChanged" />
-                <Slider x:Name="TrimEndSlider" Minimum="0" Maximum="1000" Value="1000" PropertyChanged="TrimEnd_OnPropertyChanged" />
-              </StackPanel>
+            </Grid>
+
+            <Grid Grid.Column="1" RowDefinitions="24,*">
+              <controls:TimelineRulerControl x:Name="TimelineRuler"
+                                             Duration="{Binding Duration}"
+                                             PointerPressed="TimelineSurface_OnPointerPressed"
+                                             PointerMoved="TimelineSurface_OnPointerMoved"
+                                             PointerReleased="TimelineSurface_OnPointerReleased" />
+              <Grid x:Name="TimelineSurface"
+                    Grid.Row="1"
+                    SizeChanged="TimelineSurface_OnSizeChanged"
+                    PointerPressed="TimelineSurface_OnPointerPressed"
+                    PointerMoved="TimelineSurface_OnPointerMoved"
+                    PointerReleased="TimelineSurface_OnPointerReleased">
+                <ItemsControl ItemsSource="{Binding TimelineTracks}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <controls:TimelineLaneControl Height="{Binding LaneHeight}"
+                                                    Margin="0,0,0,6"
+                                                    LaneBrush="{Binding Color}"
+                                                    IsVideo="{Binding IsVideo}"
+                                                    Peaks="{Binding WaveformPeaks}"
+                                                    TrimStartPercent="{Binding $parent[Window].DataContext.TrimStartPercentValue}"
+                                                    TrimEndPercent="{Binding $parent[Window].DataContext.TrimEndPercentValue}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <Canvas x:Name="TimelineOverlay" IsHitTestVisible="False">
+                  <Border x:Name="TrimSelection"
+                          Height="32"
+                          BorderBrush="#13C8B5"
+                          BorderThickness="2"
+                          CornerRadius="4"
+                          Background="#151F24" />
+                  <Border x:Name="TimelinePlayhead"
+                          Width="3"
+                          Background="#F2F6FB" />
+                  <Polygon x:Name="PlayheadCap"
+                           Points="0,0 16,0 8,10"
+                           Fill="#F2F6FB" />
+                </Canvas>
+
+                <Canvas x:Name="TimelineHandleLayer">
+                  <Button x:Name="TrimStartHandle"
+                          Classes="transportButton"
+                          Width="14"
+                          Height="32"
+                          Background="#13C8B5"
+                          BorderThickness="0"
+                          Cursor="SizeWestEast"
+                          PointerPressed="TrimStartHandle_OnPointerPressed"
+                          PointerMoved="TimelineSurface_OnPointerMoved"
+                          PointerReleased="TimelineSurface_OnPointerReleased" />
+                  <Button x:Name="TrimEndHandle"
+                          Classes="transportButton"
+                          Width="14"
+                          Height="32"
+                          Background="#13C8B5"
+                          BorderThickness="0"
+                          Cursor="SizeWestEast"
+                          PointerPressed="TrimEndHandle_OnPointerPressed"
+                          PointerMoved="TimelineSurface_OnPointerMoved"
+                          PointerReleased="TimelineSurface_OnPointerReleased" />
+                </Canvas>
+              </Grid>
             </Grid>
           </Grid>
         </Grid>

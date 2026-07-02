@@ -16,7 +16,7 @@ public sealed partial class MainWindow : Window
     private readonly DispatcherTimer _playbackTimer;
     private PlaybackSession? _playback;
     private CancellationTokenSource? _playbackStartCts;
-    private bool _isUpdatingTimelineSlider;
+    private TimelineDragMode _timelineDragMode = TimelineDragMode.None;
 
     public MainWindow()
     {
@@ -78,6 +78,12 @@ public sealed partial class MainWindow : Window
     private void Window_OnSizeChanged(object? sender, SizeChangedEventArgs e)
     {
         ViewModel?.UpdateCardLayout(e.NewSize.Width);
+        UpdateTimelineChrome();
+    }
+
+    private void TimelineSurface_OnSizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        UpdateTimelineChrome();
     }
 
     private async void ClipCard_OnPointerPressed(object? sender, PointerPressedEventArgs e)
@@ -196,36 +202,49 @@ public sealed partial class MainWindow : Window
         _playback?.Seek(ViewModel.CurrentTime);
     }
 
-    private void TimelineSeek_OnPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    private void TimelineSurface_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (ViewModel is null || sender is not Slider slider) return;
-        if (_isUpdatingTimelineSlider) return;
-        if (e.Property != Slider.ValueProperty || ViewModel.Duration <= TimeSpan.Zero) return;
-        ViewModel.CurrentTime = TimeSpan.FromMilliseconds(ViewModel.Duration.TotalMilliseconds * slider.Value / 1000);
+        if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
+        _timelineDragMode = TimelineDragMode.Playhead;
+        UpdateTimelineFromPointer(e, TimelineDragMode.Playhead);
+        e.Pointer.Capture(TimelineSurface);
+        e.Handled = true;
     }
 
-    private void TimelineSeek_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
+    private void TrimStartHandle_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (ViewModel is not null)
+        if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
+        _timelineDragMode = TimelineDragMode.TrimStart;
+        e.Pointer.Capture(TimelineSurface);
+        e.Handled = true;
+    }
+
+    private void TrimEndHandle_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
+        _timelineDragMode = TimelineDragMode.TrimEnd;
+        e.Pointer.Capture(TimelineSurface);
+        e.Handled = true;
+    }
+
+    private void TimelineSurface_OnPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_timelineDragMode == TimelineDragMode.None) return;
+        UpdateTimelineFromPointer(e, _timelineDragMode);
+    }
+
+    private void TimelineSurface_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (_timelineDragMode == TimelineDragMode.None) return;
+        UpdateTimelineFromPointer(e, _timelineDragMode);
+        if (_timelineDragMode == TimelineDragMode.Playhead)
         {
-            _playback?.Seek(ViewModel.CurrentTime);
+            _playback?.Seek(ViewModel!.CurrentTime);
         }
-    }
 
-    private void TrimStart_OnPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
-    {
-        if (ViewModel is null || sender is not Slider slider) return;
-        if (_isUpdatingTimelineSlider) return;
-        if (e.Property != Slider.ValueProperty || ViewModel.Duration <= TimeSpan.Zero) return;
-        ViewModel.TrimStart = TimeSpan.FromMilliseconds(ViewModel.Duration.TotalMilliseconds * slider.Value / 1000);
-    }
-
-    private void TrimEnd_OnPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
-    {
-        if (ViewModel is null || sender is not Slider slider) return;
-        if (_isUpdatingTimelineSlider) return;
-        if (e.Property != Slider.ValueProperty || ViewModel.Duration <= TimeSpan.Zero) return;
-        ViewModel.TrimEnd = TimeSpan.FromMilliseconds(ViewModel.Duration.TotalMilliseconds * slider.Value / 1000);
+        _timelineDragMode = TimelineDragMode.None;
+        e.Pointer.Capture(null);
+        e.Handled = true;
     }
 
     private void TrackVolume_OnPointerPressed(object? sender, PointerPressedEventArgs e)
@@ -343,7 +362,7 @@ public sealed partial class MainWindow : Window
             {
                 ViewModel.SetDuration(_playback.Duration);
             }
-            UpdateTimelineSliders();
+            UpdateTimelineChrome();
         }
         catch (Exception error)
         {
@@ -379,7 +398,7 @@ public sealed partial class MainWindow : Window
         }
 
         ViewModel.CurrentTime = _playback.Position;
-        UpdateTimelineSliders();
+        UpdateTimelineChrome();
         if (ViewModel.TrimEnd > TimeSpan.Zero && ViewModel.CurrentTime >= ViewModel.TrimEnd)
         {
             _playback.Pause();
@@ -388,20 +407,60 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void UpdateTimelineSliders()
+    private void UpdateTimelineFromPointer(PointerEventArgs e, TimelineDragMode mode)
     {
         if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
-        _isUpdatingTimelineSlider = true;
-        try
+        var point = e.GetPosition(TimelineSurface);
+        var width = Math.Max(1, TimelineSurface.Bounds.Width);
+        var time = TimeSpan.FromMilliseconds(ViewModel.Duration.TotalMilliseconds * Math.Clamp(point.X / width, 0, 1));
+        switch (mode)
         {
-            TimelineSeekSlider.Value = ViewModel.CurrentTime.TotalMilliseconds / ViewModel.Duration.TotalMilliseconds * 1000;
-            TrimStartSlider.Value = ViewModel.TrimStart.TotalMilliseconds / ViewModel.Duration.TotalMilliseconds * 1000;
-            TrimEndSlider.Value = ViewModel.TrimEnd.TotalMilliseconds / ViewModel.Duration.TotalMilliseconds * 1000;
+            case TimelineDragMode.TrimStart:
+                ViewModel.TrimStart = time;
+                if (ViewModel.CurrentTime < ViewModel.TrimStart) ViewModel.CurrentTime = ViewModel.TrimStart;
+                break;
+            case TimelineDragMode.TrimEnd:
+                ViewModel.TrimEnd = time;
+                if (ViewModel.CurrentTime > ViewModel.TrimEnd) ViewModel.CurrentTime = ViewModel.TrimEnd;
+                break;
+            case TimelineDragMode.Playhead:
+                ViewModel.CurrentTime = time;
+                break;
         }
-        finally
-        {
-            _isUpdatingTimelineSlider = false;
-        }
+
+        UpdateTimelineChrome();
+    }
+
+    private void UpdateTimelineChrome()
+    {
+        if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
+        var width = Math.Max(1, TimelineSurface.Bounds.Width);
+        var height = Math.Max(1, TimelineSurface.Bounds.Height);
+        var start = ViewModel.TrimStart.TotalMilliseconds / ViewModel.Duration.TotalMilliseconds * width;
+        var end = ViewModel.TrimEnd.TotalMilliseconds / ViewModel.Duration.TotalMilliseconds * width;
+        var playhead = ViewModel.CurrentTime.TotalMilliseconds / ViewModel.Duration.TotalMilliseconds * width;
+
+        Canvas.SetLeft(TrimSelection, start);
+        TrimSelection.Width = Math.Max(0, end - start);
+
+        Canvas.SetLeft(TrimStartHandle, start - TrimStartHandle.Width / 2);
+        Canvas.SetTop(TrimStartHandle, 0);
+        Canvas.SetLeft(TrimEndHandle, end - TrimEndHandle.Width / 2);
+        Canvas.SetTop(TrimEndHandle, 0);
+
+        Canvas.SetLeft(TimelinePlayhead, playhead - TimelinePlayhead.Width / 2);
+        TimelinePlayhead.Height = height;
+        Canvas.SetTop(TimelinePlayhead, -8);
+        Canvas.SetLeft(PlayheadCap, playhead - 8);
+        Canvas.SetTop(PlayheadCap, -12);
+    }
+
+    private enum TimelineDragMode
+    {
+        None,
+        Playhead,
+        TrimStart,
+        TrimEnd
     }
 
     private static async Task<ProcessResult> RunProcessAsync(string fileName, IReadOnlyList<string> arguments)

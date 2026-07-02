@@ -4,6 +4,7 @@ public sealed class TrackLaneViewModel : ViewModelBase
 {
     private double _volumePercent = 100;
     private bool _showVolumePercent;
+    private IReadOnlyList<double> _waveformPeaks = Array.Empty<double>();
 
     public TrackLaneViewModel(int streamIndex, string label, string type, string color, bool canAdjustVolume)
     {
@@ -21,7 +22,9 @@ public sealed class TrackLaneViewModel : ViewModelBase
     public bool CanAdjustVolume { get; }
     public bool IsAudio => Type == "audio";
     public bool IsVideo => Type == "video";
+    public double LaneHeight => IsVideo ? 32 : 40;
     public string VolumeLabel => $"{VolumePercent:0}%";
+    public string HeaderClass => IsAudio ? "audioHeader" : "videoHeader";
 
     public double VolumePercent
     {
@@ -38,5 +41,11 @@ public sealed class TrackLaneViewModel : ViewModelBase
     {
         get => _showVolumePercent;
         set => SetProperty(ref _showVolumePercent, value);
+    }
+
+    public IReadOnlyList<double> WaveformPeaks
+    {
+        get => _waveformPeaks;
+        set => SetProperty(ref _waveformPeaks, value);
     }
 }
