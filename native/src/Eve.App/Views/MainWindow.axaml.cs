@@ -5,6 +5,7 @@ using Avalonia.Layout;
 using Avalonia;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using System.Diagnostics;
 using Eve.App.Services;
 using Eve.App.ViewModels;
@@ -40,6 +41,8 @@ public sealed partial class MainWindow : Window
             _playback?.Dispose();
             ViewModel?.Dispose();
         };
+        AddHandler(PointerPressedEvent, VolumeSlider_OnPointerPressedAny, RoutingStrategies.Tunnel, true);
+        AddHandler(PointerReleasedEvent, VolumeSlider_OnPointerReleasedAny, RoutingStrategies.Tunnel, true);
         _playbackTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _playbackTimer.Tick += (_, _) => SyncPlaybackPosition();
     }
@@ -323,7 +326,7 @@ public sealed partial class MainWindow : Window
         if (sender is Slider { DataContext: TrackLaneViewModel track })
         {
             track.ShowVolumePercent = true;
-            UpdateVolumeBadgePosition((Slider)sender, track, e.GetPosition((Slider)sender).X);
+            UpdateVolumeBadgePosition((Slider)sender, track);
             e.Handled = false;
         }
     }
@@ -338,6 +341,21 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void VolumeSlider_OnPointerPressedAny(object? sender, PointerPressedEventArgs e)
+    {
+        var slider = (e.Source as Visual)?.FindAncestorOfType<Slider>();
+        if (slider?.DataContext is not TrackLaneViewModel track || !track.IsAudio) return;
+        track.ShowVolumePercent = true;
+        UpdateVolumeBadgePosition(slider, track);
+    }
+
+    private void VolumeSlider_OnPointerReleasedAny(object? sender, PointerReleasedEventArgs e)
+    {
+        var slider = (e.Source as Visual)?.FindAncestorOfType<Slider>();
+        if (slider?.DataContext is not TrackLaneViewModel track || !track.IsAudio) return;
+        track.ShowVolumePercent = false;
+    }
+
     private void TrackVolume_OnPointerMoved(object? sender, PointerEventArgs e)
     {
         if (sender is Slider { DataContext: TrackLaneViewModel track } slider && track.ShowVolumePercent)
@@ -350,7 +368,6 @@ public sealed partial class MainWindow : Window
     {
         if (e.Property != Slider.ValueProperty || sender is not Slider { DataContext: TrackLaneViewModel track }) return;
         UpdateVolumeBadgePosition((Slider)sender, track);
-        track.ShowVolumePercent = true;
         _playback?.SetTrackVolume(track.StreamIndex, track.VolumePercent);
     }
 
@@ -442,18 +459,8 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            var playback = await Task.Run(() =>
-            {
-                var session = new PlaybackSession();
-                session.LoadVideo(ViewModel.SelectedVideoPath);
-                return session;
-            }, cancellationToken);
-            if (cancellationToken.IsCancellationRequested)
-            {
-                playback.Dispose();
-                return;
-            }
-
+            var playback = new PlaybackSession();
+            playback.LoadVideo(ViewModel.SelectedVideoPath);
             _playback = playback;
             EditorVideoView.MediaPlayer = playback.VideoPlayer;
             var audioTracks = ViewModel.TimelineTracks
