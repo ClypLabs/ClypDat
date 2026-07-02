@@ -196,6 +196,12 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        if (ViewModel.TrimEnd > TimeSpan.Zero && ViewModel.CurrentTime >= ViewModel.TrimEnd - TimeSpan.FromMilliseconds(80))
+        {
+            ViewModel.CurrentTime = ViewModel.TrimStart;
+            _playback.Seek(ViewModel.CurrentTime);
+        }
+
         SyncSmoothPlaybackClock(ViewModel.CurrentTime, true);
         _playback.Play();
         ViewModel.IsPlaying = true;
@@ -462,7 +468,7 @@ public sealed partial class MainWindow : Window
         {
             var smoothTime = _smoothPlaybackBase + _smoothPlaybackClock.Elapsed;
             var vlcTime = _playback.Position;
-            if (Math.Abs((vlcTime - smoothTime).TotalMilliseconds) > 350)
+            if (Math.Abs((vlcTime - smoothTime).TotalMilliseconds) > 1500)
             {
                 SyncSmoothPlaybackClock(vlcTime, true);
                 smoothTime = vlcTime;
@@ -480,6 +486,7 @@ public sealed partial class MainWindow : Window
             _playback.Pause();
             _playback.Seek(ViewModel.TrimEnd);
             SyncSmoothPlaybackClock(ViewModel.TrimEnd, false);
+            ViewModel.CurrentTime = ViewModel.TrimEnd;
             ViewModel.IsPlaying = false;
         }
     }

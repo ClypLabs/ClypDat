@@ -466,7 +466,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             };
             if (track.Type == "video") hasVideo = true;
             var label = track.Type == "audio"
-                ? (string.IsNullOrWhiteSpace(track.Label) ? AudioLabel(audioIndex) : track.Label)
+                ? AudioLaneLabel(track.Label, audioIndex)
                 : "Video";
             TimelineTracks.Add(new TrackLaneViewModel(track.Index, label, track.Type, color, track.Type == "audio", track.VolumePercent));
             if (track.Type == "audio") audioIndex++;
@@ -731,6 +731,15 @@ public sealed class MainWindowViewModel : ViewModelBase
             2 => "Microphone",
             _ => $"Audio {audioIndex + 1}"
         };
+    }
+
+    private static string AudioLaneLabel(string label, int audioIndex)
+    {
+        return string.IsNullOrWhiteSpace(label) ||
+               label.StartsWith("Track", StringComparison.OrdinalIgnoreCase) ||
+               label.StartsWith("Audio ", StringComparison.OrdinalIgnoreCase)
+            ? AudioLabel(audioIndex)
+            : label;
     }
 
     private static string AudioColor(int audioIndex)

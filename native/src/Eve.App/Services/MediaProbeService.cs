@@ -365,11 +365,20 @@ public sealed class MediaProbeService
 
         if (stream.TryGetProperty("tags", out var tags))
         {
-            var title = GetString(tags, "title");
-            if (!string.IsNullOrWhiteSpace(title)) return title;
-
             var handlerName = GetString(tags, "handler_name");
-            if (!string.IsNullOrWhiteSpace(handlerName)) return handlerName;
+            if (!string.IsNullOrWhiteSpace(handlerName) &&
+                !handlerName.Equals("VideoHandler", StringComparison.OrdinalIgnoreCase) &&
+                !handlerName.Equals("SoundHandler", StringComparison.OrdinalIgnoreCase))
+            {
+                return handlerName;
+            }
+
+            var title = GetString(tags, "title");
+            if (!string.IsNullOrWhiteSpace(title) &&
+                !title.StartsWith("Track", StringComparison.OrdinalIgnoreCase))
+            {
+                return title;
+            }
 
             var language = GetString(tags, "language");
             if (!string.IsNullOrWhiteSpace(language)) return $"{prefix} {index} ({language})";
