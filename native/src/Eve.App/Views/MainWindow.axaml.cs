@@ -19,6 +19,7 @@ public sealed partial class MainWindow : Window
     private CancellationTokenSource? _playbackStartCts;
     private TimelineDragMode _timelineDragMode = TimelineDragMode.None;
     private TimeSpan _smoothPlaybackBase = TimeSpan.Zero;
+    private bool _waitingForPlaybackStart;
 
     public MainWindow()
     {
@@ -348,11 +349,14 @@ public sealed partial class MainWindow : Window
     private void TrackVolume_OnPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
     {
         if (e.Property != Slider.ValueProperty || sender is not Slider { DataContext: TrackLaneViewModel track }) return;
+        UpdateVolumeBadgePosition((Slider)sender, track);
+        track.ShowVolumePercent = true;
         _playback?.SetTrackVolume(track.StreamIndex, track.VolumePercent);
     }
 
-    private static void UpdateVolumeBadgePosition(Slider slider, TrackLaneViewModel track, double x)
+    private static void UpdateVolumeBadgePosition(Slider slider, TrackLaneViewModel track, double? pointerX = null)
     {
+        var x = pointerX ?? slider.Bounds.Width * Math.Clamp(track.VolumePercent / 150d, 0, 1);
         track.VolumeBadgeX = Math.Clamp(x, 0, Math.Max(1, slider.Bounds.Width));
     }
 
@@ -438,24 +442,36 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            _playback = new PlaybackSession();
-            EditorVideoView.MediaPlayer = _playback.VideoPlayer;
+            var playback = await Task.Run(() =>
+            {
+                var session = new PlaybackSession();
+                session.LoadVideo(ViewModel.SelectedVideoPath);
+                return session;
+            }, cancellationToken);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                playback.Dispose();
+                return;
+            }
+
+            _playback = playback;
+            EditorVideoView.MediaPlayer = playback.VideoPlayer;
             var audioTracks = ViewModel.TimelineTracks
                 .Where(track => track.IsAudio)
                 .Select(track => new AudioPreviewTrack(track.StreamIndex, track.VolumePercent))
                 .ToArray();
-            _playback.LoadVideo(ViewModel.SelectedVideoPath);
             if (cancellationToken.IsCancellationRequested) return;
 
-            _playback.PlayFrom(ViewModel.CurrentTime);
-            SyncSmoothPlaybackClock(_playback.Position, true);
+            playback.PlayFrom(ViewModel.CurrentTime);
+            _waitingForPlaybackStart = true;
+            SyncSmoothPlaybackClock(ViewModel.CurrentTime, false);
             ViewModel.IsPlaying = true;
             _playbackTimer.Start();
-            _ = LoadEditorAudioAsync(_playback, ViewModel.SelectedVideoPath, audioTracks, cancellationToken);
+            _ = LoadEditorAudioAsync(playback, ViewModel.SelectedVideoPath, audioTracks, cancellationToken);
             await Task.Delay(200, cancellationToken);
-            if (_playback.Duration > TimeSpan.Zero)
+            if (playback.Duration > TimeSpan.Zero)
             {
-                ViewModel.SetDuration(_playback.Duration);
+                ViewModel.SetDuration(playback.Duration);
             }
             UpdateTimelineChrome();
         }
@@ -498,6 +514,7 @@ public sealed partial class MainWindow : Window
         _playbackTimer.Stop();
         _smoothPlaybackClock.Reset();
         _smoothPlaybackBase = TimeSpan.Zero;
+        _waitingForPlaybackStart = false;
         var playback = _playback;
         _playback = null;
         EditorVideoView.MediaPlayer = null;
@@ -523,8 +540,22 @@ public sealed partial class MainWindow : Window
 
         if (_playback.IsPlaying)
         {
-            var smoothTime = _smoothPlaybackBase + _smoothPlaybackClock.Elapsed;
             var vlcTime = _playback.Position;
+            if (_waitingForPlaybackStart)
+            {
+                if (vlcTime <= ViewModel.TrimStart + TimeSpan.FromMilliseconds(120))
+                {
+                    ViewModel.CurrentTime = ViewModel.TrimStart;
+                    SyncSmoothPlaybackClock(ViewModel.TrimStart, false);
+                    UpdateTimelineChrome();
+                    return;
+                }
+
+                _waitingForPlaybackStart = false;
+                SyncSmoothPlaybackClock(vlcTime, true);
+            }
+
+            var smoothTime = _smoothPlaybackBase + _smoothPlaybackClock.Elapsed;
             if (vlcTime < TimeSpan.FromMilliseconds(250) &&
                 smoothTime - vlcTime > TimeSpan.FromMilliseconds(250))
             {
