@@ -23,7 +23,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         _media = media;
         _mediaProbe = mediaProbe;
         _previewImagePath = media.ThumbnailPath;
-        _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(17) };
+        _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
         _previewTimer.Tick += (_, _) => AdvancePreview();
         SetPreviewImage(_previewImagePath);
     }
@@ -105,6 +105,7 @@ public sealed class ClipCardViewModel : ViewModelBase
 
         if (_previewBitmaps.Count == 0) return;
         _previewIndex = 0;
+        _previewTimer.Interval = GetPreviewFrameInterval();
         PreviewImage = _previewBitmaps[_previewIndex];
         _previewTimer.Start();
     }
@@ -138,6 +139,17 @@ public sealed class ClipCardViewModel : ViewModelBase
         }
 
         return bitmaps;
+    }
+
+    private TimeSpan GetPreviewFrameInterval()
+    {
+        if (Duration <= TimeSpan.Zero || _previewBitmaps.Count == 0)
+        {
+            return TimeSpan.FromMilliseconds(250);
+        }
+
+        var frameMs = Duration.TotalMilliseconds / _previewBitmaps.Count;
+        return TimeSpan.FromMilliseconds(Math.Max(17, frameMs));
     }
 
     private void SetPreviewImage(string path)

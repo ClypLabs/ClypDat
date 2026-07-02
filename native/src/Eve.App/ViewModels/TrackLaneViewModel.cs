@@ -22,7 +22,7 @@ public sealed class TrackLaneViewModel : ViewModelBase
     public bool CanAdjustVolume { get; }
     public bool IsAudio => Type == "audio";
     public bool IsVideo => Type == "video";
-    public double LaneHeight => IsVideo ? 32 : 40;
+    public double LaneHeight => IsVideo ? 32 : 46;
     public string VolumeLabel => $"{VolumePercent:0}%";
     public string HeaderClass => IsAudio ? "audioHeader" : "videoHeader";
 
