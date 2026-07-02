@@ -81,16 +81,11 @@
     <Border Grid.Row="1" Background="#101820" IsVisible="{Binding IsLibraryVisible}">
       <DockPanel Margin="20,18">
         <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto">
-          <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center" IsVisible="{Binding HasNoSelection}">
-            <TextBlock Text="{Binding LibraryHeaderDate}" Foreground="#C4D0DF" FontSize="15" FontWeight="Bold" />
-            <TextBlock Text="{Binding LibraryHeaderGame}" Foreground="#647181" FontSize="15" FontWeight="Bold" />
-          </StackPanel>
           <TextBlock Grid.Column="1"
                      Text="{Binding LibraryLocationText}"
                      Foreground="#647181"
                      FontSize="12"
-                     VerticalAlignment="Center"
-                     IsVisible="{Binding HasNoSelection}" />
+                     VerticalAlignment="Center" />
 
         </Grid>
 

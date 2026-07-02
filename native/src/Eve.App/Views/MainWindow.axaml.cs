@@ -73,8 +73,7 @@ public sealed partial class MainWindow : Window
         if (sender is not Control { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
 
         e.Handled = true;
-        await Task.Run(() => { });
-        ViewModel.OpenClip(clip);
+        await ViewModel.OpenClipAsync(clip);
     }
 
     private async void ClipCard_OnPointerEntered(object? sender, PointerEventArgs e)

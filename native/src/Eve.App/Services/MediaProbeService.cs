@@ -34,6 +34,23 @@ public sealed class MediaProbeService
             .OrderByDescending(File.GetCreationTimeUtc);
     }
 
+    public MediaFileInfo CreateLibraryStub(string filePath)
+    {
+        var info = new FileInfo(filePath);
+        var thumbnailPath = GetThumbnailPath(filePath);
+        return new MediaFileInfo(
+            Path.GetFileNameWithoutExtension(filePath),
+            filePath,
+            info.CreationTimeUtc,
+            TimeSpan.Zero,
+            info.Length,
+            File.Exists(thumbnailPath) ? thumbnailPath : string.Empty,
+            Array.Empty<MediaTrackInfo>(),
+            0,
+            0,
+            0);
+    }
+
     public async Task<MediaFileInfo> ProbeAsync(string filePath)
     {
         var info = new FileInfo(filePath);
@@ -151,7 +168,7 @@ public sealed class MediaProbeService
 
     private async Task<string> EnsureThumbnailAsync(string filePath, TimeSpan duration)
     {
-        var output = Path.Combine(_cacheFolder, $"{CacheKey(filePath)}.jpg");
+        var output = GetThumbnailPath(filePath);
         if (File.Exists(output))
         {
             return output;
@@ -173,6 +190,11 @@ public sealed class MediaProbeService
         });
 
         return result.ExitCode == 0 && File.Exists(output) ? output : string.Empty;
+    }
+
+    private string GetThumbnailPath(string filePath)
+    {
+        return Path.Combine(_cacheFolder, $"{CacheKey(filePath)}.jpg");
     }
 
     private static string BuildTrackLabel(JsonElement stream, string codecType, int index)

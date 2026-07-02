@@ -13,12 +13,13 @@ public sealed class ClipCardViewModel : ViewModelBase
     private int _previewIndex;
     private bool _isSelected;
     private bool _isHovered;
+    private MediaFileInfo _media;
     private string _previewImagePath;
     private Bitmap? _previewImage;
 
     public ClipCardViewModel(MediaFileInfo media, MediaProbeService mediaProbe)
     {
-        Media = media;
+        _media = media;
         _mediaProbe = mediaProbe;
         _previewImagePath = media.ThumbnailPath;
         _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(420) };
@@ -26,7 +27,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         SetPreviewImage(_previewImagePath);
     }
 
-    public MediaFileInfo Media { get; }
+    public MediaFileInfo Media => _media;
     public string Name => Media.Name;
     public string Path => Media.Path;
     public DateTimeOffset CreatedAt => Media.CreatedAt;
@@ -77,6 +78,20 @@ public sealed class ClipCardViewModel : ViewModelBase
     public bool IsCheckVisible => IsSelected || IsHovered;
     public IBrush SelectionBorderBrush => IsSelected ? Brush.Parse("#22CFC3") : Brush.Parse("#24303A");
     public Avalonia.Thickness SelectionBorderThickness => IsSelected ? new Avalonia.Thickness(2) : new Avalonia.Thickness(0);
+
+    public void UpdateMedia(MediaFileInfo media)
+    {
+        _media = media;
+        _previewFrames = Array.Empty<string>();
+        PreviewImagePath = media.ThumbnailPath;
+        OnPropertyChanged(nameof(Media));
+        OnPropertyChanged(nameof(Name));
+        OnPropertyChanged(nameof(CreatedAt));
+        OnPropertyChanged(nameof(Duration));
+        OnPropertyChanged(nameof(SizeBytes));
+        OnPropertyChanged(nameof(DateLabel));
+        OnPropertyChanged(nameof(DurationLabel));
+    }
 
     public async Task StartPreviewAsync()
     {

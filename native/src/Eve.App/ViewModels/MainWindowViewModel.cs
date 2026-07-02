@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Avalonia.Threading;
 using Eve.App.Services;
 using Eve.Core.Settings;
 
@@ -165,7 +166,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         IsEditorVisible = false;
     }
 
-    public async Task RefreshLibraryAsync()
+    public Task RefreshLibraryAsync()
     {
         ClipGroups.Clear();
         ClearSelection();
@@ -173,23 +174,14 @@ public sealed class MainWindowViewModel : ViewModelBase
         if (string.IsNullOrWhiteSpace(Settings.LibraryFolder) || !Directory.Exists(Settings.LibraryFolder))
         {
             NotifyLibraryChrome();
-            return;
+            return Task.CompletedTask;
         }
 
-        var files = _mediaProbe.EnumerateVideos(Settings.LibraryFolder).ToArray();
-        var clips = new ClipCardViewModel?[files.Length];
-
-        await Parallel.ForEachAsync(
-            files.Select((path, index) => new { path, index }),
-            new ParallelOptions { MaxDegreeOfParallelism = 4 },
-            async (item, _) =>
-            {
-                clips[item.index] = await BuildClipAsync(item.path);
-            });
+        var clips = _mediaProbe.EnumerateVideos(Settings.LibraryFolder)
+            .Select(file => new ClipCardViewModel(_mediaProbe.CreateLibraryStub(file), _mediaProbe))
+            .ToArray();
 
         foreach (var group in clips
-                     .Where(clip => clip is not null)
-                     .Cast<ClipCardViewModel>()
                      .GroupBy(clip => clip.CreatedAt.ToLocalTime().Date)
                      .OrderByDescending(group => group.Key))
         {
@@ -198,6 +190,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
 
         NotifyLibraryChrome();
+        _ = HydrateLibraryClipsAsync(clips);
+        return Task.CompletedTask;
     }
 
     public async Task OpenVideoFileAsync(string filePath)
@@ -206,8 +200,20 @@ public sealed class MainWindowViewModel : ViewModelBase
         OpenMedia(media);
     }
 
-    public void OpenClip(ClipCardViewModel clip)
+    public async Task OpenClipAsync(ClipCardViewModel clip)
     {
+        if (clip.Duration == TimeSpan.Zero || clip.Media.Tracks.Count == 0)
+        {
+            try
+            {
+                clip.UpdateMedia(await _mediaProbe.ProbeAsync(clip.Path));
+            }
+            catch
+            {
+                // Fall back to the file info already on the card.
+            }
+        }
+
         OpenMedia(clip.Media);
     }
 
@@ -335,28 +341,23 @@ public sealed class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(SelectionSummary));
     }
 
-    private async Task<ClipCardViewModel> BuildClipAsync(string file)
+    private async Task HydrateLibraryClipsAsync(IReadOnlyList<ClipCardViewModel> clips)
     {
-        try
-        {
-            return new ClipCardViewModel(await _mediaProbe.ProbeAsync(file), _mediaProbe);
-        }
-        catch
-        {
-            var info = new FileInfo(file);
-            var fallback = new MediaFileInfo(
-                Path.GetFileNameWithoutExtension(file),
-                file,
-                info.CreationTimeUtc,
-                TimeSpan.Zero,
-                info.Length,
-                string.Empty,
-                Array.Empty<MediaTrackInfo>(),
-                0,
-                0,
-                0);
-            return new ClipCardViewModel(fallback, _mediaProbe);
-        }
+        await Parallel.ForEachAsync(
+            clips,
+            new ParallelOptions { MaxDegreeOfParallelism = 3 },
+            async (clip, _) =>
+            {
+                try
+                {
+                    var media = await _mediaProbe.ProbeAsync(clip.Path);
+                    await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(media));
+                }
+                catch
+                {
+                    // Bad files should not stop the rest of the library from filling in.
+                }
+            });
     }
 
     private static Avalonia.Media.Imaging.Bitmap? LoadBitmap(string path)
