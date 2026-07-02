@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vlc="using:LibVLCSharp.Avalonia"
         xmlns:vm="using:Eve.App.ViewModels"
         x:Class="Eve.App.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
@@ -58,11 +59,11 @@
           <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" />
           <TextBlock Text="{Binding SelectedCreated}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" />
           <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" />
-          <TextBlock Text="{Binding SelectedQuality}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" />
+          <TextBlock Text="{Binding SelectedQuality}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" TextTrimming="CharacterEllipsis" MaxWidth="180" />
           <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" />
-          <TextBlock Text="{Binding SelectedSize}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" />
+          <TextBlock Text="{Binding SelectedSize}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" TextTrimming="CharacterEllipsis" MaxWidth="110" />
           <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" />
-          <TextBlock Text="{Binding SelectedVideoPath}" Foreground="#BDD4EE" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" />
+          <TextBlock Text="{Binding SelectedVideoPath}" Foreground="#BDD4EE" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" TextTrimming="CharacterEllipsis" MaxWidth="420" />
         </StackPanel>
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" IsVisible="{Binding ShowLibraryActions}">
@@ -81,6 +82,11 @@
     <Border Grid.Row="1" Background="#101820" IsVisible="{Binding IsLibraryVisible}">
       <DockPanel Margin="20,18">
         <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto">
+          <TextBlock Text="{Binding LibraryTitle}"
+                     Foreground="#C4D0DF"
+                     FontSize="15"
+                     FontWeight="Bold"
+                     VerticalAlignment="Center" />
           <TextBlock Grid.Column="1"
                      Text="{Binding LibraryLocationText}"
                      Foreground="#647181"
@@ -114,14 +120,19 @@
                         <Border Width="{Binding $parent[Window].DataContext.CardWidth}"
                                 Margin="4,4,20,24"
                                 Background="#24303A"
-                                BorderBrush="{Binding SelectionBorderBrush}"
-                                BorderThickness="{Binding SelectionBorderThickness}"
                                 CornerRadius="4"
                                 ClipToBounds="True"
                                 PointerPressed="ClipCard_OnPointerPressed"
                                 PointerEntered="ClipCard_OnPointerEntered"
                                 PointerExited="ClipCard_OnPointerExited">
                           <Grid RowDefinitions="Auto,104">
+                            <Border Grid.RowSpan="2"
+                                    BorderBrush="{Binding SelectionBorderBrush}"
+                                    BorderThickness="2"
+                                    CornerRadius="4"
+                                    IsVisible="{Binding IsSelected}"
+                                    IsHitTestVisible="False"
+                                    ZIndex="10" />
                             <Border Background="#16202A" Height="{Binding $parent[Window].DataContext.CardImageHeight}">
                               <Grid>
                                 <Image Source="{Binding PreviewImage}" Stretch="UniformToFill" />
@@ -176,17 +187,22 @@
     <Grid Grid.Row="1" RowDefinitions="*,220" IsVisible="{Binding IsEditorVisible}">
       <Grid Background="#0E141A" ColumnDefinitions="*,300">
         <Border Background="#05080B">
-          <Image Source="{Binding SelectedThumbnail}" Stretch="Uniform" />
+          <vlc:VideoView x:Name="EditorVideoView" />
         </Border>
         <Border Grid.Column="1" Background="#101820" BorderBrush="#1F2B34" BorderThickness="1,0,0,0">
           <StackPanel Margin="20" Spacing="14">
             <TextBlock Text="CLIP DETAILS" Foreground="#C4D9F2" FontSize="13" FontWeight="Bold" />
             <TextBlock Text="Title" Foreground="#93A6B8" FontSize="12" />
-            <TextBlock Text="{Binding SelectedVideoName}" Foreground="#EDF4FB" FontSize="14" FontWeight="Bold" TextWrapping="Wrap" />
+            <TextBox Text="{Binding EditorTitle}" Foreground="#EDF4FB" FontSize="14" FontWeight="Bold" Background="#0D151C" BorderBrush="#17232D" />
             <TextBlock Text="Description" Foreground="#93A6B8" FontSize="12" />
-            <Border MinHeight="70" Background="#0D151C" CornerRadius="4" Padding="10">
-              <TextBlock Text="Type description here" Foreground="#647181" FontSize="12" />
-            </Border>
+            <TextBox Text="{Binding EditorDescription}"
+                     MinHeight="86"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     Watermark="Type description here"
+                     Background="#0D151C"
+                     BorderBrush="#17232D"
+                     Foreground="#D6E2F0" />
             <Border Height="1" Background="#22303A" Margin="0,10,0,0" />
           </StackPanel>
         </Border>
@@ -195,21 +211,37 @@
       <Border Grid.Row="1" Background="#141D24" BorderBrush="#22303A" BorderThickness="0,1,0,0">
         <Grid RowDefinitions="42,*" ColumnDefinitions="150,*" Margin="8">
           <StackPanel Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
-            <Button Content="|&lt;" Width="34" />
-            <Button Content="&lt;" Width="34" />
-            <Button Content="▶" Width="38" />
-            <Button Content="&gt;" Width="34" />
-            <Button Content="&gt;|" Width="34" />
+            <Button Content="|&lt;" Width="34" Click="RestartButton_OnClick" />
+            <Button Content="&lt;" Width="34" Click="StepBackButton_OnClick" />
+            <Button Content="{Binding PlayPauseIcon}" Width="64" Click="PlayPauseButton_OnClick" />
+            <Button Content="&gt;" Width="34" Click="StepForwardButton_OnClick" />
+            <Button Content="&gt;|" Width="34" Click="EndButton_OnClick" />
           </StackPanel>
 
           <StackPanel Grid.Row="1" Spacing="6">
-            <TextBlock Text="0:00 / 0:00" Foreground="#8EB6D8" FontSize="12" />
+            <TextBlock Text="{Binding TimelineStatusLabel}" Foreground="#8EB6D8" FontSize="12" />
             <ItemsControl ItemsSource="{Binding TimelineTracks}">
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
-                  <Border Height="32" Margin="0,0,0,6" Background="#263442" CornerRadius="3">
-                    <TextBlock Text="{Binding Label}" Foreground="#D1DEEC" FontSize="12" Margin="8,0" VerticalAlignment="Center" />
-                  </Border>
+                  <Grid Height="32" Margin="0,0,0,6">
+                    <Border Background="#263442" CornerRadius="3" />
+                    <StackPanel Margin="8,0" VerticalAlignment="Center" Spacing="3">
+                      <TextBlock Text="{Binding Label}" Foreground="#D1DEEC" FontSize="12" />
+                      <Grid IsVisible="{Binding IsAudio}" ColumnDefinitions="14,*,14,34">
+                        <TextBlock Text="-" Foreground="#D1DEEC" FontSize="11" VerticalAlignment="Center" />
+                        <Slider Grid.Column="1"
+                                Minimum="0"
+                                Maximum="150"
+                                Value="{Binding VolumePercent}"
+                                IsEnabled="{Binding CanAdjustVolume}"
+                                PointerPressed="TrackVolume_OnPointerPressed"
+                                PointerReleased="TrackVolume_OnPointerReleased"
+                                PropertyChanged="TrackVolume_OnPropertyChanged" />
+                        <TextBlock Grid.Column="2" Text="+" Foreground="#D1DEEC" FontSize="11" VerticalAlignment="Center" HorizontalAlignment="Right" />
+                        <TextBlock Grid.Column="3" Text="{Binding VolumeLabel}" Foreground="#D1DEEC" FontSize="10" VerticalAlignment="Center" IsVisible="{Binding ShowVolumePercent}" />
+                      </Grid>
+                    </StackPanel>
+                  </Grid>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
@@ -217,18 +249,46 @@
 
           <Grid Grid.Row="0" Grid.Column="1" HorizontalAlignment="Right" Margin="0,0,0,6">
             <StackPanel Orientation="Horizontal" Spacing="8">
-              <Button Content="Save Trim" Background="#5864E8" Foreground="#FFFFFF" FontWeight="Bold" Width="110" />
-              <Button Content="Cancel" Width="110" />
+              <Button Content="{Binding ExportButtonText}"
+                      Background="#5864E8"
+                      Foreground="#FFFFFF"
+                      FontWeight="Bold"
+                      HorizontalContentAlignment="Center"
+                      Width="110"
+                      IsEnabled="{Binding !IsExporting}"
+                      Click="ExportButton_OnClick" />
             </StackPanel>
           </Grid>
 
-          <ItemsControl Grid.Row="1" Grid.Column="1" ItemsSource="{Binding TimelineTracks}" Margin="8,20,0,0">
-            <ItemsControl.ItemTemplate>
-              <DataTemplate>
-                <Border Height="32" Margin="0,0,0,6" Background="{Binding Color}" CornerRadius="2" Opacity="0.78" />
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
+          <Grid Grid.Row="1" Grid.Column="1" RowDefinitions="20,24,*" Margin="8,0,0,0">
+            <Grid ColumnDefinitions="*,*,*,*">
+              <TextBlock Text="0:00" Foreground="#8EB6D8" FontSize="11" />
+              <TextBlock Grid.Column="1" Text="0:10" Foreground="#8EB6D8" FontSize="11" />
+              <TextBlock Grid.Column="2" Text="0:20" Foreground="#8EB6D8" FontSize="11" />
+              <TextBlock Grid.Column="3" Text="{Binding DurationLabel}" Foreground="#8EB6D8" FontSize="11" HorizontalAlignment="Right" />
+            </Grid>
+            <Slider x:Name="TimelineSeekSlider"
+                    Grid.Row="1"
+                    Minimum="0"
+                    Maximum="1000"
+                    Value="0"
+                    PropertyChanged="TimelineSeek_OnPropertyChanged"
+                    PointerReleased="TimelineSeek_OnPointerReleased" />
+            <Grid Grid.Row="2">
+              <ItemsControl ItemsSource="{Binding TimelineTracks}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Border Height="32" Margin="0,0,0,6" Background="{Binding Color}" CornerRadius="2" Opacity="0.78" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <Border Width="3" Background="#F2F7FF" HorizontalAlignment="Center" IsHitTestVisible="False" />
+              <StackPanel VerticalAlignment="Bottom" Spacing="4">
+                <Slider x:Name="TrimStartSlider" Minimum="0" Maximum="1000" Value="0" PropertyChanged="TrimStart_OnPropertyChanged" />
+                <Slider x:Name="TrimEndSlider" Minimum="0" Maximum="1000" Value="1000" PropertyChanged="TrimEnd_OnPropertyChanged" />
+              </StackPanel>
+            </Grid>
+          </Grid>
         </Grid>
       </Border>
     </Grid>

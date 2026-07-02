@@ -21,6 +21,14 @@ public sealed class MainWindowViewModel : ViewModelBase
     private string _selectedCreated = "Created: No clip loaded";
     private string _selectedQuality = "Video Quality: Unknown";
     private string _selectedSize = "Size: 0 B";
+    private string _editorTitle = string.Empty;
+    private string _editorDescription = string.Empty;
+    private TimeSpan _currentTime = TimeSpan.Zero;
+    private TimeSpan _duration = TimeSpan.Zero;
+    private TimeSpan _trimStart = TimeSpan.Zero;
+    private TimeSpan _trimEnd = TimeSpan.Zero;
+    private bool _isPlaying;
+    private bool _isExporting;
     private double _cardWidth = 368;
     private double _cardImageHeight = 207;
     private int _cardColumns = 3;
@@ -40,6 +48,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public string LibraryHeaderDate => ClipGroups.Count > 0 ? ClipGroups[0].Label : "LIBRARY";
     public string LibraryHeaderGame => ClipGroups.Count > 0 ? "Videos" : "No folder selected";
+    public string LibraryTitle => "Clips";
     public string LibraryFolderDisplay => string.IsNullOrWhiteSpace(Settings.LibraryFolder)
         ? "Choose a folder"
         : Settings.LibraryFolder;
@@ -159,6 +168,94 @@ public sealed class MainWindowViewModel : ViewModelBase
         private set => SetProperty(ref _selectedSize, value);
     }
 
+    public string EditorTitle
+    {
+        get => _editorTitle;
+        set => SetProperty(ref _editorTitle, value);
+    }
+
+    public string EditorDescription
+    {
+        get => _editorDescription;
+        set => SetProperty(ref _editorDescription, value);
+    }
+
+    public TimeSpan CurrentTime
+    {
+        get => _currentTime;
+        set
+        {
+            if (!SetProperty(ref _currentTime, ClampTime(value))) return;
+            OnTimelineChanged();
+        }
+    }
+
+    public TimeSpan Duration
+    {
+        get => _duration;
+        private set
+        {
+            if (!SetProperty(ref _duration, value < TimeSpan.Zero ? TimeSpan.Zero : value)) return;
+            OnTimelineChanged();
+        }
+    }
+
+    public TimeSpan TrimStart
+    {
+        get => _trimStart;
+        set
+        {
+            var clamped = ClampTime(value);
+            if (TrimEnd > TimeSpan.Zero && clamped > TrimEnd) clamped = TrimEnd;
+            if (!SetProperty(ref _trimStart, clamped)) return;
+            OnTimelineChanged();
+        }
+    }
+
+    public TimeSpan TrimEnd
+    {
+        get => _trimEnd;
+        set
+        {
+            var clamped = ClampTime(value);
+            if (clamped < TrimStart) clamped = TrimStart;
+            if (!SetProperty(ref _trimEnd, clamped)) return;
+            OnTimelineChanged();
+        }
+    }
+
+    public bool IsPlaying
+    {
+        get => _isPlaying;
+        set
+        {
+            if (!SetProperty(ref _isPlaying, value)) return;
+            OnPropertyChanged(nameof(PlayPauseIcon));
+        }
+    }
+
+    public bool IsExporting
+    {
+        get => _isExporting;
+        set
+        {
+            if (!SetProperty(ref _isExporting, value)) return;
+            OnPropertyChanged(nameof(ExportButtonText));
+        }
+    }
+
+    public string PlayPauseIcon => IsPlaying ? "Pause" : "Play";
+    public string CurrentTimeLabel => FormatTime(CurrentTime);
+    public string DurationLabel => FormatTime(Duration);
+    public string TimelineStatusLabel => $"{CurrentTimeLabel} / {DurationLabel}";
+    public string TrimStartPercent => Percent(TrimStart);
+    public string TrimEndPercent => Percent(TrimEnd);
+    public string PlayheadPercent => Percent(CurrentTime);
+    public string LeftShadeWidth => TrimStartPercent;
+    public string RightShadeLeft => TrimEndPercent;
+    public string RightShadeWidth => $"{Math.Max(0, 100 - PercentValue(TrimEnd)):0.###}%";
+    public string ExportButtonText => IsExporting ? "Exporting..." : "Export";
+
     public async Task LoadLibraryFolderAsync(string folderPath)
     {
         Settings.LibraryFolder = folderPath;
@@ -268,7 +365,64 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public void CloseEditor()
     {
+        IsPlaying = false;
         IsEditorVisible = false;
+    }
+
+    public void SetDuration(TimeSpan duration)
+    {
+        if (duration <= TimeSpan.Zero) return;
+        Duration = duration;
+        if (TrimEnd <= TimeSpan.Zero || TrimEnd > duration)
+        {
+            TrimEnd = duration;
+        }
+    }
+
+    public void SeekBySeconds(double seconds)
+    {
+        CurrentTime = CurrentTime + TimeSpan.FromSeconds(seconds);
+    }
+
+    public void RestartPlayback()
+    {
+        CurrentTime = TrimStart;
+    }
+
+    public IReadOnlyList<string> BuildExportArguments(string outputPath)
+    {
+        var startSeconds = Math.Max(0, TrimStart.TotalSeconds);
+        var end = TrimEnd > TrimStart ? TrimEnd : Duration;
+        var durationSeconds = Math.Max(0.1, (end - TrimStart).TotalSeconds);
+        var args = new List<string>
+        {
+            "-y",
+            "-ss", startSeconds.ToString("0.###"),
+            "-t", durationSeconds.ToString("0.###"),
+            "-i", SelectedVideoPath,
+            "-map", "0:v:0",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "20"
+        };
+
+        var audioTracks = TimelineTracks.Where(track => track.IsAudio).ToArray();
+        for (var i = 0; i < audioTracks.Length; i++)
+        {
+            var track = audioTracks[i];
+            var filter = $"volume={track.VolumePercent / 100:0.###}";
+            args.Add("-map");
+            args.Add($"0:a:{i}");
+            args.Add($"-filter:a:{i}");
+            args.Add(filter);
+            args.Add($"-c:a:{i}");
+            args.Add("aac");
+        }
+
+        args.Add("-movflags");
+        args.Add("+faststart");
+        args.Add(outputPath);
+        return args;
     }
 
     private void OpenMedia(MediaFileInfo media)
@@ -277,31 +431,41 @@ public sealed class MainWindowViewModel : ViewModelBase
         SelectedVideoPath = media.Path;
         SelectedThumbnailPath = media.ThumbnailPath;
         SelectedThumbnail = LoadBitmap(media.ThumbnailPath);
+        EditorTitle = media.Name;
+        EditorDescription = string.Empty;
         SelectedCreated = $"Created: {media.CreatedAt.ToLocalTime():d MMM yyyy, H:mm}";
-        SelectedQuality = media.Width > 0 && media.Height > 0
-            ? $"Video Quality: {media.Width}x{media.Height}, {media.Fps:0.#} FPS"
+        SelectedQuality = media.Height > 0
+            ? $"Video Quality: {ResolutionLabel(media.Height)}"
             : "Video Quality: Unknown";
         SelectedSize = $"Size: {FormatBytes(media.SizeBytes)}";
         SelectedMetadata = $"{SelectedQuality} - {SelectedSize}";
+        Duration = media.Duration;
+        CurrentTime = TimeSpan.Zero;
+        TrimStart = TimeSpan.Zero;
+        TrimEnd = media.Duration;
+        IsPlaying = false;
         TimelineTracks.Clear();
 
         var hasVideo = false;
+        var audioIndex = 0;
         foreach (var track in media.Tracks)
         {
+            if (track.Type == "subtitle") continue;
             var color = track.Type switch
             {
                 "video" => "#05C7B7",
-                "audio" => "#2F9DD4",
-                "subtitle" => "#CA8F1B",
+                "audio" => AudioColor(audioIndex),
                 _ => "#607080"
             };
             if (track.Type == "video") hasVideo = true;
-            TimelineTracks.Add(new TrackLaneViewModel(track.Label, track.Type, color));
+            var label = track.Type == "audio" ? AudioLabel(audioIndex) : "Video";
+            TimelineTracks.Add(new TrackLaneViewModel(track.Index, label, track.Type, color, track.Type == "audio"));
+            if (track.Type == "audio") audioIndex++;
         }
 
         if (!hasVideo)
         {
-            TimelineTracks.Insert(0, new TrackLaneViewModel("Video", "video", "#05C7B7"));
+            TimelineTracks.Insert(0, new TrackLaneViewModel(0, "Video", "video", "#05C7B7", false));
         }
 
         IsEditorVisible = true;
@@ -327,6 +491,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(LibraryHeaderDate));
         OnPropertyChanged(nameof(LibraryHeaderGame));
+        OnPropertyChanged(nameof(LibraryTitle));
         OnPropertyChanged(nameof(LibraryFolderDisplay));
         OnPropertyChanged(nameof(LibraryLocationText));
         NotifySelectionChrome();
@@ -360,6 +525,37 @@ public sealed class MainWindowViewModel : ViewModelBase
             });
     }
 
+    private TimeSpan ClampTime(TimeSpan time)
+    {
+        if (time < TimeSpan.Zero) return TimeSpan.Zero;
+        return Duration > TimeSpan.Zero && time > Duration ? Duration : time;
+    }
+
+    private void OnTimelineChanged()
+    {
+        OnPropertyChanged(nameof(CurrentTimeLabel));
+        OnPropertyChanged(nameof(DurationLabel));
+        OnPropertyChanged(nameof(TimelineStatusLabel));
+        OnPropertyChanged(nameof(TrimStartPercent));
+        OnPropertyChanged(nameof(TrimEndPercent));
+        OnPropertyChanged(nameof(PlayheadPercent));
+        OnPropertyChanged(nameof(LeftShadeWidth));
+        OnPropertyChanged(nameof(RightShadeLeft));
+        OnPropertyChanged(nameof(RightShadeWidth));
+    }
+
+    private string Percent(TimeSpan time)
+    {
+        return $"{PercentValue(time):0.###}%";
+    }
+
+    private double PercentValue(TimeSpan time)
+    {
+        return Duration <= TimeSpan.Zero
+            ? 0
+            : Math.Clamp(time.TotalMilliseconds / Duration.TotalMilliseconds * 100, 0, 100);
+    }
+
     private static Avalonia.Media.Imaging.Bitmap? LoadBitmap(string path)
     {
         try
@@ -386,5 +582,43 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
 
         return $"{value:0.#} {units[unit]}";
+    }
+
+    private static string FormatTime(TimeSpan time)
+    {
+        return time.TotalHours >= 1
+            ? time.ToString("h\\:mm\\:ss")
+            : time.ToString("m\\:ss");
+    }
+
+    private static string ResolutionLabel(int height)
+    {
+        if (height >= 2160) return "4K";
+        if (height >= 1440) return "1440p";
+        if (height >= 1080) return "1080p";
+        if (height >= 720) return "720p";
+        return $"{height}p";
+    }
+
+    private static string AudioLabel(int audioIndex)
+    {
+        return audioIndex switch
+        {
+            0 => "Game Audio",
+            1 => "Chat Audio",
+            2 => "Microphone",
+            _ => $"Audio {audioIndex + 1}"
+        };
+    }
+
+    private static string AudioColor(int audioIndex)
+    {
+        return audioIndex switch
+        {
+            0 => "#05C7B7",
+            1 => "#2F9DD4",
+            2 => "#CA8F1B",
+            _ => "#607080"
+        };
     }
 }
