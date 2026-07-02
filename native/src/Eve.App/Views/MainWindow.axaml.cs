@@ -5,6 +5,7 @@ using Avalonia.Layout;
 using Avalonia;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using System.Diagnostics;
 using Eve.App.Services;
 using Eve.App.ViewModels;
@@ -18,14 +19,27 @@ public sealed partial class MainWindow : Window
     private PlaybackSession? _playback;
     private CancellationTokenSource? _playbackStartCts;
     private TimelineDragMode _timelineDragMode = TimelineDragMode.None;
+    private TrackLaneViewModel? _draggingVolumeTrack;
+    private Slider? _draggingVolumeSlider;
     private TimeSpan _smoothPlaybackBase = TimeSpan.Zero;
 
     public MainWindow()
     {
         InitializeComponent();
-        Opened += (_, _) => ViewModel?.UpdateCardLayout(Bounds.Width);
+        Opened += (_, _) =>
+        {
+            ApplySavedWindowBounds();
+            ViewModel?.UpdateCardLayout(Bounds.Width);
+        };
         KeyDown += MainWindow_OnKeyDown;
-        Closing += (_, _) => ViewModel?.SaveSettings();
+        AddHandler(PointerPressedEvent, WindowPointerPressed, RoutingStrategies.Tunnel, true);
+        AddHandler(PointerMovedEvent, WindowPointerMoved, RoutingStrategies.Tunnel, true);
+        AddHandler(PointerReleasedEvent, WindowPointerReleased, RoutingStrategies.Tunnel, true);
+        Closing += (_, _) =>
+        {
+            SaveWindowBounds();
+            ViewModel?.SaveSettings();
+        };
         Closed += (_, _) => _playback?.Dispose();
         _playbackTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _playbackTimer.Tick += (_, _) => SyncPlaybackPosition();
@@ -257,6 +271,7 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
         _timelineDragMode = TimelineDragMode.TrimStart;
+        UpdateTimelineFromPointer(e, TimelineDragMode.TrimStart);
         e.Pointer.Capture(TimelineSurface);
         e.Handled = true;
     }
@@ -265,6 +280,7 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
         _timelineDragMode = TimelineDragMode.TrimEnd;
+        UpdateTimelineFromPointer(e, TimelineDragMode.TrimEnd);
         e.Pointer.Capture(TimelineSurface);
         e.Handled = true;
     }
@@ -294,6 +310,7 @@ public sealed partial class MainWindow : Window
         if (sender is Slider { DataContext: TrackLaneViewModel track })
         {
             track.ShowVolumePercent = true;
+            UpdateVolumeBadgePosition((Slider)sender, track, e.GetPosition((Slider)sender).X);
         }
     }
 
@@ -309,6 +326,41 @@ public sealed partial class MainWindow : Window
     {
         if (e.Property != Slider.ValueProperty || sender is not Slider { DataContext: TrackLaneViewModel track }) return;
         _playback?.SetTrackVolume(track.StreamIndex, track.VolumePercent);
+    }
+
+    private void WindowPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        var slider = FindAncestor<Slider>(e.Source as Control);
+        if (slider?.DataContext is not TrackLaneViewModel track || !track.IsAudio) return;
+
+        _draggingVolumeTrack = track;
+        _draggingVolumeSlider = slider;
+        track.ShowVolumePercent = true;
+        UpdateVolumeBadgePosition(slider, track, e.GetPosition(slider).X);
+        e.Pointer.Capture(slider);
+    }
+
+    private void WindowPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_draggingVolumeTrack is null || _draggingVolumeSlider is null) return;
+
+        UpdateVolumeBadgePosition(_draggingVolumeSlider, _draggingVolumeTrack, e.GetPosition(_draggingVolumeSlider).X);
+    }
+
+    private void WindowPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (_draggingVolumeTrack is not null)
+        {
+            _draggingVolumeTrack.ShowVolumePercent = false;
+            _draggingVolumeTrack = null;
+            _draggingVolumeSlider = null;
+            e.Pointer.Capture(null);
+        }
+    }
+
+    private static void UpdateVolumeBadgePosition(Slider slider, TrackLaneViewModel track, double x)
+    {
+        track.VolumeBadgeX = Math.Clamp(x, 0, Math.Max(1, slider.Bounds.Width));
     }
 
     private async void ExportButton_OnClick(object? sender, RoutedEventArgs e)
@@ -535,6 +587,53 @@ public sealed partial class MainWindow : Window
         {
             _smoothPlaybackClock.Stop();
         }
+    }
+
+    private void ApplySavedWindowBounds()
+    {
+        if (ViewModel is null) return;
+        var settings = ViewModel.Settings;
+        if (settings.WindowWidth >= MinWidth && settings.WindowHeight >= MinHeight)
+        {
+            Width = settings.WindowWidth;
+            Height = settings.WindowHeight;
+        }
+
+        if (!double.IsNaN(settings.WindowX) && !double.IsNaN(settings.WindowY))
+        {
+            Position = new PixelPoint((int)settings.WindowX, (int)settings.WindowY);
+        }
+
+        if (settings.IsWindowMaximized)
+        {
+            WindowState = WindowState.Maximized;
+        }
+    }
+
+    private void SaveWindowBounds()
+    {
+        if (ViewModel is null) return;
+        var settings = ViewModel.Settings;
+        settings.IsWindowMaximized = WindowState == WindowState.Maximized;
+        if (WindowState == WindowState.Normal)
+        {
+            settings.WindowX = Position.X;
+            settings.WindowY = Position.Y;
+            settings.WindowWidth = Bounds.Width;
+            settings.WindowHeight = Bounds.Height;
+        }
+    }
+
+    private static T? FindAncestor<T>(Control? control)
+        where T : Control
+    {
+        while (control is not null)
+        {
+            if (control is T match) return match;
+            control = control.GetVisualParent() as Control;
+        }
+
+        return null;
     }
 
     private enum TimelineDragMode

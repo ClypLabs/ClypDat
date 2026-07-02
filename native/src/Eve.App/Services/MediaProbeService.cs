@@ -146,19 +146,11 @@ public sealed class MediaProbeService
         Directory.CreateDirectory(folder);
 
         var duration = Math.Max(1, media.Duration.TotalSeconds);
-        var sourceFps = media.Fps > 0 ? media.Fps : 60;
-        var targetFps = Math.Min(60, sourceFps);
-        var frameCount = (int)Math.Clamp(Math.Ceiling(duration * targetFps), 60, 600);
+        const int frameCount = 120;
         var existing = Directory.EnumerateFiles(folder, "*.jpg").OrderBy(path => path).ToArray();
-        if (existing.Length >= frameCount)
+        if (existing.Length > 0)
         {
             return existing;
-        }
-
-        foreach (var file in existing)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            TryDelete(file);
         }
 
         var outputPattern = Path.Combine(folder, "%04d.jpg");

@@ -129,11 +129,14 @@ public sealed class TimelineLaneControl : Control
     private static void DrawShade(DrawingContext context, Rect rect)
     {
         if (rect.Width <= 0) return;
-        context.DrawRectangle(new SolidColorBrush(Color.FromArgb(120, 10, 15, 19)), null, rect);
-        var pen = new Pen(new SolidColorBrush(Color.FromArgb(18, 255, 255, 255)), 1);
-        for (var x = -rect.Height; x < rect.Width + rect.Height; x += 16)
+        using (context.PushClip(rect))
         {
-            context.DrawLine(pen, new Point(rect.X + x, rect.Bottom), new Point(rect.X + x + rect.Height, rect.Y));
+            context.DrawRectangle(new SolidColorBrush(Color.FromArgb(120, 10, 15, 19)), null, rect);
+            var pen = new Pen(new SolidColorBrush(Color.FromArgb(18, 255, 255, 255)), 1);
+            for (var x = -rect.Height; x < rect.Width + rect.Height; x += 16)
+            {
+                context.DrawLine(pen, new Point(rect.X + x, rect.Bottom), new Point(rect.X + x + rect.Height, rect.Y));
+            }
         }
     }
 

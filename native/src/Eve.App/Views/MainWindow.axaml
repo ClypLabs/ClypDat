@@ -296,7 +296,7 @@
                             Background="#2A3540"
                             CornerRadius="4"
                             ClipToBounds="False">
-                      <Grid Margin="8,5" RowDefinitions="Auto,24" ColumnDefinitions="16,*,16">
+                      <Grid Margin="8,6" RowDefinitions="Auto,32" ColumnDefinitions="16,*,16">
                         <TextBlock Grid.ColumnSpan="3"
                                    Text="{Binding Label}"
                                    Foreground="#D4E0EA"
@@ -312,8 +312,9 @@
                                 Grid.Column="1"
                                 Minimum="0"
                                 Maximum="150"
-                                Height="24"
-                                MinHeight="24"
+                                Height="32"
+                                MinHeight="32"
+                                Margin="0,-2,0,0"
                                 Value="{Binding VolumePercent}"
                                 IsEnabled="{Binding CanAdjustVolume}"
                                 IsVisible="{Binding IsAudio}"

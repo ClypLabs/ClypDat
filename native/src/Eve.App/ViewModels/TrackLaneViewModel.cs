@@ -5,6 +5,7 @@ namespace Eve.App.ViewModels;
 public sealed class TrackLaneViewModel : ViewModelBase
 {
     private double _volumePercent = 100;
+    private double _volumeBadgeX = 46;
     private bool _showVolumePercent;
     private IReadOnlyList<double> _waveformPeaks = Array.Empty<double>();
 
@@ -24,9 +25,9 @@ public sealed class TrackLaneViewModel : ViewModelBase
     public bool CanAdjustVolume { get; }
     public bool IsAudio => Type == "audio";
     public bool IsVideo => Type == "video";
-    public double LaneHeight => IsVideo ? 32 : 46;
+    public double LaneHeight => IsVideo ? 32 : 56;
     public string VolumeLabel => $"{VolumePercent:0}%";
-    public Thickness VolumeBadgeMargin => new(Math.Clamp(VolumePercent / 150 * 112 - 20, -2, 92), -28, 0, 0);
+    public Thickness VolumeBadgeMargin => new(Math.Clamp(VolumeBadgeX - 18, -2, 116), -26, 0, 0);
     public string HeaderClass => IsAudio ? "audioHeader" : "videoHeader";
 
     public double VolumePercent
@@ -45,6 +46,16 @@ public sealed class TrackLaneViewModel : ViewModelBase
     {
         get => _showVolumePercent;
         set => SetProperty(ref _showVolumePercent, value);
+    }
+
+    public double VolumeBadgeX
+    {
+        get => _volumeBadgeX;
+        set
+        {
+            if (!SetProperty(ref _volumeBadgeX, value)) return;
+            OnPropertyChanged(nameof(VolumeBadgeMargin));
+        }
     }
 
     public IReadOnlyList<double> WaveformPeaks
