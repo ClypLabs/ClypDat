@@ -414,24 +414,14 @@ public sealed class MainWindowViewModel : ViewModelBase
             "-ss", startSeconds.ToString("0.###"),
             "-t", durationSeconds.ToString("0.###"),
             "-i", SelectedVideoPath,
-            "-map", "0:v:0",
+            "-map", "0:v:0?",
+            "-map", "0:a?",
+            "-sn",
             "-c:v", "libx264",
             "-preset", "veryfast",
-            "-crf", "20"
+            "-crf", "20",
+            "-c:a", "aac"
         };
-
-        var audioTracks = TimelineTracks.Where(track => track.IsAudio).ToArray();
-        for (var i = 0; i < audioTracks.Length; i++)
-        {
-            var track = audioTracks[i];
-            var filter = $"volume={track.VolumePercent / 100:0.###}";
-            args.Add("-map");
-            args.Add($"0:a:{i}");
-            args.Add($"-filter:a:{i}");
-            args.Add(filter);
-            args.Add($"-c:a:{i}");
-            args.Add("aac");
-        }
 
         args.Add("-movflags");
         args.Add("+faststart");

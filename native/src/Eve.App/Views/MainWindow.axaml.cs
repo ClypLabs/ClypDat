@@ -5,7 +5,6 @@ using Avalonia.Layout;
 using Avalonia;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
-using Avalonia.VisualTree;
 using System.Diagnostics;
 using Eve.App.Services;
 using Eve.App.ViewModels;
@@ -19,8 +18,6 @@ public sealed partial class MainWindow : Window
     private PlaybackSession? _playback;
     private CancellationTokenSource? _playbackStartCts;
     private TimelineDragMode _timelineDragMode = TimelineDragMode.None;
-    private TrackLaneViewModel? _draggingVolumeTrack;
-    private Slider? _draggingVolumeSlider;
     private TimeSpan _smoothPlaybackBase = TimeSpan.Zero;
 
     public MainWindow()
@@ -32,9 +29,6 @@ public sealed partial class MainWindow : Window
             ViewModel?.UpdateCardLayout(Bounds.Width);
         };
         KeyDown += MainWindow_OnKeyDown;
-        AddHandler(PointerPressedEvent, WindowPointerPressed, RoutingStrategies.Tunnel, true);
-        AddHandler(PointerMovedEvent, WindowPointerMoved, RoutingStrategies.Tunnel, true);
-        AddHandler(PointerReleasedEvent, WindowPointerReleased, RoutingStrategies.Tunnel, true);
         Closing += (_, _) =>
         {
             SaveWindowBounds();
@@ -110,27 +104,8 @@ public sealed partial class MainWindow : Window
         if (sender is not Control { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
 
         e.Handled = true;
-        clip.StopPreview();
         await ViewModel.OpenClipAsync(clip);
         QueueEditorPlayback();
-    }
-
-    private async void ClipCard_OnPointerEntered(object? sender, PointerEventArgs e)
-    {
-        if (sender is Control { DataContext: ClipCardViewModel clip })
-        {
-            clip.IsHovered = true;
-            await clip.StartPreviewAsync();
-        }
-    }
-
-    private void ClipCard_OnPointerExited(object? sender, PointerEventArgs e)
-    {
-        if (sender is Control { DataContext: ClipCardViewModel clip })
-        {
-            clip.IsHovered = false;
-            clip.StopPreview();
-        }
     }
 
     private void ClipCheckBox_OnClick(object? sender, RoutedEventArgs e)
@@ -311,6 +286,7 @@ public sealed partial class MainWindow : Window
         {
             track.ShowVolumePercent = true;
             UpdateVolumeBadgePosition((Slider)sender, track, e.GetPosition((Slider)sender).X);
+            e.Handled = false;
         }
     }
 
@@ -318,7 +294,9 @@ public sealed partial class MainWindow : Window
     {
         if (sender is Slider { DataContext: TrackLaneViewModel track })
         {
-            ClearVolumeDrag(e.Pointer);
+            track.ShowVolumePercent = false;
+            e.Pointer.Capture(null);
+            e.Handled = false;
         }
     }
 
@@ -328,45 +306,9 @@ public sealed partial class MainWindow : Window
         _playback?.SetTrackVolume(track.StreamIndex, track.VolumePercent);
     }
 
-    private void WindowPointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        var slider = FindAncestor<Slider>(e.Source as Control);
-        if (slider?.DataContext is not TrackLaneViewModel track || !track.IsAudio) return;
-
-        _draggingVolumeTrack = track;
-        _draggingVolumeSlider = slider;
-        track.ShowVolumePercent = true;
-        UpdateVolumeBadgePosition(slider, track, e.GetPosition(slider).X);
-        e.Pointer.Capture(slider);
-    }
-
-    private void WindowPointerMoved(object? sender, PointerEventArgs e)
-    {
-        if (_draggingVolumeTrack is null || _draggingVolumeSlider is null) return;
-
-        UpdateVolumeBadgePosition(_draggingVolumeSlider, _draggingVolumeTrack, e.GetPosition(_draggingVolumeSlider).X);
-    }
-
-    private void WindowPointerReleased(object? sender, PointerReleasedEventArgs e)
-    {
-        ClearVolumeDrag(e.Pointer);
-    }
-
     private static void UpdateVolumeBadgePosition(Slider slider, TrackLaneViewModel track, double x)
     {
         track.VolumeBadgeX = Math.Clamp(x, 0, Math.Max(1, slider.Bounds.Width));
-    }
-
-    private void ClearVolumeDrag(IPointer pointer)
-    {
-        if (_draggingVolumeTrack is not null)
-        {
-            _draggingVolumeTrack.ShowVolumePercent = false;
-        }
-
-        _draggingVolumeTrack = null;
-        _draggingVolumeSlider = null;
-        pointer.Capture(null);
     }
 
     private async void ExportButton_OnClick(object? sender, RoutedEventArgs e)
@@ -385,15 +327,25 @@ public sealed partial class MainWindow : Window
             }
         });
         if (file?.Path.LocalPath is not { Length: > 0 } outputPath) return;
+        if (string.IsNullOrWhiteSpace(Path.GetExtension(outputPath)))
+        {
+            outputPath = Path.ChangeExtension(outputPath, ".mp4");
+        }
 
         ViewModel.IsExporting = true;
         try
         {
+            _playback?.Pause();
+            ViewModel.IsPlaying = false;
             var args = ViewModel.BuildExportArguments(outputPath);
             var result = await RunProcessAsync("ffmpeg", args);
             if (result.ExitCode != 0)
             {
                 await ShowMessageAsync("Export failed", string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg failed." : result.Error);
+            }
+            else
+            {
+                await ShowMessageAsync("Export complete", outputPath);
             }
         }
         finally
@@ -628,18 +580,6 @@ public sealed partial class MainWindow : Window
             settings.WindowWidth = Bounds.Width;
             settings.WindowHeight = Bounds.Height;
         }
-    }
-
-    private static T? FindAncestor<T>(Control? control)
-        where T : Control
-    {
-        while (control is not null)
-        {
-            if (control is T match) return match;
-            control = control.GetVisualParent() as Control;
-        }
-
-        return null;
     }
 
     private enum TimelineDragMode

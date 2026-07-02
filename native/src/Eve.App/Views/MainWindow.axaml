@@ -163,9 +163,7 @@
                                 Background="#24303A"
                                 CornerRadius="4"
                                 ClipToBounds="True"
-                                PointerPressed="ClipCard_OnPointerPressed"
-                                PointerEntered="ClipCard_OnPointerEntered"
-                                PointerExited="ClipCard_OnPointerExited">
+                                PointerPressed="ClipCard_OnPointerPressed">
                           <Grid RowDefinitions="Auto,104">
                             <Border Grid.RowSpan="2"
                                     BorderBrush="{Binding SelectionBorderBrush}"
