@@ -4,6 +4,7 @@
     <AssemblyName>EVE</AssemblyName>
     <RootNamespace>Eve.App</RootNamespace>
     <ApplicationIcon>..\..\..\assets\eve-icon.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
