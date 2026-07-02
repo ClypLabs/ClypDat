@@ -246,7 +246,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
-    public string PlayPauseIcon => IsPlaying ? "Pause" : "Play";
+    public string PlayPauseIcon => IsPlaying ? "II" : ">";
     public string CurrentTimeLabel => FormatTime(CurrentTime);
     public string DurationLabel => FormatTime(Duration);
     public string TimelineStatusLabel => $"{CurrentTimeLabel} / {DurationLabel}";

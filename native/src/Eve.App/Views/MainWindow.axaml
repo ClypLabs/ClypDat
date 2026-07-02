@@ -225,7 +225,7 @@
       </DockPanel>
     </Border>
 
-    <Grid Grid.Row="1" RowDefinitions="*,220" IsVisible="{Binding IsEditorVisible}">
+    <Grid Grid.Row="1" RowDefinitions="*,270" IsVisible="{Binding IsEditorVisible}">
       <Grid Background="#0E141A" ColumnDefinitions="*,300">
         <Border Background="#05080B">
           <vlc:VideoView x:Name="EditorVideoView" />
@@ -252,12 +252,6 @@
       <Border Grid.Row="1" Background="#141D24" BorderBrush="#22303A" BorderThickness="0,1,0,0">
         <Grid RowDefinitions="44,*" Margin="8,0,8,8">
           <Grid ColumnDefinitions="160,*,Auto" Height="44">
-            <TextBlock Text="{Binding TimelineStatusLabel}"
-                       Foreground="#A8CFFF"
-                       FontSize="11"
-                       VerticalAlignment="Bottom"
-                       Margin="0,0,0,7"
-                       FontFamily="Consolas" />
             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="7">
               <Button Content="|&lt;" Classes="transportButton" Click="RestartButton_OnClick" />
               <Button Content="&lt;" Classes="transportButton" Click="StepBackButton_OnClick" />
@@ -326,6 +320,9 @@
                                 Padding="5,2"
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Top"
+                                Margin="0,-18,0,0"
+                                ZIndex="10"
+                                IsHitTestVisible="False"
                                 IsVisible="{Binding ShowVolumePercent}">
                           <TextBlock Text="{Binding VolumeLabel}" Foreground="#18202A" FontSize="10" FontWeight="Bold" />
                         </Border>
