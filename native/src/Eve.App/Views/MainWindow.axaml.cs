@@ -391,9 +391,13 @@ public sealed partial class MainWindow : Window
         _playbackTimer.Stop();
         _smoothPlaybackClock.Reset();
         _smoothPlaybackBase = TimeSpan.Zero;
-        _playback?.Dispose();
+        var playback = _playback;
         _playback = null;
         EditorVideoView.MediaPlayer = null;
+        if (playback is not null)
+        {
+            _ = Task.Run(playback.Dispose);
+        }
         if (ViewModel is not null)
         {
             ViewModel.IsPlaying = false;
@@ -445,11 +449,15 @@ public sealed partial class MainWindow : Window
         {
             case TimelineDragMode.TrimStart:
                 ViewModel.TrimStart = time;
-                if (ViewModel.CurrentTime < ViewModel.TrimStart) ViewModel.CurrentTime = ViewModel.TrimStart;
+                ViewModel.CurrentTime = ViewModel.TrimStart;
+                _playback?.Seek(ViewModel.CurrentTime);
+                SyncSmoothPlaybackClock(ViewModel.CurrentTime, _playback?.IsPlaying == true);
                 break;
             case TimelineDragMode.TrimEnd:
                 ViewModel.TrimEnd = time;
-                if (ViewModel.CurrentTime > ViewModel.TrimEnd) ViewModel.CurrentTime = ViewModel.TrimEnd;
+                ViewModel.CurrentTime = ViewModel.TrimEnd;
+                _playback?.Seek(ViewModel.CurrentTime);
+                SyncSmoothPlaybackClock(ViewModel.CurrentTime, _playback?.IsPlaying == true);
                 break;
             case TimelineDragMode.Playhead:
                 ViewModel.CurrentTime = time;
