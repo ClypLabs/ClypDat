@@ -1,5 +1,6 @@
 using LibVLCSharp.Shared;
 using System.Diagnostics;
+using System.Globalization;
 
 namespace Eve.App.Services;
 
@@ -26,7 +27,7 @@ public sealed class PlaybackSession : IDisposable
     public TimeSpan Position => TimeSpan.FromMilliseconds(Math.Max(0, VideoPlayer.Time));
     public bool IsPlaying => VideoPlayer.IsPlaying;
 
-    public async Task LoadAsync(string path, IEnumerable<int> audioStreamIndexes, CancellationToken cancellationToken)
+    public async Task LoadAsync(string path, IReadOnlyList<AudioPreviewTrack> audioTracks, CancellationToken cancellationToken)
     {
         Stop();
         DisposeMedia();
@@ -35,10 +36,9 @@ public sealed class PlaybackSession : IDisposable
         VideoPlayer.Media = _videoMedia;
         VideoPlayer.Mute = true;
 
-        var audioStreams = audioStreamIndexes.ToArray();
-        if (audioStreams.Length == 0) return;
+        if (audioTracks.Count == 0) return;
 
-        _mixedAudioPath = await CreateMixedAudioPreviewAsync(path, audioStreams.Length, cancellationToken);
+        _mixedAudioPath = await CreateMixedAudioPreviewAsync(path, audioTracks, cancellationToken);
         _mixedAudioMedia = new Media(_libVlc, new Uri(_mixedAudioPath));
         _mixedAudioPlayer = new MediaPlayer(_mixedAudioMedia)
         {
@@ -140,15 +140,18 @@ public sealed class PlaybackSession : IDisposable
         return (int)Math.Clamp(Math.Round(volume), 0, 150);
     }
 
-    private static async Task<string> CreateMixedAudioPreviewAsync(string inputPath, int audioTrackCount, CancellationToken cancellationToken)
+    private static async Task<string> CreateMixedAudioPreviewAsync(
+        string inputPath,
+        IReadOnlyList<AudioPreviewTrack> audioTracks,
+        CancellationToken cancellationToken)
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "EVE", "preview-audio");
         Directory.CreateDirectory(tempDir);
         var outputPath = Path.Combine(tempDir, $"{Guid.NewGuid():N}.wav");
-        var labels = Enumerable.Range(0, audioTrackCount).Select(index => $"[a{index}]").ToArray();
-        var filters = Enumerable.Range(0, audioTrackCount)
-            .Select(index => $"[0:a:{index}]volume=1[a{index}]")
-            .Concat(new[] { $"{string.Concat(labels)}amix=inputs={audioTrackCount}:duration=longest:normalize=0[aout]" });
+        var labels = Enumerable.Range(0, audioTracks.Count).Select(index => $"[a{index}]").ToArray();
+        var filters = audioTracks.Select((track, index) =>
+            $"[0:a:{index}]volume={Math.Clamp(track.VolumePercent / 100, 0, 1.5).ToString("0.###", CultureInfo.InvariantCulture)}[a{index}]")
+            .Concat(new[] { $"{string.Concat(labels)}amix=inputs={audioTracks.Count}:duration=longest:normalize=0[aout]" });
 
         var startInfo = new ProcessStartInfo("ffmpeg")
         {
@@ -188,3 +191,5 @@ public sealed class PlaybackSession : IDisposable
         return outputPath;
     }
 }
+
+public sealed record AudioPreviewTrack(int StreamIndex, double VolumePercent);

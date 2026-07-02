@@ -9,13 +9,14 @@ public sealed class TrackLaneViewModel : ViewModelBase
     private bool _showVolumePercent;
     private IReadOnlyList<double> _waveformPeaks = Array.Empty<double>();
 
-    public TrackLaneViewModel(int streamIndex, string label, string type, string color, bool canAdjustVolume)
+    public TrackLaneViewModel(int streamIndex, string label, string type, string color, bool canAdjustVolume, double volumePercent = 100)
     {
         StreamIndex = streamIndex;
         Label = label;
         Type = type;
         Color = color;
         CanAdjustVolume = canAdjustVolume;
+        _volumePercent = Math.Clamp(volumePercent, 0, 150);
     }
 
     public int StreamIndex { get; }

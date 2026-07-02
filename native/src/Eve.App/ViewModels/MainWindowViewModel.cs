@@ -465,8 +465,10 @@ public sealed class MainWindowViewModel : ViewModelBase
                 _ => "#607080"
             };
             if (track.Type == "video") hasVideo = true;
-            var label = track.Type == "audio" ? AudioLabel(audioIndex) : "Video";
-            TimelineTracks.Add(new TrackLaneViewModel(track.Index, label, track.Type, color, track.Type == "audio"));
+            var label = track.Type == "audio"
+                ? (string.IsNullOrWhiteSpace(track.Label) ? AudioLabel(audioIndex) : track.Label)
+                : "Video";
+            TimelineTracks.Add(new TrackLaneViewModel(track.Index, label, track.Type, color, track.Type == "audio", track.VolumePercent));
             if (track.Type == "audio") audioIndex++;
         }
 

@@ -72,21 +72,33 @@ public sealed class MediaProbeService
         if (result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.Output))
         {
             using var doc = JsonDocument.Parse(result.Output);
+            var steelSeriesAudioTracks = Array.Empty<SteelSeriesAudioTrack>();
             if (doc.RootElement.TryGetProperty("format", out var format) &&
-                format.TryGetProperty("duration", out var durationJson) &&
-                double.TryParse(durationJson.GetString(), out var seconds))
+                format.TryGetProperty("duration", out var durationJson))
             {
-                duration = TimeSpan.FromSeconds(Math.Max(0, seconds));
+                if (double.TryParse(durationJson.GetString(), out var seconds))
+                {
+                    duration = TimeSpan.FromSeconds(Math.Max(0, seconds));
+                }
+
+                steelSeriesAudioTracks = ReadSteelSeriesAudioTracks(format);
             }
 
             if (doc.RootElement.TryGetProperty("streams", out var streams))
             {
+                var audioIndex = 0;
                 foreach (var stream in streams.EnumerateArray())
                 {
                     var codecType = GetString(stream, "codec_type");
                     var codecName = GetString(stream, "codec_name");
                     var index = GetInt(stream, "index");
-                    var label = BuildTrackLabel(stream, codecType, index);
+                    var audioTrack = codecType == "audio" && audioIndex < steelSeriesAudioTracks.Length
+                        ? steelSeriesAudioTracks[audioIndex]
+                        : null;
+                    var label = audioTrack?.Name ?? BuildTrackLabel(stream, codecType, index);
+                    var volumePercent = audioTrack is null
+                        ? 100
+                        : Math.Clamp(audioTrack.Muted ? 0 : audioTrack.Volume * 100, 0, 150);
 
                     if (codecType == "video")
                     {
@@ -97,7 +109,12 @@ public sealed class MediaProbeService
 
                     if (codecType is "video" or "audio" or "subtitle")
                     {
-                        tracks.Add(new MediaTrackInfo(index, codecType, codecName, label));
+                        tracks.Add(new MediaTrackInfo(index, codecType, codecName, label, volumePercent));
+                    }
+
+                    if (codecType == "audio")
+                    {
+                        audioIndex++;
                     }
                 }
             }
@@ -351,6 +368,9 @@ public sealed class MediaProbeService
             var title = GetString(tags, "title");
             if (!string.IsNullOrWhiteSpace(title)) return title;
 
+            var handlerName = GetString(tags, "handler_name");
+            if (!string.IsNullOrWhiteSpace(handlerName)) return handlerName;
+
             var language = GetString(tags, "language");
             if (!string.IsNullOrWhiteSpace(language)) return $"{prefix} {index} ({language})";
         }
@@ -381,6 +401,50 @@ public sealed class MediaProbeService
         }
 
         return double.TryParse(value, out var number) ? number : 0;
+    }
+
+    private static SteelSeriesAudioTrack[] ReadSteelSeriesAudioTracks(JsonElement format)
+    {
+        if (!format.TryGetProperty("tags", out var tags)) return Array.Empty<SteelSeriesAudioTrack>();
+
+        var json = string.Concat(tags.EnumerateObject()
+            .Where(property => property.Name.StartsWith("STEELSERIES_META", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(property => property.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(property => property.Value.ToString()));
+        if (string.IsNullOrWhiteSpace(json)) return Array.Empty<SteelSeriesAudioTrack>();
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("audio_tracks_props", out var tracks) ||
+                tracks.ValueKind != JsonValueKind.Array)
+            {
+                return Array.Empty<SteelSeriesAudioTrack>();
+            }
+
+            return tracks.EnumerateArray()
+                .Select(track => new SteelSeriesAudioTrack(
+                    GetString(track, "name"),
+                    GetDouble(track, "volume", 1),
+                    GetBool(track, "muted")))
+                .ToArray();
+        }
+        catch (JsonException)
+        {
+            return Array.Empty<SteelSeriesAudioTrack>();
+        }
+    }
+
+    private static double GetDouble(JsonElement element, string property, double fallback)
+    {
+        return element.TryGetProperty(property, out var value) && value.TryGetDouble(out var number)
+            ? number
+            : fallback;
+    }
+
+    private static bool GetBool(JsonElement element, string property)
+    {
+        return element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.True;
     }
 
     private static string CacheKey(string path)
@@ -461,6 +525,8 @@ public sealed record MediaFileInfo(
     int Height,
     double Fps);
 
-public sealed record MediaTrackInfo(int Index, string Type, string Codec, string Label);
+public sealed record MediaTrackInfo(int Index, string Type, string Codec, string Label, double VolumePercent = 100);
+
+internal sealed record SteelSeriesAudioTrack(string Name, double Volume, bool Muted);
 
 internal sealed record ProcessResult(int ExitCode, string Output, string Error);

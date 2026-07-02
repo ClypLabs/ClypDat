@@ -395,11 +395,11 @@ public sealed partial class MainWindow : Window
         {
             _playback = new PlaybackSession();
             EditorVideoView.MediaPlayer = _playback.VideoPlayer;
-            var audioStreams = ViewModel.TimelineTracks
+            var audioTracks = ViewModel.TimelineTracks
                 .Where(track => track.IsAudio)
-                .Select(track => track.StreamIndex)
+                .Select(track => new AudioPreviewTrack(track.StreamIndex, track.VolumePercent))
                 .ToArray();
-            await _playback.LoadAsync(ViewModel.SelectedVideoPath, audioStreams, cancellationToken);
+            await _playback.LoadAsync(ViewModel.SelectedVideoPath, audioTracks, cancellationToken);
             if (cancellationToken.IsCancellationRequested) return;
             foreach (var track in ViewModel.TimelineTracks.Where(track => track.IsAudio))
             {
