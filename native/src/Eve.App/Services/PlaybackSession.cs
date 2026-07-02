@@ -37,10 +37,14 @@ public sealed class PlaybackSession : IDisposable
         {
             var media = new Media(_libVlc, new Uri(path));
             media.AddOption(":no-video");
+            media.AddOption($":audio-track={i}");
+            media.AddOption($":audio-track-id={audioStreams[i]}");
             var player = new MediaPlayer(media)
             {
                 EnableKeyInput = false,
-                EnableMouseInput = false
+                EnableMouseInput = false,
+                Mute = false,
+                Volume = 100
             };
             _audioPlayers.Add(new AudioTrackPlayer(audioStreams[i], i, media, player));
         }
@@ -54,6 +58,7 @@ public sealed class PlaybackSession : IDisposable
             audio.Player.Play();
             ApplyAudioTrack(audio);
             audio.Player.Time = VideoPlayer.Time;
+            ScheduleAudioTrackApply(audio, VideoPlayer.Time);
         }
     }
 
@@ -154,6 +159,20 @@ public sealed class PlaybackSession : IDisposable
         var track = tracks[audio.AudioOrdinal];
         if (audio.Player.AudioTrack == track.Id) return;
         audio.Player.SetAudioTrack(track.Id);
+    }
+
+    private static void ScheduleAudioTrackApply(AudioTrackPlayer audio, long syncTime)
+    {
+        _ = Task.Run(async () =>
+        {
+            foreach (var delay in new[] { 75, 200, 500 })
+            {
+                await Task.Delay(delay).ConfigureAwait(false);
+                if (audio.Player.Media is null) return;
+                ApplyAudioTrack(audio);
+                audio.Player.Time = syncTime;
+            }
+        });
     }
 
     private sealed record AudioTrackPlayer(int StreamIndex, int AudioOrdinal, Media Media, MediaPlayer Player);
