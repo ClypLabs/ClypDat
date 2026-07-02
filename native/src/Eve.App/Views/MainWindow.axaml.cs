@@ -456,6 +456,7 @@ public sealed partial class MainWindow : Window
         {
             ViewModel.SetDuration(_playback.Duration);
         }
+        _playback.SyncAudioStreams();
 
         if (_playback.IsPlaying)
         {
