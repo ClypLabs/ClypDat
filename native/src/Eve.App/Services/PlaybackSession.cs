@@ -37,13 +37,12 @@ public sealed class PlaybackSession : IDisposable
         {
             var media = new Media(_libVlc, new Uri(path));
             media.AddOption(":no-video");
-            media.AddOption($":audio-track={i}");
             var player = new MediaPlayer(media)
             {
                 EnableKeyInput = false,
                 EnableMouseInput = false
             };
-            _audioPlayers.Add(new AudioTrackPlayer(audioStreams[i], media, player));
+            _audioPlayers.Add(new AudioTrackPlayer(audioStreams[i], i, media, player));
         }
     }
 
@@ -53,6 +52,7 @@ public sealed class PlaybackSession : IDisposable
         foreach (var audio in _audioPlayers)
         {
             audio.Player.Play();
+            ApplyAudioTrack(audio);
             audio.Player.Time = VideoPlayer.Time;
         }
     }
@@ -99,6 +99,7 @@ public sealed class PlaybackSession : IDisposable
         var videoTime = VideoPlayer.Time;
         foreach (var audio in _audioPlayers)
         {
+            ApplyAudioTrack(audio);
             if (Math.Abs(audio.Player.Time - videoTime) > 150)
             {
                 audio.Player.Time = videoTime;
@@ -143,5 +144,17 @@ public sealed class PlaybackSession : IDisposable
         return (int)Math.Clamp(Math.Round(volume), 0, 150);
     }
 
-    private sealed record AudioTrackPlayer(int StreamIndex, Media Media, MediaPlayer Player);
+    private static void ApplyAudioTrack(AudioTrackPlayer audio)
+    {
+        var tracks = audio.Player.AudioTrackDescription
+            .Where(description => description.Id >= 0)
+            .ToArray();
+        if (audio.AudioOrdinal >= tracks.Length) return;
+
+        var track = tracks[audio.AudioOrdinal];
+        if (audio.Player.AudioTrack == track.Id) return;
+        audio.Player.SetAudioTrack(track.Id);
+    }
+
+    private sealed record AudioTrackPlayer(int StreamIndex, int AudioOrdinal, Media Media, MediaPlayer Player);
 }
