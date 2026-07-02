@@ -15,7 +15,7 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.13" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.13" />
     <PackageReference Include="LibVLCSharp.Avalonia" Version="3.10.0" />
-    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" />
+    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" GeneratePathProperty="true" />
   </ItemGroup>
 
   <ItemGroup>
@@ -27,4 +27,13 @@
     <AvaloniaResource Include="..\..\..\assets\eve-icon*.png" Link="Assets\%(Filename)%(Extension)" />
     <AvaloniaResource Include="..\..\..\assets\eve-icon.ico" Link="Assets\eve-icon.ico" />
   </ItemGroup>
+
+  <Target Name="CopyLibVlcRuntimeToPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <LibVlcRuntimeFiles Include="$(PkgVideoLAN_LibVLC_Windows)\build\x64\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(LibVlcRuntimeFiles)"
+          DestinationFiles="@(LibVlcRuntimeFiles->'$(PublishDir)libvlc\win-x64\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
 </Project>

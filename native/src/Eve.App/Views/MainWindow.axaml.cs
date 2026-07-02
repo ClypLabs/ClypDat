@@ -300,27 +300,35 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
         StopEditorPlayback();
 
-        _playback = new PlaybackSession();
-        EditorVideoView.MediaPlayer = _playback.VideoPlayer;
-        var audioStreams = ViewModel.TimelineTracks
-            .Where(track => track.IsAudio)
-            .Select(track => track.StreamIndex)
-            .ToArray();
-        _playback.Load(ViewModel.SelectedVideoPath, audioStreams);
-        foreach (var track in ViewModel.TimelineTracks.Where(track => track.IsAudio))
+        try
         {
-            _playback.SetTrackVolume(track.StreamIndex, track.VolumePercent);
-        }
+            _playback = new PlaybackSession();
+            EditorVideoView.MediaPlayer = _playback.VideoPlayer;
+            var audioStreams = ViewModel.TimelineTracks
+                .Where(track => track.IsAudio)
+                .Select(track => track.StreamIndex)
+                .ToArray();
+            _playback.Load(ViewModel.SelectedVideoPath, audioStreams);
+            foreach (var track in ViewModel.TimelineTracks.Where(track => track.IsAudio))
+            {
+                _playback.SetTrackVolume(track.StreamIndex, track.VolumePercent);
+            }
 
-        _playback.Play();
-        ViewModel.IsPlaying = true;
-        _playbackTimer.Start();
-        await Task.Delay(200);
-        if (_playback.Duration > TimeSpan.Zero)
-        {
-            ViewModel.SetDuration(_playback.Duration);
+            _playback.Play();
+            ViewModel.IsPlaying = true;
+            _playbackTimer.Start();
+            await Task.Delay(200);
+            if (_playback.Duration > TimeSpan.Zero)
+            {
+                ViewModel.SetDuration(_playback.Duration);
+            }
+            UpdateTimelineSliders();
         }
-        UpdateTimelineSliders();
+        catch (Exception error)
+        {
+            StopEditorPlayback();
+            await ShowMessageAsync("Playback unavailable", error.Message);
+        }
     }
 
     private void StopEditorPlayback()
