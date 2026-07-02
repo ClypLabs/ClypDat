@@ -317,8 +317,6 @@
                                 Value="{Binding VolumePercent}"
                                 IsEnabled="{Binding CanAdjustVolume}"
                                 IsVisible="{Binding IsAudio}"
-                                PointerEntered="TrackVolume_OnPointerEntered"
-                                PointerExited="TrackVolume_OnPointerExited"
                                 PointerPressed="TrackVolume_OnPointerPressed"
                                 PointerReleased="TrackVolume_OnPointerReleased"
                                 PropertyChanged="TrackVolume_OnPropertyChanged" />
@@ -335,9 +333,9 @@
                                 Background="#E8EEF8"
                                 CornerRadius="4"
                                 Padding="5,2"
-                                HorizontalAlignment="Center"
+                                HorizontalAlignment="Left"
                                 VerticalAlignment="Top"
-                                Margin="0,-24,0,0"
+                                Margin="{Binding VolumeBadgeMargin}"
                                 ZIndex="10"
                                 IsHitTestVisible="False"
                                 IsVisible="{Binding ShowVolumePercent}">

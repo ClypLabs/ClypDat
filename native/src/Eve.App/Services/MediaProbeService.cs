@@ -140,36 +140,38 @@ public sealed class MediaProbeService
         return waveforms;
     }
 
-    public async Task<IReadOnlyList<string>> EnsurePreviewFramesAsync(MediaFileInfo media)
+    public async Task<IReadOnlyList<string>> EnsurePreviewFramesAsync(MediaFileInfo media, CancellationToken cancellationToken)
     {
         var folder = Path.Combine(_cacheFolder, $"{CacheKey(media.Path)}-frames");
         Directory.CreateDirectory(folder);
 
-        const int frameCount = 60;
+        var duration = Math.Max(1, media.Duration.TotalSeconds);
+        var sourceFps = media.Fps > 0 ? media.Fps : 60;
+        var targetFps = Math.Min(60, sourceFps);
+        var frameCount = (int)Math.Clamp(Math.Ceiling(duration * targetFps), 60, 600);
         var existing = Directory.EnumerateFiles(folder, "*.jpg").OrderBy(path => path).ToArray();
         if (existing.Length >= frameCount)
         {
             return existing;
         }
 
-        var duration = Math.Max(1, media.Duration.TotalSeconds);
-        for (var i = 0; i < frameCount; i++)
+        foreach (var file in existing)
         {
-            var output = Path.Combine(folder, $"{i:D2}.jpg");
-            if (File.Exists(output)) continue;
-
-            var seek = Math.Min(duration - 0.1, Math.Max(0, duration * i / frameCount));
-            await RunProcessAsync("ffmpeg", new[]
-            {
-                "-y",
-                "-ss", seek.ToString("0.###"),
-                "-i", media.Path,
-                "-frames:v", "1",
-                "-vf", "scale=480:-1",
-                "-q:v", "5",
-                output
-            });
+            cancellationToken.ThrowIfCancellationRequested();
+            TryDelete(file);
         }
+
+        var outputPattern = Path.Combine(folder, "%04d.jpg");
+        await RunProcessAsync("ffmpeg", new[]
+        {
+            "-y",
+            "-v", "error",
+            "-i", media.Path,
+            "-vf", $"fps={frameCount / duration:0.###},scale=480:-1",
+            "-frames:v", frameCount.ToString(),
+            "-q:v", "5",
+            outputPattern
+        }, cancellationToken);
 
         return Directory.EnumerateFiles(folder, "*.jpg").OrderBy(path => path).ToArray();
     }
@@ -412,8 +414,28 @@ public sealed class MediaProbeService
 
         var outputTask = process.StandardOutput.ReadToEndAsync();
         var errorTask = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync(cancellationToken);
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            TryKill(process);
+            throw;
+        }
         return new ProcessResult(process.ExitCode, await outputTask, await errorTask);
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited) process.Kill(true);
+        }
+        catch
+        {
+            // Best effort cancellation.
+        }
     }
 
     private static void TryDelete(string path)

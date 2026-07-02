@@ -9,6 +9,7 @@ public sealed class ClipCardViewModel : ViewModelBase
 {
     private readonly MediaProbeService _mediaProbe;
     private readonly DispatcherTimer _previewTimer;
+    private CancellationTokenSource? _previewCts;
     private IReadOnlyList<string> _previewFrames = Array.Empty<string>();
     private IReadOnlyList<Bitmap> _previewBitmaps = Array.Empty<Bitmap>();
     private int _previewIndex;
@@ -97,21 +98,36 @@ public sealed class ClipCardViewModel : ViewModelBase
 
     public async Task StartPreviewAsync()
     {
-        if (_previewFrames.Count == 0)
-        {
-            _previewFrames = await _mediaProbe.EnsurePreviewFramesAsync(Media);
-            _previewBitmaps = LoadPreviewBitmaps(_previewFrames);
-        }
+        _previewCts?.Cancel();
+        _previewCts?.Dispose();
+        _previewCts = new CancellationTokenSource();
+        var token = _previewCts.Token;
 
-        if (_previewBitmaps.Count == 0) return;
-        _previewIndex = 0;
-        _previewTimer.Interval = GetPreviewFrameInterval();
-        PreviewImage = _previewBitmaps[_previewIndex];
-        _previewTimer.Start();
+        try
+        {
+            if (_previewFrames.Count == 0)
+            {
+                _previewFrames = await _mediaProbe.EnsurePreviewFramesAsync(Media, token);
+                if (token.IsCancellationRequested) return;
+                _previewBitmaps = await Task.Run(() => LoadPreviewBitmaps(_previewFrames), token);
+            }
+
+            if (token.IsCancellationRequested || _previewBitmaps.Count == 0) return;
+            _previewIndex = 0;
+            _previewTimer.Interval = GetPreviewFrameInterval();
+            PreviewImage = _previewBitmaps[_previewIndex];
+            _previewTimer.Start();
+        }
+        catch (OperationCanceledException)
+        {
+        }
     }
 
     public void StopPreview()
     {
+        _previewCts?.Cancel();
+        _previewCts?.Dispose();
+        _previewCts = null;
         _previewTimer.Stop();
         PreviewImagePath = Media.ThumbnailPath;
     }

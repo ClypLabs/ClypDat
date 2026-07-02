@@ -96,6 +96,7 @@ public sealed partial class MainWindow : Window
         if (sender is not Control { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
 
         e.Handled = true;
+        clip.StopPreview();
         await ViewModel.OpenClipAsync(clip);
         QueueEditorPlayback();
     }
@@ -288,22 +289,6 @@ public sealed partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void TrackVolume_OnPointerEntered(object? sender, PointerEventArgs e)
-    {
-        if (sender is Slider { DataContext: TrackLaneViewModel track })
-        {
-            track.ShowVolumePercent = true;
-        }
-    }
-
-    private void TrackVolume_OnPointerExited(object? sender, PointerEventArgs e)
-    {
-        if (sender is Slider { DataContext: TrackLaneViewModel track })
-        {
-            track.ShowVolumePercent = false;
-        }
-    }
-
     private void TrackVolume_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (sender is Slider { DataContext: TrackLaneViewModel track })
@@ -316,14 +301,13 @@ public sealed partial class MainWindow : Window
     {
         if (sender is Slider { DataContext: TrackLaneViewModel track })
         {
-            track.ShowVolumePercent = true;
+            track.ShowVolumePercent = false;
         }
     }
 
     private void TrackVolume_OnPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
     {
         if (e.Property != Slider.ValueProperty || sender is not Slider { DataContext: TrackLaneViewModel track }) return;
-        track.ShowVolumePercent = true;
         _playback?.SetTrackVolume(track.StreamIndex, track.VolumePercent);
     }
 
