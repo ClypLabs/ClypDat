@@ -399,7 +399,7 @@ public sealed partial class MainWindow : Window
                 .Where(track => track.IsAudio)
                 .Select(track => track.StreamIndex)
                 .ToArray();
-            _playback.Load(ViewModel.SelectedVideoPath, audioStreams);
+            await _playback.LoadAsync(ViewModel.SelectedVideoPath, audioStreams, cancellationToken);
             if (cancellationToken.IsCancellationRequested) return;
             foreach (var track in ViewModel.TimelineTracks.Where(track => track.IsAudio))
             {

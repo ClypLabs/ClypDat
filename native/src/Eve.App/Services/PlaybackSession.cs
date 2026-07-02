@@ -1,12 +1,15 @@
 using LibVLCSharp.Shared;
+using System.Diagnostics;
 
 namespace Eve.App.Services;
 
 public sealed class PlaybackSession : IDisposable
 {
     private readonly LibVLC _libVlc;
-    private readonly List<AudioTrackPlayer> _audioPlayers = new();
+    private MediaPlayer? _mixedAudioPlayer;
     private Media? _videoMedia;
+    private Media? _mixedAudioMedia;
+    private string? _mixedAudioPath;
     private bool _disposed;
 
     public PlaybackSession()
@@ -23,92 +26,70 @@ public sealed class PlaybackSession : IDisposable
     public TimeSpan Position => TimeSpan.FromMilliseconds(Math.Max(0, VideoPlayer.Time));
     public bool IsPlaying => VideoPlayer.IsPlaying;
 
-    public void Load(string path, IEnumerable<int> audioStreamIndexes)
+    public async Task LoadAsync(string path, IEnumerable<int> audioStreamIndexes, CancellationToken cancellationToken)
     {
         Stop();
         DisposeMedia();
-        DisposeAudioPlayers();
+        DisposeMixedAudio();
         _videoMedia = new Media(_libVlc, new Uri(path));
         VideoPlayer.Media = _videoMedia;
         VideoPlayer.Mute = true;
 
         var audioStreams = audioStreamIndexes.ToArray();
-        for (var i = 0; i < audioStreams.Length; i++)
+        if (audioStreams.Length == 0) return;
+
+        _mixedAudioPath = await CreateMixedAudioPreviewAsync(path, audioStreams.Length, cancellationToken);
+        _mixedAudioMedia = new Media(_libVlc, new Uri(_mixedAudioPath));
+        _mixedAudioPlayer = new MediaPlayer(_mixedAudioMedia)
         {
-            var media = new Media(_libVlc, new Uri(path));
-            media.AddOption(":no-video");
-            media.AddOption($":audio-track={i}");
-            media.AddOption($":audio-track-id={audioStreams[i]}");
-            var player = new MediaPlayer(media)
-            {
-                EnableKeyInput = false,
-                EnableMouseInput = false,
-                Mute = false,
-                Volume = 100
-            };
-            _audioPlayers.Add(new AudioTrackPlayer(audioStreams[i], i, media, player));
-        }
+            EnableKeyInput = false,
+            EnableMouseInput = false,
+            Mute = false,
+            Volume = 100
+        };
     }
 
     public void Play()
     {
         VideoPlayer.Play();
-        foreach (var audio in _audioPlayers)
+        if (_mixedAudioPlayer is not null)
         {
-            audio.Player.Play();
-            ApplyAudioTrack(audio);
-            audio.Player.Time = VideoPlayer.Time;
-            ScheduleAudioTrackApply(audio, VideoPlayer.Time);
+            _mixedAudioPlayer.Play();
+            _mixedAudioPlayer.Time = VideoPlayer.Time;
         }
     }
 
     public void Pause()
     {
         VideoPlayer.Pause();
-        foreach (var audio in _audioPlayers)
-        {
-            audio.Player.Pause();
-        }
+        _mixedAudioPlayer?.Pause();
     }
 
     public void Stop()
     {
         VideoPlayer.Stop();
-        foreach (var audio in _audioPlayers)
-        {
-            audio.Player.Stop();
-        }
+        _mixedAudioPlayer?.Stop();
     }
 
     public void Seek(TimeSpan time)
     {
         var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
         VideoPlayer.Time = milliseconds;
-        foreach (var audio in _audioPlayers)
-        {
-            audio.Player.Time = milliseconds;
-        }
+        if (_mixedAudioPlayer is not null) _mixedAudioPlayer.Time = milliseconds;
     }
 
     public void SetTrackVolume(int streamIndex, double percent)
     {
-        var volume = VolumeCurve(percent);
-        foreach (var audio in _audioPlayers.Where(audio => audio.StreamIndex == streamIndex))
-        {
-            audio.Player.Volume = volume;
-        }
+        if (_mixedAudioPlayer is not null) _mixedAudioPlayer.Volume = VolumeCurve(percent);
     }
 
     public void SyncAudioStreams()
     {
+        if (_mixedAudioPlayer is null) return;
         var videoTime = VideoPlayer.Time;
-        foreach (var audio in _audioPlayers)
+        if (Math.Abs(_mixedAudioPlayer.Time - videoTime) > 150)
         {
-            ApplyAudioTrack(audio);
-            if (Math.Abs(audio.Player.Time - videoTime) > 150)
-            {
-                audio.Player.Time = videoTime;
-            }
+            _mixedAudioPlayer.Time = videoTime;
         }
     }
 
@@ -118,7 +99,7 @@ public sealed class PlaybackSession : IDisposable
         _disposed = true;
         Stop();
         VideoPlayer.Dispose();
-        DisposeAudioPlayers();
+        DisposeMixedAudio();
         DisposeMedia();
         _libVlc.Dispose();
     }
@@ -129,15 +110,25 @@ public sealed class PlaybackSession : IDisposable
         _videoMedia = null;
     }
 
-    private void DisposeAudioPlayers()
+    private void DisposeMixedAudio()
     {
-        foreach (var audio in _audioPlayers)
+        _mixedAudioPlayer?.Dispose();
+        _mixedAudioPlayer = null;
+        _mixedAudioMedia?.Dispose();
+        _mixedAudioMedia = null;
+        if (_mixedAudioPath is not null)
         {
-            audio.Player.Dispose();
-            audio.Media.Dispose();
-        }
+            try
+            {
+                File.Delete(_mixedAudioPath);
+            }
+            catch
+            {
+                // Best-effort cleanup only.
+            }
 
-        _audioPlayers.Clear();
+            _mixedAudioPath = null;
+        }
     }
 
     private static int VolumeCurve(double percent)
@@ -149,31 +140,51 @@ public sealed class PlaybackSession : IDisposable
         return (int)Math.Clamp(Math.Round(volume), 0, 150);
     }
 
-    private static void ApplyAudioTrack(AudioTrackPlayer audio)
+    private static async Task<string> CreateMixedAudioPreviewAsync(string inputPath, int audioTrackCount, CancellationToken cancellationToken)
     {
-        var tracks = audio.Player.AudioTrackDescription
-            .Where(description => description.Id >= 0)
-            .ToArray();
-        if (audio.AudioOrdinal >= tracks.Length) return;
+        var tempDir = Path.Combine(Path.GetTempPath(), "EVE", "preview-audio");
+        Directory.CreateDirectory(tempDir);
+        var outputPath = Path.Combine(tempDir, $"{Guid.NewGuid():N}.wav");
+        var labels = Enumerable.Range(0, audioTrackCount).Select(index => $"[a{index}]").ToArray();
+        var filters = Enumerable.Range(0, audioTrackCount)
+            .Select(index => $"[0:a:{index}]volume=1[a{index}]")
+            .Concat(new[] { $"{string.Concat(labels)}amix=inputs={audioTrackCount}:duration=longest:normalize=0[aout]" });
 
-        var track = tracks[audio.AudioOrdinal];
-        if (audio.Player.AudioTrack == track.Id) return;
-        audio.Player.SetAudioTrack(track.Id);
-    }
-
-    private static void ScheduleAudioTrackApply(AudioTrackPlayer audio, long syncTime)
-    {
-        _ = Task.Run(async () =>
+        var startInfo = new ProcessStartInfo("ffmpeg")
         {
-            foreach (var delay in new[] { 75, 200, 500 })
-            {
-                await Task.Delay(delay).ConfigureAwait(false);
-                if (audio.Player.Media is null) return;
-                ApplyAudioTrack(audio);
-                audio.Player.Time = syncTime;
-            }
-        });
-    }
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
 
-    private sealed record AudioTrackPlayer(int StreamIndex, int AudioOrdinal, Media Media, MediaPlayer Player);
+        foreach (var argument in new[]
+        {
+            "-y",
+            "-i", inputPath,
+            "-filter_complex", string.Join(";", filters),
+            "-map", "[aout]",
+            "-vn",
+            "-ac", "2",
+            "-ar", "48000",
+            "-f", "wav",
+            outputPath
+        })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start ffmpeg.");
+        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        await process.WaitForExitAsync(cancellationToken);
+        if (process.ExitCode != 0)
+        {
+            var error = await errorTask;
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? "ffmpeg failed to create preview audio." : error);
+        }
+
+        await outputTask;
+        return outputPath;
+    }
 }
