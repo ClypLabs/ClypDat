@@ -318,7 +318,7 @@ public sealed partial class MainWindow : Window
     {
         if (sender is Slider { DataContext: TrackLaneViewModel track })
         {
-            track.ShowVolumePercent = false;
+            ClearVolumeDrag(e.Pointer);
         }
     }
 
@@ -349,18 +349,24 @@ public sealed partial class MainWindow : Window
 
     private void WindowPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (_draggingVolumeTrack is not null)
-        {
-            _draggingVolumeTrack.ShowVolumePercent = false;
-            _draggingVolumeTrack = null;
-            _draggingVolumeSlider = null;
-            e.Pointer.Capture(null);
-        }
+        ClearVolumeDrag(e.Pointer);
     }
 
     private static void UpdateVolumeBadgePosition(Slider slider, TrackLaneViewModel track, double x)
     {
         track.VolumeBadgeX = Math.Clamp(x, 0, Math.Max(1, slider.Bounds.Width));
+    }
+
+    private void ClearVolumeDrag(IPointer pointer)
+    {
+        if (_draggingVolumeTrack is not null)
+        {
+            _draggingVolumeTrack.ShowVolumePercent = false;
+        }
+
+        _draggingVolumeTrack = null;
+        _draggingVolumeSlider = null;
+        pointer.Capture(null);
     }
 
     private async void ExportButton_OnClick(object? sender, RoutedEventArgs e)

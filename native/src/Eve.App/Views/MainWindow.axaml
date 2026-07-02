@@ -225,7 +225,7 @@
       </DockPanel>
     </Border>
 
-    <Grid Grid.Row="1" RowDefinitions="*,270" IsVisible="{Binding IsEditorVisible}">
+    <Grid Grid.Row="1" RowDefinitions="*,320" IsVisible="{Binding IsEditorVisible}">
       <Grid Background="#0E141A" ColumnDefinitions="*,300">
         <Border Background="#05080B">
           <vlc:VideoView x:Name="EditorVideoView" />
@@ -296,18 +296,19 @@
                             Background="#2A3540"
                             CornerRadius="4"
                             ClipToBounds="False">
-                      <Grid Margin="8,6" RowDefinitions="Auto,32" ColumnDefinitions="16,*,16">
+                      <Grid Margin="8,6" RowDefinitions="Auto,32" ColumnDefinitions="18,*,18">
                         <TextBlock Grid.ColumnSpan="3"
                                    Text="{Binding Label}"
                                    Foreground="#D4E0EA"
                                    FontSize="11"
                                    TextTrimming="CharacterEllipsis" />
-                        <TextBlock Grid.Row="1"
-                                   Text="-"
-                                   Foreground="#C6D4E6"
-                                   FontSize="10"
-                                   VerticalAlignment="Center"
-                                   IsVisible="{Binding IsAudio}" />
+                        <PathIcon Grid.Row="1"
+                                  Width="14"
+                                  Height="14"
+                                  Foreground="#D1DEE9"
+                                  VerticalAlignment="Center"
+                                  Data="M 3,8 L 6,8 L 11,4 L 11,16 L 6,12 L 3,12 Z"
+                                  IsVisible="{Binding IsAudio}" />
                         <Slider Grid.Row="1"
                                 Grid.Column="1"
                                 Minimum="0"
@@ -321,14 +322,15 @@
                                 PointerPressed="TrackVolume_OnPointerPressed"
                                 PointerReleased="TrackVolume_OnPointerReleased"
                                 PropertyChanged="TrackVolume_OnPropertyChanged" />
-                        <TextBlock Grid.Row="1"
-                                   Grid.Column="2"
-                                   Text="+"
-                                   Foreground="#C6D4E6"
-                                   FontSize="10"
-                                   VerticalAlignment="Center"
-                                   HorizontalAlignment="Right"
-                                   IsVisible="{Binding IsAudio}" />
+                        <PathIcon Grid.Row="1"
+                                  Grid.Column="2"
+                                  Width="14"
+                                  Height="14"
+                                  Foreground="#D1DEE9"
+                                  HorizontalAlignment="Right"
+                                  VerticalAlignment="Center"
+                                  Data="M 3,8 L 6,8 L 11,4 L 11,16 L 6,12 L 3,12 Z M 13,7 C 15,9 15,11 13,13 M 15,5 C 18,8 18,12 15,15"
+                                  IsVisible="{Binding IsAudio}" />
                         <Border Grid.Row="1"
                                 Grid.Column="1"
                                 Background="#E8EEF8"

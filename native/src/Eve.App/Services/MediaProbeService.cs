@@ -148,9 +148,15 @@ public sealed class MediaProbeService
         var duration = Math.Max(1, media.Duration.TotalSeconds);
         const int frameCount = 120;
         var existing = Directory.EnumerateFiles(folder, "*.jpg").OrderBy(path => path).ToArray();
-        if (existing.Length > 0)
+        if (existing.Length >= frameCount)
         {
             return existing;
+        }
+
+        foreach (var file in existing)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            TryDelete(file);
         }
 
         var outputPattern = Path.Combine(folder, "%04d.jpg");
@@ -159,7 +165,7 @@ public sealed class MediaProbeService
             "-y",
             "-v", "error",
             "-i", media.Path,
-            "-vf", $"fps={frameCount / duration:0.###},scale=480:-1",
+            "-vf", $"fps={frameCount / duration:0.###},scale=960:-1",
             "-frames:v", frameCount.ToString(),
             "-q:v", "5",
             outputPattern
