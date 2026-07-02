@@ -15,6 +15,7 @@ public sealed partial class MainWindow : Window
 {
     private readonly DispatcherTimer _playbackTimer;
     private PlaybackSession? _playback;
+    private CancellationTokenSource? _playbackStartCts;
     private bool _isUpdatingTimelineSlider;
 
     public MainWindow()
@@ -62,7 +63,7 @@ public sealed partial class MainWindow : Window
         if (file?.Path.LocalPath is { Length: > 0 } path)
         {
             await ViewModel!.OpenVideoFileAsync(path);
-            await StartEditorPlaybackAsync();
+            QueueEditorPlayback();
         }
     }
 
@@ -86,7 +87,7 @@ public sealed partial class MainWindow : Window
 
         e.Handled = true;
         await ViewModel.OpenClipAsync(clip);
-        await StartEditorPlaybackAsync();
+        QueueEditorPlayback();
     }
 
     private async void ClipCard_OnPointerEntered(object? sender, PointerEventArgs e)
@@ -152,7 +153,7 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null) return;
         if (_playback is null)
         {
-            await StartEditorPlaybackAsync();
+            await StartEditorPlaybackAsync(CancellationToken.None);
             return;
         }
 
@@ -295,10 +296,29 @@ public sealed partial class MainWindow : Window
         await dialog.ShowDialog<bool>(this);
     }
 
-    private async Task StartEditorPlaybackAsync()
+    private void QueueEditorPlayback()
+    {
+        _playbackStartCts?.Cancel();
+        _playbackStartCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _playbackStartCts = cts;
+
+        Dispatcher.UIThread.Post(
+            async () =>
+            {
+                if (cts.IsCancellationRequested) return;
+                await StartEditorPlaybackAsync(cts.Token);
+            },
+            DispatcherPriority.Background);
+    }
+
+    private async Task StartEditorPlaybackAsync(CancellationToken cancellationToken)
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
-        StopEditorPlayback();
+        await Task.Yield();
+        if (cancellationToken.IsCancellationRequested) return;
+
+        StopEditorPlayback(cancelQueuedStart: false);
 
         try
         {
@@ -309,6 +329,7 @@ public sealed partial class MainWindow : Window
                 .Select(track => track.StreamIndex)
                 .ToArray();
             _playback.Load(ViewModel.SelectedVideoPath, audioStreams);
+            if (cancellationToken.IsCancellationRequested) return;
             foreach (var track in ViewModel.TimelineTracks.Where(track => track.IsAudio))
             {
                 _playback.SetTrackVolume(track.StreamIndex, track.VolumePercent);
@@ -317,7 +338,7 @@ public sealed partial class MainWindow : Window
             _playback.Play();
             ViewModel.IsPlaying = true;
             _playbackTimer.Start();
-            await Task.Delay(200);
+            await Task.Delay(200, cancellationToken);
             if (_playback.Duration > TimeSpan.Zero)
             {
                 ViewModel.SetDuration(_playback.Duration);
@@ -331,8 +352,14 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void StopEditorPlayback()
+    private void StopEditorPlayback(bool cancelQueuedStart = true)
     {
+        if (cancelQueuedStart)
+        {
+            _playbackStartCts?.Cancel();
+            _playbackStartCts?.Dispose();
+            _playbackStartCts = null;
+        }
         _playbackTimer.Stop();
         _playback?.Dispose();
         _playback = null;

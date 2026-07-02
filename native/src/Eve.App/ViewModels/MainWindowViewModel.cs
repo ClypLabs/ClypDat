@@ -9,6 +9,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 {
     private readonly MediaProbeService _mediaProbe = new();
     private readonly HashSet<string> _selectedPaths = new(StringComparer.OrdinalIgnoreCase);
+    private CancellationTokenSource? _libraryHydrationCts;
     private bool _isReplayRecording;
     private bool _isEditorVisible;
     private string _recorderStatus = "Replay Off";
@@ -287,31 +288,30 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
 
         NotifyLibraryChrome();
-        _ = HydrateLibraryClipsAsync(clips);
+        StartLibraryHydration(clips);
         return Task.CompletedTask;
     }
 
-    public async Task OpenVideoFileAsync(string filePath)
+    public Task OpenVideoFileAsync(string filePath)
     {
-        var media = await _mediaProbe.ProbeAsync(filePath);
+        CancelLibraryHydration();
+        var media = _mediaProbe.CreateLibraryStub(filePath);
         OpenMedia(media);
+        _ = HydrateSelectedMediaAsync(filePath);
+        return Task.CompletedTask;
     }
 
-    public async Task OpenClipAsync(ClipCardViewModel clip)
+    public Task OpenClipAsync(ClipCardViewModel clip)
     {
+        CancelLibraryHydration();
+        OpenMedia(clip.Media);
+
         if (clip.Duration == TimeSpan.Zero || clip.Media.Tracks.Count == 0)
         {
-            try
-            {
-                clip.UpdateMedia(await _mediaProbe.ProbeAsync(clip.Path));
-            }
-            catch
-            {
-                // Fall back to the file info already on the card.
-            }
+            _ = HydrateOpenClipAsync(clip);
         }
 
-        OpenMedia(clip.Media);
+        return Task.CompletedTask;
     }
 
     public void UpdateCardLayout(double availableWidth)
@@ -425,14 +425,17 @@ public sealed class MainWindowViewModel : ViewModelBase
         return args;
     }
 
-    private void OpenMedia(MediaFileInfo media)
+    private void OpenMedia(MediaFileInfo media, bool preserveEditorText = false)
     {
         SelectedVideoName = media.Name;
         SelectedVideoPath = media.Path;
         SelectedThumbnailPath = media.ThumbnailPath;
         SelectedThumbnail = LoadBitmap(media.ThumbnailPath);
-        EditorTitle = media.Name;
-        EditorDescription = string.Empty;
+        if (!preserveEditorText)
+        {
+            EditorTitle = media.Name;
+            EditorDescription = string.Empty;
+        }
         SelectedCreated = $"Created: {media.CreatedAt.ToLocalTime():d MMM yyyy, H:mm}";
         SelectedQuality = media.Height > 0
             ? $"Video Quality: {ResolutionLabel(media.Height)}"
@@ -506,23 +509,97 @@ public sealed class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(SelectionSummary));
     }
 
-    private async Task HydrateLibraryClipsAsync(IReadOnlyList<ClipCardViewModel> clips)
+    private void StartLibraryHydration(IReadOnlyList<ClipCardViewModel> clips)
     {
-        await Parallel.ForEachAsync(
-            clips,
-            new ParallelOptions { MaxDegreeOfParallelism = 3 },
-            async (clip, _) =>
+        CancelLibraryHydration();
+        _libraryHydrationCts = new CancellationTokenSource();
+        _ = HydrateLibraryClipsAsync(clips, _libraryHydrationCts.Token);
+    }
+
+    private void CancelLibraryHydration()
+    {
+        _libraryHydrationCts?.Cancel();
+        _libraryHydrationCts?.Dispose();
+        _libraryHydrationCts = null;
+    }
+
+    private async Task HydrateOpenClipAsync(ClipCardViewModel clip)
+    {
+        try
+        {
+            var media = await _mediaProbe.ProbeAsync(clip.Path);
+            await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                try
+                clip.UpdateMedia(media);
+                if (string.Equals(SelectedVideoPath, clip.Path, StringComparison.OrdinalIgnoreCase))
                 {
-                    var media = await _mediaProbe.ProbeAsync(clip.Path);
-                    await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(media));
-                }
-                catch
-                {
-                    // Bad files should not stop the rest of the library from filling in.
+                    OpenMedia(media, preserveEditorText: true);
                 }
             });
+        }
+        catch
+        {
+            // Card stubs are enough to keep editor responsive when probe fails.
+        }
+    }
+
+    private async Task HydrateSelectedMediaAsync(string filePath)
+    {
+        try
+        {
+            var media = await _mediaProbe.ProbeAsync(filePath);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (string.Equals(SelectedVideoPath, filePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    OpenMedia(media, preserveEditorText: true);
+                }
+            });
+        }
+        catch
+        {
+            // File can still play even when metadata/thumbnail generation fails.
+        }
+    }
+
+    private async Task HydrateLibraryClipsAsync(IReadOnlyList<ClipCardViewModel> clips, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Parallel.ForEachAsync(
+                clips,
+                new ParallelOptions { MaxDegreeOfParallelism = 1, CancellationToken = cancellationToken },
+                async (clip, token) =>
+                {
+                    try
+                    {
+                        token.ThrowIfCancellationRequested();
+                        var media = await _mediaProbe.ProbeAsync(clip.Path);
+                        if (token.IsCancellationRequested) return;
+                        await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(media));
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch
+                    {
+                        // Bad files should not stop the rest of the library from filling in.
+                    }
+                });
+        }
+        catch (OperationCanceledException)
+        {
+            // New folder/editor open superseded this scan.
+        }
+        finally
+        {
+            if (_libraryHydrationCts?.Token == cancellationToken)
+            {
+                _libraryHydrationCts.Dispose();
+                _libraryHydrationCts = null;
+            }
+        }
     }
 
     private TimeSpan ClampTime(TimeSpan time)
