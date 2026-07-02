@@ -332,11 +332,12 @@
                                 Maximum="150"
                                 Height="34"
                                 MinHeight="34"
-                                Margin="0,-14,0,0"
+                                Margin="0,-4,0,0"
                                 Value="{Binding VolumePercent}"
                                 IsEnabled="{Binding CanAdjustVolume}"
                                 IsVisible="{Binding IsAudio}"
                                 PointerPressed="TrackVolume_OnPointerPressed"
+                                PointerMoved="TrackVolume_OnPointerMoved"
                                 PointerReleased="TrackVolume_OnPointerReleased"
                                 PropertyChanged="TrackVolume_OnPropertyChanged" />
                         <PathIcon Grid.Row="1"

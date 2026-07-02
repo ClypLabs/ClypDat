@@ -219,12 +219,11 @@ public sealed partial class MainWindow : Window
         if (ViewModel.TrimEnd > TimeSpan.Zero && ViewModel.CurrentTime >= ViewModel.TrimEnd - TimeSpan.FromMilliseconds(80))
         {
             ViewModel.CurrentTime = ViewModel.TrimStart;
-            _playback.Seek(ViewModel.CurrentTime);
             SyncSmoothPlaybackClock(ViewModel.CurrentTime, false);
         }
 
-        SyncSmoothPlaybackClock(ViewModel.CurrentTime, true);
-        _playback.Play();
+        _playback.PlayFrom(ViewModel.CurrentTime);
+        SyncSmoothPlaybackClock(_playback.Position, true);
         ViewModel.IsPlaying = true;
     }
 
@@ -232,8 +231,19 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null) return;
         ViewModel.RestartPlayback();
-        _playback?.Seek(ViewModel.CurrentTime);
-        SyncSmoothPlaybackClock(ViewModel.CurrentTime, _playback?.IsPlaying == true);
+        if (_playback is not null)
+        {
+            if (_playback.IsPlaying)
+            {
+                _playback.PlayFrom(ViewModel.CurrentTime);
+                SyncSmoothPlaybackClock(_playback.Position, true);
+            }
+            else
+            {
+                _playback.Seek(ViewModel.CurrentTime);
+                SyncSmoothPlaybackClock(ViewModel.CurrentTime, false);
+            }
+        }
     }
 
     private void StepBackButton_OnClick(object? sender, RoutedEventArgs e)
@@ -324,6 +334,14 @@ public sealed partial class MainWindow : Window
             track.ShowVolumePercent = false;
             e.Pointer.Capture(null);
             e.Handled = false;
+        }
+    }
+
+    private void TrackVolume_OnPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (sender is Slider { DataContext: TrackLaneViewModel track } slider && track.ShowVolumePercent)
+        {
+            UpdateVolumeBadgePosition(slider, track, e.GetPosition(slider).X);
         }
     }
 
@@ -429,8 +447,8 @@ public sealed partial class MainWindow : Window
             _playback.LoadVideo(ViewModel.SelectedVideoPath);
             if (cancellationToken.IsCancellationRequested) return;
 
-            _playback.Play();
-            SyncSmoothPlaybackClock(ViewModel.CurrentTime, true);
+            _playback.PlayFrom(ViewModel.CurrentTime);
+            SyncSmoothPlaybackClock(_playback.Position, true);
             ViewModel.IsPlaying = true;
             _playbackTimer.Start();
             _ = LoadEditorAudioAsync(_playback, ViewModel.SelectedVideoPath, audioTracks, cancellationToken);
@@ -507,6 +525,12 @@ public sealed partial class MainWindow : Window
         {
             var smoothTime = _smoothPlaybackBase + _smoothPlaybackClock.Elapsed;
             var vlcTime = _playback.Position;
+            if (vlcTime < TimeSpan.FromMilliseconds(250) &&
+                smoothTime - vlcTime > TimeSpan.FromMilliseconds(250))
+            {
+                smoothTime = vlcTime;
+                SyncSmoothPlaybackClock(vlcTime, true);
+            }
             if (Math.Abs((vlcTime - smoothTime).TotalMilliseconds) > 1500)
             {
                 SyncSmoothPlaybackClock(vlcTime, true);

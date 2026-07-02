@@ -68,6 +68,21 @@ public sealed class PlaybackSession : IDisposable
         PlayMixedAudioIfReady();
     }
 
+    public void PlayFrom(TimeSpan time)
+    {
+        var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
+        if (VideoPlayer.State is VLCState.Ended or VLCState.Stopped)
+        {
+            VideoPlayer.Stop();
+            _mixedAudioPlayer?.Stop();
+        }
+
+        VideoPlayer.Play();
+        VideoPlayer.Time = milliseconds;
+        PlayMixedAudioIfReady();
+        Seek(time);
+    }
+
     public void Pause()
     {
         VideoPlayer.Pause();
