@@ -23,7 +23,7 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         Opened += (_, _) => ViewModel?.UpdateCardLayout(Bounds.Width);
         Closed += (_, _) => _playback?.Dispose();
-        _playbackTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
+        _playbackTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _playbackTimer.Tick += (_, _) => SyncPlaybackPosition();
     }
 
@@ -237,9 +237,9 @@ public sealed partial class MainWindow : Window
     {
         if (_timelineDragMode == TimelineDragMode.None) return;
         UpdateTimelineFromPointer(e, _timelineDragMode);
-        if (_timelineDragMode == TimelineDragMode.Playhead)
+        if (_timelineDragMode == TimelineDragMode.Playhead && ViewModel is not null)
         {
-            _playback?.Seek(ViewModel!.CurrentTime);
+            _playback?.Seek(ViewModel.CurrentTime);
         }
 
         _timelineDragMode = TimelineDragMode.None;
@@ -392,6 +392,7 @@ public sealed partial class MainWindow : Window
     private void SyncPlaybackPosition()
     {
         if (ViewModel is null || _playback is null) return;
+        if (_timelineDragMode != TimelineDragMode.None) return;
         if (_playback.Duration > TimeSpan.Zero)
         {
             ViewModel.SetDuration(_playback.Duration);
@@ -425,6 +426,7 @@ public sealed partial class MainWindow : Window
                 break;
             case TimelineDragMode.Playhead:
                 ViewModel.CurrentTime = time;
+                _playback?.Seek(time);
                 break;
         }
 

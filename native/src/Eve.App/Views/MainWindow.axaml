@@ -253,11 +253,24 @@
         <Grid RowDefinitions="44,*" Margin="8,0,8,8">
           <Grid ColumnDefinitions="160,*,Auto" Height="44">
             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="7">
-              <Button Content="|&lt;" Classes="transportButton" Click="RestartButton_OnClick" />
-              <Button Content="&lt;" Classes="transportButton" Click="StepBackButton_OnClick" />
-              <Button Content="{Binding PlayPauseIcon}" Classes="playButton" Click="PlayPauseButton_OnClick" />
-              <Button Content="&gt;" Classes="transportButton" Click="StepForwardButton_OnClick" />
-              <Button Content="&gt;|" Classes="transportButton" Click="EndButton_OnClick" />
+              <Button Classes="transportButton" Click="RestartButton_OnClick">
+                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 5,3 L 7,3 L 7,17 L 5,17 Z M 17,4 L 17,16 L 8,10 Z" />
+              </Button>
+              <Button Classes="transportButton" Click="StepBackButton_OnClick">
+                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 15,4 L 15,16 L 6,10 Z" />
+              </Button>
+              <Button Classes="playButton" Click="PlayPauseButton_OnClick">
+                <Grid>
+                  <PathIcon Width="16" Height="16" Foreground="#DDE8F6" Data="M 7,4 L 17,10 L 7,16 Z" IsVisible="{Binding !IsPlaying}" />
+                  <PathIcon Width="16" Height="16" Foreground="#DDE8F6" Data="M 6,4 L 9,4 L 9,16 L 6,16 Z M 12,4 L 15,4 L 15,16 L 12,16 Z" IsVisible="{Binding IsPlaying}" />
+                </Grid>
+              </Button>
+              <Button Classes="transportButton" Click="StepForwardButton_OnClick">
+                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 5,4 L 14,10 L 5,16 Z" />
+              </Button>
+              <Button Classes="transportButton" Click="EndButton_OnClick">
+                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 15,3 L 17,3 L 17,17 L 15,17 Z M 4,4 L 13,10 L 4,16 Z" />
+              </Button>
             </StackPanel>
             <Button Grid.Column="2"
                     Content="{Binding ExportButtonText}"
@@ -375,22 +388,20 @@
                 </Canvas>
 
                 <Canvas x:Name="TimelineHandleLayer">
-                  <Button x:Name="TrimStartHandle"
-                          Classes="transportButton"
+                  <Border x:Name="TrimStartHandle"
                           Width="14"
                           Height="32"
                           Background="#13C8B5"
-                          BorderThickness="0"
+                          CornerRadius="2"
                           Cursor="SizeWestEast"
                           PointerPressed="TrimStartHandle_OnPointerPressed"
                           PointerMoved="TimelineSurface_OnPointerMoved"
                           PointerReleased="TimelineSurface_OnPointerReleased" />
-                  <Button x:Name="TrimEndHandle"
-                          Classes="transportButton"
+                  <Border x:Name="TrimEndHandle"
                           Width="14"
                           Height="32"
                           Background="#13C8B5"
-                          BorderThickness="0"
+                          CornerRadius="2"
                           Cursor="SizeWestEast"
                           PointerPressed="TrimEndHandle_OnPointerPressed"
                           PointerMoved="TimelineSurface_OnPointerMoved"
