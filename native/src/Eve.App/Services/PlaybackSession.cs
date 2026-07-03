@@ -1,4 +1,5 @@
 using LibVLCSharp.Shared;
+using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 using System.Diagnostics;
@@ -82,8 +83,9 @@ public sealed class PlaybackSession : IDisposable
             _audioMixer.AddMixerInput(provider);
         }
 
-        var limited = new SoftLimiterSampleProvider(_audioMixer);
-        _audioOutput = new WasapiOut();
+        var normalized = new GainSampleProvider(_audioMixer, 1f / Math.Max(1, providers.Count));
+        var limited = new SoftLimiterSampleProvider(normalized);
+        _audioOutput = new WasapiOut(AudioClientShareMode.Shared, false, 120);
         _audioOutput.Init(limited);
     }
 
@@ -349,6 +351,32 @@ public sealed class PlaybackSession : IDisposable
 
                 var limited = 0.95f + ((magnitude - 0.95f) / (1f + magnitude - 0.95f)) * 0.05f;
                 buffer[index] = MathF.CopySign(limited, sample);
+            }
+
+            return read;
+        }
+    }
+
+    private sealed class GainSampleProvider : ISampleProvider
+    {
+        private readonly ISampleProvider _source;
+        private readonly float _gain;
+
+        public GainSampleProvider(ISampleProvider source, float gain)
+        {
+            _source = source;
+            _gain = gain;
+            WaveFormat = source.WaveFormat;
+        }
+
+        public WaveFormat WaveFormat { get; }
+
+        public int Read(float[] buffer, int offset, int count)
+        {
+            var read = _source.Read(buffer, offset, count);
+            for (var index = offset; index < offset + read; index++)
+            {
+                buffer[index] *= _gain;
             }
 
             return read;
