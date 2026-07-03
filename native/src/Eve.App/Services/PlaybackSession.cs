@@ -1,4 +1,6 @@
 using LibVLCSharp.Shared;
+using NAudio.Wave;
+using NAudio.Wave.SampleProviders;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -8,7 +10,9 @@ namespace Eve.App.Services;
 public sealed class PlaybackSession : IDisposable
 {
     private readonly LibVLC _libVlc;
-    private readonly Dictionary<int, AudioTrackPlayer> _audioPlayers = new();
+    private readonly Dictionary<int, AudioTrackSource> _audioSources = new();
+    private WasapiOut? _audioOutput;
+    private MixingSampleProvider? _audioMixer;
     private Media? _videoMedia;
     private bool _disposed;
     private bool _ended;
@@ -39,7 +43,7 @@ public sealed class PlaybackSession : IDisposable
     {
         Stop();
         DisposeMedia();
-        DisposeAudioPlayers();
+        DisposeAudio();
         _ended = false;
         _videoMedia = new Media(_libVlc, new Uri(path));
         VideoPlayer.Media = _videoMedia;
@@ -48,22 +52,39 @@ public sealed class PlaybackSession : IDisposable
 
     public async Task LoadAudioAsync(string path, IReadOnlyList<AudioPreviewTrack> audioTracks, CancellationToken cancellationToken)
     {
-        DisposeAudioPlayers();
+        DisposeAudio();
+        if (audioTracks.Count == 0) return;
+
+        var providers = new List<ISampleProvider>();
         foreach (var track in audioTracks)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var audioPath = await ExtractAudioTrackAsync(path, track.StreamIndex, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
-            var media = new Media(_libVlc, new Uri(audioPath));
-            var player = new MediaPlayer(media)
+
+            var reader = new AudioFileReader(audioPath);
+            var volume = new VolumeSampleProvider(reader)
             {
-                EnableKeyInput = false,
-                EnableMouseInput = false,
-                Mute = false,
                 Volume = VolumeCurve(track.VolumePercent)
             };
-            _audioPlayers[track.StreamIndex] = new AudioTrackPlayer(media, player);
+            _audioSources[track.StreamIndex] = new AudioTrackSource(reader, volume);
+            providers.Add(volume);
         }
+
+        if (providers.Count == 0) return;
+        _audioMixer = new MixingSampleProvider(WaveFormat.CreateIeeeFloatWaveFormat(48000, 2))
+        {
+            ReadFully = true
+        };
+
+        foreach (var provider in providers)
+        {
+            _audioMixer.AddMixerInput(provider);
+        }
+
+        var limited = new SoftLimiterSampleProvider(_audioMixer);
+        _audioOutput = new WasapiOut();
+        _audioOutput.Init(limited);
     }
 
     public void Play()
@@ -77,38 +98,26 @@ public sealed class PlaybackSession : IDisposable
         if (IsEnded || VideoPlayer.State == VLCState.Stopped)
         {
             VideoPlayer.Stop();
-            foreach (var audio in _audioPlayers.Values)
-            {
-                audio.Player.Stop();
-            }
+            _audioOutput?.Stop();
         }
 
         _ended = false;
+        SeekAudio(time);
         VideoPlayer.Play();
         VideoPlayer.Time = milliseconds;
-        foreach (var audio in _audioPlayers.Values)
-        {
-            audio.Player.Play();
-            audio.Player.Time = milliseconds;
-        }
+        _audioOutput?.Play();
     }
 
     public void Pause()
     {
         VideoPlayer.Pause();
-        foreach (var audio in _audioPlayers.Values)
-        {
-            audio.Player.Pause();
-        }
+        _audioOutput?.Pause();
     }
 
     public void Stop()
     {
         VideoPlayer.Stop();
-        foreach (var audio in _audioPlayers.Values)
-        {
-            audio.Player.Stop();
-        }
+        _audioOutput?.Stop();
         _ended = false;
     }
 
@@ -117,44 +126,44 @@ public sealed class PlaybackSession : IDisposable
         var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
         _ended = false;
         VideoPlayer.Time = milliseconds;
-        foreach (var audio in _audioPlayers.Values)
-        {
-            audio.Player.Time = milliseconds;
-        }
+        SeekAudio(time);
     }
 
     public void SetTrackVolume(int streamIndex, double percent)
     {
-        if (_audioPlayers.TryGetValue(streamIndex, out var audio))
+        if (_audioSources.TryGetValue(streamIndex, out var source))
         {
-            audio.Player.Volume = VolumeCurve(percent);
+            source.Volume.Volume = VolumeCurve(percent);
         }
     }
 
     public void SyncAudioStreams()
     {
-        if (!VideoPlayer.IsPlaying) return;
-        var videoTime = VideoPlayer.Time;
-        foreach (var audio in _audioPlayers.Values)
-        {
-            if (!audio.Player.IsPlaying)
-            {
-                audio.Player.Play();
-            }
+        if (_audioOutput is null || !VideoPlayer.IsPlaying) return;
+        var videoTime = Position;
+        var maxDrift = _audioSources.Values
+            .Select(source => Math.Abs((source.Reader.CurrentTime - videoTime).TotalMilliseconds))
+            .DefaultIfEmpty(0)
+            .Max();
 
-            if (Math.Abs(audio.Player.Time - videoTime) > 150)
-            {
-                audio.Player.Time = videoTime;
-            }
+        if (maxDrift > 150)
+        {
+            SeekAudio(videoTime);
+        }
+
+        if (_audioOutput.PlaybackState != PlaybackState.Playing)
+        {
+            _audioOutput.Play();
         }
     }
 
     public void SyncAndPlayMixedAudio()
     {
-        foreach (var audio in _audioPlayers.Values)
+        if (_audioOutput is null) return;
+        SeekAudio(Position);
+        if (VideoPlayer.IsPlaying)
         {
-            audio.Player.Play();
-            audio.Player.Time = VideoPlayer.Time;
+            _audioOutput.Play();
         }
     }
 
@@ -164,9 +173,17 @@ public sealed class PlaybackSession : IDisposable
         _disposed = true;
         Stop();
         VideoPlayer.Dispose();
-        DisposeAudioPlayers();
+        DisposeAudio();
         DisposeMedia();
         _libVlc.Dispose();
+    }
+
+    private void SeekAudio(TimeSpan time)
+    {
+        foreach (var source in _audioSources.Values)
+        {
+            source.Reader.CurrentTime = time < TimeSpan.Zero ? TimeSpan.Zero : time;
+        }
     }
 
     private void DisposeMedia()
@@ -175,20 +192,24 @@ public sealed class PlaybackSession : IDisposable
         _videoMedia = null;
     }
 
-    private void DisposeAudioPlayers()
+    private void DisposeAudio()
     {
-        foreach (var audio in _audioPlayers.Values)
+        _audioOutput?.Stop();
+        _audioOutput?.Dispose();
+        _audioOutput = null;
+        _audioMixer = null;
+
+        foreach (var source in _audioSources.Values)
         {
-            audio.Player.Dispose();
-            audio.Media.Dispose();
+            source.Reader.Dispose();
         }
 
-        _audioPlayers.Clear();
+        _audioSources.Clear();
     }
 
-    private static int VolumeCurve(double percent)
+    private static float VolumeCurve(double percent)
     {
-        return (int)Math.Clamp(Math.Round(percent), 0, 150);
+        return (float)Math.Clamp(percent / 100d, 0, 1.5);
     }
 
     private static async Task<string> ExtractAudioTrackAsync(
@@ -300,7 +321,39 @@ public sealed class PlaybackSession : IDisposable
         }
     }
 
-    private sealed record AudioTrackPlayer(Media Media, MediaPlayer Player);
+    private sealed record AudioTrackSource(AudioFileReader Reader, VolumeSampleProvider Volume);
+
+    private sealed class SoftLimiterSampleProvider : ISampleProvider
+    {
+        private readonly ISampleProvider _source;
+
+        public SoftLimiterSampleProvider(ISampleProvider source)
+        {
+            _source = source;
+            WaveFormat = source.WaveFormat;
+        }
+
+        public WaveFormat WaveFormat { get; }
+
+        public int Read(float[] buffer, int offset, int count)
+        {
+            var read = _source.Read(buffer, offset, count);
+            for (var index = offset; index < offset + read; index++)
+            {
+                var sample = buffer[index];
+                var magnitude = MathF.Abs(sample);
+                if (magnitude <= 0.95f)
+                {
+                    continue;
+                }
+
+                var limited = 0.95f + ((magnitude - 0.95f) / (1f + magnitude - 0.95f)) * 0.05f;
+                buffer[index] = MathF.CopySign(limited, sample);
+            }
+
+            return read;
+        }
+    }
 }
 
 public sealed record AudioPreviewTrack(int StreamIndex, double VolumePercent);

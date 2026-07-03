@@ -18,6 +18,7 @@ public sealed partial class MainWindow : Window
     private PlaybackSession? _playback;
     private CancellationTokenSource? _playbackStartCts;
     private TimelineDragMode _timelineDragMode = TimelineDragMode.None;
+    private bool _endedAtTrimBoundary;
 
     public MainWindow()
     {
@@ -182,11 +183,13 @@ public sealed partial class MainWindow : Window
         switch (e.Key)
         {
             case Key.Left:
+                _endedAtTrimBoundary = false;
                 ViewModel.SeekBySeconds(-1);
                 _playback?.Seek(ViewModel.CurrentTime);
                 e.Handled = true;
                 break;
             case Key.Right:
+                _endedAtTrimBoundary = false;
                 ViewModel.SeekBySeconds(1);
                 _playback?.Seek(ViewModel.CurrentTime);
                 e.Handled = true;
@@ -215,12 +218,14 @@ public sealed partial class MainWindow : Window
         }
 
         var startTime = ViewModel.CurrentTime;
-        if (_playback.IsEnded && ViewModel.TrimEnd > TimeSpan.Zero && startTime >= ViewModel.TrimEnd - TimeSpan.FromMilliseconds(80))
+        if (_endedAtTrimBoundary ||
+            (_playback.IsEnded && ViewModel.TrimEnd > TimeSpan.Zero && startTime >= ViewModel.TrimEnd - TimeSpan.FromMilliseconds(80)))
         {
             startTime = ViewModel.TrimStart;
             ViewModel.CurrentTime = startTime;
         }
 
+        _endedAtTrimBoundary = false;
         _playback.PlayFrom(startTime);
         ViewModel.IsPlaying = true;
     }
@@ -228,6 +233,7 @@ public sealed partial class MainWindow : Window
     private void RestartButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
+        _endedAtTrimBoundary = false;
         ViewModel.RestartPlayback();
         if (_playback is not null)
         {
@@ -245,6 +251,7 @@ public sealed partial class MainWindow : Window
     private void StepBackButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
+        _endedAtTrimBoundary = false;
         ViewModel.SeekBySeconds(-5);
         _playback?.Seek(ViewModel.CurrentTime);
     }
@@ -252,6 +259,7 @@ public sealed partial class MainWindow : Window
     private void StepForwardButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
+        _endedAtTrimBoundary = false;
         ViewModel.SeekBySeconds(5);
         _playback?.Seek(ViewModel.CurrentTime);
     }
@@ -259,6 +267,7 @@ public sealed partial class MainWindow : Window
     private void EndButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
+        _endedAtTrimBoundary = true;
         ViewModel.CurrentTime = ViewModel.TrimEnd > TimeSpan.Zero ? ViewModel.TrimEnd : ViewModel.Duration;
         _playback?.Seek(ViewModel.CurrentTime);
     }
@@ -267,6 +276,7 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
         _timelineDragMode = TimelineDragMode.Playhead;
+        _endedAtTrimBoundary = false;
         UpdateTimelineFromPointer(e, TimelineDragMode.Playhead);
         e.Pointer.Capture(TimelineSurface);
         e.Handled = true;
@@ -276,6 +286,7 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
         _timelineDragMode = TimelineDragMode.TrimStart;
+        _endedAtTrimBoundary = false;
         UpdateTimelineFromPointer(e, TimelineDragMode.TrimStart);
         e.Pointer.Capture(TimelineSurface);
         e.Handled = true;
@@ -285,6 +296,7 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
         _timelineDragMode = TimelineDragMode.TrimEnd;
+        _endedAtTrimBoundary = false;
         UpdateTimelineFromPointer(e, TimelineDragMode.TrimEnd);
         e.Pointer.Capture(TimelineSurface);
         e.Handled = true;
@@ -461,6 +473,7 @@ public sealed partial class MainWindow : Window
             if (cancellationToken.IsCancellationRequested) return;
 
             playback.PlayFrom(ViewModel.CurrentTime);
+            _endedAtTrimBoundary = false;
             ViewModel.IsPlaying = true;
             _playbackTimer.Start();
             _ = LoadEditorAudioAsync(playback, ViewModel.SelectedVideoPath, audioTracks, cancellationToken);
@@ -495,7 +508,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception error)
         {
-            await ShowMessageAsync("Audio preview unavailable", error.Message);
+            await Dispatcher.UIThread.InvokeAsync(() => ShowMessageAsync("Audio preview unavailable", error.Message));
         }
     }
 
@@ -508,6 +521,7 @@ public sealed partial class MainWindow : Window
             _playbackStartCts = null;
         }
         _playbackTimer.Stop();
+        _endedAtTrimBoundary = false;
         var playback = _playback;
         _playback = null;
         EditorVideoView.MediaPlayer = null;
@@ -546,6 +560,12 @@ public sealed partial class MainWindow : Window
             _playback.Seek(ViewModel.TrimEnd);
             ViewModel.CurrentTime = ViewModel.TrimEnd;
             ViewModel.IsPlaying = false;
+            _endedAtTrimBoundary = true;
+        }
+        else if (_playback.IsEnded)
+        {
+            ViewModel.IsPlaying = false;
+            _endedAtTrimBoundary = true;
         }
     }
 
