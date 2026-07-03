@@ -12,6 +12,8 @@ public sealed class PlaybackSession : IDisposable
 {
     private readonly LibVLC _libVlc;
     private readonly Dictionary<int, AudioTrackSource> _audioSources = new();
+    private readonly Dictionary<int, string> _audioPaths = new();
+    private readonly Dictionary<int, double> _audioVolumes = new();
     private WasapiOut? _audioOutput;
     private MixingSampleProvider? _audioMixer;
     private Media? _videoMedia;
@@ -56,23 +58,35 @@ public sealed class PlaybackSession : IDisposable
         DisposeAudio();
         if (audioTracks.Count == 0) return;
 
-        var providers = new List<ISampleProvider>();
         foreach (var track in audioTracks)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var audioPath = await ExtractAudioTrackAsync(path, track.StreamIndex, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
+            _audioPaths[track.StreamIndex] = audioPath;
+            _audioVolumes[track.StreamIndex] = track.VolumePercent;
+        }
 
+        RebuildAudioOutput();
+    }
+
+    private void RebuildAudioOutput()
+    {
+        DisposeAudioOutput();
+        if (_audioPaths.Count == 0) return;
+
+        var providers = new List<ISampleProvider>();
+        foreach (var (streamIndex, audioPath) in _audioPaths)
+        {
             var reader = new AudioFileReader(audioPath);
             var volume = new VolumeSampleProvider(reader)
             {
-                Volume = VolumeCurve(track.VolumePercent)
+                Volume = VolumeCurve(_audioVolumes.GetValueOrDefault(streamIndex, 100))
             };
-            _audioSources[track.StreamIndex] = new AudioTrackSource(reader, volume);
+            _audioSources[streamIndex] = new AudioTrackSource(reader, volume);
             providers.Add(volume);
         }
 
-        if (providers.Count == 0) return;
         _audioMixer = new MixingSampleProvider(WaveFormat.CreateIeeeFloatWaveFormat(48000, 2))
         {
             ReadFully = true
@@ -100,7 +114,7 @@ public sealed class PlaybackSession : IDisposable
         if (IsEnded || VideoPlayer.State == VLCState.Stopped)
         {
             VideoPlayer.Stop();
-            _audioOutput?.Stop();
+            RebuildAudioOutput();
         }
 
         _ended = false;
@@ -133,6 +147,7 @@ public sealed class PlaybackSession : IDisposable
 
     public void SetTrackVolume(int streamIndex, double percent)
     {
+        _audioVolumes[streamIndex] = percent;
         if (_audioSources.TryGetValue(streamIndex, out var source))
         {
             source.Volume.Volume = VolumeCurve(percent);
@@ -184,6 +199,13 @@ public sealed class PlaybackSession : IDisposable
     }
 
     private void DisposeAudio()
+    {
+        DisposeAudioOutput();
+        _audioPaths.Clear();
+        _audioVolumes.Clear();
+    }
+
+    private void DisposeAudioOutput()
     {
         _audioOutput?.Stop();
         _audioOutput?.Dispose();
