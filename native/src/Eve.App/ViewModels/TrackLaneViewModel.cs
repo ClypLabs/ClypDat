@@ -28,7 +28,7 @@ public sealed class TrackLaneViewModel : ViewModelBase
     public bool IsVideo => Type == "video";
     public double LaneHeight => IsVideo ? 32 : 56;
     public string VolumeLabel => $"{VolumePercent:0}%";
-    public Thickness VolumeBadgeMargin => new(Math.Clamp(VolumeBadgeX - 18, -2, 118), -16, 0, 0);
+    public Thickness VolumeBadgeMargin => new(VolumeBadgeX, -8, 0, 0);
     public string HeaderClass => IsAudio ? "audioHeader" : "videoHeader";
 
     public double VolumePercent

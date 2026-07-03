@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Eve.App.Services;
 using Eve.App.ViewModels;
 using Eve.App.Views;
 
@@ -15,6 +16,8 @@ public sealed partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
+        PlaybackSession.WarmUp();
+
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.MainWindow = new MainWindow

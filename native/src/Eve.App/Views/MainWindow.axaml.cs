@@ -15,13 +15,9 @@ namespace Eve.App.Views;
 public sealed partial class MainWindow : Window
 {
     private readonly DispatcherTimer _playbackTimer;
-    private readonly Stopwatch _smoothPlaybackClock = new();
     private PlaybackSession? _playback;
     private CancellationTokenSource? _playbackStartCts;
-    private CancellationTokenSource? _audioReloadCts;
     private TimelineDragMode _timelineDragMode = TimelineDragMode.None;
-    private TimeSpan _smoothPlaybackBase = TimeSpan.Zero;
-    private bool _waitingForPlaybackStart;
 
     public MainWindow()
     {
@@ -30,7 +26,6 @@ public sealed partial class MainWindow : Window
         {
             ApplySavedWindowBounds();
             ViewModel?.UpdateCardLayout(Bounds.Width);
-            _ = Task.Run(PlaybackSession.WarmUp);
         };
         KeyDown += MainWindow_OnKeyDown;
         Closing += (_, _) =>
@@ -40,8 +35,6 @@ public sealed partial class MainWindow : Window
         };
         Closed += (_, _) =>
         {
-            _audioReloadCts?.Cancel();
-            _audioReloadCts?.Dispose();
             _playback?.Dispose();
             ViewModel?.Dispose();
         };
@@ -191,13 +184,11 @@ public sealed partial class MainWindow : Window
             case Key.Left:
                 ViewModel.SeekBySeconds(-1);
                 _playback?.Seek(ViewModel.CurrentTime);
-                SyncSmoothPlaybackClock(ViewModel.CurrentTime, _playback?.IsPlaying == true);
                 e.Handled = true;
                 break;
             case Key.Right:
                 ViewModel.SeekBySeconds(1);
                 _playback?.Seek(ViewModel.CurrentTime);
-                SyncSmoothPlaybackClock(ViewModel.CurrentTime, _playback?.IsPlaying == true);
                 e.Handled = true;
                 break;
             case Key.Space:
@@ -218,20 +209,19 @@ public sealed partial class MainWindow : Window
 
         if (_playback.IsPlaying)
         {
-            SyncSmoothPlaybackClock(_playback.Position, false);
             _playback.Pause();
             ViewModel.IsPlaying = false;
             return;
         }
 
-        if (ViewModel.TrimEnd > TimeSpan.Zero && ViewModel.CurrentTime >= ViewModel.TrimEnd - TimeSpan.FromMilliseconds(80))
+        var startTime = ViewModel.CurrentTime;
+        if (_playback.IsEnded && ViewModel.TrimEnd > TimeSpan.Zero && startTime >= ViewModel.TrimEnd - TimeSpan.FromMilliseconds(80))
         {
-            ViewModel.CurrentTime = ViewModel.TrimStart;
-            SyncSmoothPlaybackClock(ViewModel.CurrentTime, false);
+            startTime = ViewModel.TrimStart;
+            ViewModel.CurrentTime = startTime;
         }
 
-        _playback.PlayFrom(ViewModel.CurrentTime);
-        SyncSmoothPlaybackClock(_playback.Position, true);
+        _playback.PlayFrom(startTime);
         ViewModel.IsPlaying = true;
     }
 
@@ -244,12 +234,10 @@ public sealed partial class MainWindow : Window
             if (_playback.IsPlaying)
             {
                 _playback.PlayFrom(ViewModel.CurrentTime);
-                SyncSmoothPlaybackClock(_playback.Position, true);
             }
             else
             {
                 _playback.Seek(ViewModel.CurrentTime);
-                SyncSmoothPlaybackClock(ViewModel.CurrentTime, false);
             }
         }
     }
@@ -259,7 +247,6 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null) return;
         ViewModel.SeekBySeconds(-5);
         _playback?.Seek(ViewModel.CurrentTime);
-        SyncSmoothPlaybackClock(ViewModel.CurrentTime, _playback?.IsPlaying == true);
     }
 
     private void StepForwardButton_OnClick(object? sender, RoutedEventArgs e)
@@ -267,7 +254,6 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null) return;
         ViewModel.SeekBySeconds(5);
         _playback?.Seek(ViewModel.CurrentTime);
-        SyncSmoothPlaybackClock(ViewModel.CurrentTime, _playback?.IsPlaying == true);
     }
 
     private void EndButton_OnClick(object? sender, RoutedEventArgs e)
@@ -275,7 +261,6 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null) return;
         ViewModel.CurrentTime = ViewModel.TrimEnd > TimeSpan.Zero ? ViewModel.TrimEnd : ViewModel.Duration;
         _playback?.Seek(ViewModel.CurrentTime);
-        SyncSmoothPlaybackClock(ViewModel.CurrentTime, _playback?.IsPlaying == true);
     }
 
     private void TimelineSurface_OnPointerPressed(object? sender, PointerPressedEventArgs e)
@@ -341,7 +326,6 @@ public sealed partial class MainWindow : Window
         {
             track.ShowVolumePercent = false;
             e.Pointer.Capture(null);
-            QueueEditorAudioReload();
             e.Handled = false;
         }
     }
@@ -359,7 +343,6 @@ public sealed partial class MainWindow : Window
         var slider = (e.Source as Visual)?.FindAncestorOfType<Slider>();
         if (slider?.DataContext is not TrackLaneViewModel track || !track.IsAudio) return;
         track.ShowVolumePercent = false;
-        QueueEditorAudioReload();
     }
 
     private void TrackVolume_OnPointerMoved(object? sender, PointerEventArgs e)
@@ -379,41 +362,10 @@ public sealed partial class MainWindow : Window
 
     private static void UpdateVolumeBadgePosition(Slider slider, TrackLaneViewModel track, double? pointerX = null)
     {
-        var x = pointerX ?? slider.Bounds.Width * Math.Clamp(track.VolumePercent / 150d, 0, 1);
-        track.VolumeBadgeX = Math.Clamp(x, 0, Math.Max(1, slider.Bounds.Width));
-    }
-
-    private void QueueEditorAudioReload()
-    {
-        if (ViewModel is null || _playback is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
-        _audioReloadCts?.Cancel();
-        _audioReloadCts?.Dispose();
-        var cts = new CancellationTokenSource();
-        _audioReloadCts = cts;
-        var playback = _playback;
-        var path = ViewModel.SelectedVideoPath;
-        var tracks = ViewModel.TimelineTracks
-            .Where(track => track.IsAudio)
-            .Select(track => new AudioPreviewTrack(track.StreamIndex, track.VolumePercent))
-            .ToArray();
-
-        _ = Dispatcher.UIThread.InvokeAsync(async () =>
-        {
-            try
-            {
-                await Task.Delay(250, cts.Token);
-                await playback.LoadAudioAsync(path, tracks, cts.Token);
-                if (cts.IsCancellationRequested || _playback != playback) return;
-                playback.SyncAndPlayMixedAudio();
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch
-            {
-                // Keep video playback alive if remixing preview audio fails.
-            }
-        }, DispatcherPriority.Background);
+        var width = Math.Max(1, slider.Bounds.Width);
+        var thumbX = pointerX ?? width * Math.Clamp(track.VolumePercent / 150d, 0, 1);
+        var badgeX = thumbX > width - 48 ? thumbX - 48 : thumbX + 10;
+        track.VolumeBadgeX = Math.Clamp(badgeX, 0, Math.Max(1, width - 38));
     }
 
     private async void ExportButton_OnClick(object? sender, RoutedEventArgs e)
@@ -509,8 +461,6 @@ public sealed partial class MainWindow : Window
             if (cancellationToken.IsCancellationRequested) return;
 
             playback.PlayFrom(ViewModel.CurrentTime);
-            _waitingForPlaybackStart = true;
-            SyncSmoothPlaybackClock(ViewModel.CurrentTime, false);
             ViewModel.IsPlaying = true;
             _playbackTimer.Start();
             _ = LoadEditorAudioAsync(playback, ViewModel.SelectedVideoPath, audioTracks, cancellationToken);
@@ -557,13 +507,7 @@ public sealed partial class MainWindow : Window
             _playbackStartCts?.Dispose();
             _playbackStartCts = null;
         }
-        _audioReloadCts?.Cancel();
-        _audioReloadCts?.Dispose();
-        _audioReloadCts = null;
         _playbackTimer.Stop();
-        _smoothPlaybackClock.Reset();
-        _smoothPlaybackBase = TimeSpan.Zero;
-        _waitingForPlaybackStart = false;
         var playback = _playback;
         _playback = null;
         EditorVideoView.MediaPlayer = null;
@@ -589,46 +533,17 @@ public sealed partial class MainWindow : Window
 
         if (_playback.IsPlaying)
         {
-            var vlcTime = _playback.Position;
-            if (_waitingForPlaybackStart)
-            {
-                if (vlcTime <= ViewModel.TrimStart + TimeSpan.FromMilliseconds(120))
-                {
-                    ViewModel.CurrentTime = ViewModel.TrimStart;
-                    SyncSmoothPlaybackClock(ViewModel.TrimStart, false);
-                    UpdateTimelineChrome();
-                    return;
-                }
-
-                _waitingForPlaybackStart = false;
-                SyncSmoothPlaybackClock(vlcTime, true);
-            }
-
-            var smoothTime = _smoothPlaybackBase + _smoothPlaybackClock.Elapsed;
-            if (vlcTime < TimeSpan.FromMilliseconds(250) &&
-                smoothTime - vlcTime > TimeSpan.FromMilliseconds(250))
-            {
-                smoothTime = vlcTime;
-                SyncSmoothPlaybackClock(vlcTime, true);
-            }
-            if (Math.Abs((vlcTime - smoothTime).TotalMilliseconds) > 1500)
-            {
-                SyncSmoothPlaybackClock(vlcTime, true);
-                smoothTime = vlcTime;
-            }
-            ViewModel.CurrentTime = smoothTime;
+            ViewModel.CurrentTime = _playback.Position;
         }
         else
         {
             ViewModel.CurrentTime = _playback.Position;
-            SyncSmoothPlaybackClock(ViewModel.CurrentTime, false);
         }
         UpdateTimelineChrome();
         if (ViewModel.TrimEnd > TimeSpan.Zero && ViewModel.CurrentTime >= ViewModel.TrimEnd)
         {
             _playback.Pause();
             _playback.Seek(ViewModel.TrimEnd);
-            SyncSmoothPlaybackClock(ViewModel.TrimEnd, false);
             ViewModel.CurrentTime = ViewModel.TrimEnd;
             ViewModel.IsPlaying = false;
         }
@@ -646,18 +561,15 @@ public sealed partial class MainWindow : Window
                 ViewModel.TrimStart = time;
                 ViewModel.CurrentTime = ViewModel.TrimStart;
                 _playback?.Seek(ViewModel.CurrentTime);
-                SyncSmoothPlaybackClock(ViewModel.CurrentTime, _playback?.IsPlaying == true);
                 break;
             case TimelineDragMode.TrimEnd:
                 ViewModel.TrimEnd = time;
                 ViewModel.CurrentTime = ViewModel.TrimEnd;
                 _playback?.Seek(ViewModel.CurrentTime);
-                SyncSmoothPlaybackClock(ViewModel.CurrentTime, _playback?.IsPlaying == true);
                 break;
             case TimelineDragMode.Playhead:
                 ViewModel.CurrentTime = time;
                 _playback?.Seek(time);
-                SyncSmoothPlaybackClock(time, _playback?.IsPlaying == true);
                 break;
         }
 
@@ -686,16 +598,6 @@ public sealed partial class MainWindow : Window
         Canvas.SetTop(TimelinePlayhead, -8);
         Canvas.SetLeft(PlayheadCap, playhead - 8);
         Canvas.SetTop(PlayheadCap, -12);
-    }
-
-    private void SyncSmoothPlaybackClock(TimeSpan position, bool running)
-    {
-        _smoothPlaybackBase = position;
-        _smoothPlaybackClock.Restart();
-        if (!running)
-        {
-            _smoothPlaybackClock.Stop();
-        }
     }
 
     private void ApplySavedWindowBounds()
