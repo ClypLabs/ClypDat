@@ -747,6 +747,11 @@ public sealed partial class MainWindow : Window
             Width = 96,
             HorizontalContentAlignment = HorizontalAlignment.Center
         };
+        if (showCancel)
+        {
+            ok.Background = Avalonia.Media.Brush.Parse("#D95B62");
+            ok.Foreground = Avalonia.Media.Brush.Parse("#FFFFFF");
+        }
         ok.Click += (_, _) => window.Close(true);
 
         var buttons = new StackPanel
