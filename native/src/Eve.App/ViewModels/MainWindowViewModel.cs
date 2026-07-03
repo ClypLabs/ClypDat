@@ -283,6 +283,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         AppSettingsStore.Save(Settings);
     }
 
+    public void SaveSelectedClipEditState()
+    {
+        if (string.IsNullOrWhiteSpace(SelectedVideoPath)) return;
+        var key = ClipEditKey(SelectedVideoPath);
+        Settings.ClipEdits[key] = new ClipEditSettings
+        {
+            TrimStartSeconds = Math.Max(0, TrimStart.TotalSeconds),
+            TrimEndSeconds = Math.Max(0, TrimEnd.TotalSeconds),
+            TrackVolumes = TimelineTracks
+                .Where(track => track.IsAudio)
+                .ToDictionary(track => track.StreamIndex, track => Math.Clamp(track.VolumePercent, 0, 150))
+        };
+        SaveSettings();
+    }
+
     public Task RefreshLibraryAsync()
     {
         ClipGroups.Clear();
@@ -388,8 +403,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             File.Delete(clip.Path);
             _mediaProbe.DeleteCacheFor(clip.Path);
+            Settings.ClipEdits.Remove(ClipEditKey(clip.Path));
         }
 
+        SaveSettings();
         await RefreshLibraryAsync();
         return selected.Length;
     }
@@ -497,8 +514,31 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             TimelineTracks.Insert(0, new TrackLaneViewModel(0, "Video", "video", "#05C7B7", false));
         }
 
+        ApplyClipEditState(media.Path);
         IsEditorVisible = true;
         StartWaveformLoad(media);
+    }
+
+    private void ApplyClipEditState(string path)
+    {
+        if (!Settings.ClipEdits.TryGetValue(ClipEditKey(path), out var edit)) return;
+        if (Duration > TimeSpan.Zero)
+        {
+            var start = TimeSpan.FromSeconds(Math.Clamp(edit.TrimStartSeconds, 0, Duration.TotalSeconds));
+            var end = TimeSpan.FromSeconds(Math.Clamp(edit.TrimEndSeconds, 0, Duration.TotalSeconds));
+            if (end <= TimeSpan.Zero || end < start) end = Duration;
+            TrimStart = start;
+            TrimEnd = end;
+            CurrentTime = TrimStart;
+        }
+
+        foreach (var track in TimelineTracks.Where(track => track.IsAudio))
+        {
+            if (edit.TrackVolumes.TryGetValue(track.StreamIndex, out var volume))
+            {
+                track.VolumePercent = Math.Clamp(volume, 0, 150);
+            }
+        }
     }
 
     private void ClearSelection()
@@ -769,6 +809,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return time.TotalHours >= 1
             ? time.ToString("h\\:mm\\:ss")
             : time.ToString("m\\:ss");
+    }
+
+    private static string ClipEditKey(string path)
+    {
+        return Path.GetFullPath(path).ToUpperInvariant();
     }
 
     private static string ResolutionLabel(int height)

@@ -11,4 +11,12 @@ public sealed class AppSettings
     public double WindowWidth { get; set; } = 1180;
     public double WindowHeight { get; set; } = 780;
     public bool IsWindowMaximized { get; set; }
+    public Dictionary<string, ClipEditSettings> ClipEdits { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+public sealed class ClipEditSettings
+{
+    public double TrimStartSeconds { get; set; }
+    public double TrimEndSeconds { get; set; }
+    public Dictionary<int, double> TrackVolumes { get; set; } = new();
 }

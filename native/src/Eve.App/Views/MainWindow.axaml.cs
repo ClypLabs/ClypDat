@@ -166,6 +166,7 @@ public sealed partial class MainWindow : Window
 
     private void CloseEditorButton_OnClick(object? sender, RoutedEventArgs e)
     {
+        ViewModel?.SaveSelectedClipEditState();
         StopEditorPlayback();
         ViewModel?.CloseEditor();
     }
@@ -311,10 +312,15 @@ public sealed partial class MainWindow : Window
     private void TimelineSurface_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
         if (_timelineDragMode == TimelineDragMode.None) return;
+        var mode = _timelineDragMode;
         UpdateTimelineFromPointer(e, _timelineDragMode);
-        if (_timelineDragMode == TimelineDragMode.Playhead && ViewModel is not null)
+        if (mode == TimelineDragMode.Playhead && ViewModel is not null)
         {
             _playback?.Seek(ViewModel.CurrentTime);
+        }
+        else if (ViewModel is not null)
+        {
+            ViewModel.SaveSelectedClipEditState();
         }
 
         _timelineDragMode = TimelineDragMode.None;
@@ -337,6 +343,7 @@ public sealed partial class MainWindow : Window
         if (sender is Slider { DataContext: TrackLaneViewModel track })
         {
             track.ShowVolumePercent = false;
+            ViewModel?.SaveSelectedClipEditState();
             e.Pointer.Capture(null);
             e.Handled = false;
         }
@@ -355,6 +362,7 @@ public sealed partial class MainWindow : Window
         var slider = (e.Source as Visual)?.FindAncestorOfType<Slider>();
         if (slider?.DataContext is not TrackLaneViewModel track || !track.IsAudio) return;
         track.ShowVolumePercent = false;
+        ViewModel?.SaveSelectedClipEditState();
     }
 
     private void TrackVolume_OnPointerMoved(object? sender, PointerEventArgs e)

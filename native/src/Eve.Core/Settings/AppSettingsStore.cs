@@ -17,7 +17,9 @@ public static class AppSettingsStore
         {
             if (!File.Exists(SettingsPath)) return new AppSettings();
             var json = File.ReadAllText(SettingsPath);
-            return JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+            var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+            settings.ClipEdits ??= new Dictionary<string, ClipEditSettings>(StringComparer.OrdinalIgnoreCase);
+            return settings;
         }
         catch
         {
