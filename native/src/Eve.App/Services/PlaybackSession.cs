@@ -30,6 +30,12 @@ public sealed class PlaybackSession : IDisposable
     public TimeSpan Position => TimeSpan.FromMilliseconds(Math.Max(0, VideoPlayer.Time));
     public bool IsPlaying => VideoPlayer.IsPlaying;
 
+    public static void WarmUp()
+    {
+        global::LibVLCSharp.Shared.Core.Initialize();
+        using var libVlc = new LibVLC("--quiet");
+    }
+
     public async Task LoadAsync(string path, IReadOnlyList<AudioPreviewTrack> audioTracks, CancellationToken cancellationToken)
     {
         LoadVideo(path);
@@ -48,6 +54,7 @@ public sealed class PlaybackSession : IDisposable
 
     public async Task LoadAudioAsync(string path, IReadOnlyList<AudioPreviewTrack> audioTracks, CancellationToken cancellationToken)
     {
+        DisposeMixedAudio();
         if (audioTracks.Count == 0) return;
 
         _mixedAudioPath = await CreateMixedAudioPreviewAsync(path, audioTracks, cancellationToken);

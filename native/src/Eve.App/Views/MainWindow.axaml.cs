@@ -18,6 +18,7 @@ public sealed partial class MainWindow : Window
     private readonly Stopwatch _smoothPlaybackClock = new();
     private PlaybackSession? _playback;
     private CancellationTokenSource? _playbackStartCts;
+    private CancellationTokenSource? _audioReloadCts;
     private TimelineDragMode _timelineDragMode = TimelineDragMode.None;
     private TimeSpan _smoothPlaybackBase = TimeSpan.Zero;
     private bool _waitingForPlaybackStart;
@@ -29,6 +30,7 @@ public sealed partial class MainWindow : Window
         {
             ApplySavedWindowBounds();
             ViewModel?.UpdateCardLayout(Bounds.Width);
+            _ = Task.Run(PlaybackSession.WarmUp);
         };
         KeyDown += MainWindow_OnKeyDown;
         Closing += (_, _) =>
@@ -38,6 +40,8 @@ public sealed partial class MainWindow : Window
         };
         Closed += (_, _) =>
         {
+            _audioReloadCts?.Cancel();
+            _audioReloadCts?.Dispose();
             _playback?.Dispose();
             ViewModel?.Dispose();
         };
@@ -337,6 +341,7 @@ public sealed partial class MainWindow : Window
         {
             track.ShowVolumePercent = false;
             e.Pointer.Capture(null);
+            QueueEditorAudioReload();
             e.Handled = false;
         }
     }
@@ -354,13 +359,14 @@ public sealed partial class MainWindow : Window
         var slider = (e.Source as Visual)?.FindAncestorOfType<Slider>();
         if (slider?.DataContext is not TrackLaneViewModel track || !track.IsAudio) return;
         track.ShowVolumePercent = false;
+        QueueEditorAudioReload();
     }
 
     private void TrackVolume_OnPointerMoved(object? sender, PointerEventArgs e)
     {
         if (sender is Slider { DataContext: TrackLaneViewModel track } slider && track.ShowVolumePercent)
         {
-            UpdateVolumeBadgePosition(slider, track, e.GetPosition(slider).X);
+            UpdateVolumeBadgePosition(slider, track);
         }
     }
 
@@ -375,6 +381,39 @@ public sealed partial class MainWindow : Window
     {
         var x = pointerX ?? slider.Bounds.Width * Math.Clamp(track.VolumePercent / 150d, 0, 1);
         track.VolumeBadgeX = Math.Clamp(x, 0, Math.Max(1, slider.Bounds.Width));
+    }
+
+    private void QueueEditorAudioReload()
+    {
+        if (ViewModel is null || _playback is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
+        _audioReloadCts?.Cancel();
+        _audioReloadCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _audioReloadCts = cts;
+        var playback = _playback;
+        var path = ViewModel.SelectedVideoPath;
+        var tracks = ViewModel.TimelineTracks
+            .Where(track => track.IsAudio)
+            .Select(track => new AudioPreviewTrack(track.StreamIndex, track.VolumePercent))
+            .ToArray();
+
+        _ = Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            try
+            {
+                await Task.Delay(250, cts.Token);
+                await playback.LoadAudioAsync(path, tracks, cts.Token);
+                if (cts.IsCancellationRequested || _playback != playback) return;
+                playback.SyncAndPlayMixedAudio();
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch
+            {
+                // Keep video playback alive if remixing preview audio fails.
+            }
+        }, DispatcherPriority.Background);
     }
 
     private async void ExportButton_OnClick(object? sender, RoutedEventArgs e)
@@ -518,6 +557,9 @@ public sealed partial class MainWindow : Window
             _playbackStartCts?.Dispose();
             _playbackStartCts = null;
         }
+        _audioReloadCts?.Cancel();
+        _audioReloadCts?.Dispose();
+        _audioReloadCts = null;
         _playbackTimer.Stop();
         _smoothPlaybackClock.Reset();
         _smoothPlaybackBase = TimeSpan.Zero;
