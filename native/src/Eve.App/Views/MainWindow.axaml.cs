@@ -564,7 +564,7 @@ public sealed partial class MainWindow : Window
         }
         _playback.SyncAudioStreams();
 
-        if (_playback.IsPlaying)
+        if (ViewModel.IsPlaying)
         {
             ViewModel.CurrentTime = SmoothPlaybackPosition();
         }
