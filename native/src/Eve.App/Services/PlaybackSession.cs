@@ -142,17 +142,6 @@ public sealed class PlaybackSession : IDisposable
     public void SyncAudioStreams()
     {
         if (_audioOutput is null || !VideoPlayer.IsPlaying) return;
-        var videoTime = Position;
-        var maxDrift = _audioSources.Values
-            .Select(source => Math.Abs((source.Reader.CurrentTime - videoTime).TotalMilliseconds))
-            .DefaultIfEmpty(0)
-            .Max();
-
-        if (maxDrift > 150)
-        {
-            SeekAudio(videoTime);
-        }
-
         if (_audioOutput.PlaybackState != PlaybackState.Playing)
         {
             _audioOutput.Play();
