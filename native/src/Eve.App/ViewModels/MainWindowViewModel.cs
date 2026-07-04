@@ -21,6 +21,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isCapturingHotkey;
     private AudioDeviceOption? _selectedChatAudioDevice;
     private AudioDeviceOption? _selectedMicrophoneDevice;
+    private ProcessOption? _selectedProcessExclusion;
     private string _recorderStatus = "Replay Off";
     private string _activeGame = "No game detected";
     private string _selectedVideoName = "No video selected";
@@ -50,8 +51,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         TimelineTracks = new ObservableCollection<TrackLaneViewModel>();
         ChatAudioDevices = new ObservableCollection<AudioDeviceOption>();
         MicrophoneDevices = new ObservableCollection<AudioDeviceOption>();
+        OpenProcesses = new ObservableCollection<ProcessOption>();
         ExcludedProcesses = new ObservableCollection<string>(Settings.GameAudioExcludedProcesses);
         RefreshAudioDevices();
+        RefreshOpenProcesses();
         _libraryRefreshDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
         _libraryRefreshDebounce.Tick += async (_, _) =>
         {
@@ -66,6 +69,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<TrackLaneViewModel> TimelineTracks { get; }
     public ObservableCollection<AudioDeviceOption> ChatAudioDevices { get; }
     public ObservableCollection<AudioDeviceOption> MicrophoneDevices { get; }
+    public ObservableCollection<ProcessOption> OpenProcesses { get; }
     public ObservableCollection<string> ExcludedProcesses { get; }
 
     public IEnumerable<ClipCardViewModel> AllClips => ClipGroups.SelectMany(group => group.Clips);
@@ -241,6 +245,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Settings.MicrophoneDeviceId = value?.Id ?? string.Empty;
             SaveSettings();
         }
+    }
+
+    public ProcessOption? SelectedProcessExclusion
+    {
+        get => _selectedProcessExclusion;
+        set => SetProperty(ref _selectedProcessExclusion, value);
     }
 
     public string SelectedVideoName
@@ -564,6 +574,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SaveSettings();
     }
 
+    public void AddSelectedProcessExclusion()
+    {
+        if (SelectedProcessExclusion is null) return;
+        AddExcludedProcess(SelectedProcessExclusion.Name);
+    }
+
     public void RemoveExcludedProcess(string processName)
     {
         Settings.GameAudioExcludedProcesses.RemoveAll(item => string.Equals(item, processName, StringComparison.OrdinalIgnoreCase));
@@ -579,6 +595,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         foreach (var device in _audioDevices.GetCaptureDevices()) MicrophoneDevices.Add(device);
         SelectedChatAudioDevice = ChatAudioDevices.FirstOrDefault(device => device.Id == Settings.ChatAudioDeviceId) ?? ChatAudioDevices.FirstOrDefault();
         SelectedMicrophoneDevice = MicrophoneDevices.FirstOrDefault(device => device.Id == Settings.MicrophoneDeviceId) ?? MicrophoneDevices.FirstOrDefault();
+    }
+
+    public void RefreshOpenProcesses()
+    {
+        var selectedName = SelectedProcessExclusion?.Name;
+        OpenProcesses.Clear();
+        foreach (var process in ProcessListService.GetOpenExecutables())
+        {
+            OpenProcesses.Add(process);
+        }
+
+        SelectedProcessExclusion =
+            OpenProcesses.FirstOrDefault(process => string.Equals(process.Name, selectedName, StringComparison.OrdinalIgnoreCase)) ??
+            OpenProcesses.FirstOrDefault();
     }
 
     public ReplayBufferConfig CreateReplayConfig()

@@ -314,6 +314,16 @@ public sealed partial class MainWindow : Window
         textBox.Text = string.Empty;
     }
 
+    private void AddSelectedProcessButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel?.AddSelectedProcessExclusion();
+    }
+
+    private void RefreshProcessesButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel?.RefreshOpenProcesses();
+    }
+
     private void RemoveExcludedProcessButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is Button { DataContext: string processName })

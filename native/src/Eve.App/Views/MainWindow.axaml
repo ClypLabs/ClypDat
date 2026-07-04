@@ -315,9 +315,14 @@
             <StackPanel Spacing="14">
               <TextBlock Text="Game Audio Exclusions" Foreground="#C4D0DF" FontWeight="Bold" />
               <TextBlock Text="Saved now; app-specific capture filtering will be wired in a later pass." Foreground="#718296" />
+              <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                <ComboBox ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedProcessExclusion}" />
+                <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
+                <Button Grid.Column="2" Content="Add" Click="AddSelectedProcessButton_OnClick" />
+              </Grid>
               <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
                 <TextBox Name="ExcludedProcessTextBox" Watermark="discord.exe" />
-                <Button Grid.Column="1" Content="Add" Click="AddExcludedProcessButton_OnClick" />
+                <Button Grid.Column="1" Content="Add Manual" Click="AddExcludedProcessButton_OnClick" />
               </Grid>
               <ItemsControl ItemsSource="{Binding ExcludedProcesses}">
                 <ItemsControl.ItemTemplate>
