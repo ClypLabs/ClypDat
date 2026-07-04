@@ -7,6 +7,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using System.Diagnostics;
+using Eve.Capture.Abstractions;
 using Eve.App.Services;
 using Eve.App.ViewModels;
 
@@ -21,7 +22,7 @@ public sealed partial class MainWindow : Window
     private bool _endedAtTrimBoundary;
     private readonly Stopwatch _playheadClock = new();
     private TimeSpan _playheadBaseTime = TimeSpan.Zero;
-    private FfmpegReplayBuffer? _replayBuffer;
+    private IReplayBuffer? _replayBuffer;
     private GlobalHotkeyService? _globalHotkey;
     private readonly HashSet<string> _capturedHotkeyKeys = new(StringComparer.OrdinalIgnoreCase);
     private bool _replayTransitioning;
@@ -62,7 +63,7 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null || _replayBuffer is not null) return;
 
-        _replayBuffer = new FfmpegReplayBuffer(ViewModel.CreateReplayConfig);
+        _replayBuffer = ReplayBufferFactory.Create(ViewModel.CreateReplayConfig);
         _replayBuffer.RecordingStopped += ReplayBuffer_OnRecordingStopped;
         _globalHotkey = new GlobalHotkeyService();
         _globalHotkey.SetHotkey(ViewModel.Settings.SaveReplayHotkey);

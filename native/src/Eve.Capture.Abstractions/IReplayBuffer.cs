@@ -1,9 +1,10 @@
 namespace Eve.Capture.Abstractions;
 
-public interface IReplayBuffer
+public interface IReplayBuffer : IDisposable
 {
     bool IsRecording { get; }
     TimeSpan Duration { get; }
+    event EventHandler? RecordingStopped;
 
     Task StartAsync(CancellationToken cancellationToken = default);
     Task StopAsync(CancellationToken cancellationToken = default);
