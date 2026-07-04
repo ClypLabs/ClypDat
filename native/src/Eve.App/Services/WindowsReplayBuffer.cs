@@ -14,17 +14,18 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     private readonly Func<ReplayBufferConfig> _configProvider;
     private readonly string _bufferFolder;
     private readonly object _lock = new();
+    private static readonly TimeSpan SegmentDuration = TimeSpan.FromSeconds(5);
     private Recorder? _recorder;
     private Timer? _rotationTimer;
     private Timer? _audioRouteTimer;
     private string _activePath = string.Empty;
-    private string _previousPath = string.Empty;
     private ReplayBufferConfig? _config;
     private string _audioRouteKey = string.Empty;
     private DateTime _startedAtUtc;
     private TaskCompletionSource<string>? _completion;
     private readonly SemaphoreSlim _transition = new(1, 1);
     private readonly List<AudioCaptureSession> _audioCaptures = new();
+    private readonly List<ReplayVideoSegment> _segments = new();
 
     public WindowsReplayBuffer(Func<ReplayBufferConfig> configProvider)
     {
@@ -76,9 +77,9 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
             DisposeRecorder();
             TryDelete(_activePath);
-            TryDelete(_previousPath);
+            foreach (var segment in _segments.ToArray()) TryDelete(segment.Path);
+            _segments.Clear();
             _activePath = string.Empty;
-            _previousPath = string.Empty;
             StopAudioCaptures();
         }
         finally
@@ -87,53 +88,43 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         }
     }
 
-    private async Task StopCurrentForRotateAsync(CancellationToken cancellationToken = default)
-    {
-        var recorder = _recorder;
-        if (recorder is null) return;
-        var completion = _completion;
-        recorder.Stop();
-        if (completion is not null)
-        {
-            await completion.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
-        }
-
-        DisposeRecorder();
-    }
-
     public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default)
     {
         await _transition.WaitAsync(cancellationToken);
         try
         {
             if (!IsRecording) throw new InvalidOperationException("Replay buffer is not running.");
-            if (DateTime.UtcNow - _startedAtUtc < TimeSpan.FromSeconds(2) && string.IsNullOrWhiteSpace(_previousPath))
+            if (DateTime.UtcNow - _startedAtUtc < TimeSpan.FromSeconds(2) && _segments.Count == 0)
             {
                 throw new InvalidOperationException("Replay buffer is still warming up.");
             }
 
             Directory.CreateDirectory(outputFolder);
-            var usePrevious = DateTime.UtcNow - _startedAtUtc < TimeSpan.FromSeconds(2) && File.Exists(_previousPath);
-            var sourcePath = usePrevious ? _previousPath : await StopCurrentRecordingAsync(cancellationToken);
-            var stoppedCurrent = string.Equals(sourcePath, _activePath, StringComparison.OrdinalIgnoreCase);
-            var outputPath = Path.Combine(outputFolder, $"Replay {DateTime.Now:yyyy-MM-dd HH-mm-ss}.mp4");
+            var activeSegment = await StopCurrentRecordingAsync(cancellationToken);
+            AddSegment(activeSegment);
+            var sourceSegments = GetReplaySegments();
+            if (sourceSegments.Length == 0)
+            {
+                throw new InvalidOperationException("Replay buffer has no finished segments yet.");
+            }
+
             StopAudioCaptures();
+            var sourcePath = await BuildReplayVideoAsync(sourceSegments, cancellationToken);
+            var outputPath = Path.Combine(outputFolder, $"Replay {DateTime.Now:yyyy-MM-dd HH-mm-ss}.mp4");
             try
             {
                 await MuxAudioTracksAsync(sourcePath, outputPath, cancellationToken);
-                if (stoppedCurrent)
-                {
-                    TryDelete(sourcePath);
-                }
             }
             finally
             {
-                if (stoppedCurrent && !IsRecording)
+                TryDelete(sourcePath);
+                if (!IsRecording)
                 {
                     StartRecorder();
                 }
 
                 StartAudioCaptures(_config ?? _configProvider());
+                PruneSegments();
             }
 
             return outputPath;
@@ -162,7 +153,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             _startedAtUtc = DateTime.UtcNow;
             _recorder.Record(_activePath);
             _rotationTimer?.Dispose();
-            _rotationTimer = new Timer(_ => _ = RotateAsync(), null, Duration, Timeout.InfiniteTimeSpan);
+            _rotationTimer = new Timer(_ => _ = RotateAsync(), null, SegmentDuration, Timeout.InfiniteTimeSpan);
         }
     }
 
@@ -172,9 +163,9 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         try
         {
             if (!IsRecording) return;
-            var completedPath = await StopCurrentRecordingAsync(CancellationToken.None);
-            TryDelete(_previousPath);
-            _previousPath = completedPath;
+            var completedSegment = await StopCurrentRecordingAsync(CancellationToken.None);
+            AddSegment(completedSegment);
+            PruneSegments();
             StartRecorder();
         }
         catch
@@ -187,14 +178,16 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         }
     }
 
-    private async Task<string> StopCurrentRecordingAsync(CancellationToken cancellationToken)
+    private async Task<ReplayVideoSegment> StopCurrentRecordingAsync(CancellationToken cancellationToken)
     {
         var recorder = _recorder ?? throw new InvalidOperationException("Replay buffer is not running.");
         var completion = _completion ?? throw new InvalidOperationException("Replay buffer is not ready.");
+        var startedAt = _startedAtUtc;
         recorder.Stop();
         var path = await completion.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+        var endedAt = DateTime.UtcNow;
         DisposeRecorder();
-        return path;
+        return new ReplayVideoSegment(path, startedAt, endedAt);
     }
 
     private RecorderOptions CreateOptions(ReplayBufferConfig config)
@@ -229,32 +222,122 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         StopAudioCaptures();
         var routes = ResolveAudioRoutes(config);
         _audioRouteKey = routes.RouteKey;
+        using var enumerator = new MMDeviceEnumerator();
         try
         {
-            using var enumerator = new MMDeviceEnumerator();
             StartLoopbackCapture(enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia), "Game Audio", "game");
-            foreach (var pid in routes.ChatProcessIds)
+        }
+        catch
+        {
+            // Game audio is best effort; save path creates silent missing tracks.
+        }
+
+        foreach (var pid in routes.ChatProcessIds)
+        {
+            try
             {
                 StartProcessLoopbackCapture(pid, ProcessLoopbackCaptureMode.IncludeTargetProcessTree, "Chat Audio", $"chat_{pid}");
             }
+            catch
+            {
+                // Process audio can fail for protected/exited apps.
+            }
+        }
 
-            foreach (var pid in routes.ExcludedProcessIds)
+        foreach (var pid in routes.ExcludedProcessIds)
+        {
+            try
             {
                 StartProcessLoopbackCapture(pid, ProcessLoopbackCaptureMode.IncludeTargetProcessTree, "Excluded Audio", $"excluded_{pid}");
             }
+            catch
+            {
+                // Process audio can fail for protected/exited apps.
+            }
+        }
 
+        try
+        {
             if (!string.IsNullOrWhiteSpace(config.MicrophoneDeviceId))
             {
                 StartMicrophoneCapture(enumerator.GetDevice(config.MicrophoneDeviceId), "Microphone", "microphone");
             }
-
-            _audioRouteTimer?.Dispose();
-            _audioRouteTimer = new Timer(_ => RefreshAudioRoutes(), null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
         }
         catch
         {
-            // Audio capture is best effort; save path creates silent missing tracks.
+            // Microphone capture is best effort.
         }
+
+        _audioRouteTimer?.Dispose();
+        _audioRouteTimer = new Timer(_ => RefreshAudioRoutes(), null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
+    }
+
+    private ReplayVideoSegment[] GetReplaySegments()
+    {
+        var cutoff = DateTime.UtcNow - Duration - TimeSpan.FromSeconds(2);
+        return _segments
+            .Where(segment => segment.EndedAtUtc >= cutoff && File.Exists(segment.Path))
+            .OrderBy(segment => segment.StartedAtUtc)
+            .ToArray();
+    }
+
+    private void AddSegment(ReplayVideoSegment segment)
+    {
+        if (File.Exists(segment.Path)) _segments.Add(segment);
+    }
+
+    private void PruneSegments()
+    {
+        var cutoff = DateTime.UtcNow - Duration - TimeSpan.FromSeconds(15);
+        foreach (var segment in _segments.Where(segment => segment.EndedAtUtc < cutoff).ToArray())
+        {
+            _segments.Remove(segment);
+            TryDelete(segment.Path);
+        }
+    }
+
+    private async Task<string> BuildReplayVideoAsync(IReadOnlyList<ReplayVideoSegment> segments, CancellationToken cancellationToken)
+    {
+        var concatPath = Path.Combine(_bufferFolder, $"concat_{Guid.NewGuid():N}.txt");
+        var stitchedPath = Path.Combine(_bufferFolder, $"stitched_{Guid.NewGuid():N}.mp4");
+        var trimmedPath = Path.Combine(_bufferFolder, $"trimmed_{Guid.NewGuid():N}.mp4");
+        try
+        {
+            await File.WriteAllLinesAsync(
+                concatPath,
+                segments.Select(segment => $"file '{EscapeConcatPath(segment.Path)}'"),
+                cancellationToken);
+
+            var concatResult = await RunProcessAsync(
+                "ffmpeg",
+                new[] { "-y", "-f", "concat", "-safe", "0", "-i", concatPath, "-c", "copy", stitchedPath },
+                cancellationToken);
+            if (concatResult.ExitCode != 0)
+            {
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(concatResult.Error) ? "ffmpeg concat failed." : concatResult.Error);
+            }
+
+            var trimResult = await RunProcessAsync(
+                "ffmpeg",
+                new[] { "-y", "-sseof", $"-{Math.Max(1, Duration.TotalSeconds):0.###}", "-i", stitchedPath, "-c", "copy", trimmedPath },
+                cancellationToken);
+            if (trimResult.ExitCode != 0)
+            {
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(trimResult.Error) ? "ffmpeg trim failed." : trimResult.Error);
+            }
+
+            return trimmedPath;
+        }
+        finally
+        {
+            TryDelete(concatPath);
+            TryDelete(stitchedPath);
+        }
+    }
+
+    private static string EscapeConcatPath(string path)
+    {
+        return path.Replace("\\", "/", StringComparison.Ordinal).Replace("'", "'\\''", StringComparison.Ordinal);
     }
 
     private void StartLoopbackCapture(MMDevice device, string title, string fileName)
@@ -462,6 +545,11 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                 _recorder = null;
             }
         }
+
+        foreach (var file in Directory.EnumerateFiles(_bufferFolder, "stitched_*.mp4").Concat(Directory.EnumerateFiles(_bufferFolder, "trimmed_*.mp4")).Concat(Directory.EnumerateFiles(_bufferFolder, "concat_*.txt")))
+        {
+            TryDelete(file);
+        }
     }
 
     private void CleanupOldFiles()
@@ -511,6 +599,8 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     private sealed record AudioMuxInput(string Title, string Path);
 
     private sealed record AudioRoutes(int[] ChatProcessIds, int[] ExcludedProcessIds, string RouteKey);
+
+    private sealed record ReplayVideoSegment(string Path, DateTime StartedAtUtc, DateTime EndedAtUtc);
 
     private static bool IsUsableAudioFile(string path)
     {

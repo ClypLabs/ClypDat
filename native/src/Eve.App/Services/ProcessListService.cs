@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using NAudio.CoreAudioApi;
+using NAudio.CoreAudioApi.Interfaces;
 
 namespace Eve.App.Services;
 
@@ -30,12 +32,49 @@ public static class ProcessListService
             return true;
         }, IntPtr.Zero);
 
+        windows.AddRange(GetAudioSessionProcesses());
+
         return windows
             .GroupBy(process => $"{process.Name}|{process.WindowTitle}", StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .OrderBy(process => process.Name, StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(process => process.WindowTitle, StringComparer.CurrentCultureIgnoreCase)
             .ToArray();
+    }
+
+    private static IEnumerable<ProcessOption> GetAudioSessionProcesses()
+    {
+        var options = new List<ProcessOption>();
+        try
+        {
+            using var enumerator = new MMDeviceEnumerator();
+            using var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+            var sessions = device.AudioSessionManager.Sessions;
+            for (var index = 0; index < sessions.Count; index++)
+            {
+                using var session = sessions[index];
+                if (session.IsSystemSoundsSession || session.State == AudioSessionState.AudioSessionStateExpired) continue;
+                if (session.GetProcessID == 0) continue;
+
+                try
+                {
+                    using var process = Process.GetProcessById((int)session.GetProcessID);
+                    var title = process.MainWindowTitle;
+                    var option = GetProcess(process, string.IsNullOrWhiteSpace(title) ? "Audio source" : title);
+                    if (option is not null) options.Add(option);
+                }
+                catch
+                {
+                    // Audio sessions can outlive their process.
+                }
+            }
+        }
+        catch
+        {
+            // Audio session list is best effort.
+        }
+
+        return options;
     }
 
     private static ProcessOption? GetProcess(Process process, string windowTitle)
