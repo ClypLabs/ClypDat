@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Text;
 using Eve.Capture.Abstractions;
+using NAudio.CoreAudioApi;
+using NAudio.Wave;
 
 namespace Eve.App.Services;
 
@@ -13,6 +15,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
     private readonly string _logPath;
     private readonly string _pidPath;
     private Process? _process;
+    private readonly List<AudioCaptureSession> _audioCaptures = new();
     private TimeSpan _duration = TimeSpan.FromSeconds(60);
 
     public FfmpegReplayBuffer(Func<ReplayBufferConfig> configProvider)
@@ -56,6 +59,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         _process = StartCaptureProcess("ffmpeg", args);
         _process.Exited += Process_OnExited;
         await File.WriteAllTextAsync(_pidPath, _process.Id.ToString(), cancellationToken);
+        StartAudioCaptures(config);
 
         var started = await WaitForFirstSegmentAsync(TimeSpan.FromSeconds(4), cancellationToken);
         if (started) return;
@@ -91,6 +95,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         }
         finally
         {
+            StopAudioCaptures();
             process.Exited -= Process_OnExited;
             process.Dispose();
             TryDelete(_pidPath);
@@ -112,6 +117,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         if (files.Length == 0) throw new InvalidOperationException("Replay buffer has no finished segments yet.");
 
         var concatPath = Path.Combine(_bufferFolder, $"concat_{Guid.NewGuid():N}.txt");
+        var tempVideoPath = Path.Combine(_bufferFolder, $"replay_video_{Guid.NewGuid():N}.mkv");
         var outputPath = Path.Combine(outputFolder, $"Replay {DateTime.Now:yyyy-MM-dd HH-mm-ss}.mkv");
         await File.WriteAllLinesAsync(
             concatPath,
@@ -128,15 +134,17 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
                 "-safe", "0",
                 "-i", concatPath,
                 "-c", "copy",
-                outputPath
+                tempVideoPath
             }, cancellationToken);
 
             if (result.ExitCode != 0) throw new InvalidOperationException(result.Error);
+            await MuxAudioTracksAsync(tempVideoPath, outputPath, cancellationToken);
             return outputPath;
         }
         finally
         {
             TryDelete(concatPath);
+            TryDelete(tempVideoPath);
         }
     }
 
@@ -147,43 +155,19 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
 
     private string[] BuildCaptureArguments(ReplayBufferConfig config)
     {
-        var hasWasapi = SupportsInputFormat("wasapi");
-        var hasDshow = SupportsInputFormat("dshow");
         var args = new List<string>
         {
             "-hide_banner",
             "-loglevel", "warning",
             "-f", "gdigrab",
             "-framerate", Math.Clamp(config.FrameRate, 15, 60).ToString(),
+            "-offset_x", config.CaptureX.ToString(),
+            "-offset_y", config.CaptureY.ToString(),
+            "-video_size", $"{Math.Max(320, config.CaptureWidth)}x{Math.Max(240, config.CaptureHeight)}",
             "-i", "desktop"
         };
 
         var audioTitles = new List<string>();
-        if (hasWasapi)
-        {
-            AddWasapiInput(args, "default");
-            audioTitles.Add("Game Audio");
-            if (!string.IsNullOrWhiteSpace(config.ChatAudioDeviceName))
-            {
-                AddWasapiInput(args, config.ChatAudioDeviceName);
-                audioTitles.Add("Chat Audio");
-            }
-
-            if (!string.IsNullOrWhiteSpace(config.MicrophoneDeviceName))
-            {
-                AddWasapiInput(args, config.MicrophoneDeviceName);
-                audioTitles.Add("Microphone");
-            }
-        }
-        else if (hasDshow && !string.IsNullOrWhiteSpace(config.MicrophoneDeviceName))
-        {
-            AddDshowAudioInput(args, config.MicrophoneDeviceName);
-            audioTitles.Add("Microphone");
-        }
-        else if (!hasWasapi)
-        {
-            LastError = "This FFmpeg build has no wasapi input, so replay buffer is recording video-only.";
-        }
 
         args.AddRange(new[] { "-map", "0:v:0" });
         var inputIndex = 1;
@@ -256,6 +240,94 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
     private static void AddDshowAudioInput(List<string> args, string device)
     {
         args.AddRange(new[] { "-f", "dshow", "-i", $"audio={device}" });
+    }
+
+    private void StartAudioCaptures(ReplayBufferConfig config)
+    {
+        StopAudioCaptures();
+        try
+        {
+            using var enumerator = new MMDeviceEnumerator();
+            StartLoopbackCapture(enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia), "Game Audio", "game");
+            if (!string.IsNullOrWhiteSpace(config.ChatAudioDeviceId))
+            {
+                StartLoopbackCapture(enumerator.GetDevice(config.ChatAudioDeviceId), "Chat Audio", "chat");
+            }
+
+            if (!string.IsNullOrWhiteSpace(config.MicrophoneDeviceId))
+            {
+                StartMicrophoneCapture(enumerator.GetDevice(config.MicrophoneDeviceId), "Microphone", "microphone");
+            }
+        }
+        catch (Exception error)
+        {
+            LastError = $"Audio capture unavailable: {error.Message}";
+        }
+    }
+
+    private void StartLoopbackCapture(MMDevice device, string title, string fileName)
+    {
+        var path = Path.Combine(_bufferFolder, $"{fileName}.wav");
+        TryDelete(path);
+        var capture = new WasapiLoopbackCapture(device);
+        _audioCaptures.Add(AudioCaptureSession.Start(capture, path, title));
+    }
+
+    private void StartMicrophoneCapture(MMDevice device, string title, string fileName)
+    {
+        var path = Path.Combine(_bufferFolder, $"{fileName}.wav");
+        TryDelete(path);
+        var capture = new WasapiCapture(device);
+        _audioCaptures.Add(AudioCaptureSession.Start(capture, path, title));
+    }
+
+    private void StopAudioCaptures()
+    {
+        foreach (var capture in _audioCaptures.ToArray())
+        {
+            capture.Dispose();
+        }
+
+        _audioCaptures.Clear();
+    }
+
+    private async Task MuxAudioTracksAsync(string videoPath, string outputPath, CancellationToken cancellationToken)
+    {
+        var audioFiles = new[] { "game.wav", "chat.wav", "microphone.wav" }
+            .Select(path => Path.Combine(_bufferFolder, path))
+            .Where(path => File.Exists(path) && new FileInfo(path).Length > 44)
+            .ToArray();
+        if (audioFiles.Length == 0)
+        {
+            File.Copy(videoPath, outputPath, overwrite: true);
+            return;
+        }
+
+        var args = new List<string> { "-y", "-i", videoPath };
+        foreach (var audioFile in audioFiles)
+        {
+            args.AddRange(new[] { "-sseof", $"-{Math.Max(1, _duration.TotalSeconds):0.###}", "-i", audioFile });
+        }
+
+        args.AddRange(new[] { "-map", "0:v:0", "-c:v", "copy" });
+        for (var i = 0; i < audioFiles.Length; i++)
+        {
+            args.AddRange(new[] { "-map", $"{i + 1}:a:0", $"-metadata:s:a:{i}", $"title={AudioTitleForPath(audioFiles[i])}" });
+        }
+
+        args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k", "-shortest", outputPath });
+        var result = await RunProcessAsync("ffmpeg", args, cancellationToken);
+        if (result.ExitCode != 0) throw new InvalidOperationException(result.Error);
+    }
+
+    private static string AudioTitleForPath(string path)
+    {
+        return Path.GetFileNameWithoutExtension(path).ToLowerInvariant() switch
+        {
+            "chat" => "Chat Audio",
+            "microphone" => "Microphone",
+            _ => "Game Audio"
+        };
     }
 
     private static Process StartProcess(string fileName, IEnumerable<string> args, bool redirect)
@@ -461,5 +533,69 @@ public sealed record ReplayBufferConfig(
     int DurationSeconds,
     int MaxHeight,
     int FrameRate,
+    int CaptureX,
+    int CaptureY,
+    int CaptureWidth,
+    int CaptureHeight,
     string ChatAudioDeviceName,
+    string ChatAudioDeviceId,
+    string MicrophoneDeviceId,
     string MicrophoneDeviceName);
+
+internal sealed class AudioCaptureSession : IDisposable
+{
+    private readonly IWaveIn _capture;
+    private readonly FileStream _stream;
+    private readonly WaveFileWriter _writer;
+    private readonly object _lock = new();
+
+    private AudioCaptureSession(IWaveIn capture, FileStream stream, WaveFileWriter writer, string title)
+    {
+        _capture = capture;
+        _stream = stream;
+        _writer = writer;
+        Title = title;
+    }
+
+    public string Title { get; }
+
+    public static AudioCaptureSession Start(IWaveIn capture, string path, string title)
+    {
+        var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+        var writer = new WaveFileWriter(stream, capture.WaveFormat);
+        var session = new AudioCaptureSession(capture, stream, writer, title);
+        capture.DataAvailable += session.Capture_OnDataAvailable;
+        capture.StartRecording();
+        return session;
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            _capture.StopRecording();
+        }
+        catch
+        {
+            // Stop is best effort.
+        }
+
+        _capture.DataAvailable -= Capture_OnDataAvailable;
+        lock (_lock)
+        {
+            _writer.Dispose();
+            _stream.Dispose();
+        }
+
+        _capture.Dispose();
+    }
+
+    private void Capture_OnDataAvailable(object? sender, WaveInEventArgs e)
+    {
+        lock (_lock)
+        {
+            _writer.Write(e.Buffer, 0, e.BytesRecorded);
+            _writer.Flush();
+        }
+    }
+}

@@ -90,6 +90,13 @@
     <Style Selector="Button.brandButton:pointerover">
       <Setter Property="Background" Value="Transparent" />
     </Style>
+    <Style Selector="ComboBox.settingsInput, TextBox.settingsInput">
+      <Setter Property="Background" Value="#1D2A36" />
+      <Setter Property="Foreground" Value="#D8E4F2" />
+      <Setter Property="BorderBrush" Value="#2C3B48" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="5" />
+    </Style>
     <Style Selector="Slider.volumeSlider /template/ Thumb">
       <Setter Property="Width" Value="14" />
       <Setter Property="Height" Value="18" />
@@ -242,11 +249,7 @@
                               </Grid>
                             </Border>
 
-                            <StackPanel Grid.Row="1" Spacing="7" Margin="16,14">
-                              <TextBlock Text="{Binding GameLabel}"
-                                         Foreground="#8C98A7"
-                                         FontSize="13"
-                                         FontWeight="Bold" />
+                            <StackPanel Grid.Row="1" Spacing="7" Margin="16,14,16,10">
                               <TextBlock Text="{Binding Name}"
                                          Foreground="#D2DEEC"
                                          FontSize="15"
@@ -285,9 +288,9 @@
                 <TextBlock Text="Save hotkey" Foreground="#93A6B8" VerticalAlignment="Center" />
                 <Button Grid.Column="1" Content="{Binding HotkeyDisplay}" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Left" MinWidth="180" />
                 <TextBlock Grid.Row="1" Text="Replay length" Foreground="#93A6B8" VerticalAlignment="Center" />
-                <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}" Width="160" HorizontalAlignment="Left" />
+                <ComboBox Grid.Row="1" Grid.Column="1" Classes="settingsInput" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}" Width="160" HorizontalAlignment="Left" />
                 <TextBlock Grid.Row="2" Text="Replay quality" Foreground="#93A6B8" VerticalAlignment="Center" />
-                <ComboBox Grid.Row="2" Grid.Column="1" ItemsSource="{Binding ReplayQualityPresets}" SelectedItem="{Binding SelectedReplayQualityPreset}" Width="240" HorizontalAlignment="Left" />
+                <ComboBox Grid.Row="2" Grid.Column="1" Classes="settingsInput" ItemsSource="{Binding ReplayQualityPresets}" SelectedItem="{Binding SelectedReplayQualityPreset}" Width="240" HorizontalAlignment="Left" />
                 <CheckBox Grid.Row="3" Grid.ColumnSpan="2" Content="Start replay buffer when EVE opens" IsChecked="{Binding StartReplayOnLaunch}" />
               </Grid>
             </StackPanel>
@@ -306,9 +309,9 @@
               <TextBlock Text="Audio Devices" Foreground="#C4D0DF" FontWeight="Bold" />
               <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto" RowSpacing="12" ColumnSpacing="16">
                 <TextBlock Text="Chat Audio" Foreground="#93A6B8" VerticalAlignment="Center" />
-                <ComboBox Grid.Column="1" ItemsSource="{Binding ChatAudioDevices}" SelectedItem="{Binding SelectedChatAudioDevice}" MaxWidth="520" />
+                <ComboBox Grid.Column="1" Classes="settingsInput" ItemsSource="{Binding ChatAudioDevices}" SelectedItem="{Binding SelectedChatAudioDevice}" MaxWidth="520" />
                 <TextBlock Grid.Row="1" Text="Microphone" Foreground="#93A6B8" VerticalAlignment="Center" />
-                <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" MaxWidth="520" />
+                <ComboBox Grid.Row="1" Grid.Column="1" Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" MaxWidth="520" />
               </Grid>
             </StackPanel>
           </Border>
@@ -318,12 +321,12 @@
               <TextBlock Text="Game Audio Exclusions" Foreground="#C4D0DF" FontWeight="Bold" />
               <TextBlock Text="Saved now; app-specific capture filtering will be wired in a later pass." Foreground="#718296" />
               <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
-                <ComboBox ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedProcessExclusion}" />
+                <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedProcessExclusion}" />
                 <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
                 <Button Grid.Column="2" Content="Add" Click="AddSelectedProcessButton_OnClick" />
               </Grid>
               <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-                <TextBox Name="ExcludedProcessTextBox" Watermark="discord.exe" />
+                <TextBox Name="ExcludedProcessTextBox" Classes="settingsInput" Watermark="discord.exe" />
                 <Button Grid.Column="1" Content="Add Manual" Click="AddExcludedProcessButton_OnClick" />
               </Grid>
               <ItemsControl ItemsSource="{Binding ExcludedProcesses}">
@@ -362,6 +365,12 @@
                      BorderBrush="#17232D"
                      Foreground="#D6E2F0" />
             <Border Height="1" Background="#22303A" Margin="0,10,0,0" />
+            <TextBlock Text="Export codec" Foreground="#93A6B8" FontSize="12" />
+            <ComboBox Classes="settingsInput"
+                      ItemsSource="{Binding ExportCodecs}"
+                      SelectedItem="{Binding SelectedExportCodec}"
+                      Width="180"
+                      HorizontalAlignment="Left" />
           </StackPanel>
         </Border>
       </Grid>

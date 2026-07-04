@@ -24,6 +24,7 @@ public sealed partial class MainWindow : Window
     private FfmpegReplayBuffer? _replayBuffer;
     private GlobalHotkeyService? _globalHotkey;
     private readonly HashSet<string> _capturedHotkeyKeys = new(StringComparer.OrdinalIgnoreCase);
+    private bool _replayTransitioning;
 
     public MainWindow()
     {
@@ -141,8 +142,11 @@ public sealed partial class MainWindow : Window
 
         if (_replayBuffer.IsRecording)
         {
+            if (_replayTransitioning) return;
+            _replayTransitioning = true;
             await _replayBuffer.StopAsync();
             ViewModel.IsReplayRecording = false;
+            _replayTransitioning = false;
         }
         else
         {
@@ -160,10 +164,13 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null) return;
         InitializeReplayServices();
         if (_replayBuffer is null) return;
+        if (_replayTransitioning) return;
 
         try
         {
+            _replayTransitioning = true;
             await EnsureLibraryFolderAsync();
+            ApplyPrimaryCaptureBounds();
             await Task.Run(() => _replayBuffer.StartAsync());
             ViewModel.IsReplayRecording = _replayBuffer.IsRecording;
         }
@@ -174,6 +181,10 @@ public sealed partial class MainWindow : Window
             {
                 await ShowMessageAsync("Replay unavailable", error.Message);
             }
+        }
+        finally
+        {
+            _replayTransitioning = false;
         }
     }
 
@@ -362,6 +373,25 @@ public sealed partial class MainWindow : Window
             _capturedHotkeyKeys.Add(HotkeyCombo.NormalizeKey(e.Key.ToString()));
             e.Handled = true;
             return;
+        }
+
+        if (e.Key == Key.Escape && ViewModel is not null && !IsTypingInTextInput(e.Source))
+        {
+            if (ViewModel.IsSettingsVisible)
+            {
+                ViewModel.CloseSettings();
+                e.Handled = true;
+                return;
+            }
+
+            if (ViewModel.IsEditorVisible)
+            {
+                ViewModel.SaveSelectedClipEditState();
+                StopEditorPlayback();
+                ViewModel.CloseEditor();
+                e.Handled = true;
+                return;
+            }
         }
 
         if (ViewModel is null ||
@@ -805,18 +835,18 @@ public sealed partial class MainWindow : Window
                 ViewModel.TrimStart = time;
                 ViewModel.CurrentTime = ViewModel.TrimStart;
                 _playback?.Seek(ViewModel.CurrentTime);
-                SetPlayheadBase(ViewModel.CurrentTime);
+                ResetPlayheadClockAfterSeek(ViewModel.CurrentTime);
                 break;
             case TimelineDragMode.TrimEnd:
                 ViewModel.TrimEnd = time;
                 ViewModel.CurrentTime = ViewModel.TrimEnd;
                 _playback?.Seek(ViewModel.CurrentTime);
-                SetPlayheadBase(ViewModel.CurrentTime);
+                ResetPlayheadClockAfterSeek(ViewModel.CurrentTime);
                 break;
             case TimelineDragMode.Playhead:
                 ViewModel.CurrentTime = time;
                 _playback?.Seek(time);
-                SetPlayheadBase(time);
+                ResetPlayheadClockAfterSeek(time);
                 break;
         }
 
@@ -1005,10 +1035,10 @@ public sealed partial class MainWindow : Window
         {
             var info = new ProcessStartInfo("explorer.exe")
             {
-                UseShellExecute = true
+                UseShellExecute = true,
+                Arguments = selectFile ? $"/select,\"{path}\"" : $"\"{path}\""
             };
 
-            info.ArgumentList.Add(selectFile ? $"/select,{path}" : path);
             Process.Start(info);
         }
         catch
@@ -1020,6 +1050,29 @@ public sealed partial class MainWindow : Window
     private static bool IsTypingInTextInput(object? source)
     {
         return source is TextBox;
+    }
+
+    private void ApplyPrimaryCaptureBounds()
+    {
+        if (ViewModel is null) return;
+        var primary = Screens.Primary ?? Screens.All.FirstOrDefault();
+        if (primary is null) return;
+        ViewModel.ReplayCaptureX = primary.Bounds.X;
+        ViewModel.ReplayCaptureY = primary.Bounds.Y;
+        ViewModel.ReplayCaptureWidth = primary.Bounds.Width;
+        ViewModel.ReplayCaptureHeight = primary.Bounds.Height;
+    }
+
+    private void ResetPlayheadClockAfterSeek(TimeSpan time)
+    {
+        if (ViewModel?.IsPlaying == true)
+        {
+            StartPlayheadClock(time);
+        }
+        else
+        {
+            SetPlayheadBase(time);
+        }
     }
 
     private sealed record ProcessResult(int ExitCode, string Output, string Error);

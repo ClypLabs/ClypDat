@@ -24,6 +24,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private ProcessOption? _selectedProcessExclusion;
     private ReplayDurationPreset? _selectedReplayDurationPreset;
     private ReplayQualityPreset? _selectedReplayQualityPreset;
+    private ExportCodecOption? _selectedExportCodec;
     private string _recorderStatus = "Replay Off";
     private string _activeGame = "No game detected";
     private string _selectedVideoName = "No video selected";
@@ -73,6 +74,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("Smooth", 1080, 60),
             new("Quality", 1440, 60)
         };
+        ExportCodecs = new ObservableCollection<ExportCodecOption>
+        {
+            new("H.264", "h264_nvenc", "libx264"),
+            new("H.265", "hevc_nvenc", "libx265"),
+            new("AV1", "av1_nvenc", "libaom-av1")
+        };
         ExcludedProcesses = new ObservableCollection<string>(Settings.GameAudioExcludedProcesses);
         RefreshAudioDevices();
         SelectedReplayDurationPreset = ReplayDurationPresets.FirstOrDefault(preset => preset.Seconds == Settings.ReplayDurationSeconds) ??
@@ -81,6 +88,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                                           string.Equals(preset.Label, Settings.ReplayQualityPreset, StringComparison.OrdinalIgnoreCase) ||
                                           (preset.MaxHeight == Settings.ReplayMaxHeight && preset.FrameRate == Settings.ReplayFrameRate)) ??
                                       ReplayQualityPresets.First(preset => preset.Label == "Balanced");
+        SelectedExportCodec = ExportCodecs.FirstOrDefault(codec => string.Equals(codec.Label, Settings.ExportVideoCodec, StringComparison.OrdinalIgnoreCase)) ??
+                              ExportCodecs.First(codec => codec.Label == "H.264");
         _libraryRefreshDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
         _libraryRefreshDebounce.Tick += async (_, _) =>
         {
@@ -98,9 +107,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ProcessOption> OpenProcesses { get; }
     public ObservableCollection<ReplayDurationPreset> ReplayDurationPresets { get; }
     public ObservableCollection<ReplayQualityPreset> ReplayQualityPresets { get; }
+    public ObservableCollection<ExportCodecOption> ExportCodecs { get; }
     public ObservableCollection<string> ExcludedProcesses { get; }
 
     public IEnumerable<ClipCardViewModel> AllClips => ClipGroups.SelectMany(group => group.Clips);
+    public int ReplayCaptureX { get; set; }
+    public int ReplayCaptureY { get; set; }
+    public int ReplayCaptureWidth { get; set; } = 1920;
+    public int ReplayCaptureHeight { get; set; } = 1080;
 
     public string LibraryHeaderDate => ClipGroups.Count > 0 ? ClipGroups[0].Label : "LIBRARY";
     public string LibraryHeaderGame => ClipGroups.Count > 0 ? "Videos" : "No folder selected";
@@ -224,6 +238,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Settings.ReplayMaxHeight = value.MaxHeight;
             Settings.ReplayFrameRate = value.FrameRate;
             OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    public ExportCodecOption? SelectedExportCodec
+    {
+        get => _selectedExportCodec;
+        set
+        {
+            if (!SetProperty(ref _selectedExportCodec, value) || value is null) return;
+            Settings.ExportVideoCodec = value.Label;
             SaveSettings();
         }
     }
@@ -659,7 +684,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SelectedReplayDurationPreset?.Seconds ?? Settings.ReplayDurationSeconds,
             SelectedReplayQualityPreset?.MaxHeight ?? Settings.ReplayMaxHeight,
             SelectedReplayQualityPreset?.FrameRate ?? Settings.ReplayFrameRate,
+            ReplayCaptureX,
+            ReplayCaptureY,
+            ReplayCaptureWidth,
+            ReplayCaptureHeight,
             SelectedChatAudioDevice?.IsDisabled == true ? string.Empty : SelectedChatAudioDevice?.Name ?? string.Empty,
+            SelectedChatAudioDevice?.IsDisabled == true ? string.Empty : SelectedChatAudioDevice?.Id ?? string.Empty,
+            SelectedMicrophoneDevice?.Id ?? string.Empty,
             SelectedMicrophoneDevice?.Name ?? string.Empty);
     }
 
@@ -696,17 +727,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             "-i", SelectedVideoPath,
             "-map", "0:v:0?",
             "-map", "0:a?",
-            "-sn",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "20",
-            "-c:a", "aac"
+            "-sn"
         };
+
+        args.AddRange(BuildExportCodecArguments());
+        args.AddRange(new[] { "-c:a", "aac" });
 
         args.Add("-movflags");
         args.Add("+faststart");
         args.Add(outputPath);
         return args;
+    }
+
+    private IReadOnlyList<string> BuildExportCodecArguments()
+    {
+        return SelectedExportCodec?.Label switch
+        {
+            "H.265" => new[] { "-c:v", "libx265", "-preset", "veryfast", "-crf", "24" },
+            "AV1" => new[] { "-c:v", "libaom-av1", "-cpu-used", "6", "-crf", "32", "-b:v", "0" },
+            _ => new[] { "-c:v", "libx264", "-preset", "veryfast", "-crf", "20" }
+        };
     }
 
     private void OpenMedia(MediaFileInfo media, bool preserveEditorText = false)
