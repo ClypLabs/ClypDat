@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using System.Text.RegularExpressions;
 using Eve.Capture.Abstractions;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
@@ -19,6 +20,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
     private readonly List<AudioCaptureSession> _audioCaptures = new();
     private CancellationTokenSource? _cleanupCts;
     private Task? _cleanupTask;
+    private ReplayBufferConfig? _lastConfig;
     private TimeSpan _duration = TimeSpan.FromSeconds(60);
 
     public FfmpegReplayBuffer(Func<ReplayBufferConfig> configProvider)
@@ -48,6 +50,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         CleanupStaleReplayProcess();
 
         var config = _configProvider();
+        _lastConfig = config;
         _duration = TimeSpan.FromSeconds(Math.Clamp(config.DurationSeconds, 30, 1200));
         Directory.CreateDirectory(_bufferFolder);
         Directory.CreateDirectory(Path.GetDirectoryName(_logPath)!);
@@ -126,16 +129,14 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         if (!Directory.Exists(outputFolder)) Directory.CreateDirectory(outputFolder);
 
         PruneOldSegments();
-        var cutoff = DateTime.UtcNow - TimeSpan.FromMilliseconds(800);
-        var files = Directory.EnumerateFiles(_bufferFolder, "segment_*.mkv")
-            .Select(path => new FileInfo(path))
-            .Where(file => file.Exists && file.Length > 0 && file.LastWriteTimeUtc < cutoff)
-            .OrderBy(file => file.LastWriteTimeUtc)
+        var files = GetFinishedVideoSegments()
             .TakeLast(Math.Max(2, (int)Math.Ceiling(_duration.TotalSeconds / 2) + 4))
             .ToArray();
 
         if (files.Length == 0) throw new InvalidOperationException("Replay buffer has no finished segments yet.");
 
+        var config = _lastConfig;
+        StopAudioCaptures();
         var concatPath = Path.Combine(_bufferFolder, $"concat_{Guid.NewGuid():N}.txt");
         var tempVideoPath = Path.Combine(_bufferFolder, $"replay_video_{Guid.NewGuid():N}.mkv");
         var outputPath = Path.Combine(outputFolder, $"Replay {DateTime.Now:yyyy-MM-dd HH-mm-ss}.mkv");
@@ -165,6 +166,10 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         {
             TryDelete(concatPath);
             TryDelete(tempVideoPath);
+            if (IsRecording && config is not null)
+            {
+                StartAudioCaptures(config);
+            }
         }
     }
 
@@ -178,7 +183,9 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         var args = new List<string>
         {
             "-hide_banner",
-            "-loglevel", "warning"
+            "-loglevel", "warning",
+            "-nostdin",
+            "-rtbufsize", "128M"
         };
 
         var frameRate = Math.Clamp(config.FrameRate, 15, 60).ToString();
@@ -263,7 +270,8 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
             "-vf", scale,
             "-preset", "ultrafast",
             "-tune", "zerolatency",
-            "-threads", "4",
+            "-threads", "2",
+            "-crf", "28",
             "-pix_fmt", "yuv420p"
         };
     }
@@ -475,6 +483,15 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         };
         foreach (var arg in args) info.ArgumentList.Add(arg);
         var process = Process.Start(info) ?? throw new InvalidOperationException($"Could not start {fileName}.");
+        try
+        {
+            process.PriorityClass = ProcessPriorityClass.BelowNormal;
+        }
+        catch
+        {
+            // Priority is best effort.
+        }
+
         process.EnableRaisingEvents = true;
         process.ErrorDataReceived += (_, e) =>
         {
@@ -508,6 +525,25 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         }
 
         return _process is { HasExited: false };
+    }
+
+    private IReadOnlyList<FileInfo> GetFinishedVideoSegments()
+    {
+        var cutoff = DateTime.UtcNow - TimeSpan.FromMilliseconds(800);
+        var segments = Directory.EnumerateFiles(_bufferFolder, "segment_*.mkv")
+            .Select(path => new FileInfo(path))
+            .Where(file => file.Exists && file.Length > 0 && file.LastWriteTimeUtc < cutoff)
+            .Select(file => new { File = file, Index = SegmentIndex(file.Name) })
+            .Where(item => item.Index >= 0)
+            .OrderBy(item => item.Index)
+            .ToArray();
+
+        if (segments.Length <= 1) return Array.Empty<FileInfo>();
+
+        return segments
+            .Take(segments.Length - 1)
+            .Select(item => item.File)
+            .ToArray();
     }
 
     private void Process_OnExited(object? sender, EventArgs e)
@@ -678,6 +714,12 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
     private static int MakeEven(int value)
     {
         return value % 2 == 0 ? value : value - 1;
+    }
+
+    private static int SegmentIndex(string fileName)
+    {
+        var match = Regex.Match(fileName, @"segment_(\d+)\.mkv$", RegexOptions.IgnoreCase);
+        return match.Success && int.TryParse(match.Groups[1].Value, out var value) ? value : -1;
     }
 
     private enum CaptureBackend
