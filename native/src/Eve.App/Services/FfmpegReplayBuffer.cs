@@ -10,12 +10,15 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
 {
     private static readonly Lazy<HashSet<string>> SupportedInputFormats = new(LoadSupportedInputFormats);
     private static readonly Lazy<HashSet<string>> SupportedEncoders = new(LoadSupportedEncoders);
+    private static readonly Lazy<HashSet<string>> SupportedFilters = new(LoadSupportedFilters);
     private readonly Func<ReplayBufferConfig> _configProvider;
     private readonly string _bufferFolder;
     private readonly string _logPath;
     private readonly string _pidPath;
     private Process? _process;
     private readonly List<AudioCaptureSession> _audioCaptures = new();
+    private CancellationTokenSource? _cleanupCts;
+    private Task? _cleanupTask;
     private TimeSpan _duration = TimeSpan.FromSeconds(60);
 
     public FfmpegReplayBuffer(Func<ReplayBufferConfig> configProvider)
@@ -55,21 +58,32 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
             TryDelete(file);
         }
 
-        var args = BuildCaptureArguments(config);
-        _process = StartCaptureProcess("ffmpeg", args);
-        _process.Exited += Process_OnExited;
-        await File.WriteAllTextAsync(_pidPath, _process.Id.ToString(), cancellationToken);
-        StartAudioCaptures(config);
-
-        var started = await WaitForFirstSegmentAsync(TimeSpan.FromSeconds(4), cancellationToken);
-        if (started) return;
-
-        if (_process.HasExited)
+        var attempts = SupportsFilter("ddagrab")
+            ? new[] { CaptureBackend.Ddagrab, CaptureBackend.Gdigrab }
+            : new[] { CaptureBackend.Gdigrab };
+        foreach (var backend in attempts)
         {
-            LastError = ReadTail(_logPath);
+            var args = BuildCaptureArguments(config, backend);
+            _process = StartCaptureProcess("ffmpeg", args);
+            _process.Exited += Process_OnExited;
+            await File.WriteAllTextAsync(_pidPath, _process.Id.ToString(), cancellationToken);
+
+            var started = await WaitForFirstSegmentAsync(TimeSpan.FromSeconds(4), cancellationToken);
+            if (started)
+            {
+                StartAudioCaptures(config);
+                StartCleanupLoop(cancellationToken);
+                return;
+            }
+
+            if (_process.HasExited)
+            {
+                LastError = ReadTail(_logPath);
+            }
+
+            await StopVideoProcessAsync(cancellationToken);
         }
 
-        await StopAsync(cancellationToken);
         throw new InvalidOperationException(string.IsNullOrWhiteSpace(LastError)
             ? $"Replay buffer did not start. See {_logPath}."
             : LastError);
@@ -79,7 +93,12 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
     {
         var process = _process;
         _process = null;
-        if (process is null) return;
+        StopCleanupLoop();
+        if (process is null)
+        {
+            StopAudioCaptures();
+            return;
+        }
 
         try
         {
@@ -106,6 +125,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
     {
         if (!Directory.Exists(outputFolder)) Directory.CreateDirectory(outputFolder);
 
+        PruneOldSegments();
         var cutoff = DateTime.UtcNow - TimeSpan.FromMilliseconds(800);
         var files = Directory.EnumerateFiles(_bufferFolder, "segment_*.mkv")
             .Select(path => new FileInfo(path))
@@ -153,19 +173,36 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         _ = StopAsync();
     }
 
-    private string[] BuildCaptureArguments(ReplayBufferConfig config)
+    private string[] BuildCaptureArguments(ReplayBufferConfig config, CaptureBackend backend)
     {
         var args = new List<string>
         {
             "-hide_banner",
-            "-loglevel", "warning",
-            "-f", "gdigrab",
-            "-framerate", Math.Clamp(config.FrameRate, 15, 60).ToString(),
-            "-offset_x", config.CaptureX.ToString(),
-            "-offset_y", config.CaptureY.ToString(),
-            "-video_size", $"{Math.Max(320, config.CaptureWidth)}x{Math.Max(240, config.CaptureHeight)}",
-            "-i", "desktop"
+            "-loglevel", "warning"
         };
+
+        var frameRate = Math.Clamp(config.FrameRate, 15, 60).ToString();
+        var size = $"{Math.Max(320, config.CaptureWidth)}x{Math.Max(240, config.CaptureHeight)}";
+        if (backend == CaptureBackend.Ddagrab)
+        {
+            args.AddRange(new[]
+            {
+                "-f", "lavfi",
+                "-i", $"ddagrab=framerate={frameRate}:video_size={size}:offset_x={config.CaptureX}:offset_y={config.CaptureY}:output_fmt=8bit:allow_fallback=1"
+            });
+        }
+        else
+        {
+            args.AddRange(new[]
+            {
+                "-f", "gdigrab",
+                "-framerate", frameRate,
+                "-offset_x", config.CaptureX.ToString(),
+                "-offset_y", config.CaptureY.ToString(),
+                "-video_size", size,
+                "-i", "desktop"
+            });
+        }
 
         var audioTitles = new List<string>();
 
@@ -193,7 +230,6 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         {
             "-f", "segment",
             "-segment_time", "2",
-            "-segment_wrap", Math.Max(8, (int)Math.Ceiling(_duration.TotalSeconds / 2d) + 6).ToString(),
             "-reset_timestamps", "1",
             Path.Combine(_bufferFolder, "segment_%05d.mkv")
         });
@@ -240,6 +276,31 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
     private static void AddDshowAudioInput(List<string> args, string device)
     {
         args.AddRange(new[] { "-f", "dshow", "-i", $"audio={device}" });
+    }
+
+    private async Task StopVideoProcessAsync(CancellationToken cancellationToken)
+    {
+        var process = _process;
+        _process = null;
+        if (process is null) return;
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync(cancellationToken);
+            }
+        }
+        catch
+        {
+            // Fallback startup cleanup is best effort.
+        }
+        finally
+        {
+            process.Exited -= Process_OnExited;
+            process.Dispose();
+            TryDelete(_pidPath);
+        }
     }
 
     private void StartAudioCaptures(ReplayBufferConfig config)
@@ -289,6 +350,66 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         }
 
         _audioCaptures.Clear();
+    }
+
+    private void StartCleanupLoop(CancellationToken cancellationToken)
+    {
+        StopCleanupLoop();
+        _cleanupCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var token = _cleanupCts.Token;
+        _cleanupTask = Task.Run(async () =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                PruneOldSegments();
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(10), token);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+        }, token);
+    }
+
+    private void StopCleanupLoop()
+    {
+        try
+        {
+            _cleanupCts?.Cancel();
+        }
+        catch
+        {
+            // Cleanup stop is best effort.
+        }
+        finally
+        {
+            _cleanupCts?.Dispose();
+            _cleanupCts = null;
+            _cleanupTask = null;
+        }
+    }
+
+    private void PruneOldSegments()
+    {
+        var cutoff = DateTime.UtcNow - _duration - TimeSpan.FromSeconds(12);
+        foreach (var file in Directory.EnumerateFiles(_bufferFolder, "segment_*.mkv"))
+        {
+            try
+            {
+                var info = new FileInfo(file);
+                if (info.Exists && info.LastWriteTimeUtc < cutoff)
+                {
+                    TryDelete(file);
+                }
+            }
+            catch
+            {
+                // Prune is best effort.
+            }
+        }
     }
 
     private async Task MuxAudioTracksAsync(string videoPath, string outputPath, CancellationToken cancellationToken)
@@ -466,6 +587,11 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         return SupportedEncoders.Value.Contains(name);
     }
 
+    private static bool SupportsFilter(string name)
+    {
+        return SupportedFilters.Value.Contains(name);
+    }
+
     private static HashSet<string> LoadSupportedInputFormats()
     {
         var formats = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -518,6 +644,32 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         return encoders;
     }
 
+    private static HashSet<string> LoadSupportedFilters()
+    {
+        var filters = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var result = RunProcessAsync("ffmpeg", new[] { "-hide_banner", "-filters" }, CancellationToken.None)
+                .GetAwaiter()
+                .GetResult();
+            var text = result.Error + Environment.NewLine + result.Output;
+            foreach (var line in text.Split(Environment.NewLine))
+            {
+                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (parts.Length >= 2)
+                {
+                    filters.Add(parts[1]);
+                }
+            }
+        }
+        catch
+        {
+            // Missing filter support falls back to gdigrab.
+        }
+
+        return filters;
+    }
+
     private static string EscapeConcatPath(string path)
     {
         return path.Replace("\\", "\\\\").Replace("'", "'\\''");
@@ -526,6 +678,12 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
     private static int MakeEven(int value)
     {
         return value % 2 == 0 ? value : value - 1;
+    }
+
+    private enum CaptureBackend
+    {
+        Ddagrab,
+        Gdigrab
     }
 }
 
@@ -539,6 +697,7 @@ public sealed record ReplayBufferConfig(
     int CaptureHeight,
     string ChatAudioDeviceName,
     string ChatAudioDeviceId,
+    string ChatAudioProcessName,
     string MicrophoneDeviceId,
     string MicrophoneDeviceName);
 

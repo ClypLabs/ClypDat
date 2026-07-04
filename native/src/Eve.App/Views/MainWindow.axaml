@@ -306,10 +306,11 @@
 
           <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="6" Padding="18">
             <StackPanel Spacing="14">
-              <TextBlock Text="Audio Devices" Foreground="#C4D0DF" FontWeight="Bold" />
-              <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto" RowSpacing="12" ColumnSpacing="16">
-                <TextBlock Text="Chat Audio" Foreground="#93A6B8" VerticalAlignment="Center" />
-                <ComboBox Grid.Column="1" Classes="settingsInput" ItemsSource="{Binding ChatAudioDevices}" SelectedItem="{Binding SelectedChatAudioDevice}" MaxWidth="520" />
+              <TextBlock Text="Audio" Foreground="#C4D0DF" FontWeight="Bold" />
+              <Grid ColumnDefinitions="220,*,Auto" RowDefinitions="Auto,Auto" RowSpacing="12" ColumnSpacing="16">
+                <TextBlock Text="Chat Audio app" Foreground="#93A6B8" VerticalAlignment="Center" />
+                <ComboBox Grid.Column="1" Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedChatProcess}" MaxWidth="520" />
+                <Button Grid.Column="2" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
                 <TextBlock Grid.Row="1" Text="Microphone" Foreground="#93A6B8" VerticalAlignment="Center" />
                 <ComboBox Grid.Row="1" Grid.Column="1" Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" MaxWidth="520" />
               </Grid>
@@ -319,7 +320,7 @@
           <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="6" Padding="18">
             <StackPanel Spacing="14">
               <TextBlock Text="Game Audio Exclusions" Foreground="#C4D0DF" FontWeight="Bold" />
-              <TextBlock Text="Saved now; app-specific capture filtering will be wired in a later pass." Foreground="#718296" />
+              <TextBlock Text="Saved for app routing; current replay still captures the full system mix." Foreground="#718296" />
               <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
                 <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedProcessExclusion}" />
                 <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />

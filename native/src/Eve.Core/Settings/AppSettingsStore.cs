@@ -24,6 +24,7 @@ public static class AppSettingsStore
             if (settings.ReplayFrameRate <= 0) settings.ReplayFrameRate = 30;
             if (settings.ReplayMaxHeight <= 0) settings.ReplayMaxHeight = 1080;
             if (string.IsNullOrWhiteSpace(settings.ExportVideoCodec)) settings.ExportVideoCodec = "H.264";
+            settings.ChatAudioProcessName ??= string.Empty;
             return settings;
         }
         catch

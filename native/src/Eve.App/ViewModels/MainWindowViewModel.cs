@@ -21,6 +21,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isCapturingHotkey;
     private AudioDeviceOption? _selectedChatAudioDevice;
     private AudioDeviceOption? _selectedMicrophoneDevice;
+    private ProcessOption? _selectedChatProcess;
     private ProcessOption? _selectedProcessExclusion;
     private ReplayDurationPreset? _selectedReplayDurationPreset;
     private ReplayQualityPreset? _selectedReplayQualityPreset;
@@ -298,6 +299,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (!SetProperty(ref _selectedChatAudioDevice, value)) return;
             Settings.ChatAudioDeviceId = value?.Id ?? string.Empty;
+            SaveSettings();
+        }
+    }
+
+    public ProcessOption? SelectedChatProcess
+    {
+        get => _selectedChatProcess;
+        set
+        {
+            if (!SetProperty(ref _selectedChatProcess, value)) return;
+            Settings.ChatAudioProcessName = value?.Name ?? string.Empty;
             SaveSettings();
         }
     }
@@ -665,6 +677,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public async Task RefreshOpenProcessesAsync()
     {
+        var selectedChatName = SelectedChatProcess?.Name ?? Settings.ChatAudioProcessName;
         var selectedName = SelectedProcessExclusion?.Name;
         var processes = await Task.Run(ProcessListService.GetOpenExecutables);
         OpenProcesses.Clear();
@@ -673,6 +686,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OpenProcesses.Add(process);
         }
 
+        SelectedChatProcess =
+            OpenProcesses.FirstOrDefault(process => string.Equals(process.Name, selectedChatName, StringComparison.OrdinalIgnoreCase)) ??
+            OpenProcesses.FirstOrDefault();
         SelectedProcessExclusion =
             OpenProcesses.FirstOrDefault(process => string.Equals(process.Name, selectedName, StringComparison.OrdinalIgnoreCase)) ??
             OpenProcesses.FirstOrDefault();
@@ -688,8 +704,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ReplayCaptureY,
             ReplayCaptureWidth,
             ReplayCaptureHeight,
-            SelectedChatAudioDevice?.IsDisabled == true ? string.Empty : SelectedChatAudioDevice?.Name ?? string.Empty,
-            SelectedChatAudioDevice?.IsDisabled == true ? string.Empty : SelectedChatAudioDevice?.Id ?? string.Empty,
+            string.Empty,
+            string.Empty,
+            SelectedChatProcess?.Name ?? Settings.ChatAudioProcessName,
             SelectedMicrophoneDevice?.Id ?? string.Empty,
             SelectedMicrophoneDevice?.Name ?? string.Empty);
     }

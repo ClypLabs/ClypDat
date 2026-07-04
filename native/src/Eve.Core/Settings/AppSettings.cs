@@ -13,6 +13,7 @@ public sealed class AppSettings
     public bool LaunchOnWindowsStartup { get; set; }
     public bool StartMinimizedToTray { get; set; }
     public string ChatAudioDeviceId { get; set; } = string.Empty;
+    public string ChatAudioProcessName { get; set; } = string.Empty;
     public string MicrophoneDeviceId { get; set; } = string.Empty;
     public List<string> GameAudioExcludedProcesses { get; set; } = new();
     public bool EnableEditorKeyboardShortcuts { get; set; } = true;
