@@ -13,8 +13,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private CancellationTokenSource? _waveformCts;
     private FileSystemWatcher? _libraryWatcher;
     private readonly DispatcherTimer _libraryRefreshDebounce;
+    private readonly AudioDeviceService _audioDevices = new();
     private bool _isReplayRecording;
     private bool _isEditorVisible;
+    private bool _isSettingsVisible;
+    private bool _wasEditorVisibleBeforeSettings;
+    private bool _isCapturingHotkey;
+    private AudioDeviceOption? _selectedChatAudioDevice;
+    private AudioDeviceOption? _selectedMicrophoneDevice;
     private string _recorderStatus = "Replay Off";
     private string _activeGame = "No game detected";
     private string _selectedVideoName = "No video selected";
@@ -42,6 +48,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings = AppSettingsStore.Load();
         ClipGroups = new ObservableCollection<ClipGroupViewModel>();
         TimelineTracks = new ObservableCollection<TrackLaneViewModel>();
+        ChatAudioDevices = new ObservableCollection<AudioDeviceOption>();
+        MicrophoneDevices = new ObservableCollection<AudioDeviceOption>();
+        ExcludedProcesses = new ObservableCollection<string>(Settings.GameAudioExcludedProcesses);
+        RefreshAudioDevices();
         _libraryRefreshDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
         _libraryRefreshDebounce.Tick += async (_, _) =>
         {
@@ -54,6 +64,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public AppSettings Settings { get; }
     public ObservableCollection<ClipGroupViewModel> ClipGroups { get; }
     public ObservableCollection<TrackLaneViewModel> TimelineTracks { get; }
+    public ObservableCollection<AudioDeviceOption> ChatAudioDevices { get; }
+    public ObservableCollection<AudioDeviceOption> MicrophoneDevices { get; }
+    public ObservableCollection<string> ExcludedProcesses { get; }
 
     public IEnumerable<ClipCardViewModel> AllClips => ClipGroups.SelectMany(group => group.Clips);
 
@@ -65,12 +78,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         : Settings.LibraryFolder;
 
     public string LibraryLocationText => $"Location: {LibraryFolderDisplay}";
+    public string HotkeyDisplay => IsCapturingHotkey ? "Press keys..." : Settings.SaveReplayHotkey;
 
     public int SelectedCount => _selectedPaths.Count;
     public bool HasSelection => SelectedCount > 0;
     public bool HasNoSelection => !HasSelection;
     public bool ShowLibraryActions => HasNoSelection && IsLibraryVisible;
     public bool ShowLibraryStatus => IsLibraryVisible;
+    public bool ShowSettingsClose => IsSettingsVisible;
 
     public string SelectionSummary
     {
@@ -124,12 +139,109 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (!SetProperty(ref _isEditorVisible, value)) return;
             OnPropertyChanged(nameof(IsLibraryVisible));
+            OnPropertyChanged(nameof(IsSettingsVisible));
             OnPropertyChanged(nameof(ShowLibraryActions));
             OnPropertyChanged(nameof(ShowLibraryStatus));
         }
     }
 
-    public bool IsLibraryVisible => !IsEditorVisible;
+    public bool IsSettingsVisible
+    {
+        get => _isSettingsVisible;
+        private set
+        {
+            if (!SetProperty(ref _isSettingsVisible, value)) return;
+            OnPropertyChanged(nameof(IsLibraryVisible));
+            OnPropertyChanged(nameof(ShowLibraryActions));
+            OnPropertyChanged(nameof(ShowLibraryStatus));
+            OnPropertyChanged(nameof(ShowSettingsClose));
+        }
+    }
+
+    public bool IsLibraryVisible => !IsEditorVisible && !IsSettingsVisible;
+
+    public bool IsCapturingHotkey
+    {
+        get => _isCapturingHotkey;
+        set
+        {
+            if (!SetProperty(ref _isCapturingHotkey, value)) return;
+            OnPropertyChanged(nameof(HotkeyDisplay));
+        }
+    }
+
+    public int ReplayDurationSeconds
+    {
+        get => Settings.ReplayDurationSeconds;
+        set
+        {
+            var clamped = Math.Clamp(value, 10, 600);
+            if (Settings.ReplayDurationSeconds == clamped) return;
+            Settings.ReplayDurationSeconds = clamped;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    public bool StartReplayOnLaunch
+    {
+        get => Settings.StartReplayOnLaunch;
+        set
+        {
+            if (Settings.StartReplayOnLaunch == value) return;
+            Settings.StartReplayOnLaunch = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    public bool LaunchOnWindowsStartup
+    {
+        get => Settings.LaunchOnWindowsStartup;
+        set
+        {
+            if (Settings.LaunchOnWindowsStartup == value) return;
+            Settings.LaunchOnWindowsStartup = value;
+            OnPropertyChanged();
+            SaveSettings();
+            StartupService.SetLaunchOnStartup(value, Settings.StartMinimizedToTray);
+        }
+    }
+
+    public bool StartMinimizedToTray
+    {
+        get => Settings.StartMinimizedToTray;
+        set
+        {
+            if (Settings.StartMinimizedToTray == value) return;
+            Settings.StartMinimizedToTray = value;
+            OnPropertyChanged();
+            SaveSettings();
+            if (Settings.LaunchOnWindowsStartup) StartupService.SetLaunchOnStartup(true, value);
+        }
+    }
+
+    public AudioDeviceOption? SelectedChatAudioDevice
+    {
+        get => _selectedChatAudioDevice;
+        set
+        {
+            if (!SetProperty(ref _selectedChatAudioDevice, value)) return;
+            Settings.ChatAudioDeviceId = value?.Id ?? string.Empty;
+            SaveSettings();
+        }
+    }
+
+    public AudioDeviceOption? SelectedMicrophoneDevice
+    {
+        get => _selectedMicrophoneDevice;
+        set
+        {
+            if (!SetProperty(ref _selectedMicrophoneDevice, value)) return;
+            Settings.MicrophoneDeviceId = value?.Id ?? string.Empty;
+            SaveSettings();
+        }
+    }
 
     public string SelectedVideoName
     {
@@ -418,6 +530,63 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _waveformCts = null;
         IsPlaying = false;
         IsEditorVisible = false;
+    }
+
+    public void OpenSettings()
+    {
+        _wasEditorVisibleBeforeSettings = IsEditorVisible;
+        IsEditorVisible = false;
+        IsSettingsVisible = true;
+    }
+
+    public void CloseSettings()
+    {
+        IsSettingsVisible = false;
+        IsEditorVisible = _wasEditorVisibleBeforeSettings && !string.IsNullOrWhiteSpace(SelectedVideoPath);
+    }
+
+    public void SetHotkey(string hotkey)
+    {
+        Settings.SaveReplayHotkey = hotkey;
+        IsCapturingHotkey = false;
+        OnPropertyChanged(nameof(HotkeyDisplay));
+        SaveSettings();
+    }
+
+    public void AddExcludedProcess(string processName)
+    {
+        var normalized = Path.GetFileName(processName.Trim());
+        if (string.IsNullOrWhiteSpace(normalized)) return;
+        if (!normalized.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) normalized += ".exe";
+        if (Settings.GameAudioExcludedProcesses.Contains(normalized, StringComparer.OrdinalIgnoreCase)) return;
+        Settings.GameAudioExcludedProcesses.Add(normalized);
+        ExcludedProcesses.Add(normalized);
+        SaveSettings();
+    }
+
+    public void RemoveExcludedProcess(string processName)
+    {
+        Settings.GameAudioExcludedProcesses.RemoveAll(item => string.Equals(item, processName, StringComparison.OrdinalIgnoreCase));
+        ExcludedProcesses.Remove(processName);
+        SaveSettings();
+    }
+
+    public void RefreshAudioDevices()
+    {
+        ChatAudioDevices.Clear();
+        foreach (var device in _audioDevices.GetRenderDevices(includeDisabled: true)) ChatAudioDevices.Add(device);
+        MicrophoneDevices.Clear();
+        foreach (var device in _audioDevices.GetCaptureDevices()) MicrophoneDevices.Add(device);
+        SelectedChatAudioDevice = ChatAudioDevices.FirstOrDefault(device => device.Id == Settings.ChatAudioDeviceId) ?? ChatAudioDevices.FirstOrDefault();
+        SelectedMicrophoneDevice = MicrophoneDevices.FirstOrDefault(device => device.Id == Settings.MicrophoneDeviceId) ?? MicrophoneDevices.FirstOrDefault();
+    }
+
+    public ReplayBufferConfig CreateReplayConfig()
+    {
+        return new ReplayBufferConfig(
+            ReplayDurationSeconds,
+            SelectedChatAudioDevice?.IsDisabled == true ? string.Empty : SelectedChatAudioDevice?.Name ?? string.Empty,
+            SelectedMicrophoneDevice?.Name ?? string.Empty);
     }
 
     public void SetDuration(TimeSpan duration)

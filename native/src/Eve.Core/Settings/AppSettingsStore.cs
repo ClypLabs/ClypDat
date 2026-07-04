@@ -19,6 +19,7 @@ public static class AppSettingsStore
             var json = File.ReadAllText(SettingsPath);
             var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
             settings.ClipEdits ??= new Dictionary<string, ClipEditSettings>(StringComparer.OrdinalIgnoreCase);
+            settings.GameAudioExcludedProcesses ??= new List<string>();
             return settings;
         }
         catch

@@ -71,6 +71,25 @@
       <Setter Property="CornerRadius" Value="5" />
       <Setter Property="Padding" Value="12,8" />
     </Style>
+    <Style Selector="Button.linkButton">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Foreground" Value="#BDD4EE" />
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+    </Style>
+    <Style Selector="Button.linkButton:pointerover">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="#FFFFFF" />
+    </Style>
+    <Style Selector="Button.brandButton">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="Button.brandButton:pointerover">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
     <Style Selector="Slider.volumeSlider /template/ Thumb">
       <Setter Property="Width" Value="14" />
       <Setter Property="Height" Value="18" />
@@ -91,15 +110,17 @@
   <Grid RowDefinitions="48,*">
     <Border Grid.Row="0" Background="#171F27" BorderBrush="#1E2A33" BorderThickness="0,0,0,1">
       <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,0" VerticalAlignment="Center">
-        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-          <Image Source="/Assets/eve-icon-24.png" Width="24" Height="24" />
-          <TextBlock Text="EVE" FontSize="18" FontWeight="Bold" Foreground="#EDF4FB" />
-        </StackPanel>
+        <Button Classes="brandButton" Click="OpenSettingsButton_OnClick">
+          <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <Image Source="/Assets/eve-icon-24.png" Width="24" Height="24" />
+            <TextBlock Text="EVE" FontSize="18" FontWeight="Bold" Foreground="#EDF4FB" />
+          </StackPanel>
+        </Button>
 
         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" Margin="18,0,0,0" VerticalAlignment="Center">
-          <Button Content="{Binding RecorderStatus}" Classes="replayButton" />
-          <Button Content="Clip" IsEnabled="{Binding IsReplayRecording}" />
-          <TextBlock Text="Ctrl+Shift+F9" Foreground="#93A6B8" FontWeight="Bold" VerticalAlignment="Center" />
+          <Button Content="{Binding RecorderStatus}" Classes="replayButton" Click="ReplayButton_OnClick" />
+          <Button Content="Clip" IsEnabled="{Binding IsReplayRecording}" Click="ClipButton_OnClick" />
+          <TextBlock Text="{Binding HotkeyDisplay}" Foreground="#93A6B8" FontWeight="Bold" VerticalAlignment="Center" />
           <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding ShowLibraryStatus}" />
           <TextBlock Text="{Binding ActiveGame}" Foreground="#BDD4EE" VerticalAlignment="Center" IsVisible="{Binding ShowLibraryStatus}" />
           <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding HasSelection}" />
@@ -120,7 +141,9 @@
           <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" />
           <TextBlock Text="{Binding SelectedSize}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" TextTrimming="CharacterEllipsis" MaxWidth="110" />
           <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" />
-          <TextBlock Text="{Binding SelectedVideoPath}" Foreground="#BDD4EE" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" TextTrimming="CharacterEllipsis" MaxWidth="420" />
+          <Button Classes="linkButton" Click="EditorPathButton_OnClick" IsVisible="{Binding IsEditorVisible}" MaxWidth="420">
+            <TextBlock Text="{Binding SelectedVideoPath}" TextTrimming="CharacterEllipsis" />
+          </Button>
         </StackPanel>
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" IsVisible="{Binding ShowLibraryActions}">
@@ -133,6 +156,11 @@
                 Classes="closeEditor"
                 Click="CloseEditorButton_OnClick"
                 IsVisible="{Binding IsEditorVisible}" />
+        <Button Grid.Column="2"
+                Content="Back"
+                Classes="closeEditor"
+                Click="CloseSettingsButton_OnClick"
+                IsVisible="{Binding ShowSettingsClose}" />
       </Grid>
     </Border>
 
@@ -144,11 +172,15 @@
                      FontSize="15"
                      FontWeight="Bold"
                      VerticalAlignment="Center" />
-          <TextBlock Grid.Column="1"
-                     Text="{Binding LibraryLocationText}"
-                     Foreground="#647181"
-                     FontSize="12"
-                     VerticalAlignment="Center" />
+          <Button Grid.Column="1"
+                  Classes="linkButton"
+                  Click="LibraryPathButton_OnClick"
+                  VerticalAlignment="Center">
+            <TextBlock Text="{Binding LibraryLocationText}"
+                       Foreground="#647181"
+                       FontSize="12"
+                       TextTrimming="CharacterEllipsis" />
+          </Button>
 
         </Grid>
 
@@ -239,6 +271,68 @@
           </ItemsControl>
         </ScrollViewer>
       </DockPanel>
+    </Border>
+
+    <Border Grid.Row="1" Background="#101820" IsVisible="{Binding IsSettingsVisible}">
+      <ScrollViewer>
+        <StackPanel Margin="32,28" Spacing="22" MaxWidth="860">
+          <TextBlock Text="Settings" Foreground="#EDF4FB" FontSize="26" FontWeight="Bold" />
+
+          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="6" Padding="18">
+            <StackPanel Spacing="14">
+              <TextBlock Text="Replay Buffer" Foreground="#C4D0DF" FontWeight="Bold" />
+              <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="12" ColumnSpacing="16">
+                <TextBlock Text="Save hotkey" Foreground="#93A6B8" VerticalAlignment="Center" />
+                <Button Grid.Column="1" Content="{Binding HotkeyDisplay}" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Left" MinWidth="180" />
+                <TextBlock Grid.Row="1" Text="Replay length" Foreground="#93A6B8" VerticalAlignment="Center" />
+                <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding ReplayDurationSeconds}" Minimum="10" Maximum="600" Increment="5" Width="140" HorizontalAlignment="Left" />
+                <CheckBox Grid.Row="2" Grid.ColumnSpan="2" Content="Start replay buffer when EVE opens" IsChecked="{Binding StartReplayOnLaunch}" />
+              </Grid>
+            </StackPanel>
+          </Border>
+
+          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="6" Padding="18">
+            <StackPanel Spacing="14">
+              <TextBlock Text="Startup" Foreground="#C4D0DF" FontWeight="Bold" />
+              <CheckBox Content="Launch EVE on Windows boot" IsChecked="{Binding LaunchOnWindowsStartup}" />
+              <CheckBox Content="Start minimized on boot" IsChecked="{Binding StartMinimizedToTray}" />
+            </StackPanel>
+          </Border>
+
+          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="6" Padding="18">
+            <StackPanel Spacing="14">
+              <TextBlock Text="Audio Devices" Foreground="#C4D0DF" FontWeight="Bold" />
+              <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto" RowSpacing="12" ColumnSpacing="16">
+                <TextBlock Text="Chat Audio" Foreground="#93A6B8" VerticalAlignment="Center" />
+                <ComboBox Grid.Column="1" ItemsSource="{Binding ChatAudioDevices}" SelectedItem="{Binding SelectedChatAudioDevice}" MaxWidth="520" />
+                <TextBlock Grid.Row="1" Text="Microphone" Foreground="#93A6B8" VerticalAlignment="Center" />
+                <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" MaxWidth="520" />
+              </Grid>
+            </StackPanel>
+          </Border>
+
+          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="6" Padding="18">
+            <StackPanel Spacing="14">
+              <TextBlock Text="Game Audio Exclusions" Foreground="#C4D0DF" FontWeight="Bold" />
+              <TextBlock Text="Saved now; app-specific capture filtering will be wired in a later pass." Foreground="#718296" />
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                <TextBox Name="ExcludedProcessTextBox" Watermark="discord.exe" />
+                <Button Grid.Column="1" Content="Add" Click="AddExcludedProcessButton_OnClick" />
+              </Grid>
+              <ItemsControl ItemsSource="{Binding ExcludedProcesses}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                      <TextBlock Text="{Binding}" Foreground="#D8E4F2" VerticalAlignment="Center" />
+                      <Button Grid.Column="1" Content="Remove" Click="RemoveExcludedProcessButton_OnClick" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
     </Border>
 
     <Grid Grid.Row="1" RowDefinitions="*,320" IsVisible="{Binding IsEditorVisible}">

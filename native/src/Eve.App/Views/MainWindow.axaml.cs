@@ -21,6 +21,9 @@ public sealed partial class MainWindow : Window
     private bool _endedAtTrimBoundary;
     private readonly Stopwatch _playheadClock = new();
     private TimeSpan _playheadBaseTime = TimeSpan.Zero;
+    private FfmpegReplayBuffer? _replayBuffer;
+    private GlobalHotkeyService? _globalHotkey;
+    private readonly HashSet<string> _capturedHotkeyKeys = new(StringComparer.OrdinalIgnoreCase);
 
     public MainWindow()
     {
@@ -29,7 +32,9 @@ public sealed partial class MainWindow : Window
         {
             ApplySavedWindowBounds();
             ViewModel?.UpdateCardLayout(Bounds.Width);
+            InitializeReplayServices();
         };
+        KeyUp += MainWindow_OnKeyUp;
         KeyDown += MainWindow_OnKeyDown;
         Closing += (_, _) =>
         {
@@ -38,6 +43,8 @@ public sealed partial class MainWindow : Window
         };
         Closed += (_, _) =>
         {
+            _globalHotkey?.Dispose();
+            _replayBuffer?.Dispose();
             _playback?.Dispose();
             ViewModel?.Dispose();
         };
@@ -48,6 +55,29 @@ public sealed partial class MainWindow : Window
     }
 
     private MainWindowViewModel? ViewModel => DataContext as MainWindowViewModel;
+
+    private void InitializeReplayServices()
+    {
+        if (ViewModel is null || _replayBuffer is not null) return;
+
+        _replayBuffer = new FfmpegReplayBuffer(ViewModel.CreateReplayConfig);
+        _globalHotkey = new GlobalHotkeyService();
+        _globalHotkey.SetHotkey(ViewModel.Settings.SaveReplayHotkey);
+        _globalHotkey.Pressed += (_, _) => Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync());
+        try
+        {
+            _globalHotkey.Start();
+        }
+        catch
+        {
+            // Global hotkey failure should not block editor startup.
+        }
+
+        if (ViewModel.Settings.StartReplayOnLaunch)
+        {
+            _ = StartReplayBufferAsync();
+        }
+    }
 
     private async void FolderButton_OnClick(object? sender, RoutedEventArgs e)
     {
@@ -99,6 +129,80 @@ public sealed partial class MainWindow : Window
     {
         ViewModel?.UpdateCardLayout(e.NewSize.Width);
         UpdateTimelineChrome();
+    }
+
+    private async void ReplayButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        InitializeReplayServices();
+        if (_replayBuffer is null) return;
+
+        if (_replayBuffer.IsRecording)
+        {
+            await _replayBuffer.StopAsync();
+            ViewModel.IsReplayRecording = false;
+        }
+        else
+        {
+            await StartReplayBufferAsync();
+        }
+    }
+
+    private async void ClipButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        await SaveReplayClipAsync();
+    }
+
+    private async Task StartReplayBufferAsync()
+    {
+        if (ViewModel is null) return;
+        InitializeReplayServices();
+        if (_replayBuffer is null) return;
+
+        try
+        {
+            await EnsureLibraryFolderAsync();
+            await _replayBuffer.StartAsync();
+            ViewModel.IsReplayRecording = _replayBuffer.IsRecording;
+        }
+        catch (Exception error)
+        {
+            ViewModel.IsReplayRecording = false;
+            await ShowMessageAsync("Replay unavailable", error.Message);
+        }
+    }
+
+    private async Task SaveReplayClipAsync()
+    {
+        if (ViewModel is null) return;
+        InitializeReplayServices();
+        if (_replayBuffer is null || !_replayBuffer.IsRecording) return;
+
+        try
+        {
+            await EnsureLibraryFolderAsync();
+            await _replayBuffer.SaveReplayAsync(ViewModel.Settings.LibraryFolder);
+            await ViewModel.RefreshLibraryAsync();
+        }
+        catch (Exception error)
+        {
+            await ShowMessageAsync("Clip failed", error.Message);
+        }
+    }
+
+    private async Task EnsureLibraryFolderAsync()
+    {
+        if (ViewModel is null) return;
+        if (!string.IsNullOrWhiteSpace(ViewModel.Settings.LibraryFolder) && Directory.Exists(ViewModel.Settings.LibraryFolder)) return;
+
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select clip folder",
+            AllowMultiple = false
+        });
+        var folder = folders.FirstOrDefault();
+        if (folder?.Path.LocalPath is not { Length: > 0 } path) throw new InvalidOperationException("No clip folder selected.");
+        await ViewModel.LoadLibraryFolderAsync(path);
     }
 
     private void TimelineSurface_OnSizeChanged(object? sender, SizeChangedEventArgs e)
@@ -173,8 +277,60 @@ public sealed partial class MainWindow : Window
         ViewModel?.CloseEditor();
     }
 
+    private void OpenSettingsButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel?.OpenSettings();
+    }
+
+    private void CloseSettingsButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel?.CloseSettings();
+    }
+
+    private void LibraryPathButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.Settings.LibraryFolder)) return;
+        OpenInExplorer(ViewModel.Settings.LibraryFolder, selectFile: false);
+    }
+
+    private void EditorPathButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
+        OpenInExplorer(ViewModel.SelectedVideoPath, selectFile: true);
+    }
+
+    private void HotkeyCaptureButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        _capturedHotkeyKeys.Clear();
+        if (ViewModel is not null) ViewModel.IsCapturingHotkey = true;
+        Focus();
+    }
+
+    private void AddExcludedProcessButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        if (this.FindControl<TextBox>("ExcludedProcessTextBox") is not { } textBox) return;
+        ViewModel.AddExcludedProcess(textBox.Text ?? string.Empty);
+        textBox.Text = string.Empty;
+    }
+
+    private void RemoveExcludedProcessButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: string processName })
+        {
+            ViewModel?.RemoveExcludedProcess(processName);
+        }
+    }
+
     private void MainWindow_OnKeyDown(object? sender, KeyEventArgs e)
     {
+        if (ViewModel?.IsCapturingHotkey == true)
+        {
+            _capturedHotkeyKeys.Add(HotkeyCombo.NormalizeKey(e.Key.ToString()));
+            e.Handled = true;
+            return;
+        }
+
         if (ViewModel is null ||
             !ViewModel.IsEditorVisible ||
             !ViewModel.Settings.EnableEditorKeyboardShortcuts ||
@@ -202,6 +358,20 @@ public sealed partial class MainWindow : Window
                 e.Handled = true;
                 break;
         }
+    }
+
+    private void MainWindow_OnKeyUp(object? sender, KeyEventArgs e)
+    {
+        if (ViewModel?.IsCapturingHotkey != true) return;
+        if (_capturedHotkeyKeys.Count == 0) return;
+
+        var hotkey = HotkeyCombo.Normalize(_capturedHotkeyKeys);
+        if (!string.IsNullOrWhiteSpace(hotkey))
+        {
+            ViewModel.SetHotkey(hotkey);
+            _globalHotkey?.SetHotkey(hotkey);
+        }
+        e.Handled = true;
     }
 
     private async void PlayPauseButton_OnClick(object? sender, RoutedEventArgs e)
@@ -794,6 +964,24 @@ public sealed partial class MainWindow : Window
         };
 
         return window;
+    }
+
+    private static void OpenInExplorer(string path, bool selectFile)
+    {
+        try
+        {
+            var info = new ProcessStartInfo("explorer.exe")
+            {
+                UseShellExecute = true
+            };
+
+            info.ArgumentList.Add(selectFile ? $"/select,{path}" : path);
+            Process.Start(info);
+        }
+        catch
+        {
+            // Explorer links are convenience-only.
+        }
     }
 
     private static bool IsTypingInTextInput(object? source)

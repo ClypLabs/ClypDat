@@ -20,9 +20,12 @@ public sealed partial class App : Application
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            var minimized = desktop.Args?.Any(arg => string.Equals(arg, "--minimized", StringComparison.OrdinalIgnoreCase)) == true;
             desktop.MainWindow = new MainWindow
             {
-                DataContext = new MainWindowViewModel()
+                DataContext = new MainWindowViewModel(),
+                WindowState = minimized ? Avalonia.Controls.WindowState.Minimized : Avalonia.Controls.WindowState.Normal,
+                ShowInTaskbar = true
             };
         }
 

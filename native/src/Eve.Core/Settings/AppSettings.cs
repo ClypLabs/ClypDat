@@ -5,6 +5,12 @@ public sealed class AppSettings
     public string LibraryFolder { get; set; } = string.Empty;
     public int ReplayDurationSeconds { get; set; } = 60;
     public string SaveReplayHotkey { get; set; } = "Ctrl+Shift+F9";
+    public bool StartReplayOnLaunch { get; set; }
+    public bool LaunchOnWindowsStartup { get; set; }
+    public bool StartMinimizedToTray { get; set; }
+    public string ChatAudioDeviceId { get; set; } = string.Empty;
+    public string MicrophoneDeviceId { get; set; } = string.Empty;
+    public List<string> GameAudioExcludedProcesses { get; set; } = new();
     public bool EnableEditorKeyboardShortcuts { get; set; } = true;
     public double WindowX { get; set; } = double.NaN;
     public double WindowY { get; set; } = double.NaN;
