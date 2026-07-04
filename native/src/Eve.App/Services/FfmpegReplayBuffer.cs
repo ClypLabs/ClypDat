@@ -11,6 +11,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
     private readonly Func<ReplayBufferConfig> _configProvider;
     private readonly string _bufferFolder;
     private readonly string _logPath;
+    private readonly string _pidPath;
     private Process? _process;
     private TimeSpan _duration = TimeSpan.FromSeconds(60);
 
@@ -26,6 +27,8 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
             "EVE",
             "logs",
             "replay-buffer.log");
+        _pidPath = Path.Combine(_bufferFolder, "ffmpeg.pid");
+        CleanupStaleReplayProcess();
     }
 
     public bool IsRecording => _process is { HasExited: false };
@@ -35,7 +38,8 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
-        if (IsRecording) return;
+        if (IsRecording) await StopAsync(cancellationToken);
+        CleanupStaleReplayProcess();
 
         var config = _configProvider();
         _duration = TimeSpan.FromSeconds(Math.Clamp(config.DurationSeconds, 30, 1200));
@@ -51,6 +55,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         var args = BuildCaptureArguments(config);
         _process = StartCaptureProcess("ffmpeg", args);
         _process.Exited += Process_OnExited;
+        await File.WriteAllTextAsync(_pidPath, _process.Id.ToString(), cancellationToken);
 
         var started = await WaitForFirstSegmentAsync(TimeSpan.FromSeconds(4), cancellationToken);
         if (started) return;
@@ -88,6 +93,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         {
             process.Exited -= Process_OnExited;
             process.Dispose();
+            TryDelete(_pidPath);
         }
     }
 
@@ -148,7 +154,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
             "-hide_banner",
             "-loglevel", "warning",
             "-f", "gdigrab",
-            "-framerate", "60",
+            "-framerate", Math.Clamp(config.FrameRate, 15, 60).ToString(),
             "-i", "desktop"
         };
 
@@ -189,7 +195,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
             audioOutputIndex++;
         }
 
-        args.AddRange(BuildVideoEncoderArguments());
+        args.AddRange(BuildVideoEncoderArguments(config.MaxHeight));
         if (audioTitles.Count > 0)
         {
             args.AddRange(new[]
@@ -211,14 +217,17 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         return args.ToArray();
     }
 
-    private static string[] BuildVideoEncoderArguments()
+    private static string[] BuildVideoEncoderArguments(int maxHeight)
     {
+        var height = Math.Clamp(maxHeight, 480, 1440);
+        var width = Math.Min(3840, MakeEven((int)Math.Round(height * 16 / 9d)));
+        var scale = $"scale=w={width}:h={height}:force_original_aspect_ratio=decrease:force_divisible_by=2";
         if (SupportsEncoder("h264_nvenc"))
         {
             return new[]
             {
                 "-c:v", "h264_nvenc",
-                "-vf", "scale=w=min(3840\\,iw):h=-2",
+                "-vf", scale,
                 "-preset", "p1",
                 "-tune", "ull",
                 "-rc", "vbr",
@@ -231,6 +240,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         return new[]
         {
             "-c:v", "libx264",
+            "-vf", scale,
             "-preset", "ultrafast",
             "-tune", "zerolatency",
             "-threads", "4",
@@ -310,6 +320,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
     private void Process_OnExited(object? sender, EventArgs e)
     {
         LastError = ReadTail(_logPath);
+        TryDelete(_pidPath);
         RecordingStopped?.Invoke(this, EventArgs.Empty);
     }
 
@@ -345,6 +356,31 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         catch
         {
             // Segment cleanup is best effort.
+        }
+    }
+
+    private void CleanupStaleReplayProcess()
+    {
+        try
+        {
+            if (!File.Exists(_pidPath)) return;
+            var text = File.ReadAllText(_pidPath).Trim();
+            if (int.TryParse(text, out var pid))
+            {
+                using var process = Process.GetProcessById(pid);
+                if (!process.HasExited && string.Equals(process.ProcessName, "ffmpeg", StringComparison.OrdinalIgnoreCase))
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+        }
+        catch
+        {
+            // Stale cleanup is best effort and must not block app launch.
+        }
+        finally
+        {
+            TryDelete(_pidPath);
         }
     }
 
@@ -414,9 +450,16 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
     {
         return path.Replace("\\", "\\\\").Replace("'", "'\\''");
     }
+
+    private static int MakeEven(int value)
+    {
+        return value % 2 == 0 ? value : value - 1;
+    }
 }
 
 public sealed record ReplayBufferConfig(
     int DurationSeconds,
+    int MaxHeight,
+    int FrameRate,
     string ChatAudioDeviceName,
     string MicrophoneDeviceName);

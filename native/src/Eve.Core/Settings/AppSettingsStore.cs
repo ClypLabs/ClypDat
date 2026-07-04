@@ -20,6 +20,9 @@ public static class AppSettingsStore
             var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
             settings.ClipEdits ??= new Dictionary<string, ClipEditSettings>(StringComparer.OrdinalIgnoreCase);
             settings.GameAudioExcludedProcesses ??= new List<string>();
+            if (string.IsNullOrWhiteSpace(settings.ReplayQualityPreset)) settings.ReplayQualityPreset = "Balanced";
+            if (settings.ReplayFrameRate <= 0) settings.ReplayFrameRate = 30;
+            if (settings.ReplayMaxHeight <= 0) settings.ReplayMaxHeight = 1080;
             return settings;
         }
         catch

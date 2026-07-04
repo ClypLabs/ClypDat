@@ -23,6 +23,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private AudioDeviceOption? _selectedMicrophoneDevice;
     private ProcessOption? _selectedProcessExclusion;
     private ReplayDurationPreset? _selectedReplayDurationPreset;
+    private ReplayQualityPreset? _selectedReplayQualityPreset;
     private string _recorderStatus = "Replay Off";
     private string _activeGame = "No game detected";
     private string _selectedVideoName = "No video selected";
@@ -65,10 +66,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("15 Minutes", 900),
             new("20 Minutes", 1200)
         };
+        ReplayQualityPresets = new ObservableCollection<ReplayQualityPreset>
+        {
+            new("Performance", 720, 30),
+            new("Balanced", 1080, 30),
+            new("Smooth", 1080, 60),
+            new("Quality", 1440, 60)
+        };
         ExcludedProcesses = new ObservableCollection<string>(Settings.GameAudioExcludedProcesses);
         RefreshAudioDevices();
         SelectedReplayDurationPreset = ReplayDurationPresets.FirstOrDefault(preset => preset.Seconds == Settings.ReplayDurationSeconds) ??
                                        ReplayDurationPresets.First(preset => preset.Seconds == 60);
+        SelectedReplayQualityPreset = ReplayQualityPresets.FirstOrDefault(preset =>
+                                          string.Equals(preset.Label, Settings.ReplayQualityPreset, StringComparison.OrdinalIgnoreCase) ||
+                                          (preset.MaxHeight == Settings.ReplayMaxHeight && preset.FrameRate == Settings.ReplayFrameRate)) ??
+                                      ReplayQualityPresets.First(preset => preset.Label == "Balanced");
         _libraryRefreshDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
         _libraryRefreshDebounce.Tick += async (_, _) =>
         {
@@ -85,6 +97,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<AudioDeviceOption> MicrophoneDevices { get; }
     public ObservableCollection<ProcessOption> OpenProcesses { get; }
     public ObservableCollection<ReplayDurationPreset> ReplayDurationPresets { get; }
+    public ObservableCollection<ReplayQualityPreset> ReplayQualityPresets { get; }
     public ObservableCollection<string> ExcludedProcesses { get; }
 
     public IEnumerable<ClipCardViewModel> AllClips => ClipGroups.SelectMany(group => group.Clips);
@@ -196,6 +209,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (!SetProperty(ref _selectedReplayDurationPreset, value) || value is null) return;
             Settings.ReplayDurationSeconds = value.Seconds;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    public ReplayQualityPreset? SelectedReplayQualityPreset
+    {
+        get => _selectedReplayQualityPreset;
+        set
+        {
+            if (!SetProperty(ref _selectedReplayQualityPreset, value) || value is null) return;
+            Settings.ReplayQualityPreset = value.Label;
+            Settings.ReplayMaxHeight = value.MaxHeight;
+            Settings.ReplayFrameRate = value.FrameRate;
             OnPropertyChanged();
             SaveSettings();
         }
@@ -630,6 +657,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         return new ReplayBufferConfig(
             SelectedReplayDurationPreset?.Seconds ?? Settings.ReplayDurationSeconds,
+            SelectedReplayQualityPreset?.MaxHeight ?? Settings.ReplayMaxHeight,
+            SelectedReplayQualityPreset?.FrameRate ?? Settings.ReplayFrameRate,
             SelectedChatAudioDevice?.IsDisabled == true ? string.Empty : SelectedChatAudioDevice?.Name ?? string.Empty,
             SelectedMicrophoneDevice?.Name ?? string.Empty);
     }

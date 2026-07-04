@@ -4,6 +4,9 @@ public sealed class AppSettings
 {
     public string LibraryFolder { get; set; } = string.Empty;
     public int ReplayDurationSeconds { get; set; } = 60;
+    public string ReplayQualityPreset { get; set; } = "Balanced";
+    public int ReplayFrameRate { get; set; } = 30;
+    public int ReplayMaxHeight { get; set; } = 1080;
     public string SaveReplayHotkey { get; set; } = "Ctrl+Shift+F9";
     public bool StartReplayOnLaunch { get; set; }
     public bool LaunchOnWindowsStartup { get; set; }
