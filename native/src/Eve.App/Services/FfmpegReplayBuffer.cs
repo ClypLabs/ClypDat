@@ -190,10 +190,17 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         }
 
         args.AddRange(BuildVideoEncoderArguments());
+        if (audioTitles.Count > 0)
+        {
+            args.AddRange(new[]
+            {
+                "-c:a", "aac",
+                "-b:a", "192k"
+            });
+        }
+
         args.AddRange(new[]
         {
-            "-c:a", "aac",
-            "-b:a", "192k",
             "-f", "segment",
             "-segment_time", "2",
             "-segment_wrap", Math.Max(8, (int)Math.Ceiling(_duration.TotalSeconds / 2d) + 6).ToString(),
@@ -211,6 +218,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
             return new[]
             {
                 "-c:v", "h264_nvenc",
+                "-vf", "scale=w=min(3840\\,iw):h=-2",
                 "-preset", "p1",
                 "-tune", "ull",
                 "-rc", "vbr",
