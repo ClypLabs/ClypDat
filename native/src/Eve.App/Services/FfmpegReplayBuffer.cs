@@ -6,6 +6,7 @@ namespace Eve.App.Services;
 
 public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
 {
+    private static readonly Lazy<HashSet<string>> SupportedInputFormats = new(LoadSupportedInputFormats);
     private readonly Func<ReplayBufferConfig> _configProvider;
     private readonly string _bufferFolder;
     private readonly string _logPath;
@@ -317,20 +318,33 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
 
     private static bool SupportsInputFormat(string name)
     {
+        return SupportedInputFormats.Value.Contains(name);
+    }
+
+    private static HashSet<string> LoadSupportedInputFormats()
+    {
+        var formats = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
             var result = RunProcessAsync("ffmpeg", new[] { "-hide_banner", "-formats" }, CancellationToken.None)
                 .GetAwaiter()
                 .GetResult();
             var text = result.Error + Environment.NewLine + result.Output;
-            return text.Split(Environment.NewLine)
-                .Any(line => line.Contains($" {name} ", StringComparison.OrdinalIgnoreCase) ||
-                             line.EndsWith($" {name}", StringComparison.OrdinalIgnoreCase));
+            foreach (var line in text.Split(Environment.NewLine))
+            {
+                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (parts.Length >= 2 && parts[0].Contains('D'))
+                {
+                    formats.Add(parts[1]);
+                }
+            }
         }
         catch
         {
-            return false;
+            // Missing ffmpeg support is reported when capture starts.
         }
+
+        return formats;
     }
 }
 

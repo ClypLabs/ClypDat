@@ -16,7 +16,7 @@ public sealed partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
-        PlaybackSession.WarmUp();
+        _ = Task.Run(PlaybackSession.WarmUp);
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {

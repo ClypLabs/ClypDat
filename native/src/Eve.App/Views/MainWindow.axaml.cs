@@ -77,7 +77,7 @@ public sealed partial class MainWindow : Window
 
         if (ViewModel.Settings.StartReplayOnLaunch)
         {
-            _ = StartReplayBufferAsync();
+            _ = StartReplayBufferAsync(showErrors: false);
         }
     }
 
@@ -146,7 +146,7 @@ public sealed partial class MainWindow : Window
         }
         else
         {
-            await StartReplayBufferAsync();
+            await StartReplayBufferAsync(showErrors: true);
         }
     }
 
@@ -155,7 +155,7 @@ public sealed partial class MainWindow : Window
         await SaveReplayClipAsync();
     }
 
-    private async Task StartReplayBufferAsync()
+    private async Task StartReplayBufferAsync(bool showErrors)
     {
         if (ViewModel is null) return;
         InitializeReplayServices();
@@ -164,13 +164,16 @@ public sealed partial class MainWindow : Window
         try
         {
             await EnsureLibraryFolderAsync();
-            await _replayBuffer.StartAsync();
+            await Task.Run(() => _replayBuffer.StartAsync());
             ViewModel.IsReplayRecording = _replayBuffer.IsRecording;
         }
         catch (Exception error)
         {
             ViewModel.IsReplayRecording = false;
-            await ShowMessageAsync("Replay unavailable", error.Message);
+            if (showErrors)
+            {
+                await ShowMessageAsync("Replay unavailable", error.Message);
+            }
         }
     }
 
