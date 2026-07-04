@@ -139,6 +139,8 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
 
     private string[] BuildCaptureArguments(ReplayBufferConfig config)
     {
+        var hasWasapi = SupportsInputFormat("wasapi");
+        var hasDshow = SupportsInputFormat("dshow");
         var args = new List<string>
         {
             "-hide_banner",
@@ -148,14 +150,37 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
             "-i", "desktop"
         };
 
-        AddWasapiInput(args, "default");
-        if (!string.IsNullOrWhiteSpace(config.ChatAudioDeviceName)) AddWasapiInput(args, config.ChatAudioDeviceName);
-        if (!string.IsNullOrWhiteSpace(config.MicrophoneDeviceName)) AddWasapiInput(args, config.MicrophoneDeviceName);
+        var audioTitles = new List<string>();
+        if (hasWasapi)
+        {
+            AddWasapiInput(args, "default");
+            audioTitles.Add("Game Audio");
+            if (!string.IsNullOrWhiteSpace(config.ChatAudioDeviceName))
+            {
+                AddWasapiInput(args, config.ChatAudioDeviceName);
+                audioTitles.Add("Chat Audio");
+            }
+
+            if (!string.IsNullOrWhiteSpace(config.MicrophoneDeviceName))
+            {
+                AddWasapiInput(args, config.MicrophoneDeviceName);
+                audioTitles.Add("Microphone");
+            }
+        }
+        else if (hasDshow && !string.IsNullOrWhiteSpace(config.MicrophoneDeviceName))
+        {
+            AddDshowAudioInput(args, config.MicrophoneDeviceName);
+            audioTitles.Add("Microphone");
+        }
+        else if (!hasWasapi)
+        {
+            LastError = "This FFmpeg build has no wasapi input, so replay buffer is recording video-only.";
+        }
 
         args.AddRange(new[] { "-map", "0:v:0" });
         var inputIndex = 1;
         var audioOutputIndex = 0;
-        foreach (var title in BuildAudioTitles(config))
+        foreach (var title in audioTitles)
         {
             args.AddRange(new[] { "-map", $"{inputIndex}:a:0", $"-metadata:s:a:{audioOutputIndex}", $"title={title}" });
             inputIndex++;
@@ -180,16 +205,14 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         return args.ToArray();
     }
 
-    private static IEnumerable<string> BuildAudioTitles(ReplayBufferConfig config)
-    {
-        yield return "Game Audio";
-        if (!string.IsNullOrWhiteSpace(config.ChatAudioDeviceName)) yield return "Chat Audio";
-        if (!string.IsNullOrWhiteSpace(config.MicrophoneDeviceName)) yield return "Microphone";
-    }
-
     private static void AddWasapiInput(List<string> args, string device)
     {
         args.AddRange(new[] { "-f", "wasapi", "-i", device });
+    }
+
+    private static void AddDshowAudioInput(List<string> args, string device)
+    {
+        args.AddRange(new[] { "-f", "dshow", "-i", $"audio={device}" });
     }
 
     private static Process StartProcess(string fileName, IEnumerable<string> args, bool redirect)
@@ -271,12 +294,13 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         }
     }
 
-    private static async Task<(int ExitCode, string Error)> RunProcessAsync(string fileName, IEnumerable<string> args, CancellationToken cancellationToken)
+    private static async Task<(int ExitCode, string Output, string Error)> RunProcessAsync(string fileName, IEnumerable<string> args, CancellationToken cancellationToken)
     {
         using var process = StartProcess(fileName, args, redirect: true);
+        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
-        return (process.ExitCode, await errorTask);
+        return (process.ExitCode, await outputTask, await errorTask);
     }
 
     private static void TryDelete(string path)
@@ -288,6 +312,24 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         catch
         {
             // Segment cleanup is best effort.
+        }
+    }
+
+    private static bool SupportsInputFormat(string name)
+    {
+        try
+        {
+            var result = RunProcessAsync("ffmpeg", new[] { "-hide_banner", "-formats" }, CancellationToken.None)
+                .GetAwaiter()
+                .GetResult();
+            var text = result.Error + Environment.NewLine + result.Output;
+            return text.Split(Environment.NewLine)
+                .Any(line => line.Contains($" {name} ", StringComparison.OrdinalIgnoreCase) ||
+                             line.EndsWith($" {name}", StringComparison.OrdinalIgnoreCase));
+        }
+        catch
+        {
+            return false;
         }
     }
 }
