@@ -7,6 +7,7 @@ namespace Eve.App.Services;
 public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
 {
     private static readonly Lazy<HashSet<string>> SupportedInputFormats = new(LoadSupportedInputFormats);
+    private static readonly Lazy<HashSet<string>> SupportedEncoders = new(LoadSupportedEncoders);
     private readonly Func<ReplayBufferConfig> _configProvider;
     private readonly string _bufferFolder;
     private readonly string _logPath;
@@ -108,8 +109,8 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         var outputPath = Path.Combine(outputFolder, $"Replay {DateTime.Now:yyyy-MM-dd HH-mm-ss}.mkv");
         await File.WriteAllLinesAsync(
             concatPath,
-            files.Select(file => $"file '{file.FullName.Replace("'", "'\\''")}'"),
-            Encoding.UTF8,
+            files.Select(file => $"file '{EscapeConcatPath(file.FullName)}'"),
+            new UTF8Encoding(false),
             cancellationToken);
 
         try
@@ -188,12 +189,9 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
             audioOutputIndex++;
         }
 
+        args.AddRange(BuildVideoEncoderArguments());
         args.AddRange(new[]
         {
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-tune", "zerolatency",
-            "-pix_fmt", "yuv420p",
             "-c:a", "aac",
             "-b:a", "192k",
             "-f", "segment",
@@ -204,6 +202,32 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         });
 
         return args.ToArray();
+    }
+
+    private static string[] BuildVideoEncoderArguments()
+    {
+        if (SupportsEncoder("h264_nvenc"))
+        {
+            return new[]
+            {
+                "-c:v", "h264_nvenc",
+                "-preset", "p1",
+                "-tune", "ull",
+                "-rc", "vbr",
+                "-cq", "23",
+                "-b:v", "0",
+                "-pix_fmt", "yuv420p"
+            };
+        }
+
+        return new[]
+        {
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-tune", "zerolatency",
+            "-threads", "4",
+            "-pix_fmt", "yuv420p"
+        };
     }
 
     private static void AddWasapiInput(List<string> args, string device)
@@ -321,6 +345,11 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         return SupportedInputFormats.Value.Contains(name);
     }
 
+    private static bool SupportsEncoder(string name)
+    {
+        return SupportedEncoders.Value.Contains(name);
+    }
+
     private static HashSet<string> LoadSupportedInputFormats()
     {
         var formats = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -345,6 +374,37 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         }
 
         return formats;
+    }
+
+    private static HashSet<string> LoadSupportedEncoders()
+    {
+        var encoders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var result = RunProcessAsync("ffmpeg", new[] { "-hide_banner", "-encoders" }, CancellationToken.None)
+                .GetAwaiter()
+                .GetResult();
+            var text = result.Error + Environment.NewLine + result.Output;
+            foreach (var line in text.Split(Environment.NewLine))
+            {
+                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (parts.Length >= 2 && parts[0].Contains('V'))
+                {
+                    encoders.Add(parts[1]);
+                }
+            }
+        }
+        catch
+        {
+            // Missing ffmpeg support is reported when capture starts.
+        }
+
+        return encoders;
+    }
+
+    private static string EscapeConcatPath(string path)
+    {
+        return path.Replace("\\", "\\\\").Replace("'", "'\\''");
     }
 }
 
