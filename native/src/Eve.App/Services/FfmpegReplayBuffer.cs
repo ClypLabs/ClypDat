@@ -8,6 +8,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
 {
     private readonly Func<ReplayBufferConfig> _configProvider;
     private readonly string _bufferFolder;
+    private readonly string _logPath;
     private Process? _process;
     private TimeSpan _duration = TimeSpan.FromSeconds(60);
 
@@ -18,26 +19,49 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "EVE",
             "replay-buffer");
+        _logPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "EVE",
+            "logs",
+            "replay-buffer.log");
     }
 
     public bool IsRecording => _process is { HasExited: false };
     public TimeSpan Duration => _duration;
+    public string LastError { get; private set; } = string.Empty;
+    public event EventHandler? RecordingStopped;
 
-    public Task StartAsync(CancellationToken cancellationToken = default)
+    public async Task StartAsync(CancellationToken cancellationToken = default)
     {
-        if (IsRecording) return Task.CompletedTask;
+        if (IsRecording) return;
 
         var config = _configProvider();
-        _duration = TimeSpan.FromSeconds(Math.Clamp(config.DurationSeconds, 10, 600));
+        _duration = TimeSpan.FromSeconds(Math.Clamp(config.DurationSeconds, 30, 1200));
         Directory.CreateDirectory(_bufferFolder);
+        Directory.CreateDirectory(Path.GetDirectoryName(_logPath)!);
+        LastError = string.Empty;
+        await File.WriteAllTextAsync(_logPath, $"EVE replay buffer {DateTime.Now:O}{Environment.NewLine}", cancellationToken);
         foreach (var file in Directory.EnumerateFiles(_bufferFolder, "segment_*.mkv"))
         {
             TryDelete(file);
         }
 
         var args = BuildCaptureArguments(config);
-        _process = StartProcess("ffmpeg", args, redirect: false);
-        return Task.CompletedTask;
+        _process = StartCaptureProcess("ffmpeg", args);
+        _process.Exited += Process_OnExited;
+
+        var started = await WaitForFirstSegmentAsync(TimeSpan.FromSeconds(4), cancellationToken);
+        if (started) return;
+
+        if (_process.HasExited)
+        {
+            LastError = ReadTail(_logPath);
+        }
+
+        await StopAsync(cancellationToken);
+        throw new InvalidOperationException(string.IsNullOrWhiteSpace(LastError)
+            ? $"Replay buffer did not start. See {_logPath}."
+            : LastError);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
@@ -60,6 +84,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         }
         finally
         {
+            process.Exited -= Process_OnExited;
             process.Dispose();
         }
     }
@@ -147,7 +172,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
             "-b:a", "192k",
             "-f", "segment",
             "-segment_time", "2",
-            "-segment_wrap", Math.Max(8, (int)Math.Ceiling(config.DurationSeconds / 2d) + 6).ToString(),
+            "-segment_wrap", Math.Max(8, (int)Math.Ceiling(_duration.TotalSeconds / 2d) + 6).ToString(),
             "-reset_timestamps", "1",
             Path.Combine(_bufferFolder, "segment_%05d.mkv")
         });
@@ -178,6 +203,72 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         };
         foreach (var arg in args) info.ArgumentList.Add(arg);
         return Process.Start(info) ?? throw new InvalidOperationException($"Could not start {fileName}.");
+    }
+
+    private Process StartCaptureProcess(string fileName, IEnumerable<string> args)
+    {
+        var info = new ProcessStartInfo(fileName)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardError = true,
+            RedirectStandardOutput = false
+        };
+        foreach (var arg in args) info.ArgumentList.Add(arg);
+        var process = Process.Start(info) ?? throw new InvalidOperationException($"Could not start {fileName}.");
+        process.EnableRaisingEvents = true;
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (string.IsNullOrWhiteSpace(e.Data)) return;
+            try
+            {
+                File.AppendAllText(_logPath, e.Data + Environment.NewLine);
+            }
+            catch
+            {
+                // Logging must not kill capture.
+            }
+        };
+        process.BeginErrorReadLine();
+        return process;
+    }
+
+    private async Task<bool> WaitForFirstSegmentAsync(TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var end = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < end)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_process is null || _process.HasExited) return false;
+            if (Directory.EnumerateFiles(_bufferFolder, "segment_*.mkv").Any(path => new FileInfo(path).Length > 0))
+            {
+                return true;
+            }
+
+            await Task.Delay(150, cancellationToken);
+        }
+
+        return _process is { HasExited: false };
+    }
+
+    private void Process_OnExited(object? sender, EventArgs e)
+    {
+        LastError = ReadTail(_logPath);
+        RecordingStopped?.Invoke(this, EventArgs.Empty);
+    }
+
+    private static string ReadTail(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return string.Empty;
+            var lines = File.ReadLines(path).TakeLast(20);
+            return string.Join(Environment.NewLine, lines);
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     private static async Task<(int ExitCode, string Error)> RunProcessAsync(string fileName, IEnumerable<string> args, CancellationToken cancellationToken)

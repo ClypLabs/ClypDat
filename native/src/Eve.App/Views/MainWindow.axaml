@@ -285,7 +285,7 @@
                 <TextBlock Text="Save hotkey" Foreground="#93A6B8" VerticalAlignment="Center" />
                 <Button Grid.Column="1" Content="{Binding HotkeyDisplay}" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Left" MinWidth="180" />
                 <TextBlock Grid.Row="1" Text="Replay length" Foreground="#93A6B8" VerticalAlignment="Center" />
-                <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding ReplayDurationSeconds}" Minimum="10" Maximum="600" Increment="5" Width="140" HorizontalAlignment="Left" />
+                <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}" Width="160" HorizontalAlignment="Left" />
                 <CheckBox Grid.Row="2" Grid.ColumnSpan="2" Content="Start replay buffer when EVE opens" IsChecked="{Binding StartReplayOnLaunch}" />
               </Grid>
             </StackPanel>

@@ -22,6 +22,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private AudioDeviceOption? _selectedChatAudioDevice;
     private AudioDeviceOption? _selectedMicrophoneDevice;
     private ProcessOption? _selectedProcessExclusion;
+    private ReplayDurationPreset? _selectedReplayDurationPreset;
     private string _recorderStatus = "Replay Off";
     private string _activeGame = "No game detected";
     private string _selectedVideoName = "No video selected";
@@ -52,9 +53,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ChatAudioDevices = new ObservableCollection<AudioDeviceOption>();
         MicrophoneDevices = new ObservableCollection<AudioDeviceOption>();
         OpenProcesses = new ObservableCollection<ProcessOption>();
+        ReplayDurationPresets = new ObservableCollection<ReplayDurationPreset>
+        {
+            new("30s", 30),
+            new("1 Minute", 60),
+            new("2 Minutes", 120),
+            new("3 Minutes", 180),
+            new("4 Minutes", 240),
+            new("5 Minutes", 300),
+            new("10 Minutes", 600),
+            new("15 Minutes", 900),
+            new("20 Minutes", 1200)
+        };
         ExcludedProcesses = new ObservableCollection<string>(Settings.GameAudioExcludedProcesses);
         RefreshAudioDevices();
-        RefreshOpenProcesses();
+        SelectedReplayDurationPreset = ReplayDurationPresets.FirstOrDefault(preset => preset.Seconds == Settings.ReplayDurationSeconds) ??
+                                       ReplayDurationPresets.First(preset => preset.Seconds == 60);
         _libraryRefreshDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
         _libraryRefreshDebounce.Tick += async (_, _) =>
         {
@@ -70,6 +84,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<AudioDeviceOption> ChatAudioDevices { get; }
     public ObservableCollection<AudioDeviceOption> MicrophoneDevices { get; }
     public ObservableCollection<ProcessOption> OpenProcesses { get; }
+    public ObservableCollection<ReplayDurationPreset> ReplayDurationPresets { get; }
     public ObservableCollection<string> ExcludedProcesses { get; }
 
     public IEnumerable<ClipCardViewModel> AllClips => ClipGroups.SelectMany(group => group.Clips);
@@ -174,14 +189,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public int ReplayDurationSeconds
+    public ReplayDurationPreset? SelectedReplayDurationPreset
     {
-        get => Settings.ReplayDurationSeconds;
+        get => _selectedReplayDurationPreset;
         set
         {
-            var clamped = Math.Clamp(value, 10, 600);
-            if (Settings.ReplayDurationSeconds == clamped) return;
-            Settings.ReplayDurationSeconds = clamped;
+            if (!SetProperty(ref _selectedReplayDurationPreset, value) || value is null) return;
+            Settings.ReplayDurationSeconds = value.Seconds;
             OnPropertyChanged();
             SaveSettings();
         }
@@ -597,11 +611,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedMicrophoneDevice = MicrophoneDevices.FirstOrDefault(device => device.Id == Settings.MicrophoneDeviceId) ?? MicrophoneDevices.FirstOrDefault();
     }
 
-    public void RefreshOpenProcesses()
+    public async Task RefreshOpenProcessesAsync()
     {
         var selectedName = SelectedProcessExclusion?.Name;
+        var processes = await Task.Run(ProcessListService.GetOpenExecutables);
         OpenProcesses.Clear();
-        foreach (var process in ProcessListService.GetOpenExecutables())
+        foreach (var process in processes)
         {
             OpenProcesses.Add(process);
         }
@@ -614,7 +629,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReplayBufferConfig CreateReplayConfig()
     {
         return new ReplayBufferConfig(
-            ReplayDurationSeconds,
+            SelectedReplayDurationPreset?.Seconds ?? Settings.ReplayDurationSeconds,
             SelectedChatAudioDevice?.IsDisabled == true ? string.Empty : SelectedChatAudioDevice?.Name ?? string.Empty,
             SelectedMicrophoneDevice?.Name ?? string.Empty);
     }

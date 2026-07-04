@@ -44,6 +44,7 @@ public sealed partial class MainWindow : Window
         Closed += (_, _) =>
         {
             _globalHotkey?.Dispose();
+            if (_replayBuffer is not null) _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
             _replayBuffer?.Dispose();
             _playback?.Dispose();
             ViewModel?.Dispose();
@@ -61,6 +62,7 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null || _replayBuffer is not null) return;
 
         _replayBuffer = new FfmpegReplayBuffer(ViewModel.CreateReplayConfig);
+        _replayBuffer.RecordingStopped += ReplayBuffer_OnRecordingStopped;
         _globalHotkey = new GlobalHotkeyService();
         _globalHotkey.SetHotkey(ViewModel.Settings.SaveReplayHotkey);
         _globalHotkey.Pressed += (_, _) => Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync());
@@ -176,7 +178,12 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null) return;
         InitializeReplayServices();
-        if (_replayBuffer is null || !_replayBuffer.IsRecording) return;
+        if (_replayBuffer is null || !_replayBuffer.IsRecording)
+        {
+            if (ViewModel.IsReplayRecording) ViewModel.IsReplayRecording = false;
+            await ShowMessageAsync("Clip failed", "Replay buffer is not running.");
+            return;
+        }
 
         try
         {
@@ -188,6 +195,14 @@ public sealed partial class MainWindow : Window
         {
             await ShowMessageAsync("Clip failed", error.Message);
         }
+    }
+
+    private void ReplayBuffer_OnRecordingStopped(object? sender, EventArgs e)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (ViewModel is not null) ViewModel.IsReplayRecording = false;
+        });
     }
 
     private async Task EnsureLibraryFolderAsync()
@@ -277,9 +292,11 @@ public sealed partial class MainWindow : Window
         ViewModel?.CloseEditor();
     }
 
-    private void OpenSettingsButton_OnClick(object? sender, RoutedEventArgs e)
+    private async void OpenSettingsButton_OnClick(object? sender, RoutedEventArgs e)
     {
-        ViewModel?.OpenSettings();
+        if (ViewModel is null) return;
+        ViewModel.OpenSettings();
+        await ViewModel.RefreshOpenProcessesAsync();
     }
 
     private void CloseSettingsButton_OnClick(object? sender, RoutedEventArgs e)
@@ -319,9 +336,12 @@ public sealed partial class MainWindow : Window
         ViewModel?.AddSelectedProcessExclusion();
     }
 
-    private void RefreshProcessesButton_OnClick(object? sender, RoutedEventArgs e)
+    private async void RefreshProcessesButton_OnClick(object? sender, RoutedEventArgs e)
     {
-        ViewModel?.RefreshOpenProcesses();
+        if (ViewModel is not null)
+        {
+            await ViewModel.RefreshOpenProcessesAsync();
+        }
     }
 
     private void RemoveExcludedProcessButton_OnClick(object? sender, RoutedEventArgs e)

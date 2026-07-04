@@ -28,6 +28,7 @@ public sealed class GlobalHotkeyService : IDisposable
     public void SetHotkey(string hotkey)
     {
         _combo = HotkeyCombo.Parse(hotkey);
+        _pressed.Clear();
         _fired = false;
     }
 
@@ -61,7 +62,7 @@ public sealed class GlobalHotkeyService : IDisposable
                 if (message is WmKeyDown or WmSysKeyDown)
                 {
                     _pressed.Add(key);
-                    if (!_fired && _combo.Count > 0 && _combo.SetEquals(_pressed))
+                    if (!_fired && _combo.Count > 0 && _combo.All(key => _pressed.Contains(key)))
                     {
                         _fired = true;
                         Pressed?.Invoke(this, EventArgs.Empty);

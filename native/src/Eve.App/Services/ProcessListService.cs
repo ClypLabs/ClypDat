@@ -17,6 +17,7 @@ public static class ProcessListService
 
     private static string GetProcessName(Process process)
     {
+        var fallbackName = $"{process.ProcessName}.exe";
         try
         {
             var fileName = process.MainModule?.FileName;
@@ -34,6 +35,6 @@ public static class ProcessListService
             process.Dispose();
         }
 
-        return $"{process.ProcessName}.exe";
+        return fallbackName;
     }
 }
