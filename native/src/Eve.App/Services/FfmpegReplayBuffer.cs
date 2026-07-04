@@ -741,7 +741,8 @@ public sealed record ReplayBufferConfig(
     string ChatAudioDeviceId,
     string ChatAudioProcessName,
     string MicrophoneDeviceId,
-    string MicrophoneDeviceName);
+    string MicrophoneDeviceName,
+    IReadOnlyList<string> GameAudioExcludedProcesses);
 
 internal sealed class AudioCaptureSession : IDisposable
 {

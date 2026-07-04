@@ -320,7 +320,7 @@
           <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="6" Padding="18">
             <StackPanel Spacing="14">
               <TextBlock Text="Game Audio Exclusions" Foreground="#C4D0DF" FontWeight="Bold" />
-              <TextBlock Text="Saved for app routing; current replay still captures the full system mix." Foreground="#718296" />
+              <TextBlock Text="Saved for app routing; app-level audio isolation is still in progress." Foreground="#718296" />
               <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
                 <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedProcessExclusion}" />
                 <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />

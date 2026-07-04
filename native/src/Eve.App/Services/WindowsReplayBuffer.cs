@@ -1,5 +1,9 @@
 using Eve.Capture.Abstractions;
+using NAudio.CoreAudioApi;
+using NAudio.Wave;
 using ScreenRecorderLib;
+using System.Diagnostics;
+using System.Text;
 
 namespace Eve.App.Services;
 
@@ -16,6 +20,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     private DateTime _startedAtUtc;
     private TaskCompletionSource<string>? _completion;
     private readonly SemaphoreSlim _transition = new(1, 1);
+    private readonly List<AudioCaptureSession> _audioCaptures = new();
 
     public WindowsReplayBuffer(Func<ReplayBufferConfig> configProvider)
     {
@@ -39,6 +44,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         _config = _configProvider();
         Duration = TimeSpan.FromSeconds(Math.Clamp(_config.DurationSeconds, 30, 1200));
         StartRecorder();
+        StartAudioCaptures(_config);
         return Task.CompletedTask;
     }
 
@@ -50,7 +56,11 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             _rotationTimer?.Dispose();
             _rotationTimer = null;
             var recorder = _recorder;
-            if (recorder is null) return;
+            if (recorder is null)
+            {
+                StopAudioCaptures();
+                return;
+            }
             var completion = _completion;
             recorder.Stop();
             if (completion is not null)
@@ -63,6 +73,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             TryDelete(_previousPath);
             _activePath = string.Empty;
             _previousPath = string.Empty;
+            StopAudioCaptures();
         }
         finally
         {
@@ -96,15 +107,27 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             }
 
             Directory.CreateDirectory(outputFolder);
-            var sourcePath = DateTime.UtcNow - _startedAtUtc < TimeSpan.FromSeconds(2) && File.Exists(_previousPath)
-                ? _previousPath
-                : await StopCurrentRecordingAsync(cancellationToken);
+            var usePrevious = DateTime.UtcNow - _startedAtUtc < TimeSpan.FromSeconds(2) && File.Exists(_previousPath);
+            var sourcePath = usePrevious ? _previousPath : await StopCurrentRecordingAsync(cancellationToken);
+            var stoppedCurrent = string.Equals(sourcePath, _activePath, StringComparison.OrdinalIgnoreCase);
             var outputPath = Path.Combine(outputFolder, $"Replay {DateTime.Now:yyyy-MM-dd HH-mm-ss}.mp4");
-            File.Copy(sourcePath, outputPath, overwrite: true);
-            if (string.Equals(sourcePath, _activePath, StringComparison.OrdinalIgnoreCase))
+            StopAudioCaptures();
+            try
             {
-                TryDelete(sourcePath);
-                StartRecorder();
+                await MuxAudioTracksAsync(sourcePath, outputPath, cancellationToken);
+                if (stoppedCurrent)
+                {
+                    TryDelete(sourcePath);
+                }
+            }
+            finally
+            {
+                if (stoppedCurrent && !IsRecording)
+                {
+                    StartRecorder();
+                }
+
+                StartAudioCaptures(_config ?? _configProvider());
             }
 
             return outputPath;
@@ -173,9 +196,9 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         var options = RecorderOptions.DefaultMainMonitor;
         options.AudioOptions = new AudioOptions
         {
-            IsAudioEnabled = true,
-            IsInputDeviceEnabled = !string.IsNullOrWhiteSpace(config.MicrophoneDeviceName),
-            IsOutputDeviceEnabled = true
+            IsAudioEnabled = false,
+            IsInputDeviceEnabled = false,
+            IsOutputDeviceEnabled = false
         };
         options.OutputOptions = new OutputOptions
         {
@@ -193,6 +216,84 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         };
 
         return options;
+    }
+
+    private void StartAudioCaptures(ReplayBufferConfig config)
+    {
+        StopAudioCaptures();
+        try
+        {
+            using var enumerator = new MMDeviceEnumerator();
+            StartLoopbackCapture(enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia), "Game Audio", "game");
+            if (!string.IsNullOrWhiteSpace(config.MicrophoneDeviceId))
+            {
+                StartMicrophoneCapture(enumerator.GetDevice(config.MicrophoneDeviceId), "Microphone", "microphone");
+            }
+        }
+        catch
+        {
+            // Audio capture is best effort; save path creates silent missing tracks.
+        }
+    }
+
+    private void StartLoopbackCapture(MMDevice device, string title, string fileName)
+    {
+        var path = Path.Combine(_bufferFolder, $"{fileName}.wav");
+        TryDelete(path);
+        var capture = new WasapiLoopbackCapture(device);
+        _audioCaptures.Add(AudioCaptureSession.Start(capture, path, title));
+    }
+
+    private void StartMicrophoneCapture(MMDevice device, string title, string fileName)
+    {
+        var path = Path.Combine(_bufferFolder, $"{fileName}.wav");
+        TryDelete(path);
+        var capture = new WasapiCapture(device);
+        _audioCaptures.Add(AudioCaptureSession.Start(capture, path, title));
+    }
+
+    private void StopAudioCaptures()
+    {
+        foreach (var capture in _audioCaptures.ToArray())
+        {
+            capture.Dispose();
+        }
+
+        _audioCaptures.Clear();
+    }
+
+    private async Task MuxAudioTracksAsync(string videoPath, string outputPath, CancellationToken cancellationToken)
+    {
+        var duration = Math.Max(1, Duration.TotalSeconds);
+        var audioInputs = new[]
+        {
+            new AudioMuxInput("Game Audio", Path.Combine(_bufferFolder, "game.wav")),
+            new AudioMuxInput("Chat Audio", string.Empty),
+            new AudioMuxInput("Microphone", Path.Combine(_bufferFolder, "microphone.wav"))
+        };
+
+        var args = new List<string> { "-y", "-i", videoPath };
+        foreach (var input in audioInputs)
+        {
+            if (!string.IsNullOrWhiteSpace(input.Path) && File.Exists(input.Path) && new FileInfo(input.Path).Length > 44)
+            {
+                args.AddRange(new[] { "-sseof", $"-{duration:0.###}", "-i", input.Path });
+            }
+            else
+            {
+                args.AddRange(new[] { "-f", "lavfi", "-t", $"{duration:0.###}", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000" });
+            }
+        }
+
+        args.AddRange(new[] { "-map", "0:v:0", "-c:v", "copy" });
+        for (var i = 0; i < audioInputs.Length; i++)
+        {
+            args.AddRange(new[] { "-map", $"{i + 1}:a:0", $"-metadata:s:a:{i}", $"title={audioInputs[i].Title}" });
+        }
+
+        args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k", "-shortest", outputPath });
+        var result = await RunProcessAsync("ffmpeg", args, cancellationToken);
+        if (result.ExitCode != 0) throw new InvalidOperationException(string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg mux failed." : result.Error);
     }
 
     private void Recorder_OnRecordingComplete(object? sender, RecordingCompleteEventArgs e)
@@ -239,4 +340,30 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             // Cleanup best effort.
         }
     }
+
+    private static async Task<(int ExitCode, string Output, string Error)> RunProcessAsync(string fileName, IEnumerable<string> args, CancellationToken cancellationToken)
+    {
+        using var process = StartProcess(fileName, args);
+        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        await process.WaitForExitAsync(cancellationToken);
+        return (process.ExitCode, await outputTask, await errorTask);
+    }
+
+    private static Process StartProcess(string fileName, IEnumerable<string> args)
+    {
+        var info = new ProcessStartInfo(fileName)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            StandardErrorEncoding = Encoding.UTF8,
+            StandardOutputEncoding = Encoding.UTF8
+        };
+        foreach (var arg in args) info.ArgumentList.Add(arg);
+        return Process.Start(info) ?? throw new InvalidOperationException($"Could not start {fileName}.");
+    }
+
+    private sealed record AudioMuxInput(string Title, string Path);
 }

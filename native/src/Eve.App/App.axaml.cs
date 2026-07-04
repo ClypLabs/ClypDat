@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform;
+using System.Diagnostics;
 using Eve.App.Services;
 using Eve.App.ViewModels;
 using Eve.App.Views;
@@ -13,6 +14,7 @@ public sealed partial class App : Application
 {
     private TrayIcon? _trayIcon;
     private MainWindow? _mainWindow;
+    private Stream? _trayIconStream;
 
     public override void Initialize()
     {
@@ -48,18 +50,30 @@ public sealed partial class App : Application
         if (_mainWindow is null) return;
         try
         {
-            using var stream = AssetLoader.Open(new Uri("avares://Eve.App/Assets/eve-icon.ico"));
+            _trayIconStream = AssetLoader.Open(new Uri("avares://Eve.App/Assets/eve-icon.ico"));
+            var openItem = new NativeMenuItem("Open EVE");
+            openItem.Click += (_, _) => RestoreMainWindow();
+            var quitItem = new NativeMenuItem("Quit");
+            quitItem.Click += (_, _) =>
+            {
+                _trayIcon?.Dispose();
+                if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+                {
+                    desktop.Shutdown();
+                }
+            };
             _trayIcon = new TrayIcon
             {
-                Icon = new WindowIcon(stream),
-                ToolTipText = "EVE"
+                Icon = new WindowIcon(_trayIconStream),
+                ToolTipText = "EVE",
+                Menu = new NativeMenu { Items = { openItem, quitItem } }
             };
             _trayIcon.Clicked += (_, _) => RestoreMainWindow();
             _trayIcon.IsVisible = true;
         }
-        catch
+        catch (Exception error)
         {
-            // Tray is convenience-only.
+            Debug.WriteLine($"Tray unavailable: {error.Message}");
         }
     }
 

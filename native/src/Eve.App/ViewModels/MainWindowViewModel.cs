@@ -708,7 +708,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             string.Empty,
             SelectedChatProcess?.Name ?? Settings.ChatAudioProcessName,
             SelectedMicrophoneDevice?.Id ?? string.Empty,
-            SelectedMicrophoneDevice?.Name ?? string.Empty);
+            SelectedMicrophoneDevice?.Name ?? string.Empty,
+            Settings.GameAudioExcludedProcesses.ToArray());
     }
 
     public void SetDuration(TimeSpan duration)
