@@ -308,7 +308,7 @@
             <StackPanel Spacing="14">
               <TextBlock Text="Audio" Foreground="#C4D0DF" FontWeight="Bold" />
               <Grid ColumnDefinitions="220,*,Auto" RowDefinitions="Auto,Auto" RowSpacing="12" ColumnSpacing="16">
-                <TextBlock Text="Chat Audio app" Foreground="#93A6B8" VerticalAlignment="Center" />
+                <TextBlock Text="Chat Audio App" Foreground="#93A6B8" VerticalAlignment="Center" />
                 <ComboBox Grid.Column="1" Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedChatProcess}" MaxWidth="520" />
                 <Button Grid.Column="2" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
                 <TextBlock Grid.Row="1" Text="Microphone" Foreground="#93A6B8" VerticalAlignment="Center" />
