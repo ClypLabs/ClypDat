@@ -99,30 +99,36 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         try
         {
             if (!IsRecording) throw new InvalidOperationException("Replay buffer is not running.");
-            if (DateTime.UtcNow - _startedAtUtc < TimeSpan.FromSeconds(2) && _segments.Count == 0)
-            {
-                throw new InvalidOperationException("Replay buffer is still warming up.");
-            }
 
             Directory.CreateDirectory(outputFolder);
             var activeSegment = await StopCurrentRecordingAsync(cancellationToken);
-            AddSegment(activeSegment);
-            sourceSegments = GetReplaySegments();
-            if (sourceSegments.Length == 0)
+            try
             {
-                throw new InvalidOperationException("Replay buffer has no finished segments yet.");
-            }
+                AddSegment(activeSegment);
+                sourceSegments = GetReplaySegments();
+                if (sourceSegments.Length == 0)
+                {
+                    throw new InvalidOperationException("Replay buffer has no finished segments yet.");
+                }
 
-            clipEndUtc = activeSegment.EndedAtUtc;
-            clipStartUtc = clipEndUtc - Duration;
-            if (sourceSegments.First().StartedAtUtc > clipStartUtc + TimeSpan.FromSeconds(1))
+                clipEndUtc = activeSegment.EndedAtUtc;
+                var firstAvailableUtc = sourceSegments.First().StartedAtUtc;
+                clipStartUtc = new[] { clipEndUtc - Duration, firstAvailableUtc }.Max();
+                if (clipEndUtc - clipStartUtc < TimeSpan.FromSeconds(1))
+                {
+                    throw new InvalidOperationException("Replay just started. Try again in a second.");
+                }
+
+                config = _config ?? _configProvider();
+                PruneSegments();
+            }
+            finally
             {
-                throw new InvalidOperationException($"Replay buffer is still warming up ({FormatDuration(clipEndUtc - sourceSegments.First().StartedAtUtc)} available).");
+                if (!IsRecording)
+                {
+                    StartRecorder();
+                }
             }
-
-            config = _config ?? _configProvider();
-            StartRecorder();
-            PruneSegments();
         }
         finally
         {
@@ -133,7 +139,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         var outputPath = Path.Combine(outputFolder, $"Replay {DateTime.Now:yyyy-MM-dd HH-mm-ss}.mp4");
         try
         {
-            await MuxAudioTracksAsync(sourcePath, outputPath, clipStartUtc, config, cancellationToken);
+            await MuxAudioTracksAsync(sourcePath, outputPath, clipStartUtc, (clipEndUtc - clipStartUtc).TotalSeconds, config, cancellationToken);
         }
         finally
         {
@@ -467,11 +473,11 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         _audioCaptures.Clear();
     }
 
-    private async Task MuxAudioTracksAsync(string videoPath, string outputPath, DateTime clipStartUtc, ReplayBufferConfig config, CancellationToken cancellationToken)
+    private async Task MuxAudioTracksAsync(string videoPath, string outputPath, DateTime clipStartUtc, double clipDurationSeconds, ReplayBufferConfig config, CancellationToken cancellationToken)
     {
         var gameAudioPreExcluded = _gameAudioPreExcluded;
         var snapshots = new List<string>();
-        var duration = Math.Max(1, Duration.TotalSeconds);
+        var duration = Math.Max(1, clipDurationSeconds);
         var captures = _audioCaptures.ToArray();
         var chatInputs = captures
             .Where(capture => capture.Path.Contains("\\chat_", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(capture.Path).StartsWith("chat_", StringComparison.OrdinalIgnoreCase))
