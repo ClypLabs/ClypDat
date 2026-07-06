@@ -20,6 +20,8 @@ public sealed class PlaybackSession : IDisposable
     private bool _disposed;
     private bool _ended;
     private bool _isSeeking;
+    private bool _shouldPlay;
+    private long _seekVersion;
 
     public PlaybackSession()
     {
@@ -120,6 +122,7 @@ public sealed class PlaybackSession : IDisposable
         }
 
         _ended = false;
+        _shouldPlay = true;
         VideoPlayer.Time = milliseconds;
         SeekAudio(time);
         VideoPlayer.Play();
@@ -129,6 +132,7 @@ public sealed class PlaybackSession : IDisposable
 
     public void Pause()
     {
+        _shouldPlay = false;
         _audioOutput?.Stop();
         VideoPlayer.Pause();
     }
@@ -140,6 +144,7 @@ public sealed class PlaybackSession : IDisposable
             _audioOutput?.Stop();
             VideoPlayer.Stop();
             _ended = false;
+            _shouldPlay = false;
         }
         catch (Exception error)
         {
@@ -154,22 +159,28 @@ public sealed class PlaybackSession : IDisposable
 
     public async Task SeekAsync(TimeSpan time, bool resumePlayback = false, CancellationToken cancellationToken = default)
     {
+        var seekVersion = Interlocked.Increment(ref _seekVersion);
         var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
         _ended = false;
         _isSeeking = true;
+        _shouldPlay = resumePlayback;
         try
         {
             _audioOutput?.Stop();
             VideoPlayer.Pause();
             VideoPlayer.Time = milliseconds;
             await Task.Delay(80, cancellationToken).ConfigureAwait(false);
+            if (seekVersion != Interlocked.Read(ref _seekVersion)) return;
             var settledTime = Position;
             SeekAudio(time);
             if (resumePlayback)
             {
                 VideoPlayer.Play();
                 await Task.Delay(40, cancellationToken).ConfigureAwait(false);
-                _audioOutput?.Play();
+                if (seekVersion == Interlocked.Read(ref _seekVersion) && _shouldPlay)
+                {
+                    _audioOutput?.Play();
+                }
             }
 
             AppLog.Info($"Editor seek requested={time.TotalSeconds:0.###}s, settled={settledTime.TotalSeconds:0.###}s, resume={resumePlayback}.");
@@ -183,6 +194,7 @@ public sealed class PlaybackSession : IDisposable
     public void EnsurePlayingIfNeeded(bool shouldPlay)
     {
         if (!shouldPlay) return;
+        _shouldPlay = true;
         if (!VideoPlayer.IsPlaying) VideoPlayer.Play();
         if (_audioOutput is not null && _audioOutput.PlaybackState != PlaybackState.Playing) _audioOutput.Play();
     }
@@ -198,7 +210,7 @@ public sealed class PlaybackSession : IDisposable
 
     public void SyncAudioStreams()
     {
-        if (_isSeeking || _audioOutput is null || !VideoPlayer.IsPlaying) return;
+        if (_isSeeking || !_shouldPlay || _audioOutput is null || !VideoPlayer.IsPlaying) return;
         if (_audioOutput.PlaybackState != PlaybackState.Playing)
         {
             _audioOutput.Play();
@@ -209,7 +221,7 @@ public sealed class PlaybackSession : IDisposable
     {
         if (_audioOutput is null) return;
         SeekAudio(Position);
-        if (VideoPlayer.IsPlaying)
+        if (_shouldPlay && VideoPlayer.IsPlaying)
         {
             _audioOutput.Play();
         }

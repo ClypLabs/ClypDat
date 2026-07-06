@@ -566,6 +566,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         var systemPath = SnapshotAudioFile(captures.FirstOrDefault(capture => string.Equals(Path.GetFileName(capture.Path), "game.wav", StringComparison.OrdinalIgnoreCase)), sourceSegments, videoOffsetSeconds, duration, snapshots);
         var microphonePath = SnapshotAudioFile(captures.FirstOrDefault(capture => string.Equals(Path.GetFileName(capture.Path), "microphone.wav", StringComparison.OrdinalIgnoreCase)), sourceSegments, videoOffsetSeconds, duration, snapshots);
         AppLog.Info($"Replay mux inputs: system={(IsUsableAudioFile(systemPath) ? 1 : 0)}, chat={chatInputs.Length}, excluded={excludedInputs.Length}, microphone={(IsUsableAudioFile(microphonePath) ? 1 : 0)}.");
+        AppLog.Info($"Replay mux bytes: system={AudioFileLength(systemPath)}, chat={string.Join(",", chatInputs.Select(AudioFileLength))}, excluded={string.Join(",", excludedInputs.Select(AudioFileLength))}, microphone={AudioFileLength(microphonePath)}.");
         var inputs = new List<AudioMuxInput>
         {
             new("system", IsUsableAudioFile(systemPath) ? systemPath : string.Empty)
@@ -719,7 +720,6 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             .ToArray();
         var excludedPids = exclusionNames
             .SelectMany(ResolveProcessIds)
-            .Except(chatPids)
             .Distinct()
             .OrderBy(pid => pid)
             .ToArray();
@@ -851,5 +851,10 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     private static bool IsUsableAudioFile(string path)
     {
         return !string.IsNullOrWhiteSpace(path) && File.Exists(path) && new FileInfo(path).Length > 44;
+    }
+
+    private static long AudioFileLength(string path)
+    {
+        return IsUsableAudioFile(path) ? new FileInfo(path).Length : 0;
     }
 }

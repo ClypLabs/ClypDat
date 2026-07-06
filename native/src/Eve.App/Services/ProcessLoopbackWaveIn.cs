@@ -18,6 +18,7 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
     private readonly IAudioCaptureClientNative _captureClient;
     private CancellationTokenSource? _cts;
     private Task? _captureTask;
+    private bool _loggedFirstPacket;
 
     public ProcessLoopbackWaveIn(int processId, ProcessLoopbackCaptureMode mode)
     {
@@ -25,29 +26,35 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
         _processId = (uint)processId;
         _mode = mode;
         _audioClient = ActivateAudioClient(_processId, _mode);
-        var mixFormatPtr = IntPtr.Zero;
-        try
-        {
-            Marshal.ThrowExceptionForHR(_audioClient.GetMixFormat(out mixFormatPtr));
-            WaveFormat = WaveFormat.MarshalFromPtr(mixFormatPtr);
-        }
-        finally
-        {
-            if (mixFormatPtr != IntPtr.Zero) Marshal.FreeCoTaskMem(mixFormatPtr);
-        }
+        WaveFormat = GetSharedRenderFormat();
 
         var sessionGuid = Guid.Empty;
-        Marshal.ThrowExceptionForHR(_audioClient.Initialize(
-            AudioClientShareMode.Shared,
-            AudioClientStreamFlags.Loopback,
-            0,
-            0,
-            WaveFormat,
-            ref sessionGuid));
+        try
+        {
+            Marshal.ThrowExceptionForHR(_audioClient.Initialize(
+                AudioClientShareMode.Shared,
+                AudioClientStreamFlags.Loopback,
+                0,
+                0,
+                WaveFormat,
+                ref sessionGuid));
+        }
+        catch
+        {
+            Marshal.ThrowExceptionForHR(_audioClient.Initialize(
+                AudioClientShareMode.Shared,
+                AudioClientStreamFlags.None,
+                0,
+                0,
+                WaveFormat,
+                ref sessionGuid));
+        }
+
         object service;
         var captureClientGuid = AudioCaptureClientGuid;
         Marshal.ThrowExceptionForHR(_audioClient.GetService(captureClientGuid, out service));
         _captureClient = (IAudioCaptureClientNative)service;
+        AppLog.Info($"Process loopback initialized: pid={_processId}, mode={_mode}, format={WaveFormat.SampleRate}Hz/{WaveFormat.Channels}ch/{WaveFormat.BitsPerSample}bit.");
     }
 
     public WaveFormat WaveFormat { get; set; }
@@ -115,7 +122,16 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
                     }
 
                     _captureClient.ReleaseBuffer(frames);
-                    if (bytes > 0) DataAvailable?.Invoke(this, new WaveInEventArgs(buffer, bytes));
+                    if (bytes > 0)
+                    {
+                        if (!_loggedFirstPacket)
+                        {
+                            _loggedFirstPacket = true;
+                            AppLog.Info($"Process loopback first packet: pid={_processId}, mode={_mode}, frames={frames}, bytes={bytes}, silent={flags.HasFlag(AudioClientBufferFlags.Silent)}.");
+                        }
+
+                        DataAvailable?.Invoke(this, new WaveInEventArgs(buffer, bytes));
+                    }
                     Marshal.ThrowExceptionForHR(_captureClient.GetNextPacketSize(out packetFrames));
                 }
 
@@ -175,6 +191,20 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
         {
             Marshal.FreeHGlobal(propVariantPtr);
             Marshal.FreeHGlobal(activationPtr);
+        }
+    }
+
+    private static WaveFormat GetSharedRenderFormat()
+    {
+        try
+        {
+            using var enumerator = new MMDeviceEnumerator();
+            using var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+            return device.AudioClient.MixFormat;
+        }
+        catch
+        {
+            return WaveFormat.CreateIeeeFloatWaveFormat(48000, 2);
         }
     }
 
