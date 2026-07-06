@@ -150,14 +150,17 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
             ProcessLoopbackMode = mode == ProcessLoopbackCaptureMode.IncludeTargetProcessTree ? 0 : 1
         };
         var activationPtr = Marshal.AllocHGlobal(Marshal.SizeOf<AudioClientActivationParamsNative>());
-        var propVariantPtr = Marshal.AllocHGlobal(Marshal.SizeOf<PropVariantNative>());
+        var propVariantPtr = Marshal.AllocHGlobal(Marshal.SizeOf<PropVariantBlobNative>());
         try
         {
             Marshal.StructureToPtr(activation, activationPtr, false);
-            Marshal.ThrowExceptionForHR(InitPropVariantFromBuffer(
-                activationPtr,
-                (uint)Marshal.SizeOf<AudioClientActivationParamsNative>(),
-                propVariantPtr));
+            var propVariant = new PropVariantBlobNative
+            {
+                VariantType = 65,
+                BlobSize = (uint)Marshal.SizeOf<AudioClientActivationParamsNative>(),
+                BlobData = activationPtr
+            };
+            Marshal.StructureToPtr(propVariant, propVariantPtr, false);
             var handler = new ActivateAudioInterfaceCompletionHandler();
             var audioClientGuid = AudioClientGuid;
             Marshal.ThrowExceptionForHR(ActivateAudioInterfaceAsync(
@@ -170,7 +173,6 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
         }
         finally
         {
-            PropVariantClear(propVariantPtr);
             Marshal.FreeHGlobal(propVariantPtr);
             Marshal.FreeHGlobal(activationPtr);
         }
@@ -184,12 +186,6 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
         IActivateAudioInterfaceCompletionHandler completionHandler,
         out IActivateAudioInterfaceAsyncOperation activationOperation);
 
-    [DllImport("Propsys.dll", ExactSpelling = true)]
-    private static extern int InitPropVariantFromBuffer(IntPtr pv, uint cb, IntPtr propvar);
-
-    [DllImport("Ole32.dll", ExactSpelling = true)]
-    private static extern int PropVariantClear(IntPtr propvar);
-
     [StructLayout(LayoutKind.Sequential)]
     private struct AudioClientActivationParamsNative
     {
@@ -199,14 +195,14 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct PropVariantNative
+    private struct PropVariantBlobNative
     {
         public ushort VariantType;
         public ushort Reserved1;
         public ushort Reserved2;
         public ushort Reserved3;
-        public IntPtr Data1;
-        public IntPtr Data2;
+        public uint BlobSize;
+        public IntPtr BlobData;
     }
 
     [ComImport]
