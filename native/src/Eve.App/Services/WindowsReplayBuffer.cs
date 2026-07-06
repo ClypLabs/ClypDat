@@ -21,7 +21,6 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     private string _activePath = string.Empty;
     private ReplayBufferConfig? _config;
     private string _audioRouteKey = string.Empty;
-    private bool _gameAudioPreExcluded;
     private DateTime _startedAtUtc;
     private TaskCompletionSource<string>? _completion;
     private readonly SemaphoreSlim _transition = new(1, 1);
@@ -135,11 +134,13 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             _transition.Release();
         }
 
-        var sourcePath = await BuildReplayVideoAsync(sourceSegments, clipEndUtc, cancellationToken);
+        var sourceStartUtc = sourceSegments.First().StartedAtUtc;
+        var videoOffsetSeconds = Math.Max(0, (clipStartUtc - sourceStartUtc).TotalSeconds);
+        var sourcePath = await BuildReplayVideoAsync(sourceSegments, cancellationToken);
         var outputPath = Path.Combine(outputFolder, $"Replay {DateTime.Now:yyyy-MM-dd HH-mm-ss}.mp4");
         try
         {
-            await MuxAudioTracksAsync(sourcePath, outputPath, clipStartUtc, (clipEndUtc - clipStartUtc).TotalSeconds, config, cancellationToken);
+            await MuxAudioTracksAsync(sourcePath, outputPath, videoOffsetSeconds, clipStartUtc, (clipEndUtc - clipStartUtc).TotalSeconds, config, cancellationToken);
         }
         finally
         {
@@ -243,20 +244,10 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         using var enumerator = new MMDeviceEnumerator();
         try
         {
-            var gameExcludedPids = routes.ChatProcessIds.Concat(routes.ExcludedProcessIds).Distinct().ToArray();
-            _gameAudioPreExcluded = gameExcludedPids.Length == 1;
-            if (_gameAudioPreExcluded)
-            {
-                StartProcessLoopbackCapture(gameExcludedPids[0], ProcessLoopbackCaptureMode.ExcludeTargetProcessTree, "Game Audio", "game");
-            }
-            else
-            {
-                StartLoopbackCapture(enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia), "Game Audio", "game");
-            }
+            StartLoopbackCapture(enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia), "Game Audio", "game");
         }
         catch
         {
-            _gameAudioPreExcluded = false;
             // Game audio is best effort; save path creates silent missing tracks.
         }
 
@@ -297,7 +288,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         }
 
         _audioRouteTimer?.Dispose();
-        _audioRouteTimer = new Timer(_ => RefreshAudioRoutes(), null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
+        _audioRouteTimer = null;
     }
 
     private ReplayVideoSegment[] GetReplaySegments()
@@ -324,13 +315,10 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         }
     }
 
-    private async Task<string> BuildReplayVideoAsync(IReadOnlyList<ReplayVideoSegment> segments, DateTime clipEndUtc, CancellationToken cancellationToken)
+    private async Task<string> BuildReplayVideoAsync(IReadOnlyList<ReplayVideoSegment> segments, CancellationToken cancellationToken)
     {
         var concatPath = Path.Combine(_bufferFolder, $"concat_{Guid.NewGuid():N}.txt");
         var stitchedPath = Path.Combine(_bufferFolder, $"stitched_{Guid.NewGuid():N}.mp4");
-        var trimmedPath = Path.Combine(_bufferFolder, $"trimmed_{Guid.NewGuid():N}.mp4");
-        var availableSeconds = Math.Max(0.1, (clipEndUtc - segments.First().StartedAtUtc).TotalSeconds);
-        var trimSeconds = Math.Min(Duration.TotalSeconds, availableSeconds);
         try
         {
             await File.WriteAllLinesAsync(
@@ -347,21 +335,11 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(concatResult.Error) ? "ffmpeg concat failed." : concatResult.Error);
             }
 
-            var trimResult = await RunProcessAsync(
-                "ffmpeg",
-                new[] { "-y", "-sseof", $"-{trimSeconds:0.###}", "-i", stitchedPath, "-c", "copy", trimmedPath },
-                cancellationToken);
-            if (trimResult.ExitCode != 0)
-            {
-                throw new InvalidOperationException(string.IsNullOrWhiteSpace(trimResult.Error) ? "ffmpeg trim failed." : trimResult.Error);
-            }
-
-            return trimmedPath;
+            return stitchedPath;
         }
         finally
         {
             TryDelete(concatPath);
-            TryDelete(stitchedPath);
         }
     }
 
@@ -373,17 +351,26 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     private string SnapshotAudioFile(ReplayAudioCapture? capture, DateTime clipStartUtc, double durationSeconds, ICollection<string> snapshots)
     {
         if (capture is null || !IsUsableAudioFile(capture.Path)) return string.Empty;
+        var sourceSnapshotPath = Path.Combine(_bufferFolder, $"audio_source_{Guid.NewGuid():N}.wav");
         var snapshotPath = Path.Combine(_bufferFolder, $"audio_{Guid.NewGuid():N}.wav");
         var offset = Math.Max(0, (clipStartUtc - capture.StartedAtUtc).TotalSeconds);
         try
         {
+            if (!capture.Session.SnapshotTo(sourceSnapshotPath) || !IsUsableAudioFile(sourceSnapshotPath))
+            {
+                TryDelete(sourceSnapshotPath);
+                TryDelete(snapshotPath);
+                return string.Empty;
+            }
+
+            snapshots.Add(sourceSnapshotPath);
             var result = RunProcessAsync("ffmpeg", new[]
             {
                 "-y",
                 "-v", "error",
                 "-ss", offset.ToString("0.###"),
                 "-t", durationSeconds.ToString("0.###"),
-                "-i", capture.Path,
+                "-i", sourceSnapshotPath,
                 "-ac", "2",
                 "-ar", "48000",
                 "-c:a", "pcm_s16le",
@@ -400,20 +387,24 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         }
         catch
         {
+            TryDelete(sourceSnapshotPath);
             TryDelete(snapshotPath);
             return string.Empty;
         }
     }
 
-    private string SnapshotAudioFile(string path, ICollection<string> snapshots)
+    private string SnapshotAudioFile(ReplayAudioCapture capture, ICollection<string> snapshots)
     {
-        if (!IsUsableAudioFile(path)) return string.Empty;
+        if (!IsUsableAudioFile(capture.Path)) return string.Empty;
         var snapshotPath = Path.Combine(_bufferFolder, $"audio_{Guid.NewGuid():N}.wav");
         try
         {
-            using var source = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            using var destination = new FileStream(snapshotPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
-            source.CopyTo(destination);
+            if (!capture.Session.SnapshotTo(snapshotPath) || !IsUsableAudioFile(snapshotPath))
+            {
+                TryDelete(snapshotPath);
+                return string.Empty;
+            }
+
             snapshots.Add(snapshotPath);
             return snapshotPath;
         }
@@ -473,9 +464,8 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         _audioCaptures.Clear();
     }
 
-    private async Task MuxAudioTracksAsync(string videoPath, string outputPath, DateTime clipStartUtc, double clipDurationSeconds, ReplayBufferConfig config, CancellationToken cancellationToken)
+    private async Task MuxAudioTracksAsync(string videoPath, string outputPath, double videoOffsetSeconds, DateTime clipStartUtc, double clipDurationSeconds, ReplayBufferConfig config, CancellationToken cancellationToken)
     {
-        var gameAudioPreExcluded = _gameAudioPreExcluded;
         var snapshots = new List<string>();
         var duration = Math.Max(1, clipDurationSeconds);
         var captures = _audioCaptures.ToArray();
@@ -510,12 +500,18 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         var excludedStart = inputs.Count + 1;
         inputs.AddRange(excludedInputs.Select((path, index) => new AudioMuxInput($"excluded{index}", path)));
 
-        var args = new List<string> { "-y", "-i", videoPath };
+        var args = new List<string>
+        {
+            "-y",
+            "-ss", videoOffsetSeconds.ToString("0.###"),
+            "-t", duration.ToString("0.###"),
+            "-i", videoPath
+        };
         foreach (var input in inputs)
         {
             if (!string.IsNullOrWhiteSpace(input.Path) && IsUsableAudioFile(input.Path))
             {
-                args.AddRange(new[] { "-sseof", $"-{duration:0.###}", "-i", input.Path });
+                args.AddRange(new[] { "-i", input.Path });
             }
             else
             {
@@ -525,11 +521,9 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
         try
         {
-            var subtractInputIndexes = gameAudioPreExcluded
-                ? Array.Empty<int>()
-                : Enumerable.Range(2, chatInputs.Length)
-                    .Concat(Enumerable.Range(excludedStart, excludedInputs.Length))
-                    .ToArray();
+            var subtractInputIndexes = Enumerable.Range(2, chatInputs.Length)
+                .Concat(Enumerable.Range(excludedStart, excludedInputs.Length))
+                .ToArray();
 
             var filter = new StringBuilder();
             if (subtractInputIndexes.Length > 0)

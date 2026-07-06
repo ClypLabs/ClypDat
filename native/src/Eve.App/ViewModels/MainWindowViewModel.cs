@@ -686,9 +686,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OpenProcesses.Add(process);
         }
 
-        SelectedChatProcess =
-            OpenProcesses.FirstOrDefault(process => string.Equals(process.Name, selectedChatName, StringComparison.OrdinalIgnoreCase)) ??
-            OpenProcesses.FirstOrDefault();
+        SelectedChatProcess = string.IsNullOrWhiteSpace(selectedChatName)
+            ? null
+            : OpenProcesses.FirstOrDefault(process => string.Equals(process.Name, selectedChatName, StringComparison.OrdinalIgnoreCase));
         SelectedProcessExclusion =
             OpenProcesses.FirstOrDefault(process => string.Equals(process.Name, selectedName, StringComparison.OrdinalIgnoreCase)) ??
             OpenProcesses.FirstOrDefault();

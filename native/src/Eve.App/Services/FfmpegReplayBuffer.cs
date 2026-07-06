@@ -792,6 +792,26 @@ internal sealed class AudioCaptureSession : IDisposable
         _capture.Dispose();
     }
 
+    public bool SnapshotTo(string path)
+    {
+        lock (_lock)
+        {
+            try
+            {
+                _writer.Flush();
+                _stream.Flush(true);
+                using var source = new FileStream(((FileStream)_stream).Name, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using var destination = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+                source.CopyTo(destination);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
     private void Capture_OnDataAvailable(object? sender, WaveInEventArgs e)
     {
         lock (_lock)
