@@ -15,7 +15,6 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     private readonly Func<ReplayBufferConfig> _configProvider;
     private readonly string _bufferFolder;
     private readonly object _lock = new();
-    private static readonly TimeSpan SegmentDuration = TimeSpan.FromSeconds(5);
     private Recorder? _recorder;
     private Timer? _rotationTimer;
     private Timer? _audioRouteTimer;
@@ -167,7 +166,8 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             _startedAtUtc = DateTime.UtcNow;
             _recorder.Record(_activePath);
             _rotationTimer?.Dispose();
-            _rotationTimer = new Timer(_ => _ = RotateAsync(), null, SegmentDuration, Timeout.InfiniteTimeSpan);
+            var segmentDuration = TimeSpan.FromSeconds(Math.Clamp(Duration.TotalSeconds, 30, 1200));
+            _rotationTimer = new Timer(_ => _ = RotateAsync(), null, segmentDuration, Timeout.InfiniteTimeSpan);
         }
     }
 

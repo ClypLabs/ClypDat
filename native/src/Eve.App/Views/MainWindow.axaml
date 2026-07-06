@@ -451,7 +451,7 @@
                                 Height="34"
                                 MinHeight="34"
                                 Margin="0,-8,0,0"
-                                Value="{Binding VolumePercent}"
+                                Value="{Binding VolumePercent, Mode=TwoWay}"
                                 IsEnabled="{Binding CanAdjustVolume}"
                                 IsVisible="{Binding IsAudio}"
                                 PointerPressed="TrackVolume_OnPointerPressed"

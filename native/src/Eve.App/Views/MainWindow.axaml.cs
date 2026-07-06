@@ -636,8 +636,9 @@ public sealed partial class MainWindow : Window
 
     private void TrackVolume_OnPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
     {
-        if (e.Property != Slider.ValueProperty || sender is not Slider { DataContext: TrackLaneViewModel track }) return;
-        UpdateVolumeBadgePosition((Slider)sender, track);
+        if (e.Property != Slider.ValueProperty || sender is not Slider { DataContext: TrackLaneViewModel track } slider) return;
+        track.VolumePercent = Math.Clamp(slider.Value, 0, 150);
+        UpdateVolumeBadgePosition(slider, track);
         _playback?.SetTrackVolume(track.StreamIndex, track.VolumePercent);
     }
 
