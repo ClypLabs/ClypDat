@@ -26,6 +26,7 @@ public sealed partial class MainWindow : Window
     private GlobalHotkeyService? _globalHotkey;
     private readonly HashSet<string> _capturedHotkeyKeys = new(StringComparer.OrdinalIgnoreCase);
     private bool _replayTransitioning;
+    private bool _clipSaving;
 
     public MainWindow()
     {
@@ -192,6 +193,7 @@ public sealed partial class MainWindow : Window
     private async Task SaveReplayClipAsync()
     {
         if (ViewModel is null) return;
+        if (_clipSaving) return;
         InitializeReplayServices();
         if (_replayBuffer is null || !_replayBuffer.IsRecording)
         {
@@ -202,13 +204,19 @@ public sealed partial class MainWindow : Window
 
         try
         {
+            _clipSaving = true;
             await EnsureLibraryFolderAsync();
-            await _replayBuffer.SaveReplayAsync(ViewModel.Settings.LibraryFolder);
+            var outputFolder = ViewModel.Settings.LibraryFolder;
+            await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder));
             await ViewModel.RefreshLibraryAsync();
         }
         catch (Exception error)
         {
             await ShowMessageAsync("Clip failed", error.Message);
+        }
+        finally
+        {
+            _clipSaving = false;
         }
     }
 
