@@ -22,6 +22,7 @@ public sealed class PlaybackSession : IDisposable
     private bool _isSeeking;
     private bool _shouldPlay;
     private long _seekVersion;
+    private readonly SemaphoreSlim _seekLock = new(1, 1);
 
     public PlaybackSession()
     {
@@ -68,7 +69,7 @@ public sealed class PlaybackSession : IDisposable
             var audioPath = await ExtractAudioTrackAsync(path, track.StreamIndex, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             _audioPaths[track.StreamIndex] = audioPath;
-            _audioVolumes[track.StreamIndex] = track.VolumePercent;
+            _audioVolumes.TryAdd(track.StreamIndex, track.VolumePercent);
         }
 
         RebuildAudioOutput();
@@ -160,6 +161,7 @@ public sealed class PlaybackSession : IDisposable
     public async Task SeekAsync(TimeSpan time, bool resumePlayback = false, CancellationToken cancellationToken = default)
     {
         var seekVersion = Interlocked.Increment(ref _seekVersion);
+        await _seekLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
         _ended = false;
         _isSeeking = true;
@@ -176,9 +178,10 @@ public sealed class PlaybackSession : IDisposable
             if (resumePlayback)
             {
                 VideoPlayer.Play();
-                await Task.Delay(40, cancellationToken).ConfigureAwait(false);
-                if (seekVersion == Interlocked.Read(ref _seekVersion) && _shouldPlay)
+                var videoReady = await WaitForVideoReadyAsync(time, cancellationToken).ConfigureAwait(false);
+                if (seekVersion == Interlocked.Read(ref _seekVersion) && _shouldPlay && videoReady)
                 {
+                    SeekAudio(Position);
                     _audioOutput?.Play();
                 }
             }
@@ -188,6 +191,7 @@ public sealed class PlaybackSession : IDisposable
         finally
         {
             _isSeeking = false;
+            _seekLock.Release();
         }
     }
 
@@ -236,6 +240,27 @@ public sealed class PlaybackSession : IDisposable
         DisposeAudio();
         DisposeMedia();
         _libVlc.Dispose();
+        _seekLock.Dispose();
+    }
+
+    private async Task<bool> WaitForVideoReadyAsync(TimeSpan target, CancellationToken cancellationToken)
+    {
+        var start = DateTime.UtcNow;
+        var targetMs = target.TotalMilliseconds;
+        while ((DateTime.UtcNow - start).TotalMilliseconds < 700)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var deltaMs = Math.Abs(Position.TotalMilliseconds - targetMs);
+            if (VideoPlayer.IsPlaying && deltaMs < 450)
+            {
+                return true;
+            }
+
+            await Task.Delay(25, cancellationToken).ConfigureAwait(false);
+        }
+
+        AppLog.Info($"Editor video seek settle timeout: target={target.TotalSeconds:0.###}s, actual={Position.TotalSeconds:0.###}s, playing={VideoPlayer.IsPlaying}.");
+        return false;
     }
 
     private void SeekAudio(TimeSpan time)
