@@ -65,8 +65,11 @@ public sealed class PlaybackSession : IDisposable
         _ended = false;
         _lastRequestedPosition = TimeSpan.Zero;
         _videoMedia = new Media(_libVlc, new Uri(path));
+        _videoMedia.AddOption(":no-audio");
+        _videoMedia.AddOption(":avcodec-hw=d3d11va");
         VideoPlayer.Media = _videoMedia;
         VideoPlayer.Mute = true;
+        VideoPlayer.Volume = 0;
     }
 
     public async Task LoadAudioAsync(string path, IReadOnlyList<AudioPreviewTrack> audioTracks, CancellationToken cancellationToken)
@@ -84,6 +87,7 @@ public sealed class PlaybackSession : IDisposable
             _audioVolumes.TryAdd(track.StreamIndex, track.VolumePercent);
         }
 
+        AppLog.Info($"Editor audio loaded: streams={string.Join(",", _audioPaths.Keys.OrderBy(key => key))}, volumes={string.Join(",", _audioVolumes.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:{pair.Value:0}%"))}.");
         RebuildAudioOutput();
     }
 
@@ -137,9 +141,11 @@ public sealed class PlaybackSession : IDisposable
         _ended = false;
         _shouldPlay = true;
         _lastRequestedPosition = TimeSpan.FromMilliseconds(milliseconds);
+        ForceVideoSilent();
         VideoPlayer.Time = milliseconds;
         SeekAudio(time);
         VideoPlayer.Play();
+        VideoPlayer.SetPause(false);
         _audioOutput?.Play();
         AppLog.Info($"Editor play from {time.TotalSeconds:0.###}s.");
     }
@@ -148,10 +154,7 @@ public sealed class PlaybackSession : IDisposable
     {
         _shouldPlay = false;
         _audioOutput?.Stop();
-        if (VideoPlayer.IsPlaying)
-        {
-            VideoPlayer.Pause();
-        }
+        VideoPlayer.SetPause(true);
         AppLog.Info($"Editor pause at {Position.TotalSeconds:0.###}s.");
     }
 
@@ -180,41 +183,44 @@ public sealed class PlaybackSession : IDisposable
         var seekVersion = Interlocked.Increment(ref _seekVersion);
         await _seekLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
+        var requested = TimeSpan.FromMilliseconds(milliseconds);
         _ended = false;
         _isSeeking = true;
         _shouldPlay = resumePlayback;
-        _lastRequestedPosition = TimeSpan.FromMilliseconds(milliseconds);
+        _lastRequestedPosition = requested;
         var resumed = false;
         try
         {
             _audioOutput?.Stop();
-            if (VideoPlayer.IsPlaying)
-            {
-                VideoPlayer.Pause();
-            }
-            VideoPlayer.Time = milliseconds;
-            await Task.Delay(80, cancellationToken).ConfigureAwait(false);
-            if (seekVersion != Interlocked.Read(ref _seekVersion)) return false;
-            var settledTime = Position;
-            SeekAudio(time);
-            if (resumePlayback)
+            ForceVideoSilent();
+            AppLog.Info($"Editor seek begin: requested={requested.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, resume={resumePlayback}, version={seekVersion}.");
+            if (!VideoPlayer.IsPlaying)
             {
                 VideoPlayer.Play();
-                var videoReady = await WaitForVideoReadyAsync(time, cancellationToken).ConfigureAwait(false);
-                if (seekVersion == Interlocked.Read(ref _seekVersion) && _shouldPlay && videoReady)
-                {
-                    SeekAudio(Position);
-                    _audioOutput?.Play();
-                    resumed = true;
-                }
-                else
-                {
-                    _shouldPlay = false;
-                    _audioOutput?.Stop();
-                }
             }
 
-            AppLog.Info($"Editor seek requested={time.TotalSeconds:0.###}s, settled={settledTime.TotalSeconds:0.###}s, resume={resumePlayback}, resumed={resumed}, version={seekVersion}.");
+            VideoPlayer.SetPause(false);
+            VideoPlayer.Time = milliseconds;
+            if (seekVersion != Interlocked.Read(ref _seekVersion)) return false;
+            var videoReady = await WaitForVideoReadyAsync(requested, cancellationToken).ConfigureAwait(false);
+            if (seekVersion != Interlocked.Read(ref _seekVersion)) return false;
+            var settledTime = Position;
+            SeekAudio(requested);
+            if (resumePlayback && videoReady)
+            {
+                VideoPlayer.SetPause(false);
+                SeekAudio(Position);
+                _audioOutput?.Play();
+                resumed = true;
+            }
+            else
+            {
+                _shouldPlay = false;
+                _audioOutput?.Stop();
+                VideoPlayer.SetPause(true);
+            }
+
+            AppLog.Info($"Editor seek end: requested={requested.TotalSeconds:0.###}s, settled={settledTime.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, resume={resumePlayback}, resumed={resumed}, version={seekVersion}.");
             return !resumePlayback || resumed;
         }
         finally
@@ -228,7 +234,9 @@ public sealed class PlaybackSession : IDisposable
     {
         if (!shouldPlay) return;
         _shouldPlay = true;
+        ForceVideoSilent();
         if (!VideoPlayer.IsPlaying) VideoPlayer.Play();
+        VideoPlayer.SetPause(false);
         if (_audioOutput is not null && _audioOutput.PlaybackState != PlaybackState.Playing) _audioOutput.Play();
     }
 
@@ -238,6 +246,11 @@ public sealed class PlaybackSession : IDisposable
         if (_audioSources.TryGetValue(streamIndex, out var source))
         {
             source.Volume.Volume = VolumeCurve(percent);
+            AppLog.Info($"Editor volume changed: stream={streamIndex}, percent={percent:0}%, found=True.");
+        }
+        else
+        {
+            AppLog.Info($"Editor volume changed: stream={streamIndex}, percent={percent:0}%, found=False, loaded={string.Join(",", _audioSources.Keys.OrderBy(key => key))}.");
         }
     }
 
@@ -274,34 +287,44 @@ public sealed class PlaybackSession : IDisposable
 
     private async Task<bool> WaitForVideoReadyAsync(TimeSpan target, CancellationToken cancellationToken)
     {
-        var start = DateTime.UtcNow;
         var targetMs = target.TotalMilliseconds;
-        var lastMs = VideoPlayer.Time;
-        var movedSamples = 0;
-        while ((DateTime.UtcNow - start).TotalMilliseconds < 700)
+        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnTimeChanged(object? sender, MediaPlayerTimeChangedEventArgs args)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var currentMs = VideoPlayer.Time;
-            var deltaMs = Math.Abs(currentMs - targetMs);
-            if (VideoPlayer.IsPlaying && deltaMs < 650)
+            if (Math.Abs(args.Time - targetMs) < 650)
             {
-                if (Math.Abs(currentMs - lastMs) >= 15 || targetMs < 50)
-                {
-                    movedSamples++;
-                    if (movedSamples >= 2)
-                    {
-                        _lastRequestedPosition = TimeSpan.FromMilliseconds(Math.Max(0, currentMs));
-                        return true;
-                    }
-                }
+                ready.TrySetResult();
             }
-
-            lastMs = currentMs;
-            await Task.Delay(25, cancellationToken).ConfigureAwait(false);
         }
 
-        AppLog.Info($"Editor video seek settle timeout: target={target.TotalSeconds:0.###}s, actual={Position.TotalSeconds:0.###}s, playing={VideoPlayer.IsPlaying}.");
-        return false;
+        VideoPlayer.TimeChanged += OnTimeChanged;
+        try
+        {
+            if (Math.Abs(VideoPlayer.Time - targetMs) < 650)
+            {
+                _lastRequestedPosition = TimeSpan.FromMilliseconds(Math.Max(0, VideoPlayer.Time));
+                return true;
+            }
+
+            await ready.Task.WaitAsync(TimeSpan.FromMilliseconds(900), cancellationToken).ConfigureAwait(false);
+            _lastRequestedPosition = TimeSpan.FromMilliseconds(Math.Max(0, VideoPlayer.Time));
+            return true;
+        }
+        catch (TimeoutException)
+        {
+            AppLog.Info($"Editor video seek settle timeout: target={target.TotalSeconds:0.###}s, actual={Position.TotalSeconds:0.###}s, playing={VideoPlayer.IsPlaying}.");
+            return false;
+        }
+        finally
+        {
+            VideoPlayer.TimeChanged -= OnTimeChanged;
+        }
+    }
+
+    private void ForceVideoSilent()
+    {
+        VideoPlayer.Mute = true;
+        VideoPlayer.Volume = 0;
     }
 
     private void SeekAudio(TimeSpan time)
