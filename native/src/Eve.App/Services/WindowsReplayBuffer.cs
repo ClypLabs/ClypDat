@@ -346,7 +346,11 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                 : await ProbeVideoDurationAsync(segment.Path, cancellationToken);
             if (duration > TimeSpan.FromMilliseconds(250))
             {
-                hydrated.Add(segment with { VideoDuration = duration });
+                var wallDuration = segment.EndedAtUtc - segment.StartedAtUtc;
+                var adjustedStartUtc = segment.EndedAtUtc - duration;
+                var correctionMs = (adjustedStartUtc - segment.StartedAtUtc).TotalMilliseconds;
+                AppLog.Info($"Replay segment hydrated: path={segment.Path}, wall={wallDuration.TotalSeconds:0.###}s, video={duration.TotalSeconds:0.###}s, startCorrection={correctionMs:0}ms.");
+                hydrated.Add(segment with { StartedAtUtc = adjustedStartUtc, VideoDuration = duration });
             }
             else
             {

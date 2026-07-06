@@ -18,6 +18,7 @@ public sealed partial class MainWindow : Window
     private readonly DispatcherTimer _playbackTimer;
     private PlaybackSession? _playback;
     private CancellationTokenSource? _playbackStartCts;
+    private CancellationTokenSource? _editorSeekCts;
     private TimelineDragMode _timelineDragMode = TimelineDragMode.None;
     private bool _endedAtTrimBoundary;
     private bool _timelineWasPlayingBeforeDrag;
@@ -469,7 +470,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        if (_playback.IsPlaying)
+        if (ViewModel.IsPlaying)
         {
             var pauseTime = ViewModel.CurrentTime;
             _playback.Pause();
@@ -816,6 +817,9 @@ public sealed partial class MainWindow : Window
             _playbackStartCts?.Dispose();
             _playbackStartCts = null;
         }
+        _editorSeekCts?.Cancel();
+        _editorSeekCts?.Dispose();
+        _editorSeekCts = null;
         _playbackTimer.Stop();
         _playheadClock.Stop();
         _endedAtTrimBoundary = false;
@@ -898,22 +902,36 @@ public sealed partial class MainWindow : Window
     private async Task ApplyTimelineSeekAsync(TimeSpan time, bool resumePlayback)
     {
         if (ViewModel is null) return;
+        _editorSeekCts?.Cancel();
+        _editorSeekCts?.Dispose();
+        var seekCts = new CancellationTokenSource();
+        _editorSeekCts = seekCts;
         _endedAtTrimBoundary = false;
         ViewModel.CurrentTime = time;
+        var didResume = false;
         if (_playback is not null)
         {
-            await _playback.SeekAsync(time, resumePlayback);
+            try
+            {
+                didResume = await _playback.SeekAsync(time, resumePlayback, seekCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
         }
-        if (resumePlayback)
+        if (_editorSeekCts != seekCts) return;
+        if (resumePlayback && didResume)
         {
-            StartPlayheadClock(time);
+            StartPlayheadClock(_playback?.Position ?? time);
             ViewModel.IsPlaying = true;
             _playbackTimer.Start();
         }
         else
         {
-            SetPlayheadBase(time);
+            SetPlayheadBase(_playback?.Position ?? time);
             ViewModel.IsPlaying = false;
+            _playbackTimer.Stop();
         }
         UpdateTimelineChrome();
     }

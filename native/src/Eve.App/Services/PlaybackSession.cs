@@ -22,6 +22,7 @@ public sealed class PlaybackSession : IDisposable
     private bool _isSeeking;
     private bool _shouldPlay;
     private long _seekVersion;
+    private TimeSpan _lastRequestedPosition = TimeSpan.Zero;
     private readonly SemaphoreSlim _seekLock = new(1, 1);
 
     public PlaybackSession()
@@ -36,7 +37,16 @@ public sealed class PlaybackSession : IDisposable
 
     public MediaPlayer VideoPlayer { get; }
     public TimeSpan Duration => TimeSpan.FromMilliseconds(Math.Max(0, VideoPlayer.Length));
-    public TimeSpan Position => TimeSpan.FromMilliseconds(Math.Max(0, VideoPlayer.Time));
+    public TimeSpan Position
+    {
+        get
+        {
+            var time = VideoPlayer.Time;
+            return time > 0
+                ? TimeSpan.FromMilliseconds(time)
+                : _lastRequestedPosition;
+        }
+    }
     public bool IsPlaying => VideoPlayer.IsPlaying;
     public bool IsEnded => _ended || VideoPlayer.State == VLCState.Ended;
     public bool IsSeeking => _isSeeking;
@@ -53,6 +63,7 @@ public sealed class PlaybackSession : IDisposable
         DisposeMedia();
         DisposeAudio();
         _ended = false;
+        _lastRequestedPosition = TimeSpan.Zero;
         _videoMedia = new Media(_libVlc, new Uri(path));
         VideoPlayer.Media = _videoMedia;
         VideoPlayer.Mute = true;
@@ -60,7 +71,8 @@ public sealed class PlaybackSession : IDisposable
 
     public async Task LoadAudioAsync(string path, IReadOnlyList<AudioPreviewTrack> audioTracks, CancellationToken cancellationToken)
     {
-        DisposeAudio();
+        DisposeAudioOutput();
+        _audioPaths.Clear();
         if (audioTracks.Count == 0) return;
 
         foreach (var track in audioTracks)
@@ -124,6 +136,7 @@ public sealed class PlaybackSession : IDisposable
 
         _ended = false;
         _shouldPlay = true;
+        _lastRequestedPosition = TimeSpan.FromMilliseconds(milliseconds);
         VideoPlayer.Time = milliseconds;
         SeekAudio(time);
         VideoPlayer.Play();
@@ -135,7 +148,11 @@ public sealed class PlaybackSession : IDisposable
     {
         _shouldPlay = false;
         _audioOutput?.Stop();
-        VideoPlayer.Pause();
+        if (VideoPlayer.IsPlaying)
+        {
+            VideoPlayer.Pause();
+        }
+        AppLog.Info($"Editor pause at {Position.TotalSeconds:0.###}s.");
     }
 
     public void Stop()
@@ -158,7 +175,7 @@ public sealed class PlaybackSession : IDisposable
         SeekAsync(time, resumePlayback).GetAwaiter().GetResult();
     }
 
-    public async Task SeekAsync(TimeSpan time, bool resumePlayback = false, CancellationToken cancellationToken = default)
+    public async Task<bool> SeekAsync(TimeSpan time, bool resumePlayback = false, CancellationToken cancellationToken = default)
     {
         var seekVersion = Interlocked.Increment(ref _seekVersion);
         await _seekLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -166,13 +183,18 @@ public sealed class PlaybackSession : IDisposable
         _ended = false;
         _isSeeking = true;
         _shouldPlay = resumePlayback;
+        _lastRequestedPosition = TimeSpan.FromMilliseconds(milliseconds);
+        var resumed = false;
         try
         {
             _audioOutput?.Stop();
-            VideoPlayer.Pause();
+            if (VideoPlayer.IsPlaying)
+            {
+                VideoPlayer.Pause();
+            }
             VideoPlayer.Time = milliseconds;
             await Task.Delay(80, cancellationToken).ConfigureAwait(false);
-            if (seekVersion != Interlocked.Read(ref _seekVersion)) return;
+            if (seekVersion != Interlocked.Read(ref _seekVersion)) return false;
             var settledTime = Position;
             SeekAudio(time);
             if (resumePlayback)
@@ -183,10 +205,17 @@ public sealed class PlaybackSession : IDisposable
                 {
                     SeekAudio(Position);
                     _audioOutput?.Play();
+                    resumed = true;
+                }
+                else
+                {
+                    _shouldPlay = false;
+                    _audioOutput?.Stop();
                 }
             }
 
-            AppLog.Info($"Editor seek requested={time.TotalSeconds:0.###}s, settled={settledTime.TotalSeconds:0.###}s, resume={resumePlayback}.");
+            AppLog.Info($"Editor seek requested={time.TotalSeconds:0.###}s, settled={settledTime.TotalSeconds:0.###}s, resume={resumePlayback}, resumed={resumed}, version={seekVersion}.");
+            return !resumePlayback || resumed;
         }
         finally
         {
@@ -247,15 +276,27 @@ public sealed class PlaybackSession : IDisposable
     {
         var start = DateTime.UtcNow;
         var targetMs = target.TotalMilliseconds;
+        var lastMs = VideoPlayer.Time;
+        var movedSamples = 0;
         while ((DateTime.UtcNow - start).TotalMilliseconds < 700)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var deltaMs = Math.Abs(Position.TotalMilliseconds - targetMs);
-            if (VideoPlayer.IsPlaying && deltaMs < 450)
+            var currentMs = VideoPlayer.Time;
+            var deltaMs = Math.Abs(currentMs - targetMs);
+            if (VideoPlayer.IsPlaying && deltaMs < 650)
             {
-                return true;
+                if (Math.Abs(currentMs - lastMs) >= 15 || targetMs < 50)
+                {
+                    movedSamples++;
+                    if (movedSamples >= 2)
+                    {
+                        _lastRequestedPosition = TimeSpan.FromMilliseconds(Math.Max(0, currentMs));
+                        return true;
+                    }
+                }
             }
 
+            lastMs = currentMs;
             await Task.Delay(25, cancellationToken).ConfigureAwait(false);
         }
 
@@ -265,6 +306,7 @@ public sealed class PlaybackSession : IDisposable
 
     private void SeekAudio(TimeSpan time)
     {
+        _lastRequestedPosition = time < TimeSpan.Zero ? TimeSpan.Zero : time;
         foreach (var source in _audioSources.Values)
         {
             source.Reader.CurrentTime = time < TimeSpan.Zero ? TimeSpan.Zero : time;
