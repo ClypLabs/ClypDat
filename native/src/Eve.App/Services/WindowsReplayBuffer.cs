@@ -12,6 +12,7 @@ namespace Eve.App.Services;
 [SupportedOSPlatform("windows")]
 public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 {
+    private static readonly TimeSpan MaxVideoSegmentDuration = TimeSpan.FromSeconds(20);
     private readonly Func<ReplayBufferConfig> _configProvider;
     private readonly string _bufferFolder;
     private readonly object _lock = new();
@@ -162,8 +163,9 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             _startedAtUtc = DateTime.UtcNow;
             _recorder.Record(_activePath);
             _rotationTimer?.Dispose();
-            var segmentDuration = TimeSpan.FromSeconds(Math.Clamp(Duration.TotalSeconds, 30, 1200));
-            _rotationTimer = new Timer(_ => _ = RotateAsync(), null, segmentDuration, Timeout.InfiniteTimeSpan);
+            var segmentDuration = VideoSegmentDuration();
+            _rotationTimer = new Timer(_ => _ = RotateAsync(), null, segmentDuration, segmentDuration);
+            AppLog.Info($"Replay video segment started: path={_activePath}, rotateEvery={segmentDuration.TotalSeconds:0}s.");
         }
     }
 
@@ -177,13 +179,15 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         try
         {
             if (!IsRecording) return;
+            _rotationTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
             var completedSegment = await StopCurrentRecordingAsync(CancellationToken.None);
             AddSegment(completedSegment);
             PruneSegments();
             StartRecorder();
         }
-        catch
+        catch (Exception error)
         {
+            AppLog.Error("Replay segment rotation failed", error);
             RecordingStopped?.Invoke(this, EventArgs.Empty);
         }
         finally
@@ -201,7 +205,8 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         recorder.Stop();
         var path = await completion.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
         DisposeRecorder();
-        AppLog.Info($"Replay segment stopped: path={path}, start={startedAt:o}, end={endedAt:o}, duration={(endedAt - startedAt).TotalSeconds:0.###}s.");
+        var bytes = File.Exists(path) ? new FileInfo(path).Length : 0;
+        AppLog.Info($"Replay segment stopped: path={path}, start={startedAt:o}, end={endedAt:o}, wallDuration={(endedAt - startedAt).TotalSeconds:0.###}s, bytes={bytes}.");
         return new ReplayVideoSegment(path, startedAt, endedAt, TimeSpan.Zero);
     }
 
@@ -221,15 +226,41 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         };
         options.VideoEncoderOptions = new VideoEncoderOptions
         {
+            Encoder = new H264VideoEncoder
+            {
+                BitrateMode = H264BitrateControlMode.UnconstrainedVBR,
+                EncoderProfile = H264Profile.High
+            },
             IsHardwareEncodingEnabled = true,
             IsLowLatencyEnabled = true,
-            IsThrottlingDisabled = false,
+            IsThrottlingDisabled = true,
             IsFixedFramerate = true,
-            Quality = 70,
+            Quality = 85,
+            Bitrate = CaptureBitrate(config),
             Framerate = Math.Clamp(config.FrameRate, 15, 60)
         };
 
         return options;
+    }
+
+    private TimeSpan VideoSegmentDuration()
+    {
+        return TimeSpan.FromSeconds(Math.Clamp(Math.Min(Duration.TotalSeconds, MaxVideoSegmentDuration.TotalSeconds), 5, MaxVideoSegmentDuration.TotalSeconds));
+    }
+
+    private static int CaptureBitrate(ReplayBufferConfig config)
+    {
+        var height = Math.Clamp(config.MaxHeight, 480, 2160);
+        var frameRate = Math.Clamp(config.FrameRate, 15, 60);
+        var megapixels = height switch
+        {
+            >= 2160 => 8.3,
+            >= 1440 => 3.7,
+            >= 1080 => 2.1,
+            >= 720 => 0.9,
+            _ => 0.4
+        };
+        return (int)Math.Clamp(megapixels * frameRate * 115_000, 6_000_000, 60_000_000);
     }
 
     private void StartAudioCaptures(ReplayBufferConfig config)
@@ -349,7 +380,8 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                 var wallDuration = segment.EndedAtUtc - segment.StartedAtUtc;
                 var adjustedStartUtc = segment.EndedAtUtc - duration;
                 var correctionMs = (adjustedStartUtc - segment.StartedAtUtc).TotalMilliseconds;
-                AppLog.Info($"Replay segment hydrated: path={segment.Path}, wall={wallDuration.TotalSeconds:0.###}s, video={duration.TotalSeconds:0.###}s, startCorrection={correctionMs:0}ms.");
+                var fpsHealth = wallDuration.TotalSeconds > 0 ? duration.TotalSeconds / wallDuration.TotalSeconds : 1d;
+                AppLog.Info($"Replay segment hydrated: path={segment.Path}, wall={wallDuration.TotalSeconds:0.###}s, video={duration.TotalSeconds:0.###}s, startCorrection={correctionMs:0}ms, health={fpsHealth:P0}.");
                 hydrated.Add(segment with { StartedAtUtc = adjustedStartUtc, VideoDuration = duration });
             }
             else
