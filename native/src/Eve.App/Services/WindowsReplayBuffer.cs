@@ -237,14 +237,16 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         StopAudioCaptures();
         var routes = ResolveAudioRoutes(config);
         _audioRouteKey = routes.RouteKey;
+        AppLog.Info(
+            $"Audio route resolved: chat='{config.ChatAudioProcessName}', chatPids={FormatIds(routes.ChatProcessIds)}, exclusions='{string.Join(",", config.GameAudioExcludedProcesses)}', excludedPids={FormatIds(routes.ExcludedProcessIds)}.");
         using var enumerator = new MMDeviceEnumerator();
         try
         {
             StartLoopbackCapture(enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia), "Game Audio", "game");
         }
-        catch
+        catch (Exception error)
         {
-            // Game audio is best effort; save path creates silent missing tracks.
+            AppLog.Error("Game audio capture failed", error);
         }
 
         foreach (var pid in routes.ChatProcessIds)
@@ -253,9 +255,9 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             {
                 StartProcessLoopbackCapture(pid, ProcessLoopbackCaptureMode.IncludeTargetProcessTree, "Chat Audio", $"chat_{pid}");
             }
-            catch
+            catch (Exception error)
             {
-                // Process audio can fail for protected/exited apps.
+                AppLog.Error($"Chat audio capture failed: pid={pid}", error);
             }
         }
 
@@ -265,9 +267,9 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             {
                 StartProcessLoopbackCapture(pid, ProcessLoopbackCaptureMode.IncludeTargetProcessTree, "Excluded Audio", $"excluded_{pid}");
             }
-            catch
+            catch (Exception error)
             {
-                // Process audio can fail for protected/exited apps.
+                AppLog.Error($"Excluded audio capture failed: pid={pid}", error);
             }
         }
 
@@ -278,13 +280,12 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                 StartMicrophoneCapture(enumerator.GetDevice(config.MicrophoneDeviceId), "Microphone", "microphone");
             }
         }
-        catch
+        catch (Exception error)
         {
-            // Microphone capture is best effort.
+            AppLog.Error("Microphone capture failed", error);
         }
 
-        _audioRouteTimer?.Dispose();
-        _audioRouteTimer = null;
+        StartAudioRouteTimer();
     }
 
     private ReplayVideoSegment[] GetReplaySegments()
@@ -564,6 +565,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             .ToArray();
         var systemPath = SnapshotAudioFile(captures.FirstOrDefault(capture => string.Equals(Path.GetFileName(capture.Path), "game.wav", StringComparison.OrdinalIgnoreCase)), sourceSegments, videoOffsetSeconds, duration, snapshots);
         var microphonePath = SnapshotAudioFile(captures.FirstOrDefault(capture => string.Equals(Path.GetFileName(capture.Path), "microphone.wav", StringComparison.OrdinalIgnoreCase)), sourceSegments, videoOffsetSeconds, duration, snapshots);
+        AppLog.Info($"Replay mux inputs: system={(IsUsableAudioFile(systemPath) ? 1 : 0)}, chat={chatInputs.Length}, excluded={excludedInputs.Length}, microphone={(IsUsableAudioFile(microphonePath) ? 1 : 0)}.");
         var inputs = new List<AudioMuxInput>
         {
             new("system", IsUsableAudioFile(systemPath) ? systemPath : string.Empty)
@@ -676,18 +678,35 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
     private void RefreshAudioRoutes()
     {
-        var config = _config;
-        if (config is null || !IsRecording) return;
-        var routes = ResolveAudioRoutes(config);
-        if (string.Equals(routes.RouteKey, _audioRouteKey, StringComparison.Ordinal)) return;
+        if (!_transition.Wait(0)) return;
         try
         {
-            StartAudioCaptures(config);
+            var config = _config;
+            if (config is null || !IsRecording) return;
+            var latestConfig = _configProvider();
+            var routes = ResolveAudioRoutes(latestConfig);
+            if (string.Equals(routes.RouteKey, _audioRouteKey, StringComparison.Ordinal)) return;
+            try
+            {
+                _config = latestConfig;
+                AppLog.Info("Audio route changed; restarting replay audio captures.");
+                StartAudioCaptures(latestConfig);
+            }
+            catch (Exception error)
+            {
+                AppLog.Error("Audio route refresh failed", error);
+            }
         }
-        catch
+        finally
         {
-            // Routing refresh is best effort.
+            _transition.Release();
         }
+    }
+
+    private void StartAudioRouteTimer()
+    {
+        _audioRouteTimer?.Dispose();
+        _audioRouteTimer = new Timer(_ => RefreshAudioRoutes(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
     }
 
     private static AudioRoutes ResolveAudioRoutes(ReplayBufferConfig config)
@@ -706,6 +725,12 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             .ToArray();
         var key = $"{string.Join(',', chatPids.OrderBy(pid => pid))}|{string.Join(',', excludedPids)}";
         return new AudioRoutes(chatPids.OrderBy(pid => pid).ToArray(), excludedPids, key);
+    }
+
+    private static string FormatIds(IEnumerable<int> ids)
+    {
+        var values = ids.ToArray();
+        return values.Length == 0 ? "none" : string.Join(",", values);
     }
 
     private static IEnumerable<int> ResolveProcessIds(string processName)

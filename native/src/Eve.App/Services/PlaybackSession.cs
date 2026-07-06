@@ -19,6 +19,7 @@ public sealed class PlaybackSession : IDisposable
     private Media? _videoMedia;
     private bool _disposed;
     private bool _ended;
+    private bool _isSeeking;
 
     public PlaybackSession()
     {
@@ -35,6 +36,7 @@ public sealed class PlaybackSession : IDisposable
     public TimeSpan Position => TimeSpan.FromMilliseconds(Math.Max(0, VideoPlayer.Time));
     public bool IsPlaying => VideoPlayer.IsPlaying;
     public bool IsEnded => _ended || VideoPlayer.State == VLCState.Ended;
+    public bool IsSeeking => _isSeeking;
 
     public static void WarmUp()
     {
@@ -147,17 +149,35 @@ public sealed class PlaybackSession : IDisposable
 
     public void Seek(TimeSpan time, bool resumePlayback = false)
     {
+        SeekAsync(time, resumePlayback).GetAwaiter().GetResult();
+    }
+
+    public async Task SeekAsync(TimeSpan time, bool resumePlayback = false, CancellationToken cancellationToken = default)
+    {
         var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
         _ended = false;
-        _audioOutput?.Stop();
-        VideoPlayer.Time = milliseconds;
-        SeekAudio(time);
-        if (resumePlayback)
+        _isSeeking = true;
+        try
         {
-            VideoPlayer.Play();
-            _audioOutput?.Play();
+            _audioOutput?.Stop();
+            VideoPlayer.Pause();
+            VideoPlayer.Time = milliseconds;
+            await Task.Delay(80, cancellationToken).ConfigureAwait(false);
+            var settledTime = Position;
+            SeekAudio(time);
+            if (resumePlayback)
+            {
+                VideoPlayer.Play();
+                await Task.Delay(40, cancellationToken).ConfigureAwait(false);
+                _audioOutput?.Play();
+            }
+
+            AppLog.Info($"Editor seek requested={time.TotalSeconds:0.###}s, settled={settledTime.TotalSeconds:0.###}s, resume={resumePlayback}.");
         }
-        AppLog.Info($"Editor seek {time.TotalSeconds:0.###}s.");
+        finally
+        {
+            _isSeeking = false;
+        }
     }
 
     public void EnsurePlayingIfNeeded(bool shouldPlay)
@@ -178,7 +198,7 @@ public sealed class PlaybackSession : IDisposable
 
     public void SyncAudioStreams()
     {
-        if (_audioOutput is null || !VideoPlayer.IsPlaying) return;
+        if (_isSeeking || _audioOutput is null || !VideoPlayer.IsPlaying) return;
         if (_audioOutput.PlaybackState != PlaybackState.Playing)
         {
             _audioOutput.Play();

@@ -427,14 +427,16 @@ public sealed partial class MainWindow : Window
         {
             case Key.Left:
                 _endedAtTrimBoundary = false;
+                var leftWasPlaying = ViewModel.IsPlaying;
                 ViewModel.SeekBySeconds(-1);
-                _playback?.Seek(ViewModel.CurrentTime);
+                _ = ApplyTimelineSeekAsync(ViewModel.CurrentTime, leftWasPlaying);
                 e.Handled = true;
                 break;
             case Key.Right:
                 _endedAtTrimBoundary = false;
+                var rightWasPlaying = ViewModel.IsPlaying;
                 ViewModel.SeekBySeconds(1);
-                _playback?.Seek(ViewModel.CurrentTime);
+                _ = ApplyTimelineSeekAsync(ViewModel.CurrentTime, rightWasPlaying);
                 e.Handled = true;
                 break;
             case Key.Space:
@@ -500,7 +502,7 @@ public sealed partial class MainWindow : Window
         ViewModel.RestartPlayback();
         if (_playback is not null)
         {
-            ApplyTimelineSeek(ViewModel.CurrentTime, ViewModel.IsPlaying);
+            _ = ApplyTimelineSeekAsync(ViewModel.CurrentTime, ViewModel.IsPlaying);
         }
     }
 
@@ -510,7 +512,7 @@ public sealed partial class MainWindow : Window
         _endedAtTrimBoundary = false;
         var wasPlaying = ViewModel.IsPlaying;
         ViewModel.SeekBySeconds(-5);
-        ApplyTimelineSeek(ViewModel.CurrentTime, wasPlaying);
+        _ = ApplyTimelineSeekAsync(ViewModel.CurrentTime, wasPlaying);
     }
 
     private void StepForwardButton_OnClick(object? sender, RoutedEventArgs e)
@@ -519,7 +521,7 @@ public sealed partial class MainWindow : Window
         _endedAtTrimBoundary = false;
         var wasPlaying = ViewModel.IsPlaying;
         ViewModel.SeekBySeconds(5);
-        ApplyTimelineSeek(ViewModel.CurrentTime, wasPlaying);
+        _ = ApplyTimelineSeekAsync(ViewModel.CurrentTime, wasPlaying);
     }
 
     private void EndButton_OnClick(object? sender, RoutedEventArgs e)
@@ -528,7 +530,7 @@ public sealed partial class MainWindow : Window
         var wasPlaying = ViewModel.IsPlaying;
         _endedAtTrimBoundary = true;
         ViewModel.CurrentTime = ViewModel.TrimEnd > TimeSpan.Zero ? ViewModel.TrimEnd : ViewModel.Duration;
-        ApplyTimelineSeek(ViewModel.CurrentTime, wasPlaying);
+        _ = ApplyTimelineSeekAsync(ViewModel.CurrentTime, wasPlaying);
     }
 
     private void TimelineSurface_OnPointerPressed(object? sender, PointerPressedEventArgs e)
@@ -588,18 +590,18 @@ public sealed partial class MainWindow : Window
         UpdateTimelineFromPointer(e, _timelineDragMode);
     }
 
-    private void TimelineSurface_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
+    private async void TimelineSurface_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
         if (_timelineDragMode == TimelineDragMode.None) return;
         var mode = _timelineDragMode;
         UpdateTimelineFromPointer(e, _timelineDragMode);
         if (mode == TimelineDragMode.Playhead && ViewModel is not null)
         {
-            ApplyTimelineSeek(ViewModel.CurrentTime, _timelineWasPlayingBeforeDrag);
+            await ApplyTimelineSeekAsync(ViewModel.CurrentTime, _timelineWasPlayingBeforeDrag);
         }
         else if (ViewModel is not null)
         {
-            ApplyTimelineSeek(ViewModel.CurrentTime, _timelineWasPlayingBeforeDrag);
+            await ApplyTimelineSeekAsync(ViewModel.CurrentTime, _timelineWasPlayingBeforeDrag);
             ViewModel.SaveSelectedClipEditState();
         }
 
@@ -854,7 +856,7 @@ public sealed partial class MainWindow : Window
         if (ViewModel.TrimEnd > TimeSpan.Zero && ViewModel.CurrentTime >= ViewModel.TrimEnd)
         {
             _playback.Pause();
-            _playback.Seek(ViewModel.TrimEnd);
+            _ = _playback.SeekAsync(ViewModel.TrimEnd);
             ViewModel.CurrentTime = ViewModel.TrimEnd;
             SetPlayheadBase(ViewModel.CurrentTime);
             ViewModel.IsPlaying = false;
@@ -896,12 +898,15 @@ public sealed partial class MainWindow : Window
         UpdateTimelineChrome();
     }
 
-    private void ApplyTimelineSeek(TimeSpan time, bool resumePlayback)
+    private async Task ApplyTimelineSeekAsync(TimeSpan time, bool resumePlayback)
     {
         if (ViewModel is null) return;
         _endedAtTrimBoundary = false;
         ViewModel.CurrentTime = time;
-        _playback?.Seek(time, resumePlayback);
+        if (_playback is not null)
+        {
+            await _playback.SeekAsync(time, resumePlayback);
+        }
         if (resumePlayback)
         {
             StartPlayheadClock(time);
