@@ -3,6 +3,7 @@ using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using ScreenRecorderLib;
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.Versioning;
 using System.Text;
 
@@ -503,8 +504,6 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         var args = new List<string>
         {
             "-y",
-            "-ss", videoOffsetSeconds.ToString("0.###"),
-            "-t", duration.ToString("0.###"),
             "-i", videoPath
         };
         foreach (var input in inputs)
@@ -515,7 +514,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             }
             else
             {
-                args.AddRange(new[] { "-f", "lavfi", "-t", $"{duration:0.###}", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000" });
+                args.AddRange(new[] { "-f", "lavfi", "-t", FormatSeconds(duration), "-i", "anullsrc=channel_layout=stereo:sample_rate=48000" });
             }
         }
 
@@ -526,47 +525,54 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                 .ToArray();
 
             var filter = new StringBuilder();
+            filter.Append($"[0:v]trim=start={FormatSeconds(videoOffsetSeconds)}:duration={FormatSeconds(duration)},setpts=PTS-STARTPTS,{BuildVideoFilter(config)}[vout];");
+            for (var index = 0; index < inputs.Count; index++)
+            {
+                var inputIndex = index + 1;
+                filter.Append($"[{inputIndex}:a]aresample=48000,atrim=0:{FormatSeconds(duration)},asetpts=PTS-STARTPTS,apad=whole_dur={FormatSeconds(duration)}[a{inputIndex}];");
+            }
+
             if (subtractInputIndexes.Length > 0)
             {
-                filter.Append("[1:a]");
-                foreach (var index in subtractInputIndexes) filter.Append($"[{index}:a]");
+                filter.Append("[a1]");
+                foreach (var index in subtractInputIndexes) filter.Append($"[a{index}]");
                 filter.Append($"amix=inputs={subtractInputIndexes.Length + 1}:weights='1");
                 foreach (var _ in subtractInputIndexes) filter.Append(" -1");
-                filter.Append("':normalize=0[gameout];");
+                filter.Append($"':normalize=0,atrim=0:{FormatSeconds(duration)},asetpts=PTS-STARTPTS[gameout];");
             }
             else
             {
-                filter.Append("[1:a]anull[gameout];");
+                filter.Append($"[a1]atrim=0:{FormatSeconds(duration)},asetpts=PTS-STARTPTS[gameout];");
             }
 
             if (chatInputs.Length > 1)
             {
-                foreach (var index in Enumerable.Range(chatOutStart, chatInputs.Length)) filter.Append($"[{index}:a]");
-                filter.Append($"amix=inputs={chatInputs.Length}:normalize=0[chatout];");
+                foreach (var index in Enumerable.Range(chatOutStart, chatInputs.Length)) filter.Append($"[a{index}]");
+                filter.Append($"amix=inputs={chatInputs.Length}:normalize=0,atrim=0:{FormatSeconds(duration)},asetpts=PTS-STARTPTS[chatout];");
             }
             else
             {
-                filter.Append($"[{chatOutStart}:a]anull[chatout];");
+                filter.Append($"[a{chatOutStart}]atrim=0:{FormatSeconds(duration)},asetpts=PTS-STARTPTS[chatout];");
             }
 
-            filter.Append($"[{microphoneIndex}:a]anull[micout]");
+            filter.Append($"[a{microphoneIndex}]atrim=0:{FormatSeconds(duration)},asetpts=PTS-STARTPTS[micout]");
             args.AddRange(new[] { "-filter_complex", filter.ToString() });
             args.AddRange(new[]
             {
-                "-map", "0:v:0",
+                "-map", "[vout]",
                 "-map", "[gameout]",
                 "-map", "[chatout]",
                 "-map", "[micout]",
                 "-metadata:s:a:0", "title=Game Audio",
                 "-metadata:s:a:1", "title=Chat Audio",
                 "-metadata:s:a:2", "title=Microphone",
-            "-vf", BuildVideoFilter(config),
-            "-c:v", "h264_nvenc",
-            "-preset", "p1",
-            "-tune", "ull"
-        });
-        args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k", "-shortest", outputPath });
-        var result = await RunProcessAsync("ffmpeg", args, cancellationToken);
+                "-t", FormatSeconds(duration),
+                "-c:v", "h264_nvenc",
+                "-preset", "p1",
+                "-tune", "ull"
+            });
+            args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k", outputPath });
+            var result = await RunProcessAsync("ffmpeg", args, cancellationToken);
             if (result.ExitCode != 0)
             {
                 args = args.Select(arg => arg == "h264_nvenc" ? "libx264" : arg).Where(arg => arg is not "-preset" and not "p1" and not "-tune" and not "ull").ToList();
@@ -579,6 +585,11 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         {
             foreach (var snapshot in snapshots) TryDelete(snapshot);
         }
+    }
+
+    private static string FormatSeconds(double seconds)
+    {
+        return seconds.ToString("0.###", CultureInfo.InvariantCulture);
     }
 
     private void RefreshAudioRoutes()
