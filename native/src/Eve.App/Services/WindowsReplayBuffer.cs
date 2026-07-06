@@ -95,6 +95,8 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         double videoOffsetSeconds;
         double clipDurationSeconds;
         ReplayBufferConfig config;
+        string sourcePath = string.Empty;
+        string outputPath = string.Empty;
         await _transition.WaitAsync(cancellationToken);
         try
         {
@@ -128,21 +130,15 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                     StartRecorder();
                 }
             }
-        }
-        finally
-        {
-            _transition.Release();
-        }
 
-        var sourcePath = await BuildReplayVideoAsync(sourceSegments, cancellationToken);
-        var outputPath = Path.Combine(outputFolder, $"Replay {DateTime.Now:yyyy-MM-dd HH-mm-ss}.mp4");
-        try
-        {
+            sourcePath = await BuildReplayVideoAsync(sourceSegments, cancellationToken);
+            outputPath = Path.Combine(outputFolder, $"Replay {DateTime.Now:yyyy-MM-dd HH-mm-ss}.mp4");
             await MuxAudioTracksAsync(sourcePath, outputPath, videoOffsetSeconds, sourceSegments, clipDurationSeconds, config, cancellationToken);
         }
         finally
         {
             TryDelete(sourcePath);
+            _transition.Release();
         }
 
         return outputPath;
@@ -759,7 +755,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             }
         }
 
-        foreach (var file in Directory.EnumerateFiles(_bufferFolder, "stitched_*.mp4").Concat(Directory.EnumerateFiles(_bufferFolder, "trimmed_*.mp4")).Concat(Directory.EnumerateFiles(_bufferFolder, "concat_*.txt")))
+        foreach (var file in Directory.EnumerateFiles(_bufferFolder, "concat_*.txt"))
         {
             TryDelete(file);
         }
@@ -773,6 +769,11 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         }
 
         foreach (var file in Directory.EnumerateFiles(_bufferFolder, "audio_*.wav"))
+        {
+            TryDelete(file);
+        }
+
+        foreach (var file in Directory.EnumerateFiles(_bufferFolder, "stitched_*.mp4"))
         {
             TryDelete(file);
         }

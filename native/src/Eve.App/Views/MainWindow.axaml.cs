@@ -197,9 +197,11 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null) return;
         if (_clipSaving) return;
+        _clipSaving = true;
         InitializeReplayServices();
         if (_replayBuffer is null || !_replayBuffer.IsRecording)
         {
+            _clipSaving = false;
             if (ViewModel.IsReplayRecording) ViewModel.IsReplayRecording = false;
             await ShowMessageAsync("Clip failed", "Replay buffer is not running.");
             return;
@@ -207,7 +209,6 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            _clipSaving = true;
             await EnsureLibraryFolderAsync();
             var outputFolder = ViewModel.Settings.LibraryFolder;
             AppLog.Info("Replay clip save requested.");
