@@ -93,8 +93,8 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default)
     {
         ReplayVideoSegment[] sourceSegments;
-        DateTime clipStartUtc;
-        DateTime clipEndUtc;
+        double videoOffsetSeconds;
+        double clipDurationSeconds;
         ReplayBufferConfig config;
         await _transition.WaitAsync(cancellationToken);
         try
@@ -106,22 +106,20 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             try
             {
                 AddSegment(activeSegment);
-                sourceSegments = GetReplaySegments();
-                if (sourceSegments.Length == 0)
+                var availableSegments = await HydrateSegmentDurationsAsync(GetReplaySegments(), cancellationToken);
+                if (availableSegments.Length == 0)
                 {
                     throw new InvalidOperationException("Replay buffer has no finished segments yet.");
                 }
 
-                clipEndUtc = activeSegment.EndedAtUtc;
-                var firstAvailableUtc = sourceSegments.First().StartedAtUtc;
-                clipStartUtc = new[] { clipEndUtc - Duration, firstAvailableUtc }.Max();
-                if (clipEndUtc - clipStartUtc < TimeSpan.FromSeconds(1))
+                (sourceSegments, videoOffsetSeconds, clipDurationSeconds) = SelectReplayWindow(availableSegments, Duration.TotalSeconds);
+                if (clipDurationSeconds < 1)
                 {
                     throw new InvalidOperationException("Replay just started. Try again in a second.");
                 }
 
                 config = _config ?? _configProvider();
-                AppLog.Info($"Replay save timing: segments={sourceSegments.Length}, first={firstAvailableUtc:o}, start={clipStartUtc:o}, end={clipEndUtc:o}, duration={(clipEndUtc - clipStartUtc).TotalSeconds:0.###}s.");
+                AppLog.Info($"Replay save timing: segments={sourceSegments.Length}, videoOffset={videoOffsetSeconds:0.###}s, duration={clipDurationSeconds:0.###}s.");
                 PruneSegments();
             }
             finally
@@ -137,13 +135,11 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             _transition.Release();
         }
 
-        var sourceStartUtc = sourceSegments.First().StartedAtUtc;
-        var videoOffsetSeconds = Math.Max(0, (clipStartUtc - sourceStartUtc).TotalSeconds);
         var sourcePath = await BuildReplayVideoAsync(sourceSegments, cancellationToken);
         var outputPath = Path.Combine(outputFolder, $"Replay {DateTime.Now:yyyy-MM-dd HH-mm-ss}.mp4");
         try
         {
-            await MuxAudioTracksAsync(sourcePath, outputPath, videoOffsetSeconds, clipStartUtc, (clipEndUtc - clipStartUtc).TotalSeconds, config, cancellationToken);
+            await MuxAudioTracksAsync(sourcePath, outputPath, videoOffsetSeconds, sourceSegments, clipDurationSeconds, config, cancellationToken);
         }
         finally
         {
@@ -210,7 +206,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         var path = await completion.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
         DisposeRecorder();
         AppLog.Info($"Replay segment stopped: path={path}, start={startedAt:o}, end={endedAt:o}, duration={(endedAt - startedAt).TotalSeconds:0.###}s.");
-        return new ReplayVideoSegment(path, startedAt, endedAt);
+        return new ReplayVideoSegment(path, startedAt, endedAt, TimeSpan.Zero);
     }
 
     private RecorderOptions CreateOptions(ReplayBufferConfig config)
@@ -319,6 +315,64 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         }
     }
 
+    private async Task<ReplayVideoSegment[]> HydrateSegmentDurationsAsync(ReplayVideoSegment[] segments, CancellationToken cancellationToken)
+    {
+        var hydrated = new List<ReplayVideoSegment>(segments.Length);
+        foreach (var segment in segments)
+        {
+            var duration = segment.VideoDuration > TimeSpan.Zero
+                ? segment.VideoDuration
+                : await ProbeVideoDurationAsync(segment.Path, cancellationToken);
+            if (duration > TimeSpan.FromMilliseconds(250))
+            {
+                hydrated.Add(segment with { VideoDuration = duration });
+            }
+            else
+            {
+                AppLog.Info($"Replay segment skipped: no usable duration, path={segment.Path}.");
+            }
+        }
+
+        return hydrated.ToArray();
+    }
+
+    private static (ReplayVideoSegment[] Segments, double FirstOffsetSeconds, double DurationSeconds) SelectReplayWindow(ReplayVideoSegment[] segments, double targetDurationSeconds)
+    {
+        var selected = new List<ReplayVideoSegment>();
+        var total = 0d;
+        for (var index = segments.Length - 1; index >= 0 && total < targetDurationSeconds; index--)
+        {
+            selected.Insert(0, segments[index]);
+            total += segments[index].VideoDuration.TotalSeconds;
+        }
+
+        total = selected.Sum(segment => segment.VideoDuration.TotalSeconds);
+        var duration = Math.Min(total, targetDurationSeconds);
+        var offset = Math.Max(0, total - duration);
+        return (selected.ToArray(), offset, duration);
+    }
+
+    private async Task<TimeSpan> ProbeVideoDurationAsync(string path, CancellationToken cancellationToken)
+    {
+        var result = await RunProcessAsync("ffprobe", new[]
+        {
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            path
+        }, cancellationToken);
+
+        if (result.ExitCode == 0 &&
+            double.TryParse(result.Output.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds) &&
+            seconds > 0)
+        {
+            return TimeSpan.FromSeconds(seconds);
+        }
+
+        AppLog.Info($"ffprobe duration failed: path={path}, exit={result.ExitCode}, error={result.Error}");
+        return TimeSpan.Zero;
+    }
+
     private async Task<string> BuildReplayVideoAsync(IReadOnlyList<ReplayVideoSegment> segments, CancellationToken cancellationToken)
     {
         var concatPath = Path.Combine(_bufferFolder, $"concat_{Guid.NewGuid():N}.txt");
@@ -352,12 +406,11 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         return path.Replace("\\", "/", StringComparison.Ordinal).Replace("'", "'\\''", StringComparison.Ordinal);
     }
 
-    private string SnapshotAudioFile(ReplayAudioCapture? capture, DateTime clipStartUtc, double durationSeconds, ICollection<string> snapshots)
+    private string SnapshotAudioFile(ReplayAudioCapture? capture, IReadOnlyList<ReplayVideoSegment> segments, double firstVideoOffsetSeconds, double durationSeconds, ICollection<string> snapshots)
     {
         if (capture is null || !IsUsableAudioFile(capture.Path)) return string.Empty;
         var sourceSnapshotPath = Path.Combine(_bufferFolder, $"audio_source_{Guid.NewGuid():N}.wav");
         var snapshotPath = Path.Combine(_bufferFolder, $"audio_{Guid.NewGuid():N}.wav");
-        var offset = Math.Max(0, (clipStartUtc - capture.StartedAtUtc).TotalSeconds);
         try
         {
             if (!capture.Session.SnapshotTo(sourceSnapshotPath) || !IsUsableAudioFile(sourceSnapshotPath))
@@ -368,15 +421,39 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             }
 
             snapshots.Add(sourceSnapshotPath);
+            var filters = new StringBuilder();
+            var partCount = 0;
+            var remaining = durationSeconds;
+            foreach (var segment in segments)
+            {
+                if (remaining <= 0) break;
+                var segmentOffset = partCount == 0 ? firstVideoOffsetSeconds : 0;
+                var partDuration = Math.Min(remaining, Math.Max(0, segment.VideoDuration.TotalSeconds - segmentOffset));
+                if (partDuration <= 0) continue;
+                var segmentAudioStartUtc = segment.EndedAtUtc - segment.VideoDuration + TimeSpan.FromSeconds(segmentOffset);
+                var audioOffset = Math.Max(0, (segmentAudioStartUtc - capture.StartedAtUtc).TotalSeconds);
+                filters.Append($"[0:a]atrim=start={FormatSeconds(audioOffset)}:duration={FormatSeconds(partDuration)},asetpts=PTS-STARTPTS[p{partCount}];");
+                remaining -= partDuration;
+                partCount++;
+            }
+
+            if (partCount == 0)
+            {
+                TryDelete(snapshotPath);
+                return string.Empty;
+            }
+
+            for (var index = 0; index < partCount; index++) filters.Append($"[p{index}]");
+            filters.Append($"concat=n={partCount}:v=0:a=1,aresample=48000,apad=whole_dur={FormatSeconds(durationSeconds)},atrim=0:{FormatSeconds(durationSeconds)}[out]");
+
             var result = RunProcessAsync("ffmpeg", new[]
             {
                 "-y",
                 "-v", "error",
-                "-ss", offset.ToString("0.###"),
-                "-t", durationSeconds.ToString("0.###"),
                 "-i", sourceSnapshotPath,
+                "-filter_complex", filters.ToString(),
+                "-map", "[out]",
                 "-ac", "2",
-                "-ar", "48000",
                 "-c:a", "pcm_s16le",
                 snapshotPath
             }, CancellationToken.None).GetAwaiter().GetResult();
@@ -471,7 +548,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         _audioCaptures.Clear();
     }
 
-    private async Task MuxAudioTracksAsync(string videoPath, string outputPath, double videoOffsetSeconds, DateTime clipStartUtc, double clipDurationSeconds, ReplayBufferConfig config, CancellationToken cancellationToken)
+    private async Task MuxAudioTracksAsync(string videoPath, string outputPath, double videoOffsetSeconds, IReadOnlyList<ReplayVideoSegment> sourceSegments, double clipDurationSeconds, ReplayBufferConfig config, CancellationToken cancellationToken)
     {
         var snapshots = new List<string>();
         var duration = Math.Max(1, clipDurationSeconds);
@@ -479,18 +556,18 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         AppLog.Info($"Replay mux start: videoOffset={videoOffsetSeconds:0.###}s, duration={duration:0.###}s, captures={captures.Length}.");
         var chatInputs = captures
             .Where(capture => capture.Path.Contains("\\chat_", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(capture.Path).StartsWith("chat_", StringComparison.OrdinalIgnoreCase))
-            .Select(capture => SnapshotAudioFile(capture, clipStartUtc, duration, snapshots))
+            .Select(capture => SnapshotAudioFile(capture, sourceSegments, videoOffsetSeconds, duration, snapshots))
             .Where(IsUsableAudioFile)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var excludedInputs = captures
             .Where(capture => capture.Path.Contains("\\excluded_", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(capture.Path).StartsWith("excluded_", StringComparison.OrdinalIgnoreCase))
-            .Select(capture => SnapshotAudioFile(capture, clipStartUtc, duration, snapshots))
+            .Select(capture => SnapshotAudioFile(capture, sourceSegments, videoOffsetSeconds, duration, snapshots))
             .Where(IsUsableAudioFile)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        var systemPath = SnapshotAudioFile(captures.FirstOrDefault(capture => string.Equals(Path.GetFileName(capture.Path), "game.wav", StringComparison.OrdinalIgnoreCase)), clipStartUtc, duration, snapshots);
-        var microphonePath = SnapshotAudioFile(captures.FirstOrDefault(capture => string.Equals(Path.GetFileName(capture.Path), "microphone.wav", StringComparison.OrdinalIgnoreCase)), clipStartUtc, duration, snapshots);
+        var systemPath = SnapshotAudioFile(captures.FirstOrDefault(capture => string.Equals(Path.GetFileName(capture.Path), "game.wav", StringComparison.OrdinalIgnoreCase)), sourceSegments, videoOffsetSeconds, duration, snapshots);
+        var microphonePath = SnapshotAudioFile(captures.FirstOrDefault(capture => string.Equals(Path.GetFileName(capture.Path), "microphone.wav", StringComparison.OrdinalIgnoreCase)), sourceSegments, videoOffsetSeconds, duration, snapshots);
         var inputs = new List<AudioMuxInput>
         {
             new("system", IsUsableAudioFile(systemPath) ? systemPath : string.Empty)
@@ -741,7 +818,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
     private sealed record AudioRoutes(int[] ChatProcessIds, int[] ExcludedProcessIds, string RouteKey);
 
-    private sealed record ReplayVideoSegment(string Path, DateTime StartedAtUtc, DateTime EndedAtUtc);
+    private sealed record ReplayVideoSegment(string Path, DateTime StartedAtUtc, DateTime EndedAtUtc, TimeSpan VideoDuration);
 
     private sealed record ReplayAudioCapture(AudioCaptureSession Session, string Path, string Title, DateTime StartedAtUtc);
 
