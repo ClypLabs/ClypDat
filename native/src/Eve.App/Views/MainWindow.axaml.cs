@@ -20,6 +20,7 @@ public sealed partial class MainWindow : Window
     private CancellationTokenSource? _playbackStartCts;
     private TimelineDragMode _timelineDragMode = TimelineDragMode.None;
     private bool _endedAtTrimBoundary;
+    private bool _timelineWasPlayingBeforeDrag;
     private readonly Stopwatch _playheadClock = new();
     private TimeSpan _playheadBaseTime = TimeSpan.Zero;
     private IReplayBuffer? _replayBuffer;
@@ -467,9 +468,12 @@ public sealed partial class MainWindow : Window
 
         if (_playback.IsPlaying)
         {
+            var pauseTime = ViewModel.CurrentTime;
             _playback.Pause();
-            SetPlayheadBase(_playback.Position);
+            ViewModel.CurrentTime = pauseTime;
+            SetPlayheadBase(pauseTime);
             ViewModel.IsPlaying = false;
+            _playbackTimer.Stop();
             return;
         }
 
@@ -485,6 +489,7 @@ public sealed partial class MainWindow : Window
         _playback.PlayFrom(startTime);
         StartPlayheadClock(startTime);
         ViewModel.IsPlaying = true;
+        _playbackTimer.Start();
     }
 
     private void RestartButton_OnClick(object? sender, RoutedEventArgs e)
@@ -494,16 +499,7 @@ public sealed partial class MainWindow : Window
         ViewModel.RestartPlayback();
         if (_playback is not null)
         {
-            if (_playback.IsPlaying)
-            {
-                _playback.PlayFrom(ViewModel.CurrentTime);
-                StartPlayheadClock(ViewModel.CurrentTime);
-            }
-            else
-            {
-                _playback.Seek(ViewModel.CurrentTime);
-                SetPlayheadBase(ViewModel.CurrentTime);
-            }
+            ApplyTimelineSeek(ViewModel.CurrentTime, ViewModel.IsPlaying);
         }
     }
 
@@ -511,34 +507,41 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null) return;
         _endedAtTrimBoundary = false;
+        var wasPlaying = ViewModel.IsPlaying;
         ViewModel.SeekBySeconds(-5);
-        _playback?.Seek(ViewModel.CurrentTime);
-        SetPlayheadBase(ViewModel.CurrentTime);
+        ApplyTimelineSeek(ViewModel.CurrentTime, wasPlaying);
     }
 
     private void StepForwardButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
         _endedAtTrimBoundary = false;
+        var wasPlaying = ViewModel.IsPlaying;
         ViewModel.SeekBySeconds(5);
-        _playback?.Seek(ViewModel.CurrentTime);
-        SetPlayheadBase(ViewModel.CurrentTime);
+        ApplyTimelineSeek(ViewModel.CurrentTime, wasPlaying);
     }
 
     private void EndButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
+        var wasPlaying = ViewModel.IsPlaying;
         _endedAtTrimBoundary = true;
         ViewModel.CurrentTime = ViewModel.TrimEnd > TimeSpan.Zero ? ViewModel.TrimEnd : ViewModel.Duration;
-        _playback?.Seek(ViewModel.CurrentTime);
-        SetPlayheadBase(ViewModel.CurrentTime);
+        ApplyTimelineSeek(ViewModel.CurrentTime, wasPlaying);
     }
 
     private void TimelineSurface_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
         _timelineDragMode = TimelineDragMode.Playhead;
+        _timelineWasPlayingBeforeDrag = ViewModel.IsPlaying;
         _endedAtTrimBoundary = false;
+        if (_timelineWasPlayingBeforeDrag)
+        {
+            _playback?.Pause();
+            ViewModel.IsPlaying = false;
+            _playbackTimer.Stop();
+        }
         UpdateTimelineFromPointer(e, TimelineDragMode.Playhead);
         e.Pointer.Capture(TimelineSurface);
         e.Handled = true;
@@ -548,7 +551,14 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
         _timelineDragMode = TimelineDragMode.TrimStart;
+        _timelineWasPlayingBeforeDrag = ViewModel.IsPlaying;
         _endedAtTrimBoundary = false;
+        if (_timelineWasPlayingBeforeDrag)
+        {
+            _playback?.Pause();
+            ViewModel.IsPlaying = false;
+            _playbackTimer.Stop();
+        }
         UpdateTimelineFromPointer(e, TimelineDragMode.TrimStart);
         e.Pointer.Capture(TimelineSurface);
         e.Handled = true;
@@ -558,7 +568,14 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
         _timelineDragMode = TimelineDragMode.TrimEnd;
+        _timelineWasPlayingBeforeDrag = ViewModel.IsPlaying;
         _endedAtTrimBoundary = false;
+        if (_timelineWasPlayingBeforeDrag)
+        {
+            _playback?.Pause();
+            ViewModel.IsPlaying = false;
+            _playbackTimer.Stop();
+        }
         UpdateTimelineFromPointer(e, TimelineDragMode.TrimEnd);
         e.Pointer.Capture(TimelineSurface);
         e.Handled = true;
@@ -577,14 +594,16 @@ public sealed partial class MainWindow : Window
         UpdateTimelineFromPointer(e, _timelineDragMode);
         if (mode == TimelineDragMode.Playhead && ViewModel is not null)
         {
-            _playback?.Seek(ViewModel.CurrentTime);
+            ApplyTimelineSeek(ViewModel.CurrentTime, _timelineWasPlayingBeforeDrag);
         }
         else if (ViewModel is not null)
         {
+            ApplyTimelineSeek(ViewModel.CurrentTime, _timelineWasPlayingBeforeDrag);
             ViewModel.SaveSelectedClipEditState();
         }
 
         _timelineDragMode = TimelineDragMode.None;
+        _timelineWasPlayingBeforeDrag = false;
         e.Pointer.Capture(null);
         e.Handled = true;
     }
@@ -838,11 +857,13 @@ public sealed partial class MainWindow : Window
             ViewModel.CurrentTime = ViewModel.TrimEnd;
             SetPlayheadBase(ViewModel.CurrentTime);
             ViewModel.IsPlaying = false;
+            _playbackTimer.Stop();
             _endedAtTrimBoundary = true;
         }
         else if (_playback.IsEnded)
         {
             ViewModel.IsPlaying = false;
+            _playbackTimer.Stop();
             _endedAtTrimBoundary = true;
         }
     }
@@ -858,23 +879,39 @@ public sealed partial class MainWindow : Window
             case TimelineDragMode.TrimStart:
                 ViewModel.TrimStart = time;
                 ViewModel.CurrentTime = ViewModel.TrimStart;
-                _playback?.Seek(ViewModel.CurrentTime);
                 ResetPlayheadClockAfterSeek(ViewModel.CurrentTime);
                 break;
             case TimelineDragMode.TrimEnd:
                 ViewModel.TrimEnd = time;
                 ViewModel.CurrentTime = ViewModel.TrimEnd;
-                _playback?.Seek(ViewModel.CurrentTime);
                 ResetPlayheadClockAfterSeek(ViewModel.CurrentTime);
                 break;
             case TimelineDragMode.Playhead:
                 ViewModel.CurrentTime = time;
-                _playback?.Seek(time);
-                _playback?.EnsurePlayingIfNeeded(ViewModel.IsPlaying);
                 ResetPlayheadClockAfterSeek(time);
                 break;
         }
 
+        UpdateTimelineChrome();
+    }
+
+    private void ApplyTimelineSeek(TimeSpan time, bool resumePlayback)
+    {
+        if (ViewModel is null) return;
+        _endedAtTrimBoundary = false;
+        ViewModel.CurrentTime = time;
+        _playback?.Seek(time, resumePlayback);
+        if (resumePlayback)
+        {
+            StartPlayheadClock(time);
+            ViewModel.IsPlaying = true;
+            _playbackTimer.Start();
+        }
+        else
+        {
+            SetPlayheadBase(time);
+            ViewModel.IsPlaying = false;
+        }
         UpdateTimelineChrome();
     }
 

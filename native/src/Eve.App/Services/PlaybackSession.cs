@@ -118,17 +118,17 @@ public sealed class PlaybackSession : IDisposable
         }
 
         _ended = false;
+        VideoPlayer.Time = milliseconds;
         SeekAudio(time);
         VideoPlayer.Play();
-        VideoPlayer.Time = milliseconds;
         _audioOutput?.Play();
         AppLog.Info($"Editor play from {time.TotalSeconds:0.###}s.");
     }
 
     public void Pause()
     {
+        _audioOutput?.Stop();
         VideoPlayer.Pause();
-        _audioOutput?.Pause();
     }
 
     public void Stop()
@@ -145,12 +145,18 @@ public sealed class PlaybackSession : IDisposable
         }
     }
 
-    public void Seek(TimeSpan time)
+    public void Seek(TimeSpan time, bool resumePlayback = false)
     {
         var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
         _ended = false;
+        _audioOutput?.Stop();
         VideoPlayer.Time = milliseconds;
         SeekAudio(time);
+        if (resumePlayback)
+        {
+            VideoPlayer.Play();
+            _audioOutput?.Play();
+        }
         AppLog.Info($"Editor seek {time.TotalSeconds:0.###}s.");
     }
 
