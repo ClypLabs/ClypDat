@@ -51,6 +51,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         Duration = TimeSpan.FromSeconds(Math.Clamp(_config.DurationSeconds, 30, 1200));
         StartRecorder();
         StartAudioCaptures(_config);
+        AppLog.Info($"Replay buffer started: duration={Duration.TotalSeconds:0}s, quality={_config.MaxHeight}p{_config.FrameRate}.");
         return Task.CompletedTask;
     }
 
@@ -120,6 +121,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                 }
 
                 config = _config ?? _configProvider();
+                AppLog.Info($"Replay save timing: segments={sourceSegments.Length}, first={firstAvailableUtc:o}, start={clipStartUtc:o}, end={clipEndUtc:o}, duration={(clipEndUtc - clipStartUtc).TotalSeconds:0.###}s.");
                 PruneSegments();
             }
             finally
@@ -203,10 +205,11 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         var recorder = _recorder ?? throw new InvalidOperationException("Replay buffer is not running.");
         var completion = _completion ?? throw new InvalidOperationException("Replay buffer is not ready.");
         var startedAt = _startedAtUtc;
+        var endedAt = DateTime.UtcNow;
         recorder.Stop();
         var path = await completion.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
-        var endedAt = DateTime.UtcNow;
         DisposeRecorder();
+        AppLog.Info($"Replay segment stopped: path={path}, start={startedAt:o}, end={endedAt:o}, duration={(endedAt - startedAt).TotalSeconds:0.###}s.");
         return new ReplayVideoSegment(path, startedAt, endedAt);
     }
 
@@ -435,6 +438,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         TryDelete(path);
         var capture = new WasapiLoopbackCapture(device);
         _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, DateTime.UtcNow));
+        AppLog.Info($"Audio capture started: {title}, device={device.FriendlyName}.");
     }
 
     private void StartProcessLoopbackCapture(int processId, ProcessLoopbackCaptureMode mode, string title, string fileName)
@@ -443,6 +447,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         TryDelete(path);
         var capture = new ProcessLoopbackWaveIn(processId, mode);
         _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, DateTime.UtcNow));
+        AppLog.Info($"Audio capture started: {title}, pid={processId}, mode={mode}.");
     }
 
     private void StartMicrophoneCapture(MMDevice device, string title, string fileName)
@@ -451,6 +456,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         TryDelete(path);
         var capture = new WasapiCapture(device);
         _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, DateTime.UtcNow));
+        AppLog.Info($"Audio capture started: {title}, device={device.FriendlyName}.");
     }
 
     private void StopAudioCaptures()
@@ -470,6 +476,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         var snapshots = new List<string>();
         var duration = Math.Max(1, clipDurationSeconds);
         var captures = _audioCaptures.ToArray();
+        AppLog.Info($"Replay mux start: videoOffset={videoOffsetSeconds:0.###}s, duration={duration:0.###}s, captures={captures.Length}.");
         var chatInputs = captures
             .Where(capture => capture.Path.Contains("\\chat_", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(capture.Path).StartsWith("chat_", StringComparison.OrdinalIgnoreCase))
             .Select(capture => SnapshotAudioFile(capture, clipStartUtc, duration, snapshots))
@@ -573,11 +580,13 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             });
             args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k", outputPath });
             var result = await RunProcessAsync("ffmpeg", args, cancellationToken);
+            AppLog.Info($"Replay mux ffmpeg result: exit={result.ExitCode}, output={outputPath}.");
             if (result.ExitCode != 0)
             {
                 args = args.Select(arg => arg == "h264_nvenc" ? "libx264" : arg).Where(arg => arg is not "-preset" and not "p1" and not "-tune" and not "ull").ToList();
                 args.InsertRange(args.Count - 1, new[] { "-preset", "ultrafast" });
                 result = await RunProcessAsync("ffmpeg", args, cancellationToken);
+                AppLog.Info($"Replay mux fallback result: exit={result.ExitCode}, output={outputPath}.");
                 if (result.ExitCode != 0) throw new InvalidOperationException(string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg mux failed." : result.Error);
             }
         }

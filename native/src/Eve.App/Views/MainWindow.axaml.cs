@@ -174,10 +174,12 @@ public sealed partial class MainWindow : Window
             await EnsureLibraryFolderAsync();
             ApplyPrimaryCaptureBounds();
             await Task.Run(() => _replayBuffer.StartAsync());
+            AppLog.Info("Replay started.");
             ViewModel.IsReplayRecording = _replayBuffer.IsRecording;
         }
         catch (Exception error)
         {
+            AppLog.Error("Replay start failed", error);
             ViewModel.IsReplayRecording = false;
             if (showErrors)
             {
@@ -207,11 +209,14 @@ public sealed partial class MainWindow : Window
             _clipSaving = true;
             await EnsureLibraryFolderAsync();
             var outputFolder = ViewModel.Settings.LibraryFolder;
-            await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder));
-            await ViewModel.RefreshLibraryAsync();
+            AppLog.Info("Replay clip save requested.");
+            var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder));
+            AppLog.Info($"Replay clip saved: {outputPath}");
+            await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
         }
         catch (Exception error)
         {
+            AppLog.Error("Replay clip save failed", error);
             await ShowMessageAsync("Clip failed", error.Message);
         }
         finally
@@ -325,6 +330,11 @@ public sealed partial class MainWindow : Window
     private void CloseSettingsButton_OnClick(object? sender, RoutedEventArgs e)
     {
         ViewModel?.CloseSettings();
+    }
+
+    private void OpenLogsButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        AppLog.OpenFolder();
     }
 
     private void LibraryPathButton_OnClick(object? sender, RoutedEventArgs e)
@@ -724,6 +734,7 @@ public sealed partial class MainWindow : Window
             var playback = new PlaybackSession();
             playback.LoadVideo(ViewModel.SelectedVideoPath);
             _playback = playback;
+            AppLog.Info($"Editor open: {ViewModel.SelectedVideoPath}");
             EditorVideoView.MediaPlayer = playback.VideoPlayer;
             var audioTracks = ViewModel.TimelineTracks
                 .Where(track => track.IsAudio)
@@ -746,6 +757,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception error)
         {
+            AppLog.Error("Editor playback failed", error);
             StopEditorPlayback();
             await ShowMessageAsync("Playback unavailable", error.Message);
         }
@@ -768,6 +780,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception error)
         {
+            AppLog.Error("Editor audio preview failed", error);
             await Dispatcher.UIThread.InvokeAsync(() => ShowMessageAsync("Audio preview unavailable", error.Message));
         }
     }
@@ -788,6 +801,7 @@ public sealed partial class MainWindow : Window
         EditorVideoView.MediaPlayer = null;
         if (playback is not null)
         {
+            playback.Stop();
             _ = Task.Run(playback.Dispose);
         }
         if (ViewModel is not null)
@@ -855,6 +869,7 @@ public sealed partial class MainWindow : Window
             case TimelineDragMode.Playhead:
                 ViewModel.CurrentTime = time;
                 _playback?.Seek(time);
+                _playback?.EnsurePlayingIfNeeded(ViewModel.IsPlaying);
                 ResetPlayheadClockAfterSeek(time);
                 break;
         }

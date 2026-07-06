@@ -122,6 +122,7 @@ public sealed class PlaybackSession : IDisposable
         VideoPlayer.Play();
         VideoPlayer.Time = milliseconds;
         _audioOutput?.Play();
+        AppLog.Info($"Editor play from {time.TotalSeconds:0.###}s.");
     }
 
     public void Pause()
@@ -132,9 +133,16 @@ public sealed class PlaybackSession : IDisposable
 
     public void Stop()
     {
-        VideoPlayer.Stop();
-        _audioOutput?.Stop();
-        _ended = false;
+        try
+        {
+            _audioOutput?.Stop();
+            VideoPlayer.Stop();
+            _ended = false;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Editor stop failed", error);
+        }
     }
 
     public void Seek(TimeSpan time)
@@ -143,6 +151,14 @@ public sealed class PlaybackSession : IDisposable
         _ended = false;
         VideoPlayer.Time = milliseconds;
         SeekAudio(time);
+        AppLog.Info($"Editor seek {time.TotalSeconds:0.###}s.");
+    }
+
+    public void EnsurePlayingIfNeeded(bool shouldPlay)
+    {
+        if (!shouldPlay) return;
+        if (!VideoPlayer.IsPlaying) VideoPlayer.Play();
+        if (_audioOutput is not null && _audioOutput.PlaybackState != PlaybackState.Playing) _audioOutput.Play();
     }
 
     public void SetTrackVolume(int streamIndex, double percent)

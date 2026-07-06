@@ -500,6 +500,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public Task RefreshLibraryAsync()
     {
+        var scanClock = System.Diagnostics.Stopwatch.StartNew();
         ClipGroups.Clear();
         ClearSelection();
         StartLibraryWatcher();
@@ -524,7 +525,44 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         NotifyLibraryChrome();
         StartLibraryHydration(clips);
+        AppLog.Info($"Library refresh: {clips.Length} clips in {scanClock.ElapsedMilliseconds}ms.");
         return Task.CompletedTask;
+    }
+
+    public async Task AddOrUpdateLibraryClipAsync(string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath)) return;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var media = _mediaProbe.CreateLibraryStub(filePath);
+        var existing = AllClips.FirstOrDefault(clip => string.Equals(clip.Path, filePath, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+        {
+            existing.UpdateMedia(media);
+        }
+        else
+        {
+            var clip = new ClipCardViewModel(media, _mediaProbe);
+            var date = clip.CreatedAt.ToLocalTime().Date;
+            var key = date.ToString("yyyy-MM-dd");
+            var group = ClipGroups.FirstOrDefault(item => item.Key == key);
+            if (group is null)
+            {
+                group = new ClipGroupViewModel(key, date.ToString("ddd, MMM d").ToUpperInvariant(), new[] { clip });
+                var insertIndex = 0;
+                while (insertIndex < ClipGroups.Count && string.CompareOrdinal(ClipGroups[insertIndex].Key, key) > 0) insertIndex++;
+                ClipGroups.Insert(insertIndex, group);
+            }
+            else
+            {
+                var insertIndex = 0;
+                while (insertIndex < group.Clips.Count && group.Clips[insertIndex].CreatedAt > clip.CreatedAt) insertIndex++;
+                group.Clips.Insert(insertIndex, clip);
+            }
+        }
+
+        NotifyLibraryChrome();
+        AppLog.Info($"Library quick add: {filePath} in {clock.ElapsedMilliseconds}ms.");
+        await HydrateOpenClipAsync(existing ?? AllClips.First(clip => string.Equals(clip.Path, filePath, StringComparison.OrdinalIgnoreCase)));
     }
 
     public void Dispose()
