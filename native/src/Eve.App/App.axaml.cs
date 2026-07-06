@@ -23,6 +23,7 @@ public sealed partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
+        AppLog.Startup();
         _ = Task.Run(PlaybackSession.WarmUp);
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)

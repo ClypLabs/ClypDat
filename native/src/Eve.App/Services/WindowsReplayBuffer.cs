@@ -238,15 +238,37 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         var routes = ResolveAudioRoutes(config);
         _audioRouteKey = routes.RouteKey;
         AppLog.Info(
-            $"Audio route resolved: chat='{config.ChatAudioProcessName}', chatPids={FormatIds(routes.ChatProcessIds)}, exclusions='{string.Join(",", config.GameAudioExcludedProcesses)}', excludedPids={FormatIds(routes.ExcludedProcessIds)}.");
+            $"Audio route resolved: chat='{config.ChatAudioProcessName}', chatPids={FormatIds(routes.ChatProcessIds)}, exclusions='{string.Join(",", config.GameAudioExcludedProcesses)}', excludedPids={FormatIds(routes.ExcludedProcessIds)}, gamePids={FormatIds(routes.GameProcessIds)}.");
         using var enumerator = new MMDeviceEnumerator();
-        try
+        if (routes.UseProcessRouting)
         {
-            StartLoopbackCapture(enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia), "Game Audio", "game");
+            foreach (var pid in routes.GameProcessIds)
+            {
+                try
+                {
+                    StartProcessLoopbackCapture(pid, ProcessLoopbackCaptureMode.IncludeTargetProcessTree, "Game Audio", $"game_{pid}");
+                }
+                catch (Exception error)
+                {
+                    AppLog.Error($"Game app audio capture failed: pid={pid}", error);
+                }
+            }
+
+            if (routes.GameProcessIds.Length == 0)
+            {
+                AppLog.Info("Game audio process routing active but no allowed audio apps found; Game Audio track will be silent.");
+            }
         }
-        catch (Exception error)
+        else
         {
-            AppLog.Error("Game audio capture failed", error);
+            try
+            {
+                StartLoopbackCapture(enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia), "Game Audio", "game");
+            }
+            catch (Exception error)
+            {
+                AppLog.Error("Game audio capture failed", error);
+            }
         }
 
         foreach (var pid in routes.ChatProcessIds)
@@ -258,18 +280,6 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             catch (Exception error)
             {
                 AppLog.Error($"Chat audio capture failed: pid={pid}", error);
-            }
-        }
-
-        foreach (var pid in routes.ExcludedProcessIds)
-        {
-            try
-            {
-                StartProcessLoopbackCapture(pid, ProcessLoopbackCaptureMode.IncludeTargetProcessTree, "Excluded Audio", $"excluded_{pid}");
-            }
-            catch (Exception error)
-            {
-                AppLog.Error($"Excluded audio capture failed: pid={pid}", error);
             }
         }
 
@@ -551,27 +561,29 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         var duration = Math.Max(1, clipDurationSeconds);
         var captures = _audioCaptures.ToArray();
         AppLog.Info($"Replay mux start: videoOffset={videoOffsetSeconds:0.###}s, duration={duration:0.###}s, captures={captures.Length}.");
+        var gameInputs = captures
+            .Where(capture => string.Equals(Path.GetFileName(capture.Path), "game.wav", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(capture.Path).StartsWith("game_", StringComparison.OrdinalIgnoreCase))
+            .Select(capture => SnapshotAudioFile(capture, sourceSegments, videoOffsetSeconds, duration, snapshots))
+            .Where(IsUsableAudioFile)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         var chatInputs = captures
             .Where(capture => capture.Path.Contains("\\chat_", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(capture.Path).StartsWith("chat_", StringComparison.OrdinalIgnoreCase))
             .Select(capture => SnapshotAudioFile(capture, sourceSegments, videoOffsetSeconds, duration, snapshots))
             .Where(IsUsableAudioFile)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        var excludedInputs = captures
-            .Where(capture => capture.Path.Contains("\\excluded_", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(capture.Path).StartsWith("excluded_", StringComparison.OrdinalIgnoreCase))
-            .Select(capture => SnapshotAudioFile(capture, sourceSegments, videoOffsetSeconds, duration, snapshots))
-            .Where(IsUsableAudioFile)
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        var systemPath = SnapshotAudioFile(captures.FirstOrDefault(capture => string.Equals(Path.GetFileName(capture.Path), "game.wav", StringComparison.OrdinalIgnoreCase)), sourceSegments, videoOffsetSeconds, duration, snapshots);
         var microphonePath = SnapshotAudioFile(captures.FirstOrDefault(capture => string.Equals(Path.GetFileName(capture.Path), "microphone.wav", StringComparison.OrdinalIgnoreCase)), sourceSegments, videoOffsetSeconds, duration, snapshots);
-        AppLog.Info($"Replay mux inputs: system={(IsUsableAudioFile(systemPath) ? 1 : 0)}, chat={chatInputs.Length}, excluded={excludedInputs.Length}, microphone={(IsUsableAudioFile(microphonePath) ? 1 : 0)}.");
-        AppLog.Info($"Replay mux bytes: system={AudioFileLength(systemPath)}, chat={string.Join(",", chatInputs.Select(AudioFileLength))}, excluded={string.Join(",", excludedInputs.Select(AudioFileLength))}, microphone={AudioFileLength(microphonePath)}.");
-        var inputs = new List<AudioMuxInput>
+        AppLog.Info($"Replay mux inputs: game={gameInputs.Length}, chat={chatInputs.Length}, microphone={(IsUsableAudioFile(microphonePath) ? 1 : 0)}.");
+        AppLog.Info($"Replay mux bytes: game={string.Join(",", gameInputs.Select(AudioFileLength))}, chat={string.Join(",", chatInputs.Select(AudioFileLength))}, microphone={AudioFileLength(microphonePath)}.");
+        var inputs = new List<AudioMuxInput>();
+        var gameStart = inputs.Count + 1;
+        inputs.AddRange(gameInputs.Select((path, index) => new AudioMuxInput($"game{index}", path)));
+        if (gameInputs.Length == 0)
         {
-            new("system", IsUsableAudioFile(systemPath) ? systemPath : string.Empty)
-        };
-        inputs.AddRange(chatInputs.Select((path, index) => new AudioMuxInput($"chatForGame{index}", path)));
+            inputs.Add(new AudioMuxInput("gameSilent", string.Empty));
+        }
+
         var chatOutStart = inputs.Count + 1;
         inputs.AddRange(chatInputs.Select((path, index) => new AudioMuxInput($"chatOut{index}", path)));
         if (chatInputs.Length == 0)
@@ -581,8 +593,6 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
         var microphoneIndex = inputs.Count + 1;
         inputs.Add(new AudioMuxInput("microphone", IsUsableAudioFile(microphonePath) ? microphonePath : string.Empty));
-        var excludedStart = inputs.Count + 1;
-        inputs.AddRange(excludedInputs.Select((path, index) => new AudioMuxInput($"excluded{index}", path)));
 
         var args = new List<string>
         {
@@ -603,10 +613,6 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
         try
         {
-            var subtractInputIndexes = Enumerable.Range(2, chatInputs.Length)
-                .Concat(Enumerable.Range(excludedStart, excludedInputs.Length))
-                .ToArray();
-
             var filter = new StringBuilder();
             filter.Append($"[0:v]trim=start={FormatSeconds(videoOffsetSeconds)}:duration={FormatSeconds(duration)},setpts=PTS-STARTPTS,{BuildVideoFilter(config)}[vout];");
             for (var index = 0; index < inputs.Count; index++)
@@ -615,17 +621,15 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                 filter.Append($"[{inputIndex}:a]aresample=48000,atrim=0:{FormatSeconds(duration)},asetpts=PTS-STARTPTS,apad=whole_dur={FormatSeconds(duration)}[a{inputIndex}];");
             }
 
-            if (subtractInputIndexes.Length > 0)
+            var gameInputCount = Math.Max(1, gameInputs.Length);
+            if (gameInputCount > 1)
             {
-                filter.Append("[a1]");
-                foreach (var index in subtractInputIndexes) filter.Append($"[a{index}]");
-                filter.Append($"amix=inputs={subtractInputIndexes.Length + 1}:weights='1");
-                foreach (var _ in subtractInputIndexes) filter.Append(" -1");
-                filter.Append($"':normalize=0,atrim=0:{FormatSeconds(duration)},asetpts=PTS-STARTPTS[gameout];");
+                foreach (var index in Enumerable.Range(gameStart, gameInputCount)) filter.Append($"[a{index}]");
+                filter.Append($"amix=inputs={gameInputCount}:normalize=0,atrim=0:{FormatSeconds(duration)},asetpts=PTS-STARTPTS[gameout];");
             }
             else
             {
-                filter.Append($"[a1]atrim=0:{FormatSeconds(duration)},asetpts=PTS-STARTPTS[gameout];");
+                filter.Append($"[a{gameStart}]atrim=0:{FormatSeconds(duration)},asetpts=PTS-STARTPTS[gameout];");
             }
 
             if (chatInputs.Length > 1)
@@ -713,6 +717,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     private static AudioRoutes ResolveAudioRoutes(ReplayBufferConfig config)
     {
         var chatPids = ResolveProcessIds(config.ChatAudioProcessName).ToArray();
+        var useProcessRouting = chatPids.Length > 0 || config.GameAudioExcludedProcesses.Any(name => !string.IsNullOrWhiteSpace(name));
         var exclusionNames = config.GameAudioExcludedProcesses
             .Append(config.ChatAudioProcessName)
             .Where(name => !string.IsNullOrWhiteSpace(name))
@@ -723,8 +728,17 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             .Distinct()
             .OrderBy(pid => pid)
             .ToArray();
-        var key = $"{string.Join(',', chatPids.OrderBy(pid => pid))}|{string.Join(',', excludedPids)}";
-        return new AudioRoutes(chatPids.OrderBy(pid => pid).ToArray(), excludedPids, key);
+        var selfPid = Environment.ProcessId;
+        var gamePids = useProcessRouting
+            ? ResolveActiveAudioProcessIds()
+                .Where(pid => pid != selfPid)
+                .Except(excludedPids)
+                .Distinct()
+                .OrderBy(pid => pid)
+                .ToArray()
+            : Array.Empty<int>();
+        var key = $"{useProcessRouting}|{string.Join(',', chatPids.OrderBy(pid => pid))}|{string.Join(',', excludedPids)}|{string.Join(',', gamePids)}";
+        return new AudioRoutes(chatPids.OrderBy(pid => pid).ToArray(), excludedPids, gamePids, useProcessRouting, key);
     }
 
     private static string FormatIds(IEnumerable<int> ids)
@@ -751,6 +765,40 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                     // Process can exit while enumerating.
                 }
             }
+        }
+
+        return ids;
+    }
+
+    private static IEnumerable<int> ResolveActiveAudioProcessIds()
+    {
+        var ids = new HashSet<int>();
+        try
+        {
+            using var enumerator = new MMDeviceEnumerator();
+            using var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+            var sessions = device.AudioSessionManager.Sessions;
+            for (var index = 0; index < sessions.Count; index++)
+            {
+                using var session = sessions[index];
+                try
+                {
+                    if (session.IsSystemSoundsSession) continue;
+                    if (session.State != NAudio.CoreAudioApi.Interfaces.AudioSessionState.AudioSessionStateActive) continue;
+                    var processId = (int)session.GetProcessID;
+                    if (processId <= 0) continue;
+                    using var process = Process.GetProcessById(processId);
+                    if (!process.HasExited) ids.Add(processId);
+                }
+                catch
+                {
+                    // Audio sessions can disappear while enumerating.
+                }
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Active audio process resolve failed", error);
         }
 
         return ids;
@@ -842,7 +890,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
     private sealed record AudioMuxInput(string Title, string Path);
 
-    private sealed record AudioRoutes(int[] ChatProcessIds, int[] ExcludedProcessIds, string RouteKey);
+    private sealed record AudioRoutes(int[] ChatProcessIds, int[] ExcludedProcessIds, int[] GameProcessIds, bool UseProcessRouting, string RouteKey);
 
     private sealed record ReplayVideoSegment(string Path, DateTime StartedAtUtc, DateTime EndedAtUtc, TimeSpan VideoDuration);
 

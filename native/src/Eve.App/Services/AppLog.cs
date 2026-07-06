@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using System.Reflection;
 
 namespace Eve.App.Services;
 
@@ -26,6 +27,13 @@ public static class AppLog
     {
         Directory.CreateDirectory(LogFolder);
         Process.Start(new ProcessStartInfo(LogFolder) { UseShellExecute = true });
+    }
+
+    public static void Startup()
+    {
+        var path = Environment.ProcessPath ?? Assembly.GetEntryAssembly()?.Location ?? "unknown";
+        var timestamp = File.Exists(path) ? File.GetLastWriteTime(path).ToString("yyyy-MM-dd HH:mm:ss") : "missing";
+        Info($"App startup: path={path}, timestamp={timestamp}, version={Assembly.GetEntryAssembly()?.GetName().Version}.");
     }
 
     private static void Write(string level, string message)

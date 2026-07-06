@@ -824,8 +824,7 @@ public sealed partial class MainWindow : Window
         EditorVideoView.MediaPlayer = null;
         if (playback is not null)
         {
-            playback.Stop();
-            _ = Task.Run(playback.Dispose);
+            playback.Dispose();
         }
         if (ViewModel is not null)
         {
@@ -841,8 +840,6 @@ public sealed partial class MainWindow : Window
         {
             ViewModel.SetDuration(_playback.Duration);
         }
-        _playback.SyncAudioStreams();
-
         if (ViewModel.IsPlaying)
         {
             ViewModel.CurrentTime = SmoothPlaybackPosition();
