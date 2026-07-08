@@ -45,9 +45,10 @@ using obs_scene_t = void;
 using obs_sceneitem_t = void;
 using obs_output_t = void;
 using obs_encoder_t = void;
+using obs_module_t = void;
 using proc_handler_t = void;
 
-constexpr int VIDEO_FORMAT_NV12 = 7;
+constexpr int VIDEO_FORMAT_RGBA = 1;
 constexpr int VIDEO_CS_709 = 2;
 constexpr int VIDEO_RANGE_PARTIAL = 1;
 constexpr int OBS_SCALE_BICUBIC = 2;
@@ -57,6 +58,11 @@ std::mutex g_lock;
 std::wstring g_last_error;
 std::wstring g_runtime;
 std::wstring g_last_replay;
+std::string g_bin_path;
+std::string g_data_path;
+std::string g_plugin_binary_path;
+std::string g_plugin_data_path;
+std::string g_config_path;
 HMODULE g_obs = nullptr;
 bool g_initialized = false;
 obs_source_t *g_scene_source = nullptr;
@@ -69,6 +75,8 @@ obs_encoder_t *g_audio_encoder = nullptr;
 int g_duration_seconds = 60;
 int g_max_height = 1080;
 int g_frame_rate = 60;
+
+std::filesystem::path app_data_folder();
 
 std::string narrow(const std::wstring &value)
 {
@@ -93,6 +101,19 @@ void set_error(const std::wstring &message)
     g_last_error = message;
 }
 
+void trace(const std::string &message)
+{
+    char temp[MAX_PATH] = {};
+    if (!GetTempPathA(MAX_PATH, temp)) return;
+    std::string path = std::string(temp) + "eve-obs-bridge-trace.log";
+    HANDLE file = CreateFileA(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return;
+    DWORD written = 0;
+    std::string line = message + "\r\n";
+    WriteFile(file, line.data(), static_cast<DWORD>(line.size()), &written, nullptr);
+    CloseHandle(file);
+}
+
 template <typename T>
 bool load_fn(T &target, const char *name)
 {
@@ -111,6 +132,9 @@ struct ObsApi {
     void(__cdecl *add_data_path)(const char *) = nullptr;
     void(__cdecl *add_module_path)(const char *, const char *) = nullptr;
     void(__cdecl *load_all_modules)() = nullptr;
+    int(__cdecl *open_module)(obs_module_t **, const char *, const char *) = nullptr;
+    bool(__cdecl *init_module)(obs_module_t *) = nullptr;
+    void(__cdecl *post_load_modules)() = nullptr;
     int(__cdecl *reset_video)(ObsVideoInfo *) = nullptr;
     bool(__cdecl *reset_audio)(ObsAudioInfo *) = nullptr;
     obs_data_t *(__cdecl *data_create)() = nullptr;
@@ -150,6 +174,7 @@ bool load_obs_api(const std::filesystem::path &bin)
     SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_USER_DIRS);
     AddDllDirectory(bin.c_str());
     SetDllDirectoryW(bin.c_str());
+    g_bin_path = narrow(bin.wstring());
     g_obs = LoadLibraryW((bin / L"obs.dll").c_str());
     if (!g_obs) {
         set_error(L"Could not load obs.dll from " + bin.wstring());
@@ -162,6 +187,9 @@ bool load_obs_api(const std::filesystem::path &bin)
            load_fn(obs.add_data_path, "obs_add_data_path") &&
            load_fn(obs.add_module_path, "obs_add_module_path") &&
            load_fn(obs.load_all_modules, "obs_load_all_modules") &&
+           load_fn(obs.open_module, "obs_open_module") &&
+           load_fn(obs.init_module, "obs_init_module") &&
+           load_fn(obs.post_load_modules, "obs_post_load_modules") &&
            load_fn(obs.reset_video, "obs_reset_video") &&
            load_fn(obs.reset_audio, "obs_reset_audio") &&
            load_fn(obs.data_create, "obs_data_create") &&
@@ -198,12 +226,10 @@ bool load_obs_api(const std::filesystem::path &bin)
 
 std::filesystem::path app_data_folder()
 {
-    wchar_t *local = nullptr;
-    size_t length = 0;
-    if (_wdupenv_s(&local, &length, L"LOCALAPPDATA") == 0 && local) {
-        std::filesystem::path path(local);
-        free(local);
-        return path / L"EVE";
+    wchar_t local[MAX_PATH] = {};
+    DWORD length = GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH);
+    if (length > 0 && length < MAX_PATH) {
+        return std::filesystem::path(local) / L"EVE";
     }
 
     return std::filesystem::temp_directory_path() / L"EVE";
@@ -338,6 +364,20 @@ bool create_replay_output()
     return true;
 }
 
+void load_module(const std::filesystem::path &root, const wchar_t *name)
+{
+    const auto path = root / L"obs-plugins" / L"64bit" / (std::wstring(name) + L".dll");
+    const auto data = root / L"data" / L"obs-plugins" / name;
+    const auto module_name = narrow(std::wstring(name));
+    obs_module_t *module = nullptr;
+    int result = obs.open_module(&module, narrow(path.wstring()).c_str(), narrow(data.wstring()).c_str());
+    trace("init: open_module " + module_name + " result=" + std::to_string(result));
+    if (result == 0 && module) {
+        bool loaded = obs.init_module(module);
+        trace("init: init_module " + module_name + " loaded=" + std::to_string(loaded ? 1 : 0));
+    }
+}
+
 bool copy_string(wchar_t *destination, int length, const std::wstring &value)
 {
     if (!destination || length <= 0) return false;
@@ -350,6 +390,7 @@ bool copy_string(wchar_t *destination, int length, const std::wstring &value)
 extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder, int max_height, int frame_rate, int duration_seconds)
 {
     std::lock_guard lock(g_lock);
+    trace("init: enter");
     if (g_initialized) return 0;
     g_last_error.clear();
     g_runtime = runtime_folder ? runtime_folder : L"";
@@ -364,25 +405,45 @@ extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder,
         return -1;
     }
 
+    SetCurrentDirectoryW(bin.c_str());
+    trace("init: load_obs_api");
     if (!load_obs_api(bin)) return -2;
 
+    trace("init: set_log_handler");
     obs.set_log_handler(obs_log_handler, nullptr);
     const auto data_root = root / L"data";
     const auto plugins = root / L"obs-plugins" / L"64bit";
     const auto data = data_root / L"obs-plugins" / L"%module%";
-    obs.add_data_path(narrow(data_root).c_str());
-    obs.add_module_path(narrow(plugins / L"%module%.dll").c_str(), narrow(data).c_str());
+    g_data_path = narrow(data_root.wstring());
+    g_plugin_binary_path = narrow((plugins / L"%module%.dll").wstring());
+    g_plugin_data_path = narrow(data.wstring());
+    trace("init: add_data_path");
+    obs.add_data_path(g_data_path.c_str());
+    trace("init: add_module_path");
+    obs.add_module_path(g_plugin_binary_path.c_str(), g_plugin_data_path.c_str());
 
+    trace("init: config_path_begin");
     const auto config_folder = app_data_folder() / L"obs-config";
-    std::filesystem::create_directories(config_folder);
-    if (!obs.startup("en-US", narrow(config_folder.wstring()).c_str(), nullptr)) {
+    trace("init: config_create");
+    const auto app_folder = config_folder.parent_path();
+    CreateDirectoryW(app_folder.c_str(), nullptr);
+    CreateDirectoryW(config_folder.c_str(), nullptr);
+    trace("init: config_narrow");
+    g_config_path = narrow(config_folder.wstring());
+    trace("init: startup");
+    if (!obs.startup("en-US", g_config_path.c_str(), nullptr)) {
         set_error(L"obs_startup failed.");
         cleanup_obs();
         return -3;
     }
     g_initialized = true;
 
-    obs.load_all_modules();
+    trace("init: load_selected_modules");
+    load_module(root, L"win-capture");
+    load_module(root, L"obs-ffmpeg");
+    load_module(root, L"obs-nvenc");
+    load_module(root, L"obs-x264");
+    obs.post_load_modules();
 
     auto [base_width, base_height] = primary_monitor_size();
     auto [out_width, out_height] = output_size();
@@ -394,13 +455,15 @@ extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder,
     video.base_height = static_cast<uint32_t>(base_height);
     video.output_width = static_cast<uint32_t>(out_width);
     video.output_height = static_cast<uint32_t>(out_height);
-    video.output_format = VIDEO_FORMAT_NV12;
-    video.gpu_conversion = true;
+    video.output_format = VIDEO_FORMAT_RGBA;
+    video.gpu_conversion = false;
     video.colorspace = VIDEO_CS_709;
     video.range = VIDEO_RANGE_PARTIAL;
     video.scale_type = OBS_SCALE_BICUBIC;
-    if (obs.reset_video(&video) != 0) {
-        set_error(L"obs_reset_video failed.");
+    trace("init: reset_video");
+    int video_result = obs.reset_video(&video);
+    if (video_result != 0) {
+        set_error(L"obs_reset_video failed: " + std::to_wstring(video_result));
         cleanup_obs();
         return -4;
     }
@@ -408,20 +471,24 @@ extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder,
     ObsAudioInfo audio = {};
     audio.samples_per_sec = 48000;
     audio.speakers = SPEAKERS_STEREO;
+    trace("init: reset_audio");
     if (!obs.reset_audio(&audio)) {
         set_error(L"obs_reset_audio failed.");
         cleanup_obs();
         return -5;
     }
 
+    trace("init: create_scene");
     if (!create_scene()) {
         cleanup_obs();
         return -6;
     }
+    trace("init: create_replay_output");
     if (!create_replay_output()) {
         cleanup_obs();
         return -7;
     }
+    trace("init: success");
     return 0;
 }
 
