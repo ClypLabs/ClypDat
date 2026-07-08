@@ -253,7 +253,10 @@ void __cdecl obs_log_handler(int, const char *message, va_list args, void *)
 void cleanup_obs()
 {
     if (g_replay) {
-        if (obs.output_active && obs.output_active(g_replay)) obs.output_stop(g_replay);
+        if (obs.output_active && obs.output_active(g_replay)) {
+            obs.output_stop(g_replay);
+            for (int i = 0; i < 120 && obs.output_active(g_replay); i++) Sleep(25);
+        }
         if (obs.output_release) obs.output_release(g_replay);
         g_replay = nullptr;
     }
@@ -270,6 +273,7 @@ void cleanup_obs()
         g_monitor_source = nullptr;
     }
     if (g_scene_source) {
+        if (obs.set_output_source) obs.set_output_source(0, nullptr);
         if (obs.source_release) obs.source_release(g_scene_source);
         g_scene_source = nullptr;
     }
@@ -278,6 +282,14 @@ void cleanup_obs()
     }
 
     g_initialized = false;
+}
+
+std::filesystem::path process_sibling(const wchar_t *file_name)
+{
+    wchar_t path[MAX_PATH] = {};
+    DWORD length = GetModuleFileNameW(nullptr, path, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) return {};
+    return std::filesystem::path(path).parent_path() / file_name;
 }
 
 std::pair<int, int> primary_monitor_size()
@@ -321,23 +333,31 @@ bool create_scene()
 
     g_scene_source = obs.scene_get_source(g_scene);
     obs.set_output_source(0, g_scene_source);
+    obs.source_release(g_monitor_source);
+    g_monitor_source = nullptr;
     return true;
 }
 
 bool create_replay_output()
 {
     obs_data_t *v = obs.data_create();
-    obs.data_set_int(v, "bitrate", g_max_height >= 1440 ? 32000 : 20000);
-    obs.data_set_string(v, "rate_control", "CRF");
-    obs.data_set_int(v, "crf", 18);
-    obs.data_set_string(v, "preset", "veryfast");
+    obs.data_set_string(v, "rate_control", "CQP");
+    obs.data_set_int(v, "cqp", 20);
+    obs.data_set_string(v, "preset2", "p5");
+    obs.data_set_string(v, "multipass", "qres");
+    obs.data_set_string(v, "tune", "hq");
     obs.data_set_string(v, "profile", "high");
-    g_video_encoder = obs.video_encoder_create("obs_x264", "EVE x264", v, nullptr);
+    obs.data_set_int(v, "keyint_sec", 2);
+    obs.data_set_bool(v, "psycho_aq", true);
+    obs.data_set_int(v, "gpu", 0);
+    obs.data_set_int(v, "bf", 2);
+    g_video_encoder = obs.video_encoder_create("jim_nvenc", "EVE NVENC H.264", v, nullptr);
     obs.data_release(v);
     if (!g_video_encoder) {
-        set_error(L"OBS video encoder create failed.");
+        set_error(L"OBS NVENC encoder create failed. EVE requires NVIDIA NVENC for replay to avoid CPU capture stutter.");
         return false;
     }
+    trace("init: video_encoder jim_nvenc created");
     obs.encoder_set_video(g_video_encoder, obs.get_video());
 
     obs_data_t *a = obs.data_create();
@@ -363,7 +383,7 @@ bool create_replay_output()
     return true;
 }
 
-void load_module(const std::filesystem::path &root, const wchar_t *name)
+bool load_module(const std::filesystem::path &root, const wchar_t *name)
 {
     const auto path = root / L"obs-plugins" / L"64bit" / (std::wstring(name) + L".dll");
     const auto data = root / L"data" / L"obs-plugins" / name;
@@ -374,7 +394,9 @@ void load_module(const std::filesystem::path &root, const wchar_t *name)
     if (result == 0 && module) {
         bool loaded = obs.init_module(module);
         trace("init: init_module " + module_name + " loaded=" + std::to_string(loaded ? 1 : 0));
+        return loaded;
     }
+    return false;
 }
 
 bool copy_string(wchar_t *destination, int length, const std::wstring &value)
@@ -437,11 +459,18 @@ extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder,
     }
     g_initialized = true;
 
+    const auto nvenc_helper = process_sibling(L"obs-nvenc-test.exe");
+    trace("init: process_id=" + std::to_string(GetCurrentProcessId()));
+    trace("init: nvenc_helper " + narrow(nvenc_helper.wstring()) + " exists=" + std::to_string(std::filesystem::exists(nvenc_helper) ? 1 : 0));
+
     trace("init: load_selected_modules");
     load_module(root, L"win-capture");
     load_module(root, L"obs-ffmpeg");
-    load_module(root, L"obs-nvenc");
-    load_module(root, L"obs-x264");
+    if (!load_module(root, L"obs-nvenc")) {
+        set_error(L"OBS NVENC module failed. Expected obs-nvenc-test.exe beside EVE.exe: " + nvenc_helper.wstring());
+        cleanup_obs();
+        return -4;
+    }
     obs.post_load_modules();
 
     auto [base_width, base_height] = primary_monitor_size();
@@ -464,7 +493,7 @@ extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder,
     if (video_result != 0) {
         set_error(L"obs_reset_video failed: " + std::to_wstring(video_result));
         cleanup_obs();
-        return -4;
+        return -5;
     }
 
     ObsAudioInfo audio = {};
@@ -474,18 +503,18 @@ extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder,
     if (!obs.reset_audio(&audio)) {
         set_error(L"obs_reset_audio failed.");
         cleanup_obs();
-        return -5;
+        return -6;
     }
 
     trace("init: create_scene");
     if (!create_scene()) {
         cleanup_obs();
-        return -6;
+        return -7;
     }
     trace("init: create_replay_output");
     if (!create_replay_output()) {
         cleanup_obs();
-        return -7;
+        return -8;
     }
     trace("init: success");
     return 0;
@@ -554,7 +583,12 @@ extern "C" __declspec(dllexport) int eve_obs_stop()
 {
     std::lock_guard lock(g_lock);
     if (!g_initialized || !g_replay) return 0;
-    if (obs.output_active(g_replay)) obs.output_stop(g_replay);
+    trace("stop: enter");
+    if (obs.output_active(g_replay)) {
+        obs.output_stop(g_replay);
+        for (int i = 0; i < 120 && obs.output_active(g_replay); i++) Sleep(25);
+    }
+    trace("stop: exit active=" + std::to_string(obs.output_active(g_replay) ? 1 : 0));
     return 0;
 }
 

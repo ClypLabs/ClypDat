@@ -51,5 +51,9 @@
           DestinationFolder="$(PublishDir)obs"
           SkipUnchangedFiles="true"
           Condition="Exists('..\Eve.ObsBridge\bin\x64\$(Configuration)\Eve.ObsBridge.dll')" />
+    <Copy SourceFiles="..\..\vendor\obs-runtime\bin\64bit\obs-nvenc-test.exe"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('..\..\vendor\obs-runtime\bin\64bit\obs-nvenc-test.exe')" />
   </Target>
 </Project>

@@ -1,4 +1,5 @@
 using Eve.Capture.Abstractions;
+using System.Diagnostics;
 using System.Runtime.Versioning;
 
 namespace Eve.App.Services;
@@ -29,7 +30,8 @@ public sealed class ObsReplayBuffer : IReplayBuffer
 
         var config = _configProvider();
         Duration = TimeSpan.FromSeconds(Math.Clamp(config.DurationSeconds, 30, 1200));
-        AppLog.Info($"OBS replay backend starting: runtime={runtime.RootFolder}, maxHeight={config.MaxHeight}, fps={config.FrameRate}, duration={Duration.TotalSeconds:0}s.");
+        using var process = Process.GetCurrentProcess();
+        AppLog.Info($"OBS replay backend starting: pid={Environment.ProcessId}, process={process.ProcessName}, runtime={runtime.RootFolder}, maxHeight={config.MaxHeight}, fps={config.FrameRate}, duration={Duration.TotalSeconds:0}s.");
         try
         {
             _bridge.Initialize(runtime.RootFolder, config.MaxHeight, config.FrameRate, (int)Duration.TotalSeconds);
@@ -49,16 +51,31 @@ public sealed class ObsReplayBuffer : IReplayBuffer
 
     public Task StopAsync(CancellationToken cancellationToken = default)
     {
-        if (!IsRecording) return Task.CompletedTask;
+        if (!IsRecording && !_initialized) return Task.CompletedTask;
+        var clock = Stopwatch.StartNew();
         try
         {
-            _bridge.Stop();
+            if (IsRecording) _bridge.Stop();
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("OBS replay backend stop failed", error);
+        }
+
+        try
+        {
+            if (_initialized) _bridge.Shutdown();
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("OBS replay backend shutdown failed", error);
         }
         finally
         {
             IsRecording = false;
+            _initialized = false;
             RecordingStopped?.Invoke(this, EventArgs.Empty);
-            AppLog.Info("OBS replay backend stopped.");
+            AppLog.Info($"OBS replay backend stopped in {clock.ElapsedMilliseconds}ms.");
         }
 
         return Task.CompletedTask;
@@ -102,27 +119,6 @@ public sealed class ObsReplayBuffer : IReplayBuffer
 
     public void Dispose()
     {
-        try
-        {
-            if (IsRecording) _bridge.Stop();
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("OBS replay backend stop during dispose failed", error);
-        }
-        finally
-        {
-            IsRecording = false;
-        }
-
-        if (!_initialized) return;
-        try
-        {
-            _bridge.Shutdown();
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("OBS replay backend shutdown failed", error);
-        }
+        StopAsync().GetAwaiter().GetResult();
     }
 }
