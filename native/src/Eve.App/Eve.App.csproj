@@ -47,5 +47,9 @@
     <Copy SourceFiles="@(ObsRuntimeFiles)"
           DestinationFiles="@(ObsRuntimeFiles->'$(PublishDir)obs\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
+    <Copy SourceFiles="..\Eve.ObsBridge\bin\x64\$(Configuration)\Eve.ObsBridge.dll"
+          DestinationFolder="$(PublishDir)obs"
+          SkipUnchangedFiles="true"
+          Condition="Exists('..\Eve.ObsBridge\bin\x64\$(Configuration)\Eve.ObsBridge.dll')" />
   </Target>
 </Project>
