@@ -39,4 +39,13 @@
           DestinationFiles="@(LibVlcRuntimeFiles->'$(PublishDir)libvlc\win-x64\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
   </Target>
+
+  <Target Name="CopyObsRuntimeToPublish" AfterTargets="Publish" Condition="Exists('..\..\vendor\obs-runtime')">
+    <ItemGroup>
+      <ObsRuntimeFiles Include="..\..\vendor\obs-runtime\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ObsRuntimeFiles)"
+          DestinationFiles="@(ObsRuntimeFiles->'$(PublishDir)obs\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
 </Project>

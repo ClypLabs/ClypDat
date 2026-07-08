@@ -7,6 +7,7 @@ public sealed class AppSettings
     public string ReplayQualityPreset { get; set; } = "Balanced";
     public int ReplayFrameRate { get; set; } = 30;
     public int ReplayMaxHeight { get; set; } = 1080;
+    public string ReplayBackend { get; set; } = "Auto";
     public string ExportVideoCodec { get; set; } = "H.264";
     public string SaveReplayHotkey { get; set; } = "Ctrl+Shift+F9";
     public bool StartReplayOnLaunch { get; set; }

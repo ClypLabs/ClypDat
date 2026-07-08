@@ -1,0 +1,93 @@
+using Eve.Capture.Abstractions;
+using System.Runtime.Versioning;
+
+namespace Eve.App.Services;
+
+[SupportedOSPlatform("windows")]
+public sealed class ObsReplayBuffer : IReplayBuffer
+{
+    private readonly Func<ReplayBufferConfig> _configProvider;
+    private readonly ObsNativeBridge _bridge = new();
+    private bool _initialized;
+
+    public ObsReplayBuffer(Func<ReplayBufferConfig> configProvider)
+    {
+        _configProvider = configProvider;
+    }
+
+    public bool IsRecording { get; private set; }
+    public TimeSpan Duration { get; private set; } = TimeSpan.FromSeconds(60);
+    public event EventHandler? RecordingStopped;
+
+    public Task StartAsync(CancellationToken cancellationToken = default)
+    {
+        if (IsRecording) return Task.CompletedTask;
+        if (!ObsRuntimeLocator.IsAvailable(out var runtime, out var reason))
+        {
+            throw new InvalidOperationException(reason);
+        }
+
+        var config = _configProvider();
+        Duration = TimeSpan.FromSeconds(Math.Clamp(config.DurationSeconds, 30, 1200));
+        AppLog.Info($"OBS replay backend starting: runtime={runtime.RootFolder}, maxHeight={config.MaxHeight}, fps={config.FrameRate}, duration={Duration.TotalSeconds:0}s.");
+        _bridge.Initialize(runtime.RootFolder, config.MaxHeight, config.FrameRate, (int)Duration.TotalSeconds);
+        _initialized = true;
+        _bridge.StartPrimaryMonitor();
+        IsRecording = true;
+        AppLog.Info("OBS replay backend started.");
+        return Task.CompletedTask;
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken = default)
+    {
+        if (!IsRecording) return Task.CompletedTask;
+        try
+        {
+            _bridge.Stop();
+        }
+        finally
+        {
+            IsRecording = false;
+            RecordingStopped?.Invoke(this, EventArgs.Empty);
+            AppLog.Info("OBS replay backend stopped.");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default)
+    {
+        if (!IsRecording) throw new InvalidOperationException("OBS replay buffer is not running.");
+        Directory.CreateDirectory(outputFolder);
+        var output = _bridge.SaveReplay(outputFolder);
+        if (string.IsNullOrWhiteSpace(output)) throw new InvalidOperationException("OBS replay backend returned no output path.");
+        AppLog.Info($"OBS replay saved: {output}.");
+        return Task.FromResult(output);
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            if (IsRecording) _bridge.Stop();
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("OBS replay backend stop during dispose failed", error);
+        }
+        finally
+        {
+            IsRecording = false;
+        }
+
+        if (!_initialized) return;
+        try
+        {
+            _bridge.Shutdown();
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("OBS replay backend shutdown failed", error);
+        }
+    }
+}
