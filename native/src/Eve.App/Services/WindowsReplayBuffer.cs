@@ -13,6 +13,7 @@ namespace Eve.App.Services;
 public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 {
     private static readonly TimeSpan MaxVideoSegmentDuration = TimeSpan.FromSeconds(20);
+    private const double MinimumSegmentHealth = 0.80;
     private readonly Func<ReplayBufferConfig> _configProvider;
     private readonly string _bufferFolder;
     private readonly object _lock = new();
@@ -104,10 +105,14 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             if (!IsRecording) throw new InvalidOperationException("Replay buffer is not running.");
 
             Directory.CreateDirectory(outputFolder);
-            var activeSegment = await StopCurrentRecordingAsync(cancellationToken);
+            var activeSegment = await TryStopCurrentRecordingAsync(cancellationToken);
             try
             {
-                AddSegment(activeSegment);
+                if (activeSegment is not null)
+                {
+                    AddSegment(activeSegment);
+                }
+
                 var availableSegments = await HydrateSegmentDurationsAsync(GetReplaySegments(), cancellationToken);
                 if (availableSegments.Length == 0)
                 {
@@ -180,15 +185,19 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         {
             if (!IsRecording) return;
             _rotationTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
-            var completedSegment = await StopCurrentRecordingAsync(CancellationToken.None);
-            AddSegment(completedSegment);
+            var completedSegment = await TryStopCurrentRecordingAsync(CancellationToken.None);
+            if (completedSegment is not null)
+            {
+                AddSegment(completedSegment);
+            }
+
             PruneSegments();
             StartRecorder();
         }
         catch (Exception error)
         {
             AppLog.Error("Replay segment rotation failed", error);
-            RecordingStopped?.Invoke(this, EventArgs.Empty);
+            RecoverRecorderAfterFailure();
         }
         finally
         {
@@ -196,14 +205,27 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         }
     }
 
-    private async Task<ReplayVideoSegment> StopCurrentRecordingAsync(CancellationToken cancellationToken)
+    private async Task<ReplayVideoSegment?> TryStopCurrentRecordingAsync(CancellationToken cancellationToken)
     {
         var recorder = _recorder ?? throw new InvalidOperationException("Replay buffer is not running.");
         var completion = _completion ?? throw new InvalidOperationException("Replay buffer is not ready.");
         var startedAt = _startedAtUtc;
         var endedAt = DateTime.UtcNow;
         recorder.Stop();
-        var path = await completion.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+        string path;
+        try
+        {
+            path = await completion.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+        }
+        catch (TimeoutException error)
+        {
+            AppLog.Error($"Replay segment stop timed out; dropping active segment: path={_activePath}", error);
+            var failedPath = _activePath;
+            DisposeRecorder();
+            TryDelete(failedPath);
+            return null;
+        }
+
         DisposeRecorder();
         var bytes = File.Exists(path) ? new FileInfo(path).Length : 0;
         AppLog.Info($"Replay segment stopped: path={path}, start={startedAt:o}, end={endedAt:o}, wallDuration={(endedAt - startedAt).TotalSeconds:0.###}s, bytes={bytes}.");
@@ -222,7 +244,9 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         options.OutputOptions = new OutputOptions
         {
             RecorderMode = RecorderMode.Video,
-            IsVideoCaptureEnabled = true
+            IsVideoCaptureEnabled = true,
+            OutputFrameSize = CaptureOutputSize(config),
+            Stretch = StretchMode.Uniform
         };
         options.VideoEncoderOptions = new VideoEncoderOptions
         {
@@ -261,6 +285,22 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             _ => 0.4
         };
         return (int)Math.Clamp(megapixels * frameRate * 115_000, 6_000_000, 60_000_000);
+    }
+
+    private static ScreenSize CaptureOutputSize(ReplayBufferConfig config)
+    {
+        var height = Math.Clamp(config.MaxHeight, 480, 2160);
+        var sourceWidth = Math.Max(1, config.CaptureWidth);
+        var sourceHeight = Math.Max(1, config.CaptureHeight);
+        var aspect = sourceWidth / (double)sourceHeight;
+        var width = MakeEven((int)Math.Round(height * aspect));
+        return new ScreenSize(width, MakeEven(height));
+    }
+
+    private static int MakeEven(int value)
+    {
+        value = Math.Max(2, value);
+        return value % 2 == 0 ? value : value + 1;
     }
 
     private void StartAudioCaptures(ReplayBufferConfig config)
@@ -382,6 +422,13 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                 var correctionMs = (adjustedStartUtc - segment.StartedAtUtc).TotalMilliseconds;
                 var fpsHealth = wallDuration.TotalSeconds > 0 ? duration.TotalSeconds / wallDuration.TotalSeconds : 1d;
                 AppLog.Info($"Replay segment hydrated: path={segment.Path}, wall={wallDuration.TotalSeconds:0.###}s, video={duration.TotalSeconds:0.###}s, startCorrection={correctionMs:0}ms, health={fpsHealth:P0}.");
+                if (fpsHealth < MinimumSegmentHealth || wallDuration > MaxVideoSegmentDuration + TimeSpan.FromSeconds(8))
+                {
+                    AppLog.Info($"Replay segment skipped: unhealthy capture, path={segment.Path}, health={fpsHealth:P0}.");
+                    TryDelete(segment.Path);
+                    continue;
+                }
+
                 hydrated.Add(segment with { StartedAtUtc = adjustedStartUtc, VideoDuration = duration });
             }
             else
@@ -541,12 +588,6 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             TryDelete(snapshotPath);
             return string.Empty;
         }
-    }
-
-    private static string BuildVideoFilter(ReplayBufferConfig config)
-    {
-        var height = Math.Clamp(config.MaxHeight, 480, 2160);
-        return $"fps={Math.Clamp(config.FrameRate, 15, 60)},scale=-2:{height}:force_original_aspect_ratio=decrease";
     }
 
     private static string FormatDuration(TimeSpan duration)
@@ -720,7 +761,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         try
         {
             var filter = new StringBuilder();
-            filter.Append($"[0:v]trim=start={FormatSeconds(videoOffsetSeconds)}:duration={FormatSeconds(duration)},setpts=PTS-STARTPTS,{BuildVideoFilter(config)}[vout];");
+            filter.Append($"[0:v]trim=start={FormatSeconds(videoOffsetSeconds)}:duration={FormatSeconds(duration)},setpts=PTS-STARTPTS[vout];");
             for (var index = 0; index < inputs.Count; index++)
             {
                 var inputIndex = index + 1;
@@ -759,18 +800,18 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                 "-metadata:s:a:0", "title=Game Audio",
                 "-metadata:s:a:1", "title=Chat Audio",
                 "-metadata:s:a:2", "title=Microphone",
-                "-t", FormatSeconds(duration),
-                "-c:v", "h264_nvenc",
-                "-preset", "p1",
-                "-tune", "ull"
+                "-t", FormatSeconds(duration)
             });
+            var baseArgs = args.ToList();
+            args.AddRange(BuildNvencVideoArgs(config));
             args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k", outputPath });
             var result = await RunProcessAsync("ffmpeg", args, cancellationToken);
             AppLog.Info($"Replay mux ffmpeg result: exit={result.ExitCode}, output={outputPath}.");
             if (result.ExitCode != 0)
             {
-                args = args.Select(arg => arg == "h264_nvenc" ? "libx264" : arg).Where(arg => arg is not "-preset" and not "p1" and not "-tune" and not "ull").ToList();
-                args.InsertRange(args.Count - 1, new[] { "-preset", "ultrafast" });
+                args = baseArgs.ToList();
+                args.AddRange(BuildSoftwareVideoArgs());
+                args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k", outputPath });
                 result = await RunProcessAsync("ffmpeg", args, cancellationToken);
                 AppLog.Info($"Replay mux fallback result: exit={result.ExitCode}, output={outputPath}.");
                 if (result.ExitCode != 0) throw new InvalidOperationException(string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg mux failed." : result.Error);
@@ -785,6 +826,61 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     private static string FormatSeconds(double seconds)
     {
         return seconds.ToString("0.###", CultureInfo.InvariantCulture);
+    }
+
+    private static string[] BuildNvencVideoArgs(ReplayBufferConfig config)
+    {
+        var bitrate = MuxVideoBitrate(config);
+        var maxrate = (int)Math.Round(bitrate * 1.5);
+        var bufsize = bitrate * 2;
+        return new[]
+        {
+            "-c:v", "h264_nvenc",
+            "-preset", "p4",
+            "-tune", "hq",
+            "-rc", "vbr",
+            "-cq", "18",
+            "-profile:v", "high",
+            "-b:v", bitrate.ToString(CultureInfo.InvariantCulture),
+            "-maxrate", maxrate.ToString(CultureInfo.InvariantCulture),
+            "-bufsize", bufsize.ToString(CultureInfo.InvariantCulture)
+        };
+    }
+
+    private static string[] BuildSoftwareVideoArgs()
+    {
+        return new[] { "-c:v", "libx264", "-preset", "veryfast", "-crf", "18" };
+    }
+
+    private static int MuxVideoBitrate(ReplayBufferConfig config)
+    {
+        var height = Math.Clamp(config.MaxHeight, 480, 2160);
+        var frameRate = Math.Clamp(config.FrameRate, 15, 60);
+        var baseRate = height switch
+        {
+            >= 2160 => 48_000_000,
+            >= 1440 => 32_000_000,
+            >= 1080 => 20_000_000,
+            >= 720 => 10_000_000,
+            _ => 6_000_000
+        };
+        return frameRate >= 60 ? baseRate : (int)Math.Round(baseRate * 0.7);
+    }
+
+    private void RecoverRecorderAfterFailure()
+    {
+        var failedPath = _activePath;
+        DisposeRecorder();
+        TryDelete(failedPath);
+        try
+        {
+            StartRecorder();
+        }
+        catch (Exception restartError)
+        {
+            AppLog.Error("Replay recorder restart failed", restartError);
+            RecordingStopped?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     private void RefreshAudioRoutes()
