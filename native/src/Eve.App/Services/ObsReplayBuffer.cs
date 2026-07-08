@@ -30,11 +30,20 @@ public sealed class ObsReplayBuffer : IReplayBuffer
         var config = _configProvider();
         Duration = TimeSpan.FromSeconds(Math.Clamp(config.DurationSeconds, 30, 1200));
         AppLog.Info($"OBS replay backend starting: runtime={runtime.RootFolder}, maxHeight={config.MaxHeight}, fps={config.FrameRate}, duration={Duration.TotalSeconds:0}s.");
-        _bridge.Initialize(runtime.RootFolder, config.MaxHeight, config.FrameRate, (int)Duration.TotalSeconds);
-        _initialized = true;
-        _bridge.StartPrimaryMonitor();
-        IsRecording = true;
-        AppLog.Info("OBS replay backend started.");
+        try
+        {
+            _bridge.Initialize(runtime.RootFolder, config.MaxHeight, config.FrameRate, (int)Duration.TotalSeconds);
+            _initialized = true;
+            _bridge.StartPrimaryMonitor();
+            IsRecording = true;
+            AppLog.Info("OBS replay backend started.");
+        }
+        catch
+        {
+            CleanupAfterFailedStart();
+            throw;
+        }
+
         return Task.CompletedTask;
     }
 
@@ -63,6 +72,32 @@ public sealed class ObsReplayBuffer : IReplayBuffer
         if (string.IsNullOrWhiteSpace(output)) throw new InvalidOperationException("OBS replay backend returned no output path.");
         AppLog.Info($"OBS replay saved: {output}.");
         return Task.FromResult(output);
+    }
+
+    private void CleanupAfterFailedStart()
+    {
+        try
+        {
+            _bridge.Stop();
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("OBS replay backend stop after failed start failed", error);
+        }
+
+        try
+        {
+            if (_initialized) _bridge.Shutdown();
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("OBS replay backend shutdown after failed start failed", error);
+        }
+        finally
+        {
+            _initialized = false;
+            IsRecording = false;
+        }
     }
 
     public void Dispose()

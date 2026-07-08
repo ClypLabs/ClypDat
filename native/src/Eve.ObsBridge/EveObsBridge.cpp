@@ -161,6 +161,7 @@ struct ObsApi {
     bool(__cdecl *output_start)(obs_output_t *) = nullptr;
     void(__cdecl *output_stop)(obs_output_t *) = nullptr;
     bool(__cdecl *output_active)(const obs_output_t *) = nullptr;
+    const char *(__cdecl *output_get_last_error)(const obs_output_t *) = nullptr;
     void(__cdecl *output_update)(obs_output_t *, obs_data_t *) = nullptr;
     void(__cdecl *output_release)(obs_output_t *) = nullptr;
     proc_handler_t *(__cdecl *output_get_proc_handler)(const obs_output_t *) = nullptr;
@@ -216,6 +217,7 @@ bool load_obs_api(const std::filesystem::path &bin)
            load_fn(obs.output_start, "obs_output_start") &&
            load_fn(obs.output_stop, "obs_output_stop") &&
            load_fn(obs.output_active, "obs_output_active") &&
+           load_fn(obs.output_get_last_error, "obs_output_get_last_error") &&
            load_fn(obs.output_update, "obs_output_update") &&
            load_fn(obs.output_release, "obs_output_release") &&
            load_fn(obs.output_get_proc_handler, "obs_output_get_proc_handler") &&
@@ -326,14 +328,11 @@ bool create_replay_output()
 {
     obs_data_t *v = obs.data_create();
     obs.data_set_int(v, "bitrate", g_max_height >= 1440 ? 32000 : 20000);
-    obs.data_set_string(v, "preset", "p4");
+    obs.data_set_string(v, "rate_control", "CRF");
+    obs.data_set_int(v, "crf", 18);
+    obs.data_set_string(v, "preset", "veryfast");
     obs.data_set_string(v, "profile", "high");
-    g_video_encoder = obs.video_encoder_create("ffmpeg_nvenc", "EVE NVENC", v, nullptr);
-    if (!g_video_encoder) {
-        obs.data_set_string(v, "rate_control", "CRF");
-        obs.data_set_int(v, "crf", 18);
-        g_video_encoder = obs.video_encoder_create("obs_x264", "EVE x264", v, nullptr);
-    }
+    g_video_encoder = obs.video_encoder_create("obs_x264", "EVE x264", v, nullptr);
     obs.data_release(v);
     if (!g_video_encoder) {
         set_error(L"OBS video encoder create failed.");
@@ -500,10 +499,14 @@ extern "C" __declspec(dllexport) int eve_obs_start_primary_monitor()
         return -1;
     }
     if (obs.output_active(g_replay)) return 0;
+    trace("start: output_start");
     if (!obs.output_start(g_replay)) {
-        set_error(L"obs_output_start replay_buffer failed.");
+        const char *last_error = obs.output_get_last_error ? obs.output_get_last_error(g_replay) : nullptr;
+        std::wstring detail = widen(last_error);
+        set_error(detail.empty() ? L"obs_output_start replay_buffer failed." : L"obs_output_start replay_buffer failed: " + detail);
         return -2;
     }
+    trace("start: output_started");
     return 0;
 }
 
