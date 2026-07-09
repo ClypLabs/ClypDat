@@ -467,8 +467,8 @@ bool create_scene()
     obs.data_set_bool(settings, "anti_cheat_hook", true);
     obs.data_set_bool(settings, "capture_overlays", false);
     obs.data_set_bool(settings, "capture_audio", true);
-    obs.data_set_bool(settings, "limit_framerate", true);
-    obs.data_set_int(settings, "hook_rate", 2);
+    obs.data_set_bool(settings, "limit_framerate", false);
+    obs.data_set_int(settings, "hook_rate", 1);
     g_capture_source = obs.source_create("game_capture", "Auto Game Capture", settings, nullptr);
     obs.data_release(settings);
     if (!g_capture_source) {
@@ -580,10 +580,10 @@ bool create_replay_output()
 {
     obs_data_t *v = obs.data_create();
     obs.data_set_string(v, "rate_control", "CQP");
-    obs.data_set_int(v, "cqp", 20);
-    obs.data_set_string(v, "preset2", "p3");
+    obs.data_set_int(v, "cqp", 18);
+    obs.data_set_string(v, "preset2", "p5");
     obs.data_set_string(v, "multipass", "disabled");
-    obs.data_set_string(v, "tune", "ll");
+    obs.data_set_string(v, "tune", "hq");
     obs.data_set_string(v, "profile", "high");
     obs.data_set_int(v, "keyint_sec", 2);
     obs.data_set_bool(v, "psycho_aq", false);

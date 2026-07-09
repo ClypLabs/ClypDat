@@ -83,6 +83,12 @@ public sealed class PlaybackSession : IDisposable
             cancellationToken.ThrowIfCancellationRequested();
             var audioPath = await ExtractAudioTrackAsync(path, track.StreamIndex, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
+            if (!IsUsableAudioCache(audioPath))
+            {
+                AppLog.Info($"Editor audio cache invalid after extract: stream={track.StreamIndex}, path={audioPath}.");
+                TryDelete(audioPath);
+                audioPath = await ExtractAudioTrackAsync(path, track.StreamIndex, cancellationToken);
+            }
             _audioPaths[track.StreamIndex] = audioPath;
             _audioVolumes.TryAdd(track.StreamIndex, track.VolumePercent);
         }
@@ -122,6 +128,7 @@ public sealed class PlaybackSession : IDisposable
         var limited = new SoftLimiterSampleProvider(normalized);
         _audioOutput = new WasapiOut(AudioClientShareMode.Shared, false, 120);
         _audioOutput.Init(limited);
+        AppLog.Info($"Editor audio output ready: streams={string.Join(",", _audioSources.Keys.OrderBy(key => key))}.");
     }
 
     public void Play()
@@ -401,7 +408,8 @@ public sealed class PlaybackSession : IDisposable
             "preview-audio");
         Directory.CreateDirectory(tempDir);
         var outputPath = Path.Combine(tempDir, $"{AudioCacheKey(inputPath, streamIndex)}.wav");
-        if (File.Exists(outputPath)) return outputPath;
+        if (IsUsableAudioCache(outputPath)) return outputPath;
+        TryDelete(outputPath);
 
         var pendingPath = Path.Combine(tempDir, $"{Guid.NewGuid():N}.wav");
         var startInfo = new ProcessStartInfo("ffmpeg")
@@ -461,6 +469,20 @@ public sealed class PlaybackSession : IDisposable
         }
 
         return outputPath;
+    }
+
+    private static bool IsUsableAudioCache(string path)
+    {
+        try
+        {
+            if (!File.Exists(path) || new FileInfo(path).Length < 4096) return false;
+            using var reader = new WaveFileReader(path);
+            return reader.TotalTime > TimeSpan.FromMilliseconds(250);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static string AudioCacheKey(string inputPath, int streamIndex)
