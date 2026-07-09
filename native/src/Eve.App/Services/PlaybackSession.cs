@@ -143,6 +143,7 @@ public sealed class PlaybackSession : IDisposable
         _lastRequestedPosition = TimeSpan.FromMilliseconds(milliseconds);
         ForceVideoSilent();
         VideoPlayer.Time = milliseconds;
+        EnsureAudioOutputCanSeek(time);
         SeekAudio(time);
         VideoPlayer.Play();
         VideoPlayer.SetPause(false);
@@ -205,6 +206,7 @@ public sealed class PlaybackSession : IDisposable
             var videoReady = await WaitForVideoReadyAsync(requested, cancellationToken).ConfigureAwait(false);
             if (seekVersion != Interlocked.Read(ref _seekVersion)) return false;
             var settledTime = Position;
+            EnsureAudioOutputCanSeek(requested);
             SeekAudio(requested);
             if (resumePlayback && videoReady)
             {
@@ -334,6 +336,25 @@ public sealed class PlaybackSession : IDisposable
         {
             source.Reader.CurrentTime = time < TimeSpan.Zero ? TimeSpan.Zero : time;
         }
+    }
+
+    private void EnsureAudioOutputCanSeek(TimeSpan target)
+    {
+        if (_audioPaths.Count == 0) return;
+        if (_audioOutput is null)
+        {
+            RebuildAudioOutput();
+            return;
+        }
+
+        var targetBeforeEnd = _audioSources.Values.Any(source => target < source.Reader.TotalTime - TimeSpan.FromMilliseconds(100));
+        if (!targetBeforeEnd) return;
+
+        var anyReaderAtEnd = _audioSources.Values.Any(source => source.Reader.Position >= source.Reader.Length);
+        if (!anyReaderAtEnd) return;
+
+        AppLog.Info("Editor audio output reached EOF; rebuilding before replay.");
+        RebuildAudioOutput();
     }
 
     private void DisposeMedia()
