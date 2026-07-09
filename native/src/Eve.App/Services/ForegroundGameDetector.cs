@@ -31,12 +31,28 @@ public sealed class ForegroundGameDetector
         "explorer.exe",
         "firefox.exe",
         "gamebar.exe",
+        "gamebarftserver.exe",
+        "gamebarpresencewriter.exe",
         "msedge.exe",
+        "medal.exe",
+        "medalencoder.exe",
+        "msiafterburner.exe",
+        "nvidia app.exe",
+        "nvidia overlay.exe",
+        "nvidia share.exe",
+        "nvidia web helper.exe",
+        "nvcontainer.exe",
+        "nvdisplay.container.exe",
+        "obs64.exe",
+        "overwolf.exe",
         "powershell.exe",
+        "rtss.exe",
+        "rtsshooksloader64.exe",
         "searchhost.exe",
         "shellexperiencehost.exe",
         "spotify.exe",
         "steam.exe",
+        "steamwebhelper.exe",
         "taskmgr.exe",
         "textinputhost.exe",
         "windowsterminal.exe",
@@ -114,6 +130,7 @@ public sealed class ForegroundGameDetector
             var title = GetWindowTitle(handle);
             if (string.IsNullOrWhiteSpace(title) || IsTinyOrToolWindow(handle)) return GameDetection.None;
             var className = GetWindowClass(handle);
+            if (IsOverlayWindow(title, className)) return GameDetection.None;
             var displayName = _catalog.TryGetValue(exeName, out var catalogName) && !string.IsNullOrWhiteSpace(catalogName)
                 ? catalogName
                 : CleanExecutableName(exeName);
@@ -180,6 +197,31 @@ public sealed class ForegroundGameDetector
     private static bool IsTinyOrToolWindow(IntPtr handle)
     {
         return !GetWindowRect(handle, out var rect) || rect.Right - rect.Left < 320 || rect.Bottom - rect.Top < 240;
+    }
+
+    private static bool IsOverlayWindow(string title, string className)
+    {
+        return ContainsAny(title,
+                   "NVIDIA",
+                   "GeForce",
+                   "Game Bar",
+                   "Xbox",
+                   "Steam Overlay",
+                   "Discord Overlay",
+                   "Overwolf",
+                   "Medal",
+                   "overlay") ||
+               ContainsAny(className,
+                   "CEF",
+                   "Chrome_WidgetWin",
+                   "GameBar",
+                   "Windows.UI.Core.CoreWindow",
+                   "ApplicationFrameWindow");
+    }
+
+    private static bool ContainsAny(string value, params string[] terms)
+    {
+        return terms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string GetWindowTitle(IntPtr handle)
