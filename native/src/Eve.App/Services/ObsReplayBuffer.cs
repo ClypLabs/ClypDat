@@ -36,7 +36,7 @@ public sealed class ObsReplayBuffer : IReplayBuffer
         {
             _bridge.Initialize(runtime.RootFolder, config.MaxHeight, config.FrameRate, (int)Duration.TotalSeconds);
             _initialized = true;
-            _bridge.StartPrimaryMonitor();
+            _bridge.StartReplayCapture();
             IsRecording = true;
             AppLog.Info("OBS replay backend started.");
         }

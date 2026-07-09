@@ -20,9 +20,9 @@ public sealed class ObsNativeBridge
         ThrowIfFailed(result);
     }
 
-    public void StartPrimaryMonitor()
+    public void StartReplayCapture()
     {
-        ThrowIfFailed(eve_obs_start_primary_monitor());
+        ThrowIfFailed(eve_obs_start_replay_capture());
     }
 
     public void Stop()
@@ -82,7 +82,7 @@ public sealed class ObsNativeBridge
     private static extern int eve_obs_init(string runtimeFolder, int maxHeight, int frameRate, int durationSeconds);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    private static extern int eve_obs_start_primary_monitor();
+    private static extern int eve_obs_start_replay_capture();
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
     private static extern int eve_obs_save_replay(string outputFolder, StringBuilder outputPath, int outputPathLength);

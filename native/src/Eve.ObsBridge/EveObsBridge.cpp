@@ -48,7 +48,7 @@ using obs_encoder_t = void;
 using obs_module_t = void;
 using proc_handler_t = void;
 
-constexpr int VIDEO_FORMAT_RGBA = 1;
+constexpr int VIDEO_FORMAT_NV12 = 2;
 constexpr int VIDEO_CS_709 = 2;
 constexpr int VIDEO_RANGE_PARTIAL = 1;
 constexpr int OBS_SCALE_BICUBIC = 2;
@@ -66,7 +66,7 @@ std::string g_config_path;
 HMODULE g_obs = nullptr;
 bool g_initialized = false;
 obs_source_t *g_scene_source = nullptr;
-obs_source_t *g_monitor_source = nullptr;
+obs_source_t *g_capture_source = nullptr;
 obs_scene_t *g_scene = nullptr;
 obs_sceneitem_t *g_scene_item = nullptr;
 obs_output_t *g_replay = nullptr;
@@ -268,9 +268,9 @@ void cleanup_obs()
         if (obs.encoder_release) obs.encoder_release(g_audio_encoder);
         g_audio_encoder = nullptr;
     }
-    if (g_monitor_source) {
-        if (obs.source_release) obs.source_release(g_monitor_source);
-        g_monitor_source = nullptr;
+    if (g_capture_source) {
+        if (obs.source_release) obs.source_release(g_capture_source);
+        g_capture_source = nullptr;
     }
     if (g_scene_source) {
         if (obs.set_output_source) obs.set_output_source(0, nullptr);
@@ -309,15 +309,19 @@ std::pair<int, int> output_size()
 bool create_scene()
 {
     obs_data_t *settings = obs.data_create();
-    obs.data_set_int(settings, "monitor", 0);
+    obs.data_set_string(settings, "capture_mode", "any_fullscreen");
     obs.data_set_bool(settings, "capture_cursor", true);
-    obs.data_set_bool(settings, "compatibility", false);
-    g_monitor_source = obs.source_create("monitor_capture", "Primary Monitor", settings, nullptr);
+    obs.data_set_bool(settings, "anti_cheat_hook", true);
+    obs.data_set_bool(settings, "capture_overlays", false);
+    obs.data_set_bool(settings, "limit_framerate", false);
+    obs.data_set_int(settings, "hook_rate", 1);
+    g_capture_source = obs.source_create("game_capture", "Auto Game Capture", settings, nullptr);
     obs.data_release(settings);
-    if (!g_monitor_source) {
-        set_error(L"OBS monitor_capture source failed.");
+    if (!g_capture_source) {
+        set_error(L"OBS game_capture source failed.");
         return false;
     }
+    trace("init: capture_source game_capture any_fullscreen");
 
     g_scene = obs.scene_create("EVE Replay Scene");
     if (!g_scene) {
@@ -325,7 +329,7 @@ bool create_scene()
         return false;
     }
 
-    g_scene_item = obs.scene_add(g_scene, g_monitor_source);
+    g_scene_item = obs.scene_add(g_scene, g_capture_source);
     if (!g_scene_item) {
         set_error(L"OBS scene add failed.");
         return false;
@@ -333,8 +337,8 @@ bool create_scene()
 
     g_scene_source = obs.scene_get_source(g_scene);
     obs.set_output_source(0, g_scene_source);
-    obs.source_release(g_monitor_source);
-    g_monitor_source = nullptr;
+    obs.source_release(g_capture_source);
+    g_capture_source = nullptr;
     return true;
 }
 
@@ -483,8 +487,8 @@ extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder,
     video.base_height = static_cast<uint32_t>(base_height);
     video.output_width = static_cast<uint32_t>(out_width);
     video.output_height = static_cast<uint32_t>(out_height);
-    video.output_format = VIDEO_FORMAT_RGBA;
-    video.gpu_conversion = false;
+    video.output_format = VIDEO_FORMAT_NV12;
+    video.gpu_conversion = true;
     video.colorspace = VIDEO_CS_709;
     video.range = VIDEO_RANGE_PARTIAL;
     video.scale_type = OBS_SCALE_BICUBIC;
@@ -520,7 +524,7 @@ extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder,
     return 0;
 }
 
-extern "C" __declspec(dllexport) int eve_obs_start_primary_monitor()
+extern "C" __declspec(dllexport) int eve_obs_start_replay_capture()
 {
     std::lock_guard lock(g_lock);
     if (!g_initialized || !g_replay) {

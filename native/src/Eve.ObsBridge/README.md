@@ -6,7 +6,7 @@ Required exports:
 
 ```cpp
 extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t* runtime_folder, int max_height, int frame_rate, int duration_seconds);
-extern "C" __declspec(dllexport) int eve_obs_start_primary_monitor();
+extern "C" __declspec(dllexport) int eve_obs_start_replay_capture();
 extern "C" __declspec(dllexport) int eve_obs_save_replay(const wchar_t* output_folder, wchar_t* output_path, int output_path_length);
 extern "C" __declspec(dllexport) int eve_obs_stop();
 extern "C" __declspec(dllexport) void eve_obs_shutdown();
