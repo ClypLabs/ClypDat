@@ -794,9 +794,12 @@ public sealed partial class MainWindow : Window
         try
         {
             var dialog = CreateCs2CaptureNoticeDialog();
-            await dialog.ShowDialog<bool>(this);
-            ViewModel.Settings.HasSeenCs2CaptureNotice = true;
-            ViewModel.SaveSettings();
+            var doNotShowAgain = await dialog.ShowDialog<bool>(this);
+            if (doNotShowAgain)
+            {
+                ViewModel.Settings.HasSeenCs2CaptureNotice = true;
+                ViewModel.SaveSettings();
+            }
         }
         finally
         {
@@ -1192,7 +1195,7 @@ public sealed partial class MainWindow : Window
         const string launchOption = "-allow_third_party_software";
         var window = new Window
         {
-            Title = "Counter-Strike 2 capture",
+            Title = "CS2 capture setup",
             Width = 520,
             Height = 300,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -1211,10 +1214,18 @@ public sealed partial class MainWindow : Window
             if (clipboard is not null) await clipboard.SetTextAsync(launchOption);
         };
 
+        var later = new Button
+        {
+            Content = "Later",
+            Width = 96,
+            HorizontalContentAlignment = HorizontalAlignment.Center
+        };
+        later.Click += (_, _) => window.Close(false);
+
         var ok = new Button
         {
-            Content = "Done",
-            Width = 96,
+            Content = "Don't show again",
+            Width = 130,
             HorizontalContentAlignment = HorizontalAlignment.Center
         };
         ok.Click += (_, _) => window.Close(true);
@@ -1234,7 +1245,7 @@ public sealed partial class MainWindow : Window
                 },
                 new TextBlock
                 {
-                    Text = "For best FPS, EVE uses OBS game capture for CS2. If clips are black, add this to CS2 Steam Launch Options, then restart CS2:",
+                    Text = "EVE only shows this when Counter-Strike 2 is detected. For best FPS, EVE uses game capture. If CS2 clips are black, add this to CS2 Steam Launch Options, then restart CS2:",
                     Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"),
                     TextWrapping = Avalonia.Media.TextWrapping.Wrap
                 },
@@ -1247,7 +1258,7 @@ public sealed partial class MainWindow : Window
                 },
                 new TextBlock
                 {
-                    Text = "Steam > Counter-Strike 2 > Properties > Launch Options",
+                    Text = "Steam > Counter-Strike 2 > Properties > Launch Options. For alt-tab capture, use borderless/windowed fullscreen; exclusive fullscreen can go black when minimized.",
                     Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"),
                     TextWrapping = Avalonia.Media.TextWrapping.Wrap
                 },
@@ -1256,7 +1267,7 @@ public sealed partial class MainWindow : Window
                     Orientation = Orientation.Horizontal,
                     Spacing = 10,
                     HorizontalAlignment = HorizontalAlignment.Right,
-                    Children = { copy, ok }
+                    Children = { copy, later, ok }
                 }
             }
         };
