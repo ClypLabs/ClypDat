@@ -32,6 +32,7 @@ public sealed partial class MainWindow : Window
     private bool _replayTransitioning;
     private bool _replayArmed;
     private bool _clipSaving;
+    private bool _cs2SetupDialogOpen;
 
     public MainWindow()
     {
@@ -223,6 +224,7 @@ public sealed partial class MainWindow : Window
                 ViewModel.RecorderStatus = _replayArmed ? "Replay Armed" : "Replay Off";
                 return;
             }
+            await ShowCs2CaptureNoticeIfNeededAsync();
             await EnsureLibraryFolderAsync();
             ApplyPrimaryCaptureBounds();
             await Task.Run(() => _replayBuffer.StartAsync());
@@ -783,6 +785,25 @@ public sealed partial class MainWindow : Window
         await dialog.ShowDialog<bool>(this);
     }
 
+    private async Task ShowCs2CaptureNoticeIfNeededAsync()
+    {
+        if (ViewModel is null || _cs2SetupDialogOpen || ViewModel.Settings.HasSeenCs2CaptureNotice) return;
+        if (!string.Equals(ViewModel.ActiveGameDetection.ExeName, "cs2.exe", StringComparison.OrdinalIgnoreCase)) return;
+
+        _cs2SetupDialogOpen = true;
+        try
+        {
+            var dialog = CreateCs2CaptureNoticeDialog();
+            await dialog.ShowDialog<bool>(this);
+            ViewModel.Settings.HasSeenCs2CaptureNotice = true;
+            ViewModel.SaveSettings();
+        }
+        finally
+        {
+            _cs2SetupDialogOpen = false;
+        }
+    }
+
     private void QueueEditorPlayback()
     {
         _playbackStartCts?.Cancel();
@@ -1160,6 +1181,83 @@ public sealed partial class MainWindow : Window
                     TextWrapping = Avalonia.Media.TextWrapping.Wrap
                 },
                 buttons
+            }
+        };
+
+        return window;
+    }
+
+    private Window CreateCs2CaptureNoticeDialog()
+    {
+        const string launchOption = "-allow_third_party_software";
+        var window = new Window
+        {
+            Title = "Counter-Strike 2 capture",
+            Width = 520,
+            Height = 300,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = Avalonia.Media.Brush.Parse("#111920")
+        };
+
+        var copy = new Button
+        {
+            Content = "Copy launch option",
+            Width = 150,
+            HorizontalContentAlignment = HorizontalAlignment.Center
+        };
+        copy.Click += async (_, _) =>
+        {
+            var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+            if (clipboard is not null) await clipboard.SetTextAsync(launchOption);
+        };
+
+        var ok = new Button
+        {
+            Content = "Done",
+            Width = 96,
+            HorizontalContentAlignment = HorizontalAlignment.Center
+        };
+        ok.Click += (_, _) => window.Close(true);
+
+        window.Content = new StackPanel
+        {
+            Margin = new Avalonia.Thickness(22),
+            Spacing = 18,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = "Counter-Strike 2 blocks capture by default",
+                    Foreground = Avalonia.Media.Brush.Parse("#DDE8F5"),
+                    FontWeight = Avalonia.Media.FontWeight.Bold,
+                    FontSize = 17
+                },
+                new TextBlock
+                {
+                    Text = "For best FPS, EVE uses OBS game capture for CS2. If clips are black, add this to CS2 Steam Launch Options, then restart CS2:",
+                    Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"),
+                    TextWrapping = Avalonia.Media.TextWrapping.Wrap
+                },
+                new TextBox
+                {
+                    Text = launchOption,
+                    IsReadOnly = true,
+                    Background = Avalonia.Media.Brush.Parse("#17222C"),
+                    Foreground = Avalonia.Media.Brush.Parse("#DDE8F5")
+                },
+                new TextBlock
+                {
+                    Text = "Steam > Counter-Strike 2 > Properties > Launch Options",
+                    Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"),
+                    TextWrapping = Avalonia.Media.TextWrapping.Wrap
+                },
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 10,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    Children = { copy, ok }
+                }
             }
         };
 
