@@ -319,6 +319,38 @@ std::filesystem::path process_sibling(const wchar_t *file_name)
     return std::filesystem::path(path).parent_path() / file_name;
 }
 
+bool ensure_process_helper(const std::filesystem::path &root, const wchar_t *file_name)
+{
+    const auto source = root / L"bin" / L"64bit" / file_name;
+    const auto destination = process_sibling(file_name);
+    std::error_code exists_error;
+    if (destination.empty() || !std::filesystem::exists(source, exists_error)) {
+        trace("init: helper missing source " + narrow(source.wstring()));
+        return false;
+    }
+
+    bool should_copy = !std::filesystem::exists(destination, exists_error);
+    if (!should_copy) {
+        std::error_code source_size_error;
+        std::error_code destination_size_error;
+        const auto source_size = std::filesystem::file_size(source, source_size_error);
+        const auto destination_size = std::filesystem::file_size(destination, destination_size_error);
+        should_copy = source_size_error || destination_size_error || source_size != destination_size;
+    }
+
+    if (should_copy) {
+        std::error_code copy_error;
+        std::filesystem::copy_file(source, destination, std::filesystem::copy_options::overwrite_existing, copy_error);
+        if (copy_error) {
+            trace("init: helper copy failed " + narrow(destination.wstring()) + " error=" + copy_error.message());
+            return false;
+        }
+    }
+
+    trace("init: helper " + narrow(destination.wstring()) + " exists=" + std::to_string(std::filesystem::exists(destination) ? 1 : 0));
+    return std::filesystem::exists(destination);
+}
+
 std::pair<int, int> primary_monitor_size()
 {
     return {GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)};
@@ -559,6 +591,11 @@ extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder,
     const auto nvenc_helper = process_sibling(L"obs-nvenc-test.exe");
     trace("init: process_id=" + std::to_string(GetCurrentProcessId()));
     trace("init: nvenc_helper " + narrow(nvenc_helper.wstring()) + " exists=" + std::to_string(std::filesystem::exists(nvenc_helper) ? 1 : 0));
+    if (!ensure_process_helper(root, L"obs-ffmpeg-mux.exe")) {
+        set_error(L"OBS mux helper missing. Expected obs-ffmpeg-mux.exe beside EVE.exe.");
+        cleanup_obs();
+        return -4;
+    }
 
     trace("init: load_selected_modules");
     load_module(root, L"win-capture");
@@ -567,7 +604,7 @@ extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder,
     if (!load_module(root, L"obs-nvenc")) {
         set_error(L"OBS NVENC module failed. Expected obs-nvenc-test.exe beside EVE.exe: " + nvenc_helper.wstring());
         cleanup_obs();
-        return -4;
+        return -5;
     }
     obs.post_load_modules();
 
