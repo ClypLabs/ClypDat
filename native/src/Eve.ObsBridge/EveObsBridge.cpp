@@ -315,16 +315,17 @@ std::pair<int, int> output_size()
 
 bool create_scene()
 {
+    auto [fallback_width, fallback_height] = output_size();
     obs_data_t *fallback_settings = obs.data_create();
-    obs.data_set_int(fallback_settings, "monitor", 0);
-    obs.data_set_bool(fallback_settings, "capture_cursor", true);
-    obs.data_set_bool(fallback_settings, "compatibility", false);
-    g_fallback_source = obs.source_create("monitor_capture", "Primary Display Fallback", fallback_settings, nullptr);
+    obs.data_set_int(fallback_settings, "color", 0xFF000000);
+    obs.data_set_int(fallback_settings, "width", fallback_width);
+    obs.data_set_int(fallback_settings, "height", fallback_height);
+    g_fallback_source = obs.source_create("color_source", "EVE Idle Frame", fallback_settings, nullptr);
     obs.data_release(fallback_settings);
     if (!g_fallback_source) {
-        trace("init: monitor_capture fallback unavailable");
+        trace("init: color_source fallback unavailable");
     } else {
-        trace("init: capture_source monitor_capture primary fallback");
+        trace("init: capture_source color_source idle fallback");
     }
 
     obs_data_t *settings = obs.data_create();
@@ -536,6 +537,7 @@ extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder,
 
     trace("init: load_selected_modules");
     load_module(root, L"win-capture");
+    load_module(root, L"image-source");
     load_module(root, L"obs-ffmpeg");
     if (!load_module(root, L"obs-nvenc")) {
         set_error(L"OBS NVENC module failed. Expected obs-nvenc-test.exe beside EVE.exe: " + nvenc_helper.wstring());
