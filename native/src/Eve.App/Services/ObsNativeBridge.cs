@@ -14,9 +14,9 @@ public sealed class ObsNativeBridge
         EnsureResolver();
     }
 
-    public void Initialize(string runtimeFolder, int maxHeight, int frameRate, int durationSeconds)
+    public void Initialize(string runtimeFolder, int maxHeight, int frameRate, int durationSeconds, string chatProcessName, string microphoneDeviceId)
     {
-        var result = eve_obs_init(runtimeFolder, maxHeight, frameRate, durationSeconds);
+        var result = eve_obs_init(runtimeFolder, maxHeight, frameRate, durationSeconds, chatProcessName, microphoneDeviceId);
         ThrowIfFailed(result);
     }
 
@@ -79,7 +79,7 @@ public sealed class ObsNativeBridge
     }
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
-    private static extern int eve_obs_init(string runtimeFolder, int maxHeight, int frameRate, int durationSeconds);
+    private static extern int eve_obs_init(string runtimeFolder, int maxHeight, int frameRate, int durationSeconds, string chatProcessName, string microphoneDeviceId);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     private static extern int eve_obs_start_replay_capture();

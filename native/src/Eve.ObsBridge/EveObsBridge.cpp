@@ -67,18 +67,21 @@ HMODULE g_obs = nullptr;
 bool g_initialized = false;
 obs_source_t *g_scene_source = nullptr;
 obs_source_t *g_capture_source = nullptr;
-obs_source_t *g_game_audio_source = nullptr;
+obs_source_t *g_chat_audio_source = nullptr;
+obs_source_t *g_microphone_source = nullptr;
 obs_scene_t *g_scene = nullptr;
 obs_sceneitem_t *g_scene_item = nullptr;
 obs_source_t *g_fallback_source = nullptr;
 obs_output_t *g_replay = nullptr;
 obs_encoder_t *g_video_encoder = nullptr;
-obs_encoder_t *g_audio_encoder = nullptr;
+obs_encoder_t *g_audio_encoders[3] = {};
 int g_duration_seconds = 60;
 int g_max_height = 1080;
 int g_frame_rate = 60;
 bool g_scene_active_ref = false;
 bool g_scene_showing_ref = false;
+std::string g_chat_process_name;
+std::string g_microphone_device_id;
 
 std::filesystem::path app_data_folder();
 
@@ -156,6 +159,7 @@ struct ObsApi {
     void(__cdecl *source_dec_showing)(obs_source_t *) = nullptr;
     void(__cdecl *source_inc_active)(obs_source_t *) = nullptr;
     void(__cdecl *source_dec_active)(obs_source_t *) = nullptr;
+    void(__cdecl *source_set_audio_mixers)(obs_source_t *, uint32_t) = nullptr;
     void(__cdecl *set_output_source)(uint32_t, obs_source_t *) = nullptr;
     void *(__cdecl *get_video)() = nullptr;
     void *(__cdecl *get_audio)() = nullptr;
@@ -218,6 +222,7 @@ bool load_obs_api(const std::filesystem::path &bin)
            load_fn(obs.source_dec_showing, "obs_source_dec_showing") &&
            load_fn(obs.source_inc_active, "obs_source_inc_active") &&
            load_fn(obs.source_dec_active, "obs_source_dec_active") &&
+           load_fn(obs.source_set_audio_mixers, "obs_source_set_audio_mixers") &&
            load_fn(obs.set_output_source, "obs_set_output_source") &&
            load_fn(obs.get_video, "obs_get_video") &&
            load_fn(obs.get_audio, "obs_get_audio") &&
@@ -288,18 +293,24 @@ void cleanup_obs()
         if (obs.encoder_release) obs.encoder_release(g_video_encoder);
         g_video_encoder = nullptr;
     }
-    if (g_audio_encoder) {
-        if (obs.encoder_release) obs.encoder_release(g_audio_encoder);
-        g_audio_encoder = nullptr;
+    for (auto &encoder : g_audio_encoders) {
+        if (encoder) {
+            if (obs.encoder_release) obs.encoder_release(encoder);
+            encoder = nullptr;
+        }
     }
     if (g_capture_source) {
         if (obs.source_release) obs.source_release(g_capture_source);
         g_capture_source = nullptr;
     }
-    if (g_game_audio_source) {
-        if (obs.set_output_source) obs.set_output_source(1, nullptr);
-        if (obs.source_release) obs.source_release(g_game_audio_source);
-        g_game_audio_source = nullptr;
+    if (g_chat_audio_source) {
+        if (obs.source_release) obs.source_release(g_chat_audio_source);
+        g_chat_audio_source = nullptr;
+    }
+    if (g_microphone_source) {
+        if (obs.set_output_source) obs.set_output_source(3, nullptr);
+        if (obs.source_release) obs.source_release(g_microphone_source);
+        g_microphone_source = nullptr;
     }
     if (g_fallback_source) {
         if (obs.source_release) obs.source_release(g_fallback_source);
@@ -391,6 +402,7 @@ bool create_scene()
     obs.data_set_bool(settings, "capture_cursor", true);
     obs.data_set_bool(settings, "anti_cheat_hook", true);
     obs.data_set_bool(settings, "capture_overlays", false);
+    obs.data_set_bool(settings, "capture_audio", true);
     obs.data_set_bool(settings, "limit_framerate", false);
     obs.data_set_int(settings, "hook_rate", 1);
     g_capture_source = obs.source_create("game_capture", "Auto Game Capture", settings, nullptr);
@@ -400,6 +412,7 @@ bool create_scene()
         return false;
     }
     trace("init: capture_source game_capture any_fullscreen");
+    obs.source_set_audio_mixers(g_capture_source, 1u);
 
     g_scene = obs.scene_create("EVE Replay Scene");
     if (!g_scene) {
@@ -439,19 +452,63 @@ bool create_scene()
     return true;
 }
 
-bool create_game_audio_source()
+std::string ensure_exe_name(const std::string &process_name)
 {
-    obs_data_t *settings = obs.data_create();
-    obs.data_set_string(settings, "device_id", "default");
-    g_game_audio_source = obs.source_create("wasapi_output_capture", "Game Audio", settings, nullptr);
-    obs.data_release(settings);
-    if (!g_game_audio_source) {
-        trace("init: game audio source unavailable");
+    if (process_name.empty()) return {};
+    return process_name.size() >= 4 && _stricmp(process_name.c_str() + process_name.size() - 4, ".exe") == 0
+        ? process_name
+        : process_name + ".exe";
+}
+
+bool create_audio_sources()
+{
+    if (!g_chat_process_name.empty()) {
+        const std::string exe = ensure_exe_name(g_chat_process_name);
+        obs_data_t *settings = obs.data_create();
+        obs.data_set_string(settings, "window", ("::" + exe).c_str());
+        obs.data_set_int(settings, "priority", 2);
+        g_chat_audio_source = obs.source_create("wasapi_process_output_capture", "Chat Audio", settings, nullptr);
+        obs.data_release(settings);
+        if (g_chat_audio_source) {
+            obs.source_set_audio_mixers(g_chat_audio_source, 2u);
+            obs.set_output_source(2, g_chat_audio_source);
+            trace("init: chat audio source " + exe);
+        } else {
+            trace("init: chat audio source unavailable " + exe);
+        }
+    }
+
+    if (!g_microphone_device_id.empty()) {
+        obs_data_t *settings = obs.data_create();
+        obs.data_set_string(settings, "device_id", g_microphone_device_id.c_str());
+        g_microphone_source = obs.source_create("wasapi_input_capture", "Microphone", settings, nullptr);
+        obs.data_release(settings);
+        if (g_microphone_source) {
+            obs.source_set_audio_mixers(g_microphone_source, 4u);
+            obs.set_output_source(3, g_microphone_source);
+            trace("init: microphone source configured");
+        } else {
+            trace("init: microphone source unavailable");
+        }
+    }
+
+    if (!g_chat_audio_source) trace("init: chat audio source not active");
+    if (!g_microphone_source) trace("init: microphone source not active");
+    return true;
+}
+
+bool create_audio_encoder(size_t index, const char *name)
+{
+    obs_data_t *a = obs.data_create();
+    obs.data_set_int(a, "bitrate", 192);
+    g_audio_encoders[index] = obs.audio_encoder_create("ffmpeg_aac", name, a, index, nullptr);
+    obs.data_release(a);
+    if (!g_audio_encoders[index]) {
+        set_error(L"OBS AAC encoder create failed.");
         return false;
     }
 
-    obs.set_output_source(1, g_game_audio_source);
-    trace("init: game audio source wasapi_output_capture default");
+    obs.encoder_set_audio(g_audio_encoders[index], obs.get_audio());
     return true;
 }
 
@@ -477,11 +534,9 @@ bool create_replay_output()
     trace("init: video_encoder jim_nvenc created");
     obs.encoder_set_video(g_video_encoder, obs.get_video());
 
-    obs_data_t *a = obs.data_create();
-    obs.data_set_int(a, "bitrate", 192);
-    g_audio_encoder = obs.audio_encoder_create("ffmpeg_aac", "EVE AAC", a, 0, nullptr);
-    obs.data_release(a);
-    if (g_audio_encoder) obs.encoder_set_audio(g_audio_encoder, obs.get_audio());
+    if (!create_audio_encoder(0, "Game Audio")) return false;
+    if (!create_audio_encoder(1, "Chat Audio")) return false;
+    if (!create_audio_encoder(2, "Microphone")) return false;
 
     obs_data_t *o = obs.data_create();
     obs.data_set_int(o, "max_time_sec", g_duration_seconds);
@@ -498,7 +553,7 @@ bool create_replay_output()
     }
 
     obs.output_set_video_encoder(g_replay, g_video_encoder);
-    if (g_audio_encoder) obs.output_set_audio_encoder(g_replay, g_audio_encoder, 0);
+    for (size_t i = 0; i < 3; i++) obs.output_set_audio_encoder(g_replay, g_audio_encoders[i], i);
     return true;
 }
 
@@ -559,7 +614,7 @@ std::wstring find_newest_replay_file(const std::filesystem::path &folder, const 
 
 } // namespace
 
-extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder, int max_height, int frame_rate, int duration_seconds)
+extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder, int max_height, int frame_rate, int duration_seconds, const wchar_t *chat_process_name, const wchar_t *microphone_device_id)
 {
     std::lock_guard lock(g_lock);
     trace("init: enter");
@@ -569,6 +624,8 @@ extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder,
     g_max_height = std::clamp(max_height, 480, 2160);
     g_frame_rate = std::clamp(frame_rate, 15, 60);
     g_duration_seconds = std::clamp(duration_seconds, 5, 1200);
+    g_chat_process_name = narrow(chat_process_name ? chat_process_name : L"");
+    g_microphone_device_id = narrow(microphone_device_id ? microphone_device_id : L"");
 
     const std::filesystem::path root(g_runtime);
     const auto bin = root / L"bin" / L"64bit";
@@ -669,8 +726,8 @@ extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder,
         cleanup_obs();
         return -7;
     }
-    trace("init: create_game_audio_source");
-    if (!create_game_audio_source()) {
+    trace("init: create_audio_sources");
+    if (!create_audio_sources()) {
         cleanup_obs();
         return -8;
     }
