@@ -67,7 +67,6 @@ HMODULE g_obs = nullptr;
 bool g_initialized = false;
 obs_source_t *g_scene_source = nullptr;
 obs_source_t *g_capture_source = nullptr;
-obs_source_t *g_game_audio_source = nullptr;
 obs_source_t *g_chat_audio_source = nullptr;
 obs_source_t *g_microphone_source = nullptr;
 obs_scene_t *g_scene = nullptr;
@@ -307,11 +306,6 @@ void cleanup_obs()
         if (obs.source_release) obs.source_release(g_capture_source);
         g_capture_source = nullptr;
     }
-    if (g_game_audio_source) {
-        if (obs.set_output_source) obs.set_output_source(1, nullptr);
-        if (obs.source_release) obs.source_release(g_game_audio_source);
-        g_game_audio_source = nullptr;
-    }
     if (g_chat_audio_source) {
         if (obs.set_output_source) obs.set_output_source(2, nullptr);
         if (obs.source_release) obs.source_release(g_chat_audio_source);
@@ -392,11 +386,6 @@ std::string game_window_match()
     return encode_window_part(g_game_window_title) + ":" + encode_window_part(g_game_window_class) + ":" + encode_window_part(g_game_exe_name);
 }
 
-bool use_window_capture_video()
-{
-    return _stricmp(g_game_exe_name.c_str(), "cs2.exe") == 0;
-}
-
 bool ensure_process_helper(const std::filesystem::path &root, const wchar_t *file_name)
 {
     const auto source = root / L"bin" / L"64bit" / file_name;
@@ -446,65 +435,48 @@ std::pair<int, int> output_size()
 bool create_scene()
 {
     auto [fallback_width, fallback_height] = output_size();
-    const bool window_capture_video = use_window_capture_video();
-    if (window_capture_video) {
-        obs_data_t *settings = obs.data_create();
-        const std::string window_match = game_window_match();
+    obs_data_t *settings = obs.data_create();
+    const std::string window_match = game_window_match();
+    if (!window_match.empty()) {
+        obs.data_set_string(settings, "capture_mode", "window");
         obs.data_set_string(settings, "window", window_match.c_str());
         obs.data_set_int(settings, "priority", 2);
-        obs.data_set_bool(settings, "capture_cursor", false);
-        obs.data_set_bool(settings, "force_sdr", true);
-        obs.data_set_bool(settings, "client_area", true);
-        obs.data_set_int(settings, "method", 0);
-        g_capture_source = obs.source_create("window_capture", "EVE Window Capture", settings, nullptr);
-        obs.data_release(settings);
-        trace("init: capture_source window_capture for " + g_game_exe_name);
+        trace("init: capture_mode exact " + g_game_exe_name);
     } else {
-        obs_data_t *settings = obs.data_create();
-        const std::string window_match = game_window_match();
-        if (!window_match.empty()) {
-            obs.data_set_string(settings, "capture_mode", "window");
-            obs.data_set_string(settings, "window", window_match.c_str());
-            obs.data_set_int(settings, "priority", 2);
-            trace("init: capture_mode exact " + g_game_exe_name);
+        obs.data_set_string(settings, "capture_mode", "any_fullscreen");
+        trace("init: capture_mode any_fullscreen");
+        obs_data_t *fallback_settings = obs.data_create();
+        obs.data_set_bool(fallback_settings, "capture_cursor", false);
+        obs.data_set_bool(fallback_settings, "force_sdr", true);
+        obs.data_set_int(fallback_settings, "method", 0);
+        g_fallback_source = obs.source_create("monitor_capture", "EVE Monitor Fallback", fallback_settings, nullptr);
+        obs.data_release(fallback_settings);
+        if (!g_fallback_source) {
+            obs_data_t *black_settings = obs.data_create();
+            obs.data_set_int(black_settings, "color", 0xFF000000);
+            obs.data_set_int(black_settings, "width", fallback_width);
+            obs.data_set_int(black_settings, "height", fallback_height);
+            g_fallback_source = obs.source_create("color_source", "EVE Idle Frame", black_settings, nullptr);
+            obs.data_release(black_settings);
+            trace("init: monitor fallback unavailable, using black idle");
         } else {
-            obs.data_set_string(settings, "capture_mode", "any_fullscreen");
-            trace("init: capture_mode any_fullscreen");
-            obs_data_t *fallback_settings = obs.data_create();
-            obs.data_set_bool(fallback_settings, "capture_cursor", false);
-            obs.data_set_bool(fallback_settings, "force_sdr", true);
-            obs.data_set_int(fallback_settings, "method", 0);
-            g_fallback_source = obs.source_create("monitor_capture", "EVE Monitor Fallback", fallback_settings, nullptr);
-            obs.data_release(fallback_settings);
-            if (!g_fallback_source) {
-                obs_data_t *black_settings = obs.data_create();
-                obs.data_set_int(black_settings, "color", 0xFF000000);
-                obs.data_set_int(black_settings, "width", fallback_width);
-                obs.data_set_int(black_settings, "height", fallback_height);
-                g_fallback_source = obs.source_create("color_source", "EVE Idle Frame", black_settings, nullptr);
-                obs.data_release(black_settings);
-                trace("init: monitor fallback unavailable, using black idle");
-            } else {
-                trace("init: capture_source monitor fallback");
-            }
+            trace("init: capture_source monitor fallback");
         }
-        obs.data_set_bool(settings, "capture_cursor", false);
-        obs.data_set_bool(settings, "anti_cheat_hook", true);
-        obs.data_set_bool(settings, "capture_overlays", false);
-        obs.data_set_bool(settings, "capture_audio", true);
-        obs.data_set_bool(settings, "limit_framerate", true);
-        obs.data_set_int(settings, "hook_rate", 2);
-        g_capture_source = obs.source_create("game_capture", "Auto Game Capture", settings, nullptr);
-        obs.data_release(settings);
     }
+    obs.data_set_bool(settings, "capture_cursor", false);
+    obs.data_set_bool(settings, "anti_cheat_hook", true);
+    obs.data_set_bool(settings, "capture_overlays", false);
+    obs.data_set_bool(settings, "capture_audio", true);
+    obs.data_set_bool(settings, "limit_framerate", true);
+    obs.data_set_int(settings, "hook_rate", 2);
+    g_capture_source = obs.source_create("game_capture", "Auto Game Capture", settings, nullptr);
+    obs.data_release(settings);
     if (!g_capture_source) {
-        set_error(window_capture_video ? L"OBS window_capture source failed." : L"OBS game_capture source failed.");
+        set_error(L"OBS game_capture source failed.");
         return false;
     }
-    if (!window_capture_video) {
-        trace("init: capture_source game_capture");
-        obs.source_set_audio_mixers(g_capture_source, 1u);
-    }
+    trace("init: capture_source game_capture");
+    obs.source_set_audio_mixers(g_capture_source, 1u);
 
     g_scene = obs.scene_create("EVE Replay Scene");
     if (!g_scene) {
@@ -554,21 +526,6 @@ std::string ensure_exe_name(const std::string &process_name)
 
 bool create_audio_sources()
 {
-    if (use_window_capture_video() && !g_game_exe_name.empty()) {
-        obs_data_t *settings = obs.data_create();
-        obs.data_set_string(settings, "window", ("::" + g_game_exe_name).c_str());
-        obs.data_set_int(settings, "priority", 2);
-        g_game_audio_source = obs.source_create("wasapi_process_output_capture", "Game Audio", settings, nullptr);
-        obs.data_release(settings);
-        if (g_game_audio_source) {
-            obs.source_set_audio_mixers(g_game_audio_source, 1u);
-            obs.set_output_source(1, g_game_audio_source);
-            trace("init: game process audio source " + g_game_exe_name);
-        } else {
-            trace("init: game process audio source unavailable " + g_game_exe_name);
-        }
-    }
-
     if (!g_chat_process_name.empty()) {
         const std::string exe = ensure_exe_name(g_chat_process_name);
         obs_data_t *settings = obs.data_create();
