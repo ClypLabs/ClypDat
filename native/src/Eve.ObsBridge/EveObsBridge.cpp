@@ -67,6 +67,7 @@ HMODULE g_obs = nullptr;
 bool g_initialized = false;
 obs_source_t *g_scene_source = nullptr;
 obs_source_t *g_capture_source = nullptr;
+obs_source_t *g_game_audio_source = nullptr;
 obs_scene_t *g_scene = nullptr;
 obs_sceneitem_t *g_scene_item = nullptr;
 obs_source_t *g_fallback_source = nullptr;
@@ -295,6 +296,11 @@ void cleanup_obs()
         if (obs.source_release) obs.source_release(g_capture_source);
         g_capture_source = nullptr;
     }
+    if (g_game_audio_source) {
+        if (obs.set_output_source) obs.set_output_source(1, nullptr);
+        if (obs.source_release) obs.source_release(g_game_audio_source);
+        g_game_audio_source = nullptr;
+    }
     if (g_fallback_source) {
         if (obs.source_release) obs.source_release(g_fallback_source);
         g_fallback_source = nullptr;
@@ -430,6 +436,22 @@ bool create_scene()
         obs.source_release(g_fallback_source);
         g_fallback_source = nullptr;
     }
+    return true;
+}
+
+bool create_game_audio_source()
+{
+    obs_data_t *settings = obs.data_create();
+    obs.data_set_string(settings, "device_id", "default");
+    g_game_audio_source = obs.source_create("wasapi_output_capture", "Game Audio", settings, nullptr);
+    obs.data_release(settings);
+    if (!g_game_audio_source) {
+        trace("init: game audio source unavailable");
+        return false;
+    }
+
+    obs.set_output_source(1, g_game_audio_source);
+    trace("init: game audio source wasapi_output_capture default");
     return true;
 }
 
@@ -599,6 +621,7 @@ extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder,
 
     trace("init: load_selected_modules");
     load_module(root, L"win-capture");
+    load_module(root, L"win-wasapi");
     load_module(root, L"image-source");
     load_module(root, L"obs-ffmpeg");
     if (!load_module(root, L"obs-nvenc")) {
@@ -646,10 +669,15 @@ extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder,
         cleanup_obs();
         return -7;
     }
+    trace("init: create_game_audio_source");
+    if (!create_game_audio_source()) {
+        cleanup_obs();
+        return -8;
+    }
     trace("init: create_replay_output");
     if (!create_replay_output()) {
         cleanup_obs();
-        return -8;
+        return -9;
     }
     trace("init: success");
     return 0;
