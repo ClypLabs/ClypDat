@@ -76,6 +76,7 @@ obs_encoder_t *g_audio_encoder = nullptr;
 int g_duration_seconds = 60;
 int g_max_height = 1080;
 int g_frame_rate = 60;
+bool g_scene_active_ref = false;
 
 std::filesystem::path app_data_folder();
 
@@ -149,6 +150,8 @@ struct ObsApi {
     void(__cdecl *sceneitem_set_order)(obs_sceneitem_t *, int) = nullptr;
     obs_source_t *(__cdecl *source_create)(const char *, const char *, obs_data_t *, obs_data_t *) = nullptr;
     void(__cdecl *source_release)(obs_source_t *) = nullptr;
+    void(__cdecl *source_inc_active)(obs_source_t *) = nullptr;
+    void(__cdecl *source_dec_active)(obs_source_t *) = nullptr;
     void(__cdecl *set_output_source)(uint32_t, obs_source_t *) = nullptr;
     void *(__cdecl *get_video)() = nullptr;
     void *(__cdecl *get_audio)() = nullptr;
@@ -164,6 +167,7 @@ struct ObsApi {
     void(__cdecl *output_stop)(obs_output_t *) = nullptr;
     bool(__cdecl *output_active)(const obs_output_t *) = nullptr;
     const char *(__cdecl *output_get_last_error)(const obs_output_t *) = nullptr;
+    uint64_t(__cdecl *output_get_total_bytes)(const obs_output_t *) = nullptr;
     void(__cdecl *output_update)(obs_output_t *, obs_data_t *) = nullptr;
     void(__cdecl *output_release)(obs_output_t *) = nullptr;
     proc_handler_t *(__cdecl *output_get_proc_handler)(const obs_output_t *) = nullptr;
@@ -206,6 +210,8 @@ bool load_obs_api(const std::filesystem::path &bin)
            load_fn(obs.sceneitem_set_order, "obs_sceneitem_set_order") &&
            load_fn(obs.source_create, "obs_source_create") &&
            load_fn(obs.source_release, "obs_source_release") &&
+           load_fn(obs.source_inc_active, "obs_source_inc_active") &&
+           load_fn(obs.source_dec_active, "obs_source_dec_active") &&
            load_fn(obs.set_output_source, "obs_set_output_source") &&
            load_fn(obs.get_video, "obs_get_video") &&
            load_fn(obs.get_audio, "obs_get_audio") &&
@@ -221,6 +227,7 @@ bool load_obs_api(const std::filesystem::path &bin)
            load_fn(obs.output_stop, "obs_output_stop") &&
            load_fn(obs.output_active, "obs_output_active") &&
            load_fn(obs.output_get_last_error, "obs_output_get_last_error") &&
+           load_fn(obs.output_get_total_bytes, "obs_output_get_total_bytes") &&
            load_fn(obs.output_update, "obs_output_update") &&
            load_fn(obs.output_release, "obs_output_release") &&
            load_fn(obs.output_get_proc_handler, "obs_output_get_proc_handler") &&
@@ -262,6 +269,10 @@ void cleanup_obs()
         }
         if (obs.output_release) obs.output_release(g_replay);
         g_replay = nullptr;
+    }
+    if (g_scene_active_ref && g_scene_source) {
+        if (obs.source_dec_active) obs.source_dec_active(g_scene_source);
+        g_scene_active_ref = false;
     }
     if (g_video_encoder) {
         if (obs.encoder_release) obs.encoder_release(g_video_encoder);
@@ -367,6 +378,9 @@ bool create_scene()
 
     g_scene_source = obs.scene_get_source(g_scene);
     obs.set_output_source(0, g_scene_source);
+    obs.source_inc_active(g_scene_source);
+    g_scene_active_ref = true;
+    trace("init: scene source forced active");
     obs.source_release(g_capture_source);
     g_capture_source = nullptr;
     if (g_fallback_source) {
@@ -635,7 +649,7 @@ extern "C" __declspec(dllexport) int eve_obs_save_replay(const wchar_t *output_f
 
     Calldata params = {};
     proc_handler_t *handler = obs.output_get_proc_handler(g_replay);
-    trace("save: request");
+    trace("save: request bytes=" + std::to_string(obs.output_get_total_bytes ? obs.output_get_total_bytes(g_replay) : 0));
     if (!handler || !obs.proc_handler_call(handler, "save", &params)) {
         if (!params.fixed && params.stack) obs.bfree(params.stack);
         set_error(L"OBS replay save proc failed.");
@@ -665,6 +679,10 @@ extern "C" __declspec(dllexport) int eve_obs_save_replay(const wchar_t *output_f
 
         if (saved_path.empty()) {
             saved_path = find_newest_replay_file(std::filesystem::temp_directory_path(), save_started_at);
+        }
+
+        if (saved_path.empty() && i > 0 && i % 40 == 0) {
+            trace("save: waiting bytes=" + std::to_string(obs.output_get_total_bytes ? obs.output_get_total_bytes(g_replay) : 0));
         }
     }
 
