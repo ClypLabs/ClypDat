@@ -28,6 +28,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private ExportCodecOption? _selectedExportCodec;
     private string _recorderStatus = "Replay Off";
     private string _activeGame = "No game detected";
+    private GameDetection _activeGameDetection = GameDetection.None;
     private string _selectedVideoName = "No video selected";
     private string _selectedVideoPath = string.Empty;
     private string _selectedThumbnailPath = string.Empty;
@@ -177,6 +178,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get => _activeGame;
         set => SetProperty(ref _activeGame, value);
+    }
+
+    public GameDetection ActiveGameDetection
+    {
+        get => _activeGameDetection;
+        set => SetProperty(ref _activeGameDetection, value);
     }
 
     public bool IsEditorVisible
@@ -748,6 +755,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SelectedMicrophoneDevice?.Id ?? string.Empty,
             SelectedMicrophoneDevice?.Name ?? string.Empty,
             Settings.GameAudioExcludedProcesses.ToArray(),
+            ActiveGameDetection.DisplayName,
+            ActiveGameDetection.ExeName,
+            ActiveGameDetection.WindowTitle,
+            ActiveGameDetection.WindowClass,
             Settings.ReplayBackend);
     }
 

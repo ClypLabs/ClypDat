@@ -30,6 +30,7 @@ public sealed partial class MainWindow : Window
     private GlobalHotkeyService? _globalHotkey;
     private readonly HashSet<string> _capturedHotkeyKeys = new(StringComparer.OrdinalIgnoreCase);
     private bool _replayTransitioning;
+    private bool _replayArmed;
     private bool _clipSaving;
 
     public MainWindow()
@@ -72,7 +73,18 @@ public sealed partial class MainWindow : Window
     private void UpdateDetectedGame()
     {
         if (ViewModel is null) return;
-        ViewModel.ActiveGame = _gameDetector.DetectDisplayName();
+        var detection = _gameDetector.Detect();
+        ViewModel.ActiveGameDetection = detection;
+        ViewModel.ActiveGame = detection.DisplayName;
+
+        if (_replayArmed && detection.IsDetected && _replayBuffer is { IsRecording: false } && !_replayTransitioning)
+        {
+            _ = StartReplayBufferAsync(showErrors: false);
+        }
+        else if (_replayArmed && _replayBuffer is { IsRecording: true } && !detection.IsDetected && !_replayTransitioning)
+        {
+            _ = StopReplayBufferAsync();
+        }
     }
 
     private void InitializeReplayServices()
@@ -95,7 +107,9 @@ public sealed partial class MainWindow : Window
 
         if (ViewModel.Settings.StartReplayOnLaunch)
         {
-            _ = StartReplayBufferAsync(showErrors: false);
+            _replayArmed = true;
+            ViewModel.RecorderStatus = "Replay Armed";
+            UpdateDetectedGame();
         }
     }
 
@@ -157,17 +171,35 @@ public sealed partial class MainWindow : Window
         InitializeReplayServices();
         if (_replayBuffer is null) return;
 
-        if (_replayBuffer.IsRecording)
+        if (_replayArmed || _replayBuffer.IsRecording)
         {
-            if (_replayTransitioning) return;
-            _replayTransitioning = true;
-            await _replayBuffer.StopAsync();
-            ViewModel.IsReplayRecording = false;
-            _replayTransitioning = false;
+            _replayArmed = false;
+            await StopReplayBufferAsync();
         }
         else
         {
-            await StartReplayBufferAsync(showErrors: true);
+            _replayArmed = true;
+            ViewModel.RecorderStatus = "Replay Armed";
+            if (ViewModel.ActiveGameDetection.IsDetected)
+            {
+                await StartReplayBufferAsync(showErrors: true);
+            }
+        }
+    }
+
+    private async Task StopReplayBufferAsync()
+    {
+        if (ViewModel is null || _replayBuffer is null || _replayTransitioning) return;
+        _replayTransitioning = true;
+        try
+        {
+            if (_replayBuffer.IsRecording) await _replayBuffer.StopAsync();
+            ViewModel.IsReplayRecording = false;
+            ViewModel.RecorderStatus = _replayArmed ? "Replay Armed" : "Replay Off";
+        }
+        finally
+        {
+            _replayTransitioning = false;
         }
     }
 
@@ -186,6 +218,11 @@ public sealed partial class MainWindow : Window
         try
         {
             _replayTransitioning = true;
+            if (!ViewModel.ActiveGameDetection.IsDetected)
+            {
+                ViewModel.RecorderStatus = _replayArmed ? "Replay Armed" : "Replay Off";
+                return;
+            }
             await EnsureLibraryFolderAsync();
             ApplyPrimaryCaptureBounds();
             await Task.Run(() => _replayBuffer.StartAsync());
@@ -217,7 +254,7 @@ public sealed partial class MainWindow : Window
         {
             _clipSaving = false;
             if (ViewModel.IsReplayRecording) ViewModel.IsReplayRecording = false;
-            await ShowMessageAsync("Clip failed", "Replay buffer is not running.");
+            await ShowMessageAsync("Clip failed", _replayArmed ? "Replay is armed, but no game is being captured yet." : "Replay buffer is not running.");
             return;
         }
 
@@ -245,7 +282,11 @@ public sealed partial class MainWindow : Window
     {
         Dispatcher.UIThread.Post(() =>
         {
-            if (ViewModel is not null) ViewModel.IsReplayRecording = false;
+            if (ViewModel is not null)
+            {
+                ViewModel.IsReplayRecording = false;
+                ViewModel.RecorderStatus = _replayArmed ? "Replay Armed" : "Replay Off";
+            }
         });
     }
 

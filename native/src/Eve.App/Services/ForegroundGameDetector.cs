@@ -5,6 +5,18 @@ using System.Text.Json;
 
 namespace Eve.App.Services;
 
+public sealed record GameDetection(
+    string DisplayName,
+    string ExeName,
+    string WindowTitle,
+    string WindowClass,
+    nint WindowHandle,
+    int ProcessId,
+    bool IsDetected)
+{
+    public static GameDetection None { get; } = new("No game detected", string.Empty, string.Empty, string.Empty, 0, 0, false);
+}
+
 public sealed class ForegroundGameDetector
 {
     private static readonly HashSet<string> IgnoredExecutables = new(StringComparer.OrdinalIgnoreCase)
@@ -33,8 +45,11 @@ public sealed class ForegroundGameDetector
 
     private readonly Dictionary<string, string> _catalog = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["FortniteClient-Win64-Shipping.exe"] = "Fortnite"
+        ["FortniteClient-Win64-Shipping.exe"] = "Fortnite",
+        ["cs2.exe"] = "Counter-Strike 2"
     };
+
+    private GameDetection _lastGame = GameDetection.None;
 
     public ForegroundGameDetector()
     {
@@ -42,30 +57,79 @@ public sealed class ForegroundGameDetector
         LoadCatalog(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "EVE", "game-catalog.json"));
     }
 
-    public string DetectDisplayName()
+    public GameDetection Detect()
+    {
+        var foreground = DetectForeground();
+        if (foreground.IsDetected)
+        {
+            _lastGame = foreground;
+            return foreground;
+        }
+
+        if (_lastGame.IsDetected && IsStillUsable(_lastGame)) return _lastGame;
+
+        var runningGame = DetectRunningGame();
+        _lastGame = runningGame;
+        return runningGame;
+    }
+
+    public string DetectDisplayName() => Detect().DisplayName;
+
+    private GameDetection DetectForeground()
     {
         var handle = GetForegroundWindow();
-        if (handle == IntPtr.Zero) return "No game detected";
+        return handle == IntPtr.Zero ? GameDetection.None : BuildDetection(handle);
+    }
+
+    private GameDetection DetectRunningGame()
+    {
+        var candidates = new List<GameDetection>();
+        EnumWindows((handle, _) =>
+        {
+            var detection = BuildDetection(handle);
+            if (detection.IsDetected) candidates.Add(detection);
+            return true;
+        }, IntPtr.Zero);
+
+        return candidates
+            .OrderByDescending(candidate => _catalog.ContainsKey(candidate.ExeName))
+            .ThenByDescending(candidate => WindowArea(candidate.WindowHandle))
+            .FirstOrDefault() ?? GameDetection.None;
+    }
+
+    private GameDetection BuildDetection(IntPtr handle)
+    {
+        if (handle == IntPtr.Zero || !IsWindowVisible(handle) || IsIconic(handle)) return GameDetection.None;
         GetWindowThreadProcessId(handle, out var processId);
-        if (processId == 0 || processId == Environment.ProcessId) return "No game detected";
+        if (processId == 0 || processId == Environment.ProcessId) return GameDetection.None;
 
         try
         {
             using var process = Process.GetProcessById((int)processId);
             var fileName = process.MainModule?.FileName;
-            if (string.IsNullOrWhiteSpace(fileName)) return "No game detected";
+            if (string.IsNullOrWhiteSpace(fileName)) return GameDetection.None;
             var exeName = Path.GetFileName(fileName);
-            if (IgnoredExecutables.Contains(exeName)) return "No game detected";
+            if (IgnoredExecutables.Contains(exeName)) return GameDetection.None;
 
             var title = GetWindowTitle(handle);
-            if (string.IsNullOrWhiteSpace(title) || IsTinyOrToolWindow(handle)) return "No game detected";
-            if (_catalog.TryGetValue(exeName, out var displayName) && !string.IsNullOrWhiteSpace(displayName)) return displayName;
-            return CleanExecutableName(exeName);
+            if (string.IsNullOrWhiteSpace(title) || IsTinyOrToolWindow(handle)) return GameDetection.None;
+            var className = GetWindowClass(handle);
+            var displayName = _catalog.TryGetValue(exeName, out var catalogName) && !string.IsNullOrWhiteSpace(catalogName)
+                ? catalogName
+                : CleanExecutableName(exeName);
+            return new GameDetection(displayName, exeName, title, className, handle, (int)processId, true);
         }
         catch
         {
-            return "No game detected";
+            return GameDetection.None;
         }
+    }
+
+    private static bool IsStillUsable(GameDetection detection)
+    {
+        if (!detection.IsDetected || detection.WindowHandle == 0) return false;
+        var handle = (IntPtr)detection.WindowHandle;
+        return IsWindow(handle) && IsWindowVisible(handle) && !IsIconic(handle);
     }
 
     private void LoadCatalog(string path)
@@ -73,11 +137,20 @@ public sealed class ForegroundGameDetector
         try
         {
             if (!File.Exists(path)) return;
-            var entries = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(path));
-            if (entries is null) return;
-            foreach (var (exe, name) in entries)
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            foreach (var property in document.RootElement.EnumerateObject())
             {
-                if (!string.IsNullOrWhiteSpace(exe) && !string.IsNullOrWhiteSpace(name)) _catalog[exe] = name;
+                if (property.Value.ValueKind == JsonValueKind.String)
+                {
+                    var name = property.Value.GetString();
+                    if (!string.IsNullOrWhiteSpace(name)) _catalog[property.Name] = name;
+                }
+                else if (property.Value.ValueKind == JsonValueKind.Object &&
+                         property.Value.TryGetProperty("name", out var nameElement))
+                {
+                    var name = nameElement.GetString();
+                    if (!string.IsNullOrWhiteSpace(name)) _catalog[property.Name] = name;
+                }
             }
         }
         catch (Exception error)
@@ -97,6 +170,13 @@ public sealed class ForegroundGameDetector
         return string.IsNullOrWhiteSpace(name) ? exeName : name.Trim('-', '_', ' ');
     }
 
+    private static long WindowArea(nint handle)
+    {
+        return GetWindowRect((IntPtr)handle, out var rect)
+            ? Math.Max(0, rect.Right - rect.Left) * Math.Max(0, rect.Bottom - rect.Top)
+            : 0;
+    }
+
     private static bool IsTinyOrToolWindow(IntPtr handle)
     {
         return !GetWindowRect(handle, out var rect) || rect.Right - rect.Left < 320 || rect.Bottom - rect.Top < 240;
@@ -109,6 +189,14 @@ public sealed class ForegroundGameDetector
         var builder = new StringBuilder(length + 1);
         return GetWindowText(handle, builder, builder.Capacity) > 0 ? builder.ToString() : string.Empty;
     }
+
+    private static string GetWindowClass(IntPtr handle)
+    {
+        var builder = new StringBuilder(256);
+        return GetClassName(handle, builder, builder.Capacity) > 0 ? builder.ToString() : string.Empty;
+    }
+
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
@@ -123,7 +211,22 @@ public sealed class ForegroundGameDetector
     private static extern int GetWindowTextLength(IntPtr hWnd);
 
     [DllImport("user32.dll")]
+    private static extern int GetClassName(IntPtr hWnd, StringBuilder className, int maxCount);
+
+    [DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hWnd, out Rect rect);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
     [StructLayout(LayoutKind.Sequential)]
     private readonly struct Rect

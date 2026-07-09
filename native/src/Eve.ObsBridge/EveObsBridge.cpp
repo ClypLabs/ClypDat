@@ -82,6 +82,9 @@ bool g_scene_active_ref = false;
 bool g_scene_showing_ref = false;
 std::string g_chat_process_name;
 std::string g_microphone_device_id;
+std::string g_game_exe_name;
+std::string g_game_window_title;
+std::string g_game_window_class;
 
 std::filesystem::path app_data_folder();
 
@@ -359,9 +362,27 @@ std::string foreground_executable_name()
     return exe;
 }
 
-bool use_exact_game_capture(const std::string &exe)
+std::string encode_window_part(std::string value)
 {
-    return _stricmp(exe.c_str(), "cs2.exe") == 0;
+    size_t pos = 0;
+    while ((pos = value.find("#", pos)) != std::string::npos) {
+        value.replace(pos, 1, "#22");
+        pos += 3;
+    }
+
+    pos = 0;
+    while ((pos = value.find(":", pos)) != std::string::npos) {
+        value.replace(pos, 1, "#3A");
+        pos += 3;
+    }
+
+    return value;
+}
+
+std::string game_window_match()
+{
+    if (g_game_exe_name.empty()) return {};
+    return encode_window_part(g_game_window_title) + ":" + encode_window_part(g_game_window_class) + ":" + encode_window_part(g_game_exe_name);
 }
 
 bool ensure_process_helper(const std::filesystem::path &root, const wchar_t *file_name)
@@ -414,28 +435,33 @@ bool create_scene()
 {
     auto [fallback_width, fallback_height] = output_size();
     obs_data_t *fallback_settings = obs.data_create();
-    obs.data_set_int(fallback_settings, "color", 0xFF000000);
-    obs.data_set_int(fallback_settings, "width", fallback_width);
-    obs.data_set_int(fallback_settings, "height", fallback_height);
-    g_fallback_source = obs.source_create("color_source", "EVE Idle Frame", fallback_settings, nullptr);
+    obs.data_set_bool(fallback_settings, "capture_cursor", true);
+    obs.data_set_bool(fallback_settings, "force_sdr", true);
+    obs.data_set_int(fallback_settings, "method", 0);
+    g_fallback_source = obs.source_create("monitor_capture", "EVE Monitor Fallback", fallback_settings, nullptr);
     obs.data_release(fallback_settings);
     if (!g_fallback_source) {
-        trace("init: color_source fallback unavailable");
+        obs_data_t *black_settings = obs.data_create();
+        obs.data_set_int(black_settings, "color", 0xFF000000);
+        obs.data_set_int(black_settings, "width", fallback_width);
+        obs.data_set_int(black_settings, "height", fallback_height);
+        g_fallback_source = obs.source_create("color_source", "EVE Idle Frame", black_settings, nullptr);
+        obs.data_release(black_settings);
+        trace("init: monitor fallback unavailable, using black idle");
     } else {
-        trace("init: capture_source color_source idle fallback");
+        trace("init: capture_source monitor fallback");
     }
 
     obs_data_t *settings = obs.data_create();
-    const std::string foreground_exe = foreground_executable_name();
-    if (use_exact_game_capture(foreground_exe)) {
-        const std::string window_match = "::" + foreground_exe;
+    const std::string window_match = game_window_match();
+    if (!window_match.empty()) {
         obs.data_set_string(settings, "capture_mode", "window");
         obs.data_set_string(settings, "window", window_match.c_str());
         obs.data_set_int(settings, "priority", 2);
-        trace("init: capture_mode exact " + foreground_exe);
+        trace("init: capture_mode exact " + g_game_exe_name);
     } else {
         obs.data_set_string(settings, "capture_mode", "any_fullscreen");
-        trace("init: capture_mode any_fullscreen foreground=" + foreground_exe);
+        trace("init: capture_mode any_fullscreen");
     }
     obs.data_set_bool(settings, "capture_cursor", true);
     obs.data_set_bool(settings, "anti_cheat_hook", true);
@@ -652,7 +678,7 @@ std::wstring find_newest_replay_file(const std::filesystem::path &folder, const 
 
 } // namespace
 
-extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder, int max_height, int frame_rate, int duration_seconds, const wchar_t *chat_process_name, const wchar_t *microphone_device_id)
+extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder, int max_height, int frame_rate, int duration_seconds, const wchar_t *chat_process_name, const wchar_t *microphone_device_id, const wchar_t *game_exe_name, const wchar_t *game_window_title, const wchar_t *game_window_class)
 {
     std::lock_guard lock(g_lock);
     trace("init: enter");
@@ -664,6 +690,9 @@ extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder,
     g_duration_seconds = std::clamp(duration_seconds, 5, 1200);
     g_chat_process_name = narrow(chat_process_name ? chat_process_name : L"");
     g_microphone_device_id = narrow(microphone_device_id ? microphone_device_id : L"");
+    g_game_exe_name = narrow(game_exe_name ? game_exe_name : L"");
+    g_game_window_title = narrow(game_window_title ? game_window_title : L"");
+    g_game_window_class = narrow(game_window_class ? game_window_class : L"");
 
     const std::filesystem::path root(g_runtime);
     const auto bin = root / L"bin" / L"64bit";

@@ -743,6 +743,10 @@ public sealed record ReplayBufferConfig(
     string MicrophoneDeviceId,
     string MicrophoneDeviceName,
     IReadOnlyList<string> GameAudioExcludedProcesses,
+    string GameDisplayName,
+    string GameExecutableName,
+    string GameWindowTitle,
+    string GameWindowClass,
     string Backend = "Auto");
 
 internal sealed class AudioCaptureSession : IDisposable

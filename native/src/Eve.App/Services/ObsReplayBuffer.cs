@@ -31,10 +31,19 @@ public sealed class ObsReplayBuffer : IReplayBuffer
         var config = _configProvider();
         Duration = TimeSpan.FromSeconds(Math.Clamp(config.DurationSeconds, 30, 1200));
         using var process = Process.GetCurrentProcess();
-        AppLog.Info($"OBS replay backend starting: pid={Environment.ProcessId}, process={process.ProcessName}, runtime={runtime.RootFolder}, maxHeight={config.MaxHeight}, fps={config.FrameRate}, duration={Duration.TotalSeconds:0}s, chat={config.ChatAudioProcessName}, mic={config.MicrophoneDeviceName}.");
+        AppLog.Info($"OBS replay backend starting: pid={Environment.ProcessId}, process={process.ProcessName}, runtime={runtime.RootFolder}, maxHeight={config.MaxHeight}, fps={config.FrameRate}, duration={Duration.TotalSeconds:0}s, game={config.GameExecutableName}, chat={config.ChatAudioProcessName}, mic={config.MicrophoneDeviceName}.");
         try
         {
-            _bridge.Initialize(runtime.RootFolder, config.MaxHeight, config.FrameRate, (int)Duration.TotalSeconds, config.ChatAudioProcessName, config.MicrophoneDeviceId);
+            _bridge.Initialize(
+                runtime.RootFolder,
+                config.MaxHeight,
+                config.FrameRate,
+                (int)Duration.TotalSeconds,
+                config.ChatAudioProcessName,
+                config.MicrophoneDeviceId,
+                config.GameExecutableName,
+                config.GameWindowTitle,
+                config.GameWindowClass);
             _initialized = true;
             _bridge.StartReplayCapture();
             IsRecording = true;
