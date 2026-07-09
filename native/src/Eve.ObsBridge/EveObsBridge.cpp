@@ -77,6 +77,7 @@ int g_duration_seconds = 60;
 int g_max_height = 1080;
 int g_frame_rate = 60;
 bool g_scene_active_ref = false;
+bool g_scene_showing_ref = false;
 
 std::filesystem::path app_data_folder();
 
@@ -150,6 +151,8 @@ struct ObsApi {
     void(__cdecl *sceneitem_set_order)(obs_sceneitem_t *, int) = nullptr;
     obs_source_t *(__cdecl *source_create)(const char *, const char *, obs_data_t *, obs_data_t *) = nullptr;
     void(__cdecl *source_release)(obs_source_t *) = nullptr;
+    void(__cdecl *source_inc_showing)(obs_source_t *) = nullptr;
+    void(__cdecl *source_dec_showing)(obs_source_t *) = nullptr;
     void(__cdecl *source_inc_active)(obs_source_t *) = nullptr;
     void(__cdecl *source_dec_active)(obs_source_t *) = nullptr;
     void(__cdecl *set_output_source)(uint32_t, obs_source_t *) = nullptr;
@@ -210,6 +213,8 @@ bool load_obs_api(const std::filesystem::path &bin)
            load_fn(obs.sceneitem_set_order, "obs_sceneitem_set_order") &&
            load_fn(obs.source_create, "obs_source_create") &&
            load_fn(obs.source_release, "obs_source_release") &&
+           load_fn(obs.source_inc_showing, "obs_source_inc_showing") &&
+           load_fn(obs.source_dec_showing, "obs_source_dec_showing") &&
            load_fn(obs.source_inc_active, "obs_source_inc_active") &&
            load_fn(obs.source_dec_active, "obs_source_dec_active") &&
            load_fn(obs.set_output_source, "obs_set_output_source") &&
@@ -273,6 +278,10 @@ void cleanup_obs()
     if (g_scene_active_ref && g_scene_source) {
         if (obs.source_dec_active) obs.source_dec_active(g_scene_source);
         g_scene_active_ref = false;
+    }
+    if (g_scene_showing_ref && g_scene_source) {
+        if (obs.source_dec_showing) obs.source_dec_showing(g_scene_source);
+        g_scene_showing_ref = false;
     }
     if (g_video_encoder) {
         if (obs.encoder_release) obs.encoder_release(g_video_encoder);
@@ -378,9 +387,11 @@ bool create_scene()
 
     g_scene_source = obs.scene_get_source(g_scene);
     obs.set_output_source(0, g_scene_source);
+    obs.source_inc_showing(g_scene_source);
+    g_scene_showing_ref = true;
     obs.source_inc_active(g_scene_source);
     g_scene_active_ref = true;
-    trace("init: scene source forced active");
+    trace("init: scene source forced showing+active");
     obs.source_release(g_capture_source);
     g_capture_source = nullptr;
     if (g_fallback_source) {
