@@ -557,6 +557,7 @@ extern "C" __declspec(dllexport) int eve_obs_save_replay(const wchar_t *output_f
     obs.data_set_string(settings, "directory", narrow(folder.wstring()).c_str());
     obs.output_update(g_replay, settings);
     obs.data_release(settings);
+    g_last_replay.clear();
 
     Calldata params = {};
     proc_handler_t *handler = obs.output_get_proc_handler(g_replay);
@@ -566,12 +567,23 @@ extern "C" __declspec(dllexport) int eve_obs_save_replay(const wchar_t *output_f
         return -2;
     }
 
-    const char *last_path = nullptr;
     std::wstring saved_path;
-    if (obs.calldata_get_string(&params, "path", &last_path) && last_path && *last_path) {
-        saved_path = widen(last_path);
-    }
     if (!params.fixed && params.stack) obs.bfree(params.stack);
+
+    for (int i = 0; i < 200 && saved_path.empty(); i++) {
+        Sleep(25);
+        Calldata last = {};
+        if (obs.proc_handler_call(handler, "get_last_replay", &last)) {
+            const char *last_path = nullptr;
+            if (obs.calldata_get_string(&last, "path", &last_path) && last_path && *last_path) {
+                auto candidate = widen(last_path);
+                if (std::filesystem::exists(candidate) && std::filesystem::file_size(candidate) > 0) {
+                    saved_path = candidate;
+                }
+            }
+        }
+        if (!last.fixed && last.stack) obs.bfree(last.stack);
+    }
 
     if (saved_path.empty()) {
         set_error(L"OBS replay save returned no path.");

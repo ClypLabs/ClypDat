@@ -16,6 +16,8 @@ namespace Eve.App.Views;
 public sealed partial class MainWindow : Window
 {
     private readonly DispatcherTimer _playbackTimer;
+    private readonly DispatcherTimer _gameDetectionTimer;
+    private readonly ForegroundGameDetector _gameDetector = new();
     private PlaybackSession? _playback;
     private CancellationTokenSource? _playbackStartCts;
     private CancellationTokenSource? _editorSeekCts;
@@ -33,11 +35,17 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        _playbackTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        _playbackTimer.Tick += (_, _) => SyncPlaybackPosition();
+        _gameDetectionTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _gameDetectionTimer.Tick += (_, _) => UpdateDetectedGame();
         Opened += (_, _) =>
         {
             ApplySavedWindowBounds();
             ViewModel?.UpdateCardLayout(Bounds.Width);
             InitializeReplayServices();
+            UpdateDetectedGame();
+            _gameDetectionTimer.Start();
         };
         KeyUp += MainWindow_OnKeyUp;
         KeyDown += MainWindow_OnKeyDown;
@@ -49,6 +57,7 @@ public sealed partial class MainWindow : Window
         Closed += (_, _) =>
         {
             _globalHotkey?.Dispose();
+            _gameDetectionTimer.Stop();
             if (_replayBuffer is not null) _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
             _replayBuffer?.Dispose();
             _playback?.Dispose();
@@ -56,11 +65,15 @@ public sealed partial class MainWindow : Window
         };
         AddHandler(PointerPressedEvent, VolumeSlider_OnPointerPressedAny, RoutingStrategies.Tunnel, true);
         AddHandler(PointerReleasedEvent, VolumeSlider_OnPointerReleasedAny, RoutingStrategies.Tunnel, true);
-        _playbackTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
-        _playbackTimer.Tick += (_, _) => SyncPlaybackPosition();
     }
 
     private MainWindowViewModel? ViewModel => DataContext as MainWindowViewModel;
+
+    private void UpdateDetectedGame()
+    {
+        if (ViewModel is null) return;
+        ViewModel.ActiveGame = _gameDetector.DetectDisplayName();
+    }
 
     private void InitializeReplayServices()
     {
