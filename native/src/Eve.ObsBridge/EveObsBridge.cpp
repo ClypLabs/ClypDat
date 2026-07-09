@@ -392,7 +392,7 @@ std::string game_window_match()
     return encode_window_part(g_game_window_title) + ":" + encode_window_part(g_game_window_class) + ":" + encode_window_part(g_game_exe_name);
 }
 
-bool use_display_capture_video()
+bool use_window_capture_video()
 {
     return _stricmp(g_game_exe_name.c_str(), "cs2.exe") == 0;
 }
@@ -446,15 +446,19 @@ std::pair<int, int> output_size()
 bool create_scene()
 {
     auto [fallback_width, fallback_height] = output_size();
-    const bool display_capture_video = use_display_capture_video();
-    if (display_capture_video) {
+    const bool window_capture_video = use_window_capture_video();
+    if (window_capture_video) {
         obs_data_t *settings = obs.data_create();
+        const std::string window_match = game_window_match();
+        obs.data_set_string(settings, "window", window_match.c_str());
+        obs.data_set_int(settings, "priority", 2);
         obs.data_set_bool(settings, "capture_cursor", false);
         obs.data_set_bool(settings, "force_sdr", true);
+        obs.data_set_bool(settings, "client_area", true);
         obs.data_set_int(settings, "method", 0);
-        g_capture_source = obs.source_create("monitor_capture", "EVE Display Capture", settings, nullptr);
+        g_capture_source = obs.source_create("window_capture", "EVE Window Capture", settings, nullptr);
         obs.data_release(settings);
-        trace("init: capture_source monitor_capture for " + g_game_exe_name);
+        trace("init: capture_source window_capture for " + g_game_exe_name);
     } else {
         obs_data_t *settings = obs.data_create();
         const std::string window_match = game_window_match();
@@ -494,10 +498,10 @@ bool create_scene()
         obs.data_release(settings);
     }
     if (!g_capture_source) {
-        set_error(display_capture_video ? L"OBS monitor_capture source failed." : L"OBS game_capture source failed.");
+        set_error(window_capture_video ? L"OBS window_capture source failed." : L"OBS game_capture source failed.");
         return false;
     }
-    if (!display_capture_video) {
+    if (!window_capture_video) {
         trace("init: capture_source game_capture");
         obs.source_set_audio_mixers(g_capture_source, 1u);
     }
@@ -550,7 +554,7 @@ std::string ensure_exe_name(const std::string &process_name)
 
 bool create_audio_sources()
 {
-    if (use_display_capture_video() && !g_game_exe_name.empty()) {
+    if (use_window_capture_video() && !g_game_exe_name.empty()) {
         obs_data_t *settings = obs.data_create();
         obs.data_set_string(settings, "window", ("::" + g_game_exe_name).c_str());
         obs.data_set_int(settings, "priority", 2);
