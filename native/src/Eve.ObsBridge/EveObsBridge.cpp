@@ -336,6 +336,34 @@ std::filesystem::path process_sibling(const wchar_t *file_name)
     return std::filesystem::path(path).parent_path() / file_name;
 }
 
+std::string foreground_executable_name()
+{
+    HWND window = GetForegroundWindow();
+    if (!window) return {};
+
+    DWORD process_id = 0;
+    GetWindowThreadProcessId(window, &process_id);
+    if (!process_id || process_id == GetCurrentProcessId()) return {};
+
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process_id);
+    if (!process) return {};
+
+    wchar_t path[MAX_PATH] = {};
+    DWORD size = MAX_PATH;
+    std::string exe;
+    if (QueryFullProcessImageNameW(process, 0, path, &size)) {
+        exe = narrow(std::filesystem::path(path).filename().wstring());
+    }
+
+    CloseHandle(process);
+    return exe;
+}
+
+bool use_exact_game_capture(const std::string &exe)
+{
+    return _stricmp(exe.c_str(), "cs2.exe") == 0;
+}
+
 bool ensure_process_helper(const std::filesystem::path &root, const wchar_t *file_name)
 {
     const auto source = root / L"bin" / L"64bit" / file_name;
@@ -398,7 +426,17 @@ bool create_scene()
     }
 
     obs_data_t *settings = obs.data_create();
-    obs.data_set_string(settings, "capture_mode", "any_fullscreen");
+    const std::string foreground_exe = foreground_executable_name();
+    if (use_exact_game_capture(foreground_exe)) {
+        const std::string window_match = "::" + foreground_exe;
+        obs.data_set_string(settings, "capture_mode", "window");
+        obs.data_set_string(settings, "window", window_match.c_str());
+        obs.data_set_int(settings, "priority", 2);
+        trace("init: capture_mode exact " + foreground_exe);
+    } else {
+        obs.data_set_string(settings, "capture_mode", "any_fullscreen");
+        trace("init: capture_mode any_fullscreen foreground=" + foreground_exe);
+    }
     obs.data_set_bool(settings, "capture_cursor", true);
     obs.data_set_bool(settings, "anti_cheat_hook", true);
     obs.data_set_bool(settings, "capture_overlays", false);
@@ -411,7 +449,7 @@ bool create_scene()
         set_error(L"OBS game_capture source failed.");
         return false;
     }
-    trace("init: capture_source game_capture any_fullscreen");
+    trace("init: capture_source game_capture");
     obs.source_set_audio_mixers(g_capture_source, 1u);
 
     g_scene = obs.scene_create("EVE Replay Scene");
