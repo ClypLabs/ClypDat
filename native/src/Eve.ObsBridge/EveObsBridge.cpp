@@ -434,24 +434,6 @@ std::pair<int, int> output_size()
 bool create_scene()
 {
     auto [fallback_width, fallback_height] = output_size();
-    obs_data_t *fallback_settings = obs.data_create();
-    obs.data_set_bool(fallback_settings, "capture_cursor", true);
-    obs.data_set_bool(fallback_settings, "force_sdr", true);
-    obs.data_set_int(fallback_settings, "method", 0);
-    g_fallback_source = obs.source_create("monitor_capture", "EVE Monitor Fallback", fallback_settings, nullptr);
-    obs.data_release(fallback_settings);
-    if (!g_fallback_source) {
-        obs_data_t *black_settings = obs.data_create();
-        obs.data_set_int(black_settings, "color", 0xFF000000);
-        obs.data_set_int(black_settings, "width", fallback_width);
-        obs.data_set_int(black_settings, "height", fallback_height);
-        g_fallback_source = obs.source_create("color_source", "EVE Idle Frame", black_settings, nullptr);
-        obs.data_release(black_settings);
-        trace("init: monitor fallback unavailable, using black idle");
-    } else {
-        trace("init: capture_source monitor fallback");
-    }
-
     obs_data_t *settings = obs.data_create();
     const std::string window_match = game_window_match();
     if (!window_match.empty()) {
@@ -462,13 +444,30 @@ bool create_scene()
     } else {
         obs.data_set_string(settings, "capture_mode", "any_fullscreen");
         trace("init: capture_mode any_fullscreen");
+        obs_data_t *fallback_settings = obs.data_create();
+        obs.data_set_bool(fallback_settings, "capture_cursor", false);
+        obs.data_set_bool(fallback_settings, "force_sdr", true);
+        obs.data_set_int(fallback_settings, "method", 0);
+        g_fallback_source = obs.source_create("monitor_capture", "EVE Monitor Fallback", fallback_settings, nullptr);
+        obs.data_release(fallback_settings);
+        if (!g_fallback_source) {
+            obs_data_t *black_settings = obs.data_create();
+            obs.data_set_int(black_settings, "color", 0xFF000000);
+            obs.data_set_int(black_settings, "width", fallback_width);
+            obs.data_set_int(black_settings, "height", fallback_height);
+            g_fallback_source = obs.source_create("color_source", "EVE Idle Frame", black_settings, nullptr);
+            obs.data_release(black_settings);
+            trace("init: monitor fallback unavailable, using black idle");
+        } else {
+            trace("init: capture_source monitor fallback");
+        }
     }
-    obs.data_set_bool(settings, "capture_cursor", true);
+    obs.data_set_bool(settings, "capture_cursor", false);
     obs.data_set_bool(settings, "anti_cheat_hook", true);
     obs.data_set_bool(settings, "capture_overlays", false);
     obs.data_set_bool(settings, "capture_audio", true);
-    obs.data_set_bool(settings, "limit_framerate", false);
-    obs.data_set_int(settings, "hook_rate", 1);
+    obs.data_set_bool(settings, "limit_framerate", true);
+    obs.data_set_int(settings, "hook_rate", 2);
     g_capture_source = obs.source_create("game_capture", "Auto Game Capture", settings, nullptr);
     obs.data_release(settings);
     if (!g_capture_source) {
@@ -581,14 +580,14 @@ bool create_replay_output()
     obs_data_t *v = obs.data_create();
     obs.data_set_string(v, "rate_control", "CQP");
     obs.data_set_int(v, "cqp", 20);
-    obs.data_set_string(v, "preset2", "p5");
-    obs.data_set_string(v, "multipass", "qres");
-    obs.data_set_string(v, "tune", "hq");
+    obs.data_set_string(v, "preset2", "p3");
+    obs.data_set_string(v, "multipass", "disabled");
+    obs.data_set_string(v, "tune", "ll");
     obs.data_set_string(v, "profile", "high");
     obs.data_set_int(v, "keyint_sec", 2);
-    obs.data_set_bool(v, "psycho_aq", true);
+    obs.data_set_bool(v, "psycho_aq", false);
     obs.data_set_int(v, "gpu", 0);
-    obs.data_set_int(v, "bf", 2);
+    obs.data_set_int(v, "bf", 0);
     g_video_encoder = obs.video_encoder_create("jim_nvenc", "EVE NVENC H.264", v, nullptr);
     obs.data_release(v);
     if (!g_video_encoder) {
