@@ -69,6 +69,7 @@ obs_source_t *g_scene_source = nullptr;
 obs_source_t *g_capture_source = nullptr;
 obs_scene_t *g_scene = nullptr;
 obs_sceneitem_t *g_scene_item = nullptr;
+obs_source_t *g_fallback_source = nullptr;
 obs_output_t *g_replay = nullptr;
 obs_encoder_t *g_video_encoder = nullptr;
 obs_encoder_t *g_audio_encoder = nullptr;
@@ -145,6 +146,7 @@ struct ObsApi {
     obs_scene_t *(__cdecl *scene_create)(const char *) = nullptr;
     obs_source_t *(__cdecl *scene_get_source)(obs_scene_t *) = nullptr;
     obs_sceneitem_t *(__cdecl *scene_add)(obs_scene_t *, obs_source_t *) = nullptr;
+    void(__cdecl *sceneitem_set_order)(obs_sceneitem_t *, int) = nullptr;
     obs_source_t *(__cdecl *source_create)(const char *, const char *, obs_data_t *, obs_data_t *) = nullptr;
     void(__cdecl *source_release)(obs_source_t *) = nullptr;
     void(__cdecl *set_output_source)(uint32_t, obs_source_t *) = nullptr;
@@ -201,6 +203,7 @@ bool load_obs_api(const std::filesystem::path &bin)
            load_fn(obs.scene_create, "obs_scene_create") &&
            load_fn(obs.scene_get_source, "obs_scene_get_source") &&
            load_fn(obs.scene_add, "obs_scene_add") &&
+           load_fn(obs.sceneitem_set_order, "obs_sceneitem_set_order") &&
            load_fn(obs.source_create, "obs_source_create") &&
            load_fn(obs.source_release, "obs_source_release") &&
            load_fn(obs.set_output_source, "obs_set_output_source") &&
@@ -272,6 +275,10 @@ void cleanup_obs()
         if (obs.source_release) obs.source_release(g_capture_source);
         g_capture_source = nullptr;
     }
+    if (g_fallback_source) {
+        if (obs.source_release) obs.source_release(g_fallback_source);
+        g_fallback_source = nullptr;
+    }
     if (g_scene_source) {
         if (obs.set_output_source) obs.set_output_source(0, nullptr);
         if (obs.source_release) obs.source_release(g_scene_source);
@@ -308,6 +315,18 @@ std::pair<int, int> output_size()
 
 bool create_scene()
 {
+    obs_data_t *fallback_settings = obs.data_create();
+    obs.data_set_int(fallback_settings, "monitor", 0);
+    obs.data_set_bool(fallback_settings, "capture_cursor", true);
+    obs.data_set_bool(fallback_settings, "compatibility", false);
+    g_fallback_source = obs.source_create("monitor_capture", "Primary Display Fallback", fallback_settings, nullptr);
+    obs.data_release(fallback_settings);
+    if (!g_fallback_source) {
+        trace("init: monitor_capture fallback unavailable");
+    } else {
+        trace("init: capture_source monitor_capture primary fallback");
+    }
+
     obs_data_t *settings = obs.data_create();
     obs.data_set_string(settings, "capture_mode", "any_fullscreen");
     obs.data_set_bool(settings, "capture_cursor", true);
@@ -329,16 +348,30 @@ bool create_scene()
         return false;
     }
 
+    if (g_fallback_source) {
+        obs_sceneitem_t *fallback_item = obs.scene_add(g_scene, g_fallback_source);
+        if (!fallback_item) {
+            set_error(L"OBS scene add fallback failed.");
+            return false;
+        }
+        obs.sceneitem_set_order(fallback_item, 3);
+    }
+
     g_scene_item = obs.scene_add(g_scene, g_capture_source);
     if (!g_scene_item) {
         set_error(L"OBS scene add failed.");
         return false;
     }
+    obs.sceneitem_set_order(g_scene_item, 2);
 
     g_scene_source = obs.scene_get_source(g_scene);
     obs.set_output_source(0, g_scene_source);
     obs.source_release(g_capture_source);
     g_capture_source = nullptr;
+    if (g_fallback_source) {
+        obs.source_release(g_fallback_source);
+        g_fallback_source = nullptr;
+    }
     return true;
 }
 
