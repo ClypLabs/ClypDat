@@ -1,6 +1,6 @@
-# EVE
+# EVE - Easy Video Editor
 
-EVE means Easy Video Editor. This MVP opens MKV files, detects audio tracks, lets you trim by time, set volume per audio track, and export to MP4 with ffmpeg.
+This MVP opens MKV files, detects audio tracks, lets you trim by time, set volume per audio track, and export to MP4!
 
 ## Native Migration
 
