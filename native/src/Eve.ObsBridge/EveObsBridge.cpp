@@ -372,6 +372,8 @@ bool create_replay_output()
 
     obs_data_t *o = obs.data_create();
     obs.data_set_int(o, "max_time_sec", g_duration_seconds);
+    obs.data_set_string(o, "format", "Replay %CCYY-%MM-%DD %hh-%mm-%ss");
+    obs.data_set_string(o, "extension", "mp4");
     obs.data_set_string(o, "format_name", "mp4");
     obs.data_set_string(o, "directory", narrow(std::filesystem::temp_directory_path().wstring()).c_str());
     obs.data_set_bool(o, "allow_spaces", true);
@@ -408,6 +410,38 @@ bool copy_string(wchar_t *destination, int length, const std::wstring &value)
     if (!destination || length <= 0) return false;
     wcsncpy_s(destination, static_cast<size_t>(length), value.c_str(), _TRUNCATE);
     return true;
+}
+
+bool usable_replay_file(const std::filesystem::path &path)
+{
+    std::error_code error;
+    return std::filesystem::exists(path, error) &&
+           std::filesystem::is_regular_file(path, error) &&
+           std::filesystem::file_size(path, error) > 0;
+}
+
+std::wstring find_newest_replay_file(const std::filesystem::path &folder, const std::filesystem::file_time_type &after)
+{
+    std::error_code error;
+    if (!std::filesystem::exists(folder, error)) return {};
+
+    std::filesystem::path newest;
+    std::filesystem::file_time_type newest_time = after;
+    for (const auto &entry : std::filesystem::directory_iterator(folder, error)) {
+        if (error) break;
+        if (!entry.is_regular_file(error)) continue;
+        auto path = entry.path();
+        auto extension = path.extension().wstring();
+        std::transform(extension.begin(), extension.end(), extension.begin(), ::towlower);
+        if (extension != L".mp4" && extension != L".mkv") continue;
+        if (!usable_replay_file(path)) continue;
+        auto written = entry.last_write_time(error);
+        if (error || written < after || written < newest_time) continue;
+        newest = path;
+        newest_time = written;
+    }
+
+    return newest.empty() ? std::wstring{} : newest.wstring();
 }
 
 } // namespace
@@ -553,14 +587,20 @@ extern "C" __declspec(dllexport) int eve_obs_save_replay(const wchar_t *output_f
 
     std::filesystem::path folder = output_folder ? output_folder : L"";
     std::filesystem::create_directories(folder);
+    const auto save_started_at = std::filesystem::file_time_type::clock::now();
     obs_data_t *settings = obs.data_create();
     obs.data_set_string(settings, "directory", narrow(folder.wstring()).c_str());
+    obs.data_set_string(settings, "format", "Replay %CCYY-%MM-%DD %hh-%mm-%ss");
+    obs.data_set_string(settings, "extension", "mp4");
+    obs.data_set_string(settings, "format_name", "mp4");
+    obs.data_set_bool(settings, "allow_spaces", true);
     obs.output_update(g_replay, settings);
     obs.data_release(settings);
     g_last_replay.clear();
 
     Calldata params = {};
     proc_handler_t *handler = obs.output_get_proc_handler(g_replay);
+    trace("save: request");
     if (!handler || !obs.proc_handler_call(handler, "save", &params)) {
         if (!params.fixed && params.stack) obs.bfree(params.stack);
         set_error(L"OBS replay save proc failed.");
@@ -570,27 +610,37 @@ extern "C" __declspec(dllexport) int eve_obs_save_replay(const wchar_t *output_f
     std::wstring saved_path;
     if (!params.fixed && params.stack) obs.bfree(params.stack);
 
-    for (int i = 0; i < 200 && saved_path.empty(); i++) {
+    for (int i = 0; i < 400 && saved_path.empty(); i++) {
         Sleep(25);
         Calldata last = {};
         if (obs.proc_handler_call(handler, "get_last_replay", &last)) {
             const char *last_path = nullptr;
             if (obs.calldata_get_string(&last, "path", &last_path) && last_path && *last_path) {
                 auto candidate = widen(last_path);
-                if (std::filesystem::exists(candidate) && std::filesystem::file_size(candidate) > 0) {
+                if (usable_replay_file(candidate)) {
                     saved_path = candidate;
                 }
             }
         }
         if (!last.fixed && last.stack) obs.bfree(last.stack);
+
+        if (saved_path.empty()) {
+            saved_path = find_newest_replay_file(folder, save_started_at);
+        }
+
+        if (saved_path.empty()) {
+            saved_path = find_newest_replay_file(std::filesystem::temp_directory_path(), save_started_at);
+        }
     }
 
     if (saved_path.empty()) {
+        trace("save: no path after wait");
         set_error(L"OBS replay save returned no path.");
         return -3;
     }
 
     g_last_replay = saved_path;
+    trace("save: path=" + narrow(g_last_replay));
     copy_string(output_path, output_path_length, g_last_replay);
     return 0;
 }
