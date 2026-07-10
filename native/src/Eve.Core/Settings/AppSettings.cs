@@ -19,6 +19,8 @@ public sealed class AppSettings
     public string MicrophoneDeviceId { get; set; } = string.Empty;
     public List<string> GameAudioExcludedProcesses { get; set; } = new();
     public bool EnableEditorKeyboardShortcuts { get; set; } = true;
+    public string ClipOverlayPosition { get; set; } = "Top Right";
+    public string ClipOverlayVolume { get; set; } = "Medium";
     public double WindowX { get; set; } = double.NaN;
     public double WindowY { get; set; } = double.NaN;
     public double WindowWidth { get; set; } = 1180;

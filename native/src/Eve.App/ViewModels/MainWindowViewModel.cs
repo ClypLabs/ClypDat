@@ -28,6 +28,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private ReplayBackendPreset? _selectedReplayBackend;
     private readonly string _initialReplayBackend;
     private bool _replayBackendRestartRequired;
+    private string _selectedClipOverlayPosition = "Top Right";
+    private string _selectedClipOverlayVolume = "Medium";
     private ExportCodecOption? _selectedExportCodec;
     private string _recorderStatus = "Replay Off";
     private string _activeGame = "No game detected";
@@ -92,6 +94,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("OBS (best quality)", "Obs", "Highest quality and lowest overhead, but some anti-cheat games (e.g. CS2) need a launch option or may show a black/frozen capture."),
             new("Windows Capture (no game hook)", "Legacy", "Captures the screen directly with no process hook, so it isn't blocked by anti-cheat - works for CS2 without any launch option, at the cost of slightly higher overhead.")
         };
+        ClipOverlayPositions = new ObservableCollection<string> { "Top Left", "Top Right" };
+        ClipOverlayVolumes = new ObservableCollection<string> { "Low", "Medium", "High" };
+        _selectedClipOverlayPosition = ClipOverlayPositions.FirstOrDefault(position => string.Equals(position, Settings.ClipOverlayPosition, StringComparison.OrdinalIgnoreCase)) ?? "Top Right";
+        _selectedClipOverlayVolume = ClipOverlayVolumes.FirstOrDefault(volume => string.Equals(volume, Settings.ClipOverlayVolume, StringComparison.OrdinalIgnoreCase)) ?? "Medium";
         ExcludedProcesses = new ObservableCollection<string>(Settings.GameAudioExcludedProcesses);
         RefreshAudioDevices();
         SelectedReplayDurationPreset = ReplayDurationPresets.FirstOrDefault(preset => preset.Seconds == Settings.ReplayDurationSeconds) ??
@@ -125,6 +131,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ReplayBackendPreset> ReplayBackends { get; }
     public ObservableCollection<ExportCodecOption> ExportCodecs { get; }
     public ObservableCollection<string> ExcludedProcesses { get; }
+    public ObservableCollection<string> ClipOverlayPositions { get; }
+    public ObservableCollection<string> ClipOverlayVolumes { get; }
 
     public IEnumerable<ClipCardViewModel> AllClips => ClipGroups.SelectMany(group => group.Clips);
     public int ReplayCaptureX { get; set; }
@@ -291,6 +299,28 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get => _replayBackendRestartRequired;
         private set => SetProperty(ref _replayBackendRestartRequired, value);
+    }
+
+    public string SelectedClipOverlayPosition
+    {
+        get => _selectedClipOverlayPosition;
+        set
+        {
+            if (!SetProperty(ref _selectedClipOverlayPosition, value)) return;
+            Settings.ClipOverlayPosition = value;
+            SaveSettings();
+        }
+    }
+
+    public string SelectedClipOverlayVolume
+    {
+        get => _selectedClipOverlayVolume;
+        set
+        {
+            if (!SetProperty(ref _selectedClipOverlayVolume, value)) return;
+            Settings.ClipOverlayVolume = value;
+            SaveSettings();
+        }
     }
 
     public bool StartReplayOnLaunch

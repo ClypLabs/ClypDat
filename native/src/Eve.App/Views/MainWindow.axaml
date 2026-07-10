@@ -235,6 +235,18 @@
 
           <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="12" Padding="18">
             <StackPanel Spacing="14">
+              <TextBlock Text="Clip Notifications" Foreground="#C4D0DF" FontWeight="Bold" />
+              <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto" RowSpacing="12" ColumnSpacing="16">
+                <TextBlock Text="Overlay position" Foreground="#93A6B8" VerticalAlignment="Center" />
+                <ComboBox Grid.Column="1" Classes="settingsInput" ItemsSource="{Binding ClipOverlayPositions}" SelectedItem="{Binding SelectedClipOverlayPosition}" Width="160" HorizontalAlignment="Left" />
+                <TextBlock Grid.Row="1" Text="Sound volume" Foreground="#93A6B8" VerticalAlignment="Center" />
+                <ComboBox Grid.Row="1" Grid.Column="1" Classes="settingsInput" ItemsSource="{Binding ClipOverlayVolumes}" SelectedItem="{Binding SelectedClipOverlayVolume}" Width="160" HorizontalAlignment="Left" />
+              </Grid>
+            </StackPanel>
+          </Border>
+
+          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="12" Padding="18">
+            <StackPanel Spacing="14">
               <TextBlock Text="Startup" Foreground="#C4D0DF" FontWeight="Bold" />
               <CheckBox Content="Launch EVE on Windows boot" IsChecked="{Binding LaunchOnWindowsStartup}" />
               <CheckBox Content="Start minimized on boot" IsChecked="{Binding StartMinimizedToTray}" />

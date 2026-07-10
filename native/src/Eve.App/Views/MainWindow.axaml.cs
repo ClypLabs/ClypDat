@@ -337,6 +337,7 @@ public sealed partial class MainWindow : Window
                 var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder));
                 AppLog.Info($"Replay clip saved: {outputPath}");
                 await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
+                ShowClipSavedNotification();
             }
             catch (Exception error)
             {
@@ -348,6 +349,92 @@ public sealed partial class MainWindow : Window
         {
             Interlocked.Exchange(ref _clipSaving, 0);
         }
+    }
+
+    private void ShowClipSavedNotification()
+    {
+        if (ViewModel is null) return;
+        try
+        {
+            ClipNotificationSound.Play(ViewModel.Settings.ClipOverlayVolume);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Clip notification sound failed", error);
+        }
+
+        try
+        {
+            ShowClipSavedOverlay(ViewModel.Settings.ClipOverlayPosition);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Clip notification overlay failed", error);
+        }
+    }
+
+    private void ShowClipSavedOverlay(string position)
+    {
+        var badge = new Border
+        {
+            Background = Avalonia.Media.Brush.Parse("#DD141D24"),
+            BorderBrush = Avalonia.Media.Brush.Parse("#2C3B48"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(16, 10),
+            Child = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 10,
+                Children =
+                {
+                    new TextBlock { Text = "\U0001F3AC", FontSize = 16, VerticalAlignment = VerticalAlignment.Center },
+                    new TextBlock
+                    {
+                        Text = "Clip saved",
+                        Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
+                        FontWeight = Avalonia.Media.FontWeight.Bold,
+                        FontSize = 13,
+                        VerticalAlignment = VerticalAlignment.Center
+                    }
+                }
+            }
+        };
+
+        var overlay = new Window
+        {
+            SystemDecorations = SystemDecorations.None,
+            CanResize = false,
+            ShowInTaskbar = false,
+            ShowActivated = false,
+            Topmost = true,
+            Background = Avalonia.Media.Brushes.Transparent,
+            TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
+            SizeToContent = SizeToContent.WidthAndHeight,
+            Content = badge
+        };
+
+        overlay.Opened += (_, _) =>
+        {
+            var screen = overlay.Screens.Primary ?? overlay.Screens.All.FirstOrDefault();
+            if (screen is null) return;
+            var area = screen.WorkingArea;
+            const int margin = 24;
+            var x = string.Equals(position, "Top Left", StringComparison.OrdinalIgnoreCase)
+                ? area.X + margin
+                : area.X + area.Width - (int)overlay.Bounds.Width - margin;
+            overlay.Position = new PixelPoint(x, area.Y + margin);
+        };
+
+        overlay.Show();
+
+        var closeTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(2200) };
+        closeTimer.Tick += (_, _) =>
+        {
+            closeTimer.Stop();
+            overlay.Close();
+        };
+        closeTimer.Start();
     }
 
     private void ReplayBuffer_OnRecordingStopped(object? sender, EventArgs e)
