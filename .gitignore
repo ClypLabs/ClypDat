@@ -26,8 +26,6 @@ yarn-debug.log*
 yarn-error.log*
 
 # OS/editor files
-AGENTS.md
-CLAUDE.md
 .DS_Store
 Thumbs.db
 Desktop.ini
