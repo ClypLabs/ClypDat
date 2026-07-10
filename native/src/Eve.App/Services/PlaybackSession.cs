@@ -24,6 +24,7 @@ public sealed class PlaybackSession : IDisposable
     private long _seekVersion;
     private TimeSpan _lastRequestedPosition = TimeSpan.Zero;
     private readonly SemaphoreSlim _seekLock = new(1, 1);
+    private readonly object _transportLock = new();
     private readonly Stopwatch _driftCheckClock = Stopwatch.StartNew();
     private static readonly TimeSpan DriftCheckInterval = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan DriftThreshold = TimeSpan.FromMilliseconds(120);
@@ -158,12 +159,15 @@ public sealed class PlaybackSession : IDisposable
         // VideoPlayer.Time here makes VLC redo a full keyframe seek/rebuffer for no
         // reason, which is what causes the video to freeze on unpause.
         var needsSeek = wasStoppedOrEnded || Math.Abs(VideoPlayer.Time - milliseconds) > 150;
-        if (needsSeek) VideoPlayer.Time = milliseconds;
-        EnsureAudioOutputCanSeek(time);
-        if (needsSeek) SeekAudio(time);
-        VideoPlayer.Play();
-        VideoPlayer.SetPause(false);
-        _audioOutput?.Play();
+        lock (_transportLock)
+        {
+            if (needsSeek) VideoPlayer.Time = milliseconds;
+            EnsureAudioOutputCanSeek(time);
+            if (needsSeek) SeekAudio(time);
+            VideoPlayer.Play();
+            VideoPlayer.SetPause(false);
+            _audioOutput?.Play();
+        }
         _driftCheckClock.Restart();
         AppLog.Info($"Editor play from {time.TotalSeconds:0.###}s (seek={needsSeek}).");
     }
@@ -171,8 +175,11 @@ public sealed class PlaybackSession : IDisposable
     public void Pause()
     {
         _shouldPlay = false;
-        _audioOutput?.Stop();
-        VideoPlayer.SetPause(true);
+        lock (_transportLock)
+        {
+            _audioOutput?.Stop();
+            VideoPlayer.SetPause(true);
+        }
         AppLog.Info($"Editor pause at {Position.TotalSeconds:0.###}s.");
     }
 
@@ -180,8 +187,11 @@ public sealed class PlaybackSession : IDisposable
     {
         try
         {
-            _audioOutput?.Stop();
-            VideoPlayer.Stop();
+            lock (_transportLock)
+            {
+                _audioOutput?.Stop();
+                VideoPlayer.Stop();
+            }
             _ended = false;
             _shouldPlay = false;
         }
@@ -217,36 +227,37 @@ public sealed class PlaybackSession : IDisposable
         var resumed = false;
         try
         {
-            _audioOutput?.Stop();
-            ForceVideoSilent();
-            AppLog.Info($"Editor seek begin: requested={requested.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, resume={resumePlayback}, version={seekVersion}.");
-            if (!VideoPlayer.IsPlaying)
+            lock (_transportLock)
             {
-                VideoPlayer.Play();
+                _audioOutput?.Stop();
+                ForceVideoSilent();
+                if (!VideoPlayer.IsPlaying) VideoPlayer.Play();
+                VideoPlayer.SetPause(false);
             }
-
-            VideoPlayer.SetPause(false);
-            VideoPlayer.Time = milliseconds;
+            AppLog.Info($"Editor seek begin: requested={requested.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, resume={resumePlayback}, version={seekVersion}.");
             if (seekVersion != Interlocked.Read(ref _seekVersion)) return false;
-            var videoReady = await WaitForVideoReadyAsync(requested, cancellationToken).ConfigureAwait(false);
+            var videoReady = await SeekAndWaitAsync(requested, cancellationToken).ConfigureAwait(false);
             if (seekVersion != Interlocked.Read(ref _seekVersion)) return false;
             var settledTime = Position;
-            EnsureAudioOutputCanSeek(requested);
-            SeekAudio(requested);
-            if (resumePlayback && videoReady)
+            lock (_transportLock)
             {
-                VideoPlayer.SetPause(false);
-                SeekAudio(Position);
-                _audioOutput?.Play();
-                _driftCheckClock.Restart();
-                resumed = true;
+                EnsureAudioOutputCanSeek(requested);
+                SeekAudio(requested);
+                if (resumePlayback && videoReady)
+                {
+                    VideoPlayer.SetPause(false);
+                    SeekAudio(Position);
+                    _audioOutput?.Play();
+                    resumed = true;
+                }
+                else
+                {
+                    _shouldPlay = false;
+                    _audioOutput?.Stop();
+                    VideoPlayer.SetPause(true);
+                }
             }
-            else
-            {
-                _shouldPlay = false;
-                _audioOutput?.Stop();
-                VideoPlayer.SetPause(true);
-            }
+            if (resumed) _driftCheckClock.Restart();
 
             AppLog.Info($"Editor seek end: requested={requested.TotalSeconds:0.###}s, settled={settledTime.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, resume={resumePlayback}, resumed={resumed}, version={seekVersion}.");
             return !resumePlayback || resumed;
@@ -263,9 +274,12 @@ public sealed class PlaybackSession : IDisposable
         if (!shouldPlay) return;
         _shouldPlay = true;
         ForceVideoSilent();
-        if (!VideoPlayer.IsPlaying) VideoPlayer.Play();
-        VideoPlayer.SetPause(false);
-        if (_audioOutput is not null && _audioOutput.PlaybackState != PlaybackState.Playing) _audioOutput.Play();
+        lock (_transportLock)
+        {
+            if (!VideoPlayer.IsPlaying) VideoPlayer.Play();
+            VideoPlayer.SetPause(false);
+            if (_audioOutput is not null && _audioOutput.PlaybackState != PlaybackState.Playing) _audioOutput.Play();
+        }
     }
 
     public void SetTrackVolume(int streamIndex, double percent)
@@ -285,9 +299,12 @@ public sealed class PlaybackSession : IDisposable
     public void SyncAudioStreams()
     {
         if (_isSeeking || !_shouldPlay || _audioOutput is null || !VideoPlayer.IsPlaying) return;
-        if (_audioOutput.PlaybackState != PlaybackState.Playing)
+        lock (_transportLock)
         {
-            _audioOutput.Play();
+            if (_audioOutput is not null && _audioOutput.PlaybackState != PlaybackState.Playing)
+            {
+                _audioOutput.Play();
+            }
         }
     }
 
@@ -297,22 +314,29 @@ public sealed class PlaybackSession : IDisposable
         if (_driftCheckClock.Elapsed < DriftCheckInterval) return;
         _driftCheckClock.Restart();
 
-        var videoTime = TimeSpan.FromMilliseconds(Math.Max(0, VideoPlayer.Time));
-        var audioTime = _audioSources.Values.First().Reader.CurrentTime;
-        var drift = videoTime - audioTime;
-        if (drift.Duration() < DriftThreshold) return;
+        lock (_transportLock)
+        {
+            if (_audioSources.Count == 0) return;
+            var videoTime = TimeSpan.FromMilliseconds(Math.Max(0, VideoPlayer.Time));
+            var audioTime = _audioSources.Values.First().Reader.CurrentTime;
+            var drift = videoTime - audioTime;
+            if (drift.Duration() < DriftThreshold) return;
 
-        AppLog.Info($"Editor audio drift corrected: drift={drift.TotalMilliseconds:0}ms, video={videoTime.TotalSeconds:0.###}s, audio={audioTime.TotalSeconds:0.###}s.");
-        SeekAudio(videoTime);
+            AppLog.Info($"Editor audio drift corrected: drift={drift.TotalMilliseconds:0}ms, video={videoTime.TotalSeconds:0.###}s, audio={audioTime.TotalSeconds:0.###}s.");
+            SeekAudio(videoTime);
+        }
     }
 
     public void SyncAndPlayMixedAudio()
     {
-        if (_audioOutput is null) return;
-        SeekAudio(Position);
-        if (_shouldPlay && VideoPlayer.IsPlaying)
+        lock (_transportLock)
         {
-            _audioOutput.Play();
+            if (_audioOutput is null) return;
+            SeekAudio(Position);
+            if (_shouldPlay && VideoPlayer.IsPlaying)
+            {
+                _audioOutput.Play();
+            }
         }
     }
 
@@ -328,7 +352,7 @@ public sealed class PlaybackSession : IDisposable
         _seekLock.Dispose();
     }
 
-    private async Task<bool> WaitForVideoReadyAsync(TimeSpan target, CancellationToken cancellationToken)
+    private async Task<bool> SeekAndWaitAsync(TimeSpan target, CancellationToken cancellationToken)
     {
         var targetMs = target.TotalMilliseconds;
         var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -340,22 +364,39 @@ public sealed class PlaybackSession : IDisposable
             }
         }
 
+        // Subscribe before issuing the seek, not after: LibVLC's TimeChanged can fire
+        // (on its own thread) before this method gets around to attaching a handler,
+        // which was silently swallowing the confirmation and forcing a false timeout
+        // even though the seek had actually landed correctly.
         VideoPlayer.TimeChanged += OnTimeChanged;
         try
         {
-            // Don't trust an immediate VideoPlayer.Time readback here: LibVLC echoes
-            // back whatever was just written to .Time before the decoder has actually
-            // caught up, so this always looked "ready" instantly - no backpressure on
-            // rapid repeated seeks, letting each new seek interrupt the last one's
-            // still-in-flight decode. Always wait for the real TimeChanged event.
-            await ready.Task.WaitAsync(TimeSpan.FromMilliseconds(900), cancellationToken).ConfigureAwait(false);
+            lock (_transportLock)
+            {
+                VideoPlayer.Time = (long)targetMs;
+            }
+
+            try
+            {
+                await ready.Task.WaitAsync(TimeSpan.FromMilliseconds(900), cancellationToken).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                // The confirmation event may still have been missed even with the
+                // race closed (e.g. a very long keyframe seek). Fall back to the
+                // actual current position instead of unconditionally treating this
+                // as failure - failure here meant "resume" silently turned into
+                // "pause" even when the seek genuinely succeeded.
+                if (Math.Abs(VideoPlayer.Time - targetMs) >= 650)
+                {
+                    AppLog.Info($"Editor video seek settle timeout: target={target.TotalSeconds:0.###}s, actual={Position.TotalSeconds:0.###}s, playing={VideoPlayer.IsPlaying}.");
+                    return false;
+                }
+                AppLog.Info($"Editor video seek settle timeout but position already matches: target={target.TotalSeconds:0.###}s, actual={Position.TotalSeconds:0.###}s.");
+            }
+
             _lastRequestedPosition = TimeSpan.FromMilliseconds(Math.Max(0, VideoPlayer.Time));
             return true;
-        }
-        catch (TimeoutException)
-        {
-            AppLog.Info($"Editor video seek settle timeout: target={target.TotalSeconds:0.###}s, actual={Position.TotalSeconds:0.###}s, playing={VideoPlayer.IsPlaying}.");
-            return false;
         }
         finally
         {
@@ -412,17 +453,20 @@ public sealed class PlaybackSession : IDisposable
 
     private void DisposeAudioOutput()
     {
-        _audioOutput?.Stop();
-        _audioOutput?.Dispose();
-        _audioOutput = null;
-        _audioMixer = null;
-
-        foreach (var source in _audioSources.Values)
+        lock (_transportLock)
         {
-            source.Reader.Dispose();
-        }
+            _audioOutput?.Stop();
+            _audioOutput?.Dispose();
+            _audioOutput = null;
+            _audioMixer = null;
 
-        _audioSources.Clear();
+            foreach (var source in _audioSources.Values)
+            {
+                source.Reader.Dispose();
+            }
+
+            _audioSources.Clear();
+        }
     }
 
     private static float VolumeCurve(double percent)
