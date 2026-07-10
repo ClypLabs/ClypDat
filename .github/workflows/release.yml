@@ -110,16 +110,34 @@ jobs:
 
       - name: Build NSIS installer
         run: >
-          makensis
+          & "C:\Program Files (x86)\NSIS\makensis.exe"
           /DEVE_VERSION=${{ steps.version.outputs.version }}
           /DEVE_SOURCE_DIR=..\native\publish\win-x64-folder
           /DEVE_OUTPUT_FILE=..\EVE-Setup.exe
           installer\EVE.nsi
+        shell: pwsh
+
+      - name: Locate WiX toolset
+        id: wix
+        shell: pwsh
+        run: |
+          $candidate = "${env:WIX}bin"
+          if (-not (Test-Path "$candidate\heat.exe")) {
+            $found = Get-ChildItem "C:\Program Files (x86)\WiX Toolset*\bin\heat.exe" -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            if (-not $found) {
+              $found = Get-ChildItem "C:\Program Files\WiX Toolset*\bin\heat.exe" -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+            }
+            if (-not $found) { throw "Could not locate WiX Toolset's bin directory (heat.exe)." }
+            $candidate = $found.DirectoryName
+          }
+          "bin=$candidate" >> $env:GITHUB_OUTPUT
 
       - name: Harvest publish folder for MSI
         shell: pwsh
         run: |
-          $wixBin = "${env:WIX}bin"
+          $wixBin = "${{ steps.wix.outputs.bin }}"
           & "$wixBin\heat.exe" dir native\publish\win-x64-folder `
             -cg AppFiles -dr INSTALLFOLDER -srd -sreg -gg -g1 -sfrag -var var.EveSourceDir `
             -out installer\AppFiles.wxs
@@ -127,7 +145,7 @@ jobs:
       - name: Build MSI
         shell: pwsh
         run: |
-          $wixBin = "${env:WIX}bin"
+          $wixBin = "${{ steps.wix.outputs.bin }}"
           $srcDir = (Resolve-Path native\publish\win-x64-folder).Path
           & "$wixBin\candle.exe" -arch x64 `
             -dEveVersion=${{ steps.version.outputs.version }} `
