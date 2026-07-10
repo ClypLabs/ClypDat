@@ -69,12 +69,15 @@ jobs:
           -o native\publish\win-x64-folder --nologo
 
       - name: Verify fresh ObsBridge.dll made it into publish output
+        # ObsRuntimeLocator.cs loads the bridge from {publish}\obs\Eve.ObsBridge.dll,
+        # not the publish root - that's where Eve.App.csproj's own
+        # CopyObsRuntimeToPublish target places it.
         shell: pwsh
         run: |
           $built = Get-FileHash native\src\Eve.ObsBridge\bin\x64\Release\Eve.ObsBridge.dll
-          $published = Get-FileHash native\publish\win-x64-folder\Eve.ObsBridge.dll
+          $published = Get-FileHash native\publish\win-x64-folder\obs\Eve.ObsBridge.dll
           if ($built.Hash -ne $published.Hash) {
-            Copy-Item native\src\Eve.ObsBridge\bin\x64\Release\Eve.ObsBridge.dll native\publish\win-x64-folder\Eve.ObsBridge.dll -Force
+            Copy-Item native\src\Eve.ObsBridge\bin\x64\Release\Eve.ObsBridge.dll native\publish\win-x64-folder\obs\Eve.ObsBridge.dll -Force
           }
 
       - name: Trim non-Windows runtime assets
