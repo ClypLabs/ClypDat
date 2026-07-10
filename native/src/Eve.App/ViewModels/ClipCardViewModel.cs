@@ -35,9 +35,11 @@ public sealed class ClipCardViewModel : ViewModelBase
     public DateTimeOffset CreatedAt => Media.CreatedAt;
     public TimeSpan Duration => Media.Duration;
     public long SizeBytes => Media.SizeBytes;
-    public string DateLabel => CreatedAt.ToString("MMM d, yyyy");
+    public string DateLabel => CreatedAt.ToString("MMM d, yyyy h:mm tt");
     public string DurationLabel => Duration > TimeSpan.Zero ? Duration.ToString("m\\:ss") : "0:00";
     public string GameLabel => "VIDEO";
+    public string CaptureBackendLabel => string.IsNullOrWhiteSpace(Media.CaptureBackend) ? string.Empty : $"Captured with: {Media.CaptureBackend}";
+    public bool HasCaptureBackendLabel => !string.IsNullOrWhiteSpace(CaptureBackendLabel);
 
     public string PreviewImagePath
     {
@@ -94,6 +96,8 @@ public sealed class ClipCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(SizeBytes));
         OnPropertyChanged(nameof(DateLabel));
         OnPropertyChanged(nameof(DurationLabel));
+        OnPropertyChanged(nameof(CaptureBackendLabel));
+        OnPropertyChanged(nameof(HasCaptureBackendLabel));
     }
 
     public async Task StartPreviewAsync()

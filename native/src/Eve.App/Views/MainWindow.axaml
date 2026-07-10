@@ -264,6 +264,11 @@
                                            FontSize="12"
                                            FontWeight="Bold" />
                               </StackPanel>
+                              <TextBlock Text="{Binding CaptureBackendLabel}"
+                                         Foreground="#6B7C8C"
+                                         FontSize="11"
+                                         IsVisible="{Binding HasCaptureBackendLabel}"
+                                         TextTrimming="CharacterEllipsis" />
                             </StackPanel>
                           </Grid>
                         </Border>
