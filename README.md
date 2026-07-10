@@ -111,3 +111,9 @@ Studio install; it's trimmed to the six plugins the bridge actually loads
   content.
 - Editor audio and video can drift out of sync on long clips (see Editor,
   above).
+
+## License
+
+GPLv3. See `LICENSE`. Third-party components bundled in distributed builds
+(OBS, LibVLC, ffmpeg) carry their own licenses; see
+`THIRD-PARTY-LICENSES.md`.

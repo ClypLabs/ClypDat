@@ -36,7 +36,7 @@
     "ffmpeg"
   ],
   "author": "",
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "devDependencies": {
     "electron": "^31.7.7",
     "electron-builder": "^26.15.3"
