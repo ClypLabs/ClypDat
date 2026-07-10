@@ -858,19 +858,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         try
         {
             var filter = new StringBuilder();
-            filter.Append($"[0:v]trim=start={FormatSeconds(videoOffsetSeconds)}:duration={FormatSeconds(duration)},setpts=PTS-STARTPTS");
-            if (config.ForceSdrTonemap)
-            {
-                // Tonemap HDR (PQ/BT.2020) frames down to an SDR (bt709) look so the
-                // saved clip matches what it would have looked like captured without
-                // HDR, instead of the washed-out/blown-out result of just relabeling
-                // HDR pixel data as SDR. zscale->linear->tonemap->zscale is ffmpeg's
-                // standard HDR-to-SDR chain; format=nv12 keeps the encoder input in a
-                // colorspace every player/encoder expects.
-                filter.Append(",zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=nv12");
-            }
-
-            filter.Append("[vout];");
+            filter.Append($"[0:v]trim=start={FormatSeconds(videoOffsetSeconds)}:duration={FormatSeconds(duration)},setpts=PTS-STARTPTS[vout];");
             for (var index = 0; index < inputs.Count; index++)
             {
                 var inputIndex = index + 1;

@@ -335,18 +335,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public bool ForceSdrDuringReplay
-    {
-        get => Settings.ForceSdrDuringReplay;
-        set
-        {
-            if (Settings.ForceSdrDuringReplay == value) return;
-            Settings.ForceSdrDuringReplay = value;
-            OnPropertyChanged();
-            SaveSettings();
-        }
-    }
-
     public bool LaunchOnWindowsStartup
     {
         get => Settings.LaunchOnWindowsStartup;
@@ -861,8 +849,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ActiveGameDetection.WindowTitle,
             ActiveGameDetection.WindowClass,
             Settings.ReplayBackend,
-            GameWindowHandle: ActiveGameDetection.WindowHandle,
-            ForceSdrTonemap: Settings.ForceSdrDuringReplay);
+            GameWindowHandle: ActiveGameDetection.WindowHandle);
     }
 
     public void SetDuration(TimeSpan duration)

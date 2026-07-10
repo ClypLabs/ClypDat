@@ -395,7 +395,6 @@ public sealed partial class MainWindow : Window
                 Spacing = 10,
                 Children =
                 {
-                    new TextBlock { Text = "\U0001F3AC", FontSize = 16, VerticalAlignment = VerticalAlignment.Center },
                     new TextBlock
                     {
                         Text = "Clip saved",
