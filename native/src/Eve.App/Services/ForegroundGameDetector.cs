@@ -38,6 +38,7 @@ public sealed class ForegroundGameDetector
         "medal.exe",
         "medalencoder.exe",
         "msiafterburner.exe",
+        "notepad.exe",
         "nvidia app.exe",
         "nvidia overlay.exe",
         "nvidia share.exe",
