@@ -458,6 +458,16 @@ bool create_scene()
         obs.data_set_string(settings, "window", window_match.c_str());
         obs.data_set_int(settings, "priority", 2);
         trace("init: capture_mode exact " + g_game_exe_name);
+
+        if (_stricmp(g_game_exe_name.c_str(), "cs2.exe") == 0) {
+            obs_data_t *fallback_settings = obs.data_create();
+            obs.data_set_bool(fallback_settings, "capture_cursor", false);
+            obs.data_set_bool(fallback_settings, "force_sdr", true);
+            obs.data_set_int(fallback_settings, "method", 0);
+            g_fallback_source = obs.source_create("monitor_capture", "EVE Monitor Fallback", fallback_settings, nullptr);
+            obs.data_release(fallback_settings);
+            trace(g_fallback_source ? "init: capture_source cs2 monitor fallback" : "init: cs2 monitor fallback unavailable");
+        }
     } else {
         obs.data_set_string(settings, "capture_mode", "any_fullscreen");
         trace("init: capture_mode any_fullscreen");
