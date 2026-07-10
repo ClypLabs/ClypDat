@@ -57,4 +57,19 @@
           SkipUnchangedFiles="true"
           Condition="Exists('..\..\vendor\obs-runtime\bin\64bit\obs-nvenc-test.exe')" />
   </Target>
+
+  <!-- OBS (GPLv2) and LibVLC (LGPL-2.1) are bundled in every distributed
+       build; their licenses require these notices/texts to ship alongside
+       the binaries. See THIRD-PARTY-LICENSES.md at the repo root. -->
+  <Target Name="CopyThirdPartyLicensesToPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <ThirdPartyLicenseFiles Include="..\..\..\licenses\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="..\..\..\THIRD-PARTY-LICENSES.md"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ThirdPartyLicenseFiles)"
+          DestinationFiles="@(ThirdPartyLicenseFiles->'$(PublishDir)licenses\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
 </Project>
