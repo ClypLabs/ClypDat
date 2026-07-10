@@ -918,7 +918,12 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
     private static AudioRoutes ResolveAudioRoutes(ReplayBufferConfig config)
     {
-        var chatPids = ResolveProcessIds(config.ChatAudioProcessName).ToArray();
+        // Multi-process apps (Discord, browsers, etc.) share one executable name across
+        // several OS processes. StartProcessLoopbackCapture already uses
+        // IncludeTargetProcessTree, so capturing more than one PID from the same app
+        // captures its audio twice - the reported "chat audio doubled" bug. Only the
+        // lowest (typically root/parent) PID is used; its process tree covers the rest.
+        var chatPids = ResolveProcessIds(config.ChatAudioProcessName).OrderBy(pid => pid).Take(1).ToArray();
         var useProcessRouting = chatPids.Length > 0 || config.GameAudioExcludedProcesses.Any(name => !string.IsNullOrWhiteSpace(name));
         var exclusionNames = config.GameAudioExcludedProcesses
             .Append(config.ChatAudioProcessName)
