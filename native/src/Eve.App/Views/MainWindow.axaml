@@ -124,36 +124,46 @@
           </StackPanel>
         </Button>
 
-        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" Margin="18,0,0,0" VerticalAlignment="Center">
-          <Button Content="{Binding RecorderStatus}" Classes="replayButton" Click="ReplayButton_OnClick" />
-          <Button Content="Clip" IsEnabled="{Binding IsReplayRecording}" Click="ClipButton_OnClick" />
-          <TextBlock Text="{Binding HotkeyDisplay}" Foreground="#93A6B8" FontWeight="Bold" VerticalAlignment="Center" />
-          <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding ShowLibraryStatus}" />
-          <TextBlock Text="{Binding ActiveGame}" Foreground="#BDD4EE" VerticalAlignment="Center" IsVisible="{Binding ShowLibraryStatus}" />
-          <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding HasSelection}" />
-          <TextBlock Text="{Binding SelectionSummary}"
+        <Grid Grid.Column="1"
+              ColumnDefinitions="Auto,10,Auto,10,Auto,10,Auto,10,Auto,10,Auto,10,Auto,10,Auto,10,Auto,10,Auto,10,Auto,10,Auto,10,Auto,10,Auto,10,Auto,10,1*,10,Auto,10,3*"
+              Margin="18,0,0,0"
+              VerticalAlignment="Center">
+          <Button Grid.Column="0" Content="{Binding RecorderStatus}" Classes="replayButton" Click="ReplayButton_OnClick" />
+          <Button Grid.Column="2" Content="Clip" IsEnabled="{Binding IsReplayRecording}" Click="ClipButton_OnClick" />
+          <TextBlock Grid.Column="4" Text="{Binding HotkeyDisplay}" Foreground="#93A6B8" FontWeight="Bold" VerticalAlignment="Center" />
+          <Border Grid.Column="6" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding ShowLibraryStatus}" />
+          <TextBlock Grid.Column="8" Text="{Binding ActiveGame}" Foreground="#BDD4EE" VerticalAlignment="Center" IsVisible="{Binding ShowLibraryStatus}" />
+          <Border Grid.Column="10" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding HasSelection}" />
+          <TextBlock Grid.Column="12"
+                     Text="{Binding SelectionSummary}"
                      Foreground="#D7E2EF"
                      FontSize="14"
                      FontWeight="Bold"
                      VerticalAlignment="Center"
                      IsVisible="{Binding HasSelection}" />
-          <Button Content="Delete"
+          <Button Grid.Column="14"
+                  Content="Delete"
                   Classes="deleteButton"
                   Click="DeleteSelectedButton_OnClick"
                   IsVisible="{Binding HasSelection}" />
-          <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" />
-          <TextBlock Text="{Binding SelectedCreated}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" />
-          <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" />
-          <TextBlock Text="{Binding SelectedQuality}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" TextTrimming="CharacterEllipsis" MaxWidth="180" />
-          <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" />
-          <TextBlock Text="{Binding SelectedSize}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" TextTrimming="CharacterEllipsis" MaxWidth="110" />
-          <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding HasSelectedCaptureBackend}" />
-          <TextBlock Text="{Binding SelectedCaptureBackend}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding HasSelectedCaptureBackend}" TextTrimming="CharacterEllipsis" MaxWidth="200" />
-          <Border Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" />
-          <Button Classes="linkButton" Click="EditorPathButton_OnClick" IsVisible="{Binding IsEditorVisible}" MaxWidth="420">
+          <Border Grid.Column="16" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" />
+          <TextBlock Grid.Column="18" Text="{Binding SelectedCreated}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" />
+          <Border Grid.Column="20" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" />
+          <TextBlock Grid.Column="22" Text="{Binding SelectedQuality}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" TextTrimming="CharacterEllipsis" MaxWidth="180" />
+          <Border Grid.Column="24" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" />
+          <TextBlock Grid.Column="26" Text="{Binding SelectedSize}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" TextTrimming="CharacterEllipsis" MaxWidth="110" />
+          <Border Grid.Column="28" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding HasSelectedCaptureBackend}" />
+          <TextBlock Grid.Column="30"
+                     Text="{Binding SelectedCaptureBackend}"
+                     Foreground="#93A6B8"
+                     VerticalAlignment="Center"
+                     IsVisible="{Binding HasSelectedCaptureBackend}"
+                     TextTrimming="CharacterEllipsis" />
+          <Border Grid.Column="32" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" />
+          <Button Grid.Column="34" Classes="linkButton" Click="EditorPathButton_OnClick" IsVisible="{Binding IsEditorVisible}">
             <TextBlock Text="{Binding SelectedVideoPath}" TextTrimming="CharacterEllipsis" />
           </Button>
-        </StackPanel>
+        </Grid>
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" IsVisible="{Binding ShowLibraryActions}">
           <Button Content="Folder" Click="FolderButton_OnClick" />
