@@ -159,7 +159,15 @@ public sealed class PlaybackSession : IDisposable
         var needsSeek = wasStoppedOrEnded || Math.Abs(VideoPlayer.Time - milliseconds) > 150;
         lock (_transportLock)
         {
-            if (needsSeek) VideoPlayer.Time = milliseconds;
+            if (needsSeek)
+            {
+                // LibVLC silently ignores a .Time assignment made before the player
+                // has actually started (state still NothingSpecial) - confirmed via
+                // logs showing the value bounce right back to 0. Play() must happen
+                // first so the seek actually takes.
+                VideoPlayer.Play();
+                VideoPlayer.Time = milliseconds;
+            }
             EnsureAudioOutputCanSeek(time);
             if (needsSeek) SeekAudio(time);
             VideoPlayer.Play();
