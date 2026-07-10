@@ -204,13 +204,6 @@
 
           <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="12" Padding="18">
             <StackPanel Spacing="14">
-              <TextBlock Text="Diagnostics" Foreground="#C4D0DF" FontWeight="Bold" />
-              <Button Content="Open Logs" Click="OpenLogsButton_OnClick" HorizontalAlignment="Left" />
-            </StackPanel>
-          </Border>
-
-          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="12" Padding="18">
-            <StackPanel Spacing="14">
               <TextBlock Text="Replay Buffer" Foreground="#C4D0DF" FontWeight="Bold" />
               <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="12" ColumnSpacing="16">
                 <TextBlock Text="Save hotkey" Foreground="#93A6B8" VerticalAlignment="Center" />
@@ -229,9 +222,9 @@
                   </StackPanel>
                 </StackPanel>
                 <CheckBox Grid.Row="4" Grid.ColumnSpan="2" Content="Start replay buffer when EVE opens" IsChecked="{Binding StartReplayOnLaunch}" />
-                <CheckBox Grid.Row="5" Grid.ColumnSpan="2" Content="Force SDR while replay buffer is active" IsChecked="{Binding ForceSdrDuringReplay}">
+                <CheckBox Grid.Row="5" Grid.ColumnSpan="2" Content="Force SDR" IsChecked="{Binding ForceSdrDuringReplay}">
                   <ToolTip.Tip>
-                    <TextBlock Text="Temporarily disables HDR on capture start and restores it on stop, to avoid washed-out HDR footage. Causes a brief screen flicker at the start and end of each session." TextWrapping="Wrap" MaxWidth="360" />
+                    <TextBlock Text="Tonemaps HDR footage down to SDR when saving a clip, so it looks like it was captured without HDR instead of washed-out or blown-out. Your display stays in HDR the whole time - only the saved clip changes." TextWrapping="Wrap" MaxWidth="360" />
                   </ToolTip.Tip>
                 </CheckBox>
               </Grid>
@@ -294,6 +287,13 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
+            </StackPanel>
+          </Border>
+
+          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="12" Padding="18">
+            <StackPanel Spacing="14">
+              <TextBlock Text="Diagnostics" Foreground="#C4D0DF" FontWeight="Bold" />
+              <Button Content="Open Logs" Click="OpenLogsButton_OnClick" HorizontalAlignment="Left" />
             </StackPanel>
           </Border>
         </StackPanel>

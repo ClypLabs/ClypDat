@@ -748,7 +748,8 @@ public sealed record ReplayBufferConfig(
     string GameWindowTitle,
     string GameWindowClass,
     string Backend = "Auto",
-    nint GameWindowHandle = 0);
+    nint GameWindowHandle = 0,
+    bool ForceSdrTonemap = false);
 
 internal sealed class AudioCaptureSession : IDisposable
 {

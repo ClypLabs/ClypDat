@@ -62,7 +62,6 @@ public sealed partial class MainWindow : Window
         {
             _globalHotkey?.Dispose();
             _gameDetectionTimer.Stop();
-            HdrDisplayController.RestoreHdr();
             if (_replayBuffer is not null) _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
             _replayBuffer?.Dispose();
             _playback?.Dispose();
@@ -257,7 +256,6 @@ public sealed partial class MainWindow : Window
         try
         {
             if (_replayBuffer.IsRecording) await _replayBuffer.StopAsync();
-            if (ViewModel.Settings.ForceSdrDuringReplay) HdrDisplayController.RestoreHdr();
             ViewModel.IsReplayRecording = false;
             ViewModel.RecorderStatus = _replayArmed ? "Replay Armed" : "Replay Off";
         }
@@ -291,7 +289,6 @@ public sealed partial class MainWindow : Window
             if (_replayBuffer is null) return;
             await EnsureLibraryFolderAsync();
             ApplyPrimaryCaptureBounds();
-            if (ViewModel.Settings.ForceSdrDuringReplay) HdrDisplayController.ForceSdrOn();
             await Task.Run(() => _replayBuffer.StartAsync());
             AppLog.Info("Replay started.");
             ViewModel.IsReplayRecording = _replayBuffer.IsRecording;

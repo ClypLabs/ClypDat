@@ -861,7 +861,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ActiveGameDetection.WindowTitle,
             ActiveGameDetection.WindowClass,
             Settings.ReplayBackend,
-            GameWindowHandle: ActiveGameDetection.WindowHandle);
+            GameWindowHandle: ActiveGameDetection.WindowHandle,
+            ForceSdrTonemap: Settings.ForceSdrDuringReplay);
     }
 
     public void SetDuration(TimeSpan duration)
