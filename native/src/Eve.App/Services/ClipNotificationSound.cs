@@ -8,9 +8,9 @@ public static class ClipNotificationSound
     {
         var gain = volumeLevel switch
         {
-            "Low" => 0.15f,
-            "High" => 0.6f,
-            _ => 0.35f
+            "Low" => 0.035f,
+            "High" => 0.16f,
+            _ => 0.08f
         };
 
         try
@@ -30,27 +30,21 @@ public static class ClipNotificationSound
         }
     }
 
-    // Two quick ascending tones with fast fade in/out, similar in shape to a
-    // typical "clip captured" chime, without embedding any third-party audio.
+    // A single warm tone with a smooth raised-cosine envelope (no hard attack/
+    // release, so there's no click or harsh edge) plus a much quieter octave
+    // overtone for a rounder, softer timbre than a plain sine beep.
     private sealed class ClipChimeSampleProvider : ISampleProvider
     {
         private const int SampleRate = 44100;
+        private const double Fundamental = 523.25; // C5 - soft, not piercing
         private readonly float _gain;
         private int _sampleIndex;
         private readonly int _totalSamples;
-        private readonly (double frequency, int startSample, int lengthSamples)[] _notes;
 
         public ClipChimeSampleProvider(float gain)
         {
             _gain = gain;
-            var noteLength = (int)(SampleRate * 0.09);
-            var gap = (int)(SampleRate * 0.03);
-            _notes = new[]
-            {
-                (880.0, 0, noteLength),
-                (1320.0, noteLength + gap, noteLength)
-            };
-            _totalSamples = noteLength + gap + noteLength + (int)(SampleRate * 0.05);
+            _totalSamples = (int)(SampleRate * 0.42);
         }
 
         public WaveFormat WaveFormat { get; } = WaveFormat.CreateIeeeFloatWaveFormat(SampleRate, 1);
@@ -70,26 +64,19 @@ public static class ClipNotificationSound
 
         private float SampleAt(int sampleIndex)
         {
-            var value = 0.0;
-            foreach (var (frequency, startSample, lengthSamples) in _notes)
-            {
-                var localIndex = sampleIndex - startSample;
-                if (localIndex < 0 || localIndex >= lengthSamples) continue;
-
-                var t = localIndex / (double)SampleRate;
-                var envelope = Envelope(localIndex, lengthSamples);
-                value += Math.Sin(2 * Math.PI * frequency * t) * envelope;
-            }
-
-            return (float)(value * _gain);
+            var t = sampleIndex / (double)SampleRate;
+            var envelope = Envelope(sampleIndex);
+            var tone = Math.Sin(2 * Math.PI * Fundamental * t) +
+                       0.25 * Math.Sin(2 * Math.PI * Fundamental * 2 * t);
+            return (float)(tone * envelope * _gain);
         }
 
-        private static double Envelope(int localIndex, int lengthSamples)
+        private double Envelope(int sampleIndex)
         {
-            var fadeSamples = Math.Min(lengthSamples / 4, (int)(SampleRate * 0.012));
-            if (localIndex < fadeSamples) return localIndex / (double)fadeSamples;
-            if (localIndex > lengthSamples - fadeSamples) return (lengthSamples - localIndex) / (double)fadeSamples;
-            return 1.0;
+            // Raised-cosine (Hann-style) envelope over the whole note: eases in,
+            // holds briefly, eases out - nothing sudden anywhere in the sound.
+            var progress = sampleIndex / (double)_totalSamples;
+            return 0.5 * (1 - Math.Cos(2 * Math.PI * Math.Min(progress, 1.0)));
         }
     }
 }

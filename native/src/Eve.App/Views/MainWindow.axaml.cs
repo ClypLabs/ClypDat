@@ -334,10 +334,17 @@ public sealed partial class MainWindow : Window
                 }
 
                 AppLog.Info("Replay clip save requested.");
+
+                // Windows Capture segments need a few seconds to concat/mux before
+                // the clip lands in the library, so give instant feedback on the
+                // hotkey press instead of waiting for that to finish.
+                var notifiedEarly = _replayBuffer is WindowsReplayBuffer;
+                if (notifiedEarly) ShowClipSavedNotification();
+
                 var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder));
                 AppLog.Info($"Replay clip saved: {outputPath}");
                 await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
-                ShowClipSavedNotification();
+                if (!notifiedEarly) ShowClipSavedNotification();
             }
             catch (Exception error)
             {
@@ -401,6 +408,9 @@ public sealed partial class MainWindow : Window
             }
         };
 
+        badge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        var desiredWidth = badge.DesiredSize.Width;
+
         var overlay = new Window
         {
             SystemDecorations = SystemDecorations.None,
@@ -416,13 +426,14 @@ public sealed partial class MainWindow : Window
 
         overlay.Opened += (_, _) =>
         {
-            var screen = overlay.Screens.Primary ?? overlay.Screens.All.FirstOrDefault();
+            var screen = overlay.Screens.ScreenFromWindow(overlay) ?? overlay.Screens.Primary ?? overlay.Screens.All.FirstOrDefault();
             if (screen is null) return;
             var area = screen.WorkingArea;
             const int margin = 24;
+            var width = overlay.Bounds.Width > 0 ? overlay.Bounds.Width : desiredWidth;
             var x = string.Equals(position, "Top Left", StringComparison.OrdinalIgnoreCase)
                 ? area.X + margin
-                : area.X + area.Width - (int)overlay.Bounds.Width - margin;
+                : area.X + area.Width - (int)width - margin;
             overlay.Position = new PixelPoint(x, area.Y + margin);
         };
 
