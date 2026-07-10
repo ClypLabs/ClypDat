@@ -160,7 +160,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
 
             if (result.ExitCode != 0) throw new InvalidOperationException(result.Error);
             await MuxAudioTracksAsync(tempVideoPath, outputPath, cancellationToken);
-            return outputPath;
+            return await ClipMetadataTagger.TagCaptureBackendAsync(outputPath, "FFmpeg", cancellationToken);
         }
         finally
         {

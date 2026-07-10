@@ -90,14 +90,15 @@ public sealed class ObsReplayBuffer : IReplayBuffer
         return Task.CompletedTask;
     }
 
-    public Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default)
+    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default)
     {
         if (!IsRecording) throw new InvalidOperationException("OBS replay buffer is not running.");
         Directory.CreateDirectory(outputFolder);
         var output = _bridge.SaveReplay(outputFolder);
         if (string.IsNullOrWhiteSpace(output)) throw new InvalidOperationException("OBS replay backend returned no output path.");
         AppLog.Info($"OBS replay saved: {output}.");
-        return Task.FromResult(output);
+        output = await ClipMetadataTagger.TagCaptureBackendAsync(output, "OBS", cancellationToken);
+        return output;
     }
 
     public void SetCapturePaused(bool paused)

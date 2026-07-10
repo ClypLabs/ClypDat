@@ -40,6 +40,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _selectedCreated = "Created: No clip loaded";
     private string _selectedQuality = "Video Quality: Unknown";
     private string _selectedSize = "Size: 0 B";
+    private string _selectedCaptureBackend = string.Empty;
     private string _editorTitle = string.Empty;
     private string _editorDescription = string.Empty;
     private TimeSpan _currentTime = TimeSpan.Zero;
@@ -417,6 +418,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         private set => SetProperty(ref _selectedSize, value);
     }
 
+    public string SelectedCaptureBackend
+    {
+        get => _selectedCaptureBackend;
+        private set
+        {
+            if (!SetProperty(ref _selectedCaptureBackend, value)) return;
+            OnPropertyChanged(nameof(HasSelectedCaptureBackend));
+        }
+    }
+
+    public bool HasSelectedCaptureBackend => !string.IsNullOrWhiteSpace(SelectedCaptureBackend);
+
     public string EditorTitle
     {
         get => _editorTitle;
@@ -514,6 +527,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SaveSettings();
         await RefreshLibraryAsync();
         IsEditorVisible = false;
+        SelectedCaptureBackend = string.Empty;
     }
 
     public void SaveSettings()
@@ -694,6 +708,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _waveformCts = null;
         IsPlaying = false;
         IsEditorVisible = false;
+        SelectedCaptureBackend = string.Empty;
     }
 
     public void OpenSettings()
@@ -878,6 +893,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ? $"Video Quality: {ResolutionLabel(media.Height)}"
             : "Video Quality: Unknown";
         SelectedSize = $"Size: {FormatBytes(media.SizeBytes)}";
+        SelectedCaptureBackend = string.IsNullOrWhiteSpace(media.CaptureBackend) ? string.Empty : $"Captured with: {media.CaptureBackend}";
         SelectedMetadata = $"{SelectedQuality} - {SelectedSize}";
         Duration = media.Duration;
         CurrentTime = TimeSpan.Zero;

@@ -68,6 +68,7 @@ public sealed class MediaProbeService
         var width = 0;
         var height = 0;
         var fps = 0d;
+        var captureBackend = string.Empty;
 
         if (result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.Output))
         {
@@ -82,6 +83,11 @@ public sealed class MediaProbeService
                 }
 
                 steelSeriesAudioTracks = ReadSteelSeriesAudioTracks(format);
+                if (format.TryGetProperty("tags", out var formatTags) &&
+                    formatTags.TryGetProperty(ClipMetadataTagger.BackendTagKey, out var backendTag))
+                {
+                    captureBackend = backendTag.GetString() ?? string.Empty;
+                }
             }
 
             if (doc.RootElement.TryGetProperty("streams", out var streams))
@@ -132,7 +138,8 @@ public sealed class MediaProbeService
             tracks,
             width,
             height,
-            fps);
+            fps,
+            captureBackend);
     }
 
     public async Task<IReadOnlyDictionary<int, IReadOnlyList<double>>> LoadWaveformsAsync(
@@ -532,7 +539,8 @@ public sealed record MediaFileInfo(
     IReadOnlyList<MediaTrackInfo> Tracks,
     int Width,
     int Height,
-    double Fps);
+    double Fps,
+    string CaptureBackend = "");
 
 public sealed record MediaTrackInfo(int Index, string Type, string Codec, string Label, double VolumePercent = 100);
 
