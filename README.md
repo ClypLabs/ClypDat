@@ -18,12 +18,9 @@ Two capture backends, switchable in Settings:
 - **Windows Capture**: `ScreenRecorderLib`, backed by Windows Graphics
   Capture / DXGI desktop duplication. Doesn't inject into the target
   process, so anti-cheat can't block it the way it blocks OBS's hook.
-  Counter-Strike 2 defaults to this backend when set to "Auto", because
-  Valve Anti-Cheat blocks OBS's game-capture hook unless the user adds
-  `-allow_third_party_software` as a launch option.
 
 Foreground-window polling drives game detection: a catalog of known
-executables (Fortnite, CS2) plus a fallback that accepts any window whose
+executables plus a fallback that accepts any window whose
 process has loaded a Direct3D, OpenGL, or Vulkan module. Saved clips are
 named after the detected game and timestamp, e.g.
 `Counter-Strike 2 2026-07-10 17-30-00.mp4`.
