@@ -29,6 +29,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     private readonly SemaphoreSlim _transition = new(1, 1);
     private readonly List<ReplayAudioCapture> _audioCaptures = new();
     private readonly List<ReplayVideoSegment> _segments = new();
+    private volatile bool _sessionActive;
 
     public WindowsReplayBuffer(Func<ReplayBufferConfig> configProvider)
     {
@@ -39,7 +40,15 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             "windows-replay-buffer");
     }
 
-    public bool IsRecording => _recorder is not null;
+    // Deliberately not "_recorder is not null": rotation disposes the old recorder
+    // and creates a new one with a brief gap in between where _recorder is null but
+    // the session is still very much active. External callers (MainWindow's 1s game-
+    // detection timer) polling IsRecording during that gap would see "not recording"
+    // and call StartAsync() again mid-session - whose first action is CleanupOldFiles(),
+    // which deletes every replay_*.mp4 including ones the current save still needs.
+    // That race was the actual cause of segments vanishing ("No such file or
+    // directory") despite having been confirmed finalized moments earlier.
+    public bool IsRecording => _sessionActive;
     public TimeSpan Duration { get; private set; } = TimeSpan.FromSeconds(60);
     public event EventHandler? RecordingStopped;
 
@@ -47,6 +56,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     {
         if (IsRecording) return Task.CompletedTask;
 
+        _sessionActive = true;
         Directory.CreateDirectory(_bufferFolder);
         CleanupOldFiles();
         _config = _configProvider();
@@ -62,6 +72,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         await _transition.WaitAsync(cancellationToken);
         try
         {
+            _sessionActive = false;
             _rotationTimer?.Dispose();
             _rotationTimer = null;
             _audioRouteTimer?.Dispose();
@@ -966,6 +977,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         catch (Exception restartError)
         {
             AppLog.Error("Replay recorder restart failed", restartError);
+            _sessionActive = false;
             RecordingStopped?.Invoke(this, EventArgs.Empty);
         }
     }
