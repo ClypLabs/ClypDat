@@ -7,11 +7,9 @@ name: Release
 # zip asset named EVE-win-x64.zip, so that name must not change without
 # also updating ExpectedAssetName there.
 #
-# native/vendor/obs-runtime is git-ignored (large binary runtime, not
-# source), so this workflow downloads a pre-trimmed copy from the
-# obs-vendor-v1 release instead of expecting it in the checkout. Re-upload
-# a new obs-runtime-vendor.zip to that release (same asset name) if the
-# vendored OBS version ever changes.
+# native/vendor/obs-runtime is committed directly to the repo (trimmed to
+# only the plugins EveObsBridge.cpp loads), so checkout has it already -
+# no separate download/extract step needed here.
 
 on:
   push:
@@ -42,14 +40,6 @@ jobs:
           $version = $tag.TrimStart("v")
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "version=$version" >> $env:GITHUB_OUTPUT
-
-      - name: Download OBS vendor runtime
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path native/vendor | Out-Null
-          Invoke-WebRequest -Uri "https://github.com/${{ github.repository }}/releases/download/obs-vendor-v1/obs-runtime-vendor.zip" -OutFile obs-runtime-vendor.zip
-          Expand-Archive -Path obs-runtime-vendor.zip -DestinationPath native/vendor -Force
-          Remove-Item obs-runtime-vendor.zip
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
