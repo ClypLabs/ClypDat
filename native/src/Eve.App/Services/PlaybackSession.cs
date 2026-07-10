@@ -141,6 +141,7 @@ public sealed class PlaybackSession : IDisposable
     {
         var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
         var wasStoppedOrEnded = IsEnded || VideoPlayer.State == VLCState.Stopped;
+        AppLog.Info($"Editor play from requested={time.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}, ended={IsEnded}.");
         if (wasStoppedOrEnded)
         {
             VideoPlayer.Stop();
@@ -165,7 +166,7 @@ public sealed class PlaybackSession : IDisposable
             VideoPlayer.SetPause(false);
             _audioOutput?.Play();
         }
-        AppLog.Info($"Editor play from {time.TotalSeconds:0.###}s (seek={needsSeek}).");
+        AppLog.Info($"Editor play from requested={time.TotalSeconds:0.###}s (seek={needsSeek}), vlc after={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}.");
     }
 
     public void Pause()
@@ -230,7 +231,7 @@ public sealed class PlaybackSession : IDisposable
                 if (!VideoPlayer.IsPlaying) VideoPlayer.Play();
                 VideoPlayer.SetPause(false);
             }
-            AppLog.Info($"Editor seek begin: requested={requested.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, resume={resumePlayback}, version={seekVersion}.");
+            AppLog.Info($"Editor seek begin: requested={requested.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}, resume={resumePlayback}, version={seekVersion}.");
             if (seekVersion != Interlocked.Read(ref _seekVersion)) return false;
             var videoReady = await SeekAndWaitAsync(requested, cancellationToken).ConfigureAwait(false);
             if (seekVersion != Interlocked.Read(ref _seekVersion)) return false;
@@ -254,7 +255,7 @@ public sealed class PlaybackSession : IDisposable
                 }
             }
 
-            AppLog.Info($"Editor seek end: requested={requested.TotalSeconds:0.###}s, settled={settledTime.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, resume={resumePlayback}, resumed={resumed}, version={seekVersion}.");
+            AppLog.Info($"Editor seek end: requested={requested.TotalSeconds:0.###}s, settled={settledTime.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}, resume={resumePlayback}, resumed={resumed}, version={seekVersion}.");
             return !resumePlayback || resumed;
         }
         finally
