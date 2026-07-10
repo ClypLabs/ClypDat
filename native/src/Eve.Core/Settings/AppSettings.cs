@@ -21,6 +21,7 @@ public sealed class AppSettings
     public bool EnableEditorKeyboardShortcuts { get; set; } = true;
     public string ClipOverlayPosition { get; set; } = "Top Right";
     public string ClipOverlayVolume { get; set; } = "Medium";
+    public bool ForceSdrDuringReplay { get; set; }
     public double WindowX { get; set; } = double.NaN;
     public double WindowY { get; set; } = double.NaN;
     public double WindowWidth { get; set; } = 1180;

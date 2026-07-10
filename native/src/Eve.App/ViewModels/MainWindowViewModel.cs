@@ -335,6 +335,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public bool ForceSdrDuringReplay
+    {
+        get => Settings.ForceSdrDuringReplay;
+        set
+        {
+            if (Settings.ForceSdrDuringReplay == value) return;
+            Settings.ForceSdrDuringReplay = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
     public bool LaunchOnWindowsStartup
     {
         get => Settings.LaunchOnWindowsStartup;

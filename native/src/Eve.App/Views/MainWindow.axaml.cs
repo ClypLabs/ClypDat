@@ -62,6 +62,7 @@ public sealed partial class MainWindow : Window
         {
             _globalHotkey?.Dispose();
             _gameDetectionTimer.Stop();
+            HdrDisplayController.RestoreHdr();
             if (_replayBuffer is not null) _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
             _replayBuffer?.Dispose();
             _playback?.Dispose();
@@ -256,6 +257,7 @@ public sealed partial class MainWindow : Window
         try
         {
             if (_replayBuffer.IsRecording) await _replayBuffer.StopAsync();
+            if (ViewModel.Settings.ForceSdrDuringReplay) HdrDisplayController.RestoreHdr();
             ViewModel.IsReplayRecording = false;
             ViewModel.RecorderStatus = _replayArmed ? "Replay Armed" : "Replay Off";
         }
@@ -289,6 +291,7 @@ public sealed partial class MainWindow : Window
             if (_replayBuffer is null) return;
             await EnsureLibraryFolderAsync();
             ApplyPrimaryCaptureBounds();
+            if (ViewModel.Settings.ForceSdrDuringReplay) HdrDisplayController.ForceSdrOn();
             await Task.Run(() => _replayBuffer.StartAsync());
             AppLog.Info("Replay started.");
             ViewModel.IsReplayRecording = _replayBuffer.IsRecording;
@@ -413,10 +416,12 @@ public sealed partial class MainWindow : Window
 
         var screen = Screens.ScreenFromWindow(this) ?? Screens.Primary ?? Screens.All.FirstOrDefault();
         var area = screen?.WorkingArea ?? new PixelRect(0, 0, 1920, 1080);
-        const int margin = 24;
+        var scaling = screen?.Scaling ?? 1.0;
+        var marginDevicePixels = (int)Math.Round(24 * scaling);
+        var widthDevicePixels = (int)Math.Round(desiredWidth * scaling);
         var x = string.Equals(position, "Top Left", StringComparison.OrdinalIgnoreCase)
-            ? area.X + margin
-            : area.X + area.Width - (int)desiredWidth - margin;
+            ? area.X + marginDevicePixels
+            : area.X + area.Width - widthDevicePixels - marginDevicePixels;
 
         var overlay = new Window
         {
@@ -429,7 +434,7 @@ public sealed partial class MainWindow : Window
             TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
             SizeToContent = SizeToContent.WidthAndHeight,
             WindowStartupLocation = WindowStartupLocation.Manual,
-            Position = new PixelPoint(x, area.Y + margin),
+            Position = new PixelPoint(x, area.Y + marginDevicePixels),
             Content = badge
         };
 
