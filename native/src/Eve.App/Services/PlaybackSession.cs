@@ -324,7 +324,14 @@ public sealed class PlaybackSession : IDisposable
             if (_audioOutput is null) return;
             var position = Position;
             SeekAudio(position);
-            var willPlay = _shouldPlay && VideoPlayer.IsPlaying;
+            // VideoPlayer.IsPlaying used to gate this too, but LibVLC's Play()/seek
+            // is asynchronous - PlayFrom already issued Play() moments earlier, but
+            // IsPlaying can still read false here if this runs before that state
+            // transition lands, which permanently skipped starting the audio output
+            // while video went on to play fine. _shouldPlay already is the source of
+            // truth for play/pause intent (set by Play()/Pause()), so trust that
+            // instead of re-checking a state that hasn't caught up yet.
+            var willPlay = _shouldPlay;
             if (willPlay)
             {
                 _audioOutput.Play();
