@@ -716,8 +716,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         foreach (var device in _audioDevices.GetRenderDevices(includeDisabled: true)) ChatAudioDevices.Add(device);
         MicrophoneDevices.Clear();
         foreach (var device in _audioDevices.GetCaptureDevices()) MicrophoneDevices.Add(device);
-        SelectedChatAudioDevice = ChatAudioDevices.FirstOrDefault(device => device.Id == Settings.ChatAudioDeviceId) ?? ChatAudioDevices.FirstOrDefault();
-        SelectedMicrophoneDevice = MicrophoneDevices.FirstOrDefault(device => device.Id == Settings.MicrophoneDeviceId) ?? MicrophoneDevices.FirstOrDefault();
+
+        // Restore the saved selection for display without persisting a fallback over it:
+        // the saved device id may just be temporarily missing from this enumeration pass
+        // (driver reinit, USB replug), and overwriting Settings here would permanently
+        // lose the user's real choice even after the device comes back.
+        var chatMatch = ChatAudioDevices.FirstOrDefault(device => device.Id == Settings.ChatAudioDeviceId);
+        SetProperty(ref _selectedChatAudioDevice, chatMatch ?? ChatAudioDevices.FirstOrDefault(), nameof(SelectedChatAudioDevice));
+
+        var micMatch = MicrophoneDevices.FirstOrDefault(device => device.Id == Settings.MicrophoneDeviceId);
+        SetProperty(ref _selectedMicrophoneDevice, micMatch ?? MicrophoneDevices.FirstOrDefault(), nameof(SelectedMicrophoneDevice));
+
+        if (micMatch is null && MicrophoneDevices.Count > 0 && !string.IsNullOrWhiteSpace(Settings.MicrophoneDeviceId))
+        {
+            AppLog.Info($"Saved microphone device '{Settings.MicrophoneDeviceId}' not found this pass; showing '{_selectedMicrophoneDevice?.Name}' without changing the saved setting.");
+        }
     }
 
     public async Task RefreshOpenProcessesAsync()

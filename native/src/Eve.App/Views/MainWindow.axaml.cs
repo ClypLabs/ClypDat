@@ -31,7 +31,7 @@ public sealed partial class MainWindow : Window
     private readonly HashSet<string> _capturedHotkeyKeys = new(StringComparer.OrdinalIgnoreCase);
     private bool _replayTransitioning;
     private bool _replayArmed;
-    private bool _clipSaving;
+    private int _clipSaving;
     private bool _cs2SetupDialogOpen;
 
     public MainWindow()
@@ -105,7 +105,7 @@ public sealed partial class MainWindow : Window
         _replayBuffer.RecordingStopped += ReplayBuffer_OnRecordingStopped;
         _globalHotkey = new GlobalHotkeyService();
         _globalHotkey.SetHotkey(ViewModel.Settings.SaveReplayHotkey);
-        _globalHotkey.Pressed += (_, _) => Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync());
+        _globalHotkey.Pressed += (_, _) => _ = Task.Run(SaveReplayClipAsync);
         try
         {
             _globalHotkey.Start();
@@ -257,35 +257,47 @@ public sealed partial class MainWindow : Window
 
     private async Task SaveReplayClipAsync()
     {
-        if (ViewModel is null) return;
-        if (_clipSaving) return;
-        _clipSaving = true;
-        InitializeReplayServices();
-        if (_replayBuffer is null || !_replayBuffer.IsRecording)
-        {
-            _clipSaving = false;
-            if (ViewModel.IsReplayRecording) ViewModel.IsReplayRecording = false;
-            await ShowMessageAsync("Clip failed", _replayArmed ? "Replay is armed, but no game is being captured yet." : "Replay buffer is not running.");
-            return;
-        }
-
+        if (Interlocked.CompareExchange(ref _clipSaving, 1, 0) != 0) return;
         try
         {
-            await EnsureLibraryFolderAsync();
-            var outputFolder = ViewModel.Settings.LibraryFolder;
-            AppLog.Info("Replay clip save requested.");
-            var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder));
-            AppLog.Info($"Replay clip saved: {outputPath}");
-            await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Replay clip save failed", error);
-            await ShowMessageAsync("Clip failed", error.Message);
+            var viewModel = ViewModel;
+            if (viewModel is null) return;
+            InitializeReplayServices();
+            if (_replayBuffer is null || !_replayBuffer.IsRecording)
+            {
+                await Dispatcher.UIThread.InvokeAsync(async () =>
+                {
+                    if (viewModel.IsReplayRecording) viewModel.IsReplayRecording = false;
+                    await ShowMessageAsync("Clip failed", _replayArmed ? "Replay is armed, but no game is being captured yet." : "Replay buffer is not running.");
+                });
+                return;
+            }
+
+            var outputFolder = viewModel.Settings.LibraryFolder;
+            var folderReady = !string.IsNullOrWhiteSpace(outputFolder) && Directory.Exists(outputFolder);
+
+            try
+            {
+                if (!folderReady)
+                {
+                    await Dispatcher.UIThread.InvokeAsync(EnsureLibraryFolderAsync);
+                    outputFolder = viewModel.Settings.LibraryFolder;
+                }
+
+                AppLog.Info("Replay clip save requested.");
+                var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder));
+                AppLog.Info($"Replay clip saved: {outputPath}");
+                await Dispatcher.UIThread.InvokeAsync(() => viewModel.AddOrUpdateLibraryClipAsync(outputPath));
+            }
+            catch (Exception error)
+            {
+                AppLog.Error("Replay clip save failed", error);
+                await Dispatcher.UIThread.InvokeAsync(() => ShowMessageAsync("Clip failed", error.Message));
+            }
         }
         finally
         {
-            _clipSaving = false;
+            Interlocked.Exchange(ref _clipSaving, 0);
         }
     }
 
