@@ -302,7 +302,10 @@
                 <StackPanel Grid.Row="3" Grid.Column="1" Spacing="6">
                   <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayBackends}" SelectedItem="{Binding SelectedReplayBackend}" Width="320" HorizontalAlignment="Left" />
                   <TextBlock Text="{Binding SelectedReplayBackend.Description}" Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" MaxWidth="420" HorizontalAlignment="Left" />
-                  <TextBlock Text="Restart EVE for the backend change to take effect." Foreground="#E5A00D" FontSize="12" FontWeight="Bold" IsVisible="{Binding ReplayBackendRestartRequired}" />
+                  <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding ReplayBackendRestartRequired}">
+                    <TextBlock Text="Restart EVE for the backend change to take effect." Foreground="#E5A00D" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
+                    <Button Content="Restart Now" Click="RestartAppButton_OnClick" />
+                  </StackPanel>
                 </StackPanel>
                 <CheckBox Grid.Row="4" Grid.ColumnSpan="2" Content="Start replay buffer when EVE opens" IsChecked="{Binding StartReplayOnLaunch}" />
               </Grid>

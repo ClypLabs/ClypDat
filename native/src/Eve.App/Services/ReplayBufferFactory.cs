@@ -4,11 +4,19 @@ namespace Eve.App.Services;
 
 public static class ReplayBufferFactory
 {
+    // Games known to fight OBS's game_capture hook (VAC blocks it for CS2 without a
+    // launch option, causing a black/frozen capture) default to Windows Capture
+    // instead when the user hasn't explicitly picked a backend.
+    private static readonly HashSet<string> AutoLegacyGames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "cs2.exe"
+    };
+
     public static IReplayBuffer Create(Func<ReplayBufferConfig> configProvider)
     {
         if (!OperatingSystem.IsWindows()) return new FfmpegReplayBuffer(configProvider);
 
-        var backend = ResolveBackend(configProvider);
+        var backend = ResolveEffectiveBackend(configProvider());
         if (backend == ReplayBackendOption.Legacy)
         {
             AppLog.Info("Replay backend selected: Legacy Windows.");
@@ -26,10 +34,20 @@ public static class ReplayBufferFactory
         return new WindowsReplayBuffer(configProvider);
     }
 
-    private static ReplayBackendOption ResolveBackend(Func<ReplayBufferConfig> configProvider)
+    public static ReplayBackendOption ResolveEffectiveBackend(ReplayBufferConfig config)
     {
-        var config = configProvider();
-        return Enum.TryParse<ReplayBackendOption>(config.Backend, ignoreCase: true, out var backend)
+        var backend = ParseBackend(config.Backend);
+        if (backend == ReplayBackendOption.Auto && AutoLegacyGames.Contains(config.GameExecutableName))
+        {
+            return ReplayBackendOption.Legacy;
+        }
+
+        return backend;
+    }
+
+    private static ReplayBackendOption ParseBackend(string value)
+    {
+        return Enum.TryParse<ReplayBackendOption>(value, ignoreCase: true, out var backend)
             ? backend
             : ReplayBackendOption.Auto;
     }

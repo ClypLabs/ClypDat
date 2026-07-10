@@ -27,6 +27,7 @@ public sealed partial class MainWindow : Window
     private readonly Stopwatch _playheadClock = new();
     private TimeSpan _playheadBaseTime = TimeSpan.Zero;
     private IReplayBuffer? _replayBuffer;
+    private ReplayBackendOption _activeReplayBackend = ReplayBackendOption.Auto;
     private GlobalHotkeyService? _globalHotkey;
     private readonly HashSet<string> _capturedHotkeyKeys = new(StringComparer.OrdinalIgnoreCase);
     private bool _replayTransitioning;
@@ -103,6 +104,7 @@ public sealed partial class MainWindow : Window
 
         _replayBuffer = ReplayBufferFactory.Create(ViewModel.CreateReplayConfig);
         _replayBuffer.RecordingStopped += ReplayBuffer_OnRecordingStopped;
+        _activeReplayBackend = ReplayBufferFactory.ResolveEffectiveBackend(ViewModel.CreateReplayConfig());
         _globalHotkey = new GlobalHotkeyService();
         _globalHotkey.SetHotkey(ViewModel.Settings.SaveReplayHotkey);
         _globalHotkey.Pressed += (_, _) => Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(), DispatcherPriority.Send);
@@ -121,6 +123,42 @@ public sealed partial class MainWindow : Window
             ViewModel.RecorderStatus = "Replay Armed";
             UpdateDetectedGame();
         }
+    }
+
+    private void RestartAppButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var exePath = Environment.ProcessPath;
+            if (!string.IsNullOrWhiteSpace(exePath))
+            {
+                Process.Start(new ProcessStartInfo(exePath) { UseShellExecute = true });
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Restart failed", error);
+        }
+        finally
+        {
+            Close();
+            Environment.Exit(0);
+        }
+    }
+
+    private void EnsureReplayBufferMatchesGame()
+    {
+        if (ViewModel is null || _replayBuffer is null || _replayBuffer.IsRecording) return;
+        var config = ViewModel.CreateReplayConfig();
+        var desired = ReplayBufferFactory.ResolveEffectiveBackend(config);
+        if (desired == _activeReplayBackend) return;
+
+        AppLog.Info($"Replay backend switching: {_activeReplayBackend} -> {desired} for game={config.GameExecutableName}.");
+        _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
+        _replayBuffer.Dispose();
+        _replayBuffer = ReplayBufferFactory.Create(ViewModel.CreateReplayConfig);
+        _replayBuffer.RecordingStopped += ReplayBuffer_OnRecordingStopped;
+        _activeReplayBackend = desired;
     }
 
     private async void FolderButton_OnClick(object? sender, RoutedEventArgs e)
@@ -233,6 +271,8 @@ public sealed partial class MainWindow : Window
                 ViewModel.RecorderStatus = _replayArmed ? "Replay Armed" : "Replay Off";
                 return;
             }
+            EnsureReplayBufferMatchesGame();
+            if (_replayBuffer is null) return;
             await ShowCs2CaptureNoticeIfNeededAsync();
             await EnsureLibraryFolderAsync();
             ApplyPrimaryCaptureBounds();
