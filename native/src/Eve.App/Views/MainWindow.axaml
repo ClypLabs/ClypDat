@@ -229,10 +229,11 @@
                   </StackPanel>
                 </StackPanel>
                 <CheckBox Grid.Row="4" Grid.ColumnSpan="2" Content="Start replay buffer when EVE opens" IsChecked="{Binding StartReplayOnLaunch}" />
-                <StackPanel Grid.Row="5" Grid.ColumnSpan="2" Spacing="4">
-                  <CheckBox Content="Force SDR while replay buffer is active" IsChecked="{Binding ForceSdrDuringReplay}" />
-                  <TextBlock Text="Temporarily disables HDR on capture start and restores it on stop, to avoid washed-out HDR footage. Causes a brief screen flicker at the start and end of each session." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" MaxWidth="560" Margin="26,0,0,0" />
-                </StackPanel>
+                <CheckBox Grid.Row="5" Grid.ColumnSpan="2" Content="Force SDR while replay buffer is active" IsChecked="{Binding ForceSdrDuringReplay}">
+                  <ToolTip.Tip>
+                    <TextBlock Text="Temporarily disables HDR on capture start and restores it on stop, to avoid washed-out HDR footage. Causes a brief screen flicker at the start and end of each session." TextWrapping="Wrap" MaxWidth="360" />
+                  </ToolTip.Tip>
+                </CheckBox>
               </Grid>
             </StackPanel>
           </Border>
