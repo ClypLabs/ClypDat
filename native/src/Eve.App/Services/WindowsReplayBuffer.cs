@@ -143,7 +143,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             }
             finally
             {
-                if (!IsRecording)
+                if (IsRecording)
                 {
                     StartRecorder();
                 }
