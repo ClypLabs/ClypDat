@@ -25,6 +25,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private ProcessOption? _selectedProcessExclusion;
     private ReplayDurationPreset? _selectedReplayDurationPreset;
     private ReplayQualityPreset? _selectedReplayQualityPreset;
+    private ReplayBackendPreset? _selectedReplayBackend;
+    private readonly string _initialReplayBackend;
+    private bool _replayBackendRestartRequired;
     private ExportCodecOption? _selectedExportCodec;
     private string _recorderStatus = "Replay Off";
     private string _activeGame = "No game detected";
@@ -82,6 +85,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("H.265", "hevc_nvenc", "libx265"),
             new("AV1", "av1_nvenc", "libaom-av1")
         };
+        ReplayBackends = new ObservableCollection<ReplayBackendPreset>
+        {
+            new("Auto", "Auto", "Uses OBS if available, otherwise falls back automatically."),
+            new("OBS (best quality)", "Obs", "Highest quality and lowest overhead, but some anti-cheat games (e.g. CS2) need a launch option or may show a black/frozen capture."),
+            new("Windows Capture (no game hook)", "Legacy", "Captures the screen directly with no process hook, so it isn't blocked by anti-cheat - works for CS2 without any launch option, at the cost of slightly higher overhead.")
+        };
         ExcludedProcesses = new ObservableCollection<string>(Settings.GameAudioExcludedProcesses);
         RefreshAudioDevices();
         SelectedReplayDurationPreset = ReplayDurationPresets.FirstOrDefault(preset => preset.Seconds == Settings.ReplayDurationSeconds) ??
@@ -92,6 +101,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                                       ReplayQualityPresets.First(preset => preset.Label == "Balanced");
         SelectedExportCodec = ExportCodecs.FirstOrDefault(codec => string.Equals(codec.Label, Settings.ExportVideoCodec, StringComparison.OrdinalIgnoreCase)) ??
                               ExportCodecs.First(codec => codec.Label == "H.264");
+        _initialReplayBackend = string.IsNullOrWhiteSpace(Settings.ReplayBackend) ? "Auto" : Settings.ReplayBackend;
+        _selectedReplayBackend = ReplayBackends.FirstOrDefault(preset => string.Equals(preset.Value, _initialReplayBackend, StringComparison.OrdinalIgnoreCase)) ??
+                                  ReplayBackends.First(preset => preset.Value == "Auto");
         _libraryRefreshDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
         _libraryRefreshDebounce.Tick += async (_, _) =>
         {
@@ -109,6 +121,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ProcessOption> OpenProcesses { get; }
     public ObservableCollection<ReplayDurationPreset> ReplayDurationPresets { get; }
     public ObservableCollection<ReplayQualityPreset> ReplayQualityPresets { get; }
+    public ObservableCollection<ReplayBackendPreset> ReplayBackends { get; }
     public ObservableCollection<ExportCodecOption> ExportCodecs { get; }
     public ObservableCollection<string> ExcludedProcesses { get; }
 
@@ -259,6 +272,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Settings.ExportVideoCodec = value.Label;
             SaveSettings();
         }
+    }
+
+    public ReplayBackendPreset? SelectedReplayBackend
+    {
+        get => _selectedReplayBackend;
+        set
+        {
+            if (!SetProperty(ref _selectedReplayBackend, value) || value is null) return;
+            Settings.ReplayBackend = value.Value;
+            SaveSettings();
+            ReplayBackendRestartRequired = !string.Equals(value.Value, _initialReplayBackend, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    public bool ReplayBackendRestartRequired
+    {
+        get => _replayBackendRestartRequired;
+        private set => SetProperty(ref _replayBackendRestartRequired, value);
     }
 
     public bool StartReplayOnLaunch
