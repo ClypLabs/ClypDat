@@ -142,7 +142,8 @@ public sealed class PlaybackSession : IDisposable
     public void PlayFrom(TimeSpan time)
     {
         var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
-        if (IsEnded || VideoPlayer.State == VLCState.Stopped)
+        var wasStoppedOrEnded = IsEnded || VideoPlayer.State == VLCState.Stopped;
+        if (wasStoppedOrEnded)
         {
             VideoPlayer.Stop();
             RebuildAudioOutput();
@@ -152,13 +153,19 @@ public sealed class PlaybackSession : IDisposable
         _shouldPlay = true;
         _lastRequestedPosition = TimeSpan.FromMilliseconds(milliseconds);
         ForceVideoSilent();
-        VideoPlayer.Time = milliseconds;
+
+        // A simple resume-from-pause is already sitting at this position; forcing
+        // VideoPlayer.Time here makes VLC redo a full keyframe seek/rebuffer for no
+        // reason, which is what causes the video to freeze on unpause.
+        var needsSeek = wasStoppedOrEnded || Math.Abs(VideoPlayer.Time - milliseconds) > 150;
+        if (needsSeek) VideoPlayer.Time = milliseconds;
         EnsureAudioOutputCanSeek(time);
-        SeekAudio(time);
+        if (needsSeek) SeekAudio(time);
         VideoPlayer.Play();
         VideoPlayer.SetPause(false);
         _audioOutput?.Play();
-        AppLog.Info($"Editor play from {time.TotalSeconds:0.###}s.");
+        _driftCheckClock.Restart();
+        AppLog.Info($"Editor play from {time.TotalSeconds:0.###}s (seek={needsSeek}).");
     }
 
     public void Pause()
@@ -223,6 +230,7 @@ public sealed class PlaybackSession : IDisposable
                 VideoPlayer.SetPause(false);
                 SeekAudio(Position);
                 _audioOutput?.Play();
+                _driftCheckClock.Restart();
                 resumed = true;
             }
             else
