@@ -26,6 +26,7 @@ public sealed partial class MainWindow : Window
     private bool _timelineWasPlayingBeforeDrag;
     private readonly Stopwatch _playheadClock = new();
     private TimeSpan _playheadBaseTime = TimeSpan.Zero;
+    private static readonly TimeSpan PlayheadResyncInterval = TimeSpan.FromMilliseconds(500);
     private IReplayBuffer? _replayBuffer;
     private GlobalHotkeyService? _globalHotkey;
     private readonly HashSet<string> _capturedHotkeyKeys = new(StringComparer.OrdinalIgnoreCase);
@@ -941,6 +942,11 @@ public sealed partial class MainWindow : Window
         }
         if (ViewModel.IsPlaying)
         {
+            _playback.CorrectAudioDriftIfNeeded();
+            if (_playheadClock.Elapsed >= PlayheadResyncInterval)
+            {
+                StartPlayheadClock(_playback.Position);
+            }
             ViewModel.CurrentTime = SmoothPlaybackPosition();
         }
         else

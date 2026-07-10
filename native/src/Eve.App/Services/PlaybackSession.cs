@@ -24,6 +24,9 @@ public sealed class PlaybackSession : IDisposable
     private long _seekVersion;
     private TimeSpan _lastRequestedPosition = TimeSpan.Zero;
     private readonly SemaphoreSlim _seekLock = new(1, 1);
+    private readonly Stopwatch _driftCheckClock = Stopwatch.StartNew();
+    private static readonly TimeSpan DriftCheckInterval = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan DriftThreshold = TimeSpan.FromMilliseconds(120);
 
     public PlaybackSession()
     {
@@ -270,6 +273,21 @@ public sealed class PlaybackSession : IDisposable
         {
             _audioOutput.Play();
         }
+    }
+
+    public void CorrectAudioDriftIfNeeded()
+    {
+        if (_isSeeking || !_shouldPlay || _audioOutput is null || _audioSources.Count == 0 || !VideoPlayer.IsPlaying) return;
+        if (_driftCheckClock.Elapsed < DriftCheckInterval) return;
+        _driftCheckClock.Restart();
+
+        var videoTime = TimeSpan.FromMilliseconds(Math.Max(0, VideoPlayer.Time));
+        var audioTime = _audioSources.Values.First().Reader.CurrentTime;
+        var drift = videoTime - audioTime;
+        if (drift.Duration() < DriftThreshold) return;
+
+        AppLog.Info($"Editor audio drift corrected: drift={drift.TotalMilliseconds:0}ms, video={videoTime.TotalSeconds:0.###}s, audio={audioTime.TotalSeconds:0.###}s.");
+        SeekAudio(videoTime);
     }
 
     public void SyncAndPlayMixedAudio()
