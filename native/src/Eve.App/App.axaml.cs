@@ -52,8 +52,10 @@ public sealed partial class App : Application
         try
         {
             _trayIconStream = AssetLoader.Open(new Uri("avares://EVE/Assets/eve-icon.ico"));
-            var openItem = new NativeMenuItem("Open EVE");
+            var openItem = new NativeMenuItem("Open");
             openItem.Click += (_, _) => RestoreMainWindow();
+            var settingsItem = new NativeMenuItem("Settings");
+            settingsItem.Click += (_, _) => OpenSettingsFromTray();
             var quitItem = new NativeMenuItem("Quit");
             quitItem.Click += (_, _) =>
             {
@@ -67,7 +69,7 @@ public sealed partial class App : Application
             {
                 Icon = new WindowIcon(_trayIconStream),
                 ToolTipText = "EVE",
-                Menu = new NativeMenu { Items = { openItem, quitItem } }
+                Menu = new NativeMenu { Items = { openItem, settingsItem, quitItem } }
             };
             _trayIcon.Clicked += (_, _) => RestoreMainWindow();
             _trayIcon.IsVisible = true;
@@ -85,5 +87,11 @@ public sealed partial class App : Application
         _mainWindow.Show();
         if (_mainWindow.WindowState == WindowState.Minimized) _mainWindow.WindowState = WindowState.Normal;
         _mainWindow.Activate();
+    }
+
+    private void OpenSettingsFromTray()
+    {
+        RestoreMainWindow();
+        if (_mainWindow?.DataContext is MainWindowViewModel viewModel) viewModel.OpenSettings();
     }
 }
