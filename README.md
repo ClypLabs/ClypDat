@@ -1,4 +1,4 @@
-# EVE
+# EVE - Easy Video Editor
 
 EVE records a rolling buffer of gameplay on Windows and saves the last N
 seconds to a file when you press a hotkey. It also has a built-in editor for
@@ -49,10 +49,6 @@ running install via a PowerShell helper that waits for the process to exit.
 - An NVIDIA GPU. The OBS backend's encoder is NVENC-only; there is no
   software or non-NVIDIA fallback.
 
-`ffmpeg` and `ffprobe` (used for muxing, probing, and thumbnail/waveform
-generation) ship bundled with EVE in `native/vendor/ffmpeg`. No separate
-install needed.
-
 ## Building
 
 ```powershell
@@ -77,30 +73,6 @@ Pushing a tag matching `v*` triggers `.github/workflows/release.yml`, which
 builds the same output and packages it four ways: a zip, a self-extracting
 portable exe, an NSIS installer, and an MSI.
 
-## Layout
-
-```
-native/
-  src/
-    Eve.App/                  Avalonia UI, view models, platform services
-    Eve.Core/                 settings and clip-library models
-    Eve.Capture.Abstractions/ IReplayBuffer and related interfaces
-    Eve.ObsBridge/             C++ bridge to the OBS runtime
-  vendor/
-    obs-runtime/               trimmed OBS Studio runtime, committed to git
-installer/                     NSIS and WiX installer definitions
-licenses/                      GPL-2.0 and LGPL-2.1 full text
-```
-
-## Third-party licenses
-
-EVE bundles OBS Studio (GPLv2) and LibVLC (LGPL-2.1-or-later) binaries.
-`THIRD-PARTY-LICENSES.md` lists what's bundled, under which license, and
-where to get matching source. `native/vendor/obs-runtime` is not a full OBS
-Studio install; it's trimmed to the six plugins the bridge actually loads
-(`win-capture`, `win-wasapi`, `image-source`, `obs-ffmpeg`, `obs-nvenc`,
-`text-freetype2`).
-
 ## Known limitations
 
 - Windows only.
@@ -111,6 +83,15 @@ Studio install; it's trimmed to the six plugins the bridge actually loads
   content.
 - Editor audio and video can drift out of sync on long clips (see Editor,
   above).
+
+## Third-party licenses
+
+EVE bundles OBS Studio (GPLv2) and LibVLC (LGPL-2.1-or-later) binaries.
+`THIRD-PARTY-LICENSES.md` lists what's bundled, under which license, and
+where to get matching source. `native/vendor/obs-runtime` is not a full OBS
+Studio install; it's trimmed to the six plugins the bridge actually loads
+(`win-capture`, `win-wasapi`, `image-source`, `obs-ffmpeg`, `obs-nvenc`,
+`text-freetype2`).
 
 ## License
 
