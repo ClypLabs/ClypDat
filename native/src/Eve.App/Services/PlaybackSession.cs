@@ -246,8 +246,13 @@ public sealed class PlaybackSession : IDisposable
             var settledTime = Position;
             lock (_transportLock)
             {
-                EnsureAudioOutputCanSeek(requested);
-                SeekAudio(requested);
+                // Seek audio to where the video actually landed (settledTime), not
+                // the raw requested time - SeekAndWaitAsync tolerates the video
+                // settling up to 650ms away from the request, and audio pinning to
+                // the unadjusted request instead of that actual position is what
+                // caused audible desync after a paused timeline click.
+                EnsureAudioOutputCanSeek(settledTime);
+                SeekAudio(settledTime);
                 if (resumePlayback && videoReady)
                 {
                     VideoPlayer.SetPause(false);
