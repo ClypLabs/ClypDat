@@ -1,0 +1,157 @@
+name: Release
+
+# Triggered by pushing a tag like v0.1.0. Builds the native win-x64 app and
+# packages it four ways: a raw zip, a self-extracting portable exe, an NSIS
+# setup.exe, and an MSI - then attaches all four to a GitHub Release for
+# that tag. AppUpdateService.cs (in-app updater) specifically looks for the
+# zip asset named EVE-win-x64.zip, so that name must not change without
+# also updating ExpectedAssetName there.
+#
+# native/vendor/obs-runtime is git-ignored (large binary runtime, not
+# source), so this workflow downloads a pre-trimmed copy from the
+# obs-vendor-v1 release instead of expecting it in the checkout. Re-upload
+# a new obs-runtime-vendor.zip to that release (same asset name) if the
+# vendored OBS version ever changes.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (defaults to the triggering tag)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ inputs.tag }}"
+          if ([string]::IsNullOrWhiteSpace($tag)) { $tag = "${{ github.ref_name }}" }
+          $version = $tag.TrimStart("v")
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Download OBS vendor runtime
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path native/vendor | Out-Null
+          Invoke-WebRequest -Uri "https://github.com/${{ github.repository }}/releases/download/obs-vendor-v1/obs-runtime-vendor.zip" -OutFile obs-runtime-vendor.zip
+          Expand-Archive -Path obs-runtime-vendor.zip -DestinationPath native/vendor -Force
+          Remove-Item obs-runtime-vendor.zip
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build native ObsBridge (C++)
+        run: msbuild native\src\Eve.ObsBridge\Eve.ObsBridge.vcxproj /p:Configuration=Release /p:Platform=x64 /nologo /v:minimal
+
+      - name: Stage ObsBridge.dll where Eve.App.csproj expects it
+        shell: pwsh
+        run: |
+          $dll = Get-ChildItem -Recurse -Filter Eve.ObsBridge.dll native\src\Eve.ObsBridge |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $dll) { throw "Eve.ObsBridge.dll not found after build." }
+          New-Item -ItemType Directory -Force -Path native\src\Eve.ObsBridge\bin\x64\Release | Out-Null
+          Copy-Item $dll.FullName native\src\Eve.ObsBridge\bin\x64\Release\Eve.ObsBridge.dll -Force
+
+      - name: Publish EVE.App
+        run: >
+          dotnet publish native\src\Eve.App\Eve.App.csproj
+          -c Release -r win-x64 --self-contained true -p:Platform=x64
+          -p:Version=${{ steps.version.outputs.version }}
+          -o native\publish\win-x64-folder --nologo
+
+      - name: Verify fresh ObsBridge.dll made it into publish output
+        shell: pwsh
+        run: |
+          $built = Get-FileHash native\src\Eve.ObsBridge\bin\x64\Release\Eve.ObsBridge.dll
+          $published = Get-FileHash native\publish\win-x64-folder\Eve.ObsBridge.dll
+          if ($built.Hash -ne $published.Hash) {
+            Copy-Item native\src\Eve.ObsBridge\bin\x64\Release\Eve.ObsBridge.dll native\publish\win-x64-folder\Eve.ObsBridge.dll -Force
+          }
+
+      - name: Trim non-Windows runtime assets
+        shell: pwsh
+        run: |
+          Get-ChildItem native\publish\win-x64-folder\runtimes -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -ne "win-x64" } | Remove-Item -Recurse -Force
+
+      - name: Build zip artifact
+        shell: pwsh
+        run: Compress-Archive -Path native\publish\win-x64-folder\* -DestinationPath EVE-win-x64.zip
+
+      - name: Install packaging tools
+        run: choco install nsis wixtoolset 7zip -y --no-progress
+
+      - name: Build portable exe (7-Zip self-extracting archive)
+        shell: pwsh
+        run: |
+          $sevenZip = "C:\Program Files\7-Zip\7z.exe"
+          $sfxModule = "C:\Program Files\7-Zip\7z.sfx"
+          & $sevenZip a -mx=5 payload.7z ".\native\publish\win-x64-folder\*"
+          $configLines = @(
+            ';!@Install@!UTF-8!',
+            'Title="EVE"',
+            'RunProgram="EVE.exe"',
+            ';!@InstallEnd@!'
+          )
+          [System.IO.File]::WriteAllText("sfx-config.txt", ($configLines -join "`r`n"), [System.Text.Encoding]::UTF8)
+          cmd /c copy /b "$sfxModule" + sfx-config.txt + payload.7z EVE-Portable.exe
+
+      - name: Build NSIS installer
+        run: >
+          makensis
+          /DEVE_VERSION=${{ steps.version.outputs.version }}
+          /DEVE_SOURCE_DIR=..\native\publish\win-x64-folder
+          /DEVE_OUTPUT_FILE=..\EVE-Setup.exe
+          installer\EVE.nsi
+
+      - name: Harvest publish folder for MSI
+        shell: pwsh
+        run: |
+          $wixBin = "${env:WIX}bin"
+          & "$wixBin\heat.exe" dir native\publish\win-x64-folder `
+            -cg AppFiles -dr INSTALLFOLDER -srd -sreg -gg -g1 -sfrag -var var.EveSourceDir `
+            -out installer\AppFiles.wxs
+
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          $wixBin = "${env:WIX}bin"
+          $srcDir = (Resolve-Path native\publish\win-x64-folder).Path
+          & "$wixBin\candle.exe" -arch x64 `
+            -dEveVersion=${{ steps.version.outputs.version }} `
+            -dEveSourceDir="$srcDir" `
+            -ext WixUtilExtension -ext WixUIExtension `
+            installer\Product.wxs installer\AppFiles.wxs -out installer\
+          & "$wixBin\light.exe" -ext WixUtilExtension -ext WixUIExtension `
+            installer\Product.wixobj installer\AppFiles.wixobj `
+            -out EVE.msi -sice:ICE61
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.version.outputs.tag }}"
+          gh release create $tag `
+            EVE-win-x64.zip EVE-Portable.exe EVE-Setup.exe EVE.msi `
+            --title "EVE $tag" `
+            --generate-notes

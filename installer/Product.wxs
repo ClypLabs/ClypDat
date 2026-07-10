@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  EVE MSI product definition. Built by the release workflow
+  (.github/workflows/release.yml), which passes -dEveVersion=<version> and
+  -dEveSourceDir=<published win-x64-folder> to candle.exe, and separately
+  runs heat.exe to harvest that same source directory into AppFiles.wxs
+  (the ComponentGroup "AppFiles" referenced below) since it's hundreds of
+  files (obs/libvlc runtimes) that shouldn't be hand-maintained here.
+
+  UpgradeCode is fixed forever - never change it across releases, or
+  upgrades will install side-by-side instead of replacing the old version.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
+  <Product Id="*"
+           Name="EVE"
+           Language="1033"
+           Version="$(var.EveVersion)"
+           Manufacturer="Stormanzanii"
+           UpgradeCode="6F6E2261-C978-4F49-AF7A-ACD933CF33FD">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perUser" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of EVE is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <Icon Id="EveIcon.ico" SourceFile="..\assets\eve-icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="EveIcon.ico" />
+
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <UIRef Id="WixUI_InstallDir" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="LocalAppDataFolder">
+        <Directory Id="ProgramsFolder" Name="Programs">
+          <Directory Id="INSTALLFOLDER" Name="EVE" />
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="EVE" />
+      </Directory>
+      <Directory Id="DesktopFolder" />
+    </Directory>
+
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="ApplicationShortcut" Guid="*">
+        <Shortcut Id="ApplicationStartMenuShortcut"
+                  Name="EVE"
+                  Target="[INSTALLFOLDER]EVE.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <Shortcut Id="UninstallShortcut"
+                  Name="Uninstall EVE"
+                  Target="[SystemFolder]msiexec.exe"
+                  Arguments="/x [ProductCode]" />
+        <RemoveFolder Id="RemoveApplicationProgramsFolder" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\EVE" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="*">
+        <Shortcut Id="ApplicationDesktopShortcut"
+                  Name="EVE"
+                  Target="[INSTALLFOLDER]EVE.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKCU" Key="Software\EVE" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="MainApplication" Title="EVE" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="ApplicationShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+  </Product>
+</Wix>
