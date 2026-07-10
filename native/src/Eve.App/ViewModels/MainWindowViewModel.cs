@@ -882,20 +882,60 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             "-y",
             "-ss", startSeconds.ToString("0.###"),
             "-t", durationSeconds.ToString("0.###"),
-            "-i", SelectedVideoPath,
-            "-map", "0:v:0?",
-            "-map", "0:a?",
-            "-sn"
+            "-i", SelectedVideoPath
         };
 
+        // The saved clip has game/chat/mic audio as separate discrete streams (so
+        // the editor can mix/mute them independently), but a blanket "-map 0:a?"
+        // just copies all of those streams into the output as separate tracks.
+        // Most players and upload targets (Discord, X, a browser's <video>) only
+        // play the first audio track of a multi-track file by default, so chat
+        // and mic audio silently "disappeared" even though the export technically
+        // contained them. Mix every audio track down to one, applying each
+        // track's current volume, the same way editor playback already sounds.
+        var audioTracks = TimelineTracks.Where(track => track.Type == "audio").ToArray();
+        args.Add("-map");
+        args.Add("0:v:0?");
+        args.Add("-sn");
+
+        if (audioTracks.Length == 1)
+        {
+            args.Add("-map");
+            args.Add($"0:{audioTracks[0].StreamIndex}?");
+            args.Add("-af");
+            args.Add($"volume={VolumeMultiplier(audioTracks[0].VolumePercent):0.###}");
+        }
+        else if (audioTracks.Length > 1)
+        {
+            var filter = new System.Text.StringBuilder();
+            var labels = new List<string>();
+            foreach (var track in audioTracks)
+            {
+                var label = $"a{track.StreamIndex}";
+                filter.Append($"[0:{track.StreamIndex}]volume={VolumeMultiplier(track.VolumePercent):0.###}[{label}];");
+                labels.Add($"[{label}]");
+            }
+
+            filter.Append($"{string.Join(string.Empty, labels)}amix=inputs={audioTracks.Length}:normalize=0[aout]");
+            args.Add("-filter_complex");
+            args.Add(filter.ToString());
+            args.Add("-map");
+            args.Add("[aout]");
+        }
+
         args.AddRange(BuildExportCodecArguments());
-        args.AddRange(new[] { "-c:a", "aac" });
+        if (audioTracks.Length > 0)
+        {
+            args.AddRange(new[] { "-c:a", "aac" });
+        }
 
         args.Add("-movflags");
         args.Add("+faststart");
         args.Add(outputPath);
         return args;
     }
+
+    private static double VolumeMultiplier(double percent) => Math.Clamp(percent / 100d, 0, 1.5);
 
     private IReadOnlyList<string> BuildExportCodecArguments()
     {
