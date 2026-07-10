@@ -485,21 +485,24 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         {
             // A segment that was readable moments ago during hydration can still vanish
             // out from under us before ffmpeg gets to it (seen in practice - likely AV
-            // real-time scanning briefly locking/removing a freshly written mp4). Drop
-            // anything missing right now instead of hard-failing the whole clip save.
-            var usableSegments = segments.Where(segment => File.Exists(segment.Path)).ToArray();
-            if (usableSegments.Length < segments.Count)
+            // real-time scanning briefly locking a freshly written mp4). That kind of
+            // lock is normally short-lived, so retry with backoff before giving up on a
+            // segment instead of dropping it immediately.
+            var usableSegments = await Task.WhenAll(segments.Select(async segment => (segment, exists: await WaitForFileAsync(segment.Path, cancellationToken))));
+            var missing = usableSegments.Count(entry => !entry.exists);
+            if (missing > 0)
             {
-                AppLog.Info($"Replay concat: {segments.Count - usableSegments.Length} segment(s) vanished before concat, continuing with {usableSegments.Length}.");
+                AppLog.Info($"Replay concat: {missing} segment(s) still missing after retry, continuing without them.");
             }
-            if (usableSegments.Length == 0)
+            var resolvedSegments = usableSegments.Where(entry => entry.exists).Select(entry => entry.segment).ToArray();
+            if (resolvedSegments.Length == 0)
             {
                 throw new InvalidOperationException("Replay segments were unavailable when building the clip. Try again.");
             }
 
             await File.WriteAllLinesAsync(
                 concatPath,
-                usableSegments.Select(segment => $"file '{EscapeConcatPath(segment.Path)}'"),
+                resolvedSegments.Select(segment => $"file '{EscapeConcatPath(segment.Path)}'"),
                 cancellationToken);
 
             var concatResult = await RunProcessAsync(
@@ -517,6 +520,34 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         {
             TryDelete(concatPath);
         }
+    }
+
+    private static async Task<bool> WaitForFileAsync(string path, CancellationToken cancellationToken)
+    {
+        const int attempts = 5;
+        for (var attempt = 0; attempt < attempts; attempt++)
+        {
+            try
+            {
+                if (File.Exists(path))
+                {
+                    using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    if (stream.Length > 0) return true;
+                }
+            }
+            catch (IOException)
+            {
+                // Likely still locked (e.g. AV real-time scan) - retry.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Same as above.
+            }
+
+            if (attempt < attempts - 1) await Task.Delay(150, cancellationToken);
+        }
+
+        return false;
     }
 
     private static string EscapeConcatPath(string path)
