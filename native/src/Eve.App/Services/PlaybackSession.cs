@@ -322,11 +322,17 @@ public sealed class PlaybackSession : IDisposable
         lock (_transportLock)
         {
             if (_audioOutput is null) return;
-            SeekAudio(Position);
-            if (_shouldPlay && VideoPlayer.IsPlaying)
+            var position = Position;
+            SeekAudio(position);
+            var willPlay = _shouldPlay && VideoPlayer.IsPlaying;
+            if (willPlay)
             {
                 _audioOutput.Play();
             }
+
+            var readerState = string.Join(",", _audioSources.Select(pair =>
+                $"{pair.Key}:cur={pair.Value.Reader.CurrentTime.TotalSeconds:0.###}s/total={pair.Value.Reader.TotalTime.TotalSeconds:0.###}s"));
+            AppLog.Info($"Editor audio sync: position={position.TotalSeconds:0.###}s, shouldPlay={_shouldPlay}, videoPlaying={VideoPlayer.IsPlaying}, willPlay={willPlay}, outputState={_audioOutput.PlaybackState}, readers=[{readerState}].");
         }
     }
 
