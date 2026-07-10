@@ -411,6 +411,13 @@ public sealed partial class MainWindow : Window
         badge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         var desiredWidth = badge.DesiredSize.Width;
 
+        var screen = Screens.ScreenFromWindow(this) ?? Screens.Primary ?? Screens.All.FirstOrDefault();
+        var area = screen?.WorkingArea ?? new PixelRect(0, 0, 1920, 1080);
+        const int margin = 24;
+        var x = string.Equals(position, "Top Left", StringComparison.OrdinalIgnoreCase)
+            ? area.X + margin
+            : area.X + area.Width - (int)desiredWidth - margin;
+
         var overlay = new Window
         {
             SystemDecorations = SystemDecorations.None,
@@ -421,20 +428,9 @@ public sealed partial class MainWindow : Window
             Background = Avalonia.Media.Brushes.Transparent,
             TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
             SizeToContent = SizeToContent.WidthAndHeight,
+            WindowStartupLocation = WindowStartupLocation.Manual,
+            Position = new PixelPoint(x, area.Y + margin),
             Content = badge
-        };
-
-        overlay.Opened += (_, _) =>
-        {
-            var screen = overlay.Screens.ScreenFromWindow(overlay) ?? overlay.Screens.Primary ?? overlay.Screens.All.FirstOrDefault();
-            if (screen is null) return;
-            var area = screen.WorkingArea;
-            const int margin = 24;
-            var width = overlay.Bounds.Width > 0 ? overlay.Bounds.Width : desiredWidth;
-            var x = string.Equals(position, "Top Left", StringComparison.OrdinalIgnoreCase)
-                ? area.X + margin
-                : area.X + area.Width - (int)width - margin;
-            overlay.Position = new PixelPoint(x, area.Y + margin);
         };
 
         overlay.Show();
