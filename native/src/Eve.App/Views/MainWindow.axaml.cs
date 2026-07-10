@@ -33,7 +33,6 @@ public sealed partial class MainWindow : Window
     private bool _replayTransitioning;
     private bool _replayArmed;
     private int _clipSaving;
-    private bool _cs2SetupDialogOpen;
     private bool _updateDialogOpen;
 
     public MainWindow()
@@ -275,7 +274,6 @@ public sealed partial class MainWindow : Window
             }
             EnsureReplayBufferMatchesGame();
             if (_replayBuffer is null) return;
-            await ShowCs2CaptureNoticeIfNeededAsync();
             await EnsureLibraryFolderAsync();
             ApplyPrimaryCaptureBounds();
             await Task.Run(() => _replayBuffer.StartAsync());
@@ -877,13 +875,38 @@ public sealed partial class MainWindow : Window
     {
         var window = new Window
         {
-            Title = "Update available",
             Width = 480,
-            Height = 380,
+            SizeToContent = SizeToContent.Height,
+            MaxHeight = 720,
             CanResize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Background = Avalonia.Media.Brush.Parse("#111920")
+            Background = Avalonia.Media.Brush.Parse("#111920"),
+            SystemDecorations = SystemDecorations.Full,
+            ExtendClientAreaToDecorationsHint = true,
+            ExtendClientAreaTitleBarHeightHint = -1,
+            ExtendClientAreaChromeHints = Avalonia.Platform.ExtendClientAreaChromeHints.NoChrome,
+            TransparencyLevelHint = new[] { Avalonia.Controls.WindowTransparencyLevel.None }
         };
+
+        var titleBar = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
+            Height = 40,
+            Background = Avalonia.Media.Brush.Parse("#0C1319")
+        };
+        titleBar.PointerPressed += (_, e) =>
+        {
+            if (e.GetCurrentPoint(titleBar).Properties.IsLeftButtonPressed) window.BeginMoveDrag(e);
+        };
+        var titleIcon = new Image { Source = new Avalonia.Media.Imaging.Bitmap(Avalonia.Platform.AssetLoader.Open(new Uri("avares://EVE/Assets/eve-icon-24.png"))), Width = 16, Height = 16, Margin = new Avalonia.Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        var titleText = new TextBlock { Text = "Update available", Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"), FontSize = 12, FontWeight = Avalonia.Media.FontWeight.SemiBold, Margin = new Avalonia.Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        var titleLeft = new StackPanel { Orientation = Orientation.Horizontal, Children = { titleIcon, titleText } };
+        Grid.SetColumn(titleLeft, 0);
+        var closeButton = new Button { Content = "✕", Width = 40, Height = 40, Padding = new Avalonia.Thickness(0), Background = Avalonia.Media.Brushes.Transparent, BorderThickness = new Avalonia.Thickness(0), CornerRadius = new Avalonia.CornerRadius(0), Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+        closeButton.Click += (_, _) => window.Close();
+        Grid.SetColumn(closeButton, 2);
+        titleBar.Children.Add(titleLeft);
+        titleBar.Children.Add(closeButton);
 
         var statusText = new TextBlock
         {
@@ -892,9 +915,9 @@ public sealed partial class MainWindow : Window
             FontSize = 12,
             IsVisible = false
         };
-        var progressBar = new ProgressBar { IsVisible = false, Minimum = 0, Maximum = 100 };
+        var progressBar = new ProgressBar { IsVisible = false, Minimum = 0, Maximum = 100, CornerRadius = new Avalonia.CornerRadius(3), Height = 6 };
 
-        var updateButton = new Button { Content = "Update Now", Width = 120, HorizontalContentAlignment = HorizontalAlignment.Center, Classes = { "replayButton" } };
+        var updateButton = new Button { Content = "Update Now", Width = 120, HorizontalContentAlignment = HorizontalAlignment.Center, Classes = { "primaryButton" } };
         var laterButton = new Button { Content = "Remind Me Later", Width = 140, HorizontalContentAlignment = HorizontalAlignment.Center };
         var ignoreButton = new Button { Content = "Skip This Version", Width = 140, HorizontalContentAlignment = HorizontalAlignment.Center };
 
@@ -939,34 +962,36 @@ public sealed partial class MainWindow : Window
             }
         };
 
-        var notesPanel = new StackPanel { Spacing = 4, IsVisible = update.ReleaseNotes.Count > 0 };
+        var notesPanel = new StackPanel { Spacing = 6, IsVisible = update.ReleaseNotes.Count > 0 };
         foreach (var note in update.ReleaseNotes.Take(8))
         {
             notesPanel.Children.Add(new TextBlock
             {
                 Text = $"• {note}",
                 Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"),
+                FontSize = 13,
                 TextWrapping = Avalonia.Media.TextWrapping.Wrap
             });
         }
 
-        window.Content = new StackPanel
+        var body = new StackPanel
         {
-            Margin = new Avalonia.Thickness(22),
+            Margin = new Avalonia.Thickness(22, 20, 22, 22),
             Spacing = 16,
             Children =
             {
                 new TextBlock
                 {
                     Text = $"EVE {FormatVersion(update.LatestVersion)} is available",
-                    Foreground = Avalonia.Media.Brush.Parse("#DDE8F5"),
+                    Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
                     FontWeight = Avalonia.Media.FontWeight.Bold,
-                    FontSize = 17
+                    FontSize = 18
                 },
                 new TextBlock
                 {
                     Text = $"You're on {FormatVersion(update.CurrentVersion)}.",
-                    Foreground = Avalonia.Media.Brush.Parse("#8EA1B6")
+                    Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"),
+                    FontSize = 13
                 },
                 notesPanel,
                 statusText,
@@ -981,32 +1006,20 @@ public sealed partial class MainWindow : Window
             }
         };
 
+        window.Content = new DockPanel
+        {
+            Children =
+            {
+                titleBar,
+                new ScrollViewer { Content = body }
+            }
+        };
+        DockPanel.SetDock(titleBar, Dock.Top);
+
         return window;
     }
 
     private static string FormatVersion(Version version) => $"{version.Major}.{version.Minor}.{version.Build}";
-
-    private async Task ShowCs2CaptureNoticeIfNeededAsync()
-    {
-        if (ViewModel is null || _cs2SetupDialogOpen || ViewModel.Settings.HasSeenCs2CaptureNotice) return;
-        if (!string.Equals(ViewModel.ActiveGameDetection.ExeName, "cs2.exe", StringComparison.OrdinalIgnoreCase)) return;
-
-        _cs2SetupDialogOpen = true;
-        try
-        {
-            var dialog = CreateCs2CaptureNoticeDialog();
-            var doNotShowAgain = await dialog.ShowDialog<bool>(this);
-            if (doNotShowAgain)
-            {
-                ViewModel.Settings.HasSeenCs2CaptureNotice = true;
-                ViewModel.SaveSettings();
-            }
-        }
-        finally
-        {
-            _cs2SetupDialogOpen = false;
-        }
-    }
 
     private void QueueEditorPlayback()
     {
@@ -1385,91 +1398,6 @@ public sealed partial class MainWindow : Window
                     TextWrapping = Avalonia.Media.TextWrapping.Wrap
                 },
                 buttons
-            }
-        };
-
-        return window;
-    }
-
-    private Window CreateCs2CaptureNoticeDialog()
-    {
-        const string launchOption = "-allow_third_party_software";
-        var window = new Window
-        {
-            Title = "CS2 capture setup",
-            Width = 520,
-            Height = 300,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Background = Avalonia.Media.Brush.Parse("#111920")
-        };
-
-        var copy = new Button
-        {
-            Content = "Copy launch option",
-            Width = 150,
-            HorizontalContentAlignment = HorizontalAlignment.Center
-        };
-        copy.Click += async (_, _) =>
-        {
-            var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
-            if (clipboard is not null) await clipboard.SetTextAsync(launchOption);
-        };
-
-        var later = new Button
-        {
-            Content = "Later",
-            Width = 96,
-            HorizontalContentAlignment = HorizontalAlignment.Center
-        };
-        later.Click += (_, _) => window.Close(false);
-
-        var ok = new Button
-        {
-            Content = "Don't show again",
-            Width = 130,
-            HorizontalContentAlignment = HorizontalAlignment.Center
-        };
-        ok.Click += (_, _) => window.Close(true);
-
-        window.Content = new StackPanel
-        {
-            Margin = new Avalonia.Thickness(22),
-            Spacing = 18,
-            Children =
-            {
-                new TextBlock
-                {
-                    Text = "Counter-Strike 2 blocks capture by default",
-                    Foreground = Avalonia.Media.Brush.Parse("#DDE8F5"),
-                    FontWeight = Avalonia.Media.FontWeight.Bold,
-                    FontSize = 17
-                },
-                new TextBlock
-                {
-                    Text = "EVE only shows this when Counter-Strike 2 is detected. For best FPS, EVE uses game capture. If CS2 clips are black, add this to CS2 Steam Launch Options, then restart CS2:",
-                    Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"),
-                    TextWrapping = Avalonia.Media.TextWrapping.Wrap
-                },
-                new TextBox
-                {
-                    Text = launchOption,
-                    IsReadOnly = true,
-                    Background = Avalonia.Media.Brush.Parse("#17222C"),
-                    Foreground = Avalonia.Media.Brush.Parse("#DDE8F5")
-                },
-                new TextBlock
-                {
-                    Text = "Steam > Counter-Strike 2 > Properties > Launch Options. For alt-tab capture, use borderless/windowed fullscreen; exclusive fullscreen can go black when minimized.",
-                    Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"),
-                    TextWrapping = Avalonia.Media.TextWrapping.Wrap
-                },
-                new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = 10,
-                    HorizontalAlignment = HorizontalAlignment.Right,
-                    Children = { copy, later, ok }
-                }
             }
         };
 

@@ -80,7 +80,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     }
 
     public bool IsCheckVisible => IsSelected || IsHovered;
-    public IBrush SelectionBorderBrush => IsSelected ? Brush.Parse("#22CFC3") : Brush.Parse("#24303A");
+    public IBrush SelectionBorderBrush => IsSelected ? Brush.Parse("#5864E8") : Brush.Parse("#24303A");
     public Avalonia.Thickness SelectionBorderThickness => IsSelected ? new Avalonia.Thickness(2) : new Avalonia.Thickness(0);
 
     public void UpdateMedia(MediaFileInfo media)

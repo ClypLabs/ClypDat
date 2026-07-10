@@ -3,5 +3,6 @@
              x:Class="Eve.App.App">
   <Application.Styles>
     <FluentTheme />
+    <StyleInclude Source="avares://EVE/Styles/AppStyles.axaml" />
   </Application.Styles>
 </Application>

@@ -1,0 +1,147 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!--
+    Shared control styles for the whole app. These must live at Application
+    level (referenced from App.axaml), not inside MainWindow.axaml's own
+    Window.Styles - a Window's local Styles only apply within that window's
+    own visual tree, not to separately-created dialog Windows (the update
+    dialog and the CS2 capture notice dialog were both silently falling
+    back to bare FluentTheme defaults because of this before this file
+    existed, which is why they looked visually inconsistent with the rest
+    of the app.
+  -->
+  <Style Selector="Button.deleteButton">
+    <Setter Property="Background" Value="#D85E61" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="Padding" Value="20,10" />
+  </Style>
+  <Style Selector="Button">
+    <Setter Property="Background" Value="#1D2A36" />
+    <Setter Property="Foreground" Value="#D8E4F2" />
+    <Setter Property="BorderBrush" Value="#2C3B48" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="Padding" Value="12,7" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Button:pointerover">
+    <Setter Property="Background" Value="#263544" />
+  </Style>
+  <Style Selector="Button:disabled">
+    <Setter Property="Opacity" Value="0.48" />
+  </Style>
+  <Style Selector="Button.transportButton">
+    <Setter Property="Width" Value="34" />
+    <Setter Property="Height" Value="32" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Background" Value="#24313C" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="FontSize" Value="15" />
+  </Style>
+  <Style Selector="Button.playButton">
+    <Setter Property="Width" Value="38" />
+    <Setter Property="Height" Value="38" />
+    <Setter Property="CornerRadius" Value="19" />
+    <Setter Property="Background" Value="#2B3642" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <Style Selector="Button.primaryButton">
+    <Setter Property="Background" Value="#5864E8" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.primaryButton:pointerover">
+    <Setter Property="Background" Value="#6D77F0" />
+  </Style>
+  <Style Selector="Button.deleteButton:pointerover">
+    <Setter Property="Background" Value="#E16B6D" />
+  </Style>
+  <Style Selector="Button.closeEditor">
+    <Setter Property="Background" Value="#1D2A36" />
+    <Setter Property="Foreground" Value="#D8E4F2" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="Padding" Value="12,8" />
+  </Style>
+  <Style Selector="Button.linkButton">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Foreground" Value="#BDD4EE" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+  </Style>
+  <Style Selector="Button.linkButton:pointerover">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+  </Style>
+  <Style Selector="Button.brandButton">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="0" />
+  </Style>
+  <Style Selector="Button.brandButton:pointerover">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.replayButton">
+    <Setter Property="Background" Value="#1D2A36" />
+    <Setter Property="Foreground" Value="#9FB0C3" />
+    <Setter Property="BorderBrush" Value="#2C3B48" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+  <Style Selector="Button.replayButton.recording">
+    <Setter Property="Background" Value="#3A1E24" />
+    <Setter Property="Foreground" Value="#FF8A8F" />
+    <Setter Property="BorderBrush" Value="#D85E61" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="Button.replayButton.recording:pointerover">
+    <Setter Property="Background" Value="#472228" />
+  </Style>
+  <Style Selector="Button.dialogClose">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="0" />
+    <Setter Property="Foreground" Value="#8EA1B6" />
+  </Style>
+  <Style Selector="Button.dialogClose:pointerover">
+    <Setter Property="Background" Value="#D85E61" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+  </Style>
+  <Style Selector="ComboBox.settingsInput, TextBox.settingsInput">
+    <Setter Property="Background" Value="#1D2A36" />
+    <Setter Property="Foreground" Value="#D8E4F2" />
+    <Setter Property="BorderBrush" Value="#2C3B48" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="7" />
+  </Style>
+  <Style Selector="Slider.volumeSlider /template/ Thumb">
+    <Setter Property="Width" Value="14" />
+    <Setter Property="Height" Value="18" />
+    <Setter Property="CornerRadius" Value="3" />
+    <Setter Property="Background" Value="#EEF4FF" />
+    <Setter Property="BorderBrush" Value="#776CFF" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+  <Style Selector="Slider.volumeSlider /template/ Thumb:pointerover">
+    <Setter Property="Background" Value="#FFFFFF" />
+    <Setter Property="BorderBrush" Value="#8B82FF" />
+  </Style>
+  <Style Selector="Slider.volumeSlider /template/ Thumb:pressed">
+    <Setter Property="Background" Value="#EAF0FF" />
+    <Setter Property="BorderBrush" Value="#6D63FF" />
+  </Style>
+</Styles>

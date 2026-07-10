@@ -1,4 +1,4 @@
-<Window xmlns="https://github.com/avaloniaui"
+﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vlc="using:LibVLCSharp.Avalonia"
         xmlns:vm="using:Eve.App.ViewModels"
@@ -13,107 +13,6 @@
         Background="#0D1116"
         Icon="/Assets/eve-icon.ico"
         SizeChanged="Window_OnSizeChanged">
-  <Window.Styles>
-    <Style Selector="Button.deleteButton">
-      <Setter Property="Background" Value="#D85E61" />
-      <Setter Property="Foreground" Value="#FFFFFF" />
-      <Setter Property="FontWeight" Value="Bold" />
-      <Setter Property="CornerRadius" Value="5" />
-      <Setter Property="Padding" Value="20,10" />
-    </Style>
-    <Style Selector="Button">
-      <Setter Property="Background" Value="#1D2A36" />
-      <Setter Property="Foreground" Value="#D8E4F2" />
-      <Setter Property="BorderBrush" Value="#2C3B48" />
-      <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="CornerRadius" Value="5" />
-      <Setter Property="Padding" Value="12,7" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-    </Style>
-    <Style Selector="Button:pointerover">
-      <Setter Property="Background" Value="#263544" />
-    </Style>
-    <Style Selector="Button:disabled">
-      <Setter Property="Opacity" Value="0.48" />
-    </Style>
-    <Style Selector="Button.transportButton">
-      <Setter Property="Width" Value="34" />
-      <Setter Property="Height" Value="32" />
-      <Setter Property="Padding" Value="0" />
-      <Setter Property="Background" Value="#24313C" />
-      <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="CornerRadius" Value="5" />
-      <Setter Property="FontSize" Value="15" />
-    </Style>
-    <Style Selector="Button.playButton">
-      <Setter Property="Width" Value="38" />
-      <Setter Property="Height" Value="38" />
-      <Setter Property="CornerRadius" Value="19" />
-      <Setter Property="Background" Value="#2B3642" />
-      <Setter Property="Padding" Value="0" />
-      <Setter Property="BorderThickness" Value="0" />
-    </Style>
-    <Style Selector="Button.primaryButton">
-      <Setter Property="Background" Value="#5864E8" />
-      <Setter Property="Foreground" Value="#FFFFFF" />
-      <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="CornerRadius" Value="5" />
-      <Setter Property="FontWeight" Value="Bold" />
-      <Setter Property="HorizontalContentAlignment" Value="Center" />
-    </Style>
-    <Style Selector="Button.deleteButton:pointerover">
-      <Setter Property="Background" Value="#E16B6D" />
-    </Style>
-    <Style Selector="Button.closeEditor">
-      <Setter Property="Background" Value="#1D2A36" />
-      <Setter Property="Foreground" Value="#D8E4F2" />
-      <Setter Property="FontWeight" Value="Bold" />
-      <Setter Property="CornerRadius" Value="5" />
-      <Setter Property="Padding" Value="12,8" />
-    </Style>
-    <Style Selector="Button.linkButton">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="Padding" Value="0" />
-      <Setter Property="Foreground" Value="#BDD4EE" />
-      <Setter Property="HorizontalContentAlignment" Value="Left" />
-    </Style>
-    <Style Selector="Button.linkButton:pointerover">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="Foreground" Value="#FFFFFF" />
-    </Style>
-    <Style Selector="Button.brandButton">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="Padding" Value="0" />
-    </Style>
-    <Style Selector="Button.brandButton:pointerover">
-      <Setter Property="Background" Value="Transparent" />
-    </Style>
-    <Style Selector="ComboBox.settingsInput, TextBox.settingsInput">
-      <Setter Property="Background" Value="#1D2A36" />
-      <Setter Property="Foreground" Value="#D8E4F2" />
-      <Setter Property="BorderBrush" Value="#2C3B48" />
-      <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="CornerRadius" Value="5" />
-    </Style>
-    <Style Selector="Slider.volumeSlider /template/ Thumb">
-      <Setter Property="Width" Value="14" />
-      <Setter Property="Height" Value="18" />
-      <Setter Property="CornerRadius" Value="3" />
-      <Setter Property="Background" Value="#EEF4FF" />
-      <Setter Property="BorderBrush" Value="#776CFF" />
-      <Setter Property="BorderThickness" Value="2" />
-    </Style>
-    <Style Selector="Slider.volumeSlider /template/ Thumb:pointerover">
-      <Setter Property="Background" Value="#FFFFFF" />
-      <Setter Property="BorderBrush" Value="#8B82FF" />
-    </Style>
-    <Style Selector="Slider.volumeSlider /template/ Thumb:pressed">
-      <Setter Property="Background" Value="#EAF0FF" />
-      <Setter Property="BorderBrush" Value="#6D63FF" />
-    </Style>
-  </Window.Styles>
   <Grid RowDefinitions="48,*">
     <Border Grid.Row="0" Background="#171F27" BorderBrush="#1E2A33" BorderThickness="0,0,0,1">
       <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,0" VerticalAlignment="Center">
@@ -128,7 +27,7 @@
               ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,1*,Auto,3*"
               Margin="18,0,0,0"
               VerticalAlignment="Center">
-          <Button Grid.Column="0" Content="{Binding RecorderStatus}" Classes="replayButton" Click="ReplayButton_OnClick" />
+          <Button Grid.Column="0" Content="{Binding RecorderStatus}" Classes="replayButton" Classes.recording="{Binding IsReplayRecording}" Click="ReplayButton_OnClick" />
           <Button Grid.Column="1" Content="Clip" IsEnabled="{Binding IsReplayRecording}" Click="ClipButton_OnClick" Margin="10,0,0,0" />
           <TextBlock Grid.Column="2" Text="{Binding HotkeyDisplay}" Foreground="#93A6B8" FontWeight="Bold" VerticalAlignment="Center" Margin="10,0,0,0" />
           <Border Grid.Column="3" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding ShowLibraryStatus}" Margin="10,0,0,0" />
@@ -231,16 +130,17 @@
                         <Border Width="{Binding $parent[Window].DataContext.CardWidth}"
                                 Margin="4,4,20,24"
                                 Background="#24303A"
-                                CornerRadius="4"
-                                ClipToBounds="True"
+                                CornerRadius="12"
+                                BoxShadow="0 6 18 -6 #66000000"
                                 PointerPressed="ClipCard_OnPointerPressed"
                                 PointerEntered="ClipCard_OnPointerEntered"
                                 PointerExited="ClipCard_OnPointerExited">
+                          <Border CornerRadius="12" ClipToBounds="True">
                           <Grid RowDefinitions="Auto,104">
                             <Border Grid.RowSpan="2"
                                     BorderBrush="{Binding SelectionBorderBrush}"
                                     BorderThickness="2"
-                                    CornerRadius="4"
+                                    CornerRadius="12"
                                     IsVisible="{Binding IsSelected}"
                                     IsHitTestVisible="False"
                                     ZIndex="10" />
@@ -284,6 +184,7 @@
                                          TextTrimming="CharacterEllipsis" />
                             </StackPanel>
                           </Grid>
+                          </Border>
                         </Border>
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
@@ -301,14 +202,14 @@
         <StackPanel Margin="32,28" Spacing="22" MaxWidth="860">
           <TextBlock Text="Settings" Foreground="#EDF4FB" FontSize="26" FontWeight="Bold" />
 
-          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="6" Padding="18">
+          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="12" Padding="18">
             <StackPanel Spacing="14">
               <TextBlock Text="Diagnostics" Foreground="#C4D0DF" FontWeight="Bold" />
               <Button Content="Open Logs" Click="OpenLogsButton_OnClick" HorizontalAlignment="Left" />
             </StackPanel>
           </Border>
 
-          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="6" Padding="18">
+          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="12" Padding="18">
             <StackPanel Spacing="14">
               <TextBlock Text="Replay Buffer" Foreground="#C4D0DF" FontWeight="Bold" />
               <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="12" ColumnSpacing="16">
@@ -332,7 +233,7 @@
             </StackPanel>
           </Border>
 
-          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="6" Padding="18">
+          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="12" Padding="18">
             <StackPanel Spacing="14">
               <TextBlock Text="Startup" Foreground="#C4D0DF" FontWeight="Bold" />
               <CheckBox Content="Launch EVE on Windows boot" IsChecked="{Binding LaunchOnWindowsStartup}" />
@@ -340,7 +241,7 @@
             </StackPanel>
           </Border>
 
-          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="6" Padding="18">
+          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="12" Padding="18">
             <StackPanel Spacing="14">
               <TextBlock Text="Audio" Foreground="#C4D0DF" FontWeight="Bold" />
               <Grid ColumnDefinitions="220,*,Auto" RowDefinitions="Auto,Auto" RowSpacing="12" ColumnSpacing="16">
@@ -353,7 +254,7 @@
             </StackPanel>
           </Border>
 
-          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="6" Padding="18">
+          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="12" Padding="18">
             <StackPanel Spacing="14">
               <TextBlock Text="Game Audio Exclusions" Foreground="#C4D0DF" FontWeight="Bold" />
               <TextBlock Text="Apps here are removed from Game Audio. Chat Audio captures the selected app above." Foreground="#718296" />
@@ -585,3 +486,4 @@
     </Grid>
   </Grid>
 </Window>
+
