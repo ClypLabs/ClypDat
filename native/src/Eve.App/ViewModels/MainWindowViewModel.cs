@@ -803,7 +803,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ActiveGameDetection.ExeName,
             ActiveGameDetection.WindowTitle,
             ActiveGameDetection.WindowClass,
-            Settings.ReplayBackend);
+            Settings.ReplayBackend,
+            GameWindowHandle: ActiveGameDetection.WindowHandle);
     }
 
     public void SetDuration(TimeSpan duration)

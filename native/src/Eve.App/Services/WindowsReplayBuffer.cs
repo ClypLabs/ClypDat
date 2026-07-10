@@ -4,6 +4,7 @@ using NAudio.Wave;
 using ScreenRecorderLib;
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
 
@@ -192,6 +193,11 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             }
 
             PruneSegments();
+            // Refresh config on every rotation, not just at session start, so the
+            // capture source can follow the currently detected game (or fall back to
+            // the monitor when none is detected) instead of being locked to whatever
+            // was foreground when the replay buffer first started.
+            _config = _configProvider();
             StartRecorder();
         }
         catch (Exception error)
@@ -232,9 +238,26 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         return new ReplayVideoSegment(path, startedAt, endedAt, TimeSpan.Zero);
     }
 
-    private RecorderOptions CreateOptions(ReplayBufferConfig config)
+    private static RecorderOptions CreateOptions(ReplayBufferConfig config)
     {
         var options = RecorderOptions.DefaultMainMonitor;
+        if (config.GameWindowHandle != 0 && IsWindow(config.GameWindowHandle))
+        {
+            options.SourceOptions.RecordingSources = new List<RecordingSourceBase>
+            {
+                new WindowRecordingSource(config.GameWindowHandle)
+                {
+                    IsCursorCaptureEnabled = false,
+                    Stretch = StretchMode.Uniform
+                }
+            };
+            AppLog.Info($"Replay capture source: window handle={config.GameWindowHandle}, game={config.GameDisplayName}.");
+        }
+        else
+        {
+            AppLog.Info("Replay capture source: main monitor (no game detected).");
+        }
+
         options.AudioOptions = new AudioOptions
         {
             IsAudioEnabled = false,
@@ -1127,6 +1150,9 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             TryDelete(file);
         }
     }
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindow(IntPtr hWnd);
 
     private static void TryDelete(string path)
     {

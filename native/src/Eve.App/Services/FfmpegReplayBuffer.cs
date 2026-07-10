@@ -747,7 +747,8 @@ public sealed record ReplayBufferConfig(
     string GameExecutableName,
     string GameWindowTitle,
     string GameWindowClass,
-    string Backend = "Auto");
+    string Backend = "Auto",
+    nint GameWindowHandle = 0);
 
 internal sealed class AudioCaptureSession : IDisposable
 {
