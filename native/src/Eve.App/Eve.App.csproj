@@ -58,6 +58,15 @@
           Condition="Exists('..\..\vendor\obs-runtime\bin\64bit\obs-nvenc-test.exe')" />
   </Target>
 
+  <Target Name="CopyFfmpegToPublish" AfterTargets="Publish" Condition="Exists('..\..\vendor\ffmpeg')">
+    <ItemGroup>
+      <FfmpegFiles Include="..\..\vendor\ffmpeg\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(FfmpegFiles)"
+          DestinationFiles="@(FfmpegFiles->'$(PublishDir)ffmpeg\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
   <!-- OBS (GPLv2) and LibVLC (LGPL-2.1) are bundled in every distributed
        build; their licenses require these notices/texts to ship alongside
        the binaries. See THIRD-PARTY-LICENSES.md at the repo root. -->

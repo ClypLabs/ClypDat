@@ -46,11 +46,12 @@ running install via a PowerShell helper that waits for the process to exit.
 
 - Windows 10 or 11, x64
 - .NET SDK 8+ to build from source
-- `ffmpeg` and `ffprobe` on `PATH`, used for muxing, probing, and
-  thumbnail/waveform generation. Not bundled; EVE does not distribute
-  ffmpeg binaries.
 - An NVIDIA GPU. The OBS backend's encoder is NVENC-only; there is no
   software or non-NVIDIA fallback.
+
+`ffmpeg` and `ffprobe` (used for muxing, probing, and thumbnail/waveform
+generation) ship bundled with EVE in `native/vendor/ffmpeg`. No separate
+install needed.
 
 ## Building
 

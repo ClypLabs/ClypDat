@@ -8,11 +8,11 @@ of the GPL/LGPL-licensed components below.
 ## OBS Studio runtime (GPLv2)
 
 EVE's OBS capture backend bundles a trimmed copy of the OBS Studio runtime
-(version **32.1.2**) as pre-built binaries — `obs.dll` and the plugins EVE
+(version **32.1.2**) as pre-built binaries: `obs.dll` and the plugins EVE
 actually loads (`win-capture`, `win-wasapi`, `image-source`, `obs-ffmpeg`,
 `obs-nvenc`, `text-freetype2`). EVE talks to these binaries entirely through
 OBS's public runtime API, loaded dynamically at runtime (`LoadLibrary` /
-`GetProcAddress`) — it does not statically link against or modify OBS's
+`GetProcAddress`). It does not statically link against or modify OBS's
 source.
 
 OBS Studio is licensed under the **GNU General Public License v2.0**
@@ -24,8 +24,8 @@ OBS Studio is licensed under the **GNU General Public License v2.0**
 - Copyright and license notices are preserved in the bundled binaries as
   shipped by the OBS Project; nothing has been stripped or modified.
 
-EVE's own source code is not itself GPL-licensed by virtue of this bundling
-— OBS is invoked as a separate, independently-distributed program via a
+EVE's own source code is not itself GPL-licensed by virtue of this bundling.
+OBS is invoked as a separate, independently-distributed program via a
 stable dynamic-loading interface, not compiled or linked into EVE's own
 binaries.
 
@@ -61,14 +61,23 @@ backend's audio routing) uses NAudio, licensed under the **MIT License**.
 
 - Project: https://github.com/naudio/NAudio
 
-## ffmpeg / ffprobe (not bundled)
+## ffmpeg / ffprobe (GPL)
 
-EVE invokes `ffmpeg`/`ffprobe` as external processes for muxing, probing,
-and thumbnail/waveform generation, but does **not** bundle these binaries —
-they must already be present on the user's system PATH. EVE does not
-redistribute ffmpeg and has no obligations under its license as a result;
-whatever build the user has installed is licensed to them directly by its
-own provider.
+EVE bundles `ffmpeg.exe` and `ffprobe.exe` (the gyan.dev "essentials"
+Windows build, version **8.1.1**) so muxing, probing, and thumbnail/
+waveform generation work without a separate ffmpeg install. This build is
+compiled with `--enable-gpl` and `--enable-libx264`, making the distributed
+binaries GPL-licensed. ffmpeg is a combination of many components under a
+mix of GPLv2, GPLv2-or-later, and GPLv3-or-later terms depending on build
+configuration; see https://ffmpeg.org/legal.html for the authoritative
+per-component breakdown for this exact configuration.
+
+- Project: https://ffmpeg.org and https://github.com/FFmpeg/FFmpeg
+- Build source: https://www.gyan.dev/ffmpeg/builds (see that page's "Git
+  Windows builds" section for the exact commit each release is built from)
+- The GPLv2 text this build is built under is reproduced in the GPLv2
+  section below.
+- EVE does not modify these binaries.
 
 ---
 

@@ -10,6 +10,7 @@ TestResults/
 *.suo
 native/vendor/*
 !native/vendor/obs-runtime/
+!native/vendor/ffmpeg/
 
 # Build output
 dist/
