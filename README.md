@@ -1,42 +1,56 @@
 # EVE
 
-EVE is a Windows replay buffer and clip editor. It records a rolling buffer of
-gameplay in the background, saves the last N seconds on a hotkey press, and
-gives you a built-in editor to trim, mix audio tracks, and export the result.
+EVE records a rolling buffer of gameplay on Windows and saves the last N
+seconds to a file when you press a hotkey. It also has a built-in editor for
+trimming clips and mixing audio tracks before export.
 
-The active codebase is the native app in `native/` (C#/.NET 8, Avalonia UI).
-An older Electron prototype still exists at the repo root but is not where
-development happens.
+The active codebase is `native/` (C#/.NET 8, Avalonia UI). An Electron
+prototype still sits at the repo root; it predates the native app and is not
+where development happens.
 
-## What it does
+## Capture
 
-- **Replay buffer.** Continuously records to a rotating buffer; press a
-  hotkey to save the last N seconds as a clip. Duration and quality are
-  configurable.
-- **Capture backends.** Two capture paths, switchable in Settings:
-  - **OBS** — uses a bundled, trimmed OBS Studio runtime via a custom C++
-    bridge (`native/src/Eve.ObsBridge`). Best quality, lowest overhead.
-  - **Windows Capture** — uses `ScreenRecorderLib` (Windows Graphics
-    Capture / DXGI desktop duplication). No process hook, so it isn't
-    blocked by anti-cheat. Games known to fight OBS's hook (currently
-    Counter-Strike 2) default to this backend automatically on "Auto".
-- **Game detection.** Foreground-window polling with a small catalog of
-  known games plus a general heuristic (any window with a loaded
-  DirectX/OpenGL/Vulkan module counts). Saved clips are named after the
-  detected game.
-- **Editor.** Trim start/end, per-track audio volume, waveform preview,
-  thumbnail scrubbing, export to MP4.
-- **Auto-update.** Checks GitHub Releases on launch; can download and
-  install a new version without leaving the app.
+Two capture backends, switchable in Settings:
+
+- **OBS**: a trimmed OBS Studio runtime (32.1.2) loaded through a custom
+  C++ bridge (`native/src/Eve.ObsBridge`) via `LoadLibrary`/`GetProcAddress`,
+  not static linking. Uses NVENC for encoding.
+- **Windows Capture**: `ScreenRecorderLib`, backed by Windows Graphics
+  Capture / DXGI desktop duplication. Doesn't inject into the target
+  process, so anti-cheat can't block it the way it blocks OBS's hook.
+  Counter-Strike 2 defaults to this backend when set to "Auto", because
+  Valve Anti-Cheat blocks OBS's game-capture hook unless the user adds
+  `-allow_third_party_software` as a launch option.
+
+Foreground-window polling drives game detection: a catalog of known
+executables (Fortnite, CS2) plus a fallback that accepts any window whose
+process has loaded a Direct3D, OpenGL, or Vulkan module. Saved clips are
+named after the detected game and timestamp, e.g.
+`Counter-Strike 2 2026-07-10 17-30-00.mp4`.
+
+## Editor
+
+Trim start/end, set per-track audio volume, scrub a thumbnail preview, view
+a waveform, export to MP4. Video playback runs on LibVLC; audio runs on a
+separate NAudio/WASAPI pipeline. They are not synchronized to a shared
+clock, so long clips can drift out of sync during playback.
+
+## Auto-update
+
+On launch, EVE checks the GitHub Releases API for a newer non-draft,
+non-prerelease tag. If found, it shows a dialog with the version and release
+notes; accepting downloads `EVE-win-x64.zip`, extracts it, and replaces the
+running install via a PowerShell helper that waits for the process to exit.
 
 ## Requirements
 
-- Windows 10/11, x64
+- Windows 10 or 11, x64
 - .NET SDK 8+ to build from source
-- `ffmpeg` and `ffprobe` on `PATH` (used for muxing, probing, and
-  thumbnail/waveform generation — not bundled)
-- An NVIDIA GPU (NVENC is required for the replay encoder; there is no
-  software-encoding fallback in the OBS backend)
+- `ffmpeg` and `ffprobe` on `PATH`, used for muxing, probing, and
+  thumbnail/waveform generation. Not bundled; EVE does not distribute
+  ffmpeg binaries.
+- An NVIDIA GPU. The OBS backend's encoder is NVENC-only; there is no
+  software or non-NVIDIA fallback.
 
 ## Building
 
@@ -45,8 +59,7 @@ dotnet restore native\EVE.Native.sln
 dotnet build native\EVE.Native.sln
 ```
 
-The OBS bridge is a separate C++ project and needs MSBuild, not `dotnet
-build`:
+`Eve.ObsBridge` is a C++ project and needs MSBuild, not `dotnet build`:
 
 ```powershell
 msbuild native\src\Eve.ObsBridge\Eve.ObsBridge.vcxproj /p:Configuration=Release /p:Platform=x64
@@ -58,45 +71,42 @@ To produce a runnable, self-contained build:
 dotnet publish native\src\Eve.App\Eve.App.csproj -c Release -r win-x64 --self-contained true -p:Platform=x64 -o native\publish\win-x64-folder
 ```
 
-`EVE.exe` and its dependencies (the OBS runtime, LibVLC, etc.) land in
-`native\publish\win-x64-folder`. Tagged pushes (`v*`) trigger
-`.github/workflows/release.yml`, which builds this same output and packages
-it four ways: a zip, a self-extracting portable exe, an NSIS installer, and
-an MSI.
+`EVE.exe` and its dependencies land in `native\publish\win-x64-folder`.
+Pushing a tag matching `v*` triggers `.github/workflows/release.yml`, which
+builds the same output and packages it four ways: a zip, a self-extracting
+portable exe, an NSIS installer, and an MSI.
 
-## Project layout
+## Layout
 
 ```
 native/
   src/
     Eve.App/                  Avalonia UI, view models, platform services
-    Eve.Core/                 settings, clip-library models
+    Eve.Core/                 settings and clip-library models
     Eve.Capture.Abstractions/ IReplayBuffer and related interfaces
-    Eve.ObsBridge/             C++ bridge to a dynamically-loaded OBS runtime
+    Eve.ObsBridge/             C++ bridge to the OBS runtime
   vendor/
-    obs-runtime/               trimmed OBS Studio runtime (committed; see below)
+    obs-runtime/               trimmed OBS Studio runtime, committed to git
 installer/                     NSIS and WiX installer definitions
-licenses/                      full text of bundled GPL/LGPL licenses
+licenses/                      GPL-2.0 and LGPL-2.1 full text
 ```
 
-## Third-party components
+## Third-party licenses
 
 EVE bundles OBS Studio (GPLv2) and LibVLC (LGPL-2.1-or-later) binaries.
-`THIRD-PARTY-LICENSES.md` documents what's bundled, under what license, and
-where to find matching source. Both licenses' full text ship with every
-build in `licenses/`.
-
-`native/vendor/obs-runtime` is trimmed to only the OBS plugins EVE's bridge
-actually loads (`win-capture`, `win-wasapi`, `image-source`, `obs-ffmpeg`,
-`obs-nvenc`, `text-freetype2`) — not a full OBS Studio install.
+`THIRD-PARTY-LICENSES.md` lists what's bundled, under which license, and
+where to get matching source. `native/vendor/obs-runtime` is not a full OBS
+Studio install; it's trimmed to the six plugins the bridge actually loads
+(`win-capture`, `win-wasapi`, `image-source`, `obs-ffmpeg`, `obs-nvenc`,
+`text-freetype2`).
 
 ## Known limitations
 
 - Windows only.
-- NVENC-only encoding; no CPU or non-NVIDIA GPU encode path.
-- Windows Capture goes black/stale while the target window is minimized,
-  and doesn't see overlay windows (Discord overlay, FPS counters) layered
-  on top of the game, since it only captures that window's own content.
-- The editor's audio and video playback are driven by separate engines
-  (NAudio and LibVLC) with no shared clock; long clips can drift slightly
-  out of sync.
+- NVENC-only encoding in the OBS backend.
+- Windows Capture goes black while its target window is minimized, and
+  doesn't capture separate overlay windows (Discord overlay, FPS counters)
+  layered on top of the game, since it only captures that window's own
+  content.
+- Editor audio and video can drift out of sync on long clips (see Editor,
+  above).
