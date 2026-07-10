@@ -138,23 +138,40 @@ jobs:
         shell: pwsh
         run: |
           $wixBin = "${{ steps.wix.outputs.bin }}"
-          & "$wixBin\heat.exe" dir native\publish\win-x64-folder `
-            -cg AppFiles -dr INSTALLFOLDER -srd -sreg -gg -g1 -sfrag -var var.EveSourceDir `
-            -out installer\AppFiles.wxs
+          $heatArgs = @(
+            "dir", "native\publish\win-x64-folder",
+            "-cg", "AppFiles", "-dr", "INSTALLFOLDER", "-srd", "-sreg", "-gg", "-g1", "-sfrag",
+            "-var", "var.EveSourceDir",
+            "-out", "installer\AppFiles.wxs"
+          )
+          & "$wixBin\heat.exe" @heatArgs
+          if ($LASTEXITCODE -ne 0) { throw "heat.exe failed with exit code $LASTEXITCODE" }
 
       - name: Build MSI
         shell: pwsh
         run: |
           $wixBin = "${{ steps.wix.outputs.bin }}"
           $srcDir = (Resolve-Path native\publish\win-x64-folder).Path
-          & "$wixBin\candle.exe" -arch x64 `
-            -dEveVersion=${{ steps.version.outputs.version }} `
-            -dEveSourceDir="$srcDir" `
-            -ext WixUtilExtension -ext WixUIExtension `
-            installer\Product.wxs installer\AppFiles.wxs -out installer\
-          & "$wixBin\light.exe" -ext WixUtilExtension -ext WixUIExtension `
-            installer\Product.wixobj installer\AppFiles.wixobj `
-            -out EVE.msi -sice:ICE61
+          $version = "${{ steps.version.outputs.version }}"
+
+          $candleArgs = @(
+            "-arch", "x64",
+            "-dEveVersion=$version",
+            "-dEveSourceDir=$srcDir",
+            "-ext", "WixUtilExtension", "-ext", "WixUIExtension",
+            "installer\Product.wxs", "installer\AppFiles.wxs",
+            "-out", "installer\"
+          )
+          & "$wixBin\candle.exe" @candleArgs
+          if ($LASTEXITCODE -ne 0) { throw "candle.exe failed with exit code $LASTEXITCODE" }
+
+          $lightArgs = @(
+            "-ext", "WixUtilExtension", "-ext", "WixUIExtension",
+            "installer\Product.wixobj", "installer\AppFiles.wixobj",
+            "-out", "EVE.msi", "-sice:ICE61"
+          )
+          & "$wixBin\light.exe" @lightArgs
+          if ($LASTEXITCODE -ne 0) { throw "light.exe failed with exit code $LASTEXITCODE" }
 
       - name: Create GitHub Release
         env:
