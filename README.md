@@ -6,7 +6,7 @@ trimming clips and mixing audio tracks before export.
 
 The active codebase is `native/` (C#/.NET 8, Avalonia UI). An Electron
 prototype still sits at the repo root; it predates the native app and is not
-where development happens.
+where development happens. (Electron prototype will probably get shit-canned tomorrow)
 
 ## Capture
 
@@ -44,7 +44,7 @@ running install via a PowerShell helper that waits for the process to exit.
 - Windows 10 or 11, x64
 - .NET SDK 8+ to build from source
 - An NVIDIA GPU. The OBS backend's encoder is NVENC-only; there is no
-  software or non-NVIDIA fallback.
+  software or non-NVIDIA fallback. (Will add AMD encoder soon! Don't worry!)
 
 ## Building
 
@@ -83,6 +83,9 @@ portable exe, an NSIS installer, and an MSI.
 
 - Windows only.
 - NVENC-only encoding in the OBS backend.
+
+## Bugs
+If you stumble across any issues or bugs, please create a "Issue" post and I'll make sure to fix them ASAP, want EVE to be perfect for everybody!
 
 ## Third-party licenses
 
