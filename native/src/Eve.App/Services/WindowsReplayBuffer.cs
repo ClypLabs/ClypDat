@@ -458,22 +458,39 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
     private async Task<TimeSpan> ProbeVideoDurationAsync(string path, CancellationToken cancellationToken)
     {
-        var result = await RunProcessAsync("ffprobe", new[]
+        // The most recently stopped segment is the one most likely to fail here: the
+        // container's moov atom can still be finalizing for a moment right after
+        // ScreenRecorderLib's "recording complete" callback fires. That segment is also
+        // the one covering the moment the hotkey was pressed, so if this gives up
+        // immediately, the whole segment gets silently dropped and the clip ends up to
+        // 20s short of where it should - the reported "the shot doesn't appear at all".
+        const int attempts = 5;
+        for (var attempt = 0; attempt < attempts; attempt++)
         {
-            "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
-            path
-        }, cancellationToken);
+            var result = await RunProcessAsync("ffprobe", new[]
+            {
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                path
+            }, cancellationToken);
 
-        if (result.ExitCode == 0 &&
-            double.TryParse(result.Output.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds) &&
-            seconds > 0)
-        {
-            return TimeSpan.FromSeconds(seconds);
+            if (result.ExitCode == 0 &&
+                double.TryParse(result.Output.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds) &&
+                seconds > 0)
+            {
+                return TimeSpan.FromSeconds(seconds);
+            }
+
+            if (attempt < attempts - 1)
+            {
+                await Task.Delay(150, cancellationToken);
+                continue;
+            }
+
+            AppLog.Info($"ffprobe duration failed after {attempts} attempts: path={path}, exit={result.ExitCode}, error={result.Error}");
         }
 
-        AppLog.Info($"ffprobe duration failed: path={path}, exit={result.ExitCode}, error={result.Error}");
         return TimeSpan.Zero;
     }
 
