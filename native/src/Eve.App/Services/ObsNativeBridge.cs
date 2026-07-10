@@ -39,6 +39,11 @@ public sealed class ObsNativeBridge
         ThrowIfFailed(eve_obs_stop());
     }
 
+    public void SetCapturePaused(bool paused)
+    {
+        ThrowIfFailed(eve_obs_set_capture_paused(paused));
+    }
+
     public string SaveReplay(string outputFolder)
     {
         var buffer = new StringBuilder(1024);
@@ -95,6 +100,9 @@ public sealed class ObsNativeBridge
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
     private static extern int eve_obs_save_replay(string outputFolder, StringBuilder outputPath, int outputPathLength);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int eve_obs_set_capture_paused(bool paused);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     private static extern int eve_obs_stop();

@@ -12,7 +12,8 @@ public sealed record GameDetection(
     string WindowClass,
     nint WindowHandle,
     int ProcessId,
-    bool IsDetected)
+    bool IsDetected,
+    bool IsForeground = false)
 {
     public static GameDetection None { get; } = new("No game detected", string.Empty, string.Empty, string.Empty, 0, 0, false);
 }
@@ -82,15 +83,19 @@ public sealed class ForegroundGameDetector
         var foreground = DetectForeground();
         if (foreground.IsDetected)
         {
-            _lastGame = foreground;
-            return foreground;
+            _lastGame = foreground with { IsForeground = true };
+            return _lastGame;
         }
 
-        if (_lastGame.IsDetected && IsStillUsable(_lastGame)) return _lastGame;
+        if (_lastGame.IsDetected && IsStillUsable(_lastGame))
+        {
+            _lastGame = _lastGame with { IsForeground = false };
+            return _lastGame;
+        }
 
         var runningGame = DetectRunningGame();
-        _lastGame = runningGame;
-        return runningGame;
+        _lastGame = runningGame.IsDetected ? runningGame with { IsForeground = false } : runningGame;
+        return _lastGame;
     }
 
     public string DetectDisplayName() => Detect().DisplayName;

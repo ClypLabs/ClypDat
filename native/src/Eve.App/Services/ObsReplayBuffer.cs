@@ -100,6 +100,19 @@ public sealed class ObsReplayBuffer : IReplayBuffer
         return Task.FromResult(output);
     }
 
+    public void SetCapturePaused(bool paused)
+    {
+        if (!IsRecording) return;
+        try
+        {
+            _bridge.SetCapturePaused(paused);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("OBS capture pause toggle failed", error);
+        }
+    }
+
     private void CleanupAfterFailedStart()
     {
         try

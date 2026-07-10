@@ -8,6 +8,7 @@
 #include <fstream>
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -72,6 +73,10 @@ obs_source_t *g_microphone_source = nullptr;
 obs_scene_t *g_scene = nullptr;
 obs_sceneitem_t *g_scene_item = nullptr;
 obs_source_t *g_fallback_source = nullptr;
+obs_sceneitem_t *g_pause_image_item = nullptr;
+obs_sceneitem_t *g_pause_dark_item = nullptr;
+obs_sceneitem_t *g_pause_text_item = nullptr;
+bool g_capture_paused = false;
 obs_output_t *g_replay = nullptr;
 obs_encoder_t *g_video_encoder = nullptr;
 obs_encoder_t *g_audio_encoders[3] = {};
@@ -87,6 +92,7 @@ std::string g_game_window_title;
 std::string g_game_window_class;
 
 std::filesystem::path app_data_folder();
+std::filesystem::path pause_frame_path();
 
 std::string narrow(const std::wstring &value)
 {
@@ -156,6 +162,8 @@ struct ObsApi {
     obs_source_t *(__cdecl *scene_get_source)(obs_scene_t *) = nullptr;
     obs_sceneitem_t *(__cdecl *scene_add)(obs_scene_t *, obs_source_t *) = nullptr;
     void(__cdecl *sceneitem_set_order)(obs_sceneitem_t *, int) = nullptr;
+    void(__cdecl *sceneitem_remove)(obs_sceneitem_t *) = nullptr;
+    bool(__cdecl *sceneitem_set_visible)(obs_sceneitem_t *, bool) = nullptr;
     obs_source_t *(__cdecl *source_create)(const char *, const char *, obs_data_t *, obs_data_t *) = nullptr;
     void(__cdecl *source_release)(obs_source_t *) = nullptr;
     void(__cdecl *source_inc_showing)(obs_source_t *) = nullptr;
@@ -219,6 +227,8 @@ bool load_obs_api(const std::filesystem::path &bin)
            load_fn(obs.scene_get_source, "obs_scene_get_source") &&
            load_fn(obs.scene_add, "obs_scene_add") &&
            load_fn(obs.sceneitem_set_order, "obs_sceneitem_set_order") &&
+           load_fn(obs.sceneitem_remove, "obs_sceneitem_remove") &&
+           load_fn(obs.sceneitem_set_visible, "obs_sceneitem_set_visible") &&
            load_fn(obs.source_create, "obs_source_create") &&
            load_fn(obs.source_release, "obs_source_release") &&
            load_fn(obs.source_inc_showing, "obs_source_inc_showing") &&
@@ -276,6 +286,12 @@ void __cdecl obs_log_handler(int, const char *message, va_list args, void *)
 
 void cleanup_obs()
 {
+    g_pause_image_item = nullptr;
+    g_pause_dark_item = nullptr;
+    g_pause_text_item = nullptr;
+    g_capture_paused = false;
+    std::error_code delete_error;
+    std::filesystem::remove(pause_frame_path(), delete_error);
     if (g_replay) {
         if (obs.output_active && obs.output_active(g_replay)) {
             obs.output_stop(g_replay);
@@ -516,6 +532,150 @@ bool create_scene()
     return true;
 }
 
+std::filesystem::path pause_frame_path()
+{
+    return app_data_folder() / L"pause_frame.bmp";
+}
+
+bool capture_screen_to_bmp(const std::filesystem::path &path)
+{
+    auto [width, height] = primary_monitor_size();
+    if (width <= 0 || height <= 0) return false;
+
+    HDC screen_dc = GetDC(nullptr);
+    if (!screen_dc) return false;
+    HDC memory_dc = CreateCompatibleDC(screen_dc);
+    HBITMAP bitmap = CreateCompatibleBitmap(screen_dc, width, height);
+    if (!memory_dc || !bitmap) {
+        if (bitmap) DeleteObject(bitmap);
+        if (memory_dc) DeleteDC(memory_dc);
+        ReleaseDC(nullptr, screen_dc);
+        return false;
+    }
+
+    HGDIOBJ previous = SelectObject(memory_dc, bitmap);
+    BitBlt(memory_dc, 0, 0, width, height, screen_dc, 0, 0, SRCCOPY);
+    SelectObject(memory_dc, previous);
+
+    BITMAPINFOHEADER info = {};
+    info.biSize = sizeof(BITMAPINFOHEADER);
+    info.biWidth = width;
+    info.biHeight = -height;
+    info.biPlanes = 1;
+    info.biBitCount = 32;
+    info.biCompression = BI_RGB;
+
+    std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 4);
+    bool ok = GetDIBits(memory_dc, bitmap, 0, height, pixels.data(), reinterpret_cast<BITMAPINFO *>(&info), DIB_RGB_COLORS) != 0;
+
+    DeleteObject(bitmap);
+    DeleteDC(memory_dc);
+    ReleaseDC(nullptr, screen_dc);
+    if (!ok) return false;
+
+    BITMAPFILEHEADER file_header = {};
+    file_header.bfType = 0x4D42;
+    file_header.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+    file_header.bfSize = static_cast<DWORD>(file_header.bfOffBits + pixels.size());
+
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file) return false;
+    file.write(reinterpret_cast<const char *>(&file_header), sizeof(file_header));
+    file.write(reinterpret_cast<const char *>(&info), sizeof(info));
+    file.write(reinterpret_cast<const char *>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
+    return file.good();
+}
+
+void remove_pause_overlay()
+{
+    if (g_pause_text_item) {
+        obs.sceneitem_remove(g_pause_text_item);
+        g_pause_text_item = nullptr;
+    }
+    if (g_pause_dark_item) {
+        obs.sceneitem_remove(g_pause_dark_item);
+        g_pause_dark_item = nullptr;
+    }
+    if (g_pause_image_item) {
+        obs.sceneitem_remove(g_pause_image_item);
+        g_pause_image_item = nullptr;
+    }
+    if (g_scene_item) obs.sceneitem_set_visible(g_scene_item, true);
+}
+
+bool set_capture_paused(bool paused)
+{
+    if (!g_initialized || !g_scene || !g_scene_item) {
+        set_error(L"OBS bridge not initialized.");
+        return false;
+    }
+    if (paused == g_capture_paused) return true;
+
+    if (!paused) {
+        remove_pause_overlay();
+        g_capture_paused = false;
+        trace("pause: resumed");
+        return true;
+    }
+
+    const auto frame_path = pause_frame_path();
+    if (!capture_screen_to_bmp(frame_path)) {
+        trace("pause: screen capture failed");
+        return false;
+    }
+
+    auto [width, height] = output_size();
+
+    obs_data_t *image_settings = obs.data_create();
+    obs.data_set_string(image_settings, "file", narrow(frame_path.wstring()).c_str());
+    obs_source_t *image_source = obs.source_create("image_source", "EVE Pause Frame", image_settings, nullptr);
+    obs.data_release(image_settings);
+    if (!image_source) {
+        trace("pause: image_source create failed");
+        return false;
+    }
+    g_pause_image_item = obs.scene_add(g_scene, image_source);
+    obs.source_release(image_source);
+    if (!g_pause_image_item) return false;
+    obs.sceneitem_set_order(g_pause_image_item, 3);
+
+    obs_data_t *dark_settings = obs.data_create();
+    obs.data_set_int(dark_settings, "color", 0x99000000);
+    obs.data_set_int(dark_settings, "width", width);
+    obs.data_set_int(dark_settings, "height", height);
+    obs_source_t *dark_source = obs.source_create("color_source", "EVE Pause Dim", dark_settings, nullptr);
+    obs.data_release(dark_settings);
+    if (!dark_source) {
+        trace("pause: dark overlay create failed");
+        remove_pause_overlay();
+        return false;
+    }
+    g_pause_dark_item = obs.scene_add(g_scene, dark_source);
+    obs.source_release(dark_source);
+    if (!g_pause_dark_item) {
+        remove_pause_overlay();
+        return false;
+    }
+    obs.sceneitem_set_order(g_pause_dark_item, 2);
+
+    obs_data_t *text_settings = obs.data_create();
+    obs.data_set_string(text_settings, "text", "Recording Paused");
+    obs_source_t *text_source = obs.source_create("text_ft2_source", "EVE Pause Text", text_settings, nullptr);
+    obs.data_release(text_settings);
+    if (text_source) {
+        g_pause_text_item = obs.scene_add(g_scene, text_source);
+        obs.source_release(text_source);
+        if (g_pause_text_item) obs.sceneitem_set_order(g_pause_text_item, 2);
+    } else {
+        trace("pause: text source create failed");
+    }
+
+    obs.sceneitem_set_visible(g_scene_item, false);
+    g_capture_paused = true;
+    trace("pause: paused");
+    return true;
+}
+
 std::string ensure_exe_name(const std::string &process_name)
 {
     if (process_name.empty()) return {};
@@ -747,6 +907,7 @@ extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder,
     load_module(root, L"win-capture");
     load_module(root, L"win-wasapi");
     load_module(root, L"image-source");
+    load_module(root, L"text-freetype2");
     load_module(root, L"obs-ffmpeg");
     if (!load_module(root, L"obs-nvenc")) {
         set_error(L"OBS NVENC module failed. Expected obs-nvenc-test.exe beside EVE.exe: " + nvenc_helper.wstring());
@@ -896,6 +1057,12 @@ extern "C" __declspec(dllexport) int eve_obs_save_replay(const wchar_t *output_f
     trace("save: path=" + narrow(g_last_replay));
     copy_string(output_path, output_path_length, g_last_replay);
     return 0;
+}
+
+extern "C" __declspec(dllexport) int eve_obs_set_capture_paused(bool paused)
+{
+    std::lock_guard lock(g_lock);
+    return set_capture_paused(paused) ? 0 : -1;
 }
 
 extern "C" __declspec(dllexport) int eve_obs_stop()

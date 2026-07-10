@@ -9,4 +9,5 @@ public interface IReplayBuffer : IDisposable
     Task StartAsync(CancellationToken cancellationToken = default);
     Task StopAsync(CancellationToken cancellationToken = default);
     Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default);
+    void SetCapturePaused(bool paused) { }
 }

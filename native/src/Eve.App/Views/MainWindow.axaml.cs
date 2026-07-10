@@ -86,6 +86,15 @@ public sealed partial class MainWindow : Window
         {
             _ = StopReplayBufferAsync();
         }
+
+        UpdateCapturePauseState(detection);
+    }
+
+    private void UpdateCapturePauseState(GameDetection detection)
+    {
+        if (_replayBuffer is not { IsRecording: true }) return;
+        var shouldPause = string.Equals(detection.ExeName, "cs2.exe", StringComparison.OrdinalIgnoreCase) && detection.IsDetected && !detection.IsForeground;
+        _replayBuffer.SetCapturePaused(shouldPause);
     }
 
     private void InitializeReplayServices()
