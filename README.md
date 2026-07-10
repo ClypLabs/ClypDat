@@ -86,12 +86,6 @@ portable exe, an NSIS installer, and an MSI.
 
 - Windows only.
 - NVENC-only encoding in the OBS backend.
-- Windows Capture goes black while its target window is minimized, and
-  doesn't capture separate overlay windows (Discord overlay, FPS counters)
-  layered on top of the game, since it only captures that window's own
-  content.
-- Editor audio and video can drift out of sync on long clips (see Editor,
-  above).
 
 ## Third-party licenses
 
