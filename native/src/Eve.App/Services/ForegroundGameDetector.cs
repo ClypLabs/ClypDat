@@ -61,7 +61,11 @@ public sealed class ForegroundGameDetector
 
     private readonly Dictionary<string, string> _catalog = new(StringComparer.OrdinalIgnoreCase)
     {
+        ["FortniteBootstrapper.exe"] = "Fortnite",
+        ["FortniteLauncher.exe"] = "Fortnite",
         ["FortniteClient-Win64-Shipping.exe"] = "Fortnite",
+        ["FortniteClient-Win64-Shipping_EAC.exe"] = "Fortnite",
+        ["FortniteClient-Win64-Shipping_EAC_EOS.exe"] = "Fortnite",
         ["cs2.exe"] = "Counter-Strike 2"
     };
 
@@ -122,17 +126,17 @@ public sealed class ForegroundGameDetector
         try
         {
             using var process = Process.GetProcessById((int)processId);
-            var fileName = process.MainModule?.FileName;
-            if (string.IsNullOrWhiteSpace(fileName)) return GameDetection.None;
-            var exeName = Path.GetFileName(fileName);
+            var exeName = GetExecutableName(process);
+            if (string.IsNullOrWhiteSpace(exeName)) return GameDetection.None;
             if (IgnoredExecutables.Contains(exeName)) return GameDetection.None;
+            var isCatalogGame = _catalog.TryGetValue(exeName, out var catalogName) && !string.IsNullOrWhiteSpace(catalogName);
 
             var title = GetWindowTitle(handle);
-            if (string.IsNullOrWhiteSpace(title) || IsTinyOrToolWindow(handle)) return GameDetection.None;
+            if ((!isCatalogGame && string.IsNullOrWhiteSpace(title)) || IsTinyOrToolWindow(handle)) return GameDetection.None;
             var className = GetWindowClass(handle);
             if (IsOverlayWindow(title, className)) return GameDetection.None;
-            var displayName = _catalog.TryGetValue(exeName, out var catalogName) && !string.IsNullOrWhiteSpace(catalogName)
-                ? catalogName
+            var displayName = isCatalogGame
+                ? catalogName!
                 : CleanExecutableName(exeName);
             return new GameDetection(displayName, exeName, title, className, handle, (int)processId, true);
         }
@@ -140,6 +144,21 @@ public sealed class ForegroundGameDetector
         {
             return GameDetection.None;
         }
+    }
+
+    private static string GetExecutableName(Process process)
+    {
+        try
+        {
+            var fileName = process.MainModule?.FileName;
+            if (!string.IsNullOrWhiteSpace(fileName)) return Path.GetFileName(fileName);
+        }
+        catch
+        {
+            // Some anti-cheat protected games block MainModule. ProcessName is still enough for catalog matching.
+        }
+
+        return string.IsNullOrWhiteSpace(process.ProcessName) ? string.Empty : process.ProcessName + ".exe";
     }
 
     private static bool IsStillUsable(GameDetection detection)
