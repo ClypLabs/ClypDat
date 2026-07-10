@@ -1,114 +1,197 @@
-using System.ComponentModel;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace Eve.App.Services;
 
+// Uses RegisterHotKey instead of a WH_KEYBOARD_LL hook. Some anti-cheat
+// drivers (observed with Marvel Rivals' Easy Anti-Cheat) suppress delivery
+// of low-level keyboard hooks while their protected game window has focus,
+// specifically to block macro/injection tools - which also silently killed
+// EVE's save-clip hotkey while actually playing. RegisterHotKey is the
+// standard Win32 "global hotkey" API (used by things like Discord's
+// push-to-talk) and is delivered via the OS hotkey table rather than a raw
+// input hook, so it isn't caught by that kind of filtering.
 public sealed class GlobalHotkeyService : IDisposable
 {
-    private const int WhKeyboardLl = 13;
-    private const int WmKeyDown = 0x0100;
-    private const int WmSysKeyDown = 0x0104;
-    private const int WmKeyUp = 0x0101;
-    private const int WmSysKeyUp = 0x0105;
+    private const int HotkeyId = 1;
+    private const uint ModAlt = 0x0001;
+    private const uint ModControl = 0x0002;
+    private const uint ModShift = 0x0004;
+    private const uint ModWin = 0x0008;
+    private const uint ModNoRepeat = 0x4000;
+    private const int WmHotkey = 0x0312;
+    private const int WmQuit = 0x0012;
+    private const int WmApplyHotkey = 0x8000; // WM_APP
+    private static readonly IntPtr HwndMessage = new(-3);
 
-    private readonly LowLevelKeyboardProc _proc;
-    private readonly HashSet<string> _pressed = new(StringComparer.OrdinalIgnoreCase);
-    private HashSet<string> _combo = HotkeyCombo.Parse("Ctrl+Shift+F9");
-    private IntPtr _hook;
-    private bool _fired;
-
-    public GlobalHotkeyService()
-    {
-        _proc = HookCallback;
-    }
+    private Thread? _thread;
+    private IntPtr _hwnd;
+    private uint _modifiers;
+    private uint _vk;
+    private readonly ManualResetEventSlim _ready = new(false);
+    private uint _threadId;
 
     public event EventHandler? Pressed;
 
     public void SetHotkey(string hotkey)
     {
-        _combo = HotkeyCombo.Parse(hotkey);
-        _pressed.Clear();
-        _fired = false;
+        var (modifiers, vk) = ToWin32Hotkey(hotkey);
+        _modifiers = modifiers;
+        _vk = vk;
+        // RegisterHotKey/UnregisterHotKey are thread-affine to the window that
+        // owns them, so if the hotkey thread is already running, ask it to
+        // reapply instead of calling the Win32 APIs from the caller's thread.
+        if (_threadId != 0) PostThreadMessage(_threadId, WmApplyHotkey, IntPtr.Zero, IntPtr.Zero);
     }
 
     public void Start()
     {
-        if (_hook != IntPtr.Zero || !OperatingSystem.IsWindows()) return;
-        using var process = Process.GetCurrentProcess();
-        using var module = process.MainModule;
-        _hook = SetWindowsHookEx(WhKeyboardLl, _proc, GetModuleHandle(module?.ModuleName), 0);
-        if (_hook == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (_thread is not null || !OperatingSystem.IsWindows()) return;
+        _thread = new Thread(RunMessageLoop) { IsBackground = true, Name = "EVE Global Hotkey" };
+        _thread.SetApartmentState(ApartmentState.STA);
+        _thread.Start();
+        _ready.Wait(TimeSpan.FromSeconds(2));
     }
 
     public void Dispose()
     {
-        if (_hook != IntPtr.Zero)
+        if (_hwnd != IntPtr.Zero)
         {
-            UnhookWindowsHookEx(_hook);
-            _hook = IntPtr.Zero;
+            UnregisterHotKey(_hwnd, HotkeyId);
+        }
+
+        if (_threadId != 0)
+        {
+            PostThreadMessage(_threadId, WmQuit, IntPtr.Zero, IntPtr.Zero);
+        }
+
+        _thread = null;
+        _hwnd = IntPtr.Zero;
+        _threadId = 0;
+    }
+
+    private void RunMessageLoop()
+    {
+        _hwnd = CreateWindowExW(0, "STATIC", "EVE Global Hotkey", 0, 0, 0, 0, 0, HwndMessage, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+        _threadId = GetCurrentThreadId();
+        if (_hwnd != IntPtr.Zero) ApplyRegistration();
+        _ready.Set();
+
+        while (GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
+        {
+            if (msg.Message == WmHotkey && msg.WParam.ToInt32() == HotkeyId)
+            {
+                Pressed?.Invoke(this, EventArgs.Empty);
+            }
+            else if (msg.Message == WmApplyHotkey)
+            {
+                ApplyRegistration();
+            }
+
+            TranslateMessage(ref msg);
+            DispatchMessage(ref msg);
+        }
+
+        if (_hwnd != IntPtr.Zero)
+        {
+            DestroyWindow(_hwnd);
         }
     }
 
-    private IntPtr HookCallback(int code, IntPtr wParam, IntPtr lParam)
+    private void ApplyRegistration()
     {
-        if (code >= 0)
+        UnregisterHotKey(_hwnd, HotkeyId);
+        if (_vk == 0) return;
+        if (!RegisterHotKey(_hwnd, HotkeyId, _modifiers | ModNoRepeat, _vk))
         {
-            var vkCode = Marshal.ReadInt32(lParam);
-            var key = NormalizeVirtualKey(vkCode);
-            if (!string.IsNullOrWhiteSpace(key))
+            AppLog.Error($"Global hotkey registration failed for vk=0x{_vk:X}, modifiers=0x{_modifiers:X}.");
+        }
+    }
+
+    private static (uint Modifiers, uint Vk) ToWin32Hotkey(string hotkey)
+    {
+        uint modifiers = 0;
+        uint vk = 0;
+        foreach (var key in HotkeyCombo.Parse(hotkey))
+        {
+            switch (key)
             {
-                var message = wParam.ToInt32();
-                if (message is WmKeyDown or WmSysKeyDown)
-                {
-                    _pressed.Add(key);
-                    if (!_fired && _combo.Count > 0 && _combo.All(key => _pressed.Contains(key)))
-                    {
-                        _fired = true;
-                        Pressed?.Invoke(this, EventArgs.Empty);
-                    }
-                }
-                else if (message is WmKeyUp or WmSysKeyUp)
-                {
-                    _pressed.Remove(key);
-                    _fired = false;
-                }
+                case "Ctrl": modifiers |= ModControl; break;
+                case "Alt": modifiers |= ModAlt; break;
+                case "Shift": modifiers |= ModShift; break;
+                case "Win": modifiers |= ModWin; break;
+                default:
+                    var mapped = ToVirtualKey(key);
+                    if (mapped != 0) vk = mapped;
+                    break;
             }
         }
 
-        return CallNextHookEx(_hook, code, wParam, lParam);
+        return (modifiers, vk);
     }
 
-    private static string NormalizeVirtualKey(int vkCode)
+    private static uint ToVirtualKey(string key)
     {
-        return vkCode switch
+        if (key.Length == 1)
         {
-            0xA0 or 0xA1 or 0x10 or 0xA2 or 0xA3 or 0x11 => vkCode is 0xA0 or 0xA1 or 0x10 ? "Shift" : "Ctrl",
-            0xA4 or 0xA5 or 0x12 => "Alt",
-            0x5B or 0x5C => "Win",
-            >= 0x30 and <= 0x39 => ((char)vkCode).ToString(),
-            >= 0x41 and <= 0x5A => ((char)vkCode).ToString(),
-            >= 0x70 and <= 0x87 => $"F{vkCode - 0x6F}",
-            0x20 => "Space",
-            0x25 => "Left",
-            0x26 => "Up",
-            0x27 => "Right",
-            0x28 => "Down",
-            _ => string.Empty
+            var c = char.ToUpperInvariant(key[0]);
+            if (c is >= '0' and <= '9' or >= 'A' and <= 'Z') return c;
+        }
+
+        if (key.Length is 2 or 3 && key[0] == 'F' && int.TryParse(key.AsSpan(1), out var fNumber) && fNumber is >= 1 and <= 24)
+        {
+            return (uint)(0x70 + (fNumber - 1));
+        }
+
+        return key switch
+        {
+            "Space" => 0x20,
+            "Left" => 0x25,
+            "Up" => 0x26,
+            "Right" => 0x27,
+            "Down" => 0x28,
+            _ => 0
         };
     }
 
-    private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSG
+    {
+        public IntPtr Hwnd;
+        public int Message;
+        public IntPtr WParam;
+        public IntPtr LParam;
+        public uint Time;
+        public int PtX;
+        public int PtY;
+    }
 
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateWindowExW(
+        uint dwExStyle, string lpClassName, string lpWindowName, uint dwStyle,
+        int x, int y, int nWidth, int nHeight,
+        IntPtr hWndParent, IntPtr hMenu, IntPtr hInstance, IntPtr lpParam);
 
     [DllImport("user32.dll")]
-    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+    private static extern bool DestroyWindow(IntPtr hWnd);
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-    private static extern IntPtr GetModuleHandle(string? lpModuleName);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+
+    [DllImport("user32.dll")]
+    private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+    [DllImport("user32.dll")]
+    private static extern int GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
+
+    [DllImport("user32.dll")]
+    private static extern bool TranslateMessage(ref MSG lpMsg);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr DispatchMessage(ref MSG lpMsg);
+
+    [DllImport("user32.dll")]
+    private static extern bool PostThreadMessage(uint idThread, int msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
 }
