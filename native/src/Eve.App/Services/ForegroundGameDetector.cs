@@ -68,7 +68,8 @@ public sealed class ForegroundGameDetector
         ["FortniteClient-Win64-Shipping.exe"] = "Fortnite",
         ["FortniteClient-Win64-Shipping_EAC.exe"] = "Fortnite",
         ["FortniteClient-Win64-Shipping_EAC_EOS.exe"] = "Fortnite",
-        ["cs2.exe"] = "Counter-Strike 2"
+        ["cs2.exe"] = "Counter-Strike 2",
+        ["Marvel-Win64-Shipping.exe"] = "Marvel Rivals"
     };
 
     private GameDetection _lastGame = GameDetection.None;
@@ -101,10 +102,24 @@ public sealed class ForegroundGameDetector
 
     public string DetectDisplayName() => Detect().DisplayName;
 
+    private string _lastLoggedRejectedExe = string.Empty;
+
     private GameDetection DetectForeground()
     {
         var handle = GetForegroundWindow();
-        return handle == IntPtr.Zero ? GameDetection.None : BuildDetection(handle);
+        if (handle == IntPtr.Zero) return GameDetection.None;
+        var detection = BuildDetection(handle, out var exeName, out var reason);
+        if (!detection.IsDetected && !string.IsNullOrEmpty(reason) && !string.Equals(exeName, _lastLoggedRejectedExe, StringComparison.OrdinalIgnoreCase))
+        {
+            _lastLoggedRejectedExe = exeName;
+            AppLog.Info($"Game detection: not detecting foreground window, exe={exeName}, reason={reason}.");
+        }
+        else if (detection.IsDetected)
+        {
+            _lastLoggedRejectedExe = string.Empty;
+        }
+
+        return detection;
     }
 
     private GameDetection DetectRunningGame()
@@ -123,8 +138,12 @@ public sealed class ForegroundGameDetector
             .FirstOrDefault() ?? GameDetection.None;
     }
 
-    private GameDetection BuildDetection(IntPtr handle)
+    private GameDetection BuildDetection(IntPtr handle) => BuildDetection(handle, out _, out _);
+
+    private GameDetection BuildDetection(IntPtr handle, out string exeName, out string rejectReason)
     {
+        exeName = string.Empty;
+        rejectReason = string.Empty;
         if (handle == IntPtr.Zero || !IsWindowVisible(handle) || IsIconic(handle)) return GameDetection.None;
         GetWindowThreadProcessId(handle, out var processId);
         if (processId == 0 || processId == Environment.ProcessId) return GameDetection.None;
@@ -132,23 +151,45 @@ public sealed class ForegroundGameDetector
         try
         {
             using var process = Process.GetProcessById((int)processId);
-            var exeName = GetExecutableName(process);
+            exeName = GetExecutableName(process);
             if (string.IsNullOrWhiteSpace(exeName)) return GameDetection.None;
-            if (IgnoredExecutables.Contains(exeName)) return GameDetection.None;
+            if (IgnoredExecutables.Contains(exeName))
+            {
+                rejectReason = "on the ignored-executables list";
+                return GameDetection.None;
+            }
             var isCatalogGame = _catalog.TryGetValue(exeName, out var catalogName) && !string.IsNullOrWhiteSpace(catalogName);
 
             var title = GetWindowTitle(handle);
-            if ((!isCatalogGame && string.IsNullOrWhiteSpace(title)) || IsTinyOrToolWindow(handle)) return GameDetection.None;
-            if (!isCatalogGame && !HasGraphicsModule(process)) return GameDetection.None;
+            if (!isCatalogGame && string.IsNullOrWhiteSpace(title))
+            {
+                rejectReason = "no window title";
+                return GameDetection.None;
+            }
+            if (IsTinyOrToolWindow(handle))
+            {
+                rejectReason = "window smaller than 320x240";
+                return GameDetection.None;
+            }
+            if (!isCatalogGame && !HasGraphicsModule(process))
+            {
+                rejectReason = "no D3D/DXGI/OpenGL/Vulkan module found (module enumeration may be blocked by anti-cheat) and not in the game catalog";
+                return GameDetection.None;
+            }
             var className = GetWindowClass(handle);
-            if (IsOverlayWindow(title, className)) return GameDetection.None;
+            if (IsOverlayWindow(title, className))
+            {
+                rejectReason = "looks like an overlay window (title/class matched an overlay pattern)";
+                return GameDetection.None;
+            }
             var displayName = isCatalogGame
                 ? catalogName!
                 : CleanExecutableName(exeName);
             return new GameDetection(displayName, exeName, title, className, handle, (int)processId, true);
         }
-        catch
+        catch (Exception error)
         {
+            rejectReason = $"exception: {error.Message}";
             return GameDetection.None;
         }
     }
