@@ -443,10 +443,10 @@ public sealed class PlaybackSession : IDisposable
 
     private void DisposeAudioOutput()
     {
+        WasapiOut? previous;
         lock (_transportLock)
         {
-            _audioOutput?.Stop();
-            _audioOutput?.Dispose();
+            previous = _audioOutput;
             _audioOutput = null;
             _audioMixer = null;
 
@@ -456,6 +456,31 @@ public sealed class PlaybackSession : IDisposable
             }
 
             _audioSources.Clear();
+        }
+
+        if (previous is null) return;
+
+        // WasapiOut.Stop()/Dispose() don't block until its internal render
+        // thread has actually released the shared-mode IAudioClient - closing
+        // one clip's editor session and immediately opening another's (or
+        // re-opening the same one) could construct+Init() a new WasapiOut
+        // before that release finished, which could silently leave the WASAPI
+        // session wedged with no audio for the rest of the app run. Wait for
+        // PlaybackStopped (or a short timeout if it never started) before
+        // disposing, so the endpoint is actually free by the time the next
+        // WasapiOut is created.
+        using var stopped = new ManualResetEventSlim(false);
+        void OnStopped(object? sender, StoppedEventArgs args) => stopped.Set();
+        previous.PlaybackStopped += OnStopped;
+        try
+        {
+            previous.Stop();
+            stopped.Wait(TimeSpan.FromMilliseconds(300));
+        }
+        finally
+        {
+            previous.PlaybackStopped -= OnStopped;
+            previous.Dispose();
         }
     }
 
