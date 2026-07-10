@@ -483,9 +483,23 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         var stitchedPath = Path.Combine(_bufferFolder, $"stitched_{Guid.NewGuid():N}.mp4");
         try
         {
+            // A segment that was readable moments ago during hydration can still vanish
+            // out from under us before ffmpeg gets to it (seen in practice - likely AV
+            // real-time scanning briefly locking/removing a freshly written mp4). Drop
+            // anything missing right now instead of hard-failing the whole clip save.
+            var usableSegments = segments.Where(segment => File.Exists(segment.Path)).ToArray();
+            if (usableSegments.Length < segments.Count)
+            {
+                AppLog.Info($"Replay concat: {segments.Count - usableSegments.Length} segment(s) vanished before concat, continuing with {usableSegments.Length}.");
+            }
+            if (usableSegments.Length == 0)
+            {
+                throw new InvalidOperationException("Replay segments were unavailable when building the clip. Try again.");
+            }
+
             await File.WriteAllLinesAsync(
                 concatPath,
-                segments.Select(segment => $"file '{EscapeConcatPath(segment.Path)}'"),
+                usableSegments.Select(segment => $"file '{EscapeConcatPath(segment.Path)}'"),
                 cancellationToken);
 
             var concatResult = await RunProcessAsync(
