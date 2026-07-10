@@ -248,6 +248,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                 new WindowRecordingSource(config.GameWindowHandle)
                 {
                     IsCursorCaptureEnabled = false,
+                    IsBorderRequired = false,
                     Stretch = StretchMode.Uniform
                 }
             };
