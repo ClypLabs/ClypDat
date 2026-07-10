@@ -34,6 +34,7 @@ public sealed partial class MainWindow : Window
     private bool _replayArmed;
     private int _clipSaving;
     private bool _cs2SetupDialogOpen;
+    private bool _updateDialogOpen;
 
     public MainWindow()
     {
@@ -49,6 +50,7 @@ public sealed partial class MainWindow : Window
             InitializeReplayServices();
             UpdateDetectedGame();
             _gameDetectionTimer.Start();
+            _ = CheckForUpdatesAsync();
         };
         KeyUp += MainWindow_OnKeyUp;
         KeyDown += MainWindow_OnKeyDown;
@@ -841,6 +843,148 @@ public sealed partial class MainWindow : Window
         var dialog = CreateDialog(title, message, false);
         await dialog.ShowDialog<bool>(this);
     }
+
+    private async Task CheckForUpdatesAsync()
+    {
+        if (ViewModel is null || _updateDialogOpen) return;
+        AppUpdateInfo? update;
+        try
+        {
+            update = await AppUpdateService.CheckAsync();
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Update check failed", error);
+            return;
+        }
+
+        if (update is null) return;
+        if (string.Equals(ViewModel.Settings.IgnoredUpdateVersion, update.TagName, StringComparison.OrdinalIgnoreCase)) return;
+
+        _updateDialogOpen = true;
+        try
+        {
+            var dialog = CreateUpdateDialog(update);
+            await dialog.ShowDialog(this);
+        }
+        finally
+        {
+            _updateDialogOpen = false;
+        }
+    }
+
+    private Window CreateUpdateDialog(AppUpdateInfo update)
+    {
+        var window = new Window
+        {
+            Title = "Update available",
+            Width = 480,
+            Height = 380,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = Avalonia.Media.Brush.Parse("#111920")
+        };
+
+        var statusText = new TextBlock
+        {
+            Text = string.Empty,
+            Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"),
+            FontSize = 12,
+            IsVisible = false
+        };
+        var progressBar = new ProgressBar { IsVisible = false, Minimum = 0, Maximum = 100 };
+
+        var updateButton = new Button { Content = "Update Now", Width = 120, HorizontalContentAlignment = HorizontalAlignment.Center, Classes = { "replayButton" } };
+        var laterButton = new Button { Content = "Remind Me Later", Width = 140, HorizontalContentAlignment = HorizontalAlignment.Center };
+        var ignoreButton = new Button { Content = "Skip This Version", Width = 140, HorizontalContentAlignment = HorizontalAlignment.Center };
+
+        laterButton.Click += (_, _) => window.Close();
+        ignoreButton.Click += (_, _) =>
+        {
+            if (ViewModel is not null)
+            {
+                ViewModel.Settings.IgnoredUpdateVersion = update.TagName;
+                ViewModel.SaveSettings();
+            }
+            window.Close();
+        };
+        updateButton.Click += async (_, _) =>
+        {
+            updateButton.IsEnabled = false;
+            laterButton.IsEnabled = false;
+            ignoreButton.IsEnabled = false;
+            statusText.IsVisible = true;
+            progressBar.IsVisible = true;
+            var progress = new Progress<UpdateDownloadProgress>(value =>
+            {
+                statusText.Text = value.Status;
+                progressBar.IsIndeterminate = value.Percentage is null;
+                if (value.Percentage is not null) progressBar.Value = value.Percentage.Value * 100;
+            });
+
+            try
+            {
+                await AppUpdateService.DownloadAndRestartAsync(update, progress);
+                window.Close();
+            }
+            catch (Exception error)
+            {
+                AppLog.Error("Update install failed", error);
+                await ShowMessageAsync("Update failed", $"EVE could not install the update.\n\n{error.Message}");
+                updateButton.IsEnabled = true;
+                laterButton.IsEnabled = true;
+                ignoreButton.IsEnabled = true;
+                statusText.IsVisible = false;
+                progressBar.IsVisible = false;
+            }
+        };
+
+        var notesPanel = new StackPanel { Spacing = 4, IsVisible = update.ReleaseNotes.Count > 0 };
+        foreach (var note in update.ReleaseNotes.Take(8))
+        {
+            notesPanel.Children.Add(new TextBlock
+            {
+                Text = $"• {note}",
+                Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"),
+                TextWrapping = Avalonia.Media.TextWrapping.Wrap
+            });
+        }
+
+        window.Content = new StackPanel
+        {
+            Margin = new Avalonia.Thickness(22),
+            Spacing = 16,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = $"EVE {FormatVersion(update.LatestVersion)} is available",
+                    Foreground = Avalonia.Media.Brush.Parse("#DDE8F5"),
+                    FontWeight = Avalonia.Media.FontWeight.Bold,
+                    FontSize = 17
+                },
+                new TextBlock
+                {
+                    Text = $"You're on {FormatVersion(update.CurrentVersion)}.",
+                    Foreground = Avalonia.Media.Brush.Parse("#8EA1B6")
+                },
+                notesPanel,
+                statusText,
+                progressBar,
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 10,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    Children = { ignoreButton, laterButton, updateButton }
+                }
+            }
+        };
+
+        return window;
+    }
+
+    private static string FormatVersion(Version version) => $"{version.Major}.{version.Minor}.{version.Build}";
 
     private async Task ShowCs2CaptureNoticeIfNeededAsync()
     {
