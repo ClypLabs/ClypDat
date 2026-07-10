@@ -942,7 +942,6 @@ public sealed partial class MainWindow : Window
         }
         if (ViewModel.IsPlaying)
         {
-            _playback.CorrectAudioDriftIfNeeded();
             if (_playheadClock.Elapsed >= PlayheadResyncInterval)
             {
                 StartPlayheadClock(_playback.Position);

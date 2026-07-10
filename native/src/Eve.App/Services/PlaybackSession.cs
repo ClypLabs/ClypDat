@@ -25,9 +25,6 @@ public sealed class PlaybackSession : IDisposable
     private TimeSpan _lastRequestedPosition = TimeSpan.Zero;
     private readonly SemaphoreSlim _seekLock = new(1, 1);
     private readonly object _transportLock = new();
-    private readonly Stopwatch _driftCheckClock = Stopwatch.StartNew();
-    private static readonly TimeSpan DriftCheckInterval = TimeSpan.FromMilliseconds(500);
-    private static readonly TimeSpan DriftThreshold = TimeSpan.FromMilliseconds(120);
 
     public PlaybackSession()
     {
@@ -168,7 +165,6 @@ public sealed class PlaybackSession : IDisposable
             VideoPlayer.SetPause(false);
             _audioOutput?.Play();
         }
-        _driftCheckClock.Restart();
         AppLog.Info($"Editor play from {time.TotalSeconds:0.###}s (seek={needsSeek}).");
     }
 
@@ -257,7 +253,6 @@ public sealed class PlaybackSession : IDisposable
                     VideoPlayer.SetPause(true);
                 }
             }
-            if (resumed) _driftCheckClock.Restart();
 
             AppLog.Info($"Editor seek end: requested={requested.TotalSeconds:0.###}s, settled={settledTime.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, resume={resumePlayback}, resumed={resumed}, version={seekVersion}.");
             return !resumePlayback || resumed;
@@ -305,25 +300,6 @@ public sealed class PlaybackSession : IDisposable
             {
                 _audioOutput.Play();
             }
-        }
-    }
-
-    public void CorrectAudioDriftIfNeeded()
-    {
-        if (_isSeeking || !_shouldPlay || _audioOutput is null || _audioSources.Count == 0 || !VideoPlayer.IsPlaying) return;
-        if (_driftCheckClock.Elapsed < DriftCheckInterval) return;
-        _driftCheckClock.Restart();
-
-        lock (_transportLock)
-        {
-            if (_audioSources.Count == 0) return;
-            var videoTime = TimeSpan.FromMilliseconds(Math.Max(0, VideoPlayer.Time));
-            var audioTime = _audioSources.Values.First().Reader.CurrentTime;
-            var drift = videoTime - audioTime;
-            if (drift.Duration() < DriftThreshold) return;
-
-            AppLog.Info($"Editor audio drift corrected: drift={drift.TotalMilliseconds:0}ms, video={videoTime.TotalSeconds:0.###}s, audio={audioTime.TotalSeconds:0.###}s.");
-            SeekAudio(videoTime);
         }
     }
 
