@@ -43,7 +43,8 @@ public sealed class ObsReplayBuffer : IReplayBuffer
                 config.MicrophoneDeviceId,
                 config.GameExecutableName,
                 config.GameWindowTitle,
-                config.GameWindowClass);
+                config.GameWindowClass,
+                config.GameDisplayName);
             _initialized = true;
             _bridge.StartReplayCapture();
             IsRecording = true;

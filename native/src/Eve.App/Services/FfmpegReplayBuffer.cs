@@ -139,7 +139,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         StopAudioCaptures();
         var concatPath = Path.Combine(_bufferFolder, $"concat_{Guid.NewGuid():N}.txt");
         var tempVideoPath = Path.Combine(_bufferFolder, $"replay_video_{Guid.NewGuid():N}.mkv");
-        var outputPath = Path.Combine(outputFolder, $"Replay {DateTime.Now:yyyy-MM-dd HH-mm-ss}.mkv");
+        var outputPath = Path.Combine(outputFolder, ClipFileNaming.BuildFileName(config?.GameDisplayName ?? string.Empty, DateTime.Now, "mkv"));
         await File.WriteAllLinesAsync(
             concatPath,
             files.Select(file => $"file '{EscapeConcatPath(file.FullName)}'"),

@@ -150,7 +150,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             }
 
             sourcePath = await BuildReplayVideoAsync(sourceSegments, cancellationToken);
-            outputPath = Path.Combine(outputFolder, $"Replay {DateTime.Now:yyyy-MM-dd HH-mm-ss}.mp4");
+            outputPath = Path.Combine(outputFolder, ClipFileNaming.BuildFileName(config.GameDisplayName, DateTime.Now, "mp4"));
             await MuxAudioTracksAsync(sourcePath, outputPath, videoOffsetSeconds, sourceSegments, clipDurationSeconds, config, cancellationToken);
         }
         finally

@@ -90,6 +90,7 @@ std::string g_microphone_device_id;
 std::string g_game_exe_name;
 std::string g_game_window_title;
 std::string g_game_window_class;
+std::string g_game_display_name;
 
 std::filesystem::path app_data_folder();
 std::filesystem::path pause_frame_path();
@@ -377,6 +378,23 @@ std::string foreground_executable_name()
 
     CloseHandle(process);
     return exe;
+}
+
+std::string replay_filename_format()
+{
+    if (g_game_display_name.empty()) return "Replay %CCYY-%MM-%DD %hh-%mm-%ss";
+
+    std::string sanitized = g_game_display_name;
+    // Strip Windows filesystem-invalid characters and '%' (OBS's format engine
+    // treats it as a token prefix - a literal one from a game name could collide
+    // with a real token like %CCYY).
+    for (char &character : sanitized) {
+        if (std::string("<>:\"/\\|?*%").find(character) != std::string::npos) {
+            character = '_';
+        }
+    }
+
+    return sanitized + " %CCYY-%MM-%DD %hh-%mm-%ss";
 }
 
 std::string encode_window_part(std::string value)
@@ -838,7 +856,7 @@ std::wstring find_newest_replay_file(const std::filesystem::path &folder, const 
 
 } // namespace
 
-extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder, int max_height, int frame_rate, int duration_seconds, const wchar_t *chat_process_name, const wchar_t *microphone_device_id, const wchar_t *game_exe_name, const wchar_t *game_window_title, const wchar_t *game_window_class)
+extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder, int max_height, int frame_rate, int duration_seconds, const wchar_t *chat_process_name, const wchar_t *microphone_device_id, const wchar_t *game_exe_name, const wchar_t *game_window_title, const wchar_t *game_window_class, const wchar_t *game_display_name)
 {
     std::lock_guard lock(g_lock);
     trace("init: enter");
@@ -853,6 +871,7 @@ extern "C" __declspec(dllexport) int eve_obs_init(const wchar_t *runtime_folder,
     g_game_exe_name = narrow(game_exe_name ? game_exe_name : L"");
     g_game_window_title = narrow(game_window_title ? game_window_title : L"");
     g_game_window_class = narrow(game_window_class ? game_window_class : L"");
+    g_game_display_name = narrow(game_display_name ? game_display_name : L"");
 
     const std::filesystem::path root(g_runtime);
     const auto bin = root / L"bin" / L"64bit";
@@ -1000,7 +1019,7 @@ extern "C" __declspec(dllexport) int eve_obs_save_replay(const wchar_t *output_f
     const auto save_started_at = std::filesystem::file_time_type::clock::now();
     obs_data_t *settings = obs.data_create();
     obs.data_set_string(settings, "directory", narrow(folder.wstring()).c_str());
-    obs.data_set_string(settings, "format", "Replay %CCYY-%MM-%DD %hh-%mm-%ss");
+    obs.data_set_string(settings, "format", replay_filename_format().c_str());
     obs.data_set_string(settings, "extension", "mp4");
     obs.data_set_string(settings, "format_name", "mp4");
     obs.data_set_bool(settings, "allow_spaces", true);
