@@ -73,6 +73,15 @@ Pushing a tag matching `v*` triggers `.github/workflows/release.yml`, which
 builds the same output and packages it four ways: a zip, a self-extracting
 portable exe, an NSIS installer, and an MSI.
 
+
+## Future Updates
+
+- Will add support to use AMD GPU's for OBS
+- Will also add auto-clipping functionalitys for games
+- Update UI, make it look more polished
+- I'll update this when I get more ideas lol
+
+
 ## Known limitations
 
 - Windows only.
