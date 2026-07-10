@@ -4,7 +4,15 @@ namespace Eve.App.Services;
 
 public static class ClipMetadataTagger
 {
+    // MP4/mov muxers only persist a whitelisted set of format-level metadata keys
+    // (title, comment, artist, etc.) and silently drop arbitrary custom keys -
+    // confirmed by directly probing a tagged file and finding the custom key gone.
+    // "comment" is one of the recognized keys, so the backend name is embedded
+    // inside it instead, prefixed for unambiguous parsing on read-back.
     public const string BackendTagKey = "EVE_CAPTURE_BACKEND";
+    private const string CommentKey = "comment";
+
+    public static string BuildCommentValue(string backendLabel) => $"{BackendTagKey}={backendLabel}";
 
     public static async Task<string> TagCaptureBackendAsync(string path, string backendLabel, CancellationToken cancellationToken = default)
     {
@@ -19,7 +27,7 @@ public static class ClipMetadataTagger
                 RedirectStandardError = true,
                 RedirectStandardOutput = true
             };
-            foreach (var arg in new[] { "-y", "-v", "error", "-i", path, "-map", "0", "-c", "copy", "-metadata", $"{BackendTagKey}={backendLabel}", taggedPath })
+            foreach (var arg in new[] { "-y", "-v", "error", "-i", path, "-map", "0", "-c", "copy", "-metadata", $"{CommentKey}={BuildCommentValue(backendLabel)}", taggedPath })
             {
                 startInfo.ArgumentList.Add(arg);
             }

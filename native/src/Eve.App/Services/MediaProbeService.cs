@@ -84,9 +84,14 @@ public sealed class MediaProbeService
 
                 steelSeriesAudioTracks = ReadSteelSeriesAudioTracks(format);
                 if (format.TryGetProperty("tags", out var formatTags) &&
-                    formatTags.TryGetProperty(ClipMetadataTagger.BackendTagKey, out var backendTag))
+                    formatTags.TryGetProperty("comment", out var commentTag))
                 {
-                    captureBackend = backendTag.GetString() ?? string.Empty;
+                    var comment = commentTag.GetString() ?? string.Empty;
+                    var prefix = ClipMetadataTagger.BackendTagKey + "=";
+                    if (comment.StartsWith(prefix, StringComparison.Ordinal))
+                    {
+                        captureBackend = comment[prefix.Length..];
+                    }
                 }
             }
 

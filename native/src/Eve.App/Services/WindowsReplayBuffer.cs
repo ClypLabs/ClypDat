@@ -897,7 +897,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                 "-metadata:s:a:0", "title=Game Audio",
                 "-metadata:s:a:1", "title=Chat Audio",
                 "-metadata:s:a:2", "title=Microphone",
-                "-metadata", $"{ClipMetadataTagger.BackendTagKey}=Windows Capture",
+                "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("Windows Capture")}",
                 "-t", FormatSeconds(duration)
             });
             var baseArgs = args.ToList();
