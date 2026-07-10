@@ -139,6 +139,7 @@ public sealed class ForegroundGameDetector
 
             var title = GetWindowTitle(handle);
             if ((!isCatalogGame && string.IsNullOrWhiteSpace(title)) || IsTinyOrToolWindow(handle)) return GameDetection.None;
+            if (!isCatalogGame && !HasGraphicsModule(process)) return GameDetection.None;
             var className = GetWindowClass(handle);
             if (IsOverlayWindow(title, className)) return GameDetection.None;
             var displayName = isCatalogGame
@@ -150,6 +151,37 @@ public sealed class ForegroundGameDetector
         {
             return GameDetection.None;
         }
+    }
+
+    private static readonly HashSet<string> GraphicsModules = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "d3d9.dll",
+        "d3d10.dll",
+        "d3d11.dll",
+        "d3d12.dll",
+        "dxgi.dll",
+        "opengl32.dll",
+        "vulkan-1.dll"
+    };
+
+    private static bool HasGraphicsModule(Process process)
+    {
+        try
+        {
+            foreach (ProcessModule module in process.Modules)
+            {
+                using (module)
+                {
+                    if (GraphicsModules.Contains(module.ModuleName)) return true;
+                }
+            }
+        }
+        catch
+        {
+            // Access denied (protected/anti-cheat process) - can't confirm, treat as not a game.
+        }
+
+        return false;
     }
 
     private static string GetExecutableName(Process process)
