@@ -73,10 +73,23 @@ public sealed partial class MainWindow : Window
 
     private MainWindowViewModel? ViewModel => DataContext as MainWindowViewModel;
 
-    private void UpdateDetectedGame()
+    private bool _gameDetectionInFlight;
+
+    private async void UpdateDetectedGame()
     {
+        if (ViewModel is null || _gameDetectionInFlight) return;
+        _gameDetectionInFlight = true;
+        GameDetection detection;
+        try
+        {
+            detection = await Task.Run(() => _gameDetector.Detect());
+        }
+        finally
+        {
+            _gameDetectionInFlight = false;
+        }
+
         if (ViewModel is null) return;
-        var detection = _gameDetector.Detect();
         ViewModel.ActiveGameDetection = detection;
         ViewModel.ActiveGame = detection.DisplayName;
 
