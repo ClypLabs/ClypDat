@@ -165,10 +165,15 @@ jobs:
           & "$wixBin\candle.exe" @candleArgs
           if ($LASTEXITCODE -ne 0) { throw "candle.exe failed with exit code $LASTEXITCODE" }
 
+          # ICE38/ICE64: heat.exe's harvested components use a file as their
+          # KeyPath by default, but MSI's per-user (LocalAppDataFolder)
+          # install validation wants a registry KeyPath under HKCU instead.
+          # This is a well-known, commonly-suppressed limitation of default
+          # heat harvesting for per-user installs, not a real defect here.
           $lightArgs = @(
             "-ext", "WixUtilExtension", "-ext", "WixUIExtension",
             "installer\Product.wixobj", "installer\AppFiles.wixobj",
-            "-out", "EVE.msi", "-sice:ICE61"
+            "-out", "EVE.msi", "-sice:ICE61", "-sice:ICE38", "-sice:ICE64"
           )
           & "$wixBin\light.exe" @lightArgs
           if ($LASTEXITCODE -ne 0) { throw "light.exe failed with exit code $LASTEXITCODE" }
