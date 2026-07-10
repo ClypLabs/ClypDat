@@ -343,12 +343,11 @@ public sealed class PlaybackSession : IDisposable
         VideoPlayer.TimeChanged += OnTimeChanged;
         try
         {
-            if (Math.Abs(VideoPlayer.Time - targetMs) < 650)
-            {
-                _lastRequestedPosition = TimeSpan.FromMilliseconds(Math.Max(0, VideoPlayer.Time));
-                return true;
-            }
-
+            // Don't trust an immediate VideoPlayer.Time readback here: LibVLC echoes
+            // back whatever was just written to .Time before the decoder has actually
+            // caught up, so this always looked "ready" instantly - no backpressure on
+            // rapid repeated seeks, letting each new seek interrupt the last one's
+            // still-in-flight decode. Always wait for the real TimeChanged event.
             await ready.Task.WaitAsync(TimeSpan.FromMilliseconds(900), cancellationToken).ConfigureAwait(false);
             _lastRequestedPosition = TimeSpan.FromMilliseconds(Math.Max(0, VideoPlayer.Time));
             return true;
