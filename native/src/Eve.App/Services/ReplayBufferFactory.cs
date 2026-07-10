@@ -9,7 +9,8 @@ public static class ReplayBufferFactory
     // instead when the user hasn't explicitly picked a backend.
     private static readonly HashSet<string> AutoLegacyGames = new(StringComparer.OrdinalIgnoreCase)
     {
-        "cs2.exe"
+        "cs2.exe",
+        "Marvel-Win64-Shipping.exe"
     };
 
     public static IReplayBuffer Create(Func<ReplayBufferConfig> configProvider)

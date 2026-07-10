@@ -319,7 +319,11 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             >= 720 => 0.9,
             _ => 0.4
         };
-        return (int)Math.Clamp(megapixels * frameRate * 115_000, 6_000_000, 60_000_000);
+        // Windows Capture (ScreenRecorderLib/Media Foundation) looks noticeably
+        // softer than OBS's NVENC CQP encode at an equivalent nominal bitrate, so
+        // it needs a higher target to look comparable - bumped from ~115k to
+        // ~170k per megapixel-frame after a quality complaint at the old rate.
+        return (int)Math.Clamp(megapixels * frameRate * 170_000, 8_000_000, 80_000_000);
     }
 
     private static ScreenSize CaptureOutputSize(ReplayBufferConfig config)
