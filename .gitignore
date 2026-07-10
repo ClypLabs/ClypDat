@@ -8,7 +8,8 @@ publish/
 TestResults/
 *.user
 *.suo
-native/vendor/
+native/vendor/*
+!native/vendor/obs-runtime/
 
 # Build output
 dist/
