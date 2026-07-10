@@ -51,7 +51,7 @@ public sealed partial class App : Application
         if (_mainWindow is null) return;
         try
         {
-            _trayIconStream = AssetLoader.Open(new Uri("avares://Eve.App/Assets/eve-icon.ico"));
+            _trayIconStream = AssetLoader.Open(new Uri("avares://EVE/Assets/eve-icon.ico"));
             var openItem = new NativeMenuItem("Open EVE");
             openItem.Click += (_, _) => RestoreMainWindow();
             var quitItem = new NativeMenuItem("Quit");
@@ -74,7 +74,7 @@ public sealed partial class App : Application
         }
         catch (Exception error)
         {
-            Debug.WriteLine($"Tray unavailable: {error.Message}");
+            AppLog.Error("Tray icon unavailable", error);
         }
     }
 
