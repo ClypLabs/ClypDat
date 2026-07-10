@@ -200,6 +200,14 @@ public sealed class PlaybackSession : IDisposable
     {
         var seekVersion = Interlocked.Increment(ref _seekVersion);
         await _seekLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (seekVersion != Interlocked.Read(ref _seekVersion))
+        {
+            // Superseded by a newer seek while queued behind the lock - bail out
+            // before touching VLC at all, instead of issuing a now-stale seek that
+            // would just interrupt the newer one's in-flight decode.
+            _seekLock.Release();
+            return false;
+        }
         var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
         var requested = TimeSpan.FromMilliseconds(milliseconds);
         _ended = false;
