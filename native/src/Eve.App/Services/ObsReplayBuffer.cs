@@ -7,9 +7,18 @@ namespace Eve.App.Services;
 [SupportedOSPlatform("windows")]
 public sealed class ObsReplayBuffer : IReplayBuffer
 {
+    // OBS's game_capture source has to inject a hook into the target process
+    // and wait for it to report frames before real (non-black) video is
+    // available; this is a real, observed OBS behaviour (not something EVE
+    // controls) and can take up to ~30s depending on the game. A clip saved
+    // before the hook has attached is silently all-black, so warn instead of
+    // returning a ruined clip.
+    private static readonly TimeSpan HookWarmup = TimeSpan.FromSeconds(30);
+
     private readonly Func<ReplayBufferConfig> _configProvider;
     private readonly ObsNativeBridge _bridge = new();
     private bool _initialized;
+    private DateTime _startedAtUtc;
 
     public ObsReplayBuffer(Func<ReplayBufferConfig> configProvider)
     {
@@ -48,6 +57,7 @@ public sealed class ObsReplayBuffer : IReplayBuffer
             _initialized = true;
             _bridge.StartReplayCapture();
             IsRecording = true;
+            _startedAtUtc = DateTime.UtcNow;
             AppLog.Info("OBS replay backend started.");
         }
         catch
@@ -94,6 +104,12 @@ public sealed class ObsReplayBuffer : IReplayBuffer
     public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default)
     {
         if (!IsRecording) throw new InvalidOperationException("OBS replay buffer is not running.");
+        var warmupRemaining = HookWarmup - (DateTime.UtcNow - _startedAtUtc);
+        if (warmupRemaining > TimeSpan.Zero)
+        {
+            throw new InvalidOperationException($"OBS is still hooking into the game, the clip would come out black. Try again in {Math.Ceiling(warmupRemaining.TotalSeconds):0}s.");
+        }
+
         Directory.CreateDirectory(outputFolder);
         var output = _bridge.SaveReplay(outputFolder);
         if (string.IsNullOrWhiteSpace(output)) throw new InvalidOperationException("OBS replay backend returned no output path.");
