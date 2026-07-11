@@ -131,6 +131,13 @@
     <Setter Property="FontSize" Value="14" />
     <Setter Property="MinHeight" Value="42" />
   </Style>
+  <Style Selector="Border.settingsCard">
+    <Setter Property="Background" Value="#141D24" />
+    <Setter Property="BorderBrush" Value="#232F3A" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="18" />
+  </Style>
   <Style Selector="ComboBox.settingsInput /template/ Border#PopupBorder">
     <Setter Property="Background" Value="#141D24" />
     <Setter Property="BorderBrush" Value="#2C3B48" />
