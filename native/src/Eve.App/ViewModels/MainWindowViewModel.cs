@@ -1251,19 +1251,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (!matches.Contains(FilteredGameCaptureRows[i])) FilteredGameCaptureRows.RemoveAt(i);
         }
 
+        // matches is always a subsequence of the same fixed sorted GameCaptureRows
+        // order, and so is FilteredGameCaptureRows after the removal pass above -
+        // an item that's already present never needs to be reordered relative to
+        // the others, so a plain forward Insert pass is enough. Deliberately not
+        // using Move() here: it used to be used to relocate an already-present row
+        // back into place, but this ItemsControl tears down and recreates that
+        // row's container on a Move instead of just repositioning it - and the
+        // recreated ComboBox's ItemsSource/SelectedItem bindings could resolve out
+        // of order, leaving the backend dropdown showing blank ("Auto" vanishing)
+        // even though the row's actual selection never changed.
         for (var i = 0; i < matches.Count; i++)
         {
             if (i < FilteredGameCaptureRows.Count && FilteredGameCaptureRows[i] == matches[i]) continue;
-
-            var existingIndex = FilteredGameCaptureRows.IndexOf(matches[i]);
-            if (existingIndex >= 0)
-            {
-                FilteredGameCaptureRows.Move(existingIndex, i);
-            }
-            else
-            {
-                FilteredGameCaptureRows.Insert(i, matches[i]);
-            }
+            FilteredGameCaptureRows.Insert(i, matches[i]);
         }
     }
 
