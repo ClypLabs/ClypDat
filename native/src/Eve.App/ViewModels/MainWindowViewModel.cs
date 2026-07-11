@@ -1140,6 +1140,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             File.Delete(clip.Path);
             _mediaProbe.DeleteCacheFor(clip.Path);
             ClipEditSidecar.Delete(clip.Path);
+            ClipInfoSidecar.Delete(clip.Path);
             Settings.ClipEdits.Remove(ClipEditKey(clip.Path));
         }
 

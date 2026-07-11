@@ -383,6 +383,10 @@ public sealed partial class MainWindow : Window
 
                 var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder, titleOverride: autoClipLabel));
                 AppLog.Info($"Replay clip saved: {outputPath}");
+                // "3K - Mirage" -> event type "3K", map dropped - the game name
+                // (not the map) is what belongs next to it as the game label.
+                var autoClipEventType = autoClipLabel?.Split(" - ", 2)[0];
+                ClipInfoSidecar.Save(outputPath, new ClipInfo(ViewModel.ActiveGameDetection.DisplayName, autoClipEventType));
                 await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
                 if (!notifiedEarly) ShowClipSavedNotification();
             }
