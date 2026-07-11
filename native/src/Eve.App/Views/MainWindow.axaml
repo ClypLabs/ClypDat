@@ -505,10 +505,13 @@
               </Border>
 
               <Border Classes="settingsCard">
-                <StackPanel Spacing="14">
+                <StackPanel Spacing="16">
                   <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-                    <TextBlock Text="{Binding MedalScanStatusText}" Foreground="#93A6B8" VerticalAlignment="Center" TextWrapping="Wrap" />
-                    <Button Grid.Column="1" Content="Scan for Medal Clips" Click="ScanMedalButton_OnClick" IsEnabled="{Binding !MedalImportInProgress}" />
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                      <TextBlock Text="Scan for Medal clips" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
+                      <TextBlock Text="{Binding MedalScanStatusText}" Foreground="#93A6B8" FontSize="12" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="Scan for Medal Clips" Classes="primaryButton" Click="ScanMedalButton_OnClick" IsEnabled="{Binding !MedalImportInProgress}" VerticalAlignment="Center" />
                   </Grid>
 
                   <StackPanel IsVisible="{Binding MedalImportInProgress}" Spacing="6">
@@ -516,31 +519,31 @@
                     <TextBlock Text="{Binding MedalImportStatusText}" Foreground="#6B7C8C" FontSize="12" />
                   </StackPanel>
                   <TextBlock Text="{Binding MedalImportStatusText}" Foreground="#6B7C8C" FontSize="12" IsVisible="{Binding !MedalImportInProgress}" />
-                </StackPanel>
-              </Border>
 
-              <Border Classes="settingsCard" IsVisible="{Binding MedalScanned}">
-                <StackPanel Spacing="14">
-                  <ItemsControl ItemsSource="{Binding MedalImportRows}">
-                    <ItemsControl.ItemTemplate>
-                      <DataTemplate>
-                        <Border Background="#0F171E" BorderBrush="#1E2A33" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,0,8">
-                          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
-                            <CheckBox IsChecked="{Binding IsSelected}" VerticalAlignment="Center" />
-                            <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
-                              <TextBlock Text="{Binding RawTitle}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" />
-                              <TextBlock Foreground="#6B7C8C" FontSize="11">
-                                <Run Text="{Binding GameFolderName}" /><Run Text=" · " /><Run Text="{Binding CreatedAtLocal}" />
-                              </TextBlock>
-                            </StackPanel>
-                          </Grid>
-                        </Border>
-                      </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                  </ItemsControl>
+                  <StackPanel Spacing="14" IsVisible="{Binding MedalScanned}">
+                    <Border Height="1" Background="#1B242D" />
 
-                  <Button Content="Import Selected" Click="ImportMedalButton_OnClick" HorizontalAlignment="Left" Classes="primaryButton"
-                          IsEnabled="{Binding !MedalImportInProgress}" />
+                    <ItemsControl ItemsSource="{Binding MedalImportRows}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Border Background="#0F171E" BorderBrush="#1E2A33" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,0,8">
+                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                              <CheckBox IsChecked="{Binding IsSelected}" VerticalAlignment="Center" />
+                              <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding RawTitle}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" />
+                                <TextBlock Foreground="#6B7C8C" FontSize="11">
+                                  <Run Text="{Binding GameFolderName}" /><Run Text=" · " /><Run Text="{Binding CreatedAtLocal}" />
+                                </TextBlock>
+                              </StackPanel>
+                            </Grid>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <Button Content="Import Selected" Click="ImportMedalButton_OnClick" HorizontalAlignment="Left" Classes="primaryButton"
+                            IsEnabled="{Binding !MedalImportInProgress}" />
+                  </StackPanel>
                 </StackPanel>
               </Border>
             </StackPanel>
