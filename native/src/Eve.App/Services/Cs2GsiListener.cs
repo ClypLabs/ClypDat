@@ -146,9 +146,20 @@ public sealed class Cs2GsiListener : IDisposable
             _lastRoundNumber = roundNum;
             _lastRoundKills = 0;
             _lastRoundKillHs = 0;
-            // No more kills are coming for the round that just ended - don't make
-            // whatever streak was still debouncing wait out the rest of its timer.
-            FirePendingKillClip();
+            // Used to flush any pending debounced clip here on the theory that
+            // "no more kills are coming for the round that just ended" - but CS2
+            // reports the round-ending kill itself under the *next* round's
+            // already-reset counter, in the same payload as the round-number
+            // change. Flushing immediately fired the streak's PREVIOUS pending
+            // label before the round-ending kill (arriving a few lines below in
+            // this same payload) got a chance to replace it - an Ace's last kill
+            // landing right as the round flipped produced a separate "4K" clip
+            // plus an "Ace" clip instead of just the Ace. The kill-ladder
+            // detection further down still schedules/replaces the pending clip
+            // for whatever kill is in *this* payload, so just letting the
+            // debounce timer run its course (no round-boundary shortcut) is
+            // both simpler and correct - it costs a few extra seconds of
+            // latency on the final clip of a round, not a split streak.
         }
 
         if (root.TryGetProperty("map", out var mapElement) &&
