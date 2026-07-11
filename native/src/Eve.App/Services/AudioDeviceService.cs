@@ -17,6 +17,20 @@ public sealed class AudioDeviceService
         return Enumerate(DataFlow.Capture);
     }
 
+    public string? GetDefaultCaptureDeviceName()
+    {
+        try
+        {
+            using var enumerator = new MMDeviceEnumerator();
+            using var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
+            return device.FriendlyName;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static IReadOnlyList<AudioDeviceOption> Enumerate(DataFlow flow)
     {
         try
