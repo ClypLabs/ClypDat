@@ -296,7 +296,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             IsFixedFramerate = true,
             Quality = 85,
             Bitrate = CaptureBitrate(config),
-            Framerate = Math.Clamp(config.FrameRate, 15, 60)
+            Framerate = Math.Clamp(config.FrameRate, 15, 240)
         };
 
         return options;
@@ -310,7 +310,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     private static int CaptureBitrate(ReplayBufferConfig config)
     {
         var height = Math.Clamp(config.MaxHeight, 480, 2160);
-        var frameRate = Math.Clamp(config.FrameRate, 15, 60);
+        var frameRate = Math.Clamp(config.FrameRate, 15, 240);
         var megapixels = height switch
         {
             >= 2160 => 8.3,
@@ -819,109 +819,53 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         _audioCaptures.Clear();
     }
 
+    // Video segments are only ever wall-clock-accurate individually (each one's
+    // StartedAtUtc/EndedAtUtc/VideoDuration triple is self-consistent per
+    // segment via the health correction in HydrateSegmentDurationsAsync), and
+    // ScreenRecorderLib's per-segment capture rate ("health") varies segment to
+    // segment (seen ~94-96% in practice, i.e. a 20s wall-clock segment only
+    // encodes ~19s of actual video). Building ONE global wall-clock window
+    // anchored off just the first segment and assuming a constant 1:1 video-
+    // to-wall-clock rate for the rest of the clip's duration was accurate near
+    // the start but drifted more with every additional segment stitched in -
+    // exactly the "gets worse toward the end of the clip" desync reported.
+    // Fixed by aligning audio independently per video segment (each segment's
+    // own accurate wall window) and concatenating those aligned slices in the
+    // same order as the video segments, instead of one flat trim across the
+    // whole clip.
     private async Task MuxAudioTracksAsync(string videoPath, string outputPath, double videoOffsetSeconds, IReadOnlyList<ReplayVideoSegment> sourceSegments, double clipDurationSeconds, ReplayBufferConfig config, CancellationToken cancellationToken)
     {
         var snapshots = new List<string>();
         var duration = Math.Max(1, clipDurationSeconds);
         var captures = _audioCaptures.ToArray();
-        var windowStartUtc = sourceSegments[0].StartedAtUtc + TimeSpan.FromSeconds(videoOffsetSeconds);
-        var windowEndUtc = windowStartUtc + TimeSpan.FromSeconds(duration);
-        AppLog.Info($"Replay mux start: videoOffset={videoOffsetSeconds:0.###}s, duration={duration:0.###}s, captures={captures.Length}, window={windowStartUtc:o}->{windowEndUtc:o}.");
-        var gameInputs = captures
-            .Where(capture => capture.Kind == AudioCaptureKind.Game && AudioCaptureOverlaps(capture, windowStartUtc, windowEndUtc))
-            .Select(capture => SnapshotAudioFile(capture, windowStartUtc, duration, snapshots))
-            .Where(IsUsableAudioFile)
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        var chatInputs = captures
-            .Where(capture => capture.Kind == AudioCaptureKind.Chat && AudioCaptureOverlaps(capture, windowStartUtc, windowEndUtc))
-            .Select(capture => SnapshotAudioFile(capture, windowStartUtc, duration, snapshots))
-            .Where(IsUsableAudioFile)
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        var microphonePath = SnapshotAudioFile(captures.LastOrDefault(capture => capture.Kind == AudioCaptureKind.Microphone && AudioCaptureOverlaps(capture, windowStartUtc, windowEndUtc)), windowStartUtc, duration, snapshots);
-        AppLog.Info($"Replay mux inputs: game={gameInputs.Length}, chat={chatInputs.Length}, microphone={(IsUsableAudioFile(microphonePath) ? 1 : 0)}.");
-        AppLog.Info($"Replay mux bytes: game={string.Join(",", gameInputs.Select(AudioFileLength))}, chat={string.Join(",", chatInputs.Select(AudioFileLength))}, microphone={AudioFileLength(microphonePath)}.");
-        var inputs = new List<AudioMuxInput>();
-        var gameStart = inputs.Count + 1;
-        inputs.AddRange(gameInputs.Select((path, index) => new AudioMuxInput($"game{index}", path)));
-        if (gameInputs.Length == 0)
-        {
-            inputs.Add(new AudioMuxInput("gameSilent", string.Empty));
-        }
-
-        var chatOutStart = inputs.Count + 1;
-        inputs.AddRange(chatInputs.Select((path, index) => new AudioMuxInput($"chatOut{index}", path)));
-        if (chatInputs.Length == 0)
-        {
-            inputs.Add(new AudioMuxInput("chatOutSilent", string.Empty));
-        }
-
-        var microphoneIndex = inputs.Count + 1;
-        inputs.Add(new AudioMuxInput("microphone", IsUsableAudioFile(microphonePath) ? microphonePath : string.Empty));
-
-        var args = new List<string>
-        {
-            "-y",
-            "-i", videoPath
-        };
-        foreach (var input in inputs)
-        {
-            if (!string.IsNullOrWhiteSpace(input.Path) && IsUsableAudioFile(input.Path))
-            {
-                args.AddRange(new[] { "-i", input.Path });
-            }
-            else
-            {
-                args.AddRange(new[] { "-f", "lavfi", "-t", FormatSeconds(duration), "-i", "anullsrc=channel_layout=stereo:sample_rate=48000" });
-            }
-        }
+        var segmentWindows = BuildSegmentWindows(sourceSegments, videoOffsetSeconds);
+        AppLog.Info($"Replay mux start: videoOffset={videoOffsetSeconds:0.###}s, duration={duration:0.###}s, captures={captures.Length}, segments={segmentWindows.Count}.");
 
         try
         {
-            var filter = new StringBuilder();
-            filter.Append($"[0:v]trim=start={FormatSeconds(videoOffsetSeconds)}:duration={FormatSeconds(duration)},setpts=PTS-STARTPTS[vout];");
-            for (var index = 0; index < inputs.Count; index++)
-            {
-                var inputIndex = index + 1;
-                filter.Append($"[{inputIndex}:a]aresample=48000,atrim=0:{FormatSeconds(duration)},asetpts=PTS-STARTPTS,apad=whole_dur={FormatSeconds(duration)}[a{inputIndex}];");
-            }
+            var gamePath = await BuildAlignedTrackAsync(AudioCaptureKind.Game, captures, segmentWindows, allowMix: true, snapshots, cancellationToken);
+            var chatPath = await BuildAlignedTrackAsync(AudioCaptureKind.Chat, captures, segmentWindows, allowMix: true, snapshots, cancellationToken);
+            var microphonePath = await BuildAlignedTrackAsync(AudioCaptureKind.Microphone, captures, segmentWindows, allowMix: false, snapshots, cancellationToken);
+            AppLog.Info($"Replay mux inputs: game={AudioFileLength(gamePath)}b, chat={AudioFileLength(chatPath)}b, microphone={AudioFileLength(microphonePath)}b.");
 
-            var gameInputCount = Math.Max(1, gameInputs.Length);
-            if (gameInputCount > 1)
+            var args = new List<string>
             {
-                foreach (var index in Enumerable.Range(gameStart, gameInputCount)) filter.Append($"[a{index}]");
-                filter.Append($"amix=inputs={gameInputCount}:normalize=0,atrim=0:{FormatSeconds(duration)},asetpts=PTS-STARTPTS[gameout];");
-            }
-            else
-            {
-                filter.Append($"[a{gameStart}]atrim=0:{FormatSeconds(duration)},asetpts=PTS-STARTPTS[gameout];");
-            }
-
-            if (chatInputs.Length > 1)
-            {
-                foreach (var index in Enumerable.Range(chatOutStart, chatInputs.Length)) filter.Append($"[a{index}]");
-                filter.Append($"amix=inputs={chatInputs.Length}:normalize=0,atrim=0:{FormatSeconds(duration)},asetpts=PTS-STARTPTS[chatout];");
-            }
-            else
-            {
-                filter.Append($"[a{chatOutStart}]atrim=0:{FormatSeconds(duration)},asetpts=PTS-STARTPTS[chatout];");
-            }
-
-            filter.Append($"[a{microphoneIndex}]atrim=0:{FormatSeconds(duration)},asetpts=PTS-STARTPTS[micout]");
-            args.AddRange(new[] { "-filter_complex", filter.ToString() });
-            args.AddRange(new[]
-            {
+                "-y",
+                "-i", videoPath,
+                "-i", gamePath,
+                "-i", chatPath,
+                "-i", microphonePath,
+                "-filter_complex", $"[0:v]trim=start={FormatSeconds(videoOffsetSeconds)}:duration={FormatSeconds(duration)},setpts=PTS-STARTPTS[vout]",
                 "-map", "[vout]",
-                "-map", "[gameout]",
-                "-map", "[chatout]",
-                "-map", "[micout]",
+                "-map", "1:a",
+                "-map", "2:a",
+                "-map", "3:a",
                 "-metadata:s:a:0", "title=Game Audio",
                 "-metadata:s:a:1", "title=Chat Audio",
                 "-metadata:s:a:2", "title=Microphone",
                 "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("Windows Capture")}",
                 "-t", FormatSeconds(duration)
-            });
+            };
             var baseArgs = args.ToList();
             args.AddRange(BuildNvencVideoArgs(config));
             args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k", outputPath });
@@ -941,6 +885,146 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         {
             foreach (var snapshot in snapshots) TryDelete(snapshot);
         }
+    }
+
+    private static List<(DateTime StartUtc, double DurationSeconds)> BuildSegmentWindows(IReadOnlyList<ReplayVideoSegment> sourceSegments, double videoOffsetSeconds)
+    {
+        var windows = new List<(DateTime StartUtc, double DurationSeconds)>(sourceSegments.Count);
+        var remainingOffset = videoOffsetSeconds;
+        foreach (var segment in sourceSegments)
+        {
+            var segmentDuration = segment.VideoDuration.TotalSeconds;
+            var trimFromStart = Math.Min(remainingOffset, segmentDuration);
+            remainingOffset = Math.Max(0, remainingOffset - trimFromStart);
+            var windowDuration = segmentDuration - trimFromStart;
+            if (windowDuration <= 0) continue;
+            windows.Add((segment.StartedAtUtc + TimeSpan.FromSeconds(trimFromStart), windowDuration));
+        }
+
+        return windows;
+    }
+
+    private async Task<string> BuildAlignedTrackAsync(
+        AudioCaptureKind kind,
+        ReplayAudioCapture[] captures,
+        List<(DateTime StartUtc, double DurationSeconds)> segmentWindows,
+        bool allowMix,
+        List<string> snapshots,
+        CancellationToken cancellationToken)
+    {
+        var segmentClips = new List<string>();
+        foreach (var (startUtc, durationSeconds) in segmentWindows)
+        {
+            var endUtc = startUtc + TimeSpan.FromSeconds(durationSeconds);
+            var overlapping = captures
+                .Where(capture => capture.Kind == kind && AudioCaptureOverlaps(capture, startUtc, endUtc))
+                .ToArray();
+            if (!allowMix && overlapping.Length > 1)
+            {
+                overlapping = new[] { overlapping[^1] };
+            }
+
+            var clipPaths = overlapping
+                .Select(capture => SnapshotAudioFile(capture, startUtc, durationSeconds, snapshots))
+                .Where(IsUsableAudioFile)
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            string segmentClip;
+            if (clipPaths.Length == 0)
+            {
+                segmentClip = await CreateSilentClipAsync(durationSeconds, snapshots, cancellationToken);
+            }
+            else if (clipPaths.Length == 1)
+            {
+                segmentClip = clipPaths[0];
+            }
+            else
+            {
+                segmentClip = await MixClipsAsync(clipPaths, durationSeconds, snapshots, cancellationToken);
+            }
+
+            segmentClips.Add(segmentClip);
+        }
+
+        if (segmentClips.Count == 0)
+        {
+            var totalDuration = segmentWindows.Sum(window => window.DurationSeconds);
+            return await CreateSilentClipAsync(totalDuration, snapshots, cancellationToken);
+        }
+
+        return segmentClips.Count == 1
+            ? segmentClips[0]
+            : await ConcatClipsAsync(segmentClips, snapshots, cancellationToken);
+    }
+
+    private async Task<string> CreateSilentClipAsync(double durationSeconds, ICollection<string> snapshots, CancellationToken cancellationToken)
+    {
+        var path = Path.Combine(_bufferFolder, $"audio_silent_{Guid.NewGuid():N}.wav");
+        var result = await RunProcessAsync("ffmpeg", new[]
+        {
+            "-y", "-v", "error",
+            "-f", "lavfi", "-t", FormatSeconds(durationSeconds), "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+            "-c:a", "pcm_s16le",
+            path
+        }, cancellationToken);
+        if (result.ExitCode != 0 || !IsUsableAudioFile(path))
+        {
+            AppLog.Error($"Silent clip generation failed: duration={durationSeconds:0.###}s, error={result.Error}");
+        }
+
+        snapshots.Add(path);
+        return path;
+    }
+
+    private async Task<string> MixClipsAsync(IReadOnlyList<string> clipPaths, double durationSeconds, ICollection<string> snapshots, CancellationToken cancellationToken)
+    {
+        var path = Path.Combine(_bufferFolder, $"audio_mix_{Guid.NewGuid():N}.wav");
+        var args = new List<string> { "-y", "-v", "error" };
+        foreach (var clipPath in clipPaths)
+        {
+            args.AddRange(new[] { "-i", clipPath });
+        }
+
+        var labels = string.Concat(Enumerable.Range(0, clipPaths.Count).Select(index => $"[{index}:a]"));
+        args.AddRange(new[]
+        {
+            "-filter_complex", $"{labels}amix=inputs={clipPaths.Count}:normalize=0,atrim=0:{FormatSeconds(durationSeconds)},asetpts=PTS-STARTPTS[out]",
+            "-map", "[out]",
+            "-c:a", "pcm_s16le",
+            path
+        });
+        var result = await RunProcessAsync("ffmpeg", args, cancellationToken);
+        if (result.ExitCode != 0 || !IsUsableAudioFile(path))
+        {
+            AppLog.Error($"Audio mix failed: clips={clipPaths.Count}, error={result.Error}");
+            return await CreateSilentClipAsync(durationSeconds, snapshots, cancellationToken);
+        }
+
+        snapshots.Add(path);
+        return path;
+    }
+
+    private async Task<string> ConcatClipsAsync(IReadOnlyList<string> clipPaths, ICollection<string> snapshots, CancellationToken cancellationToken)
+    {
+        var concatPath = Path.Combine(_bufferFolder, $"audio_concat_{Guid.NewGuid():N}.txt");
+        var outputPath = Path.Combine(_bufferFolder, $"audio_concat_{Guid.NewGuid():N}.wav");
+        await File.WriteAllLinesAsync(concatPath, clipPaths.Select(path => $"file '{EscapeConcatPath(path)}'"), cancellationToken);
+        try
+        {
+            var result = await RunProcessAsync("ffmpeg", new[] { "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", concatPath, "-c", "copy", outputPath }, cancellationToken);
+            if (result.ExitCode != 0 || !IsUsableAudioFile(outputPath))
+            {
+                AppLog.Error($"Audio concat failed: clips={clipPaths.Count}, error={result.Error}");
+            }
+        }
+        finally
+        {
+            TryDelete(concatPath);
+        }
+
+        snapshots.Add(outputPath);
+        return outputPath;
     }
 
     private static string FormatSeconds(double seconds)
@@ -975,7 +1059,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     private static int MuxVideoBitrate(ReplayBufferConfig config)
     {
         var height = Math.Clamp(config.MaxHeight, 480, 2160);
-        var frameRate = Math.Clamp(config.FrameRate, 15, 60);
+        var frameRate = Math.Clamp(config.FrameRate, 15, 240);
         var baseRate = height switch
         {
             >= 2160 => 48_000_000,
@@ -1225,8 +1309,6 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         foreach (var arg in args) info.ArgumentList.Add(arg);
         return Process.Start(info) ?? throw new InvalidOperationException($"Could not start {fileName}.");
     }
-
-    private sealed record AudioMuxInput(string Title, string Path);
 
     private sealed record AudioRoutes(int[] ChatProcessIds, int[] ExcludedProcessIds, int[] GameProcessIds, bool UseProcessRouting, string RouteKey);
 
