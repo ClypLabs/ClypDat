@@ -444,10 +444,11 @@
 
               <Border Classes="settingsCard">
                 <StackPanel Spacing="14">
-                  <Grid ColumnDefinitions="*,*,Auto" ColumnSpacing="10">
+                  <Grid ColumnDefinitions="*,*,Auto,Auto" ColumnSpacing="10">
                     <TextBox Classes="settingsInput" Watermark="game.exe" Text="{Binding NewCustomGameExecutable}" />
                     <TextBox Grid.Column="1" Classes="settingsInput" Watermark="Display name" Text="{Binding NewCustomGameDisplayName}" />
-                    <Button Grid.Column="2" Content="Add Game" Click="AddCustomGameButton_OnClick" VerticalAlignment="Center" />
+                    <Button Grid.Column="2" Content="Browse" Click="BrowseCustomGameButton_OnClick" VerticalAlignment="Center" />
+                    <Button Grid.Column="3" Content="Add Game" Click="AddCustomGameButton_OnClick" VerticalAlignment="Center" />
                   </Grid>
                   <TextBox Classes="settingsInput" Watermark="Search games" Text="{Binding GameSearchText}" />
                 </StackPanel>

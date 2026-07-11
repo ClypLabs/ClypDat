@@ -659,6 +659,30 @@ public sealed partial class MainWindow : Window
         ViewModel.AddCustomGame();
     }
 
+    private async void BrowseCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Select game executable",
+            AllowMultiple = false,
+            FileTypeFilter = new[]
+            {
+                new FilePickerFileType("Executable") { Patterns = new[] { "*.exe" } }
+            }
+        });
+
+        var file = files.FirstOrDefault();
+        if (file?.Path.LocalPath is not { Length: > 0 } path) return;
+
+        ViewModel.NewCustomGameExecutable = Path.GetFileName(path);
+        if (string.IsNullOrWhiteSpace(ViewModel.NewCustomGameDisplayName))
+        {
+            ViewModel.NewCustomGameDisplayName = Path.GetFileNameWithoutExtension(path);
+        }
+    }
+
     private void RemoveCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is Button { DataContext: GameBackendRowViewModel row } && ViewModel is not null)
