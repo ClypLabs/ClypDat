@@ -20,7 +20,8 @@ public static class ReplayBufferFactory
         "TheFirstDescendant.exe",
         "cod.exe",
         "cod24-cod.exe",
-        "Wuthering Waves.exe"
+        "Wuthering Waves.exe",
+        "Overwatch.exe"
     };
 
     public static IReplayBuffer Create(Func<ReplayBufferConfig> configProvider)
