@@ -127,6 +127,7 @@ public sealed class Cs2GsiListener : IDisposable
             roundNumElement.TryGetInt32(out var roundNum) &&
             roundNum != _lastRoundNumber)
         {
+            AppLog.Info($"CS2 GSI: round changed {_lastRoundNumber} -> {roundNum}, resetting round kill counters.");
             _lastRoundNumber = roundNum;
             _lastRoundKills = 0;
             _lastRoundKillHs = 0;
@@ -162,6 +163,12 @@ public sealed class Cs2GsiListener : IDisposable
 
         var roundKills = GetInt(state, "round_kills");
         var roundKillHs = GetInt(state, "round_killhs");
+        var matchKills = GetInt(matchStats, "kills");
+        if (roundKills.HasValue)
+        {
+            AppLog.Info($"CS2 GSI: round={_lastRoundNumber}, round_kills={roundKills.Value} (was {_lastRoundKills}), round_killhs={roundKillHs}, match_kills={matchKills}.");
+        }
+
         if (roundKills.HasValue && roundKills.Value > _lastRoundKills)
         {
             var isHeadshotKill = roundKillHs.HasValue && roundKillHs.Value > _lastRoundKillHs;
