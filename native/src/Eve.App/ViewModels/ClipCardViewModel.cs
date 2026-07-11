@@ -10,6 +10,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     private readonly MediaProbeService _mediaProbe;
     private readonly DispatcherTimer _previewTimer;
     private CancellationTokenSource? _previewCts;
+    private Task<IReadOnlyList<string>>? _frameExtractionTask;
     private IReadOnlyList<string> _previewFrames = Array.Empty<string>();
     private IReadOnlyList<Bitmap> _previewBitmaps = Array.Empty<Bitmap>();
     private int _previewIndex;
@@ -87,6 +88,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     {
         _media = media;
         _previewFrames = Array.Empty<string>();
+        _frameExtractionTask = null;
         foreach (var bitmap in _previewBitmaps) bitmap.Dispose();
         _previewBitmaps = Array.Empty<Bitmap>();
         PreviewImagePath = media.ThumbnailPath;
@@ -110,14 +112,35 @@ public sealed class ClipCardViewModel : ViewModelBase
 
         try
         {
-            if (_previewFrames.Count == 0)
+            if (_previewBitmaps.Count == 0)
             {
-                _previewFrames = await _mediaProbe.EnsurePreviewFramesAsync(Media, token);
-                if (token.IsCancellationRequested) return;
-                _previewBitmaps = await Task.Run(() => LoadPreviewBitmaps(_previewFrames), token);
+                // ffmpeg extraction is NOT tied to the hover token - a quick hover
+                // that moves on before extraction finishes used to cancel and kill
+                // it mid-run, leaving a permanently-partial frame set on disk that
+                // could never pass EnsurePreviewFramesAsync's "is the cache
+                // complete" check, so every future hover of that same clip
+                // restarted from zero and got cancelled again: it could never
+                // finish under normal browsing. Now extraction always runs to
+                // completion once started (cached to disk for next time); only
+                // waiting for it and displaying frames gets cancelled on exit.
+                _frameExtractionTask ??= _mediaProbe.EnsurePreviewFramesAsync(Media, CancellationToken.None);
+                _previewFrames = await _frameExtractionTask.WaitAsync(token);
+
+                var loaded = await Task.Run(() => LoadPreviewBitmaps(_previewFrames, token), token);
+                if (token.IsCancellationRequested)
+                {
+                    // This call was superseded before it could show anything -
+                    // whatever it just decoded is otherwise unreachable and would
+                    // never get disposed, which is exactly what was leaking memory
+                    // on every quick hover-then-move-on.
+                    foreach (var bitmap in loaded) bitmap.Dispose();
+                    return;
+                }
+
+                _previewBitmaps = loaded;
             }
 
-            if (token.IsCancellationRequested || _previewBitmaps.Count == 0) return;
+            if (_previewBitmaps.Count == 0) return;
             _previewIndex = 0;
             _previewTimer.Interval = GetPreviewFrameInterval();
             PreviewImage = _previewBitmaps[_previewIndex];
@@ -152,11 +175,12 @@ public sealed class ClipCardViewModel : ViewModelBase
         PreviewImage = _previewBitmaps[_previewIndex];
     }
 
-    private static IReadOnlyList<Bitmap> LoadPreviewBitmaps(IReadOnlyList<string> framePaths)
+    private static IReadOnlyList<Bitmap> LoadPreviewBitmaps(IReadOnlyList<string> framePaths, CancellationToken token)
     {
         var bitmaps = new List<Bitmap>(framePaths.Count);
         foreach (var path in framePaths)
         {
+            if (token.IsCancellationRequested) break;
             try
             {
                 if (File.Exists(path)) bitmaps.Add(new Bitmap(path));
