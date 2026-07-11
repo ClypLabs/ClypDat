@@ -690,6 +690,63 @@ public sealed partial class MainWindow : Window
         return _hoverPreviewMediaPlayer;
     }
 
+    // The hover-preview VideoView renders through a real native child HWND (LibVLC's
+    // windowed output), which Windows hit-tests and routes mouse messages to
+    // directly - Avalonia's own input pipeline never sees a message that lands on
+    // it, so the card's PointerPressed and the selection checkbox's Click both go
+    // silent while a preview is playing over them. Polling for the click
+    // (CheckHoverWatchdog + GetAsyncKeyState) was the first attempt at working
+    // around this and proved unreliable in practice. The actual fix: subclass that
+    // HWND's window procedure to answer WM_NCHITTEST with HTTRANSPARENT, which
+    // tells Windows "nothing here" and makes it continue hit-testing past this
+    // window to whatever's underneath (the real Avalonia surface) - clicks land on
+    // the card/checkbox normally again. This is a per-window subclass of a window
+    // this process itself owns, not a system-wide input hook (see
+    // GlobalHotkeyService's comment on why hooks are avoided here - anti-cheat
+    // flags them), so it carries none of that risk. The player (and its Hwnd) is
+    // reused across every hover, so this only needs to run once.
+    private const int GWLP_WNDPROC = -4;
+    private const uint WM_NCHITTEST = 0x0084;
+    private const nint HTTRANSPARENT = -1;
+    private WndProcDelegate? _hoverVideoWndProc;
+    private IntPtr _hoverVideoOriginalWndProc;
+    private IntPtr _hoverVideoSubclassedHwnd;
+
+    private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    private void EnsureHoverVideoClickThrough(MediaPlayer player)
+    {
+        var hwnd = player.Hwnd;
+        if (hwnd == IntPtr.Zero || hwnd == _hoverVideoSubclassedHwnd) return;
+
+        _hoverVideoWndProc = (hWnd, msg, wParam, lParam) =>
+            msg == WM_NCHITTEST
+                ? (IntPtr)HTTRANSPARENT
+                : CallWindowProc(_hoverVideoOriginalWndProc, hWnd, msg, wParam, lParam);
+
+        _hoverVideoOriginalWndProc = SetWindowLongPtr(hwnd, GWLP_WNDPROC, System.Runtime.InteropServices.Marshal.GetFunctionPointerForDelegate(_hoverVideoWndProc));
+        if (_hoverVideoOriginalWndProc == IntPtr.Zero)
+        {
+            AppLog.Error($"Hover preview click-through subclass failed, hwnd={hwnd}.", new InvalidOperationException("SetWindowLongPtr returned null"));
+            _hoverVideoWndProc = null;
+            return;
+        }
+
+        _hoverVideoSubclassedHwnd = hwnd;
+    }
+
+    private static IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong) =>
+        IntPtr.Size == 8 ? SetWindowLongPtr64(hWnd, nIndex, dwNewLong) : new IntPtr(SetWindowLong32(hWnd, nIndex, dwNewLong.ToInt32()));
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
+    private static extern IntPtr SetWindowLongPtr64(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SetWindowLongW", SetLastError = true)]
+    private static extern int SetWindowLong32(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr CallWindowProc(IntPtr lpPrevWndFunc, IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
     private void StartHoverPreview(ClipCardViewModel clip, Control border)
     {
         StopHoverPreview();
@@ -714,6 +771,7 @@ public sealed partial class MainWindow : Window
             _hoverPreviewBorder = border;
             clip.HoverPreviewPlayer = player;
             _hoverWatchdog.Start();
+            EnsureHoverVideoClickThrough(player);
             AppLog.Info($"Clip hover preview started: path={clip.Path}, played={played}, state={player.State}.");
         }
         catch (Exception error)
