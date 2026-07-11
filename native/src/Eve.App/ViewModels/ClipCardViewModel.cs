@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Avalonia.Media.Imaging;
 using Avalonia.Media;
 using Eve.App.Services;
@@ -19,6 +20,8 @@ public sealed class ClipCardViewModel : ViewModelBase
         SetPreviewImage(_previewImagePath);
     }
 
+    private static readonly Regex TrailingTimestampPattern = new(@"\s\d{4}-\d{2}-\d{2}\s\d{2}-\d{2}-\d{2}$", RegexOptions.Compiled);
+
     public MediaFileInfo Media => _media;
     public string Name => Media.Name;
     public string Path => Media.Path;
@@ -27,9 +30,12 @@ public sealed class ClipCardViewModel : ViewModelBase
     public long SizeBytes => Media.SizeBytes;
     public string DateLabel => CreatedAt.ToString("MMM d, yyyy h:mm tt");
 
-    // Name is the game/auto-clip label the clip was saved under (e.g. "Fortnite",
-    // "3K - Inferno") - there's no separate stored clip title, so this line fills
-    // the same role Medal's "Moments clip from <date>" subtitle does.
+    // Name is the filename ClipFileNaming.BuildFileName produced - the game/
+    // auto-clip label plus a " yyyy-MM-dd HH-mm-ss" timestamp appended for
+    // uniqueness on disk (e.g. "Marvel Rivals 2026-07-11 22-16-11"). Strip that
+    // suffix back off for display; there's no separately stored game field.
+    public string GameNameLabel => TrailingTimestampPattern.Replace(Name, string.Empty);
+
     public string ClipFromLabel => $"Clip from {CreatedAt:MMM d, yyyy}";
 
     // Relative for anything recent (matches how Medal/most clip tools show it -
@@ -107,6 +113,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(DateLabel));
         OnPropertyChanged(nameof(RelativeDateLabel));
         OnPropertyChanged(nameof(ClipFromLabel));
+        OnPropertyChanged(nameof(GameNameLabel));
         OnPropertyChanged(nameof(DurationLabel));
         OnPropertyChanged(nameof(CaptureBackendLabel));
         OnPropertyChanged(nameof(HasCaptureBackendLabel));
