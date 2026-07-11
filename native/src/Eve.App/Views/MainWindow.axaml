@@ -518,7 +518,7 @@
                     <ProgressBar Minimum="0" Maximum="100" Value="{Binding MedalImportProgressPercent}" Height="8" />
                     <TextBlock Text="{Binding MedalImportStatusText}" Foreground="#6B7C8C" FontSize="12" />
                   </StackPanel>
-                  <TextBlock Text="{Binding MedalImportStatusText}" Foreground="#6B7C8C" FontSize="12" IsVisible="{Binding !MedalImportInProgress}" />
+                  <TextBlock Text="{Binding MedalImportStatusText}" Foreground="#6B7C8C" FontSize="12" IsVisible="{Binding ShowMedalImportStatusText}" />
 
                   <StackPanel Spacing="14" IsVisible="{Binding MedalScanned}">
                     <Border Height="1" Background="#1B242D" />

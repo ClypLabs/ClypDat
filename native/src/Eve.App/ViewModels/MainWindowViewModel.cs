@@ -577,7 +577,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool MedalImportInProgress
     {
         get => _medalImportInProgress;
-        set => SetProperty(ref _medalImportInProgress, value);
+        set
+        {
+            if (!SetProperty(ref _medalImportInProgress, value)) return;
+            OnPropertyChanged(nameof(ShowMedalImportStatusText));
+        }
     }
 
     private double _medalImportProgressPercent;
@@ -593,8 +597,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string MedalImportStatusText
     {
         get => _medalImportStatusText;
-        set => SetProperty(ref _medalImportStatusText, value);
+        set
+        {
+            if (!SetProperty(ref _medalImportStatusText, value)) return;
+            OnPropertyChanged(nameof(ShowMedalImportStatusText));
+        }
     }
+
+    // Empty right after a scan (before any import has run) - showing this row
+    // anyway just reserved a blank spacing slot between the scan header and the
+    // results list below it.
+    public bool ShowMedalImportStatusText => !MedalImportInProgress && !string.IsNullOrWhiteSpace(MedalImportStatusText);
 
     public bool MedalImportStripEmoji
     {
