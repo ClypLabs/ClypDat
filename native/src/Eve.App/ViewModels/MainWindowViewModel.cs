@@ -24,7 +24,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private ProcessOption? _selectedChatProcess;
     private ProcessOption? _selectedProcessExclusion;
     private ReplayDurationPreset? _selectedReplayDurationPreset;
-    private ReplayQualityPreset? _selectedReplayQualityPreset;
+    private int _selectedReplayResolution;
+    private int _selectedReplayFrameRate;
     private ReplayBackendPreset? _selectedReplayBackend;
     private readonly string _initialReplayBackend;
     private bool _replayBackendRestartRequired;
@@ -75,13 +76,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("15 Minutes", 900),
             new("20 Minutes", 1200)
         };
-        ReplayQualityPresets = new ObservableCollection<ReplayQualityPreset>
-        {
-            new("Performance", 720, 30),
-            new("Balanced", 1080, 30),
-            new("Smooth", 1080, 60),
-            new("Quality", 1440, 60)
-        };
+        ReplayResolutions = new ObservableCollection<int> { 720, 1080, 1440, 2160 };
+        ReplayFrameRates = new ObservableCollection<int> { 30, 60, 120 };
         ExportCodecs = new ObservableCollection<ExportCodecOption>
         {
             new("H.264", "h264_nvenc", "libx264"),
@@ -102,10 +98,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RefreshAudioDevices();
         SelectedReplayDurationPreset = ReplayDurationPresets.FirstOrDefault(preset => preset.Seconds == Settings.ReplayDurationSeconds) ??
                                        ReplayDurationPresets.First(preset => preset.Seconds == 60);
-        SelectedReplayQualityPreset = ReplayQualityPresets.FirstOrDefault(preset =>
-                                          string.Equals(preset.Label, Settings.ReplayQualityPreset, StringComparison.OrdinalIgnoreCase) ||
-                                          (preset.MaxHeight == Settings.ReplayMaxHeight && preset.FrameRate == Settings.ReplayFrameRate)) ??
-                                      ReplayQualityPresets.First(preset => preset.Label == "Balanced");
+        _selectedReplayResolution = ReplayResolutions.Contains(Settings.ReplayMaxHeight) ? Settings.ReplayMaxHeight : 1080;
+        _selectedReplayFrameRate = ReplayFrameRates.Contains(Settings.ReplayFrameRate) ? Settings.ReplayFrameRate : 30;
         SelectedExportCodec = ExportCodecs.FirstOrDefault(codec => string.Equals(codec.Label, Settings.ExportVideoCodec, StringComparison.OrdinalIgnoreCase)) ??
                               ExportCodecs.First(codec => codec.Label == "H.264");
         _initialReplayBackend = string.IsNullOrWhiteSpace(Settings.ReplayBackend) ? "Auto" : Settings.ReplayBackend;
@@ -127,7 +121,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<AudioDeviceOption> MicrophoneDevices { get; }
     public ObservableCollection<ProcessOption> OpenProcesses { get; }
     public ObservableCollection<ReplayDurationPreset> ReplayDurationPresets { get; }
-    public ObservableCollection<ReplayQualityPreset> ReplayQualityPresets { get; }
+    public ObservableCollection<int> ReplayResolutions { get; }
+    public ObservableCollection<int> ReplayFrameRates { get; }
     public ObservableCollection<ReplayBackendPreset> ReplayBackends { get; }
     public ObservableCollection<ExportCodecOption> ExportCodecs { get; }
     public ObservableCollection<string> ExcludedProcesses { get; }
@@ -258,16 +253,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public ReplayQualityPreset? SelectedReplayQualityPreset
+    public int SelectedReplayResolution
     {
-        get => _selectedReplayQualityPreset;
+        get => _selectedReplayResolution;
         set
         {
-            if (!SetProperty(ref _selectedReplayQualityPreset, value) || value is null) return;
-            Settings.ReplayQualityPreset = value.Label;
-            Settings.ReplayMaxHeight = value.MaxHeight;
-            Settings.ReplayFrameRate = value.FrameRate;
-            OnPropertyChanged();
+            if (!SetProperty(ref _selectedReplayResolution, value)) return;
+            Settings.ReplayMaxHeight = value;
+            SaveSettings();
+        }
+    }
+
+    public int SelectedReplayFrameRate
+    {
+        get => _selectedReplayFrameRate;
+        set
+        {
+            if (!SetProperty(ref _selectedReplayFrameRate, value)) return;
+            Settings.ReplayFrameRate = value;
             SaveSettings();
         }
     }
@@ -835,8 +838,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         return new ReplayBufferConfig(
             SelectedReplayDurationPreset?.Seconds ?? Settings.ReplayDurationSeconds,
-            SelectedReplayQualityPreset?.MaxHeight ?? Settings.ReplayMaxHeight,
-            SelectedReplayQualityPreset?.FrameRate ?? Settings.ReplayFrameRate,
+            Settings.ReplayMaxHeight,
+            Settings.ReplayFrameRate,
             ReplayCaptureX,
             ReplayCaptureY,
             ReplayCaptureWidth,

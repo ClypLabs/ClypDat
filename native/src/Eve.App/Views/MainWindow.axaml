@@ -205,15 +205,17 @@
           <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="12" Padding="18">
             <StackPanel Spacing="14">
               <TextBlock Text="Replay Buffer" Foreground="#C4D0DF" FontWeight="Bold" />
-              <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="12" ColumnSpacing="16">
+              <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="12" ColumnSpacing="16">
                 <TextBlock Text="Save hotkey" Foreground="#93A6B8" VerticalAlignment="Center" />
                 <Button Grid.Column="1" Content="{Binding HotkeyDisplay}" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Left" MinWidth="180" />
                 <TextBlock Grid.Row="1" Text="Replay length" Foreground="#93A6B8" VerticalAlignment="Center" />
                 <ComboBox Grid.Row="1" Grid.Column="1" Classes="settingsInput" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}" Width="160" HorizontalAlignment="Left" />
-                <TextBlock Grid.Row="2" Text="Replay quality" Foreground="#93A6B8" VerticalAlignment="Center" />
-                <ComboBox Grid.Row="2" Grid.Column="1" Classes="settingsInput" ItemsSource="{Binding ReplayQualityPresets}" SelectedItem="{Binding SelectedReplayQualityPreset}" Width="240" HorizontalAlignment="Left" />
-                <TextBlock Grid.Row="3" Text="Capture backend" Foreground="#93A6B8" VerticalAlignment="Center" />
-                <StackPanel Grid.Row="3" Grid.Column="1" Spacing="6">
+                <TextBlock Grid.Row="2" Text="Resolution" Foreground="#93A6B8" VerticalAlignment="Center" />
+                <ComboBox Grid.Row="2" Grid.Column="1" Classes="settingsInput" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}" Width="160" HorizontalAlignment="Left" />
+                <TextBlock Grid.Row="3" Text="Frame rate" Foreground="#93A6B8" VerticalAlignment="Center" />
+                <ComboBox Grid.Row="3" Grid.Column="1" Classes="settingsInput" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}" Width="160" HorizontalAlignment="Left" />
+                <TextBlock Grid.Row="4" Text="Capture backend" Foreground="#93A6B8" VerticalAlignment="Center" />
+                <StackPanel Grid.Row="4" Grid.Column="1" Spacing="6">
                   <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayBackends}" SelectedItem="{Binding SelectedReplayBackend}" Width="320" HorizontalAlignment="Left" />
                   <TextBlock Text="{Binding SelectedReplayBackend.Description}" Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" MaxWidth="420" HorizontalAlignment="Left" />
                   <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding ReplayBackendRestartRequired}">
@@ -221,7 +223,7 @@
                     <Button Content="Restart Now" Click="RestartAppButton_OnClick" />
                   </StackPanel>
                 </StackPanel>
-                <CheckBox Grid.Row="4" Grid.ColumnSpan="2" Content="Start replay buffer when EVE opens" IsChecked="{Binding StartReplayOnLaunch}" />
+                <CheckBox Grid.Row="5" Grid.ColumnSpan="2" Content="Start replay buffer when EVE opens" IsChecked="{Binding StartReplayOnLaunch}" />
               </Grid>
             </StackPanel>
           </Border>
