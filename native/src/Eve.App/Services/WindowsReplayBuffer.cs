@@ -873,37 +873,63 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             var microphonePath = await BuildAlignedTrackAsync(AudioCaptureKind.Microphone, captures, segmentWindows, allowMix: false, snapshots, cancellationToken);
             AppLog.Info($"Replay mux inputs: game={AudioFileLength(gamePath)}b, chat={AudioFileLength(chatPath)}b, microphone={AudioFileLength(microphonePath)}b.");
 
-            var args = new List<string>
+            var metadataArgs = new[]
             {
-                "-y",
-                "-i", videoPath,
-                "-i", gamePath,
-                "-i", chatPath,
-                "-i", microphonePath,
-                "-filter_complex", $"[0:v]trim=start={FormatSeconds(videoOffsetSeconds)}:duration={FormatSeconds(duration)},setpts=PTS-STARTPTS[vout]",
-                "-map", "[vout]",
-                "-map", "1:a",
-                "-map", "2:a",
-                "-map", "3:a",
                 "-metadata:s:a:0", "title=Game Audio",
                 "-metadata:s:a:1", "title=Chat Audio",
                 "-metadata:s:a:2", "title=Microphone",
-                "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("Windows Capture")}",
-                "-t", FormatSeconds(duration)
+                "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("Windows Capture")}"
             };
-            var baseArgs = args.ToList();
-            args.AddRange(BuildNvencVideoArgs(config));
-            args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k", outputPath });
-            var result = await RunProcessAsync("ffmpeg", args, cancellationToken);
-            AppLog.Info($"Replay mux ffmpeg result: exit={result.ExitCode}, output={outputPath}.");
+
+            // Trimming via -filter_complex meant decoding and fully re-encoding the
+            // clip's entire video track (NVENC/x264) just to get a frame-accurate cut
+            // - for a long/high-res replay that's genuinely slow (this was the actual
+            // "clips take forever" bottleneck, not the concat step, which already used
+            // -c copy). -ss before -i is a fast keyframe seek, and -c:v copy just
+            // remuxes instead of re-encoding - the tradeoff is the cut lands on the
+            // nearest keyframe at/before the requested offset instead of the exact
+            // frame, which for a replay buffer clip is imperceptible against the
+            // seconds-to-tens-of-seconds this saves. Falls back to the old
+            // decode+re-encode path only if the copy attempt itself fails.
+            var copyArgs = new List<string> { "-y", "-ss", FormatSeconds(videoOffsetSeconds), "-i", videoPath, "-i", gamePath, "-i", chatPath, "-i", microphonePath };
+            copyArgs.AddRange(new[] { "-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-t", FormatSeconds(duration) });
+            copyArgs.AddRange(metadataArgs);
+            copyArgs.Add(outputPath);
+            var result = await RunProcessAsync("ffmpeg", copyArgs, cancellationToken);
+            AppLog.Info($"Replay mux (stream copy) result: exit={result.ExitCode}, output={outputPath}.");
+
             if (result.ExitCode != 0)
             {
-                args = baseArgs.ToList();
-                args.AddRange(BuildSoftwareVideoArgs());
+                var reencodeBase = new List<string>
+                {
+                    "-y",
+                    "-i", videoPath,
+                    "-i", gamePath,
+                    "-i", chatPath,
+                    "-i", microphonePath,
+                    "-filter_complex", $"[0:v]trim=start={FormatSeconds(videoOffsetSeconds)}:duration={FormatSeconds(duration)},setpts=PTS-STARTPTS[vout]",
+                    "-map", "[vout]",
+                    "-map", "1:a",
+                    "-map", "2:a",
+                    "-map", "3:a",
+                    "-t", FormatSeconds(duration)
+                };
+                reencodeBase.AddRange(metadataArgs);
+
+                var args = reencodeBase.ToList();
+                args.AddRange(BuildNvencVideoArgs(config));
                 args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k", outputPath });
                 result = await RunProcessAsync("ffmpeg", args, cancellationToken);
-                AppLog.Info($"Replay mux fallback result: exit={result.ExitCode}, output={outputPath}.");
-                if (result.ExitCode != 0) throw new InvalidOperationException(string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg mux failed." : result.Error);
+                AppLog.Info($"Replay mux (re-encode, NVENC) result: exit={result.ExitCode}, output={outputPath}.");
+                if (result.ExitCode != 0)
+                {
+                    args = reencodeBase.ToList();
+                    args.AddRange(BuildSoftwareVideoArgs());
+                    args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k", outputPath });
+                    result = await RunProcessAsync("ffmpeg", args, cancellationToken);
+                    AppLog.Info($"Replay mux (re-encode, software) result: exit={result.ExitCode}, output={outputPath}.");
+                    if (result.ExitCode != 0) throw new InvalidOperationException(string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg mux failed." : result.Error);
+                }
             }
         }
         finally
