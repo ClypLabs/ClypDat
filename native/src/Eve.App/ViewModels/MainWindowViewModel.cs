@@ -29,6 +29,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _selectedReplayFrameRate;
     private ReplayBackendPreset? _selectedReplayBackend;
     private readonly string _initialReplayBackend;
+    private string _newCustomGameExecutable = string.Empty;
+    private string _newCustomGameDisplayName = string.Empty;
+    private ReplayBackendPreset? _selectedCustomGameBackend;
     private bool _replayBackendRestartRequired;
     private int _activeReplayMaxHeight;
     private int _activeReplayFrameRate;
@@ -105,6 +108,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedClipOverlayPosition = ClipOverlayPositions.FirstOrDefault(position => string.Equals(position, Settings.ClipOverlayPosition, StringComparison.OrdinalIgnoreCase)) ?? "Top Right";
         _selectedClipOverlayVolume = ClipOverlayVolumes.FirstOrDefault(volume => string.Equals(volume, Settings.ClipOverlayVolume, StringComparison.OrdinalIgnoreCase)) ?? "Medium";
         ExcludedProcesses = new ObservableCollection<string>(Settings.GameAudioExcludedProcesses);
+        CustomGames = new ObservableCollection<CustomGameEntry>(Settings.CustomGames);
+        _selectedCustomGameBackend = ReplayBackends.First(preset => preset.Value == "Auto");
         RefreshAudioDevices();
         SelectedReplayDurationPreset = ReplayDurationPresets.FirstOrDefault(preset => preset.Seconds == Settings.ReplayDurationSeconds) ??
                                        ReplayDurationPresets.First(preset => preset.Seconds == 60);
@@ -139,6 +144,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ReplayBackendPreset> ReplayBackends { get; }
     public ObservableCollection<ExportCodecOption> ExportCodecs { get; }
     public ObservableCollection<string> ExcludedProcesses { get; }
+    public ObservableCollection<CustomGameEntry> CustomGames { get; }
     public ObservableCollection<string> ClipOverlayPositions { get; }
     public ObservableCollection<string> ClipOverlayVolumes { get; }
 
@@ -402,6 +408,30 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (Settings.EnableClipHoverPreview == value) return;
             Settings.EnableClipHoverPreview = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    public bool EnableClipOverlay
+    {
+        get => Settings.EnableClipOverlay;
+        set
+        {
+            if (Settings.EnableClipOverlay == value) return;
+            Settings.EnableClipOverlay = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    public bool EnableClipOverlaySound
+    {
+        get => Settings.EnableClipOverlaySound;
+        set
+        {
+            if (Settings.EnableClipOverlaySound == value) return;
+            Settings.EnableClipOverlaySound = value;
             OnPropertyChanged();
             SaveSettings();
         }
@@ -852,6 +882,61 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         AddExcludedProcess(SelectedProcessExclusion.Name);
     }
 
+    public string NewCustomGameExecutable
+    {
+        get => _newCustomGameExecutable;
+        set => SetProperty(ref _newCustomGameExecutable, value);
+    }
+
+    public string NewCustomGameDisplayName
+    {
+        get => _newCustomGameDisplayName;
+        set => SetProperty(ref _newCustomGameDisplayName, value);
+    }
+
+    public ReplayBackendPreset? SelectedCustomGameBackend
+    {
+        get => _selectedCustomGameBackend;
+        set => SetProperty(ref _selectedCustomGameBackend, value);
+    }
+
+    public void AddCustomGame()
+    {
+        var exe = Path.GetFileName(NewCustomGameExecutable.Trim());
+        if (string.IsNullOrWhiteSpace(exe)) return;
+        if (!exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) exe += ".exe";
+
+        var displayName = string.IsNullOrWhiteSpace(NewCustomGameDisplayName)
+            ? Path.GetFileNameWithoutExtension(exe)
+            : NewCustomGameDisplayName.Trim();
+
+        Settings.CustomGames.RemoveAll(game => string.Equals(game.ExecutableName, exe, StringComparison.OrdinalIgnoreCase));
+        CustomGames.ToList()
+            .Where(game => string.Equals(game.ExecutableName, exe, StringComparison.OrdinalIgnoreCase))
+            .ToList()
+            .ForEach(game => CustomGames.Remove(game));
+
+        var entry = new CustomGameEntry
+        {
+            ExecutableName = exe,
+            DisplayName = displayName,
+            CaptureBackend = SelectedCustomGameBackend?.Value ?? "Auto"
+        };
+        Settings.CustomGames.Add(entry);
+        CustomGames.Add(entry);
+        NewCustomGameExecutable = string.Empty;
+        NewCustomGameDisplayName = string.Empty;
+        SelectedCustomGameBackend = ReplayBackends.First(preset => preset.Value == "Auto");
+        SaveSettings();
+    }
+
+    public void RemoveCustomGame(CustomGameEntry entry)
+    {
+        Settings.CustomGames.RemoveAll(game => string.Equals(game.ExecutableName, entry.ExecutableName, StringComparison.OrdinalIgnoreCase));
+        CustomGames.Remove(entry);
+        SaveSettings();
+    }
+
     public void RemoveExcludedProcess(string processName)
     {
         Settings.GameAudioExcludedProcesses.RemoveAll(item => string.Equals(item, processName, StringComparison.OrdinalIgnoreCase));
@@ -906,6 +991,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ReplayBufferConfig CreateReplayConfig()
     {
+        var gameBackendOverride = Settings.CustomGames
+            .FirstOrDefault(game => string.Equals(game.ExecutableName, ActiveGameDetection.ExeName, StringComparison.OrdinalIgnoreCase));
+        var effectiveBackend = !string.IsNullOrWhiteSpace(gameBackendOverride?.CaptureBackend) &&
+                                !string.Equals(gameBackendOverride.CaptureBackend, "Auto", StringComparison.OrdinalIgnoreCase)
+            ? gameBackendOverride.CaptureBackend
+            : Settings.ReplayBackend;
+
         return new ReplayBufferConfig(
             SelectedReplayDurationPreset?.Seconds ?? Settings.ReplayDurationSeconds,
             Settings.ReplayMaxHeight,
@@ -924,7 +1016,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ActiveGameDetection.ExeName,
             ActiveGameDetection.WindowTitle,
             ActiveGameDetection.WindowClass,
-            Settings.ReplayBackend,
+            effectiveBackend,
             GameWindowHandle: ActiveGameDetection.WindowHandle);
     }
 

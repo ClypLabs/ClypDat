@@ -68,6 +68,7 @@ public sealed partial class MainWindow : Window
         {
             ApplySavedWindowBounds();
             ViewModel?.UpdateCardLayout(Bounds.Width);
+            if (ViewModel is not null) _gameDetector.SetCustomGames(ViewModel.Settings.CustomGames);
             InitializeReplayServices();
             UpdateDetectedGame();
             _gameDetectionTimer.Start();
@@ -393,22 +394,28 @@ public sealed partial class MainWindow : Window
     private void ShowClipSavedNotification()
     {
         if (ViewModel is null) return;
-        try
+        if (ViewModel.Settings.EnableClipOverlaySound)
         {
-            ClipNotificationSound.Play(ViewModel.Settings.ClipOverlayVolume);
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Clip notification sound failed", error);
+            try
+            {
+                ClipNotificationSound.Play(ViewModel.Settings.ClipOverlayVolume);
+            }
+            catch (Exception error)
+            {
+                AppLog.Error("Clip notification sound failed", error);
+            }
         }
 
-        try
+        if (ViewModel.Settings.EnableClipOverlay)
         {
-            ShowClipSavedOverlay(ViewModel.Settings.ClipOverlayPosition);
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Clip notification overlay failed", error);
+            try
+            {
+                ShowClipSavedOverlay(ViewModel.Settings.ClipOverlayPosition);
+            }
+            catch (Exception error)
+            {
+                AppLog.Error("Clip notification overlay failed", error);
+            }
         }
     }
 
@@ -773,6 +780,22 @@ public sealed partial class MainWindow : Window
         if (sender is Button { DataContext: string processName })
         {
             ViewModel?.RemoveExcludedProcess(processName);
+        }
+    }
+
+    private void AddCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        ViewModel.AddCustomGame();
+        _gameDetector.SetCustomGames(ViewModel.Settings.CustomGames);
+    }
+
+    private void RemoveCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: Eve.Core.Settings.CustomGameEntry entry } && ViewModel is not null)
+        {
+            ViewModel.RemoveCustomGame(entry);
+            _gameDetector.SetCustomGames(ViewModel.Settings.CustomGames);
         }
     }
 

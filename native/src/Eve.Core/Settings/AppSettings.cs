@@ -28,6 +28,16 @@ public sealed class AppSettings
     public double WindowHeight { get; set; } = 780;
     public bool IsWindowMaximized { get; set; }
     public Dictionary<string, ClipEditSettings> ClipEdits { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public List<CustomGameEntry> CustomGames { get; set; } = new();
+    public bool EnableClipOverlay { get; set; } = true;
+    public bool EnableClipOverlaySound { get; set; } = true;
+}
+
+public sealed class CustomGameEntry
+{
+    public string ExecutableName { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string CaptureBackend { get; set; } = "Auto";
 }
 
 public sealed class ClipEditSettings
