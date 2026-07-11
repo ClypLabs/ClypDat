@@ -1272,14 +1272,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             .OrderBy(pid => pid)
             .ToArray();
         var selfPid = Environment.ProcessId;
-        var gamePids = useProcessRouting
-            ? ResolveActiveAudioProcessIds()
-                .Where(pid => pid != selfPid)
-                .Except(excludedPids)
-                .Distinct()
-                .OrderBy(pid => pid)
-                .ToArray()
-            : Array.Empty<int>();
+        var gamePids = useProcessRouting ? ResolveGameAudioProcessIds(config.GameExecutableName, excludedPids, selfPid) : Array.Empty<int>();
         var key = $"{useProcessRouting}|{string.Join(',', chatPids.OrderBy(pid => pid))}|{string.Join(',', excludedPids)}|{string.Join(',', gamePids)}|{resolvedMicDeviceId}";
         return new AudioRoutes(chatPids.OrderBy(pid => pid).ToArray(), excludedPids, gamePids, useProcessRouting, key, resolvedMicDeviceId);
     }
@@ -1311,6 +1304,31 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         }
 
         return ids;
+    }
+
+    // Was "every currently-audio-active process except excluded ones" - meant to
+    // catch a game whose audio comes from a differently-named helper process,
+    // but in practice swept in ANY other app making noise at the same time
+    // (another background app, a stray notification) and mixed it into "Game
+    // Audio" alongside the actual game. cs2.exe having exactly one PID while
+    // 4 got captured as Game Audio for a single clip is what surfaced this -
+    // reported as the clip's audio sounding "a little off".
+    //
+    // Prefer the detected game's own PID(s) when they're actually among the
+    // currently-active audio sessions - only fall back to the broad sweep
+    // when the game isn't known or its own process isn't the one producing
+    // sound (some games do route audio through an unnamed child/launcher
+    // process), so that case still works.
+    private static int[] ResolveGameAudioProcessIds(string gameExecutableName, int[] excludedPids, int selfPid)
+    {
+        var activeAudioPids = ResolveActiveAudioProcessIds()
+            .Where(pid => pid != selfPid)
+            .Except(excludedPids)
+            .ToHashSet();
+
+        var gameNamePids = ResolveProcessIds(gameExecutableName).ToHashSet();
+        var matched = activeAudioPids.Where(gameNamePids.Contains).OrderBy(pid => pid).ToArray();
+        return matched.Length > 0 ? matched : activeAudioPids.OrderBy(pid => pid).ToArray();
     }
 
     private static IEnumerable<int> ResolveActiveAudioProcessIds()
