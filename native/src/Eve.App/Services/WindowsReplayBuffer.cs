@@ -665,7 +665,8 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         if (capture is null || !IsUsableAudioFile(capture.Path)) return string.Empty;
         var captureEndUtc = capture.EndedAtUtc ?? DateTime.UtcNow;
         var windowEndUtc = windowStartUtc + TimeSpan.FromSeconds(durationSeconds);
-        var overlapStartUtc = capture.StartedAtUtc > windowStartUtc ? capture.StartedAtUtc : windowStartUtc;
+        var effectiveStartUtc = capture.EffectiveStartedAtUtc;
+        var overlapStartUtc = effectiveStartUtc > windowStartUtc ? effectiveStartUtc : windowStartUtc;
         var overlapEndUtc = captureEndUtc < windowEndUtc ? captureEndUtc : windowEndUtc;
         if (overlapEndUtc <= overlapStartUtc) return string.Empty;
 
@@ -684,7 +685,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             }
 
             snapshots.Add(sourceSnapshotPath);
-            var trimStart = Math.Max(0, (overlapStartUtc - capture.StartedAtUtc).TotalSeconds);
+            var trimStart = Math.Max(0, (overlapStartUtc - effectiveStartUtc).TotalSeconds);
             var overlapDuration = Math.Max(0, (overlapEndUtc - overlapStartUtc).TotalSeconds);
             var delayMs = Math.Max(0, (int)Math.Round((overlapStartUtc - windowStartUtc).TotalMilliseconds));
             var filters = $"[0:a]atrim=start={FormatSeconds(trimStart)}:duration={FormatSeconds(overlapDuration)},asetpts=PTS-STARTPTS,aresample=48000,adelay={delayMs}|{delayMs},apad=whole_dur={FormatSeconds(durationSeconds)},atrim=0:{FormatSeconds(durationSeconds)}[out]";
@@ -1464,6 +1465,13 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         public string? DeviceId { get; }
         public DateTime StartedAtUtc { get; }
         public DateTime? EndedAtUtc { get; set; }
+
+        // Prefer the first-real-sample timestamp once known - closes the gap between
+        // when StartRecording() was called and when the device actually began
+        // delivering audio, which otherwise makes Game Audio (WASAPI endpoint
+        // loopback) lead the video by however much longer its startup latency is
+        // versus Chat/Microphone.
+        public DateTime EffectiveStartedAtUtc => Session.FirstSampleUtc ?? StartedAtUtc;
     }
 
     private static bool IsUsableAudioFile(string path)
@@ -1479,7 +1487,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     private static bool AudioCaptureOverlaps(ReplayAudioCapture capture, DateTime windowStartUtc, DateTime windowEndUtc)
     {
         var captureEndUtc = capture.EndedAtUtc ?? DateTime.UtcNow;
-        return capture.StartedAtUtc < windowEndUtc && captureEndUtc > windowStartUtc;
+        return capture.EffectiveStartedAtUtc < windowEndUtc && captureEndUtc > windowStartUtc;
     }
 
     private static bool CopyAudioFile(string source, string destination)

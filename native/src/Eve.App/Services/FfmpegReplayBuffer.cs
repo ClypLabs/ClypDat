@@ -775,6 +775,7 @@ internal sealed class AudioCaptureSession : IDisposable
     private readonly FileStream _stream;
     private readonly WaveFileWriter _writer;
     private readonly object _lock = new();
+    private bool _firstSampleSeen;
 
     private AudioCaptureSession(IWaveIn capture, FileStream stream, WaveFileWriter writer, string title)
     {
@@ -785,6 +786,15 @@ internal sealed class AudioCaptureSession : IDisposable
     }
 
     public string Title { get; }
+
+    // StartRecording() returns as soon as the request is issued, not once audio is
+    // actually flowing - WASAPI endpoint (loopback) capture has noticeably more
+    // startup latency than per-process loopback or mic capture, so stamping
+    // "started" at the StartRecording() call site under-estimates Game Audio's
+    // true start more than it does Chat/Microphone. This records when the first
+    // real sample actually arrived, which every capture kind can be aligned against
+    // on equal footing.
+    public DateTime? FirstSampleUtc { get; private set; }
 
     public static AudioCaptureSession Start(IWaveIn capture, string path, string title)
     {
@@ -839,6 +849,12 @@ internal sealed class AudioCaptureSession : IDisposable
 
     private void Capture_OnDataAvailable(object? sender, WaveInEventArgs e)
     {
+        if (!_firstSampleSeen)
+        {
+            _firstSampleSeen = true;
+            FirstSampleUtc = DateTime.UtcNow;
+        }
+
         lock (_lock)
         {
             _writer.Write(e.Buffer, 0, e.BytesRecorded);
