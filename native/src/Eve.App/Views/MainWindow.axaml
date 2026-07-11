@@ -167,33 +167,47 @@
                             </Border>
 
                             <Border Grid.Row="1" Background="#1E2A35">
-                              <StackPanel Spacing="6" Margin="16,13,16,12">
-                                <TextBlock Text="{Binding GameNameLabel}"
-                                           Foreground="#8C98A7"
-                                           FontSize="11"
-                                           FontWeight="Bold"
-                                           TextTrimming="CharacterEllipsis"
-                                           ToolTip.Tip="{Binding GameNameLabel}" />
-                                <TextBlock Text="{Binding ClipFromLabel}"
-                                           Foreground="#EDF4FB"
-                                           FontSize="15"
-                                           FontWeight="Bold"
-                                           TextTrimming="CharacterEllipsis" />
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                  <TextBlock Text="&#128337;" FontSize="11" Opacity="0.8" VerticalAlignment="Center" />
-                                  <TextBlock Text="{Binding RelativeDateLabel}"
+                              <Grid ColumnDefinitions="*,Auto" Margin="16,13,14,12">
+                                <StackPanel Spacing="6" VerticalAlignment="Top">
+                                  <TextBlock Text="{Binding GameNameLabel}"
                                              Foreground="#8C98A7"
                                              FontSize="12"
-                                             FontWeight="SemiBold"
-                                             VerticalAlignment="Center" />
-                                  <TextBlock Text="{Binding CaptureBackendLabel}"
-                                             Foreground="#5C6D7E"
-                                             FontSize="11"
-                                             IsVisible="{Binding HasCaptureBackendLabel}"
+                                             FontWeight="Bold"
                                              TextTrimming="CharacterEllipsis"
-                                             VerticalAlignment="Center" />
+                                             ToolTip.Tip="{Binding GameNameLabel}" />
+                                  <TextBlock Text="{Binding ClipFromLabel}"
+                                             Foreground="#EDF4FB"
+                                             FontSize="15"
+                                             FontWeight="Bold"
+                                             TextTrimming="CharacterEllipsis" />
+                                  <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Path Data="M11.99,2C6.47,2,2,6.48,2,12s4.47,10,9.99,10C17.52,22,22,17.52,22,12S17.52,2,11.99,2z M12.5,7H11v6l5.25,3.15l0.75-1.23l-4.5-2.67V7z"
+                                          Fill="#8C98A7" Width="12" Height="12" Stretch="Uniform" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding RelativeDateLabel}"
+                                               Foreground="#8C98A7"
+                                               FontSize="12"
+                                               FontWeight="SemiBold"
+                                               VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding CaptureBackendLabel}"
+                                               Foreground="#5C6D7E"
+                                               FontSize="11"
+                                               IsVisible="{Binding HasCaptureBackendLabel}"
+                                               TextTrimming="CharacterEllipsis"
+                                               VerticalAlignment="Center" />
+                                  </StackPanel>
                                 </StackPanel>
-                              </StackPanel>
+
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                  <Button Classes="clipCardIconButton" Click="ClipRevealButton_OnClick" ToolTip.Tip="Show in folder">
+                                    <Path Data="M10,4H4C2.89,4,2,4.89,2,6v12a2,2,0,0,0,2,2h16a2,2,0,0,0,2-2V8a2,2,0,0,0-2-2H12L10,4z"
+                                          Fill="#93A6B8" Width="14" Height="14" Stretch="Uniform" />
+                                  </Button>
+                                  <Button Classes="clipCardIconButton" Click="ClipDeleteButton_OnClick" ToolTip.Tip="Delete clip">
+                                    <Path Data="M6,19a2,2,0,0,0,2,2h8a2,2,0,0,0,2-2V7H6V19z M19,4H15.5l-1-1h-5l-1,1H5V6H19V4z"
+                                          Fill="#93A6B8" Width="14" Height="14" Stretch="Uniform" />
+                                  </Button>
+                                </StackPanel>
+                              </Grid>
                             </Border>
                           </Grid>
                           </Border>
