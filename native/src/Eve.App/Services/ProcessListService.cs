@@ -38,12 +38,47 @@ public static class ProcessListService
             .ToArray();
     }
 
+    // Windows shell chrome and background helpers keep an invisible or
+    // off-screen-but-technically-"visible" titled window around for OS plumbing
+    // (taskbar, IME, notification toasts, driver overlays) - EnumWindows/
+    // IsWindowVisible alone can't tell those apart from an app the user actually
+    // opened, so anything the user would never pick as a chat app or exclude game
+    // audio for is denied by name here regardless of title/path.
+    private static readonly HashSet<string> DeniedExecutables = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "explorer.exe",
+        "dwm.exe",
+        "textinputhost.exe",
+        "searchhost.exe",
+        "searchapp.exe",
+        "shellexperiencehost.exe",
+        "startmenuexperiencehost.exe",
+        "applicationframehost.exe",
+        "systemsettings.exe",
+        "lockapp.exe",
+        "widgets.exe",
+        "widgetservice.exe",
+        "gamebar.exe",
+        "gamebarftserver.exe",
+        "nvcontainer.exe",
+        "nvidia overlay.exe",
+        "nvidia share.exe",
+        "nvsphelper64.exe",
+        "rtkauduservice64.exe",
+        "windowsterminal.exe",
+        "conhost.exe",
+        "peopleexperiencehost.exe",
+        "sihost.exe",
+        "ctfmon.exe"
+    };
+
     private static ProcessOption? GetProcess(Process process, string windowTitle)
     {
         try
         {
             var fileName = process.MainModule?.FileName;
             if (string.IsNullOrWhiteSpace(fileName)) return null;
+            if (DeniedExecutables.Contains(Path.GetFileName(fileName))) return null;
             if (!IsUserFacingProcess(fileName, windowTitle)) return null;
             return new ProcessOption(Path.GetFileName(fileName), fileName, windowTitle);
         }
