@@ -1,0 +1,13 @@
+EVE End User License Agreement
+
+This software ("EVE") is provided free of charge for personal, non-commercial use.
+
+1. License. You are granted a non-exclusive, non-transferable license to install and use EVE on your own devices.
+
+2. No Warranty. EVE is provided "as is", without warranty of any kind, express or implied, including but not limited to warranties of merchantability, fitness for a particular purpose, and non-infringement.
+
+3. Limitation of Liability. In no event shall the authors be liable for any claim, damages, or other liability arising from the use of this software.
+
+4. Third-Party Components. EVE bundles third-party open-source components (including OBS Studio and LibVLC) under their respective licenses, included with this installation.
+
+By clicking "I Agree", you accept the terms of this agreement.
