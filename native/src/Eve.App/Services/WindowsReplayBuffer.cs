@@ -131,36 +131,35 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             // seconds to minutes long - in exchange for not thrashing the recorder.
             var recorderIsFresh = DateTime.UtcNow - _lastRecorderRestartUtc < MinRecorderRestartInterval;
             var activeSegment = recorderIsFresh ? null : await TryStopCurrentRecordingAsync(cancellationToken);
-            try
+            if (activeSegment is not null)
             {
-                if (activeSegment is not null)
-                {
-                    AddSegment(activeSegment);
-                }
-
-                var availableSegments = await HydrateSegmentDurationsAsync(GetReplaySegments(), cancellationToken);
-                if (availableSegments.Length == 0)
-                {
-                    throw new InvalidOperationException("Replay buffer has no finished segments yet.");
-                }
-
-                (sourceSegments, videoOffsetSeconds, clipDurationSeconds) = SelectReplayWindow(availableSegments, Duration.TotalSeconds);
-                if (clipDurationSeconds < 1)
-                {
-                    throw new InvalidOperationException("Replay just started. Try again in a second.");
-                }
-
-                config = _config ?? _configProvider();
-                AppLog.Info($"Replay save timing: segments={sourceSegments.Length}, videoOffset={videoOffsetSeconds:0.###}s, duration={clipDurationSeconds:0.###}s.");
-                PruneSegments();
+                AddSegment(activeSegment);
+                // Restart capture immediately, before the ffprobe hydration pass below -
+                // that pass runs ffprobe once per buffered segment and can easily take a
+                // second or more with a full buffer, and until now the recorder stayed
+                // fully stopped for all of it. That was real, silent recording downtime
+                // that landed inside the replay window: concat just glues segments back
+                // to back with continuous timestamps, so the missing wall-clock time
+                // wasn't represented anywhere - playback simply jumped forward across it,
+                // in perfect A/V sync since both tracks skipped the same real gap.
+                if (IsRecording) StartRecorder();
             }
-            finally
+
+            var availableSegments = await HydrateSegmentDurationsAsync(GetReplaySegments(), cancellationToken);
+            if (availableSegments.Length == 0)
             {
-                if (activeSegment is not null && IsRecording)
-                {
-                    StartRecorder();
-                }
+                throw new InvalidOperationException("Replay buffer has no finished segments yet.");
             }
+
+            (sourceSegments, videoOffsetSeconds, clipDurationSeconds) = SelectReplayWindow(availableSegments, Duration.TotalSeconds);
+            if (clipDurationSeconds < 1)
+            {
+                throw new InvalidOperationException("Replay just started. Try again in a second.");
+            }
+
+            config = _config ?? _configProvider();
+            AppLog.Info($"Replay save timing: segments={sourceSegments.Length}, videoOffset={videoOffsetSeconds:0.###}s, duration={clipDurationSeconds:0.###}s.");
+            PruneSegments();
 
             sourcePath = await BuildReplayVideoAsync(sourceSegments, cancellationToken);
             var clipName = string.IsNullOrWhiteSpace(titleOverride) ? config.GameDisplayName : titleOverride;
