@@ -154,6 +154,22 @@ public sealed class Cs2GsiListener : IDisposable
             _lastMapName = mapName;
         }
 
+        // "player" is whoever CS2 currently has in view - the local user while
+        // alive, but a spectated teammate or a killcam's target otherwise. Without
+        // this check, a teammate's kill (or the killcam of the person who just
+        // killed you) got tracked as if it were the local user's, auto-clipping
+        // for kills that weren't theirs. "provider.steamid" is always the actual
+        // account running the client, so only process events when they match.
+        if (root.TryGetProperty("provider", out var provider) &&
+            provider.TryGetProperty("steamid", out var providerSteamIdElement) &&
+            player.TryGetProperty("steamid", out var playerSteamIdElement) &&
+            providerSteamIdElement.GetString() is { Length: > 0 } providerSteamId &&
+            playerSteamIdElement.GetString() is { Length: > 0 } playerSteamId &&
+            !string.Equals(providerSteamId, playerSteamId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
         var state = player.TryGetProperty("state", out var stateElement) ? stateElement : default;
         var matchStats = player.TryGetProperty("match_stats", out var statsElement) ? statsElement : default;
 
