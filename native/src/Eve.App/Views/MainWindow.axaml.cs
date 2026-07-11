@@ -552,7 +552,6 @@ public sealed partial class MainWindow : Window
         _hoverPreviewLibVlc ??= new LibVLC("--quiet");
         _hoverPreviewMediaPlayer = new MediaPlayer(_hoverPreviewLibVlc) { Mute = true, Volume = 0 };
         _hoverPreviewMediaPlayer.EndReached += HoverPreview_OnEndReached;
-        _hoverPreviewMediaPlayer.Playing += HoverPreview_OnPlaying;
         return _hoverPreviewMediaPlayer;
     }
 
@@ -591,19 +590,6 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    private void HoverPreview_OnPlaying(object? sender, EventArgs e)
-    {
-        // Fires (on LibVLC's own thread) once a real frame is actually ready -
-        // only then swap the VideoView in over the thumbnail, instead of the
-        // instant Play() is called, so there's no blank/black surface showing
-        // while the first frame is still decoding.
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (_hoverPreviewMediaPlayer is not { } player || sender != player) return;
-            if (_hoverPreviewClip is { } clip) clip.IsHoverPreviewVisible = true;
-        });
-    }
-
     private void StopHoverPreview()
     {
         _pendingHoverClip = null;
@@ -622,7 +608,6 @@ public sealed partial class MainWindow : Window
         if (_hoverPreviewMediaPlayer is not null)
         {
             _hoverPreviewMediaPlayer.EndReached -= HoverPreview_OnEndReached;
-            _hoverPreviewMediaPlayer.Playing -= HoverPreview_OnPlaying;
             _hoverPreviewMediaPlayer.Dispose();
             _hoverPreviewMediaPlayer = null;
         }

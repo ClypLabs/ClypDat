@@ -87,23 +87,16 @@ public sealed class ClipCardViewModel : ViewModelBase
         set
         {
             if (!SetProperty(ref _hoverPreviewPlayer, value)) return;
-            if (value is null) IsHoverPreviewVisible = false;
+            OnPropertyChanged(nameof(IsHoverPreviewVisible));
         }
     }
 
-    private bool _isHoverPreviewVisible;
-
-    // Kept separate from HoverPreviewPlayer: the player is attached (and
-    // buffering) as soon as a hover preview starts, but the VideoView stays
-    // hidden behind the thumbnail image until the first frame is actually
-    // ready (the MediaPlayer "Playing" event) - showing it the instant the
-    // player is assigned meant a blank/black surface for however long
-    // decoding took to produce a frame.
-    public bool IsHoverPreviewVisible
-    {
-        get => _isHoverPreviewVisible;
-        set => SetProperty(ref _isHoverPreviewVisible, value);
-    }
+    // Tried gating this on MediaPlayer's "Playing" event (hide until a real
+    // frame is ready) to avoid a blank/black hold - backfired: an invisible
+    // VideoView has no native render surface for LibVLC to decode into, so
+    // Playing never fired at all and the preview stopped showing anything.
+    // Has to stay visible as soon as the player is attached.
+    public bool IsHoverPreviewVisible => HoverPreviewPlayer is not null;
 
     public bool IsCheckVisible => IsSelected || IsHovered;
     public IBrush SelectionBorderBrush => IsSelected ? Brush.Parse("#5864E8") : Brush.Parse("#24303A");
