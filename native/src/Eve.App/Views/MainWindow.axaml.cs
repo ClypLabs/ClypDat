@@ -558,9 +558,10 @@ public sealed partial class MainWindow : Window
             player.Media = media;
             _hoverPreviewMedia = media;
             previousMedia?.Dispose();
-            player.Play();
+            var played = player.Play();
             _hoverPreviewClip = clip;
             clip.HoverPreviewPlayer = player;
+            AppLog.Info($"Clip hover preview started: path={clip.Path}, played={played}, state={player.State}.");
         }
         catch (Exception error)
         {
