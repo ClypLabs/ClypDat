@@ -212,6 +212,9 @@
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Overlays and Notifications}" Tag="Overlays and Notifications" Content="Overlays and Notifications" Click="SettingsNavButton_OnClick" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Audio}" Tag="Audio" Content="Audio" Click="SettingsNavButton_OnClick" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Audio Exclusions}" Tag="Game Audio Exclusions" Content="Game Audio Exclusions" Click="SettingsNavButton_OnClick" />
+
+            <TextBlock Text="ABOUT" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" Margin="14,20,0,14" />
+            <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=About}" Tag="About" Content="About" Click="SettingsNavButton_OnClick" />
           </StackPanel>
         </Border>
 
@@ -439,6 +442,32 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
+            </StackPanel>
+
+            <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=About}">
+              <StackPanel Spacing="4">
+                <TextBlock Text="ABOUT" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
+                <TextBlock Text="Version, updates, and open source licenses." Foreground="#93A6B8" TextWrapping="Wrap" />
+              </StackPanel>
+              <Border Height="1" Background="#1B242D" />
+
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Spacing="2">
+                  <TextBlock Text="Version" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
+                  <TextBlock Text="{Binding AppVersionDisplay}" Foreground="#6B7C8C" FontSize="12" />
+                </StackPanel>
+                <Button Grid.Column="1" Content="Check for Updates" Click="CheckUpdatesButton_OnClick" VerticalAlignment="Center" />
+              </Grid>
+
+              <Border Height="1" Background="#1B242D" />
+
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Spacing="2">
+                  <TextBlock Text="Open source licenses" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
+                  <TextBlock Text="View license notices for third-party components EVE bundles (OBS, LibVLC, and others)." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                </StackPanel>
+                <Button Grid.Column="1" Content="View Licenses" Click="OpenLicensesButton_OnClick" VerticalAlignment="Center" />
+              </Grid>
             </StackPanel>
 
           </StackPanel>

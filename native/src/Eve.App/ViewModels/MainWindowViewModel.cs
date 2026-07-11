@@ -252,6 +252,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool IsLibraryVisible => !IsEditorVisible && !IsSettingsVisible;
 
+    public string AppVersionDisplay => $"v{AppUpdateService.CurrentVersion}";
+
     public string SelectedSettingsSection
     {
         get => _selectedSettingsSection;

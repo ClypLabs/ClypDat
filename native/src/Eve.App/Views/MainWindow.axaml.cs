@@ -783,6 +783,53 @@ public sealed partial class MainWindow : Window
         AppLog.OpenFolder();
     }
 
+    private async void CheckUpdatesButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null || _updateDialogOpen) return;
+
+        AppUpdateInfo? update;
+        try
+        {
+            update = await AppUpdateService.CheckAsync();
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Update check failed", error);
+            await ShowMessageAsync("Update check failed", error.Message);
+            return;
+        }
+
+        if (update is null)
+        {
+            await ShowMessageAsync("You're up to date", $"EVE {AppUpdateService.CurrentVersion} is the latest version.");
+            return;
+        }
+
+        _updateDialogOpen = true;
+        try
+        {
+            var dialog = CreateUpdateDialog(update);
+            await dialog.ShowDialog(this);
+        }
+        finally
+        {
+            _updateDialogOpen = false;
+        }
+    }
+
+    private void OpenLicensesButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "THIRD-PARTY-LICENSES.md");
+        try
+        {
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Open licenses failed", error);
+        }
+    }
+
     private void LibraryPathButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.Settings.LibraryFolder)) return;
