@@ -594,37 +594,69 @@
             <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=About}">
               <StackPanel Spacing="4">
                 <TextBlock Text="ABOUT" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
-                <TextBlock Text="Version, updates, and open source licenses." Foreground="#93A6B8" TextWrapping="Wrap" />
+                <TextBlock Text="Version, updates, source, and open source licenses." Foreground="#93A6B8" TextWrapping="Wrap" />
               </StackPanel>
               <Border Height="1" Background="#1B242D" />
 
-              <Grid ColumnDefinitions="*,Auto">
-                <StackPanel Spacing="2">
-                  <TextBlock Text="Version" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
-                  <TextBlock Text="{Binding AppVersionDisplay}" Foreground="#6B7C8C" FontSize="12" />
+              <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="10" Padding="20">
+                <StackPanel Orientation="Horizontal" Spacing="16">
+                  <Border Width="52" Height="52" CornerRadius="12" Background="#1D2A36">
+                    <Image Source="/Assets/eve-icon-24.png" Width="30" Height="30" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </Border>
+                  <StackPanel Spacing="3" VerticalAlignment="Center">
+                    <TextBlock Text="EVE" Foreground="#EDF4FB" FontWeight="Bold" FontSize="20" />
+                    <TextBlock Text="A clip recorder and editor, made to be fast and to stay out of your way." Foreground="#8EA1B6" FontSize="12" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding AppVersionDisplay}" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" Margin="0,4,0,0" />
+                  </StackPanel>
                 </StackPanel>
-                <Button Grid.Column="1" Content="Check for Updates" Click="CheckUpdatesButton_OnClick" VerticalAlignment="Center" />
-              </Grid>
+              </Border>
 
-              <Border Height="1" Background="#1B242D" />
-
-              <Grid ColumnDefinitions="*,Auto">
-                <StackPanel Spacing="2">
-                  <TextBlock Text="Open source licenses" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
-                  <TextBlock Text="View license notices for third-party components EVE bundles (OBS, LibVLC, and others)." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+              <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="10" Padding="18">
+                <StackPanel Spacing="16">
+                  <TextBlock Text="UPDATES" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" />
+                  <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="Check for updates" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
+                      <TextBlock Text="EVE also checks automatically on launch." Foreground="#6B7C8C" FontSize="12" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="Check Now" Classes="primaryButton" Click="CheckUpdatesButton_OnClick" VerticalAlignment="Center" />
+                  </Grid>
                 </StackPanel>
-                <Button Grid.Column="1" Content="View Licenses" Click="OpenLicensesButton_OnClick" VerticalAlignment="Center" />
-              </Grid>
+              </Border>
 
-              <Border Height="1" Background="#1B242D" />
-
-              <Grid ColumnDefinitions="*,Auto">
-                <StackPanel Spacing="2">
-                  <TextBlock Text="Setup walkthrough" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
-                  <TextBlock Text="Replay the first-time setup guide for library, capture, hotkey, and audio settings." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+              <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="10" Padding="18">
+                <StackPanel Spacing="16">
+                  <TextBlock Text="SOURCE AND LICENSES" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" />
+                  <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="View on GitHub" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
+                      <TextBlock Text="Source code, releases, and issue tracker." Foreground="#6B7C8C" FontSize="12" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="Open GitHub" Click="OpenGitHubButton_OnClick" VerticalAlignment="Center" />
+                  </Grid>
+                  <Border Height="1" Background="#1B242D" />
+                  <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="Open source licenses" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
+                      <TextBlock Text="License notices for third-party components EVE bundles (OBS, LibVLC, and others)." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="View Licenses" Click="OpenLicensesButton_OnClick" VerticalAlignment="Center" />
+                  </Grid>
                 </StackPanel>
-                <Button Grid.Column="1" Content="Show Walkthrough" Click="ShowWalkthroughButton_OnClick" VerticalAlignment="Center" />
-              </Grid>
+              </Border>
+
+              <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="10" Padding="18">
+                <StackPanel Spacing="16">
+                  <TextBlock Text="GET STARTED" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" />
+                  <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="Setup walkthrough" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
+                      <TextBlock Text="Replay the first-time setup guide for library, capture, hotkey, and audio settings." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="Show Walkthrough" Click="ShowWalkthroughButton_OnClick" VerticalAlignment="Center" />
+                  </Grid>
+                </StackPanel>
+              </Border>
             </StackPanel>
 
           </StackPanel>

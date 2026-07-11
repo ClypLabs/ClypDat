@@ -733,6 +733,18 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void OpenGitHubButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("https://github.com/Stormanzanii/EVE") { UseShellExecute = true });
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Open GitHub failed", error);
+        }
+    }
+
     private void OpenLicensesButton_OnClick(object? sender, RoutedEventArgs e)
     {
         var path = Path.Combine(AppContext.BaseDirectory, "THIRD-PARTY-LICENSES.md");
