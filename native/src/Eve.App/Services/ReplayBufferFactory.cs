@@ -21,7 +21,8 @@ public static class ReplayBufferFactory
         "cod.exe",
         "cod24-cod.exe",
         "Wuthering Waves.exe",
-        "Overwatch.exe"
+        "Overwatch.exe",
+        "forzahorizon6.exe"
     };
 
     public static IReplayBuffer Create(Func<ReplayBufferConfig> configProvider)
