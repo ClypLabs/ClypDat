@@ -237,13 +237,6 @@
   <Style Selector="Button.settingsNavButton.active:pointerover">
     <Setter Property="Background" Value="#1B2A3D" />
   </Style>
-  <Style Selector="Border.statusCard">
-    <Setter Property="Background" Value="#141D24" />
-    <Setter Property="BorderBrush" Value="#232F3A" />
-    <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="8" />
-    <Setter Property="Padding" Value="12,10" />
-  </Style>
   <Style Selector="Slider.volumeSlider /template/ Thumb">
     <Setter Property="Width" Value="14" />
     <Setter Property="Height" Value="18" />
