@@ -47,6 +47,7 @@ public sealed class ForegroundGameDetector
         "nvdisplay.container.exe",
         "obs64.exe",
         "overwolf.exe",
+        "parsecd.exe",
         "powershell.exe",
         "rtss.exe",
         "rtsshooksloader64.exe",
