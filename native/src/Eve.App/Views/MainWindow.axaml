@@ -615,6 +615,16 @@
                 </StackPanel>
                 <Button Grid.Column="1" Content="View Licenses" Click="OpenLicensesButton_OnClick" VerticalAlignment="Center" />
               </Grid>
+
+              <Border Height="1" Background="#1B242D" />
+
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Spacing="2">
+                  <TextBlock Text="Setup walkthrough" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
+                  <TextBlock Text="Replay the first-time setup guide for library, capture, hotkey, and audio settings." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                </StackPanel>
+                <Button Grid.Column="1" Content="Show Walkthrough" Click="ShowWalkthroughButton_OnClick" VerticalAlignment="Center" />
+              </Grid>
             </StackPanel>
 
           </StackPanel>

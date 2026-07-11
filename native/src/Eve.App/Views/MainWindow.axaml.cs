@@ -51,7 +51,7 @@ public sealed partial class MainWindow : Window
             UpdateDetectedGame();
             _gameDetectionTimer.Start();
             _ = EnsureLibraryFolderAsync();
-            _ = CheckForUpdatesAsync();
+            _ = RunStartupDialogsAsync();
             if (ViewModel is not null)
             {
                 _gameDetector.ApplyCustomGameNames(ViewModel.Settings.GameCaptureOverrides);
@@ -1149,6 +1149,203 @@ public sealed partial class MainWindow : Window
     {
         var dialog = CreateDialog(title, message, false);
         await dialog.ShowDialog<bool>(this);
+    }
+
+    private async Task RunStartupDialogsAsync()
+    {
+        await ShowOnboardingIfNeededAsync();
+        await CheckForUpdatesAsync();
+    }
+
+    private readonly record struct OnboardingStep(string Title, string Description, string SectionTag, string SectionButtonLabel);
+
+    private static readonly OnboardingStep[] OnboardingSteps =
+    {
+        new(
+            "Library and replay buffer",
+            "Pick where clips get saved, how long the replay buffer holds (how far back you can save a clip from), and the capture resolution/FPS.",
+            "Replay Buffer",
+            "Open Replay Buffer settings"),
+        new(
+            "Capture backend and game detection",
+            "\"Auto\" picks the best backend per game automatically. Anti-cheat-sensitive games are forced to Windows Capture here so OBS's hook doesn't get blocked or flag the game - you can override any game's backend individually.",
+            "Game Detection",
+            "Open Game Detection settings"),
+        new(
+            "Save hotkey and startup behavior",
+            "The save hotkey (set in Replay Buffer settings) saves whatever's currently in the buffer as a clip. You can also have EVE launch on Windows startup and start minimized to the tray.",
+            "General",
+            "Open General settings"),
+        new(
+            "Chat Audio and microphone",
+            "Pick the app whose audio should be tagged as \"Chat Audio\" in clips (Discord, etc.) and which microphone gets recorded.",
+            "Audio",
+            "Open Audio settings"),
+        new(
+            "Game Audio exclusions",
+            "Whatever app you pick as Chat Audio above is automatically removed from Game Audio so voice chat doesn't bleed into it twice. Add any other apps here (music players, notification sounds) you don't want counted as game audio.",
+            "Game Audio Exclusions",
+            "Open Game Audio Exclusions settings")
+    };
+
+    private async Task ShowOnboardingIfNeededAsync()
+    {
+        if (ViewModel is null || ViewModel.Settings.HasSeenOnboarding) return;
+        await ShowOnboardingAsync();
+    }
+
+    private async void ShowWalkthroughButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        await ShowOnboardingAsync();
+    }
+
+    private async Task ShowOnboardingAsync()
+    {
+        if (ViewModel is null) return;
+        var dialog = CreateOnboardingDialog(ViewModel);
+        await dialog.ShowDialog(this);
+        ViewModel.Settings.HasSeenOnboarding = true;
+        ViewModel.SaveSettings();
+    }
+
+    private Window CreateOnboardingDialog(MainWindowViewModel viewModel)
+    {
+        var stepIndex = 0;
+
+        var window = new Window
+        {
+            Width = 520,
+            SizeToContent = SizeToContent.Height,
+            MaxHeight = 640,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = Avalonia.Media.Brush.Parse("#111920"),
+            SystemDecorations = SystemDecorations.Full,
+            ExtendClientAreaToDecorationsHint = true,
+            ExtendClientAreaTitleBarHeightHint = -1,
+            ExtendClientAreaChromeHints = Avalonia.Platform.ExtendClientAreaChromeHints.NoChrome,
+            TransparencyLevelHint = new[] { Avalonia.Controls.WindowTransparencyLevel.None }
+        };
+
+        var titleBar = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
+            Height = 40,
+            Background = Avalonia.Media.Brush.Parse("#0C1319")
+        };
+        titleBar.PointerPressed += (_, e) =>
+        {
+            if (e.GetCurrentPoint(titleBar).Properties.IsLeftButtonPressed) window.BeginMoveDrag(e);
+        };
+        var titleIcon = new Image { Source = new Avalonia.Media.Imaging.Bitmap(Avalonia.Platform.AssetLoader.Open(new Uri("avares://EVE/Assets/eve-icon-24.png"))), Width = 16, Height = 16, Margin = new Avalonia.Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        var titleText = new TextBlock { Text = "Welcome to EVE", Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"), FontSize = 12, FontWeight = Avalonia.Media.FontWeight.SemiBold, Margin = new Avalonia.Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        var titleLeft = new StackPanel { Orientation = Orientation.Horizontal, Children = { titleIcon, titleText } };
+        Grid.SetColumn(titleLeft, 0);
+        var closeButton = new Button { Content = "✕", Width = 40, Height = 40, Padding = new Avalonia.Thickness(0), Background = Avalonia.Media.Brushes.Transparent, BorderThickness = new Avalonia.Thickness(0), CornerRadius = new Avalonia.CornerRadius(0), Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+        closeButton.Click += (_, _) => window.Close();
+        Grid.SetColumn(closeButton, 2);
+        titleBar.Children.Add(titleLeft);
+        titleBar.Children.Add(closeButton);
+
+        var stepLabel = new TextBlock { Foreground = Avalonia.Media.Brush.Parse("#6B7C8C"), FontSize = 12, FontWeight = Avalonia.Media.FontWeight.Bold };
+        var stepTitle = new TextBlock { Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"), FontWeight = Avalonia.Media.FontWeight.Bold, FontSize = 18 };
+        var stepDescription = new TextBlock { Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"), FontSize = 13, TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+
+        var dotsPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Center };
+        var dots = new List<Border>();
+        for (var i = 0; i < OnboardingSteps.Length; i++)
+        {
+            var dot = new Border { Width = 8, Height = 8, CornerRadius = new Avalonia.CornerRadius(4), Background = Avalonia.Media.Brush.Parse("#2C3B48") };
+            dots.Add(dot);
+            dotsPanel.Children.Add(dot);
+        }
+
+        var backButton = new Button { Content = "Back", Width = 96, HorizontalContentAlignment = HorizontalAlignment.Center };
+        var skipButton = new Button { Content = "Skip", Classes = { "linkButton" } };
+        var nextButton = new Button { Content = "Next", Width = 96, HorizontalContentAlignment = HorizontalAlignment.Center, Classes = { "primaryButton" } };
+        var openSectionButton = new Button { Content = "Open These Settings", HorizontalAlignment = HorizontalAlignment.Left, Classes = { "linkButton" } };
+
+        skipButton.Click += (_, _) => window.Close();
+        openSectionButton.Click += (_, _) =>
+        {
+            viewModel.OpenSettings();
+            viewModel.SelectSettingsSection(OnboardingSteps[stepIndex].SectionTag);
+            window.Close();
+        };
+
+        void RenderStep()
+        {
+            var step = OnboardingSteps[stepIndex];
+            stepLabel.Text = $"STEP {stepIndex + 1} OF {OnboardingSteps.Length}";
+            stepTitle.Text = step.Title;
+            stepDescription.Text = step.Description;
+            openSectionButton.Content = step.SectionButtonLabel;
+            backButton.IsEnabled = stepIndex > 0;
+            nextButton.Content = stepIndex == OnboardingSteps.Length - 1 ? "Finish" : "Next";
+            for (var i = 0; i < dots.Count; i++)
+            {
+                dots[i].Background = i == stepIndex
+                    ? Avalonia.Media.Brush.Parse("#5864E8")
+                    : Avalonia.Media.Brush.Parse("#2C3B48");
+            }
+        }
+
+        backButton.Click += (_, _) =>
+        {
+            if (stepIndex == 0) return;
+            stepIndex--;
+            RenderStep();
+        };
+        nextButton.Click += (_, _) =>
+        {
+            if (stepIndex == OnboardingSteps.Length - 1)
+            {
+                window.Close();
+                return;
+            }
+
+            stepIndex++;
+            RenderStep();
+        };
+
+        RenderStep();
+
+        var buttonRow = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
+        Grid.SetColumn(skipButton, 0);
+        skipButton.VerticalAlignment = VerticalAlignment.Center;
+        var rightButtons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, HorizontalAlignment = HorizontalAlignment.Right };
+        rightButtons.Children.Add(backButton);
+        rightButtons.Children.Add(nextButton);
+        Grid.SetColumn(rightButtons, 2);
+        buttonRow.Children.Add(skipButton);
+        buttonRow.Children.Add(rightButtons);
+
+        var body = new StackPanel
+        {
+            Margin = new Avalonia.Thickness(22, 20, 22, 22),
+            Spacing = 16,
+            Children =
+            {
+                stepLabel,
+                stepTitle,
+                stepDescription,
+                openSectionButton,
+                dotsPanel,
+                buttonRow
+            }
+        };
+
+        window.Content = new DockPanel
+        {
+            Children =
+            {
+                titleBar,
+                new ScrollViewer { Content = body }
+            }
+        };
+        DockPanel.SetDock(titleBar, Dock.Top);
+
+        return window;
     }
 
     private async Task CheckForUpdatesAsync()

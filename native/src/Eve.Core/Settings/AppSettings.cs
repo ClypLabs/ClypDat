@@ -33,6 +33,11 @@ public sealed class AppSettings
     public Cs2AutoClipSettings Cs2AutoClip { get; set; } = new();
     public bool MedalImportStripEmoji { get; set; } = true;
     public bool MedalImportCopyNotMove { get; set; } = true;
+    // Defaults true so upgrading an existing install (settings.json already exists,
+    // this key just isn't in it yet) never shows the walkthrough - only a genuinely
+    // fresh install (no settings.json at all, see AppSettingsStore.Load) gets it
+    // explicitly set to false.
+    public bool HasSeenOnboarding { get; set; } = true;
 }
 
 public sealed class ClipEditSettings
