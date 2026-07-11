@@ -521,7 +521,16 @@ public sealed partial class MainWindow : Window
 
     private void ClipCard_OnPointerExited(object? sender, PointerEventArgs e)
     {
-        if (sender is not Control { DataContext: ClipCardViewModel clip }) return;
+        if (sender is not Control { DataContext: ClipCardViewModel clip } border) return;
+
+        // The hover-preview VideoView hosts a native child window (HWND on Windows).
+        // When it appears over the thumbnail, the cursor ends up over that native
+        // window and Windows delivers a real mouse-leave to Avalonia, firing this
+        // handler even though the pointer never actually left the card. Ignore
+        // exits where the pointer is still within the card's bounds.
+        var pos = e.GetPosition(border);
+        if (pos.X >= 0 && pos.Y >= 0 && pos.X <= border.Bounds.Width && pos.Y <= border.Bounds.Height) return;
+
         clip.IsHovered = false;
         if (_pendingHoverClip == clip) _pendingHoverClip = null;
         _hoverPreviewDelay.Stop();
