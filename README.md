@@ -23,7 +23,24 @@ Foreground-window polling drives game detection: a catalog of known
 executables plus a fallback that accepts any window whose
 process has loaded a Direct3D, OpenGL, or Vulkan module. Saved clips are
 named after the detected game and timestamp, e.g.
-`Counter-Strike 2 2026-07-10 17-30-00.mp4`.
+`Counter-Strike 2 2026-07-10 17-30-00.mp4`. Games can also be added from
+Settings > Game Detection by picking a currently-running process or
+browsing for an executable directly.
+
+## Auto-clipping
+
+For CS2, EVE listens to the game's own Game State Integration feed (no
+screen/voice analysis) and can automatically save a clip on kills, a
+headshot, a death, or an assist. Rapid kills within a debounce window
+are coalesced into a single clip for the final milestone (e.g. a 3K
+followed quickly by a 4K only saves once, as the 4K) instead of one
+clip per kill.
+
+## First-time setup
+
+A one-time interactive setup wizard runs on first launch (library
+folder, hotkey, replay length, capture backend, audio) and can be
+replayed any time from Settings > About > Show Walkthrough.
 
 ## Editor
 
@@ -74,8 +91,8 @@ portable exe, an NSIS installer, and an MSI.
 ## Future Updates
 
 - Will add support to use AMD GPU's for OBS
-- Will also add auto-clipping functionalitys for games
-- Update UI, make it look more polished
+- Seamless replay buffer rotation for the Windows Capture backend (no
+  stop/restart gap between segments)
 - I'll update this when I get more ideas lol
 
 
