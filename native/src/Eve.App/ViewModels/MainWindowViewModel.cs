@@ -62,6 +62,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private double _cardWidth = 368;
     private double _cardImageHeight = 207;
     private int _cardColumns = 3;
+    private bool _isOnboardingVisible;
+    private string _onboardingStep = "Replay Buffer";
 
     public MainWindowViewModel()
     {
@@ -1109,6 +1111,69 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         IsEditorVisible = false;
         IsSettingsVisible = true;
         SelectedSettingsSection = "Replay Buffer";
+    }
+
+    private static readonly string[] OnboardingStepOrder =
+    {
+        "Replay Buffer",
+        "Capture Backend",
+        "Startup",
+        "Audio",
+        "Game Audio Exclusions"
+    };
+
+    public bool IsOnboardingVisible
+    {
+        get => _isOnboardingVisible;
+        set => SetProperty(ref _isOnboardingVisible, value);
+    }
+
+    public string OnboardingStep
+    {
+        get => _onboardingStep;
+        set
+        {
+            if (!SetProperty(ref _onboardingStep, value)) return;
+            OnPropertyChanged(nameof(OnboardingStepNumber));
+            OnPropertyChanged(nameof(OnboardingBackEnabled));
+            OnPropertyChanged(nameof(OnboardingNextLabel));
+        }
+    }
+
+    public int OnboardingStepNumber => Array.IndexOf(OnboardingStepOrder, OnboardingStep) + 1;
+    public int OnboardingStepCount => OnboardingStepOrder.Length;
+    public bool OnboardingBackEnabled => OnboardingStepNumber > 1;
+    public string OnboardingNextLabel => OnboardingStepNumber == OnboardingStepCount ? "Finish" : "Next";
+
+    public void StartOnboarding()
+    {
+        OnboardingStep = OnboardingStepOrder[0];
+        IsOnboardingVisible = true;
+    }
+
+    public void OnboardingBack()
+    {
+        var i = Array.IndexOf(OnboardingStepOrder, OnboardingStep);
+        if (i > 0) OnboardingStep = OnboardingStepOrder[i - 1];
+    }
+
+    public void OnboardingNext()
+    {
+        var i = Array.IndexOf(OnboardingStepOrder, OnboardingStep);
+        if (i == OnboardingStepOrder.Length - 1)
+        {
+            FinishOnboarding();
+            return;
+        }
+
+        OnboardingStep = OnboardingStepOrder[i + 1];
+    }
+
+    public void FinishOnboarding()
+    {
+        IsOnboardingVisible = false;
+        Settings.HasSeenOnboarding = true;
+        SaveSettings();
     }
 
     public void CloseSettings()

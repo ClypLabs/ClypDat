@@ -874,6 +874,147 @@
         </Grid>
       </Border>
     </Grid>
+
+    <Border Grid.RowSpan="2" Background="#000000AA" IsVisible="{Binding IsOnboardingVisible}">
+      <Border Width="560" MaxHeight="640" CornerRadius="12" Background="#111920" BorderBrush="#232F3A" BorderThickness="1"
+              HorizontalAlignment="Center" VerticalAlignment="Center">
+        <DockPanel>
+          <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto" Height="40" Background="#0C1319">
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="14,0,0,0" VerticalAlignment="Center">
+              <Image Source="/Assets/eve-icon-24.png" Width="16" Height="16" />
+              <TextBlock Text="Welcome to EVE" Foreground="#B9C6D4" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
+            </StackPanel>
+            <Button Grid.Column="2" Classes="dialogClose" Content="✕" Width="40" Height="40" Click="OnboardingSkipButton_OnClick" />
+          </Grid>
+
+          <StackPanel DockPanel.Dock="Bottom" Margin="22,0,22,20" Spacing="14">
+            <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
+              <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Replay Buffer}" />
+              <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Capture Backend}" />
+              <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Startup}" />
+              <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Audio}" />
+              <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Game Audio Exclusions}" />
+            </StackPanel>
+            <Grid ColumnDefinitions="Auto,*,Auto">
+              <Button Content="Skip" Classes="linkButton" VerticalAlignment="Center" Click="OnboardingSkipButton_OnClick" />
+              <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10">
+                <Button Content="Back" Width="96" HorizontalContentAlignment="Center" IsEnabled="{Binding OnboardingBackEnabled}" Click="OnboardingBackButton_OnClick" />
+                <Button Content="{Binding OnboardingNextLabel}" Width="96" HorizontalContentAlignment="Center" Classes="primaryButton" Click="OnboardingNextButton_OnClick" />
+              </StackPanel>
+            </Grid>
+          </StackPanel>
+
+          <ScrollViewer>
+            <StackPanel Margin="22,20,22,18" Spacing="16">
+              <TextBlock Text="{Binding OnboardingStepNumber, StringFormat='STEP {0} OF 5'}" Foreground="#6B7C8C" FontSize="12" FontWeight="Bold" />
+
+              <StackPanel Spacing="16" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Replay Buffer}">
+                <TextBlock Text="Library and replay buffer" Foreground="#EDF4FB" FontWeight="Bold" FontSize="18" />
+                <TextBlock Text="Pick where clips save, your save hotkey, and how long the replay buffer holds." Foreground="#B9C6D4" FontSize="13" TextWrapping="Wrap" />
+
+                <StackPanel Spacing="6">
+                  <TextBlock Text="Library folder" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                    <TextBlock Text="{Binding Settings.LibraryFolder}" Foreground="#6B7C8C" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <Button Grid.Column="1" Content="Change Folder" Click="FolderButton_OnClick" />
+                  </Grid>
+                </StackPanel>
+
+                <StackPanel Spacing="6">
+                  <TextBlock Text="Save hotkey" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
+                  <Button Content="{Binding HotkeyDisplay}" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Left" MinWidth="200" />
+                </StackPanel>
+
+                <StackPanel Spacing="6">
+                  <TextBlock Text="Replay length" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
+                  <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate>
+                        <TextBlock Text="{Binding Label}" />
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                </StackPanel>
+              </StackPanel>
+
+              <StackPanel Spacing="16" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Capture Backend}">
+                <TextBlock Text="Capture backend" Foreground="#EDF4FB" FontWeight="Bold" FontSize="18" />
+                <TextBlock Text="&quot;Auto&quot; picks the best backend per game. Anti-cheat-sensitive games are steered to Windows Capture automatically - per-game overrides live in Settings &gt; Game Detection if you need one later." Foreground="#B9C6D4" FontSize="13" TextWrapping="Wrap" />
+                <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayBackends}" SelectedItem="{Binding SelectedReplayBackend}">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding Label}" />
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+                <TextBlock Text="{Binding SelectedReplayBackend.Description}" Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+              </StackPanel>
+
+              <StackPanel Spacing="16" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Startup}">
+                <TextBlock Text="Startup behavior" Foreground="#EDF4FB" FontWeight="Bold" FontSize="18" />
+                <TextBlock Text="How EVE behaves when it launches." Foreground="#B9C6D4" FontSize="13" TextWrapping="Wrap" />
+
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Text="Start replay buffer when EVE opens" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" />
+                  <ToggleSwitch Grid.Column="1" IsChecked="{Binding StartReplayOnLaunch}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                </Grid>
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Text="Launch EVE on Windows boot" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" />
+                  <ToggleSwitch Grid.Column="1" IsChecked="{Binding LaunchOnWindowsStartup}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                </Grid>
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Text="Start minimized to tray" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" />
+                  <ToggleSwitch Grid.Column="1" IsChecked="{Binding StartMinimizedToTray}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                </Grid>
+              </StackPanel>
+
+              <StackPanel Spacing="16" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Audio}">
+                <TextBlock Text="Chat Audio and microphone" Foreground="#EDF4FB" FontWeight="Bold" FontSize="18" />
+                <TextBlock Text="Pick the app whose audio should be tagged Chat Audio in clips, and which microphone gets recorded." Foreground="#B9C6D4" FontSize="13" TextWrapping="Wrap" />
+
+                <StackPanel Spacing="6">
+                  <TextBlock Text="Chat Audio App" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                    <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedChatProcess}" HorizontalAlignment="Stretch" />
+                    <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
+                  </Grid>
+                </StackPanel>
+
+                <StackPanel Spacing="6">
+                  <TextBlock Text="Microphone" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
+                  <ComboBox Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" HorizontalAlignment="Stretch" />
+                </StackPanel>
+              </StackPanel>
+
+              <StackPanel Spacing="16" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Audio Exclusions}">
+                <TextBlock Text="Game Audio exclusions" Foreground="#EDF4FB" FontWeight="Bold" FontSize="18" />
+                <TextBlock Text="Whatever app is picked as Chat Audio is already removed from Game Audio. Add anything else here (music players, notification sounds) you don't want counted as game audio." Foreground="#B9C6D4" FontSize="13" TextWrapping="Wrap" />
+
+                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                  <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedProcessExclusion}" HorizontalAlignment="Stretch" />
+                  <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
+                  <Button Grid.Column="2" Content="Add" Click="AddSelectedProcessButton_OnClick" />
+                </Grid>
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                  <TextBox Name="OnboardingExcludedProcessTextBox" Classes="settingsInput" Watermark="discord.exe" />
+                  <Button Grid.Column="1" Content="Add Manual" Click="AddExcludedProcessOnboardingButton_OnClick" />
+                </Grid>
+                <ItemsControl ItemsSource="{Binding ExcludedProcesses}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                        <TextBlock Text="{Binding}" Foreground="#D8E4F2" VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Content="Remove" Click="RemoveExcludedProcessButton_OnClick" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </StackPanel>
+          </ScrollViewer>
+        </DockPanel>
+      </Border>
+    </Border>
   </Grid>
 </Window>
 
