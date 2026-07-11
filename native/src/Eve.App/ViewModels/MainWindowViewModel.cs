@@ -564,7 +564,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => SetProperty(ref _medalScanned, value);
     }
 
-    private string _medalScanStatusText = string.Empty;
+    private string _medalScanStatusText = "Not scanned yet - click Scan for Medal Clips to look for clips Medal has recorded locally.";
 
     public string MedalScanStatusText
     {

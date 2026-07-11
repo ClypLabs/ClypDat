@@ -713,44 +713,55 @@
         </ScrollViewer>
 
         <Border Grid.Column="2" Background="#0D1116" BorderBrush="#1E2A33" BorderThickness="1,0,0,0">
-          <StackPanel Margin="20,28" Spacing="16">
-            <TextBlock Text="STATUS" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
-            <Border Height="1" Background="#1B242D" />
+          <ScrollViewer>
+            <StackPanel Margin="18,28" Spacing="12">
+              <TextBlock Text="STATUS" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" Margin="4,0,0,4" />
 
-            <StackPanel Spacing="3">
-              <TextBlock Text="Replay buffer" Foreground="#6B7C8C" FontSize="11" FontWeight="Bold" />
-              <TextBlock Text="{Binding RecorderStatus}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
+              <Border Classes="statusCard">
+                <StackPanel Spacing="3">
+                  <TextBlock Text="Replay buffer" Foreground="#6B7C8C" FontSize="11" FontWeight="Bold" />
+                  <TextBlock Text="{Binding RecorderStatus}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
+                </StackPanel>
+              </Border>
+
+              <Border Classes="statusCard">
+                <StackPanel Spacing="3">
+                  <TextBlock Text="Save hotkey" Foreground="#6B7C8C" FontSize="11" FontWeight="Bold" />
+                  <TextBlock Text="{Binding HotkeyDisplay}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
+                </StackPanel>
+              </Border>
+
+              <Border Classes="statusCard">
+                <StackPanel Spacing="3">
+                  <TextBlock Text="Replay length" Foreground="#6B7C8C" FontSize="11" FontWeight="Bold" />
+                  <TextBlock Text="{Binding SelectedReplayDurationPreset.Label}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
+                </StackPanel>
+              </Border>
+
+              <Border Classes="statusCard">
+                <StackPanel Spacing="3">
+                  <TextBlock Text="Resolution / FPS" Foreground="#6B7C8C" FontSize="11" FontWeight="Bold" />
+                  <TextBlock Foreground="#D2DEEC" FontWeight="Bold" FontSize="15">
+                    <Run Text="{Binding SelectedReplayResolution.Label}" /><Run Text=" @ " /><Run Text="{Binding SelectedReplayFrameRate}" /><Run Text="fps" />
+                  </TextBlock>
+                </StackPanel>
+              </Border>
+
+              <Border Classes="statusCard">
+                <StackPanel Spacing="3">
+                  <TextBlock Text="Capture backend" Foreground="#6B7C8C" FontSize="11" FontWeight="Bold" />
+                  <TextBlock Text="{Binding SelectedReplayBackend.Label}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" TextWrapping="Wrap" />
+                </StackPanel>
+              </Border>
+
+              <Border Classes="statusCard">
+                <StackPanel Spacing="3">
+                  <TextBlock Text="Library folder" Foreground="#6B7C8C" FontSize="11" FontWeight="Bold" />
+                  <TextBlock Text="{Binding LibraryLocationText}" Foreground="#93A6B8" FontSize="12" TextWrapping="Wrap" />
+                </StackPanel>
+              </Border>
             </StackPanel>
-
-            <StackPanel Spacing="3">
-              <TextBlock Text="Save hotkey" Foreground="#6B7C8C" FontSize="11" FontWeight="Bold" />
-              <TextBlock Text="{Binding HotkeyDisplay}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
-            </StackPanel>
-
-            <StackPanel Spacing="3">
-              <TextBlock Text="Replay length" Foreground="#6B7C8C" FontSize="11" FontWeight="Bold" />
-              <TextBlock Text="{Binding SelectedReplayDurationPreset.Label}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
-            </StackPanel>
-
-            <StackPanel Spacing="3">
-              <TextBlock Text="Resolution / FPS" Foreground="#6B7C8C" FontSize="11" FontWeight="Bold" />
-              <TextBlock Foreground="#D2DEEC" FontWeight="Bold" FontSize="15">
-                <Run Text="{Binding SelectedReplayResolution.Label}" /><Run Text=" @ " /><Run Text="{Binding SelectedReplayFrameRate}" /><Run Text="fps" />
-              </TextBlock>
-            </StackPanel>
-
-            <StackPanel Spacing="3">
-              <TextBlock Text="Capture backend" Foreground="#6B7C8C" FontSize="11" FontWeight="Bold" />
-              <TextBlock Text="{Binding SelectedReplayBackend.Label}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" TextWrapping="Wrap" />
-            </StackPanel>
-
-            <Border Height="1" Background="#1B242D" />
-
-            <StackPanel Spacing="3">
-              <TextBlock Text="Library folder" Foreground="#6B7C8C" FontSize="11" FontWeight="Bold" />
-              <TextBlock Text="{Binding LibraryLocationText}" Foreground="#93A6B8" FontSize="12" TextWrapping="Wrap" />
-            </StackPanel>
-          </StackPanel>
+          </ScrollViewer>
         </Border>
       </Grid>
     </Border>

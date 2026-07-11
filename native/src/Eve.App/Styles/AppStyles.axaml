@@ -207,13 +207,20 @@
   <Style Selector="Button.settingsNavButton">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="#93A6B8" />
-    <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="CornerRadius" Value="7" />
-    <Setter Property="Padding" Value="14,9" />
+    <Setter Property="BorderThickness" Value="2,0,0,0" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="CornerRadius" Value="0,7,7,0" />
+    <Setter Property="Padding" Value="12,9" />
+    <Setter Property="Margin" Value="0,0,0,2" />
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="HorizontalAlignment" Value="Stretch" />
     <Setter Property="HorizontalContentAlignment" Value="Left" />
     <Setter Property="FontSize" Value="13.5" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.1" />
+      </Transitions>
+    </Setter>
   </Style>
   <Style Selector="Button.settingsNavButton TextBlock">
     <Setter Property="TextWrapping" Value="Wrap" />
@@ -223,11 +230,19 @@
     <Setter Property="Foreground" Value="#D8E4F2" />
   </Style>
   <Style Selector="Button.settingsNavButton.active">
-    <Setter Property="Background" Value="#1D2A36" />
+    <Setter Property="Background" Value="#1B2A3D" />
     <Setter Property="Foreground" Value="#EDF4FB" />
+    <Setter Property="BorderBrush" Value="#5864E8" />
   </Style>
   <Style Selector="Button.settingsNavButton.active:pointerover">
-    <Setter Property="Background" Value="#1D2A36" />
+    <Setter Property="Background" Value="#1B2A3D" />
+  </Style>
+  <Style Selector="Border.statusCard">
+    <Setter Property="Background" Value="#141D24" />
+    <Setter Property="BorderBrush" Value="#232F3A" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Padding" Value="12,10" />
   </Style>
   <Style Selector="Slider.volumeSlider /template/ Thumb">
     <Setter Property="Width" Value="14" />
