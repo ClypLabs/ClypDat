@@ -386,6 +386,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public bool EnableClipHoverPreview
+    {
+        get => Settings.EnableClipHoverPreview;
+        set
+        {
+            if (Settings.EnableClipHoverPreview == value) return;
+            Settings.EnableClipHoverPreview = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
     public bool LaunchOnWindowsStartup
     {
         get => Settings.LaunchOnWindowsStartup;

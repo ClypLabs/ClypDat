@@ -10,6 +10,7 @@ using System.Diagnostics;
 using Eve.Capture.Abstractions;
 using Eve.App.Services;
 using Eve.App.ViewModels;
+using LibVLCSharp.Shared;
 
 namespace Eve.App.Views;
 
@@ -34,6 +35,11 @@ public sealed partial class MainWindow : Window
     private bool _replayArmed;
     private int _clipSaving;
     private bool _updateDialogOpen;
+    private LibVLC? _hoverPreviewLibVlc;
+    private MediaPlayer? _hoverPreviewMediaPlayer;
+    private ClipCardViewModel? _hoverPreviewClip;
+    private ClipCardViewModel? _pendingHoverClip;
+    private readonly DispatcherTimer _hoverPreviewDelay = new() { Interval = TimeSpan.FromMilliseconds(350) };
 
     public MainWindow()
     {
@@ -42,6 +48,11 @@ public sealed partial class MainWindow : Window
         _playbackTimer.Tick += (_, _) => SyncPlaybackPosition();
         _gameDetectionTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _gameDetectionTimer.Tick += (_, _) => UpdateDetectedGame();
+        _hoverPreviewDelay.Tick += (_, _) =>
+        {
+            _hoverPreviewDelay.Stop();
+            if (_pendingHoverClip is not null) StartHoverPreview(_pendingHoverClip);
+        };
         Opened += (_, _) =>
         {
             ApplySavedWindowBounds();
@@ -62,6 +73,9 @@ public sealed partial class MainWindow : Window
         {
             _globalHotkey?.Dispose();
             _gameDetectionTimer.Stop();
+            _hoverPreviewDelay.Stop();
+            StopHoverPreview();
+            _hoverPreviewLibVlc?.Dispose();
             if (_replayBuffer is not null) _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
             _replayBuffer?.Dispose();
             _playback?.Dispose();
@@ -496,17 +510,73 @@ public sealed partial class MainWindow : Window
 
     private void ClipCard_OnPointerEntered(object? sender, PointerEventArgs e)
     {
-        if (sender is Control { DataContext: ClipCardViewModel clip })
-        {
-            clip.IsHovered = true;
-        }
+        if (sender is not Control { DataContext: ClipCardViewModel clip }) return;
+        clip.IsHovered = true;
+        if (ViewModel?.EnableClipHoverPreview != true) return;
+
+        _pendingHoverClip = clip;
+        _hoverPreviewDelay.Stop();
+        _hoverPreviewDelay.Start();
     }
 
     private void ClipCard_OnPointerExited(object? sender, PointerEventArgs e)
     {
-        if (sender is Control { DataContext: ClipCardViewModel clip })
+        if (sender is not Control { DataContext: ClipCardViewModel clip }) return;
+        clip.IsHovered = false;
+        if (_pendingHoverClip == clip) _pendingHoverClip = null;
+        _hoverPreviewDelay.Stop();
+        if (_hoverPreviewClip == clip) StopHoverPreview();
+    }
+
+    private void StartHoverPreview(ClipCardViewModel clip)
+    {
+        StopHoverPreview();
+        try
         {
-            clip.IsHovered = false;
+            _hoverPreviewLibVlc ??= new LibVLC("--quiet");
+            var player = new MediaPlayer(_hoverPreviewLibVlc) { Mute = true, Volume = 0 };
+            using var media = new Media(_hoverPreviewLibVlc, new Uri(clip.Path));
+            media.AddOption(":no-audio");
+            player.Media = media;
+            player.EndReached += HoverPreview_OnEndReached;
+            player.Play();
+            _hoverPreviewMediaPlayer = player;
+            _hoverPreviewClip = clip;
+            clip.HoverPreviewPlayer = player;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Clip hover preview failed", error);
+            StopHoverPreview();
+        }
+    }
+
+    private void HoverPreview_OnEndReached(object? sender, EventArgs e)
+    {
+        // Fires on LibVLC's own thread - hop back before touching the player/UI-bound clip.
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_hoverPreviewMediaPlayer is not { } player || sender != player) return;
+            player.Stop();
+            player.Play();
+        });
+    }
+
+    private void StopHoverPreview()
+    {
+        _pendingHoverClip = null;
+        if (_hoverPreviewClip is not null)
+        {
+            _hoverPreviewClip.HoverPreviewPlayer = null;
+            _hoverPreviewClip = null;
+        }
+
+        if (_hoverPreviewMediaPlayer is not null)
+        {
+            _hoverPreviewMediaPlayer.EndReached -= HoverPreview_OnEndReached;
+            _hoverPreviewMediaPlayer.Stop();
+            _hoverPreviewMediaPlayer.Dispose();
+            _hoverPreviewMediaPlayer = null;
         }
     }
 

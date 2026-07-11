@@ -2,6 +2,7 @@ using Avalonia.Threading;
 using Avalonia.Media.Imaging;
 using Avalonia.Media;
 using Eve.App.Services;
+using LibVLCSharp.Shared;
 
 namespace Eve.App.ViewModels;
 
@@ -18,6 +19,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     private MediaFileInfo _media;
     private string _previewImagePath;
     private Bitmap? _previewImage;
+    private MediaPlayer? _hoverPreviewPlayer;
 
     public ClipCardViewModel(MediaFileInfo media, MediaProbeService mediaProbe)
     {
@@ -78,6 +80,18 @@ public sealed class ClipCardViewModel : ViewModelBase
             OnPropertyChanged(nameof(IsCheckVisible));
         }
     }
+
+    public MediaPlayer? HoverPreviewPlayer
+    {
+        get => _hoverPreviewPlayer;
+        set
+        {
+            if (!SetProperty(ref _hoverPreviewPlayer, value)) return;
+            OnPropertyChanged(nameof(IsHoverPreviewPlaying));
+        }
+    }
+
+    public bool IsHoverPreviewPlaying => HoverPreviewPlayer is not null;
 
     public bool IsCheckVisible => IsSelected || IsHovered;
     public IBrush SelectionBorderBrush => IsSelected ? Brush.Parse("#5864E8") : Brush.Parse("#24303A");
