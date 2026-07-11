@@ -149,7 +149,6 @@
                             <Border Background="#16202A" Height="{Binding $parent[Window].DataContext.CardImageHeight}">
                               <Grid>
                                 <Image Source="{Binding PreviewImage}" Stretch="UniformToFill" />
-                                <vlc:VideoView MediaPlayer="{Binding HoverPreviewPlayer}" IsVisible="{Binding IsHoverPreviewVisible}" IsHitTestVisible="False" />
                                 <Border HorizontalAlignment="Right"
                                         VerticalAlignment="Top"
                                         Margin="0,12,12,0"

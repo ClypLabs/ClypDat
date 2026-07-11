@@ -2,7 +2,6 @@ using Avalonia.Threading;
 using Avalonia.Media.Imaging;
 using Avalonia.Media;
 using Eve.App.Services;
-using LibVLCSharp.Shared;
 
 namespace Eve.App.ViewModels;
 
@@ -19,7 +18,6 @@ public sealed class ClipCardViewModel : ViewModelBase
     private MediaFileInfo _media;
     private string _previewImagePath;
     private Bitmap? _previewImage;
-    private MediaPlayer? _hoverPreviewPlayer;
 
     public ClipCardViewModel(MediaFileInfo media, MediaProbeService mediaProbe)
     {
@@ -81,23 +79,6 @@ public sealed class ClipCardViewModel : ViewModelBase
         }
     }
 
-    public MediaPlayer? HoverPreviewPlayer
-    {
-        get => _hoverPreviewPlayer;
-        set
-        {
-            if (!SetProperty(ref _hoverPreviewPlayer, value)) return;
-            OnPropertyChanged(nameof(IsHoverPreviewVisible));
-        }
-    }
-
-    // Tried gating this on MediaPlayer's "Playing" event (hide until a real
-    // frame is ready) to avoid a blank/black hold - backfired: an invisible
-    // VideoView has no native render surface for LibVLC to decode into, so
-    // Playing never fired at all and the preview stopped showing anything.
-    // Has to stay visible as soon as the player is attached.
-    public bool IsHoverPreviewVisible => HoverPreviewPlayer is not null;
-
     public bool IsCheckVisible => IsSelected || IsHovered;
     public IBrush SelectionBorderBrush => IsSelected ? Brush.Parse("#5864E8") : Brush.Parse("#24303A");
     public Avalonia.Thickness SelectionBorderThickness => IsSelected ? new Avalonia.Thickness(2) : new Avalonia.Thickness(0);
@@ -106,6 +87,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     {
         _media = media;
         _previewFrames = Array.Empty<string>();
+        foreach (var bitmap in _previewBitmaps) bitmap.Dispose();
         _previewBitmaps = Array.Empty<Bitmap>();
         PreviewImagePath = media.ThumbnailPath;
         OnPropertyChanged(nameof(Media));
@@ -153,6 +135,14 @@ public sealed class ClipCardViewModel : ViewModelBase
         _previewCts = null;
         _previewTimer.Stop();
         PreviewImagePath = Media.ThumbnailPath;
+
+        // The frame set stays cached on disk (ffmpeg won't re-extract it), but
+        // freeing the decoded Bitmaps here keeps memory bounded to whichever
+        // clip is actively being hovered right now instead of accumulating one
+        // full frame set per clip ever hovered in the session.
+        foreach (var bitmap in _previewBitmaps) bitmap.Dispose();
+        _previewBitmaps = Array.Empty<Bitmap>();
+        _previewFrames = Array.Empty<string>();
     }
 
     private void AdvancePreview()

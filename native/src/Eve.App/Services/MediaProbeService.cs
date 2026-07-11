@@ -175,11 +175,16 @@ public sealed class MediaProbeService
         Directory.CreateDirectory(folder);
 
         var duration = Math.Max(1, media.Duration.TotalSeconds);
-        const int frameCount = 120;
+        // Hover-card previews render at a few hundred pixels wide, not full size -
+        // 120 frames at 960px was sized for a scrubber strip this ended up not
+        // being used for. 40 frames at 480px keeps a session's worth of hovered
+        // clips from ballooning memory (each decoded frame set is held in memory
+        // only while its card is actively hovered - see ClipCardViewModel.StopPreview).
+        const int frameCount = 40;
         var existing = Directory.EnumerateFiles(folder, "*.jpg").OrderBy(path => path).ToArray();
         if (existing.Length >= frameCount)
         {
-            return existing;
+            return existing.Take(frameCount).ToArray();
         }
 
         foreach (var file in existing)
@@ -194,7 +199,7 @@ public sealed class MediaProbeService
             "-y",
             "-v", "error",
             "-i", media.Path,
-            "-vf", $"fps={frameCount / duration:0.###},scale=960:-1",
+            "-vf", $"fps={frameCount / duration:0.###},scale=480:-1",
             "-frames:v", frameCount.ToString(),
             "-q:v", "5",
             outputPattern

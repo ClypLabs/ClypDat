@@ -36,25 +36,6 @@ public sealed partial class MainWindow : Window
     private bool _replayArmed;
     private int _clipSaving;
     private bool _updateDialogOpen;
-    private LibVLC? _hoverPreviewLibVlc;
-    private MediaPlayer? _hoverPreviewMediaPlayer;
-    private ClipCardViewModel? _hoverPreviewClip;
-    private ClipCardViewModel? _pendingHoverClip;
-    private Control? _pendingHoverBorder;
-    private Control? _hoverPreviewBorder;
-    private static readonly TimeSpan HoverPreviewSettleDelay = TimeSpan.FromMilliseconds(120);
-    private static readonly TimeSpan HoverPreviewStartCooldown = TimeSpan.FromMilliseconds(250);
-    private DateTime _lastHoverPreviewStartUtc = DateTime.MinValue;
-    private readonly DispatcherTimer _hoverPreviewDelay = new() { Interval = HoverPreviewSettleDelay };
-    // The hover-preview VideoView hosts a native child window (HWND on Windows).
-    // Whenever the cursor is directly over it, Win32 routes raw mouse input to
-    // that child window instead of the card underneath, so Avalonia's
-    // PointerExited on the card can fire spuriously (or fail to fire at all) -
-    // neither is trustworthy for deciding when to stop the preview. Polling the
-    // real OS cursor position against the card's actual screen bounds sidesteps
-    // that entirely.
-    private readonly DispatcherTimer _hoverWatchdog = new() { Interval = TimeSpan.FromMilliseconds(200) };
-
     public MainWindow()
     {
         InitializeComponent();
@@ -62,35 +43,14 @@ public sealed partial class MainWindow : Window
         _playbackTimer.Tick += (_, _) => SyncPlaybackPosition();
         _gameDetectionTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _gameDetectionTimer.Tick += (_, _) => UpdateDetectedGame();
-        // Each real StartHoverPreview() does a synchronous native Stop/Media-swap/Play
-        // on the UI thread. The settle delay alone only debounces "did the cursor stop
-        // moving" - it doesn't stop a fast swipe across many cards from firing one of
-        // these native calls every ~120ms, which is fast enough to pile up and hang the
-        // whole window (stress-testing hovers reproduced this as a genuine UI-thread
-        // freeze, not a crash). This cooldown makes sure consecutive real starts are at
-        // least HoverPreviewStartCooldown apart, rescheduling itself rather than
-        // dropping the request so the cursor's final resting card still always wins.
         _hoverPreviewDelay.Tick += (_, _) =>
         {
             _hoverPreviewDelay.Stop();
-            if (_pendingHoverClip is null || _pendingHoverBorder is null) return;
-
-            var sinceLastStart = DateTime.UtcNow - _lastHoverPreviewStartUtc;
-            if (sinceLastStart < HoverPreviewStartCooldown)
-            {
-                _hoverPreviewDelay.Interval = HoverPreviewStartCooldown - sinceLastStart;
-                _hoverPreviewDelay.Start();
-                return;
-            }
-
-            _hoverPreviewDelay.Interval = HoverPreviewSettleDelay;
-            var clip = _pendingHoverClip;
-            var border = _pendingHoverBorder;
+            if (_pendingHoverClip is not { } clip) return;
             _pendingHoverClip = null;
-            _pendingHoverBorder = null;
-            StartHoverPreview(clip, border);
+            _activeHoverClip = clip;
+            _ = clip.StartPreviewAsync();
         };
-        _hoverWatchdog.Tick += (_, _) => CheckHoverWatchdog();
         Opened += (_, _) =>
         {
             ApplySavedWindowBounds();
@@ -124,8 +84,6 @@ public sealed partial class MainWindow : Window
             _cs2GsiListener?.Dispose();
             _gameDetectionTimer.Stop();
             _hoverPreviewDelay.Stop();
-            DisposeHoverPreview();
-            _hoverPreviewLibVlc?.Dispose();
             if (_replayBuffer is not null) _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
             _replayBuffer?.Dispose();
             _playback?.Dispose();
@@ -571,277 +529,52 @@ public sealed partial class MainWindow : Window
         await OpenClipCardAsync(clip);
     }
 
-    private DateTime _lastCardOpenUtc = DateTime.MinValue;
-
-    // Shared by the normal PointerPressed path and CheckHoverWatchdog's native-HWND
-    // click-through path (see there) - debounced so a click that both paths happen
-    // to notice doesn't open the same clip twice.
     private async Task OpenClipCardAsync(ClipCardViewModel clip)
     {
         if (ViewModel is null) return;
-        if (DateTime.UtcNow - _lastCardOpenUtc < TimeSpan.FromMilliseconds(400)) return;
-        _lastCardOpenUtc = DateTime.UtcNow;
         await ViewModel.OpenClipAsync(clip);
         QueueEditorPlayback();
     }
 
+    // Sprite-frame preview (ClipCardViewModel.StartPreviewAsync/StopPreview) cycles
+    // pre-extracted JPEG frames through the card's existing Image/Bitmap binding -
+    // no native window involved, unlike the old LibVLC windowed-video approach this
+    // replaced (which fought Avalonia's input pipeline for the entire session: hover
+    // state got out of sync, clicks and the selection checkbox silently ate input
+    // while a preview played, and rapid hovering could crash or hang the process).
+    // A short settle delay still avoids kicking off ffmpeg extraction for every card
+    // a fast mouse swipe passes over.
+    private static readonly TimeSpan HoverPreviewSettleDelay = TimeSpan.FromMilliseconds(150);
+    private readonly DispatcherTimer _hoverPreviewDelay = new() { Interval = HoverPreviewSettleDelay };
+    private ClipCardViewModel? _pendingHoverClip;
+    private ClipCardViewModel? _activeHoverClip;
+
     private void ClipCard_OnPointerEntered(object? sender, PointerEventArgs e)
     {
-        if (sender is not Control { DataContext: ClipCardViewModel clip } border) return;
+        if (sender is not Control { DataContext: ClipCardViewModel clip }) return;
         clip.IsHovered = true;
-        if (ViewModel?.EnableClipHoverPreview != true || _hoverPreviewClip == clip) return;
+        if (ViewModel?.EnableClipHoverPreview != true || _activeHoverClip == clip) return;
 
         _pendingHoverClip = clip;
-        _pendingHoverBorder = border;
         _hoverPreviewDelay.Stop();
-        _hoverPreviewDelay.Interval = HoverPreviewSettleDelay;
         _hoverPreviewDelay.Start();
     }
 
     private void ClipCard_OnPointerExited(object? sender, PointerEventArgs e)
     {
-        // Deliberately not stopping the preview here - see _hoverWatchdog's
-        // comment. This only cancels a not-yet-started pending hover and resets
-        // the highlight; the watchdog poll is what actually decides when to stop.
         if (sender is not Control { DataContext: ClipCardViewModel clip }) return;
         clip.IsHovered = false;
         if (_pendingHoverClip == clip)
         {
             _pendingHoverClip = null;
-            _pendingHoverBorder = null;
             _hoverPreviewDelay.Stop();
         }
-    }
 
-    private void CheckHoverWatchdog()
-    {
-        if (_hoverPreviewBorder is null || !_hoverPreviewBorder.IsAttachedToVisualTree())
+        if (_activeHoverClip == clip)
         {
-            StopHoverPreview();
-            return;
+            _activeHoverClip = null;
+            clip.StopPreview();
         }
-
-        if (!GetCursorPos(out var cursor)) return;
-        var topLeft = _hoverPreviewBorder.PointToScreen(new Point(0, 0));
-        var bottomRight = _hoverPreviewBorder.PointToScreen(new Point(_hoverPreviewBorder.Bounds.Width, _hoverPreviewBorder.Bounds.Height));
-        var inside = cursor.X >= topLeft.X && cursor.X <= bottomRight.X && cursor.Y >= topLeft.Y && cursor.Y <= bottomRight.Y;
-        if (!inside)
-        {
-            StopHoverPreview();
-            return;
-        }
-
-        // The hover-preview VideoView is a real native child HWND, so a click that
-        // lands on it never reaches Avalonia's input pipeline at all - Windows
-        // routes the mouse message straight to that child window, bypassing both
-        // ClipCard_OnPointerPressed and the selection checkbox's own Click handler
-        // (the checkbox sits in that same corner and gets covered too).
-        // GetAsyncKeyState's low bit latches "was this key pressed since the last
-        // call", so it still catches a quick click even at this timer's interval.
-        if (_hoverPreviewClip is { } clip && (GetAsyncKeyState(VK_LBUTTON) & 0x0001) != 0)
-        {
-            var checkBox = _hoverPreviewBorder.GetVisualDescendants().OfType<CheckBox>().FirstOrDefault(box => box.DataContext == clip);
-            if (checkBox is not null && checkBox.Bounds.Width > 0)
-            {
-                var checkTopLeft = checkBox.PointToScreen(new Point(0, 0));
-                var checkBottomRight = checkBox.PointToScreen(new Point(checkBox.Bounds.Width, checkBox.Bounds.Height));
-                if (cursor.X >= checkTopLeft.X && cursor.X <= checkBottomRight.X && cursor.Y >= checkTopLeft.Y && cursor.Y <= checkBottomRight.Y)
-                {
-                    ViewModel?.SetClipSelected(clip, !clip.IsSelected);
-                    return;
-                }
-            }
-
-            _ = OpenClipCardAsync(clip);
-        }
-    }
-
-    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
-    private struct Win32Point
-    {
-        public int X;
-        public int Y;
-    }
-
-    private const int VK_LBUTTON = 0x01;
-
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern bool GetCursorPos(out Win32Point point);
-
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern short GetAsyncKeyState(int vKey);
-
-    private Media? _hoverPreviewMedia;
-    private Media? _hoverPreviewMediaPendingDispose;
-
-    // A fresh MediaPlayer per hover (and disposing it on every exit) was blocking
-    // the UI thread hard enough to trip Windows' "(Not Responding)" state,
-    // especially when the mouse crossed several cards quickly - MediaPlayer
-    // construction/disposal binds/unbinds a native video output surface, which
-    // isn't cheap. Fixed by creating the MediaPlayer once and reusing it for
-    // every hover (only swapping which clip's Media it plays), so a hover only
-    // ever costs a Media swap + Play/Stop instead of a full player teardown.
-    private MediaPlayer EnsureHoverPreviewPlayer()
-    {
-        if (_hoverPreviewMediaPlayer is not null) return _hoverPreviewMediaPlayer;
-        _hoverPreviewLibVlc ??= new LibVLC("--quiet");
-        _hoverPreviewMediaPlayer = new MediaPlayer(_hoverPreviewLibVlc) { Mute = true, Volume = 0 };
-        _hoverPreviewMediaPlayer.EndReached += HoverPreview_OnEndReached;
-        return _hoverPreviewMediaPlayer;
-    }
-
-    // The hover-preview VideoView renders through a real native child HWND (LibVLC's
-    // windowed output), which Windows hit-tests and routes mouse messages to
-    // directly - Avalonia's own input pipeline never sees a message that lands on
-    // it, so the card's PointerPressed and the selection checkbox's Click both go
-    // silent while a preview is playing over them. Polling for the click
-    // (CheckHoverWatchdog + GetAsyncKeyState) was the first attempt at working
-    // around this and proved unreliable in practice. The actual fix: subclass that
-    // HWND's window procedure to answer WM_NCHITTEST with HTTRANSPARENT, which
-    // tells Windows "nothing here" and makes it continue hit-testing past this
-    // window to whatever's underneath (the real Avalonia surface) - clicks land on
-    // the card/checkbox normally again. This is a per-window subclass of a window
-    // this process itself owns, not a system-wide input hook (see
-    // GlobalHotkeyService's comment on why hooks are avoided here - anti-cheat
-    // flags them), so it carries none of that risk. The player (and its Hwnd) is
-    // reused across every hover, so this only needs to run once.
-    private const int GWLP_WNDPROC = -4;
-    private const uint WM_NCHITTEST = 0x0084;
-    private const nint HTTRANSPARENT = -1;
-    private WndProcDelegate? _hoverVideoWndProc;
-    private IntPtr _hoverVideoOriginalWndProc;
-    private IntPtr _hoverVideoSubclassedHwnd;
-
-    private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
-
-    private void EnsureHoverVideoClickThrough(MediaPlayer player)
-    {
-        var hwnd = player.Hwnd;
-        if (hwnd == _hoverVideoSubclassedHwnd)
-        {
-            AppLog.Info($"Hover preview click-through: hwnd={hwnd} already subclassed.");
-            return;
-        }
-
-        if (hwnd == IntPtr.Zero)
-        {
-            AppLog.Info("Hover preview click-through: player.Hwnd is zero, skipping subclass this time.");
-            return;
-        }
-
-        _hoverVideoWndProc = (hWnd, msg, wParam, lParam) =>
-            msg == WM_NCHITTEST
-                ? (IntPtr)HTTRANSPARENT
-                : CallWindowProc(_hoverVideoOriginalWndProc, hWnd, msg, wParam, lParam);
-
-        var previous = SetWindowLongPtr(hwnd, GWLP_WNDPROC, System.Runtime.InteropServices.Marshal.GetFunctionPointerForDelegate(_hoverVideoWndProc));
-        var win32Error = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
-        if (previous == IntPtr.Zero)
-        {
-            AppLog.Error($"Hover preview click-through subclass failed, hwnd={hwnd}, win32Error={win32Error}.", new InvalidOperationException("SetWindowLongPtr returned null"));
-            _hoverVideoWndProc = null;
-            return;
-        }
-
-        _hoverVideoOriginalWndProc = previous;
-        _hoverVideoSubclassedHwnd = hwnd;
-        AppLog.Info($"Hover preview click-through: subclassed hwnd={hwnd}, previousWndProc={previous}.");
-    }
-
-    private static IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong) =>
-        IntPtr.Size == 8 ? SetWindowLongPtr64(hWnd, nIndex, dwNewLong) : new IntPtr(SetWindowLong32(hWnd, nIndex, dwNewLong.ToInt32()));
-
-    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
-    private static extern IntPtr SetWindowLongPtr64(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
-
-    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SetWindowLongW", SetLastError = true)]
-    private static extern int SetWindowLong32(IntPtr hWnd, int nIndex, int dwNewLong);
-
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern IntPtr CallWindowProc(IntPtr lpPrevWndFunc, IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
-
-    private void StartHoverPreview(ClipCardViewModel clip, Control border)
-    {
-        StopHoverPreview();
-        _lastHoverPreviewStartUtc = DateTime.UtcNow;
-        try
-        {
-            var player = EnsureHoverPreviewPlayer();
-            // Disposing a Media object the instant it's swapped out races LibVLC's own
-            // input thread, which can still be tearing it down when a hover-happy user
-            // fires several swaps in under a second - that race is what crashed the
-            // whole process. Keeping the previous Media alive for one extra swap (i.e.
-            // only disposing what's now two generations stale) gives LibVLC enough of a
-            // buffer before the object goes away.
-            _hoverPreviewMediaPendingDispose?.Dispose();
-            _hoverPreviewMediaPendingDispose = _hoverPreviewMedia;
-            var media = new Media(_hoverPreviewLibVlc!, new Uri(clip.Path));
-            media.AddOption(":no-audio");
-            player.Media = media;
-            _hoverPreviewMedia = media;
-            var played = player.Play();
-            _hoverPreviewClip = clip;
-            _hoverPreviewBorder = border;
-            clip.HoverPreviewPlayer = player;
-            _hoverWatchdog.Start();
-            EnsureHoverVideoClickThrough(player);
-            AppLog.Info($"Clip hover preview started: path={clip.Path}, played={played}, state={player.State}.");
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Clip hover preview failed", error);
-            StopHoverPreview();
-        }
-    }
-
-    private void HoverPreview_OnEndReached(object? sender, EventArgs e)
-    {
-        // Fires on LibVLC's own thread - hop back before touching the player/UI-bound clip.
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (_hoverPreviewMediaPlayer is not { } player || sender != player) return;
-            player.Stop();
-            player.Play();
-        });
-    }
-
-    // Deliberately does not touch _pendingHoverClip/_pendingHoverBorder - those track
-    // whichever card the cursor has moved on to (waiting on _hoverPreviewDelay to
-    // start it), which is a separate thing from the card whose preview is being torn
-    // down here. The watchdog calls this the instant the cursor leaves the old card's
-    // bounds, i.e. right as it arrives on the new one - clearing pending here used to
-    // erase the record of that new card before its delayed start ever fired, so
-    // hovering straight from one card to the next silently started nothing.
-    private void StopHoverPreview()
-    {
-        _hoverWatchdog.Stop();
-        _hoverPreviewBorder = null;
-        if (_hoverPreviewClip is not null)
-        {
-            _hoverPreviewClip.HoverPreviewPlayer = null;
-            _hoverPreviewClip = null;
-        }
-
-        _hoverPreviewMediaPlayer?.Stop();
-    }
-
-    private void DisposeHoverPreview()
-    {
-        StopHoverPreview();
-        _hoverPreviewDelay.Stop();
-        _pendingHoverClip = null;
-        _pendingHoverBorder = null;
-        if (_hoverPreviewMediaPlayer is not null)
-        {
-            _hoverPreviewMediaPlayer.EndReached -= HoverPreview_OnEndReached;
-            _hoverPreviewMediaPlayer.Dispose();
-            _hoverPreviewMediaPlayer = null;
-        }
-
-        _hoverPreviewMedia?.Dispose();
-        _hoverPreviewMedia = null;
-        _hoverPreviewMediaPendingDispose?.Dispose();
-        _hoverPreviewMediaPendingDispose = null;
     }
 
     private void ClipCheckBox_OnClick(object? sender, RoutedEventArgs e)
