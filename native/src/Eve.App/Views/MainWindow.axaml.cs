@@ -41,7 +41,10 @@ public sealed partial class MainWindow : Window
     private ClipCardViewModel? _pendingHoverClip;
     private Control? _pendingHoverBorder;
     private Control? _hoverPreviewBorder;
-    private readonly DispatcherTimer _hoverPreviewDelay = new() { Interval = TimeSpan.FromMilliseconds(120) };
+    private static readonly TimeSpan HoverPreviewSettleDelay = TimeSpan.FromMilliseconds(120);
+    private static readonly TimeSpan HoverPreviewStartCooldown = TimeSpan.FromMilliseconds(250);
+    private DateTime _lastHoverPreviewStartUtc = DateTime.MinValue;
+    private readonly DispatcherTimer _hoverPreviewDelay = new() { Interval = HoverPreviewSettleDelay };
     // The hover-preview VideoView hosts a native child window (HWND on Windows).
     // Whenever the cursor is directly over it, Win32 routes raw mouse input to
     // that child window instead of the card underneath, so Avalonia's
@@ -58,12 +61,33 @@ public sealed partial class MainWindow : Window
         _playbackTimer.Tick += (_, _) => SyncPlaybackPosition();
         _gameDetectionTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _gameDetectionTimer.Tick += (_, _) => UpdateDetectedGame();
+        // Each real StartHoverPreview() does a synchronous native Stop/Media-swap/Play
+        // on the UI thread. The settle delay alone only debounces "did the cursor stop
+        // moving" - it doesn't stop a fast swipe across many cards from firing one of
+        // these native calls every ~120ms, which is fast enough to pile up and hang the
+        // whole window (stress-testing hovers reproduced this as a genuine UI-thread
+        // freeze, not a crash). This cooldown makes sure consecutive real starts are at
+        // least HoverPreviewStartCooldown apart, rescheduling itself rather than
+        // dropping the request so the cursor's final resting card still always wins.
         _hoverPreviewDelay.Tick += (_, _) =>
         {
             _hoverPreviewDelay.Stop();
-            if (_pendingHoverClip is not null && _pendingHoverBorder is not null) StartHoverPreview(_pendingHoverClip, _pendingHoverBorder);
+            if (_pendingHoverClip is null || _pendingHoverBorder is null) return;
+
+            var sinceLastStart = DateTime.UtcNow - _lastHoverPreviewStartUtc;
+            if (sinceLastStart < HoverPreviewStartCooldown)
+            {
+                _hoverPreviewDelay.Interval = HoverPreviewStartCooldown - sinceLastStart;
+                _hoverPreviewDelay.Start();
+                return;
+            }
+
+            _hoverPreviewDelay.Interval = HoverPreviewSettleDelay;
+            var clip = _pendingHoverClip;
+            var border = _pendingHoverBorder;
             _pendingHoverClip = null;
             _pendingHoverBorder = null;
+            StartHoverPreview(clip, border);
         };
         _hoverWatchdog.Tick += (_, _) => CheckHoverWatchdog();
         Opened += (_, _) =>
@@ -540,6 +564,7 @@ public sealed partial class MainWindow : Window
         _pendingHoverClip = clip;
         _pendingHoverBorder = border;
         _hoverPreviewDelay.Stop();
+        _hoverPreviewDelay.Interval = HoverPreviewSettleDelay;
         _hoverPreviewDelay.Start();
     }
 
@@ -605,6 +630,7 @@ public sealed partial class MainWindow : Window
     private void StartHoverPreview(ClipCardViewModel clip, Control border)
     {
         StopHoverPreview();
+        _lastHoverPreviewStartUtc = DateTime.UtcNow;
         try
         {
             var player = EnsureHoverPreviewPlayer();
