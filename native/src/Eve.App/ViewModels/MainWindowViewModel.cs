@@ -24,7 +24,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private ProcessOption? _selectedChatProcess;
     private ProcessOption? _selectedProcessExclusion;
     private ReplayDurationPreset? _selectedReplayDurationPreset;
-    private int _selectedReplayResolution;
+    private ResolutionOption? _selectedReplayResolution;
     private int _selectedReplayFrameRate;
     private ReplayBackendPreset? _selectedReplayBackend;
     private readonly string _initialReplayBackend;
@@ -76,7 +76,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("15 Minutes", 900),
             new("20 Minutes", 1200)
         };
-        ReplayResolutions = new ObservableCollection<int> { 720, 1080, 1440, 2160 };
+        ReplayResolutions = new ObservableCollection<ResolutionOption>
+        {
+            new("720p", 720),
+            new("1080p", 1080),
+            new("1440p", 1440),
+            new("2160p (4K)", 2160)
+        };
         ReplayFrameRates = new ObservableCollection<int> { 30, 60, 90, 120, 144, 165, 240 };
         ExportCodecs = new ObservableCollection<ExportCodecOption>
         {
@@ -98,7 +104,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RefreshAudioDevices();
         SelectedReplayDurationPreset = ReplayDurationPresets.FirstOrDefault(preset => preset.Seconds == Settings.ReplayDurationSeconds) ??
                                        ReplayDurationPresets.First(preset => preset.Seconds == 60);
-        _selectedReplayResolution = ReplayResolutions.Contains(Settings.ReplayMaxHeight) ? Settings.ReplayMaxHeight : 1080;
+        _selectedReplayResolution = ReplayResolutions.FirstOrDefault(option => option.Height == Settings.ReplayMaxHeight) ??
+                                     ReplayResolutions.First(option => option.Height == 1080);
         _selectedReplayFrameRate = ReplayFrameRates.Contains(Settings.ReplayFrameRate) ? Settings.ReplayFrameRate : 60;
         SelectedExportCodec = ExportCodecs.FirstOrDefault(codec => string.Equals(codec.Label, Settings.ExportVideoCodec, StringComparison.OrdinalIgnoreCase)) ??
                               ExportCodecs.First(codec => codec.Label == "H.264");
@@ -121,7 +128,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<AudioDeviceOption> MicrophoneDevices { get; }
     public ObservableCollection<ProcessOption> OpenProcesses { get; }
     public ObservableCollection<ReplayDurationPreset> ReplayDurationPresets { get; }
-    public ObservableCollection<int> ReplayResolutions { get; }
+    public ObservableCollection<ResolutionOption> ReplayResolutions { get; }
     public ObservableCollection<int> ReplayFrameRates { get; }
     public ObservableCollection<ReplayBackendPreset> ReplayBackends { get; }
     public ObservableCollection<ExportCodecOption> ExportCodecs { get; }
@@ -253,13 +260,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public int SelectedReplayResolution
+    public ResolutionOption? SelectedReplayResolution
     {
         get => _selectedReplayResolution;
         set
         {
-            if (!SetProperty(ref _selectedReplayResolution, value)) return;
-            Settings.ReplayMaxHeight = value;
+            if (!SetProperty(ref _selectedReplayResolution, value) || value is null) return;
+            Settings.ReplayMaxHeight = value.Height;
             SaveSettings();
         }
     }
