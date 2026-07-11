@@ -34,7 +34,7 @@ public sealed partial class MainWindow : Window
     private readonly HashSet<string> _capturedHotkeyKeys = new(StringComparer.OrdinalIgnoreCase);
     private bool _replayTransitioning;
     private bool _replayArmed;
-    private int _clipSaving;
+    private readonly SemaphoreSlim _clipSaveLock = new(1, 1);
     private bool _updateDialogOpen;
     public MainWindow()
     {
@@ -331,7 +331,22 @@ public sealed partial class MainWindow : Window
     private async Task SaveReplayClipAsync(string? autoClipLabel = null)
     {
         var isAutoClip = autoClipLabel is not null;
-        if (Interlocked.CompareExchange(ref _clipSaving, 1, 0) != 0) return;
+        // A replay save (segment hydrate/mux) can take 20-30+ seconds. Manual clip
+        // presses reject outright while one's already running (spam-clicking
+        // shouldn't queue a pile of saves), but auto-clip triggers queue instead -
+        // a 3K's save still being in flight when the round's 4K/Ace happen a few
+        // seconds later used to just silently drop those, because this used to be
+        // "reject if busy" for everyone. Each distinct kill-streak milestone
+        // should still get its own clip even if it has to wait its turn.
+        if (isAutoClip)
+        {
+            await _clipSaveLock.WaitAsync();
+        }
+        else if (!await _clipSaveLock.WaitAsync(0))
+        {
+            return;
+        }
+
         try
         {
             if (ViewModel is null) return;
@@ -379,7 +394,7 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
-            Interlocked.Exchange(ref _clipSaving, 0);
+            _clipSaveLock.Release();
         }
     }
 
