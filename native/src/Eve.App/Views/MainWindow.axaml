@@ -231,17 +231,35 @@
 
               <StackPanel Spacing="6">
                 <TextBlock Text="Replay length" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
-                <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}" HorizontalAlignment="Stretch" />
+                <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding Label}" />
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
               </StackPanel>
 
               <StackPanel Spacing="6">
                 <TextBlock Text="Resolution" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
-                <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}" HorizontalAlignment="Stretch" />
+                <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding Label}" />
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
               </StackPanel>
 
               <StackPanel Spacing="6">
                 <TextBlock Text="Frame rate" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
-                <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}" HorizontalAlignment="Stretch" />
+                <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding StringFormat={}{0} fps}" />
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
                 <TextBlock Text="Above 1080p60, Windows Capture clips take noticeably longer to process (the clip preview can sit black for a while before it loads)."
                            Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap"
                            IsVisible="{Binding ReplayQualityAboveDefault}" />
@@ -253,7 +271,13 @@
 
               <StackPanel Spacing="6">
                 <TextBlock Text="Capture backend" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
-                <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayBackends}" SelectedItem="{Binding SelectedReplayBackend}" HorizontalAlignment="Stretch" />
+                <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayBackends}" SelectedItem="{Binding SelectedReplayBackend}">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding Label}" />
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
                 <TextBlock Text="{Binding SelectedReplayBackend.Description}" Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
                 <TextBlock Text="Games with anti-cheat (EAC, BattlEye, Ricochet, etc.) often block OBS's game hook, causing a black or frozen capture. If a game doesn't record properly on OBS, switch to Auto (recommended) or Windows Capture instead."
                            Foreground="#E5A00D" FontSize="12" FontWeight="Bold" TextWrapping="Wrap"
@@ -416,6 +440,11 @@
             <StackPanel Spacing="3">
               <TextBlock Text="Save hotkey" Foreground="#6B7C8C" FontSize="11" FontWeight="Bold" />
               <TextBlock Text="{Binding HotkeyDisplay}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
+            </StackPanel>
+
+            <StackPanel Spacing="3">
+              <TextBlock Text="Replay length" Foreground="#6B7C8C" FontSize="11" FontWeight="Bold" />
+              <TextBlock Text="{Binding SelectedReplayDurationPreset.Label}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
             </StackPanel>
 
             <StackPanel Spacing="3">
