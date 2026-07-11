@@ -30,6 +30,8 @@ public sealed class AppSettings
     public Dictionary<string, ClipEditSettings> ClipEdits { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public bool EnableClipOverlay { get; set; } = true;
     public bool EnableClipOverlaySound { get; set; } = true;
+    public List<GameCaptureOverride> GameCaptureOverrides { get; set; } = new();
+    public Cs2AutoClipSettings Cs2AutoClip { get; set; } = new();
 }
 
 public sealed class ClipEditSettings
@@ -37,4 +39,27 @@ public sealed class ClipEditSettings
     public double TrimStartSeconds { get; set; }
     public double TrimEndSeconds { get; set; }
     public Dictionary<int, double> TrackVolumes { get; set; } = new();
+}
+
+public sealed class GameCaptureOverride
+{
+    public string ExecutableName { get; set; } = string.Empty;
+    // Empty for a built-in catalog game (its name comes from the catalog);
+    // set only for a user-added game the built-in catalog doesn't know about.
+    public string DisplayName { get; set; } = string.Empty;
+    public string CaptureBackend { get; set; } = "Auto";
+}
+
+public sealed class Cs2AutoClipSettings
+{
+    public bool Enabled { get; set; }
+    public bool Kill { get; set; } = true;
+    public bool TwoKill { get; set; } = true;
+    public bool ThreeKill { get; set; } = true;
+    public bool FourKill { get; set; } = true;
+    public bool Ace { get; set; } = true;
+    public bool Headshot { get; set; }
+    public bool Death { get; set; }
+    public bool Assist { get; set; }
+    public int GsiPort { get; set; } = 3499;
 }

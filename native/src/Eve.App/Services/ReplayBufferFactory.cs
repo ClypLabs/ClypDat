@@ -4,26 +4,6 @@ namespace Eve.App.Services;
 
 public static class ReplayBufferFactory
 {
-    // Games known to fight OBS's game_capture hook (VAC blocks it for CS2 without a
-    // launch option, causing a black/frozen capture) default to Windows Capture
-    // instead when the user hasn't explicitly picked a backend.
-    private static readonly HashSet<string> AutoLegacyGames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "cs2.exe",
-        "Marvel-Win64-Shipping.exe",
-        "FortniteClient-Win64-Shipping.exe",
-        "FortniteClient-Win64-Shipping_EAC.exe",
-        "FortniteClient-Win64-Shipping_EAC_EOS.exe",
-        "helldivers2.exe",
-        "forhonor.exe",
-        "DeadByDaylight.exe",
-        "TheFirstDescendant.exe",
-        "cod.exe",
-        "cod24-cod.exe",
-        "Wuthering Waves.exe",
-        "Overwatch.exe",
-        "forzahorizon6.exe"
-    };
 
     public static IReplayBuffer Create(Func<ReplayBufferConfig> configProvider)
     {
@@ -50,7 +30,7 @@ public static class ReplayBufferFactory
     public static ReplayBackendOption ResolveEffectiveBackend(ReplayBufferConfig config)
     {
         var backend = ParseBackend(config.Backend);
-        if (backend == ReplayBackendOption.Auto && AutoLegacyGames.Contains(config.GameExecutableName))
+        if (backend == ReplayBackendOption.Auto && GameCatalog.AntiCheatSensitive.Contains(config.GameExecutableName))
         {
             return ReplayBackendOption.Legacy;
         }

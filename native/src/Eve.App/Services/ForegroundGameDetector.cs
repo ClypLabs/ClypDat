@@ -62,36 +62,7 @@ public sealed class ForegroundGameDetector
         "zen.exe"
     };
 
-    private readonly Dictionary<string, string> _catalog = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["FortniteBootstrapper.exe"] = "Fortnite",
-        ["FortniteLauncher.exe"] = "Fortnite",
-        ["FortniteClient-Win64-Shipping.exe"] = "Fortnite",
-        ["FortniteClient-Win64-Shipping_EAC.exe"] = "Fortnite",
-        ["FortniteClient-Win64-Shipping_EAC_EOS.exe"] = "Fortnite",
-        ["cs2.exe"] = "Counter-Strike 2",
-        ["Marvel-Win64-Shipping.exe"] = "Marvel Rivals",
-        ["Among Us.exe"] = "Among Us",
-        ["Back4Blood.exe"] = "Back 4 Blood",
-        ["Barotrauma.exe"] = "Barotrauma",
-        ["cod.exe"] = "Call of Duty",
-        ["cod24-cod.exe"] = "Call of Duty",
-        ["Cyberpunk2077.exe"] = "Cyberpunk 2077",
-        ["DeadByDaylight.exe"] = "Dead by Daylight",
-        ["TheFirstDescendant.exe"] = "The First Descendant",
-        ["forhonor.exe"] = "For Honor",
-        ["forzahorizon6.exe"] = "Forza Horizon 6",
-        ["GeometryDash.exe"] = "Geometry Dash",
-        ["helldivers2.exe"] = "Helldivers 2",
-        ["PenguinHotel.exe"] = "Meccha Chameleon",
-        ["Overwatch.exe"] = "Overwatch",
-        ["PEAK.exe"] = "PEAK",
-        ["Phasmophobia.exe"] = "Phasmophobia",
-        ["ProjectZomboid64.exe"] = "Project Zomboid",
-        ["RimWorldWin64.exe"] = "RimWorld",
-        ["Risk of Rain 2.exe"] = "Risk of Rain 2",
-        ["Wuthering Waves.exe"] = "Wuthering Waves"
-    };
+    private readonly Dictionary<string, string> _catalog = new(GameCatalog.BuiltIn, StringComparer.OrdinalIgnoreCase);
 
     private GameDetection _lastGame = GameDetection.None;
 
@@ -122,6 +93,18 @@ public sealed class ForegroundGameDetector
     }
 
     public string DetectDisplayName() => Detect().DisplayName;
+
+    // Lets a user-added game (settings -> Game Detection) get recognized without
+    // needing a graphics-module check to pass - same catalog dictionary the
+    // built-in list and game-catalog.json both feed into.
+    public void ApplyCustomGameNames(IEnumerable<Eve.Core.Settings.GameCaptureOverride> overrides)
+    {
+        foreach (var entry in overrides)
+        {
+            if (string.IsNullOrWhiteSpace(entry.ExecutableName) || string.IsNullOrWhiteSpace(entry.DisplayName)) continue;
+            _catalog[entry.ExecutableName] = entry.DisplayName;
+        }
+    }
 
     private string _lastLoggedRejectedExe = string.Empty;
 

@@ -19,6 +19,7 @@ public sealed partial class MainWindow : Window
     private readonly DispatcherTimer _playbackTimer;
     private readonly DispatcherTimer _gameDetectionTimer;
     private readonly ForegroundGameDetector _gameDetector = new();
+    private Cs2GsiListener? _cs2GsiListener;
     private PlaybackSession? _playback;
     private CancellationTokenSource? _playbackStartCts;
     private CancellationTokenSource? _editorSeekCts;
@@ -99,6 +100,16 @@ public sealed partial class MainWindow : Window
             _gameDetectionTimer.Start();
             _ = EnsureLibraryFolderAsync();
             _ = CheckForUpdatesAsync();
+            if (ViewModel is not null)
+            {
+                _gameDetector.ApplyCustomGameNames(ViewModel.Settings.GameCaptureOverrides);
+                ViewModel.GameCatalogChanged += (_, _) => _gameDetector.ApplyCustomGameNames(ViewModel.Settings.GameCaptureOverrides);
+                ViewModel.PropertyChanged += (_, e) =>
+                {
+                    if (e.PropertyName == nameof(MainWindowViewModel.Cs2AutoClipEnabled)) UpdateCs2AutoClipState();
+                };
+                UpdateCs2AutoClipState();
+            }
         };
         KeyUp += MainWindow_OnKeyUp;
         KeyDown += MainWindow_OnKeyDown;
@@ -110,6 +121,7 @@ public sealed partial class MainWindow : Window
         Closed += (_, _) =>
         {
             _globalHotkey?.Dispose();
+            _cs2GsiListener?.Dispose();
             _gameDetectionTimer.Stop();
             _hoverPreviewDelay.Stop();
             DisposeHoverPreview();
@@ -367,8 +379,9 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async Task SaveReplayClipAsync()
+    private async Task SaveReplayClipAsync(string? autoClipLabel = null)
     {
+        var isAutoClip = autoClipLabel is not null;
         if (Interlocked.CompareExchange(ref _clipSaving, 1, 0) != 0) return;
         try
         {
@@ -376,6 +389,10 @@ public sealed partial class MainWindow : Window
             InitializeReplayServices();
             if (_replayBuffer is null || !_replayBuffer.IsRecording)
             {
+                // A background auto-clip trigger firing before the buffer is actually
+                // recording (e.g. CS2 launched but EVE hasn't caught up yet) isn't
+                // worth interrupting the user over - just drop it.
+                if (isAutoClip) return;
                 if (ViewModel.IsReplayRecording) ViewModel.IsReplayRecording = false;
                 await ShowMessageAsync("Clip failed", _replayArmed ? "Replay is armed, but no game is being captured yet." : "Replay buffer is not running.");
                 return;
@@ -392,7 +409,7 @@ public sealed partial class MainWindow : Window
                     outputFolder = ViewModel.Settings.LibraryFolder;
                 }
 
-                AppLog.Info("Replay clip save requested.");
+                AppLog.Info(isAutoClip ? $"Auto-clip triggered: {autoClipLabel}." : "Replay clip save requested.");
 
                 // Windows Capture segments need a few seconds to concat/mux before
                 // the clip lands in the library, so give instant feedback on the
@@ -400,7 +417,7 @@ public sealed partial class MainWindow : Window
                 var notifiedEarly = _replayBuffer is WindowsReplayBuffer;
                 if (notifiedEarly) ShowClipSavedNotification();
 
-                var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder));
+                var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder, titleSuffix: autoClipLabel));
                 AppLog.Info($"Replay clip saved: {outputPath}");
                 await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
                 if (!notifiedEarly) ShowClipSavedNotification();
@@ -408,7 +425,7 @@ public sealed partial class MainWindow : Window
             catch (Exception error)
             {
                 AppLog.Error("Replay clip save failed", error);
-                await ShowMessageAsync("Clip failed", error.Message);
+                if (!isAutoClip) await ShowMessageAsync("Clip failed", error.Message);
             }
         }
         finally
@@ -781,6 +798,56 @@ public sealed partial class MainWindow : Window
     private void OpenLogsButton_OnClick(object? sender, RoutedEventArgs e)
     {
         AppLog.OpenFolder();
+    }
+
+    private void AddCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        ViewModel.AddCustomGame();
+    }
+
+    private void RemoveCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: GameBackendRowViewModel row } && ViewModel is not null)
+        {
+            ViewModel.RemoveCustomGame(row);
+        }
+    }
+
+    private void UpdateCs2AutoClipState()
+    {
+        if (ViewModel is null) return;
+
+        if (!ViewModel.Settings.Cs2AutoClip.Enabled)
+        {
+            if (_cs2GsiListener is not null)
+            {
+                _cs2GsiListener.AutoClipTriggered -= Cs2GsiListener_OnAutoClipTriggered;
+                _cs2GsiListener.Stop();
+            }
+
+            ViewModel.Cs2GsiStatusText = string.Empty;
+            return;
+        }
+
+        _cs2GsiListener ??= new Cs2GsiListener(() => ViewModel.Settings.Cs2AutoClip);
+        if (_cs2GsiListener.IsListening) return;
+
+        var port = ViewModel.Settings.Cs2AutoClip.GsiPort;
+        if (!_cs2GsiListener.Start(port))
+        {
+            ViewModel.Cs2GsiStatusText = $"Auto-clip listener couldn't start on port {port} - it may already be in use. Check the log.";
+            return;
+        }
+
+        _cs2GsiListener.AutoClipTriggered += Cs2GsiListener_OnAutoClipTriggered;
+        Cs2GsiDeployer.TryDeploy(port, out var statusMessage);
+        ViewModel.Cs2GsiStatusText = statusMessage;
+    }
+
+    private void Cs2GsiListener_OnAutoClipTriggered(object? sender, string label)
+    {
+        Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(label));
     }
 
     private async void CheckUpdatesButton_OnClick(object? sender, RoutedEventArgs e)

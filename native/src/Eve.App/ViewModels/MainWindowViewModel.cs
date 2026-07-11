@@ -29,6 +29,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _selectedReplayFrameRate;
     private ReplayBackendPreset? _selectedReplayBackend;
     private readonly string _initialReplayBackend;
+    private string _newCustomGameExecutable = string.Empty;
+    private string _newCustomGameDisplayName = string.Empty;
     private bool _replayBackendRestartRequired;
     private int _activeReplayMaxHeight;
     private int _activeReplayFrameRate;
@@ -105,6 +107,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedClipOverlayPosition = ClipOverlayPositions.FirstOrDefault(position => string.Equals(position, Settings.ClipOverlayPosition, StringComparison.OrdinalIgnoreCase)) ?? "Top Right";
         _selectedClipOverlayVolume = ClipOverlayVolumes.FirstOrDefault(volume => string.Equals(volume, Settings.ClipOverlayVolume, StringComparison.OrdinalIgnoreCase)) ?? "Medium";
         ExcludedProcesses = new ObservableCollection<string>(Settings.GameAudioExcludedProcesses);
+        GameCaptureRows = new ObservableCollection<GameBackendRowViewModel>();
+        RebuildGameCaptureRows();
         RefreshAudioDevices();
         SelectedReplayDurationPreset = ReplayDurationPresets.FirstOrDefault(preset => preset.Seconds == Settings.ReplayDurationSeconds) ??
                                        ReplayDurationPresets.First(preset => preset.Seconds == 60);
@@ -139,6 +143,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ReplayBackendPreset> ReplayBackends { get; }
     public ObservableCollection<ExportCodecOption> ExportCodecs { get; }
     public ObservableCollection<string> ExcludedProcesses { get; }
+    public ObservableCollection<GameBackendRowViewModel> GameCaptureRows { get; }
     public ObservableCollection<string> ClipOverlayPositions { get; }
     public ObservableCollection<string> ClipOverlayVolumes { get; }
 
@@ -436,6 +441,94 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged();
             SaveSettings();
         }
+    }
+
+    private string _cs2GsiStatusText = string.Empty;
+
+    public string Cs2GsiStatusText
+    {
+        get => _cs2GsiStatusText;
+        set => SetProperty(ref _cs2GsiStatusText, value);
+    }
+
+    public bool Cs2AutoClipEnabled
+    {
+        get => Settings.Cs2AutoClip.Enabled;
+        set
+        {
+            if (Settings.Cs2AutoClip.Enabled == value) return;
+            Settings.Cs2AutoClip.Enabled = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    public bool Cs2AllKills
+    {
+        get => Settings.Cs2AutoClip is { Kill: true, TwoKill: true, ThreeKill: true, FourKill: true, Ace: true };
+        set
+        {
+            Settings.Cs2AutoClip.Kill = value;
+            Settings.Cs2AutoClip.TwoKill = value;
+            Settings.Cs2AutoClip.ThreeKill = value;
+            Settings.Cs2AutoClip.FourKill = value;
+            Settings.Cs2AutoClip.Ace = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(Cs2Kill));
+            OnPropertyChanged(nameof(Cs2TwoKill));
+            OnPropertyChanged(nameof(Cs2ThreeKill));
+            OnPropertyChanged(nameof(Cs2FourKill));
+            OnPropertyChanged(nameof(Cs2Ace));
+            SaveSettings();
+        }
+    }
+
+    public bool Cs2Kill
+    {
+        get => Settings.Cs2AutoClip.Kill;
+        set { Settings.Cs2AutoClip.Kill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); SaveSettings(); }
+    }
+
+    public bool Cs2TwoKill
+    {
+        get => Settings.Cs2AutoClip.TwoKill;
+        set { Settings.Cs2AutoClip.TwoKill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); SaveSettings(); }
+    }
+
+    public bool Cs2ThreeKill
+    {
+        get => Settings.Cs2AutoClip.ThreeKill;
+        set { Settings.Cs2AutoClip.ThreeKill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); SaveSettings(); }
+    }
+
+    public bool Cs2FourKill
+    {
+        get => Settings.Cs2AutoClip.FourKill;
+        set { Settings.Cs2AutoClip.FourKill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); SaveSettings(); }
+    }
+
+    public bool Cs2Ace
+    {
+        get => Settings.Cs2AutoClip.Ace;
+        set { Settings.Cs2AutoClip.Ace = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); SaveSettings(); }
+    }
+
+    public bool Cs2Headshot
+    {
+        get => Settings.Cs2AutoClip.Headshot;
+        set { Settings.Cs2AutoClip.Headshot = value; OnPropertyChanged(); SaveSettings(); }
+    }
+
+    public bool Cs2Death
+    {
+        get => Settings.Cs2AutoClip.Death;
+        set { Settings.Cs2AutoClip.Death = value; OnPropertyChanged(); SaveSettings(); }
+    }
+
+    public bool Cs2Assist
+    {
+        get => Settings.Cs2AutoClip.Assist;
+        set { Settings.Cs2AutoClip.Assist = value; OnPropertyChanged(); SaveSettings(); }
     }
 
     public bool LaunchOnWindowsStartup
@@ -890,6 +983,92 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SaveSettings();
     }
 
+    public string NewCustomGameExecutable
+    {
+        get => _newCustomGameExecutable;
+        set => SetProperty(ref _newCustomGameExecutable, value);
+    }
+
+    public string NewCustomGameDisplayName
+    {
+        get => _newCustomGameDisplayName;
+        set => SetProperty(ref _newCustomGameDisplayName, value);
+    }
+
+    public event EventHandler? GameCatalogChanged;
+
+    public void AddCustomGame()
+    {
+        var exe = Path.GetFileName(NewCustomGameExecutable.Trim());
+        if (string.IsNullOrWhiteSpace(exe)) return;
+        if (!exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) exe += ".exe";
+        if (string.IsNullOrWhiteSpace(NewCustomGameDisplayName)) return;
+        if (GameCatalog.BuiltIn.ContainsKey(exe)) return;
+
+        Settings.GameCaptureOverrides.RemoveAll(g => string.Equals(g.ExecutableName, exe, StringComparison.OrdinalIgnoreCase));
+        Settings.GameCaptureOverrides.Add(new GameCaptureOverride
+        {
+            ExecutableName = exe,
+            DisplayName = NewCustomGameDisplayName.Trim(),
+            CaptureBackend = "Auto"
+        });
+        NewCustomGameExecutable = string.Empty;
+        NewCustomGameDisplayName = string.Empty;
+        SaveSettings();
+        RebuildGameCaptureRows();
+        GameCatalogChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void RemoveCustomGame(GameBackendRowViewModel row)
+    {
+        if (!row.IsCustom) return;
+        Settings.GameCaptureOverrides.RemoveAll(g => string.Equals(g.ExecutableName, row.ExecutableName, StringComparison.OrdinalIgnoreCase));
+        row.PropertyChanged -= GameCaptureRow_OnPropertyChanged;
+        GameCaptureRows.Remove(row);
+        SaveSettings();
+        GameCatalogChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void RebuildGameCaptureRows()
+    {
+        foreach (var row in GameCaptureRows) row.PropertyChanged -= GameCaptureRow_OnPropertyChanged;
+        GameCaptureRows.Clear();
+
+        foreach (var pair in GameCatalog.BuiltIn.OrderBy(kv => kv.Value, StringComparer.OrdinalIgnoreCase))
+        {
+            var overrideEntry = Settings.GameCaptureOverrides.FirstOrDefault(g => string.Equals(g.ExecutableName, pair.Key, StringComparison.OrdinalIgnoreCase));
+            var backend = ReplayBackends.FirstOrDefault(preset => string.Equals(preset.Value, overrideEntry?.CaptureBackend, StringComparison.OrdinalIgnoreCase))
+                          ?? ReplayBackends.First(preset => preset.Value == "Auto");
+            var row = new GameBackendRowViewModel(pair.Key, pair.Value, isCustom: false, GameCatalog.AntiCheatSensitive.Contains(pair.Key), backend);
+            row.PropertyChanged += GameCaptureRow_OnPropertyChanged;
+            GameCaptureRows.Add(row);
+        }
+
+        foreach (var overrideEntry in Settings.GameCaptureOverrides.Where(g => !GameCatalog.BuiltIn.ContainsKey(g.ExecutableName)))
+        {
+            var backend = ReplayBackends.FirstOrDefault(preset => string.Equals(preset.Value, overrideEntry.CaptureBackend, StringComparison.OrdinalIgnoreCase))
+                          ?? ReplayBackends.First(preset => preset.Value == "Auto");
+            var row = new GameBackendRowViewModel(overrideEntry.ExecutableName, overrideEntry.DisplayName, isCustom: true, GameCatalog.AntiCheatSensitive.Contains(overrideEntry.ExecutableName), backend);
+            row.PropertyChanged += GameCaptureRow_OnPropertyChanged;
+            GameCaptureRows.Add(row);
+        }
+    }
+
+    private void GameCaptureRow_OnPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(GameBackendRowViewModel.SelectedBackend) || sender is not GameBackendRowViewModel row) return;
+
+        var entry = Settings.GameCaptureOverrides.FirstOrDefault(g => string.Equals(g.ExecutableName, row.ExecutableName, StringComparison.OrdinalIgnoreCase));
+        if (entry is null)
+        {
+            entry = new GameCaptureOverride { ExecutableName = row.ExecutableName, DisplayName = row.IsCustom ? row.DisplayName : string.Empty };
+            Settings.GameCaptureOverrides.Add(entry);
+        }
+
+        entry.CaptureBackend = row.SelectedBackend?.Value ?? "Auto";
+        SaveSettings();
+    }
+
     public void RefreshAudioDevices()
     {
         ChatAudioDevices.Clear();
@@ -937,6 +1116,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ReplayBufferConfig CreateReplayConfig()
     {
+        var gameOverride = Settings.GameCaptureOverrides
+            .FirstOrDefault(g => string.Equals(g.ExecutableName, ActiveGameDetection.ExeName, StringComparison.OrdinalIgnoreCase));
+        var effectiveBackend = !string.IsNullOrWhiteSpace(gameOverride?.CaptureBackend) &&
+                                !string.Equals(gameOverride.CaptureBackend, "Auto", StringComparison.OrdinalIgnoreCase)
+            ? gameOverride.CaptureBackend
+            : Settings.ReplayBackend;
+
         return new ReplayBufferConfig(
             SelectedReplayDurationPreset?.Seconds ?? Settings.ReplayDurationSeconds,
             Settings.ReplayMaxHeight,
@@ -955,7 +1141,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ActiveGameDetection.ExeName,
             ActiveGameDetection.WindowTitle,
             ActiveGameDetection.WindowClass,
-            Settings.ReplayBackend,
+            effectiveBackend,
             GameWindowHandle: ActiveGameDetection.WindowHandle);
     }
 

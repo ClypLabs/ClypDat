@@ -103,7 +103,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         }
     }
 
-    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default)
+    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleSuffix = null)
     {
         ReplayVideoSegment[] sourceSegments;
         double videoOffsetSeconds;
@@ -150,7 +150,8 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             }
 
             sourcePath = await BuildReplayVideoAsync(sourceSegments, cancellationToken);
-            outputPath = Path.Combine(outputFolder, ClipFileNaming.BuildFileName(config.GameDisplayName, DateTime.Now, "mp4"));
+            var clipName = string.IsNullOrWhiteSpace(titleSuffix) ? config.GameDisplayName : $"{config.GameDisplayName} - {titleSuffix}";
+            outputPath = Path.Combine(outputFolder, ClipFileNaming.BuildFileName(clipName, DateTime.Now, "mp4"));
             await MuxAudioTracksAsync(sourcePath, outputPath, videoOffsetSeconds, sourceSegments, clipDurationSeconds, config, cancellationToken);
         }
         finally
