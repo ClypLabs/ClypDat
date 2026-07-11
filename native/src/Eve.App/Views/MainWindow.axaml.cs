@@ -800,6 +800,16 @@ public sealed partial class MainWindow : Window
         AppLog.OpenFolder();
     }
 
+    private void ToggleCs2CardButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is not null) ViewModel.Cs2CardExpanded = !ViewModel.Cs2CardExpanded;
+    }
+
+    private void ToggleCs2AllKillsButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is not null) ViewModel.Cs2AllKillsExpanded = !ViewModel.Cs2AllKillsExpanded;
+    }
+
     private void AddCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;

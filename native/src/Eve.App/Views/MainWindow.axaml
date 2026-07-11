@@ -211,7 +211,7 @@
             <TextBlock Text="CAPTURE" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" Margin="14,20,0,14" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Replay Buffer}" Tag="Replay Buffer" Content="Replay Buffer" Click="SettingsNavButton_OnClick" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Overlays and Notifications}" Tag="Overlays and Notifications" Content="Overlays and Notifications" Click="SettingsNavButton_OnClick" />
-            <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Auto-Clip}" Tag="Auto-Clip" Content="Auto-Clip (CS2)" Click="SettingsNavButton_OnClick" />
+            <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Auto-Clip}" Tag="Auto-Clip" Content="Auto-Clipping" Click="SettingsNavButton_OnClick" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Audio}" Tag="Audio" Content="Audio" Click="SettingsNavButton_OnClick" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Audio Exclusions}" Tag="Game Audio Exclusions" Content="Game Audio Exclusions" Click="SettingsNavButton_OnClick" />
 
@@ -410,28 +410,34 @@
                 <Button Grid.Column="2" Content="Add Game" Click="AddCustomGameButton_OnClick" VerticalAlignment="Center" />
               </Grid>
 
+              <TextBox Classes="settingsInput" Watermark="Search games" Text="{Binding GameSearchText}" />
+
               <Border Height="1" Background="#1B242D" />
 
-              <ItemsControl ItemsSource="{Binding GameCaptureRows}">
+              <ItemsControl ItemsSource="{Binding FilteredGameCaptureRows}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
-                    <StackPanel Spacing="6" Margin="0,0,0,16">
-                      <Grid ColumnDefinitions="*,Auto">
-                        <TextBlock Text="{Binding DisplayName}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
-                        <Button Grid.Column="1" Content="Remove" IsVisible="{Binding IsCustom}" Click="RemoveCustomGameButton_OnClick" />
-                      </Grid>
-                      <TextBlock Text="{Binding ExecutableName}" Foreground="#6B7C8C" FontSize="12" />
-                      <ListBox Classes="pillGroup" ItemsSource="{Binding $parent[Window].DataContext.ReplayBackends}" SelectedItem="{Binding SelectedBackend}">
-                        <ListBox.ItemTemplate>
-                          <DataTemplate>
-                            <TextBlock Text="{Binding Label}" />
-                          </DataTemplate>
-                        </ListBox.ItemTemplate>
-                      </ListBox>
-                      <TextBlock Text="This game needs Windows Capture for anti-cheat compatibility. Switching away from it may black out or freeze clips, or cause the game's anti-cheat to close it."
-                                 Foreground="#E5A00D" FontSize="12" FontWeight="Bold" TextWrapping="Wrap"
-                                 IsVisible="{Binding ShowAntiCheatWarning}" />
-                    </StackPanel>
+                    <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,0,0,8">
+                      <StackPanel Spacing="4">
+                        <Grid ColumnDefinitions="*,150,Auto" ColumnSpacing="10">
+                          <StackPanel Spacing="1" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding DisplayName}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" />
+                            <TextBlock Text="{Binding ExecutableName}" Foreground="#5C6D7E" FontSize="11" />
+                          </StackPanel>
+                          <ComboBox Grid.Column="1" Classes="settingsInput" ItemsSource="{Binding $parent[Window].DataContext.ReplayBackends}" SelectedItem="{Binding SelectedBackend}" VerticalAlignment="Center">
+                            <ComboBox.ItemTemplate>
+                              <DataTemplate>
+                                <TextBlock Text="{Binding Label}" />
+                              </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                          </ComboBox>
+                          <Button Grid.Column="2" Content="Remove" IsVisible="{Binding IsCustom}" VerticalAlignment="Center" Click="RemoveCustomGameButton_OnClick" />
+                        </Grid>
+                        <TextBlock Text="⚠ Needs Windows Capture for anti-cheat compatibility - switching away may black out clips or get the game closed."
+                                   Foreground="#E5A00D" FontSize="11" FontWeight="Bold" TextWrapping="Wrap"
+                                   IsVisible="{Binding ShowAntiCheatWarning}" />
+                      </StackPanel>
+                    </Border>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
@@ -439,60 +445,60 @@
 
             <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Auto-Clip}">
               <StackPanel Spacing="4">
-                <TextBlock Text="AUTO-CLIP (COUNTER-STRIKE 2)" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
-                <TextBlock Text="EVE reads CS2's own Game State Integration feed to save a clip the instant one of these happens - no voice or screen analysis involved. CS2 must be running for this to connect." Foreground="#93A6B8" TextWrapping="Wrap" />
+                <TextBlock Text="AUTO-CLIPPING" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
+                <TextBlock Text="EVE reads a game's own event feed to save a clip the instant one of these happens - no voice or screen analysis involved." Foreground="#93A6B8" TextWrapping="Wrap" />
               </StackPanel>
               <Border Height="1" Background="#1B242D" />
 
-              <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Text="Enable CS2 auto-clip" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
-                <ToggleSwitch Grid.Column="1" IsChecked="{Binding Cs2AutoClipEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-              </Grid>
-              <TextBlock Text="{Binding Cs2GsiStatusText}" Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding Cs2AutoClipEnabled}" />
+              <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="8">
+                <StackPanel>
+                  <Button Classes="autoClipCardHeader" Click="ToggleCs2CardButton_OnClick">
+                    <Grid ColumnDefinitions="56,*,Auto" ColumnSpacing="12">
+                      <Border Width="56" Height="56" CornerRadius="8" Background="#E8A33D">
+                        <TextBlock Text="CS2" Foreground="#171009" FontWeight="Bold" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                      </Border>
+                      <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Text="Counter-Strike 2" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
+                        <TextBlock Text="{Binding Cs2EventsSummary}" Foreground="#6B7C8C" FontSize="12" />
+                      </StackPanel>
+                      <TextBlock Grid.Column="2" Text="{Binding Cs2CardExpanded, Converter={x:Static opconv:BoolToChevronConverter.Instance}}" Foreground="#93A6B8" FontSize="16" VerticalAlignment="Center" />
+                    </Grid>
+                  </Button>
 
-              <Border Height="1" Background="#1B242D" />
+                  <StackPanel IsVisible="{Binding Cs2CardExpanded}" Margin="18,0,18,18" Spacing="12">
+                    <Border Height="1" Background="#1B242D" />
 
-              <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Text="All Kills" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
-                <ToggleSwitch Grid.Column="1" IsChecked="{Binding Cs2AllKills}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-              </Grid>
-              <StackPanel Margin="16,0,0,0" Spacing="10">
-                <Grid ColumnDefinitions="*,Auto">
-                  <TextBlock Text="Kill" Foreground="#B8C7D8" VerticalAlignment="Center" />
-                  <ToggleSwitch Grid.Column="1" IsChecked="{Binding Cs2Kill}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-                </Grid>
-                <Grid ColumnDefinitions="*,Auto">
-                  <TextBlock Text="2K" Foreground="#B8C7D8" VerticalAlignment="Center" />
-                  <ToggleSwitch Grid.Column="1" IsChecked="{Binding Cs2TwoKill}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-                </Grid>
-                <Grid ColumnDefinitions="*,Auto">
-                  <TextBlock Text="3K" Foreground="#B8C7D8" VerticalAlignment="Center" />
-                  <ToggleSwitch Grid.Column="1" IsChecked="{Binding Cs2ThreeKill}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-                </Grid>
-                <Grid ColumnDefinitions="*,Auto">
-                  <TextBlock Text="4K" Foreground="#B8C7D8" VerticalAlignment="Center" />
-                  <ToggleSwitch Grid.Column="1" IsChecked="{Binding Cs2FourKill}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-                </Grid>
-                <Grid ColumnDefinitions="*,Auto">
-                  <TextBlock Text="Ace" Foreground="#B8C7D8" VerticalAlignment="Center" />
-                  <ToggleSwitch Grid.Column="1" IsChecked="{Binding Cs2Ace}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-                </Grid>
-              </StackPanel>
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Text="Enable auto-clip for CS2" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" />
+                      <ToggleSwitch Grid.Column="1" IsChecked="{Binding Cs2AutoClipEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                    </Grid>
+                    <TextBlock Text="{Binding Cs2GsiStatusText}" Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" IsVisible="{Binding Cs2AutoClipEnabled}" />
 
-              <Border Height="1" Background="#1B242D" />
+                    <Border Height="1" Background="#1B242D" />
 
-              <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Text="Headshot" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
-                <ToggleSwitch Grid.Column="1" IsChecked="{Binding Cs2Headshot}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-              </Grid>
-              <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Text="Death" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
-                <ToggleSwitch Grid.Column="1" IsChecked="{Binding Cs2Death}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-              </Grid>
-              <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Text="Assist" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
-                <ToggleSwitch Grid.Column="1" IsChecked="{Binding Cs2Assist}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-              </Grid>
+                    <StackPanel>
+                      <Button Classes="autoClipCardHeader" Click="ToggleCs2AllKillsButton_OnClick" Padding="0,4">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                          <CheckBox IsChecked="{Binding Cs2AllKills}" IsHitTestVisible="False" />
+                          <TextBlock Grid.Column="1" Text="All Kills" Foreground="#D2DEEC" VerticalAlignment="Center" />
+                          <TextBlock Grid.Column="2" Text="{Binding Cs2AllKillsExpanded, Converter={x:Static opconv:BoolToChevronConverter.Instance}}" Foreground="#6B7C8C" FontSize="13" VerticalAlignment="Center" />
+                        </Grid>
+                      </Button>
+                      <StackPanel Margin="26,8,0,0" Spacing="8" IsVisible="{Binding Cs2AllKillsExpanded}">
+                        <CheckBox Content="Kill" IsChecked="{Binding Cs2Kill}" />
+                        <CheckBox Content="2K" IsChecked="{Binding Cs2TwoKill}" />
+                        <CheckBox Content="3K" IsChecked="{Binding Cs2ThreeKill}" />
+                        <CheckBox Content="4K" IsChecked="{Binding Cs2FourKill}" />
+                        <CheckBox Content="Ace" IsChecked="{Binding Cs2Ace}" />
+                      </StackPanel>
+                    </StackPanel>
+
+                    <CheckBox Content="Headshot" IsChecked="{Binding Cs2Headshot}" />
+                    <CheckBox Content="Death" IsChecked="{Binding Cs2Death}" />
+                    <CheckBox Content="Assist" IsChecked="{Binding Cs2Assist}" />
+                  </StackPanel>
+                </StackPanel>
+              </Border>
             </StackPanel>
 
             <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Audio}">

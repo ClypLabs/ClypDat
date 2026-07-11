@@ -30,6 +30,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private ReplayBackendPreset? _selectedReplayBackend;
     private readonly string _initialReplayBackend;
     private string _newCustomGameExecutable = string.Empty;
+    private string _gameSearchText = string.Empty;
     private string _newCustomGameDisplayName = string.Empty;
     private bool _replayBackendRestartRequired;
     private int _activeReplayMaxHeight;
@@ -144,6 +145,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ExportCodecOption> ExportCodecs { get; }
     public ObservableCollection<string> ExcludedProcesses { get; }
     public ObservableCollection<GameBackendRowViewModel> GameCaptureRows { get; }
+    public ObservableCollection<GameBackendRowViewModel> FilteredGameCaptureRows { get; } = new();
     public ObservableCollection<string> ClipOverlayPositions { get; }
     public ObservableCollection<string> ClipOverlayVolumes { get; }
 
@@ -479,6 +481,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(Cs2ThreeKill));
             OnPropertyChanged(nameof(Cs2FourKill));
             OnPropertyChanged(nameof(Cs2Ace));
+            OnPropertyChanged(nameof(Cs2EventsSummary));
             SaveSettings();
         }
     }
@@ -486,49 +489,80 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool Cs2Kill
     {
         get => Settings.Cs2AutoClip.Kill;
-        set { Settings.Cs2AutoClip.Kill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); SaveSettings(); }
+        set { Settings.Cs2AutoClip.Kill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
     }
 
     public bool Cs2TwoKill
     {
         get => Settings.Cs2AutoClip.TwoKill;
-        set { Settings.Cs2AutoClip.TwoKill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); SaveSettings(); }
+        set { Settings.Cs2AutoClip.TwoKill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
     }
 
     public bool Cs2ThreeKill
     {
         get => Settings.Cs2AutoClip.ThreeKill;
-        set { Settings.Cs2AutoClip.ThreeKill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); SaveSettings(); }
+        set { Settings.Cs2AutoClip.ThreeKill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
     }
 
     public bool Cs2FourKill
     {
         get => Settings.Cs2AutoClip.FourKill;
-        set { Settings.Cs2AutoClip.FourKill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); SaveSettings(); }
+        set { Settings.Cs2AutoClip.FourKill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
     }
 
     public bool Cs2Ace
     {
         get => Settings.Cs2AutoClip.Ace;
-        set { Settings.Cs2AutoClip.Ace = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); SaveSettings(); }
+        set { Settings.Cs2AutoClip.Ace = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
     }
 
     public bool Cs2Headshot
     {
         get => Settings.Cs2AutoClip.Headshot;
-        set { Settings.Cs2AutoClip.Headshot = value; OnPropertyChanged(); SaveSettings(); }
+        set { Settings.Cs2AutoClip.Headshot = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
     }
 
     public bool Cs2Death
     {
         get => Settings.Cs2AutoClip.Death;
-        set { Settings.Cs2AutoClip.Death = value; OnPropertyChanged(); SaveSettings(); }
+        set { Settings.Cs2AutoClip.Death = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
     }
 
     public bool Cs2Assist
     {
         get => Settings.Cs2AutoClip.Assist;
-        set { Settings.Cs2AutoClip.Assist = value; OnPropertyChanged(); SaveSettings(); }
+        set { Settings.Cs2AutoClip.Assist = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
+    }
+
+    private bool _cs2CardExpanded;
+
+    public bool Cs2CardExpanded
+    {
+        get => _cs2CardExpanded;
+        set => SetProperty(ref _cs2CardExpanded, value);
+    }
+
+    private bool _cs2AllKillsExpanded;
+
+    public bool Cs2AllKillsExpanded
+    {
+        get => _cs2AllKillsExpanded;
+        set => SetProperty(ref _cs2AllKillsExpanded, value);
+    }
+
+    public string Cs2EventsSummary
+    {
+        get
+        {
+            var clip = Settings.Cs2AutoClip;
+            var selected = new[] { clip.Kill, clip.TwoKill, clip.ThreeKill, clip.FourKill, clip.Ace, clip.Headshot, clip.Death, clip.Assist }.Count(value => value);
+            return selected switch
+            {
+                0 => "No events selected",
+                8 => "All events selected",
+                _ => $"{selected} of 8 events selected"
+            };
+        }
     }
 
     public bool LaunchOnWindowsStartup
@@ -995,6 +1029,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => SetProperty(ref _newCustomGameDisplayName, value);
     }
 
+    public string GameSearchText
+    {
+        get => _gameSearchText;
+        set
+        {
+            if (!SetProperty(ref _gameSearchText, value)) return;
+            ApplyGameSearchFilter();
+        }
+    }
+
     public event EventHandler? GameCatalogChanged;
 
     public void AddCustomGame()
@@ -1052,6 +1096,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             row.PropertyChanged += GameCaptureRow_OnPropertyChanged;
             GameCaptureRows.Add(row);
         }
+
+        ApplyGameSearchFilter();
+    }
+
+    private void ApplyGameSearchFilter()
+    {
+        FilteredGameCaptureRows.Clear();
+        var query = GameSearchText.Trim();
+        var matches = string.IsNullOrWhiteSpace(query)
+            ? GameCaptureRows
+            : GameCaptureRows.Where(row => row.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                                            row.ExecutableName.Contains(query, StringComparison.OrdinalIgnoreCase));
+        foreach (var row in matches) FilteredGameCaptureRows.Add(row);
     }
 
     private void GameCaptureRow_OnPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
