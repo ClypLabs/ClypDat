@@ -509,6 +509,41 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         return (selected.ToArray(), offset, duration);
     }
 
+    // Returns the timestamp of the video's own keyframe at-or-before targetSeconds -
+    // i.e. exactly where "-ss targetSeconds -i path -c:v copy" will actually start
+    // the output, which ffmpeg does not report back on its own. Reads packet-level
+    // flags only (no decode), so it's cheap even on a full clip-length file. Null
+    // if the probe fails or has nothing usable, signaling the caller to fall back
+    // to the slower but exact decode+re-encode trim instead of guessing.
+    private async Task<double?> FindNearestKeyframeAtOrBeforeAsync(string path, double targetSeconds, CancellationToken cancellationToken)
+    {
+        var result = await RunProcessAsync("ffprobe", new[]
+        {
+            "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "packet=pts_time,flags",
+            "-of", "csv=p=0",
+            path
+        }, cancellationToken);
+
+        if (result.ExitCode != 0)
+        {
+            AppLog.Info($"Keyframe probe failed: path={path}, exit={result.ExitCode}, error={result.Error}");
+            return null;
+        }
+
+        double? best = null;
+        foreach (var line in result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = line.Split(',');
+            if (parts.Length < 2 || !parts[1].Contains('K', StringComparison.Ordinal)) continue;
+            if (!double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var pts)) continue;
+            if (pts <= targetSeconds && (best is null || pts > best)) best = pts;
+        }
+
+        return best ?? 0;
+    }
+
     private async Task<TimeSpan> ProbeVideoDurationAsync(string path, CancellationToken cancellationToken)
     {
         // The most recently stopped segment is the one most likely to fail here: the
@@ -863,8 +898,23 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         var snapshots = new List<string>();
         var duration = Math.Max(1, clipDurationSeconds);
         var captures = _audioCaptures.ToArray();
-        var segmentWindows = BuildSegmentWindows(sourceSegments, videoOffsetSeconds);
-        AppLog.Info($"Replay mux start: videoOffset={videoOffsetSeconds:0.###}s, duration={duration:0.###}s, captures={captures.Length}, segments={segmentWindows.Count}.");
+
+        // -ss + -c:v copy seeks to the nearest keyframe AT OR BEFORE videoOffsetSeconds,
+        // not videoOffsetSeconds itself - the container timestamps end up perfectly
+        // clean either way (confirmed via ffprobe packet inspection), but the audio
+        // tracks were still being built for the window starting at the exact
+        // requested offset. Video actually starting earlier than that while audio
+        // starts exactly there is a constant, whole-clip offset between them - not a
+        // muxer timestamp bug, which is why -avoid_negative_ts didn't touch it.
+        // Finding the real keyframe position first and aligning audio to THAT instead
+        // fixes the two tracks representing the same window again.
+        var keyframeOffset = await FindNearestKeyframeAtOrBeforeAsync(videoPath, videoOffsetSeconds, cancellationToken);
+        var useStreamCopy = keyframeOffset.HasValue;
+        var effectiveOffsetSeconds = keyframeOffset ?? videoOffsetSeconds;
+        var effectiveDurationSeconds = duration + (videoOffsetSeconds - effectiveOffsetSeconds);
+
+        var segmentWindows = BuildSegmentWindows(sourceSegments, effectiveOffsetSeconds);
+        AppLog.Info($"Replay mux start: videoOffset={videoOffsetSeconds:0.###}s, keyframeOffset={effectiveOffsetSeconds:0.###}s, duration={effectiveDurationSeconds:0.###}s, captures={captures.Length}, segments={segmentWindows.Count}.");
 
         try
         {
@@ -886,24 +936,20 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             // - for a long/high-res replay that's genuinely slow (this was the actual
             // "clips take forever" bottleneck, not the concat step, which already used
             // -c copy). -ss before -i is a fast keyframe seek, and -c:v copy just
-            // remuxes instead of re-encoding - the tradeoff is the cut lands on the
-            // nearest keyframe at/before the requested offset instead of the exact
-            // frame, which for a replay buffer clip is imperceptible against the
-            // seconds-to-tens-of-seconds this saves. Falls back to the old
-            // decode+re-encode path only if the copy attempt itself fails.
-            // -ss before -i seeks the input but does NOT rebase the copied video
-            // stream's timestamps to start at 0 - it keeps its original offset from
-            // the source file, while the separately-built audio tracks start at 0.
-            // Two tracks starting from different timelines in the same container is
-            // exactly what caused the video-jumps/audio-desync symptom.
-            // -avoid_negative_ts make_zero normalizes everything back to a shared
-            // zero point on output.
-            var copyArgs = new List<string> { "-y", "-ss", FormatSeconds(videoOffsetSeconds), "-i", videoPath, "-i", gamePath, "-i", chatPath, "-i", microphonePath };
-            copyArgs.AddRange(new[] { "-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-avoid_negative_ts", "make_zero", "-t", FormatSeconds(duration) });
-            copyArgs.AddRange(metadataArgs);
-            copyArgs.Add(outputPath);
-            var result = await RunProcessAsync("ffmpeg", copyArgs, cancellationToken);
-            AppLog.Info($"Replay mux (stream copy) result: exit={result.ExitCode}, output={outputPath}.");
+            // remuxes instead of re-encoding, using the keyframe-aligned offset/duration
+            // computed above so audio and video represent the same window. Falls back
+            // to the old exact-offset decode+re-encode path if no keyframe could be
+            // found (e.g. probe failure) or the copy attempt itself fails.
+            (int ExitCode, string Output, string Error) result = (-1, string.Empty, string.Empty);
+            if (useStreamCopy)
+            {
+                var copyArgs = new List<string> { "-y", "-ss", FormatSeconds(effectiveOffsetSeconds), "-i", videoPath, "-i", gamePath, "-i", chatPath, "-i", microphonePath };
+                copyArgs.AddRange(new[] { "-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-avoid_negative_ts", "make_zero", "-t", FormatSeconds(effectiveDurationSeconds) });
+                copyArgs.AddRange(metadataArgs);
+                copyArgs.Add(outputPath);
+                result = await RunProcessAsync("ffmpeg", copyArgs, cancellationToken);
+                AppLog.Info($"Replay mux (stream copy) result: exit={result.ExitCode}, output={outputPath}.");
+            }
 
             if (result.ExitCode != 0)
             {
