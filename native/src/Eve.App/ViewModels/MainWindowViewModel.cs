@@ -340,8 +340,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Settings.ReplayBackend = value.Value;
             SaveSettings();
             ReplayBackendRestartRequired = !string.Equals(value.Value, _initialReplayBackend, StringComparison.OrdinalIgnoreCase);
+            OnPropertyChanged(nameof(ReplayBackendIsObs));
         }
     }
+
+    public bool ReplayBackendIsObs => string.Equals(SelectedReplayBackend?.Value, "Obs", StringComparison.OrdinalIgnoreCase);
 
     public bool ReplayBackendRestartRequired
     {

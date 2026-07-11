@@ -227,6 +227,9 @@
                 <StackPanel Grid.Row="4" Grid.Column="1" Spacing="6">
                   <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayBackends}" SelectedItem="{Binding SelectedReplayBackend}" Width="320" HorizontalAlignment="Left" />
                   <TextBlock Text="{Binding SelectedReplayBackend.Description}" Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" MaxWidth="420" HorizontalAlignment="Left" />
+                  <TextBlock Text="Games with anti-cheat (EAC, BattlEye, Ricochet, etc.) often block OBS's game hook, causing a black or frozen capture. If a game doesn't record properly on OBS, switch it to Windows Capture instead."
+                             Foreground="#E5A00D" FontSize="12" FontWeight="Bold" TextWrapping="Wrap" MaxWidth="420" HorizontalAlignment="Left"
+                             IsVisible="{Binding ReplayBackendIsObs}" />
                   <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding ReplayBackendRestartRequired}">
                     <TextBlock Text="Restart EVE for the backend change to take effect." Foreground="#E5A00D" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
                     <Button Content="Restart Now" Click="RestartAppButton_OnClick" />
