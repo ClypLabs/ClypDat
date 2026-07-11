@@ -572,34 +572,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void ClipRevealButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        if (sender is not Control control || control.DataContext is not ClipCardViewModel clip) return;
-        OpenInExplorer(clip.Path, selectFile: true);
-    }
-
-    private async void ClipDeleteButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        if (sender is not Control control || control.DataContext is not ClipCardViewModel clip || ViewModel is null) return;
-
-        var confirmed = await ConfirmDeleteAsync(clip.Name);
-        if (!confirmed) return;
-
-        foreach (var other in ViewModel.AllClips)
-        {
-            ViewModel.SetClipSelected(other, ReferenceEquals(other, clip));
-        }
-
-        try
-        {
-            await ViewModel.DeleteSelectedAsync();
-        }
-        catch (Exception error)
-        {
-            await ShowMessageAsync("Delete failed", error.Message);
-        }
-    }
-
     private async void DeleteSelectedButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || !ViewModel.HasSelection) return;

@@ -237,20 +237,6 @@
   <Style Selector="Button.settingsNavButton.active:pointerover">
     <Setter Property="Background" Value="#1B2A3D" />
   </Style>
-  <Style Selector="Button.clipCardIconButton">
-    <Setter Property="Width" Value="30" />
-    <Setter Property="Height" Value="30" />
-    <Setter Property="Padding" Value="0" />
-    <Setter Property="Background" Value="#141D24" />
-    <Setter Property="BorderBrush" Value="#232F3A" />
-    <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="8" />
-    <Setter Property="HorizontalContentAlignment" Value="Center" />
-    <Setter Property="VerticalContentAlignment" Value="Center" />
-  </Style>
-  <Style Selector="Button.clipCardIconButton:pointerover">
-    <Setter Property="Background" Value="#1D2A36" />
-  </Style>
   <Style Selector="Border.statusCard">
     <Setter Property="Background" Value="#141D24" />
     <Setter Property="BorderBrush" Value="#232F3A" />
