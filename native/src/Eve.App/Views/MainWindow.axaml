@@ -347,7 +347,7 @@
 
               <StackPanel Spacing="6">
                 <TextBlock Text="Sound volume" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
-                <ComboBox Classes="settingsInput" ItemsSource="{Binding ClipOverlayVolumes}" SelectedItem="{Binding SelectedClipOverlayVolume}" HorizontalAlignment="Stretch" />
+                <ListBox Classes="pillGroup" ItemsSource="{Binding ClipOverlayVolumes}" SelectedItem="{Binding SelectedClipOverlayVolume}" />
               </StackPanel>
             </StackPanel>
 
@@ -571,7 +571,7 @@
               <Border Height="1" Background="#1B242D" />
 
               <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
-                <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedProcessExclusion}" />
+                <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedProcessExclusion}" HorizontalAlignment="Stretch" />
                 <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
                 <Button Grid.Column="2" Content="Add" Click="AddSelectedProcessButton_OnClick" />
               </Grid>
