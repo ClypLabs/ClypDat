@@ -180,17 +180,6 @@
                             </Border>
 
                             <Border Grid.Row="1" Background="#1E2A35">
-                              <Grid>
-                                <Border Width="26" Height="26"
-                                        Background="#1A2530"
-                                        CornerRadius="13"
-                                        HorizontalAlignment="Left"
-                                        VerticalAlignment="Top"
-                                        Margin="16,-13,0,0"
-                                        IsVisible="{Binding HasAutoClipIcon}"
-                                        ToolTip.Tip="{Binding AutoClipEventTypeLabel}">
-                                  <Path Data="{Binding AutoClipIconGeometry}" Fill="{Binding AutoClipIconFill}" Width="13" Height="13" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                </Border>
                                 <StackPanel Spacing="6" Margin="16,13,16,13">
                                 <TextBlock Text="{Binding TileTopLabel}"
                                            Foreground="#8C98A7"
@@ -219,7 +208,6 @@
                                              VerticalAlignment="Center" />
                                 </StackPanel>
                                 </StackPanel>
-                              </Grid>
                             </Border>
                           </Grid>
                           </Border>
