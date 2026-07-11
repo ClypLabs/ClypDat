@@ -547,6 +547,13 @@ public sealed partial class MainWindow : Window
     private async void OpenSettingsButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
+
+        if (ViewModel.IsSettingsVisible)
+        {
+            ViewModel.CloseSettings();
+            return;
+        }
+
         ViewModel.OpenSettings();
         await ViewModel.RefreshOpenProcessesAsync();
     }
@@ -613,6 +620,14 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel?.IsCapturingHotkey == true)
         {
+            if (e.Key == Key.Escape)
+            {
+                _capturedHotkeyKeys.Clear();
+                ViewModel.IsCapturingHotkey = false;
+                e.Handled = true;
+                return;
+            }
+
             _capturedHotkeyKeys.Add(HotkeyCombo.NormalizeKey(e.Key.ToString()));
             e.Handled = true;
             return;
