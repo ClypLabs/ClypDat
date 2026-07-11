@@ -1303,7 +1303,7 @@ public sealed partial class MainWindow : Window
 
         var updateButton = new Button { Content = "Update Now", Width = 120, HorizontalContentAlignment = HorizontalAlignment.Center, Classes = { "primaryButton" } };
         var laterButton = new Button { Content = "Remind Me Later", Width = 140, HorizontalContentAlignment = HorizontalAlignment.Center };
-        var ignoreButton = new Button { Content = "Skip This Version", Width = 140, HorizontalContentAlignment = HorizontalAlignment.Center };
+        var ignoreButton = new Button { Content = "Skip This Version", HorizontalContentAlignment = HorizontalAlignment.Center };
 
         laterButton.Click += (_, _) => window.Close();
         ignoreButton.Click += (_, _) =>
