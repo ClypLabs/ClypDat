@@ -246,7 +246,15 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         string path;
         try
         {
-            path = await completion.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+            // A normal stop+finalize completes in well under a second (rotation
+            // logs show ~20.0-20.3s wall time against a 20s timer). 10s was
+            // generous enough that when the native recorder actually hung (GPU/
+            // driver stall), the buffer sat completely offline for the whole
+            // wait before recovery even started - directly showing up as a
+            // freeze/skip in any clip whose window crossed that gap. Failing
+            // faster doesn't fix the underlying native hang, but it shrinks the
+            // resulting blackout.
+            path = await completion.Task.WaitAsync(TimeSpan.FromSeconds(4), cancellationToken);
         }
         catch (TimeoutException error)
         {
