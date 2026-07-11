@@ -13,7 +13,14 @@ public static class ReplayBufferFactory
         "Marvel-Win64-Shipping.exe",
         "FortniteClient-Win64-Shipping.exe",
         "FortniteClient-Win64-Shipping_EAC.exe",
-        "FortniteClient-Win64-Shipping_EAC_EOS.exe"
+        "FortniteClient-Win64-Shipping_EAC_EOS.exe",
+        "helldivers2.exe",
+        "forhonor.exe",
+        "DeadByDaylight.exe",
+        "TheFirstDescendant.exe",
+        "cod.exe",
+        "cod24-cod.exe",
+        "Wuthering Waves.exe"
     };
 
     public static IReplayBuffer Create(Func<ReplayBufferConfig> configProvider)
