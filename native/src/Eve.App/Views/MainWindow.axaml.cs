@@ -39,7 +39,17 @@ public sealed partial class MainWindow : Window
     private MediaPlayer? _hoverPreviewMediaPlayer;
     private ClipCardViewModel? _hoverPreviewClip;
     private ClipCardViewModel? _pendingHoverClip;
+    private Control? _pendingHoverBorder;
+    private Control? _hoverPreviewBorder;
     private readonly DispatcherTimer _hoverPreviewDelay = new() { Interval = TimeSpan.FromMilliseconds(120) };
+    // The hover-preview VideoView hosts a native child window (HWND on Windows).
+    // Whenever the cursor is directly over it, Win32 routes raw mouse input to
+    // that child window instead of the card underneath, so Avalonia's
+    // PointerExited on the card can fire spuriously (or fail to fire at all) -
+    // neither is trustworthy for deciding when to stop the preview. Polling the
+    // real OS cursor position against the card's actual screen bounds sidesteps
+    // that entirely.
+    private readonly DispatcherTimer _hoverWatchdog = new() { Interval = TimeSpan.FromMilliseconds(200) };
 
     public MainWindow()
     {
@@ -51,8 +61,9 @@ public sealed partial class MainWindow : Window
         _hoverPreviewDelay.Tick += (_, _) =>
         {
             _hoverPreviewDelay.Stop();
-            if (_pendingHoverClip is not null) StartHoverPreview(_pendingHoverClip);
+            if (_pendingHoverClip is not null && _pendingHoverBorder is not null) StartHoverPreview(_pendingHoverClip, _pendingHoverBorder);
         };
+        _hoverWatchdog.Tick += (_, _) => CheckHoverWatchdog();
         Opened += (_, _) =>
         {
             ApplySavedWindowBounds();
@@ -510,32 +521,55 @@ public sealed partial class MainWindow : Window
 
     private void ClipCard_OnPointerEntered(object? sender, PointerEventArgs e)
     {
-        if (sender is not Control { DataContext: ClipCardViewModel clip }) return;
+        if (sender is not Control { DataContext: ClipCardViewModel clip } border) return;
         clip.IsHovered = true;
-        if (ViewModel?.EnableClipHoverPreview != true) return;
+        if (ViewModel?.EnableClipHoverPreview != true || _hoverPreviewClip == clip) return;
 
         _pendingHoverClip = clip;
+        _pendingHoverBorder = border;
         _hoverPreviewDelay.Stop();
         _hoverPreviewDelay.Start();
     }
 
     private void ClipCard_OnPointerExited(object? sender, PointerEventArgs e)
     {
-        if (sender is not Control { DataContext: ClipCardViewModel clip } border) return;
-
-        // The hover-preview VideoView hosts a native child window (HWND on Windows).
-        // When it appears over the thumbnail, the cursor ends up over that native
-        // window and Windows delivers a real mouse-leave to Avalonia, firing this
-        // handler even though the pointer never actually left the card. Ignore
-        // exits where the pointer is still within the card's bounds.
-        var pos = e.GetPosition(border);
-        if (pos.X >= 0 && pos.Y >= 0 && pos.X <= border.Bounds.Width && pos.Y <= border.Bounds.Height) return;
-
+        // Deliberately not stopping the preview here - see _hoverWatchdog's
+        // comment. This only cancels a not-yet-started pending hover and resets
+        // the highlight; the watchdog poll is what actually decides when to stop.
+        if (sender is not Control { DataContext: ClipCardViewModel clip }) return;
         clip.IsHovered = false;
-        if (_pendingHoverClip == clip) _pendingHoverClip = null;
-        _hoverPreviewDelay.Stop();
-        if (_hoverPreviewClip == clip) StopHoverPreview();
+        if (_pendingHoverClip == clip)
+        {
+            _pendingHoverClip = null;
+            _pendingHoverBorder = null;
+            _hoverPreviewDelay.Stop();
+        }
     }
+
+    private void CheckHoverWatchdog()
+    {
+        if (_hoverPreviewBorder is null || !_hoverPreviewBorder.IsAttachedToVisualTree())
+        {
+            StopHoverPreview();
+            return;
+        }
+
+        if (!GetCursorPos(out var cursor)) return;
+        var topLeft = _hoverPreviewBorder.PointToScreen(new Point(0, 0));
+        var bottomRight = _hoverPreviewBorder.PointToScreen(new Point(_hoverPreviewBorder.Bounds.Width, _hoverPreviewBorder.Bounds.Height));
+        var inside = cursor.X >= topLeft.X && cursor.X <= bottomRight.X && cursor.Y >= topLeft.Y && cursor.Y <= bottomRight.Y;
+        if (!inside) StopHoverPreview();
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct Win32Point
+    {
+        public int X;
+        public int Y;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out Win32Point point);
 
     private Media? _hoverPreviewMedia;
 
@@ -555,7 +589,7 @@ public sealed partial class MainWindow : Window
         return _hoverPreviewMediaPlayer;
     }
 
-    private void StartHoverPreview(ClipCardViewModel clip)
+    private void StartHoverPreview(ClipCardViewModel clip, Control border)
     {
         StopHoverPreview();
         try
@@ -569,7 +603,9 @@ public sealed partial class MainWindow : Window
             previousMedia?.Dispose();
             var played = player.Play();
             _hoverPreviewClip = clip;
+            _hoverPreviewBorder = border;
             clip.HoverPreviewPlayer = player;
+            _hoverWatchdog.Start();
             AppLog.Info($"Clip hover preview started: path={clip.Path}, played={played}, state={player.State}.");
         }
         catch (Exception error)
@@ -592,7 +628,10 @@ public sealed partial class MainWindow : Window
 
     private void StopHoverPreview()
     {
+        _hoverWatchdog.Stop();
         _pendingHoverClip = null;
+        _pendingHoverBorder = null;
+        _hoverPreviewBorder = null;
         if (_hoverPreviewClip is not null)
         {
             _hoverPreviewClip.HoverPreviewPlayer = null;
