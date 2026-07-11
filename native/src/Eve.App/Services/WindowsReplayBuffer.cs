@@ -25,6 +25,8 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     private ReplayBufferConfig? _config;
     private string _audioRouteKey = string.Empty;
     private DateTime _startedAtUtc;
+    private DateTime _lastRecorderRestartUtc = DateTime.MinValue;
+    private static readonly TimeSpan MinRecorderRestartInterval = TimeSpan.FromSeconds(5);
     private TaskCompletionSource<string>? _completion;
     private readonly SemaphoreSlim _transition = new(1, 1);
     private readonly List<ReplayAudioCapture> _audioCaptures = new();
@@ -117,7 +119,18 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             if (!IsRecording) throw new InvalidOperationException("Replay buffer is not running.");
 
             Directory.CreateDirectory(outputFolder);
-            var activeSegment = await TryStopCurrentRecordingAsync(cancellationToken);
+            // Stopping the live recording to finalize "right now" as a usable segment,
+            // then spinning up a brand new native Recorder, is real GPU-side work - fine
+            // once per save under normal use, but auto-clip triggers now queue instead
+            // of dropping (see MainWindow's clip-save lock), so a fast multi-kill round
+            // can call this several times within a few seconds. Recreating the hardware
+            // encoder that fast, back to back, was outpacing the driver's own teardown
+            // and growing GPU memory over a burst. Skipping the forced stop/restart when
+            // the current segment is still very fresh costs at most a few seconds off the
+            // tail of a queued clip - imperceptible against a replay window that's many
+            // seconds to minutes long - in exchange for not thrashing the recorder.
+            var recorderIsFresh = DateTime.UtcNow - _lastRecorderRestartUtc < MinRecorderRestartInterval;
+            var activeSegment = recorderIsFresh ? null : await TryStopCurrentRecordingAsync(cancellationToken);
             try
             {
                 if (activeSegment is not null)
@@ -143,7 +156,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             }
             finally
             {
-                if (IsRecording)
+                if (activeSegment is not null && IsRecording)
                 {
                     StartRecorder();
                 }
@@ -179,6 +192,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             _recorder.OnRecordingComplete += Recorder_OnRecordingComplete;
             _recorder.OnRecordingFailed += Recorder_OnRecordingFailed;
             _startedAtUtc = DateTime.UtcNow;
+            _lastRecorderRestartUtc = _startedAtUtc;
             _recorder.Record(_activePath);
             _rotationTimer?.Dispose();
             var segmentDuration = VideoSegmentDuration();
