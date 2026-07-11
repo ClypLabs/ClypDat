@@ -717,22 +717,35 @@ public sealed partial class MainWindow : Window
     private void EnsureHoverVideoClickThrough(MediaPlayer player)
     {
         var hwnd = player.Hwnd;
-        if (hwnd == IntPtr.Zero || hwnd == _hoverVideoSubclassedHwnd) return;
+        if (hwnd == _hoverVideoSubclassedHwnd)
+        {
+            AppLog.Info($"Hover preview click-through: hwnd={hwnd} already subclassed.");
+            return;
+        }
+
+        if (hwnd == IntPtr.Zero)
+        {
+            AppLog.Info("Hover preview click-through: player.Hwnd is zero, skipping subclass this time.");
+            return;
+        }
 
         _hoverVideoWndProc = (hWnd, msg, wParam, lParam) =>
             msg == WM_NCHITTEST
                 ? (IntPtr)HTTRANSPARENT
                 : CallWindowProc(_hoverVideoOriginalWndProc, hWnd, msg, wParam, lParam);
 
-        _hoverVideoOriginalWndProc = SetWindowLongPtr(hwnd, GWLP_WNDPROC, System.Runtime.InteropServices.Marshal.GetFunctionPointerForDelegate(_hoverVideoWndProc));
-        if (_hoverVideoOriginalWndProc == IntPtr.Zero)
+        var previous = SetWindowLongPtr(hwnd, GWLP_WNDPROC, System.Runtime.InteropServices.Marshal.GetFunctionPointerForDelegate(_hoverVideoWndProc));
+        var win32Error = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+        if (previous == IntPtr.Zero)
         {
-            AppLog.Error($"Hover preview click-through subclass failed, hwnd={hwnd}.", new InvalidOperationException("SetWindowLongPtr returned null"));
+            AppLog.Error($"Hover preview click-through subclass failed, hwnd={hwnd}, win32Error={win32Error}.", new InvalidOperationException("SetWindowLongPtr returned null"));
             _hoverVideoWndProc = null;
             return;
         }
 
+        _hoverVideoOriginalWndProc = previous;
         _hoverVideoSubclassedHwnd = hwnd;
+        AppLog.Info($"Hover preview click-through: subclassed hwnd={hwnd}, previousWndProc={previous}.");
     }
 
     private static IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong) =>
