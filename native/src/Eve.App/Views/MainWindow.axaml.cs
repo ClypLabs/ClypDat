@@ -584,6 +584,7 @@ public sealed partial class MainWindow : Window
     private static extern bool GetCursorPos(out Win32Point point);
 
     private Media? _hoverPreviewMedia;
+    private Media? _hoverPreviewMediaPendingDispose;
 
     // A fresh MediaPlayer per hover (and disposing it on every exit) was blocking
     // the UI thread hard enough to trip Windows' "(Not Responding)" state,
@@ -607,12 +608,18 @@ public sealed partial class MainWindow : Window
         try
         {
             var player = EnsureHoverPreviewPlayer();
-            var previousMedia = _hoverPreviewMedia;
+            // Disposing a Media object the instant it's swapped out races LibVLC's own
+            // input thread, which can still be tearing it down when a hover-happy user
+            // fires several swaps in under a second - that race is what crashed the
+            // whole process. Keeping the previous Media alive for one extra swap (i.e.
+            // only disposing what's now two generations stale) gives LibVLC enough of a
+            // buffer before the object goes away.
+            _hoverPreviewMediaPendingDispose?.Dispose();
+            _hoverPreviewMediaPendingDispose = _hoverPreviewMedia;
             var media = new Media(_hoverPreviewLibVlc!, new Uri(clip.Path));
             media.AddOption(":no-audio");
             player.Media = media;
             _hoverPreviewMedia = media;
-            previousMedia?.Dispose();
             var played = player.Play();
             _hoverPreviewClip = clip;
             _hoverPreviewBorder = border;
@@ -673,6 +680,8 @@ public sealed partial class MainWindow : Window
 
         _hoverPreviewMedia?.Dispose();
         _hoverPreviewMedia = null;
+        _hoverPreviewMediaPendingDispose?.Dispose();
+        _hoverPreviewMediaPendingDispose = null;
     }
 
     private void ClipCheckBox_OnClick(object? sender, RoutedEventArgs e)
