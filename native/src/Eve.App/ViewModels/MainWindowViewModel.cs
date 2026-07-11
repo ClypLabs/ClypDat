@@ -145,7 +145,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ExportCodecOption> ExportCodecs { get; }
     public ObservableCollection<string> ExcludedProcesses { get; }
     public ObservableCollection<GameBackendRowViewModel> GameCaptureRows { get; }
-    public ObservableCollection<GameBackendRowViewModel> FilteredGameCaptureRows { get; } = new();
     public ObservableCollection<string> ClipOverlayPositions { get; }
     public ObservableCollection<string> ClipOverlayVolumes { get; }
 
@@ -1233,38 +1232,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ApplyGameSearchFilter();
     }
 
-    // Diffs into FilteredGameCaptureRows instead of Clear()-then-re-Add() so a row
-    // that stays visible across a keystroke keeps the same container instead of
-    // being torn down and rebuilt - a full reset was making per-row state (like the
-    // anti-cheat warning) flicker away while typing in the search box.
+    // Toggles IsVisible per row instead of adding/removing rows from a separate
+    // bound collection - GameCaptureRows itself is always the ItemsControl's
+    // source now, so every row's container (and its Capture Backend ComboBox) is
+    // realized exactly once and never torn down/recreated by the search box.
     private void ApplyGameSearchFilter()
     {
         var query = GameSearchText.Trim();
-        var matches = (string.IsNullOrWhiteSpace(query)
-            ? GameCaptureRows
-            : GameCaptureRows.Where(row => row.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                                            row.ExecutableName.Contains(query, StringComparison.OrdinalIgnoreCase)))
-            .ToList();
-
-        for (var i = FilteredGameCaptureRows.Count - 1; i >= 0; i--)
+        foreach (var row in GameCaptureRows)
         {
-            if (!matches.Contains(FilteredGameCaptureRows[i])) FilteredGameCaptureRows.RemoveAt(i);
-        }
-
-        // matches is always a subsequence of the same fixed sorted GameCaptureRows
-        // order, and so is FilteredGameCaptureRows after the removal pass above -
-        // an item that's already present never needs to be reordered relative to
-        // the others, so a plain forward Insert pass is enough. Deliberately not
-        // using Move() here: it used to be used to relocate an already-present row
-        // back into place, but this ItemsControl tears down and recreates that
-        // row's container on a Move instead of just repositioning it - and the
-        // recreated ComboBox's ItemsSource/SelectedItem bindings could resolve out
-        // of order, leaving the backend dropdown showing blank ("Auto" vanishing)
-        // even though the row's actual selection never changed.
-        for (var i = 0; i < matches.Count; i++)
-        {
-            if (i < FilteredGameCaptureRows.Count && FilteredGameCaptureRows[i] == matches[i]) continue;
-            FilteredGameCaptureRows.Insert(i, matches[i]);
+            row.IsVisible = string.IsNullOrWhiteSpace(query) ||
+                row.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                row.ExecutableName.Contains(query, StringComparison.OrdinalIgnoreCase);
         }
     }
 

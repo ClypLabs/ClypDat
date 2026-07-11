@@ -403,10 +403,10 @@
 
               <Border Height="1" Background="#1B242D" />
 
-              <ItemsControl ItemsSource="{Binding FilteredGameCaptureRows}">
+              <ItemsControl ItemsSource="{Binding GameCaptureRows}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
-                    <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,0,0,8">
+                    <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,0,0,8" IsVisible="{Binding IsVisible}">
                       <StackPanel Spacing="4">
                         <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
                           <StackPanel Spacing="1" VerticalAlignment="Center">
