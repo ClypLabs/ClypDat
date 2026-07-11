@@ -81,10 +81,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("2 Minutes", 120),
             new("3 Minutes", 180),
             new("4 Minutes", 240),
-            new("5 Minutes", 300),
-            new("10 Minutes", 600),
-            new("15 Minutes", 900),
-            new("20 Minutes", 1200)
+            new("5 Minutes", 300)
         };
         ReplayResolutions = new ObservableCollection<ResolutionOption>
         {
@@ -295,13 +292,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (!SetProperty(ref _selectedReplayDurationPreset, value) || value is null) return;
             Settings.ReplayDurationSeconds = value.Seconds;
             OnPropertyChanged();
-            OnPropertyChanged(nameof(ReplayLengthLongCaptureWarning));
             SaveSettings();
         }
     }
-
-    public bool ReplayLengthLongCaptureWarning =>
-        (SelectedReplayDurationPreset?.Seconds ?? 0) >= 600 && !ReplayBackendIsObs;
 
     public ResolutionOption? SelectedReplayResolution
     {
@@ -371,7 +364,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SaveSettings();
             ReplayBackendRestartRequired = !string.Equals(value.Value, _initialReplayBackend, StringComparison.OrdinalIgnoreCase);
             OnPropertyChanged(nameof(ReplayBackendIsObs));
-            OnPropertyChanged(nameof(ReplayLengthLongCaptureWarning));
         }
     }
 
