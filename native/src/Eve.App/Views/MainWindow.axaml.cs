@@ -417,7 +417,7 @@ public sealed partial class MainWindow : Window
                 var notifiedEarly = _replayBuffer is WindowsReplayBuffer;
                 if (notifiedEarly) ShowClipSavedNotification();
 
-                var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder, titleSuffix: autoClipLabel));
+                var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder, titleOverride: autoClipLabel));
                 AppLog.Info($"Replay clip saved: {outputPath}");
                 await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
                 if (!notifiedEarly) ShowClipSavedNotification();

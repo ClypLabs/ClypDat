@@ -124,7 +124,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         }
     }
 
-    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleSuffix = null)
+    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null)
     {
         if (!Directory.Exists(outputFolder)) Directory.CreateDirectory(outputFolder);
 
@@ -139,8 +139,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         StopAudioCaptures();
         var concatPath = Path.Combine(_bufferFolder, $"concat_{Guid.NewGuid():N}.txt");
         var tempVideoPath = Path.Combine(_bufferFolder, $"replay_video_{Guid.NewGuid():N}.mkv");
-        var clipName = config?.GameDisplayName ?? string.Empty;
-        if (!string.IsNullOrWhiteSpace(titleSuffix)) clipName = string.IsNullOrWhiteSpace(clipName) ? titleSuffix : $"{clipName} - {titleSuffix}";
+        var clipName = string.IsNullOrWhiteSpace(titleOverride) ? config?.GameDisplayName ?? string.Empty : titleOverride;
         var outputPath = Path.Combine(outputFolder, ClipFileNaming.BuildFileName(clipName, DateTime.Now, "mkv"));
         await File.WriteAllLinesAsync(
             concatPath,

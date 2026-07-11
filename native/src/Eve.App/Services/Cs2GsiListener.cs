@@ -21,6 +21,7 @@ public sealed class Cs2GsiListener : IDisposable
     private int _lastMatchDeaths;
     private int _lastMatchAssists;
     private int _lastRoundNumber = -1;
+    private string _lastMapName = string.Empty;
 
     public event EventHandler<string>? AutoClipTriggered;
 
@@ -131,6 +132,13 @@ public sealed class Cs2GsiListener : IDisposable
             _lastRoundKillHs = 0;
         }
 
+        if (root.TryGetProperty("map", out var mapElement) &&
+            mapElement.TryGetProperty("name", out var mapNameElement) &&
+            mapNameElement.GetString() is { Length: > 0 } mapName)
+        {
+            _lastMapName = mapName;
+        }
+
         var state = player.TryGetProperty("state", out var stateElement) ? stateElement : default;
         var matchStats = player.TryGetProperty("match_stats", out var statsElement) ? statsElement : default;
 
@@ -191,13 +199,55 @@ public sealed class Cs2GsiListener : IDisposable
 
         if (assists.HasValue) _lastMatchAssists = assists.Value;
 
-        if (label is not null) AutoClipTriggered?.Invoke(this, label);
+        if (label is not null)
+        {
+            var mapDisplayName = FormatMapName(_lastMapName);
+            var title = string.IsNullOrEmpty(mapDisplayName) ? label : $"{label} - {mapDisplayName}";
+            AutoClipTriggered?.Invoke(this, title);
+        }
     }
 
     private static int? GetInt(JsonElement parent, string name) =>
         parent.ValueKind == JsonValueKind.Object && parent.TryGetProperty(name, out var element) && element.TryGetInt32(out var value)
             ? value
             : null;
+
+    // CS2's GSI map name is the internal codename ("de_inferno"), not the name
+    // players actually call it ("Inferno") - matches how Medal titles its own
+    // CS2 auto-clips (e.g. "4K - Inferno").
+    private static readonly Dictionary<string, string> KnownMapNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["de_dust2"] = "Dust II",
+        ["de_inferno"] = "Inferno",
+        ["de_mirage"] = "Mirage",
+        ["de_nuke"] = "Nuke",
+        ["de_overpass"] = "Overpass",
+        ["de_vertigo"] = "Vertigo",
+        ["de_ancient"] = "Ancient",
+        ["de_anubis"] = "Anubis",
+        ["de_train"] = "Train",
+        ["de_cache"] = "Cache",
+        ["cs_office"] = "Office",
+        ["cs_italy"] = "Italy"
+    };
+
+    private static string FormatMapName(string rawMapName)
+    {
+        if (string.IsNullOrWhiteSpace(rawMapName)) return string.Empty;
+        if (KnownMapNames.TryGetValue(rawMapName, out var known)) return known;
+
+        var cleaned = rawMapName;
+        foreach (var prefix in new[] { "de_", "cs_", "ar_", "gd_" })
+        {
+            if (cleaned.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                cleaned = cleaned[prefix.Length..];
+                break;
+            }
+        }
+
+        return cleaned.Length == 0 ? string.Empty : char.ToUpperInvariant(cleaned[0]) + cleaned[1..];
+    }
 
     public void Dispose() => Stop();
 }

@@ -101,7 +101,7 @@ public sealed class ObsReplayBuffer : IReplayBuffer
         return Task.CompletedTask;
     }
 
-    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleSuffix = null)
+    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null)
     {
         if (!IsRecording) throw new InvalidOperationException("OBS replay buffer is not running.");
         var warmupRemaining = HookWarmup - (DateTime.UtcNow - _startedAtUtc);
@@ -115,20 +115,19 @@ public sealed class ObsReplayBuffer : IReplayBuffer
         if (string.IsNullOrWhiteSpace(output)) throw new InvalidOperationException("OBS replay backend returned no output path.");
         AppLog.Info($"OBS replay saved: {output}.");
         output = await ClipMetadataTagger.TagCaptureBackendAsync(output, "OBS", cancellationToken);
-        if (!string.IsNullOrWhiteSpace(titleSuffix)) output = AppendTitleSuffix(output, titleSuffix);
+        if (!string.IsNullOrWhiteSpace(titleOverride)) output = ApplyTitleOverride(output, titleOverride);
         return output;
     }
 
-    // OBS names the file itself when it saves the replay buffer, so the auto-clip
-    // event label (e.g. "Ace") can only be applied by renaming after the fact.
-    internal static string AppendTitleSuffix(string path, string suffix)
+    // OBS names the file itself when it saves the replay buffer, so a title
+    // override (e.g. "4K - Inferno") can only be applied by renaming after the fact.
+    internal static string ApplyTitleOverride(string path, string title)
     {
         try
         {
             var directory = Path.GetDirectoryName(path) ?? string.Empty;
-            var name = Path.GetFileNameWithoutExtension(path);
             var extension = Path.GetExtension(path);
-            var renamed = Path.Combine(directory, $"{name} - {suffix}{extension}");
+            var renamed = Path.Combine(directory, $"{ClipFileNaming.BuildBaseName(title)} {DateTime.Now:yyyy-MM-dd HH-mm-ss}{extension}");
             File.Move(path, renamed);
             return renamed;
         }
