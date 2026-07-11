@@ -810,6 +810,18 @@ public sealed partial class MainWindow : Window
         if (ViewModel is not null) ViewModel.Cs2AllKillsExpanded = !ViewModel.Cs2AllKillsExpanded;
     }
 
+    private void ScanMedalButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel?.ScanForMedalClips();
+    }
+
+    private async void ImportMedalButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        await EnsureLibraryFolderAsync();
+        await ViewModel.ImportSelectedMedalClipsAsync();
+    }
+
     private void AddCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;

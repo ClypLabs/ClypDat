@@ -32,6 +32,8 @@ public sealed class AppSettings
     public bool EnableClipOverlaySound { get; set; } = true;
     public List<GameCaptureOverride> GameCaptureOverrides { get; set; } = new();
     public Cs2AutoClipSettings Cs2AutoClip { get; set; } = new();
+    public bool MedalImportStripEmoji { get; set; } = true;
+    public bool MedalImportCopyNotMove { get; set; } = true;
 }
 
 public sealed class ClipEditSettings

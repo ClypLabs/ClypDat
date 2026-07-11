@@ -207,6 +207,7 @@
             <TextBlock Text="GENERAL" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" Margin="14,0,0,14" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=General}" Tag="General" Content="General" Click="SettingsNavButton_OnClick" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Detection}" Tag="Game Detection" Content="Game Detection" Click="SettingsNavButton_OnClick" />
+            <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Import from Medal}" Tag="Import from Medal" Content="Import from Medal" Click="SettingsNavButton_OnClick" />
 
             <TextBlock Text="CAPTURE" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" Margin="14,20,0,14" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Replay Buffer}" Tag="Replay Buffer" Content="Replay Buffer" Click="SettingsNavButton_OnClick" />
@@ -441,6 +442,58 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
+            </StackPanel>
+
+            <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Import from Medal}">
+              <StackPanel Spacing="4">
+                <TextBlock Text="IMPORT FROM MEDAL" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
+                <TextBlock Text="Finds clips Medal has recorded locally and copies (or moves) them into your EVE library, keeping Medal's own clip titles." Foreground="#93A6B8" TextWrapping="Wrap" />
+              </StackPanel>
+              <Border Height="1" Background="#1B242D" />
+
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="Strip emoji from titles" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" />
+                <ToggleSwitch Grid.Column="1" IsChecked="{Binding MedalImportStripEmoji}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+              </Grid>
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Spacing="2">
+                  <TextBlock Text="Copy instead of move" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" />
+                  <TextBlock Text="On: Medal keeps its own copy. Off: clips are removed from Medal once imported." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                </StackPanel>
+                <ToggleSwitch Grid.Column="1" IsChecked="{Binding MedalImportCopyNotMove}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+              </Grid>
+
+              <Border Height="1" Background="#1B242D" />
+
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                <TextBlock Text="{Binding MedalScanStatusText}" Foreground="#93A6B8" VerticalAlignment="Center" TextWrapping="Wrap" />
+                <Button Grid.Column="1" Content="Scan for Medal Clips" Click="ScanMedalButton_OnClick" IsEnabled="{Binding !MedalImportInProgress}" />
+              </Grid>
+
+              <StackPanel IsVisible="{Binding MedalImportInProgress}" Spacing="6">
+                <ProgressBar Minimum="0" Maximum="100" Value="{Binding MedalImportProgressPercent}" Height="8" />
+                <TextBlock Text="{Binding MedalImportStatusText}" Foreground="#6B7C8C" FontSize="12" />
+              </StackPanel>
+              <TextBlock Text="{Binding MedalImportStatusText}" Foreground="#6B7C8C" FontSize="12" IsVisible="{Binding !MedalImportInProgress}" />
+
+              <ItemsControl ItemsSource="{Binding MedalImportRows}" IsVisible="{Binding MedalScanned}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10" Margin="0,0,0,8">
+                      <CheckBox IsChecked="{Binding IsSelected}" VerticalAlignment="Center" />
+                      <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding RawTitle}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" />
+                        <TextBlock Foreground="#6B7C8C" FontSize="11">
+                          <Run Text="{Binding GameFolderName}" /><Run Text=" · " /><Run Text="{Binding CreatedAtLocal}" />
+                        </TextBlock>
+                      </StackPanel>
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
+              <Button Content="Import Selected" Click="ImportMedalButton_OnClick" HorizontalAlignment="Left"
+                      IsVisible="{Binding MedalScanned}" IsEnabled="{Binding !MedalImportInProgress}" />
             </StackPanel>
 
             <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Auto-Clip}">

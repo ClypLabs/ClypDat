@@ -565,6 +565,148 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public ObservableCollection<MedalImportRowViewModel> MedalImportRows { get; } = new();
+
+    private bool _medalScanned;
+
+    public bool MedalScanned
+    {
+        get => _medalScanned;
+        set => SetProperty(ref _medalScanned, value);
+    }
+
+    private string _medalScanStatusText = string.Empty;
+
+    public string MedalScanStatusText
+    {
+        get => _medalScanStatusText;
+        set => SetProperty(ref _medalScanStatusText, value);
+    }
+
+    private bool _medalImportInProgress;
+
+    public bool MedalImportInProgress
+    {
+        get => _medalImportInProgress;
+        set => SetProperty(ref _medalImportInProgress, value);
+    }
+
+    private double _medalImportProgressPercent;
+
+    public double MedalImportProgressPercent
+    {
+        get => _medalImportProgressPercent;
+        set => SetProperty(ref _medalImportProgressPercent, value);
+    }
+
+    private string _medalImportStatusText = string.Empty;
+
+    public string MedalImportStatusText
+    {
+        get => _medalImportStatusText;
+        set => SetProperty(ref _medalImportStatusText, value);
+    }
+
+    public bool MedalImportStripEmoji
+    {
+        get => Settings.MedalImportStripEmoji;
+        set { Settings.MedalImportStripEmoji = value; OnPropertyChanged(); SaveSettings(); }
+    }
+
+    public bool MedalImportCopyNotMove
+    {
+        get => Settings.MedalImportCopyNotMove;
+        set { Settings.MedalImportCopyNotMove = value; OnPropertyChanged(); SaveSettings(); }
+    }
+
+    public void ScanForMedalClips()
+    {
+        MedalImportRows.Clear();
+        IReadOnlyList<MedalClipRecord> found;
+        try
+        {
+            found = MedalImportService.ScanForClips();
+        }
+        catch (Exception error)
+        {
+            MedalScanStatusText = $"Scan failed: {error.Message}";
+            MedalScanned = true;
+            return;
+        }
+
+        foreach (var record in found.OrderByDescending(record => record.CreatedAtUtc))
+        {
+            MedalImportRows.Add(new MedalImportRowViewModel(record));
+        }
+
+        MedalScanStatusText = found.Count switch
+        {
+            0 => "No Medal clips found.",
+            1 => "1 Medal clip found.",
+            _ => $"{found.Count} Medal clips found."
+        };
+        MedalScanned = true;
+    }
+
+    public async Task ImportSelectedMedalClipsAsync()
+    {
+        var selected = MedalImportRows.Where(row => row.IsSelected).ToList();
+        if (selected.Count == 0) return;
+
+        MedalImportInProgress = true;
+        MedalImportProgressPercent = 0;
+        var libraryFolder = Settings.LibraryFolder;
+        var imported = 0;
+        var failed = 0;
+
+        try
+        {
+            for (var i = 0; i < selected.Count; i++)
+            {
+                var row = selected[i];
+                MedalImportStatusText = $"Importing {i + 1} of {selected.Count}: {row.RawTitle}";
+                try
+                {
+                    var title = MedalImportStripEmoji ? MedalImportService.StripEmoji(row.RawTitle) : row.RawTitle;
+                    if (string.IsNullOrWhiteSpace(title)) title = row.GameFolderName;
+                    var extension = Path.GetExtension(row.Record.VideoPath).TrimStart('.');
+                    var fileName = ClipFileNaming.BuildFileName(title, row.CreatedAtLocal, extension);
+                    var destinationPath = Path.Combine(libraryFolder, fileName);
+
+                    await Task.Run(() =>
+                    {
+                        if (MedalImportCopyNotMove)
+                        {
+                            File.Copy(row.Record.VideoPath, destinationPath, overwrite: false);
+                        }
+                        else
+                        {
+                            File.Move(row.Record.VideoPath, destinationPath);
+                        }
+                    });
+
+                    await AddOrUpdateLibraryClipAsync(destinationPath);
+                    imported++;
+                    MedalImportRows.Remove(row);
+                }
+                catch (Exception error)
+                {
+                    AppLog.Error($"Medal import failed for {row.Record.VideoPath}", error);
+                    failed++;
+                }
+
+                MedalImportProgressPercent = (i + 1) * 100.0 / selected.Count;
+            }
+        }
+        finally
+        {
+            MedalImportInProgress = false;
+            MedalImportStatusText = failed == 0
+                ? $"Imported {imported} clip{(imported == 1 ? "" : "s")}."
+                : $"Imported {imported}, {failed} failed - see logs.";
+        }
+    }
+
     public bool LaunchOnWindowsStartup
     {
         get => Settings.LaunchOnWindowsStartup;
