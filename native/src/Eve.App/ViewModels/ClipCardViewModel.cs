@@ -49,6 +49,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     public bool IsAutoClip => !string.IsNullOrWhiteSpace(_clipInfo?.AutoClipEventType);
     public string TileTopLabel => IsAutoClip ? (_clipInfo!.GameDisplayName ?? GameNameLabel) : GameNameLabel;
     public string TileMainLabel => IsAutoClip ? GameNameLabel : ClipFromLabel;
+    public string AutoClipEventTypeLabel => _clipInfo?.AutoClipEventType ?? string.Empty;
 
     private static readonly (string Prefix, IBrush Fill)[] AutoClipIconStyles =
     {
@@ -193,6 +194,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasAutoClipIcon));
         OnPropertyChanged(nameof(AutoClipIconGeometry));
         OnPropertyChanged(nameof(AutoClipIconFill));
+        OnPropertyChanged(nameof(AutoClipEventTypeLabel));
     }
 
     private void SetPreviewImage(string path)

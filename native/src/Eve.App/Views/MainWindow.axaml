@@ -170,17 +170,6 @@
                                         CornerRadius="18">
                                   <TextBlock Text="{Binding DurationLabel}" Foreground="#D8E2EE" FontSize="14" FontWeight="Bold" />
                                 </Border>
-                                <Border HorizontalAlignment="Right"
-                                        VerticalAlignment="Bottom"
-                                        Margin="0,0,12,12"
-                                        Width="30"
-                                        Height="30"
-                                        Background="#1A2530"
-                                        CornerRadius="15"
-                                        IsVisible="{Binding HasAutoClipIcon}"
-                                        ToolTip.Tip="{Binding TileTopLabel}">
-                                  <Path Data="{Binding AutoClipIconGeometry}" Fill="{Binding AutoClipIconFill}" Width="15" Height="15" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                </Border>
                                 <CheckBox HorizontalAlignment="Left"
                                           VerticalAlignment="Top"
                                           Margin="14"
@@ -192,6 +181,11 @@
 
                             <Border Grid.Row="1" Background="#1E2A35">
                               <StackPanel Spacing="6" Margin="16,13,16,13">
+                                <Border Width="22" Height="22" Background="#1A2530" CornerRadius="11" HorizontalAlignment="Left"
+                                        IsVisible="{Binding HasAutoClipIcon}"
+                                        ToolTip.Tip="{Binding AutoClipEventTypeLabel}">
+                                  <Path Data="{Binding AutoClipIconGeometry}" Fill="{Binding AutoClipIconFill}" Width="11" Height="11" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
                                 <TextBlock Text="{Binding TileTopLabel}"
                                            Foreground="#8C98A7"
                                            FontSize="12"
