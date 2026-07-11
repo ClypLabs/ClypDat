@@ -305,6 +305,24 @@ public sealed class PlaybackSession : IDisposable
         }
     }
 
+    public void EnsurePausedIfNeeded()
+    {
+        // Mirrors the _shouldPlay-vs-VideoPlayer.IsPlaying race already fixed in
+        // SyncAndPlayMixedAudio: a seek issued while paused/ended has to force
+        // VideoPlayer.Play() first (LibVLC ignores seeks on a stopped/ended
+        // player), then immediately calls SetPause(true) to put it back - but
+        // that SetPause can silently not land if it races the seek's own async
+        // state transition, leaving video rolling from the seek point while
+        // audio (which stops synchronously) correctly stays silent. Called every
+        // UI tick as a corrective check so a missed pause self-heals quickly
+        // instead of requiring another user action.
+        if (_shouldPlay) return;
+        lock (_transportLock)
+        {
+            if (VideoPlayer.IsPlaying) VideoPlayer.SetPause(true);
+        }
+    }
+
     public void SyncAudioStreams()
     {
         if (_isSeeking || !_shouldPlay || _audioOutput is null || !VideoPlayer.IsPlaying) return;

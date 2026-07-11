@@ -1274,6 +1274,7 @@ public sealed partial class MainWindow : Window
         {
             ViewModel.CurrentTime = _playback.Position;
             SetPlayheadBase(ViewModel.CurrentTime);
+            _playback.EnsurePausedIfNeeded();
         }
         UpdateTimelineChrome();
         if (ViewModel.TrimEnd > TimeSpan.Zero && ViewModel.CurrentTime >= ViewModel.TrimEnd)
