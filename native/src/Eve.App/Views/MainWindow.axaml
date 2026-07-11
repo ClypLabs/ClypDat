@@ -166,25 +166,30 @@
                               </Grid>
                             </Border>
 
-                            <StackPanel Grid.Row="1" Spacing="7" Margin="16,14,16,10">
-                              <TextBlock Text="{Binding Name}"
-                                         Foreground="#D2DEEC"
-                                         FontSize="15"
-                                         FontWeight="Bold"
-                                         TextTrimming="CharacterEllipsis" />
-                              <StackPanel Orientation="Horizontal" Spacing="6">
-                                <TextBlock Text="TIME" Foreground="#8C98A7" FontSize="12" FontWeight="Bold" />
-                                <TextBlock Text="{Binding DateLabel}"
-                                           Foreground="#8C98A7"
-                                           FontSize="12"
-                                           FontWeight="Bold" />
+                            <Border Grid.Row="1" Background="#1E2A35">
+                              <StackPanel Spacing="6" Margin="16,13,16,12">
+                                <TextBlock Text="{Binding Name}"
+                                           Foreground="#EDF4FB"
+                                           FontSize="15"
+                                           FontWeight="Bold"
+                                           TextTrimming="CharacterEllipsis"
+                                           ToolTip.Tip="{Binding Name}" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                  <TextBlock Text="&#128337;" FontSize="11" Opacity="0.8" VerticalAlignment="Center" />
+                                  <TextBlock Text="{Binding RelativeDateLabel}"
+                                             Foreground="#8C98A7"
+                                             FontSize="12"
+                                             FontWeight="SemiBold"
+                                             VerticalAlignment="Center" />
+                                  <TextBlock Text="{Binding CaptureBackendLabel}"
+                                             Foreground="#5C6D7E"
+                                             FontSize="11"
+                                             IsVisible="{Binding HasCaptureBackendLabel}"
+                                             TextTrimming="CharacterEllipsis"
+                                             VerticalAlignment="Center" />
+                                </StackPanel>
                               </StackPanel>
-                              <TextBlock Text="{Binding CaptureBackendLabel}"
-                                         Foreground="#6B7C8C"
-                                         FontSize="11"
-                                         IsVisible="{Binding HasCaptureBackendLabel}"
-                                         TextTrimming="CharacterEllipsis" />
-                            </StackPanel>
+                            </Border>
                           </Grid>
                           </Border>
                         </Border>

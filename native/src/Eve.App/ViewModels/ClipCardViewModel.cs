@@ -26,6 +26,23 @@ public sealed class ClipCardViewModel : ViewModelBase
     public TimeSpan Duration => Media.Duration;
     public long SizeBytes => Media.SizeBytes;
     public string DateLabel => CreatedAt.ToString("MMM d, yyyy h:mm tt");
+
+    // Relative for anything recent (matches how Medal/most clip tools show it -
+    // "9 days ago" scans faster than a timestamp), falls back to an absolute date
+    // once it's old enough that "X ago" stops being useful at a glance.
+    public string RelativeDateLabel
+    {
+        get
+        {
+            var age = DateTimeOffset.Now - CreatedAt;
+            if (age < TimeSpan.Zero) age = TimeSpan.Zero;
+            if (age.TotalMinutes < 1) return "Just now";
+            if (age.TotalMinutes < 60) return $"{(int)age.TotalMinutes} min{((int)age.TotalMinutes == 1 ? "" : "s")} ago";
+            if (age.TotalHours < 24) return $"{(int)age.TotalHours} hour{((int)age.TotalHours == 1 ? "" : "s")} ago";
+            if (age.TotalDays < 30) return $"{(int)age.TotalDays} day{((int)age.TotalDays == 1 ? "" : "s")} ago";
+            return CreatedAt.ToString("MMM d, yyyy");
+        }
+    }
     public string DurationLabel => Duration > TimeSpan.Zero ? Duration.ToString("m\\:ss") : "0:00";
     public string GameLabel => "VIDEO";
     public string CaptureBackendLabel => string.IsNullOrWhiteSpace(Media.CaptureBackend) ? string.Empty : $"Captured with: {Media.CaptureBackend}";
@@ -83,6 +100,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(Duration));
         OnPropertyChanged(nameof(SizeBytes));
         OnPropertyChanged(nameof(DateLabel));
+        OnPropertyChanged(nameof(RelativeDateLabel));
         OnPropertyChanged(nameof(DurationLabel));
         OnPropertyChanged(nameof(CaptureBackendLabel));
         OnPropertyChanged(nameof(HasCaptureBackendLabel));
