@@ -5,7 +5,7 @@ public sealed class AppSettings
     public string LibraryFolder { get; set; } = string.Empty;
     public int ReplayDurationSeconds { get; set; } = 60;
     public string ReplayQualityPreset { get; set; } = "Balanced";
-    public int ReplayFrameRate { get; set; } = 30;
+    public int ReplayFrameRate { get; set; } = 60;
     public int ReplayMaxHeight { get; set; } = 1080;
     public string ReplayBackend { get; set; } = "Auto";
     public string ExportVideoCodec { get; set; } = "H.264";

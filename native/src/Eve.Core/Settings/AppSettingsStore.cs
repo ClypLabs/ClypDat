@@ -21,7 +21,7 @@ public static class AppSettingsStore
             settings.ClipEdits ??= new Dictionary<string, ClipEditSettings>(StringComparer.OrdinalIgnoreCase);
             settings.GameAudioExcludedProcesses ??= new List<string>();
             if (string.IsNullOrWhiteSpace(settings.ReplayQualityPreset)) settings.ReplayQualityPreset = "Balanced";
-            if (settings.ReplayFrameRate <= 0) settings.ReplayFrameRate = 30;
+            if (settings.ReplayFrameRate <= 0) settings.ReplayFrameRate = 60;
             if (settings.ReplayMaxHeight <= 0) settings.ReplayMaxHeight = 1080;
             if (string.IsNullOrWhiteSpace(settings.ExportVideoCodec)) settings.ExportVideoCodec = "H.264";
             settings.ChatAudioProcessName ??= string.Empty;
