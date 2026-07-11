@@ -128,6 +128,27 @@
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="7" />
   </Style>
+  <Style Selector="Button.settingsNavButton">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="#93A6B8" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="Padding" Value="14,9" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+  </Style>
+  <Style Selector="Button.settingsNavButton:pointerover">
+    <Setter Property="Background" Value="#182029" />
+    <Setter Property="Foreground" Value="#D8E4F2" />
+  </Style>
+  <Style Selector="Button.settingsNavButton.active">
+    <Setter Property="Background" Value="#1D2A36" />
+    <Setter Property="Foreground" Value="#EDF4FB" />
+  </Style>
+  <Style Selector="Button.settingsNavButton.active:pointerover">
+    <Setter Property="Background" Value="#1D2A36" />
+  </Style>
   <Style Selector="Slider.volumeSlider /template/ Thumb">
     <Setter Property="Width" Value="14" />
     <Setter Property="Height" Value="18" />

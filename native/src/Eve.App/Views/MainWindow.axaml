@@ -3,6 +3,7 @@
         xmlns:vlc="using:LibVLCSharp.Avalonia"
         xmlns:vm="using:Eve.App.ViewModels"
         xmlns:controls="using:Eve.App.Controls"
+        xmlns:conv="using:Avalonia.Data.Converters"
         x:Class="Eve.App.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="EVE"
@@ -199,14 +200,26 @@
     </Border>
 
     <Border Grid.Row="1" Background="#101820" IsVisible="{Binding IsSettingsVisible}">
-      <ScrollViewer>
-        <StackPanel Margin="32,28" Spacing="22" MaxWidth="860">
-          <TextBlock Text="Settings" Foreground="#EDF4FB" FontSize="26" FontWeight="Bold" />
+      <Grid ColumnDefinitions="220,*">
+        <Border Grid.Column="0" Background="#0D1116" BorderBrush="#1E2A33" BorderThickness="0,0,1,0">
+          <StackPanel Margin="16,24" Spacing="2">
+            <TextBlock Text="SETTINGS" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" Margin="14,0,0,14" />
+            <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Replay Buffer}" Tag="Replay Buffer" Content="Replay Buffer" Click="SettingsNavButton_OnClick" />
+            <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Clip Notifications}" Tag="Clip Notifications" Content="Clip Notifications" Click="SettingsNavButton_OnClick" />
+            <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Startup}" Tag="Startup" Content="Startup" Click="SettingsNavButton_OnClick" />
+            <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Library}" Tag="Library" Content="Library" Click="SettingsNavButton_OnClick" />
+            <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Audio}" Tag="Audio" Content="Audio" Click="SettingsNavButton_OnClick" />
+            <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Audio Exclusions}" Tag="Game Audio Exclusions" Content="Game Audio Exclusions" Click="SettingsNavButton_OnClick" />
+            <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Diagnostics}" Tag="Diagnostics" Content="Diagnostics" Click="SettingsNavButton_OnClick" />
+          </StackPanel>
+        </Border>
 
-          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="12" Padding="18">
-            <StackPanel Spacing="14">
-              <TextBlock Text="Replay Buffer" Foreground="#C4D0DF" FontWeight="Bold" />
-              <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="12" ColumnSpacing="16">
+        <ScrollViewer Grid.Column="1">
+          <StackPanel Margin="28,22" Spacing="16" MaxWidth="640">
+
+            <StackPanel Spacing="8" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Replay Buffer}">
+              <TextBlock Text="Replay Buffer" Foreground="#EDF4FB" FontSize="22" FontWeight="Bold" />
+              <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="8" ColumnSpacing="16">
                 <TextBlock Text="Save hotkey" Foreground="#93A6B8" VerticalAlignment="Center" />
                 <Button Grid.Column="1" Content="{Binding HotkeyDisplay}" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Left" MinWidth="180" />
                 <TextBlock Grid.Row="1" Text="Replay length" Foreground="#93A6B8" VerticalAlignment="Center" />
@@ -239,39 +252,31 @@
                 <CheckBox Grid.Row="5" Grid.ColumnSpan="2" Content="Start replay buffer when EVE opens" IsChecked="{Binding StartReplayOnLaunch}" />
               </Grid>
             </StackPanel>
-          </Border>
 
-          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="12" Padding="18">
-            <StackPanel Spacing="14">
-              <TextBlock Text="Clip Notifications" Foreground="#C4D0DF" FontWeight="Bold" />
-              <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto" RowSpacing="12" ColumnSpacing="16">
+            <StackPanel Spacing="8" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Clip Notifications}">
+              <TextBlock Text="Clip Notifications" Foreground="#EDF4FB" FontSize="22" FontWeight="Bold" />
+              <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto" RowSpacing="8" ColumnSpacing="16">
                 <TextBlock Text="Overlay position" Foreground="#93A6B8" VerticalAlignment="Center" />
                 <ComboBox Grid.Column="1" Classes="settingsInput" ItemsSource="{Binding ClipOverlayPositions}" SelectedItem="{Binding SelectedClipOverlayPosition}" Width="160" HorizontalAlignment="Left" />
                 <TextBlock Grid.Row="1" Text="Sound volume" Foreground="#93A6B8" VerticalAlignment="Center" />
                 <ComboBox Grid.Row="1" Grid.Column="1" Classes="settingsInput" ItemsSource="{Binding ClipOverlayVolumes}" SelectedItem="{Binding SelectedClipOverlayVolume}" Width="160" HorizontalAlignment="Left" />
               </Grid>
             </StackPanel>
-          </Border>
 
-          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="12" Padding="18">
-            <StackPanel Spacing="14">
-              <TextBlock Text="Startup" Foreground="#C4D0DF" FontWeight="Bold" />
+            <StackPanel Spacing="8" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Startup}">
+              <TextBlock Text="Startup" Foreground="#EDF4FB" FontSize="22" FontWeight="Bold" />
               <CheckBox Content="Launch EVE on Windows boot" IsChecked="{Binding LaunchOnWindowsStartup}" />
               <CheckBox Content="Start minimized on boot" IsChecked="{Binding StartMinimizedToTray}" />
             </StackPanel>
-          </Border>
 
-          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="12" Padding="18">
-            <StackPanel Spacing="14">
-              <TextBlock Text="Library" Foreground="#C4D0DF" FontWeight="Bold" />
+            <StackPanel Spacing="8" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Library}">
+              <TextBlock Text="Library" Foreground="#EDF4FB" FontSize="22" FontWeight="Bold" />
               <CheckBox Content="Play a video preview when hovering over a clip" IsChecked="{Binding EnableClipHoverPreview}" />
             </StackPanel>
-          </Border>
 
-          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="12" Padding="18">
-            <StackPanel Spacing="14">
-              <TextBlock Text="Audio" Foreground="#C4D0DF" FontWeight="Bold" />
-              <Grid ColumnDefinitions="220,*,Auto" RowDefinitions="Auto,Auto" RowSpacing="12" ColumnSpacing="16">
+            <StackPanel Spacing="8" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Audio}">
+              <TextBlock Text="Audio" Foreground="#EDF4FB" FontSize="22" FontWeight="Bold" />
+              <Grid ColumnDefinitions="220,*,Auto" RowDefinitions="Auto,Auto" RowSpacing="8" ColumnSpacing="16">
                 <TextBlock Text="Chat Audio App" Foreground="#93A6B8" VerticalAlignment="Center" />
                 <ComboBox Grid.Column="1" Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedChatProcess}" MaxWidth="520" />
                 <Button Grid.Column="2" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
@@ -279,11 +284,9 @@
                 <ComboBox Grid.Row="1" Grid.Column="1" Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" MaxWidth="520" />
               </Grid>
             </StackPanel>
-          </Border>
 
-          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="12" Padding="18">
-            <StackPanel Spacing="14">
-              <TextBlock Text="Game Audio Exclusions" Foreground="#C4D0DF" FontWeight="Bold" />
+            <StackPanel Spacing="8" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Audio Exclusions}">
+              <TextBlock Text="Game Audio Exclusions" Foreground="#EDF4FB" FontSize="22" FontWeight="Bold" />
               <TextBlock Text="Apps here are removed from Game Audio. Chat Audio captures the selected app above." Foreground="#718296" />
               <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
                 <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedProcessExclusion}" />
@@ -305,16 +308,15 @@
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
             </StackPanel>
-          </Border>
 
-          <Border Background="#141D24" BorderBrush="#25323D" BorderThickness="1" CornerRadius="12" Padding="18">
-            <StackPanel Spacing="14">
-              <TextBlock Text="Diagnostics" Foreground="#C4D0DF" FontWeight="Bold" />
+            <StackPanel Spacing="8" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Diagnostics}">
+              <TextBlock Text="Diagnostics" Foreground="#EDF4FB" FontSize="22" FontWeight="Bold" />
               <Button Content="Open Logs" Click="OpenLogsButton_OnClick" HorizontalAlignment="Left" />
             </StackPanel>
-          </Border>
-        </StackPanel>
-      </ScrollViewer>
+
+          </StackPanel>
+        </ScrollViewer>
+      </Grid>
     </Border>
 
     <Grid Grid.Row="1" RowDefinitions="*,320" IsVisible="{Binding IsEditorVisible}">

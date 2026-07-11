@@ -715,6 +715,14 @@ public sealed partial class MainWindow : Window
         ViewModel?.CloseSettings();
     }
 
+    private void SettingsNavButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string section } && ViewModel is not null)
+        {
+            ViewModel.SelectSettingsSection(section);
+        }
+    }
+
     private void OpenLogsButton_OnClick(object? sender, RoutedEventArgs e)
     {
         AppLog.OpenFolder();

@@ -17,6 +17,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isReplayRecording;
     private bool _isEditorVisible;
     private bool _isSettingsVisible;
+    private string _selectedSettingsSection = "Replay Buffer";
     private bool _wasEditorVisibleBeforeSettings;
     private bool _isCapturingHotkey;
     private AudioDeviceOption? _selectedChatAudioDevice;
@@ -250,6 +251,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public bool IsLibraryVisible => !IsEditorVisible && !IsSettingsVisible;
+
+    public string SelectedSettingsSection
+    {
+        get => _selectedSettingsSection;
+        set => SetProperty(ref _selectedSettingsSection, value);
+    }
+
+    public void SelectSettingsSection(string section) => SelectedSettingsSection = section;
 
     public bool IsCapturingHotkey
     {
@@ -809,6 +818,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _wasEditorVisibleBeforeSettings = IsEditorVisible;
         IsEditorVisible = false;
         IsSettingsVisible = true;
+        SelectedSettingsSection = "Replay Buffer";
     }
 
     public void CloseSettings()

@@ -344,12 +344,13 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
     private void StartAudioCaptures(ReplayBufferConfig config)
     {
-        var routes = ResolveAudioRoutes(config);
+        using var enumerator = new MMDeviceEnumerator();
+        var resolvedMicDeviceId = ResolveMicrophoneDeviceId(enumerator, config.MicrophoneDeviceId);
+        var routes = ResolveAudioRoutes(config, resolvedMicDeviceId);
         _audioRouteKey = routes.RouteKey;
         AppLog.Info(
             $"Audio route resolved: chat='{config.ChatAudioProcessName}', chatPids={FormatIds(routes.ChatProcessIds)}, exclusions='{string.Join(",", config.GameAudioExcludedProcesses)}', excludedPids={FormatIds(routes.ExcludedProcessIds)}, gamePids={FormatIds(routes.GameProcessIds)}.");
-        using var enumerator = new MMDeviceEnumerator();
-        StopStaleAudioCaptures(routes);
+        StopStaleAudioCaptures(routes, resolvedMicDeviceId);
         if (routes.UseProcessRouting)
         {
             foreach (var pid in routes.GameProcessIds)
@@ -400,13 +401,10 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
         try
         {
-            if (!HasLiveCapture(AudioCaptureKind.Microphone, null))
+            if (!HasLiveCapture(AudioCaptureKind.Microphone, null) && !string.IsNullOrEmpty(resolvedMicDeviceId))
             {
-                var micDevice = ResolveMicrophoneDevice(enumerator, config.MicrophoneDeviceId);
-                if (micDevice is not null)
-                {
-                    StartMicrophoneCapture(micDevice, "Microphone");
-                }
+                var micDevice = enumerator.GetDevice(resolvedMicDeviceId);
+                StartMicrophoneCapture(micDevice, "Microphone");
             }
         }
         catch (Exception error)
@@ -717,21 +715,33 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         AppLog.Info($"Audio capture started: {title}, pid={processId}, mode={mode}.");
     }
 
-    private static MMDevice? ResolveMicrophoneDevice(MMDeviceEnumerator enumerator, string microphoneDeviceId)
+    // Resolves to the actual endpoint ID (not the "default" sentinel) so the caller can
+    // detect a live default-device swap (e.g. user changes default mic in Windows Sound
+    // settings) by comparing this against the device ID the running capture was opened
+    // with - WASAPI capture stays bound to whatever device it started on and never
+    // follows the system default on its own.
+    private static string ResolveMicrophoneDeviceId(MMDeviceEnumerator enumerator, string microphoneDeviceId)
     {
         if (string.IsNullOrWhiteSpace(microphoneDeviceId) || microphoneDeviceId == AudioDeviceOption.DefaultDeviceId)
         {
             try
             {
-                return enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
+                return enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications).ID;
             }
             catch
             {
-                return null;
+                return string.Empty;
             }
         }
 
-        return enumerator.GetDevice(microphoneDeviceId);
+        try
+        {
+            return enumerator.GetDevice(microphoneDeviceId).ID;
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     private void StartMicrophoneCapture(MMDevice device, string title)
@@ -739,7 +749,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         var path = Path.Combine(_bufferFolder, $"{AudioKindPrefix(AudioCaptureKind.Microphone)}_{Guid.NewGuid():N}.wav");
         TryDelete(path);
         var capture = new WasapiCapture(device);
-        _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, AudioCaptureKind.Microphone, null, DateTime.UtcNow));
+        _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, AudioCaptureKind.Microphone, null, DateTime.UtcNow, device.ID));
         AppLog.Info($"Audio capture started: {title}, device={device.FriendlyName}.");
     }
 
@@ -756,7 +766,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         return _audioCaptures.Any(capture => capture.EndedAtUtc is null && capture.Kind == kind && capture.ProcessId == processId);
     }
 
-    private void StopStaleAudioCaptures(AudioRoutes routes)
+    private void StopStaleAudioCaptures(AudioRoutes routes, string resolvedMicDeviceId)
     {
         var wantedChat = routes.ChatProcessIds.ToHashSet();
         var excluded = routes.ExcludedProcessIds.ToHashSet();
@@ -767,7 +777,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                 AudioCaptureKind.Game when routes.UseProcessRouting => capture.ProcessId is int gamePid && !excluded.Contains(gamePid),
                 AudioCaptureKind.Game => capture.ProcessId is null,
                 AudioCaptureKind.Chat => capture.ProcessId is int chatPid && wantedChat.Contains(chatPid),
-                AudioCaptureKind.Microphone => true,
+                AudioCaptureKind.Microphone => string.Equals(capture.DeviceId, resolvedMicDeviceId, StringComparison.Ordinal),
                 _ => false
             };
 
@@ -1096,7 +1106,9 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             var config = _config;
             if (config is null || !IsRecording) return;
             var latestConfig = _configProvider();
-            var routes = ResolveAudioRoutes(latestConfig);
+            using var enumerator = new MMDeviceEnumerator();
+            var resolvedMicDeviceId = ResolveMicrophoneDeviceId(enumerator, latestConfig.MicrophoneDeviceId);
+            var routes = ResolveAudioRoutes(latestConfig, resolvedMicDeviceId);
             if (string.Equals(routes.RouteKey, _audioRouteKey, StringComparison.Ordinal)) return;
             try
             {
@@ -1121,7 +1133,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         _audioRouteTimer = new Timer(_ => RefreshAudioRoutes(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
     }
 
-    private static AudioRoutes ResolveAudioRoutes(ReplayBufferConfig config)
+    private static AudioRoutes ResolveAudioRoutes(ReplayBufferConfig config, string resolvedMicDeviceId)
     {
         // Multi-process apps (Discord, browsers, etc.) share one executable name across
         // several OS processes. StartProcessLoopbackCapture already uses
@@ -1149,8 +1161,8 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                 .OrderBy(pid => pid)
                 .ToArray()
             : Array.Empty<int>();
-        var key = $"{useProcessRouting}|{string.Join(',', chatPids.OrderBy(pid => pid))}|{string.Join(',', excludedPids)}|{string.Join(',', gamePids)}";
-        return new AudioRoutes(chatPids.OrderBy(pid => pid).ToArray(), excludedPids, gamePids, useProcessRouting, key);
+        var key = $"{useProcessRouting}|{string.Join(',', chatPids.OrderBy(pid => pid))}|{string.Join(',', excludedPids)}|{string.Join(',', gamePids)}|{resolvedMicDeviceId}";
+        return new AudioRoutes(chatPids.OrderBy(pid => pid).ToArray(), excludedPids, gamePids, useProcessRouting, key, resolvedMicDeviceId);
     }
 
     private static string FormatIds(IEnumerable<int> ids)
@@ -1310,7 +1322,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         return Process.Start(info) ?? throw new InvalidOperationException($"Could not start {fileName}.");
     }
 
-    private sealed record AudioRoutes(int[] ChatProcessIds, int[] ExcludedProcessIds, int[] GameProcessIds, bool UseProcessRouting, string RouteKey);
+    private sealed record AudioRoutes(int[] ChatProcessIds, int[] ExcludedProcessIds, int[] GameProcessIds, bool UseProcessRouting, string RouteKey, string MicrophoneDeviceId);
 
     private sealed record ReplayVideoSegment(string Path, DateTime StartedAtUtc, DateTime EndedAtUtc, TimeSpan VideoDuration);
 
@@ -1323,7 +1335,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
     private sealed class ReplayAudioCapture
     {
-        public ReplayAudioCapture(AudioCaptureSession session, string path, string title, AudioCaptureKind kind, int? processId, DateTime startedAtUtc)
+        public ReplayAudioCapture(AudioCaptureSession session, string path, string title, AudioCaptureKind kind, int? processId, DateTime startedAtUtc, string? deviceId = null)
         {
             Session = session;
             Path = path;
@@ -1331,6 +1343,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             Kind = kind;
             ProcessId = processId;
             StartedAtUtc = startedAtUtc;
+            DeviceId = deviceId;
         }
 
         public AudioCaptureSession Session { get; }
@@ -1338,6 +1351,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         public string Title { get; }
         public AudioCaptureKind Kind { get; }
         public int? ProcessId { get; }
+        public string? DeviceId { get; }
         public DateTime StartedAtUtc { get; }
         public DateTime? EndedAtUtc { get; set; }
     }
