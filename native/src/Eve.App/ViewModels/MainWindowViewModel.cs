@@ -1062,6 +1062,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         clip.IsSelected = selected;
         if (selected) _selectedPaths.Add(clip.Path);
         else _selectedPaths.Remove(clip.Path);
+        UpdateSelectionOrder(clip, selected);
         UpdateGroups();
         NotifySelectionChrome();
     }
@@ -1073,10 +1074,37 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             clip.IsSelected = selected;
             if (selected) _selectedPaths.Add(clip.Path);
             else _selectedPaths.Remove(clip.Path);
+            UpdateSelectionOrder(clip, selected);
         }
 
         UpdateGroups();
         NotifySelectionChrome();
+    }
+
+    // Tracked separately from _selectedPaths (a HashSet, so insertion order isn't
+    // guaranteed) so the card overlay can show "you selected this one 2nd" the way
+    // GG's clip picker does, instead of just a plain checkmark.
+    private readonly List<string> _selectionOrder = new();
+
+    private void UpdateSelectionOrder(ClipCardViewModel clip, bool selected)
+    {
+        if (selected)
+        {
+            if (!_selectionOrder.Any(path => string.Equals(path, clip.Path, StringComparison.OrdinalIgnoreCase))) _selectionOrder.Add(clip.Path);
+        }
+        else
+        {
+            _selectionOrder.RemoveAll(path => string.Equals(path, clip.Path, StringComparison.OrdinalIgnoreCase));
+        }
+
+        for (var i = 0; i < _selectionOrder.Count; i++)
+        {
+            var index = i;
+            var match = AllClips.FirstOrDefault(c => string.Equals(c.Path, _selectionOrder[index], StringComparison.OrdinalIgnoreCase));
+            if (match is not null) match.SelectionOrder = index + 1;
+        }
+
+        if (!selected) clip.SelectionOrder = 0;
     }
 
     public async Task<int> DeleteSelectedAsync()
@@ -1586,6 +1614,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private void ClearSelection()
     {
         _selectedPaths.Clear();
+        foreach (var clip in AllClips) clip.SelectionOrder = 0;
+        _selectionOrder.Clear();
         NotifySelectionChrome();
     }
 

@@ -75,6 +75,8 @@ public sealed class ClipCardViewModel : ViewModelBase
         private set => SetProperty(ref _previewImage, value);
     }
 
+    private int _selectionOrder;
+
     public bool IsSelected
     {
         get => _isSelected;
@@ -94,12 +96,29 @@ public sealed class ClipCardViewModel : ViewModelBase
         {
             if (!SetProperty(ref _isHovered, value)) return;
             OnPropertyChanged(nameof(IsCheckVisible));
+            OnPropertyChanged(nameof(SelectionBorderBrush));
+            OnPropertyChanged(nameof(SelectionBorderThickness));
         }
     }
 
+    // Set by MainWindowViewModel to reflect the order clips were selected in
+    // (1-based; 0 = not selected), shown as a big number overlay like GG's
+    // clip picker so a multi-select shows which clip you tapped 1st, 2nd, etc.
+    public int SelectionOrder
+    {
+        get => _selectionOrder;
+        set
+        {
+            if (!SetProperty(ref _selectionOrder, value)) return;
+            OnPropertyChanged(nameof(HasSelectionOrder));
+        }
+    }
+
+    public bool HasSelectionOrder => SelectionOrder > 0;
+
     public bool IsCheckVisible => IsSelected || IsHovered;
-    public IBrush SelectionBorderBrush => IsSelected ? Brush.Parse("#5864E8") : Brush.Parse("#24303A");
-    public Avalonia.Thickness SelectionBorderThickness => IsSelected ? new Avalonia.Thickness(2) : new Avalonia.Thickness(0);
+    public IBrush SelectionBorderBrush => IsSelected ? Brush.Parse("#5864E8") : IsHovered ? Brush.Parse("#5C6D7E") : Brush.Parse("#24303A");
+    public Avalonia.Thickness SelectionBorderThickness => IsSelected || IsHovered ? new Avalonia.Thickness(2) : new Avalonia.Thickness(0);
 
     public void UpdateMedia(MediaFileInfo media)
     {
