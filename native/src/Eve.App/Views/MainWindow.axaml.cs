@@ -71,6 +71,7 @@ public sealed partial class MainWindow : Window
             InitializeReplayServices();
             UpdateDetectedGame();
             _gameDetectionTimer.Start();
+            _ = EnsureLibraryFolderAsync();
             _ = CheckForUpdatesAsync();
         };
         KeyUp += MainWindow_OnKeyUp;
