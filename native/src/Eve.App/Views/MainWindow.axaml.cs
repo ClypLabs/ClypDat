@@ -633,12 +633,25 @@ public sealed partial class MainWindow : Window
 
         // The hover-preview VideoView is a real native child HWND, so a click that
         // lands on it never reaches Avalonia's input pipeline at all - Windows
-        // routes the mouse message straight to that child window, bypassing
-        // ClipCard_OnPointerPressed entirely. GetAsyncKeyState's low bit latches
-        // "was this key pressed since the last call", so it still catches a quick
-        // click even at this timer's poll interval.
+        // routes the mouse message straight to that child window, bypassing both
+        // ClipCard_OnPointerPressed and the selection checkbox's own Click handler
+        // (the checkbox sits in that same corner and gets covered too).
+        // GetAsyncKeyState's low bit latches "was this key pressed since the last
+        // call", so it still catches a quick click even at this timer's interval.
         if (_hoverPreviewClip is { } clip && (GetAsyncKeyState(VK_LBUTTON) & 0x0001) != 0)
         {
+            var checkBox = _hoverPreviewBorder.GetVisualDescendants().OfType<CheckBox>().FirstOrDefault(box => box.DataContext == clip);
+            if (checkBox is not null && checkBox.Bounds.Width > 0)
+            {
+                var checkTopLeft = checkBox.PointToScreen(new Point(0, 0));
+                var checkBottomRight = checkBox.PointToScreen(new Point(checkBox.Bounds.Width, checkBox.Bounds.Height));
+                if (cursor.X >= checkTopLeft.X && cursor.X <= checkBottomRight.X && cursor.Y >= checkTopLeft.Y && cursor.Y <= checkBottomRight.Y)
+                {
+                    ViewModel?.SetClipSelected(clip, !clip.IsSelected);
+                    return;
+                }
+            }
+
             _ = OpenClipCardAsync(clip);
         }
     }
