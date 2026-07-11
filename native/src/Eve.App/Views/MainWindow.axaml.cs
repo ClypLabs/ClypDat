@@ -62,6 +62,8 @@ public sealed partial class MainWindow : Window
         {
             _hoverPreviewDelay.Stop();
             if (_pendingHoverClip is not null && _pendingHoverBorder is not null) StartHoverPreview(_pendingHoverClip, _pendingHoverBorder);
+            _pendingHoverClip = null;
+            _pendingHoverBorder = null;
         };
         _hoverWatchdog.Tick += (_, _) => CheckHoverWatchdog();
         Opened += (_, _) =>
@@ -636,11 +638,16 @@ public sealed partial class MainWindow : Window
         });
     }
 
+    // Deliberately does not touch _pendingHoverClip/_pendingHoverBorder - those track
+    // whichever card the cursor has moved on to (waiting on _hoverPreviewDelay to
+    // start it), which is a separate thing from the card whose preview is being torn
+    // down here. The watchdog calls this the instant the cursor leaves the old card's
+    // bounds, i.e. right as it arrives on the new one - clearing pending here used to
+    // erase the record of that new card before its delayed start ever fired, so
+    // hovering straight from one card to the next silently started nothing.
     private void StopHoverPreview()
     {
         _hoverWatchdog.Stop();
-        _pendingHoverClip = null;
-        _pendingHoverBorder = null;
         _hoverPreviewBorder = null;
         if (_hoverPreviewClip is not null)
         {
@@ -654,6 +661,9 @@ public sealed partial class MainWindow : Window
     private void DisposeHoverPreview()
     {
         StopHoverPreview();
+        _hoverPreviewDelay.Stop();
+        _pendingHoverClip = null;
+        _pendingHoverBorder = null;
         if (_hoverPreviewMediaPlayer is not null)
         {
             _hoverPreviewMediaPlayer.EndReached -= HoverPreview_OnEndReached;
