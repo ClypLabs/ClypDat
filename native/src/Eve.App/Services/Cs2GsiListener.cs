@@ -22,6 +22,10 @@ public sealed class Cs2GsiListener : IDisposable
     private int _lastMatchAssists;
     private int _lastRoundNumber = -1;
     private string _lastMapName = string.Empty;
+    private readonly object _killClipLock = new();
+    private Timer? _killClipDebounceTimer;
+    private string? _pendingKillLabel;
+    private static readonly TimeSpan KillClipDebounce = TimeSpan.FromSeconds(4);
 
     public event EventHandler<string>? AutoClipTriggered;
 
@@ -75,6 +79,13 @@ public sealed class Cs2GsiListener : IDisposable
         _lastMatchDeaths = 0;
         _lastMatchAssists = 0;
         _lastRoundNumber = -1;
+
+        lock (_killClipLock)
+        {
+            _killClipDebounceTimer?.Dispose();
+            _killClipDebounceTimer = null;
+            _pendingKillLabel = null;
+        }
     }
 
     private async Task ListenLoopAsync(HttpListener listener, CancellationToken token)
@@ -131,6 +142,9 @@ public sealed class Cs2GsiListener : IDisposable
             _lastRoundNumber = roundNum;
             _lastRoundKills = 0;
             _lastRoundKillHs = 0;
+            // No more kills are coming for the round that just ended - don't make
+            // whatever streak was still debouncing wait out the rest of its timer.
+            FirePendingKillClip();
         }
 
         if (root.TryGetProperty("map", out var mapElement) &&
@@ -159,8 +173,6 @@ public sealed class Cs2GsiListener : IDisposable
         var settings = _settingsProvider();
         if (!settings.Enabled) return;
 
-        string? label = null;
-
         var roundKills = GetInt(state, "round_kills");
         var roundKillHs = GetInt(state, "round_killhs");
         var matchKills = GetInt(matchStats, "kills");
@@ -182,16 +194,29 @@ public sealed class Cs2GsiListener : IDisposable
                 _ => null
             };
 
-            label = isHeadshotKill && settings.Headshot
+            var killLabel = isHeadshotKill && settings.Headshot
                 ? (baseLabel is null ? "Headshot" : $"Headshot {baseLabel}")
                 : baseLabel;
+
+            // Each kill in a streak (3K -> 4K -> Ace) used to fire its own
+            // immediate clip, so a fast multi-kill round produced several
+            // duplicate/overlapping saves of essentially the same moment - and
+            // queuing them (so none get dropped) meant several full save
+            // pipelines running back to back, which is also what was spiking
+            // memory. Debounce instead: wait a few seconds after each kill
+            // before actually clipping, and if another kill lands before that
+            // timer elapses, restart it for the new (higher) label. Only the
+            // streak's final milestone actually gets clipped.
+            if (killLabel is not null) ScheduleKillClip(killLabel);
         }
 
         if (roundKills.HasValue) _lastRoundKills = roundKills.Value;
         if (roundKillHs.HasValue) _lastRoundKillHs = roundKillHs.Value;
 
+        string? label = null;
+
         var deaths = GetInt(matchStats, "deaths");
-        if (label is null && settings.Death && deaths.HasValue && deaths.Value > _lastMatchDeaths)
+        if (settings.Death && deaths.HasValue && deaths.Value > _lastMatchDeaths)
         {
             label = "Death";
         }
@@ -206,12 +231,38 @@ public sealed class Cs2GsiListener : IDisposable
 
         if (assists.HasValue) _lastMatchAssists = assists.Value;
 
-        if (label is not null)
+        if (label is not null) Fire(label);
+    }
+
+    private void ScheduleKillClip(string label)
+    {
+        lock (_killClipLock)
         {
-            var mapDisplayName = FormatMapName(_lastMapName);
-            var title = string.IsNullOrEmpty(mapDisplayName) ? label : $"{label} - {mapDisplayName}";
-            AutoClipTriggered?.Invoke(this, title);
+            _pendingKillLabel = label;
+            _killClipDebounceTimer?.Dispose();
+            _killClipDebounceTimer = new Timer(_ => FirePendingKillClip(), null, KillClipDebounce, Timeout.InfiniteTimeSpan);
         }
+    }
+
+    private void FirePendingKillClip()
+    {
+        string? label;
+        lock (_killClipLock)
+        {
+            label = _pendingKillLabel;
+            _pendingKillLabel = null;
+            _killClipDebounceTimer?.Dispose();
+            _killClipDebounceTimer = null;
+        }
+
+        if (label is not null) Fire(label);
+    }
+
+    private void Fire(string label)
+    {
+        var mapDisplayName = FormatMapName(_lastMapName);
+        var title = string.IsNullOrEmpty(mapDisplayName) ? label : $"{label} - {mapDisplayName}";
+        AutoClipTriggered?.Invoke(this, title);
     }
 
     private static int? GetInt(JsonElement parent, string name) =>
