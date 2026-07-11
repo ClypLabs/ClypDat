@@ -17,6 +17,12 @@ public sealed class AppSettings
     public string ChatAudioDeviceId { get; set; } = string.Empty;
     public string ChatAudioProcessName { get; set; } = string.Empty;
     public string MicrophoneDeviceId { get; set; } = "default";
+    public bool MicrophoneNoiseSuppressionEnabled { get; set; }
+    // ffmpeg afftdn's nr= (noise reduction) parameter, in dB - higher cuts more
+    // noise but risks eating into speech. afftdn's own valid range is 0.01-97;
+    // clamped tighter (0-30) at the settings-UI layer since anything past ~20
+    // starts sounding artifacty on typical mic noise floors.
+    public double MicrophoneNoiseSuppressionStrength { get; set; } = 12.0;
     public List<string> GameAudioExcludedProcesses { get; set; } = new();
     public bool EnableEditorKeyboardShortcuts { get; set; } = true;
     public string ClipOverlayPosition { get; set; } = "Top Right";

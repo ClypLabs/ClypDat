@@ -774,6 +774,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => SetProperty(ref _selectedProcessExclusion, value);
     }
 
+    public bool MicrophoneNoiseSuppressionEnabled
+    {
+        get => Settings.MicrophoneNoiseSuppressionEnabled;
+        set { Settings.MicrophoneNoiseSuppressionEnabled = value; OnPropertyChanged(); SaveSettings(); }
+    }
+
+    public double MicrophoneNoiseSuppressionStrength
+    {
+        get => Settings.MicrophoneNoiseSuppressionStrength;
+        set { Settings.MicrophoneNoiseSuppressionStrength = Math.Clamp(value, 0, 30); OnPropertyChanged(); SaveSettings(); }
+    }
+
     public string SelectedVideoName
     {
         get => _selectedVideoName;
@@ -1441,7 +1453,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ActiveGameDetection.WindowTitle,
             ActiveGameDetection.WindowClass,
             effectiveBackend,
-            GameWindowHandle: ActiveGameDetection.WindowHandle);
+            GameWindowHandle: ActiveGameDetection.WindowHandle,
+            MicrophoneNoiseSuppressionEnabled: Settings.MicrophoneNoiseSuppressionEnabled,
+            MicrophoneNoiseSuppressionStrength: Settings.MicrophoneNoiseSuppressionStrength);
     }
 
     public void SetDuration(TimeSpan duration)

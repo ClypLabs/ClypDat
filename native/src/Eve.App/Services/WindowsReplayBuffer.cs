@@ -659,7 +659,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         return path.Replace("\\", "/", StringComparison.Ordinal).Replace("'", "'\\''", StringComparison.Ordinal);
     }
 
-    private string SnapshotAudioFile(ReplayAudioCapture? capture, DateTime windowStartUtc, double durationSeconds, ICollection<string> snapshots)
+    private string SnapshotAudioFile(ReplayAudioCapture? capture, DateTime windowStartUtc, double durationSeconds, ICollection<string> snapshots, ReplayBufferConfig? config = null)
     {
         if (capture is null || !IsUsableAudioFile(capture.Path)) return string.Empty;
         var captureEndUtc = capture.EndedAtUtc ?? DateTime.UtcNow;
@@ -687,7 +687,14 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             var trimStart = Math.Max(0, (overlapStartUtc - effectiveStartUtc).TotalSeconds);
             var overlapDuration = Math.Max(0, (overlapEndUtc - overlapStartUtc).TotalSeconds);
             var delayMs = Math.Max(0, (int)Math.Round((overlapStartUtc - windowStartUtc).TotalMilliseconds));
-            var filters = $"[0:a]atrim=start={FormatSeconds(trimStart)}:duration={FormatSeconds(overlapDuration)},asetpts=PTS-STARTPTS,aresample=48000,adelay={delayMs}|{delayMs},apad=whole_dur={FormatSeconds(durationSeconds)},atrim=0:{FormatSeconds(durationSeconds)}[out]";
+            // Noise suppression only makes sense on the mic track - Game/Chat audio
+            // is line-level/desktop audio, not a noisy room signal. afftdn's nr= is
+            // in dB; the settings UI clamps to 0-30 (its own valid range is wider,
+            // but higher than ~20 starts eating into speech on typical mic noise).
+            var noiseSuppressionFilter = capture.Kind == AudioCaptureKind.Microphone && config?.MicrophoneNoiseSuppressionEnabled == true
+                ? $"afftdn=nr={FormatSeconds(Math.Clamp(config.MicrophoneNoiseSuppressionStrength, 0, 30))},"
+                : string.Empty;
+            var filters = $"[0:a]atrim=start={FormatSeconds(trimStart)}:duration={FormatSeconds(overlapDuration)},asetpts=PTS-STARTPTS,aresample=48000,{noiseSuppressionFilter}adelay={delayMs}|{delayMs},apad=whole_dur={FormatSeconds(durationSeconds)},atrim=0:{FormatSeconds(durationSeconds)}[out]";
             AppLog.Info($"Replay audio overlap: kind={capture.Kind}, pid={capture.ProcessId?.ToString() ?? "none"}, trim={trimStart:0.###}s, overlap={overlapDuration:0.###}s, delay={delayMs}ms, bytes={AudioFileLength(capture.Path)}.");
 
             var result = RunProcessAsync("ffmpeg", new[]
@@ -920,7 +927,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         {
             var gamePath = await BuildAlignedTrackAsync(AudioCaptureKind.Game, captures, segmentWindows, allowMix: true, snapshots, cancellationToken);
             var chatPath = await BuildAlignedTrackAsync(AudioCaptureKind.Chat, captures, segmentWindows, allowMix: true, snapshots, cancellationToken);
-            var microphonePath = await BuildAlignedTrackAsync(AudioCaptureKind.Microphone, captures, segmentWindows, allowMix: false, snapshots, cancellationToken);
+            var microphonePath = await BuildAlignedTrackAsync(AudioCaptureKind.Microphone, captures, segmentWindows, allowMix: false, snapshots, cancellationToken, config);
             AppLog.Info($"Replay mux inputs: game={AudioFileLength(gamePath)}b, chat={AudioFileLength(chatPath)}b, microphone={AudioFileLength(microphonePath)}b.");
 
             var metadataArgs = new[]
@@ -1014,7 +1021,8 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         List<(DateTime StartUtc, double DurationSeconds)> segmentWindows,
         bool allowMix,
         List<string> snapshots,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ReplayBufferConfig? config = null)
     {
         var segmentClips = new List<string>();
         foreach (var (startUtc, durationSeconds) in segmentWindows)
@@ -1029,7 +1037,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             }
 
             var clipPaths = overlapping
-                .Select(capture => SnapshotAudioFile(capture, startUtc, durationSeconds, snapshots))
+                .Select(capture => SnapshotAudioFile(capture, startUtc, durationSeconds, snapshots, config))
                 .Where(IsUsableAudioFile)
                 .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
                 .ToArray();

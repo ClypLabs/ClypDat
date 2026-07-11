@@ -629,6 +629,27 @@
                   </StackPanel>
                 </StackPanel>
               </Border>
+
+              <Border Classes="settingsCard">
+                <StackPanel Spacing="16">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="Microphone noise suppression" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
+                      <TextBlock Text="Reduces background noise (fans, keyboard, hum) on the mic track using ffmpeg's denoiser. Applied when a clip is saved." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding MicrophoneNoiseSuppressionEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                  </Grid>
+
+                  <StackPanel Spacing="6" IsVisible="{Binding MicrophoneNoiseSuppressionEnabled}">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Text="Strength" Foreground="#B8C7D8" FontWeight="Bold" FontSize="13" />
+                      <TextBlock Grid.Column="1" Text="{Binding MicrophoneNoiseSuppressionStrength, StringFormat={}{0:0} dB}" Foreground="#8C98A7" FontSize="12" />
+                    </Grid>
+                    <Slider Minimum="0" Maximum="30" Value="{Binding MicrophoneNoiseSuppressionStrength}" TickFrequency="1" IsSnapToTickEnabled="True" />
+                    <TextBlock Text="Higher cuts more noise but can start eating into your voice past ~20." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                  </StackPanel>
+                </StackPanel>
+              </Border>
             </StackPanel>
 
             <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Audio Exclusions}">
