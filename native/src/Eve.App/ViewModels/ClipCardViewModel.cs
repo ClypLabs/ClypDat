@@ -27,6 +27,11 @@ public sealed class ClipCardViewModel : ViewModelBase
     public long SizeBytes => Media.SizeBytes;
     public string DateLabel => CreatedAt.ToString("MMM d, yyyy h:mm tt");
 
+    // Name is the game/auto-clip label the clip was saved under (e.g. "Fortnite",
+    // "3K - Inferno") - there's no separate stored clip title, so this line fills
+    // the same role Medal's "Moments clip from <date>" subtitle does.
+    public string ClipFromLabel => $"Clip from {CreatedAt:MMM d, yyyy}";
+
     // Relative for anything recent (matches how Medal/most clip tools show it -
     // "9 days ago" scans faster than a timestamp), falls back to an absolute date
     // once it's old enough that "X ago" stops being useful at a glance.
@@ -101,6 +106,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(SizeBytes));
         OnPropertyChanged(nameof(DateLabel));
         OnPropertyChanged(nameof(RelativeDateLabel));
+        OnPropertyChanged(nameof(ClipFromLabel));
         OnPropertyChanged(nameof(DurationLabel));
         OnPropertyChanged(nameof(CaptureBackendLabel));
         OnPropertyChanged(nameof(HasCaptureBackendLabel));
