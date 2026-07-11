@@ -53,8 +53,8 @@ public sealed class GameCaptureOverride
 public sealed class Cs2AutoClipSettings
 {
     public bool Enabled { get; set; }
-    public bool Kill { get; set; } = true;
-    public bool TwoKill { get; set; } = true;
+    public bool Kill { get; set; }
+    public bool TwoKill { get; set; }
     public bool ThreeKill { get; set; } = true;
     public bool FourKill { get; set; } = true;
     public bool Ace { get; set; } = true;
