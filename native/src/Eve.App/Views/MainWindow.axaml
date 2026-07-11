@@ -443,13 +443,25 @@
               </StackPanel>
 
               <Border Classes="settingsCard">
-                <StackPanel Spacing="14">
-                  <Grid ColumnDefinitions="*,*,Auto,Auto" ColumnSpacing="10">
-                    <TextBox Classes="settingsInput" Watermark="game.exe" Text="{Binding NewCustomGameExecutable}" />
-                    <TextBox Grid.Column="1" Classes="settingsInput" Watermark="Display name" Text="{Binding NewCustomGameDisplayName}" />
-                    <Button Grid.Column="2" Content="Browse" Click="BrowseCustomGameButton_OnClick" VerticalAlignment="Center" />
-                    <Button Grid.Column="3" Content="Add Game" Click="AddCustomGameButton_OnClick" VerticalAlignment="Center" />
-                  </Grid>
+                <StackPanel Spacing="16">
+                  <StackPanel Spacing="6">
+                    <TextBlock Text="Add a running game" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
+                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                      <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedGameProcess}" HorizontalAlignment="Stretch" />
+                      <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
+                      <Button Grid.Column="2" Content="Add" Click="AddGameFromProcessButton_OnClick" />
+                    </Grid>
+                  </StackPanel>
+
+                  <Border Height="1" Background="#1B242D" />
+
+                  <StackPanel Spacing="6">
+                    <TextBlock Text="Or browse for an executable" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
+                    <Button Content="Browse for game.exe" Click="BrowseCustomGameButton_OnClick" HorizontalAlignment="Left" />
+                  </StackPanel>
+
+                  <Border Height="1" Background="#1B242D" />
+
                   <TextBox Classes="settingsInput" Watermark="Search games" Text="{Binding GameSearchText}" />
                 </StackPanel>
               </Border>

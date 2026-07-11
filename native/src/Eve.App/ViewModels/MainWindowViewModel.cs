@@ -774,6 +774,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => SetProperty(ref _selectedProcessExclusion, value);
     }
 
+    private ProcessOption? _selectedGameProcess;
+
+    public ProcessOption? SelectedGameProcess
+    {
+        get => _selectedGameProcess;
+        set => SetProperty(ref _selectedGameProcess, value);
+    }
+
     public bool MicrophoneNoiseSuppressionEnabled
     {
         get => Settings.MicrophoneNoiseSuppressionEnabled;
@@ -1312,6 +1320,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SaveSettings();
         RebuildGameCaptureRows();
         GameCatalogChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void AddGameFromProcess()
+    {
+        if (SelectedGameProcess is not { Name.Length: > 0 } process) return;
+        NewCustomGameExecutable = process.Name;
+        NewCustomGameDisplayName = string.IsNullOrWhiteSpace(process.WindowTitle)
+            ? Path.GetFileNameWithoutExtension(process.Name)
+            : process.WindowTitle;
+        AddCustomGame();
+        SelectedGameProcess = null;
     }
 
     public void RemoveCustomGame(GameBackendRowViewModel row)

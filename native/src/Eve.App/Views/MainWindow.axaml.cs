@@ -653,12 +653,6 @@ public sealed partial class MainWindow : Window
         await ViewModel.ImportSelectedMedalClipsAsync();
     }
 
-    private void AddCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        if (ViewModel is null) return;
-        ViewModel.AddCustomGame();
-    }
-
     private async void BrowseCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
@@ -677,10 +671,13 @@ public sealed partial class MainWindow : Window
         if (file?.Path.LocalPath is not { Length: > 0 } path) return;
 
         ViewModel.NewCustomGameExecutable = Path.GetFileName(path);
-        if (string.IsNullOrWhiteSpace(ViewModel.NewCustomGameDisplayName))
-        {
-            ViewModel.NewCustomGameDisplayName = Path.GetFileNameWithoutExtension(path);
-        }
+        ViewModel.NewCustomGameDisplayName = Path.GetFileNameWithoutExtension(path);
+        ViewModel.AddCustomGame();
+    }
+
+    private void AddGameFromProcessButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel?.AddGameFromProcess();
     }
 
     private void RemoveCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
