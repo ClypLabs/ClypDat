@@ -95,7 +95,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
         ReplayBackends = new ObservableCollection<ReplayBackendPreset>
         {
-            new("Auto (recommended)", "Auto", "Uses OBS if available, otherwise falls back automatically - also knows which games need Windows Capture due to anti-cheat and switches for you."),
+            new("Auto", "Auto", "Uses OBS if available, otherwise falls back automatically - also knows which games need Windows Capture due to anti-cheat and switches for you."),
             new("OBS (best quality)", "Obs", "Highest quality and lowest overhead, but some anti-cheat games (e.g. CS2) need a launch option or may show a black/frozen capture."),
             new("Windows Capture (no game hook)", "Legacy", "Captures the screen directly with no process hook, so it isn't blocked by anti-cheat - works for CS2 without any launch option, at the cost of slightly higher overhead.")
         };
