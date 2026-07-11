@@ -568,6 +568,19 @@ public sealed partial class MainWindow : Window
         if (sender is not Control { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
 
         e.Handled = true;
+        await OpenClipCardAsync(clip);
+    }
+
+    private DateTime _lastCardOpenUtc = DateTime.MinValue;
+
+    // Shared by the normal PointerPressed path and CheckHoverWatchdog's native-HWND
+    // click-through path (see there) - debounced so a click that both paths happen
+    // to notice doesn't open the same clip twice.
+    private async Task OpenClipCardAsync(ClipCardViewModel clip)
+    {
+        if (ViewModel is null) return;
+        if (DateTime.UtcNow - _lastCardOpenUtc < TimeSpan.FromMilliseconds(400)) return;
+        _lastCardOpenUtc = DateTime.UtcNow;
         await ViewModel.OpenClipAsync(clip);
         QueueEditorPlayback();
     }
@@ -612,7 +625,22 @@ public sealed partial class MainWindow : Window
         var topLeft = _hoverPreviewBorder.PointToScreen(new Point(0, 0));
         var bottomRight = _hoverPreviewBorder.PointToScreen(new Point(_hoverPreviewBorder.Bounds.Width, _hoverPreviewBorder.Bounds.Height));
         var inside = cursor.X >= topLeft.X && cursor.X <= bottomRight.X && cursor.Y >= topLeft.Y && cursor.Y <= bottomRight.Y;
-        if (!inside) StopHoverPreview();
+        if (!inside)
+        {
+            StopHoverPreview();
+            return;
+        }
+
+        // The hover-preview VideoView is a real native child HWND, so a click that
+        // lands on it never reaches Avalonia's input pipeline at all - Windows
+        // routes the mouse message straight to that child window, bypassing
+        // ClipCard_OnPointerPressed entirely. GetAsyncKeyState's low bit latches
+        // "was this key pressed since the last call", so it still catches a quick
+        // click even at this timer's poll interval.
+        if (_hoverPreviewClip is { } clip && (GetAsyncKeyState(VK_LBUTTON) & 0x0001) != 0)
+        {
+            _ = OpenClipCardAsync(clip);
+        }
     }
 
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
@@ -622,8 +650,13 @@ public sealed partial class MainWindow : Window
         public int Y;
     }
 
+    private const int VK_LBUTTON = 0x01;
+
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool GetCursorPos(out Win32Point point);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
 
     private Media? _hoverPreviewMedia;
     private Media? _hoverPreviewMediaPendingDispose;
