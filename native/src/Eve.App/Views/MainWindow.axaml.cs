@@ -1141,7 +1141,7 @@ public sealed partial class MainWindow : Window
             }
             else
             {
-                await ShowMessageAsync("Export complete", outputPath);
+                OpenInExplorer(outputPath, selectFile: true);
             }
         }
         finally
