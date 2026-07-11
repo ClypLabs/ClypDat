@@ -213,7 +213,13 @@
                 <TextBlock Grid.Row="2" Text="Resolution" Foreground="#93A6B8" VerticalAlignment="Center" />
                 <ComboBox Grid.Row="2" Grid.Column="1" Classes="settingsInput" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}" Width="160" HorizontalAlignment="Left" />
                 <TextBlock Grid.Row="3" Text="Frame rate" Foreground="#93A6B8" VerticalAlignment="Center" />
-                <ComboBox Grid.Row="3" Grid.Column="1" Classes="settingsInput" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}" Width="160" HorizontalAlignment="Left" />
+                <StackPanel Grid.Row="3" Grid.Column="1" Spacing="6">
+                  <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}" Width="160" HorizontalAlignment="Left" />
+                  <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding ReplayQualityRestartRequired}">
+                    <TextBlock Text="Restart the replay buffer for the resolution/frame rate change to take effect." Foreground="#E5A00D" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="360" />
+                    <Button Content="Restart Buffer" Click="RestartReplayBufferButton_OnClick" />
+                  </StackPanel>
+                </StackPanel>
                 <TextBlock Grid.Row="4" Text="Capture backend" Foreground="#93A6B8" VerticalAlignment="Center" />
                 <StackPanel Grid.Row="4" Grid.Column="1" Spacing="6">
                   <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayBackends}" SelectedItem="{Binding SelectedReplayBackend}" Width="320" HorizontalAlignment="Left" />

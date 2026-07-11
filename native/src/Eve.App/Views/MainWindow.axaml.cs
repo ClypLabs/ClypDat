@@ -265,6 +265,13 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private async void RestartReplayBufferButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null || !ViewModel.IsReplayRecording) return;
+        await StopReplayBufferAsync();
+        await StartReplayBufferAsync(showErrors: true);
+    }
+
     private async void ClipButton_OnClick(object? sender, RoutedEventArgs e)
     {
         await SaveReplayClipAsync();

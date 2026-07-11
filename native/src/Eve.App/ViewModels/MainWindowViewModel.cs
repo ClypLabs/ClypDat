@@ -29,6 +29,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private ReplayBackendPreset? _selectedReplayBackend;
     private readonly string _initialReplayBackend;
     private bool _replayBackendRestartRequired;
+    private int _activeReplayMaxHeight;
+    private int _activeReplayFrameRate;
+    private bool _replayQualityRestartRequired;
     private string _selectedClipOverlayPosition = "Top Right";
     private string _selectedClipOverlayVolume = "Medium";
     private ExportCodecOption? _selectedExportCodec;
@@ -107,6 +110,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedReplayResolution = ReplayResolutions.FirstOrDefault(option => option.Height == Settings.ReplayMaxHeight) ??
                                      ReplayResolutions.First(option => option.Height == 1080);
         _selectedReplayFrameRate = ReplayFrameRates.Contains(Settings.ReplayFrameRate) ? Settings.ReplayFrameRate : 60;
+        _activeReplayMaxHeight = Settings.ReplayMaxHeight;
+        _activeReplayFrameRate = Settings.ReplayFrameRate;
         SelectedExportCodec = ExportCodecs.FirstOrDefault(codec => string.Equals(codec.Label, Settings.ExportVideoCodec, StringComparison.OrdinalIgnoreCase)) ??
                               ExportCodecs.First(codec => codec.Label == "H.264");
         _initialReplayBackend = string.IsNullOrWhiteSpace(Settings.ReplayBackend) ? "Auto" : Settings.ReplayBackend;
@@ -189,6 +194,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (!SetProperty(ref _isReplayRecording, value)) return;
             RecorderStatus = value ? "Replay On" : "Replay Off";
+            if (value)
+            {
+                MarkReplayBufferRestarted();
+            }
+            else
+            {
+                ReplayQualityRestartRequired = false;
+            }
         }
     }
 
@@ -268,6 +281,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (!SetProperty(ref _selectedReplayResolution, value) || value is null) return;
             Settings.ReplayMaxHeight = value.Height;
             SaveSettings();
+            UpdateReplayQualityRestartRequired();
         }
     }
 
@@ -279,7 +293,27 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (!SetProperty(ref _selectedReplayFrameRate, value)) return;
             Settings.ReplayFrameRate = value;
             SaveSettings();
+            UpdateReplayQualityRestartRequired();
         }
+    }
+
+    private void UpdateReplayQualityRestartRequired()
+    {
+        ReplayQualityRestartRequired = IsReplayRecording &&
+                                        (Settings.ReplayMaxHeight != _activeReplayMaxHeight || Settings.ReplayFrameRate != _activeReplayFrameRate);
+    }
+
+    public bool ReplayQualityRestartRequired
+    {
+        get => _replayQualityRestartRequired;
+        private set => SetProperty(ref _replayQualityRestartRequired, value);
+    }
+
+    public void MarkReplayBufferRestarted()
+    {
+        _activeReplayMaxHeight = Settings.ReplayMaxHeight;
+        _activeReplayFrameRate = Settings.ReplayFrameRate;
+        ReplayQualityRestartRequired = false;
     }
 
     public ExportCodecOption? SelectedExportCodec
