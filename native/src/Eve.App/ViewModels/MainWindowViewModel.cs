@@ -792,7 +792,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         foreach (var device in _audioDevices.GetRenderDevices(includeDisabled: true)) ChatAudioDevices.Add(device);
         MicrophoneDevices.Clear();
         var defaultMicName = _audioDevices.GetDefaultCaptureDeviceName();
-        MicrophoneDevices.Add(new AudioDeviceOption(string.Empty,
+        MicrophoneDevices.Add(new AudioDeviceOption(AudioDeviceOption.DefaultDeviceId,
             string.IsNullOrWhiteSpace(defaultMicName) ? "Default" : $"Default - {defaultMicName}"));
         foreach (var device in _audioDevices.GetCaptureDevices()) MicrophoneDevices.Add(device);
 

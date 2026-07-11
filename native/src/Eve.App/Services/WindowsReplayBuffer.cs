@@ -400,11 +400,12 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
         try
         {
-            if (!string.IsNullOrWhiteSpace(config.MicrophoneDeviceId))
+            if (!HasLiveCapture(AudioCaptureKind.Microphone, null))
             {
-                if (!HasLiveCapture(AudioCaptureKind.Microphone, null))
+                var micDevice = ResolveMicrophoneDevice(enumerator, config.MicrophoneDeviceId);
+                if (micDevice is not null)
                 {
-                    StartMicrophoneCapture(enumerator.GetDevice(config.MicrophoneDeviceId), "Microphone");
+                    StartMicrophoneCapture(micDevice, "Microphone");
                 }
             }
         }
@@ -714,6 +715,23 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         var capture = new ProcessLoopbackWaveIn(processId, mode);
         _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, kind, processId, DateTime.UtcNow));
         AppLog.Info($"Audio capture started: {title}, pid={processId}, mode={mode}.");
+    }
+
+    private static MMDevice? ResolveMicrophoneDevice(MMDeviceEnumerator enumerator, string microphoneDeviceId)
+    {
+        if (string.IsNullOrWhiteSpace(microphoneDeviceId) || microphoneDeviceId == AudioDeviceOption.DefaultDeviceId)
+        {
+            try
+            {
+                return enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        return enumerator.GetDevice(microphoneDeviceId);
     }
 
     private void StartMicrophoneCapture(MMDevice device, string title)

@@ -323,9 +323,10 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
                 StartLoopbackCapture(enumerator.GetDevice(config.ChatAudioDeviceId), "Chat Audio", "chat");
             }
 
-            if (!string.IsNullOrWhiteSpace(config.MicrophoneDeviceId))
+            var micDevice = ResolveMicrophoneDevice(enumerator, config.MicrophoneDeviceId);
+            if (micDevice is not null)
             {
-                StartMicrophoneCapture(enumerator.GetDevice(config.MicrophoneDeviceId), "Microphone", "microphone");
+                StartMicrophoneCapture(micDevice, "Microphone", "microphone");
             }
         }
         catch (Exception error)
@@ -348,6 +349,23 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         TryDelete(path);
         var capture = new WasapiCapture(device);
         _audioCaptures.Add(AudioCaptureSession.Start(capture, path, title));
+    }
+
+    private static MMDevice? ResolveMicrophoneDevice(MMDeviceEnumerator enumerator, string microphoneDeviceId)
+    {
+        if (string.IsNullOrWhiteSpace(microphoneDeviceId) || microphoneDeviceId == AudioDeviceOption.DefaultDeviceId)
+        {
+            try
+            {
+                return enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        return enumerator.GetDevice(microphoneDeviceId);
     }
 
     private void StopAudioCaptures()

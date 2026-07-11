@@ -720,9 +720,15 @@ bool create_audio_sources()
         }
     }
 
-    if (!g_microphone_device_id.empty()) {
+    {
+        // "default" is OBS's own device_id convention for "whatever Windows
+        // currently considers the default capture device" - it re-resolves
+        // live rather than freezing on a specific endpoint, so an empty id
+        // (unset/legacy setting) falls back to the same live-default behavior
+        // instead of silently disabling the microphone.
+        std::string mic_device_id = g_microphone_device_id.empty() ? "default" : g_microphone_device_id;
         obs_data_t *settings = obs.data_create();
-        obs.data_set_string(settings, "device_id", g_microphone_device_id.c_str());
+        obs.data_set_string(settings, "device_id", mic_device_id.c_str());
         g_microphone_source = obs.source_create("wasapi_input_capture", "Microphone", settings, nullptr);
         obs.data_release(settings);
         if (g_microphone_source) {

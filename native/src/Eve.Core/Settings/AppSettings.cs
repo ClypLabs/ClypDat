@@ -16,7 +16,7 @@ public sealed class AppSettings
     public string IgnoredUpdateVersion { get; set; } = string.Empty;
     public string ChatAudioDeviceId { get; set; } = string.Empty;
     public string ChatAudioProcessName { get; set; } = string.Empty;
-    public string MicrophoneDeviceId { get; set; } = string.Empty;
+    public string MicrophoneDeviceId { get; set; } = "default";
     public List<string> GameAudioExcludedProcesses { get; set; } = new();
     public bool EnableEditorKeyboardShortcuts { get; set; } = true;
     public string ClipOverlayPosition { get; set; } = "Top Right";
