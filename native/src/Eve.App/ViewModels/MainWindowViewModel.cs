@@ -264,7 +264,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool IsLibraryVisible => !IsEditorVisible && !IsSettingsVisible;
 
-    public string AppVersionDisplay => $"v{AppUpdateService.CurrentVersion}";
+    // AppUpdateService.CurrentVersion is a System.Version, always 4 components -
+    // our own <Version> in the csproj is 3-part (e.g. "0.1.1"), so the SDK-
+    // generated AssemblyVersion pads a trailing ".0" that ToString() would show.
+    public string AppVersionDisplay
+    {
+        get
+        {
+            var version = AppUpdateService.CurrentVersion;
+            return $"v{version.Major}.{version.Minor}.{version.Build}";
+        }
+    }
 
     public string SelectedSettingsSection
     {
