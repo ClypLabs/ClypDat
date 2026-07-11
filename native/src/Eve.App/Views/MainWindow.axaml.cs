@@ -43,14 +43,6 @@ public sealed partial class MainWindow : Window
         _playbackTimer.Tick += (_, _) => SyncPlaybackPosition();
         _gameDetectionTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _gameDetectionTimer.Tick += (_, _) => UpdateDetectedGame();
-        _hoverPreviewDelay.Tick += (_, _) =>
-        {
-            _hoverPreviewDelay.Stop();
-            if (_pendingHoverClip is not { } clip) return;
-            _pendingHoverClip = null;
-            _activeHoverClip = clip;
-            _ = clip.StartPreviewAsync();
-        };
         Opened += (_, _) =>
         {
             ApplySavedWindowBounds();
@@ -83,7 +75,6 @@ public sealed partial class MainWindow : Window
             _globalHotkey?.Dispose();
             _cs2GsiListener?.Dispose();
             _gameDetectionTimer.Stop();
-            _hoverPreviewDelay.Stop();
             if (_replayBuffer is not null) _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
             _replayBuffer?.Dispose();
             _playback?.Dispose();
@@ -536,45 +527,16 @@ public sealed partial class MainWindow : Window
         QueueEditorPlayback();
     }
 
-    // Sprite-frame preview (ClipCardViewModel.StartPreviewAsync/StopPreview) cycles
-    // pre-extracted JPEG frames through the card's existing Image/Bitmap binding -
-    // no native window involved, unlike the old LibVLC windowed-video approach this
-    // replaced (which fought Avalonia's input pipeline for the entire session: hover
-    // state got out of sync, clicks and the selection checkbox silently ate input
-    // while a preview played, and rapid hovering could crash or hang the process).
-    // A short settle delay still avoids kicking off ffmpeg extraction for every card
-    // a fast mouse swipe passes over.
-    private static readonly TimeSpan HoverPreviewSettleDelay = TimeSpan.FromMilliseconds(150);
-    private readonly DispatcherTimer _hoverPreviewDelay = new() { Interval = HoverPreviewSettleDelay };
-    private ClipCardViewModel? _pendingHoverClip;
-    private ClipCardViewModel? _activeHoverClip;
-
     private void ClipCard_OnPointerEntered(object? sender, PointerEventArgs e)
     {
         if (sender is not Control { DataContext: ClipCardViewModel clip }) return;
         clip.IsHovered = true;
-        if (ViewModel?.EnableClipHoverPreview != true || _activeHoverClip == clip) return;
-
-        _pendingHoverClip = clip;
-        _hoverPreviewDelay.Stop();
-        _hoverPreviewDelay.Start();
     }
 
     private void ClipCard_OnPointerExited(object? sender, PointerEventArgs e)
     {
         if (sender is not Control { DataContext: ClipCardViewModel clip }) return;
         clip.IsHovered = false;
-        if (_pendingHoverClip == clip)
-        {
-            _pendingHoverClip = null;
-            _hoverPreviewDelay.Stop();
-        }
-
-        if (_activeHoverClip == clip)
-        {
-            _activeHoverClip = null;
-            clip.StopPreview();
-        }
     }
 
     private void ClipCheckBox_OnClick(object? sender, RoutedEventArgs e)

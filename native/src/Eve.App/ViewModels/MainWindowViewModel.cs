@@ -409,18 +409,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public bool EnableClipHoverPreview
-    {
-        get => Settings.EnableClipHoverPreview;
-        set
-        {
-            if (Settings.EnableClipHoverPreview == value) return;
-            Settings.EnableClipHoverPreview = value;
-            OnPropertyChanged();
-            SaveSettings();
-        }
-    }
-
     public bool EnableClipOverlay
     {
         get => Settings.EnableClipOverlay;
@@ -968,7 +956,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         var clips = _mediaProbe.EnumerateVideos(Settings.LibraryFolder)
-            .Select(file => new ClipCardViewModel(_mediaProbe.CreateLibraryStub(file), _mediaProbe))
+            .Select(file => new ClipCardViewModel(_mediaProbe.CreateLibraryStub(file)))
             .ToArray();
 
         foreach (var group in clips
@@ -997,7 +985,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         else
         {
-            var clip = new ClipCardViewModel(media, _mediaProbe);
+            var clip = new ClipCardViewModel(media);
             var date = clip.CreatedAt.ToLocalTime().Date;
             var key = date.ToString("yyyy-MM-dd");
             var group = ClipGroups.FirstOrDefault(item => item.Key == key);
