@@ -940,16 +940,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public void SaveSelectedClipEditState()
     {
         if (string.IsNullOrWhiteSpace(SelectedVideoPath)) return;
-        var key = ClipEditKey(SelectedVideoPath);
-        Settings.ClipEdits[key] = new ClipEditSettings
+        ClipEditSidecar.Save(SelectedVideoPath, new ClipEditSettings
         {
             TrimStartSeconds = Math.Max(0, TrimStart.TotalSeconds),
             TrimEndSeconds = Math.Max(0, TrimEnd.TotalSeconds),
             TrackVolumes = TimelineTracks
                 .Where(track => track.IsAudio)
                 .ToDictionary(track => track.StreamIndex, track => Math.Clamp(track.VolumePercent, 0, 150))
-        };
-        SaveSettings();
+        });
+
+        // One-time cleanup: drop the old settings.json-based copy now that this
+        // clip's edit state lives in its own sidecar file instead.
+        if (Settings.ClipEdits.Remove(ClipEditKey(SelectedVideoPath))) SaveSettings();
     }
 
     public Task RefreshLibraryAsync()
@@ -1095,6 +1097,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             File.Delete(clip.Path);
             _mediaProbe.DeleteCacheFor(clip.Path);
+            ClipEditSidecar.Delete(clip.Path);
             Settings.ClipEdits.Remove(ClipEditKey(clip.Path));
         }
 
@@ -1518,7 +1521,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void ApplyClipEditState(string path)
     {
-        if (!Settings.ClipEdits.TryGetValue(ClipEditKey(path), out var edit)) return;
+        var edit = ClipEditSidecar.Load(path);
+        if (edit is null)
+        {
+            if (!Settings.ClipEdits.TryGetValue(ClipEditKey(path), out edit)) return;
+            // Migrate this clip's edit state out of settings.json and into its own
+            // sidecar file the first time it's opened after upgrading.
+            ClipEditSidecar.Save(path, edit);
+            Settings.ClipEdits.Remove(ClipEditKey(path));
+            SaveSettings();
+        }
         if (Duration > TimeSpan.Zero)
         {
             var start = TimeSpan.FromSeconds(Math.Clamp(edit.TrimStartSeconds, 0, Duration.TotalSeconds));
