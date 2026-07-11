@@ -77,7 +77,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("20 Minutes", 1200)
         };
         ReplayResolutions = new ObservableCollection<int> { 720, 1080, 1440, 2160 };
-        ReplayFrameRates = new ObservableCollection<int> { 30, 60, 120 };
+        ReplayFrameRates = new ObservableCollection<int> { 30, 60, 90, 120, 144, 165, 240 };
         ExportCodecs = new ObservableCollection<ExportCodecOption>
         {
             new("H.264", "h264_nvenc", "libx264"),
