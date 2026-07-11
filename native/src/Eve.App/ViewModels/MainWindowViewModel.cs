@@ -793,7 +793,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         MicrophoneDevices.Clear();
         var defaultMicName = _audioDevices.GetDefaultCaptureDeviceName();
         MicrophoneDevices.Add(new AudioDeviceOption(string.Empty,
-            string.IsNullOrWhiteSpace(defaultMicName) ? "Default" : $"Default ({defaultMicName})"));
+            string.IsNullOrWhiteSpace(defaultMicName) ? "Default" : $"Default - {defaultMicName}"));
         foreach (var device in _audioDevices.GetCaptureDevices()) MicrophoneDevices.Add(device);
 
         // Restore the saved selection for display without persisting a fallback over it:
