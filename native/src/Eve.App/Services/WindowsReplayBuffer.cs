@@ -26,7 +26,16 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     private string _audioRouteKey = string.Empty;
     private DateTime _startedAtUtc;
     private DateTime _lastRecorderRestartUtc = DateTime.MinValue;
-    private static readonly TimeSpan MinRecorderRestartInterval = TimeSpan.FromSeconds(5);
+    // A kill-streak's debounced auto-clips (Assist, 3K, Headshot 4K, ...) tend to
+    // land roughly 15-16s apart in practice - each one still past a 5s "fresh"
+    // window forces its own recorder stop/restart, and each restart is a small
+    // real gap in the buffer. Since a *later* clip's window can span back across
+    // an *earlier* clip's forced-restart point (they're pulling from the same
+    // buffered segments), that earlier gap ends up embedded inside the later,
+    // bigger clip - showing up as a jump partway through. 18s covers a typical
+    // debounced-burst gap so consecutive queued saves reuse the same fresh
+    // segment instead of each forcing their own restart.
+    private static readonly TimeSpan MinRecorderRestartInterval = TimeSpan.FromSeconds(18);
     private TaskCompletionSource<string>? _completion;
     private readonly SemaphoreSlim _transition = new(1, 1);
     private readonly List<ReplayAudioCapture> _audioCaptures = new();
