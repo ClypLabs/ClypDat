@@ -68,7 +68,6 @@ public sealed partial class MainWindow : Window
         {
             ApplySavedWindowBounds();
             ViewModel?.UpdateCardLayout(Bounds.Width);
-            if (ViewModel is not null) _gameDetector.SetCustomGames(ViewModel.Settings.CustomGames);
             InitializeReplayServices();
             UpdateDetectedGame();
             _gameDetectionTimer.Start();
@@ -501,15 +500,18 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null) return;
         if (!string.IsNullOrWhiteSpace(ViewModel.Settings.LibraryFolder) && Directory.Exists(ViewModel.Settings.LibraryFolder)) return;
 
-        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = "Select clip folder",
-            AllowMultiple = false
-        });
-        var folder = folders.FirstOrDefault();
-        if (folder?.Path.LocalPath is not { Length: > 0 } path) throw new InvalidOperationException("No clip folder selected.");
+        var path = DefaultLibraryFolder();
+        Directory.CreateDirectory(path);
+        Directory.CreateDirectory(Path.Combine(path, "Saved Clips"));
         await ViewModel.LoadLibraryFolderAsync(path);
     }
+
+    // First run: EVE gets a Videos\EVE folder with no prompt, so clips just start
+    // landing somewhere sane instead of blocking recording behind a folder picker.
+    // "Saved Clips" underneath is the default export destination.
+    private static string DefaultLibraryFolder() => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.MyVideos),
+        "EVE");
 
     private void TimelineSurface_OnSizeChanged(object? sender, SizeChangedEventArgs e)
     {
@@ -783,21 +785,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void AddCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        if (ViewModel is null) return;
-        ViewModel.AddCustomGame();
-        _gameDetector.SetCustomGames(ViewModel.Settings.CustomGames);
-    }
-
-    private void RemoveCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        if (sender is Button { DataContext: Eve.Core.Settings.CustomGameEntry entry } && ViewModel is not null)
-        {
-            ViewModel.RemoveCustomGame(entry);
-            _gameDetector.SetCustomGames(ViewModel.Settings.CustomGames);
-        }
-    }
 
     private void MainWindow_OnKeyDown(object? sender, KeyEventArgs e)
     {
@@ -1098,10 +1085,17 @@ public sealed partial class MainWindow : Window
         var safeName = string.Join("_", ViewModel.EditorTitle.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
         if (string.IsNullOrWhiteSpace(safeName)) safeName = Path.GetFileNameWithoutExtension(ViewModel.SelectedVideoPath);
 
+        var savedClipsFolder = Path.Combine(
+            string.IsNullOrWhiteSpace(ViewModel.Settings.LibraryFolder) ? DefaultLibraryFolder() : ViewModel.Settings.LibraryFolder,
+            "Saved Clips");
+        Directory.CreateDirectory(savedClipsFolder);
+        var suggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(savedClipsFolder);
+
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "Export clip",
             SuggestedFileName = $"{safeName}-trim.mp4",
+            SuggestedStartLocation = suggestedStartLocation,
             FileTypeChoices = new[]
             {
                 new FilePickerFileType("MP4 video") { Patterns = new[] { "*.mp4" } }

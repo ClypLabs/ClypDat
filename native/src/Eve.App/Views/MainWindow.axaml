@@ -200,25 +200,22 @@
     </Border>
 
     <Border Grid.Row="1" Background="#101820" IsVisible="{Binding IsSettingsVisible}">
-      <Grid ColumnDefinitions="220,*">
+      <Grid ColumnDefinitions="220,*,280">
         <Border Grid.Column="0" Background="#0D1116" BorderBrush="#1E2A33" BorderThickness="0,0,1,0">
           <StackPanel Margin="16,24" Spacing="2">
             <TextBlock Text="GENERAL" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" Margin="14,0,0,14" />
-            <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Startup}" Tag="Startup" Content="Startup" Click="SettingsNavButton_OnClick" />
-            <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Detection}" Tag="Game Detection" Content="Game Detection" Click="SettingsNavButton_OnClick" />
+            <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=General}" Tag="General" Content="General" Click="SettingsNavButton_OnClick" />
 
             <TextBlock Text="CAPTURE" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" Margin="14,20,0,14" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Replay Buffer}" Tag="Replay Buffer" Content="Replay Buffer" Click="SettingsNavButton_OnClick" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Overlays and Notifications}" Tag="Overlays and Notifications" Content="Overlays and Notifications" Click="SettingsNavButton_OnClick" />
-            <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Library}" Tag="Library" Content="Library" Click="SettingsNavButton_OnClick" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Audio}" Tag="Audio" Content="Audio" Click="SettingsNavButton_OnClick" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Audio Exclusions}" Tag="Game Audio Exclusions" Content="Game Audio Exclusions" Click="SettingsNavButton_OnClick" />
-            <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Diagnostics}" Tag="Diagnostics" Content="Diagnostics" Click="SettingsNavButton_OnClick" />
           </StackPanel>
         </Border>
 
         <ScrollViewer Grid.Column="1">
-          <StackPanel Margin="36,28,36,40" Spacing="18">
+          <StackPanel Margin="36,28,36,40" Spacing="22">
 
             <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Replay Buffer}">
               <StackPanel Spacing="4">
@@ -228,22 +225,22 @@
               <Border Height="1" Background="#1B242D" />
 
               <StackPanel Spacing="6">
-                <TextBlock Text="Save hotkey" Foreground="#B8C7D8" FontWeight="Bold" />
+                <TextBlock Text="Save hotkey" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
                 <Button Content="{Binding HotkeyDisplay}" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Left" MinWidth="200" />
               </StackPanel>
 
               <StackPanel Spacing="6">
-                <TextBlock Text="Replay length" Foreground="#B8C7D8" FontWeight="Bold" />
+                <TextBlock Text="Replay length" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
                 <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}" HorizontalAlignment="Stretch" />
               </StackPanel>
 
               <StackPanel Spacing="6">
-                <TextBlock Text="Resolution" Foreground="#B8C7D8" FontWeight="Bold" />
+                <TextBlock Text="Resolution" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
                 <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}" HorizontalAlignment="Stretch" />
               </StackPanel>
 
               <StackPanel Spacing="6">
-                <TextBlock Text="Frame rate" Foreground="#B8C7D8" FontWeight="Bold" />
+                <TextBlock Text="Frame rate" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
                 <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}" HorizontalAlignment="Stretch" />
                 <TextBlock Text="Above 1080p60, Windows Capture clips take noticeably longer to process (the clip preview can sit black for a while before it loads)."
                            Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap"
@@ -255,7 +252,7 @@
               </StackPanel>
 
               <StackPanel Spacing="6">
-                <TextBlock Text="Capture backend" Foreground="#B8C7D8" FontWeight="Bold" />
+                <TextBlock Text="Capture backend" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
                 <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayBackends}" SelectedItem="{Binding SelectedReplayBackend}" HorizontalAlignment="Stretch" />
                 <TextBlock Text="{Binding SelectedReplayBackend.Description}" Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
                 <TextBlock Text="Games with anti-cheat (EAC, BattlEye, Ricochet, etc.) often block OBS's game hook, causing a black or frozen capture. If a game doesn't record properly on OBS, switch to Auto (recommended) or Windows Capture instead."
@@ -271,7 +268,7 @@
 
               <Grid ColumnDefinitions="*,Auto">
                 <StackPanel Spacing="2">
-                  <TextBlock Text="Start replay buffer when EVE opens" Foreground="#D2DEEC" FontWeight="Bold" />
+                  <TextBlock Text="Start replay buffer when EVE opens" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
                   <TextBlock Text="Automatically starts recording in the background as soon as EVE launches." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
                 </StackPanel>
                 <ToggleSwitch Grid.Column="1" IsChecked="{Binding StartReplayOnLaunch}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
@@ -286,85 +283,71 @@
               <Border Height="1" Background="#1B242D" />
 
               <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Text="Show clip saved overlay" Foreground="#D2DEEC" FontWeight="Bold" VerticalAlignment="Center" />
+                <TextBlock Text="Show clip saved overlay" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
                 <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableClipOverlay}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
               </Grid>
 
               <StackPanel Spacing="6">
-                <TextBlock Text="Overlay position" Foreground="#B8C7D8" FontWeight="Bold" />
+                <TextBlock Text="Overlay position" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
                 <ComboBox Classes="settingsInput" ItemsSource="{Binding ClipOverlayPositions}" SelectedItem="{Binding SelectedClipOverlayPosition}" HorizontalAlignment="Stretch" />
               </StackPanel>
 
               <Border Height="1" Background="#1B242D" />
 
               <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Text="Play clip saved sound" Foreground="#D2DEEC" FontWeight="Bold" VerticalAlignment="Center" />
+                <TextBlock Text="Play clip saved sound" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
                 <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableClipOverlaySound}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
               </Grid>
 
               <StackPanel Spacing="6">
-                <TextBlock Text="Sound volume" Foreground="#B8C7D8" FontWeight="Bold" />
+                <TextBlock Text="Sound volume" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
                 <ComboBox Classes="settingsInput" ItemsSource="{Binding ClipOverlayVolumes}" SelectedItem="{Binding SelectedClipOverlayVolume}" HorizontalAlignment="Stretch" />
               </StackPanel>
             </StackPanel>
 
-            <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Startup}">
+            <StackPanel Spacing="22" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=General}">
               <StackPanel Spacing="4">
-                <TextBlock Text="STARTUP" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
-                <TextBlock Text="Control what EVE does when Windows starts." Foreground="#93A6B8" TextWrapping="Wrap" />
+                <TextBlock Text="GENERAL" Foreground="#5C6D7E" FontSize="13" FontWeight="Bold" />
+                <TextBlock Text="Startup behavior, library preview, and diagnostics." Foreground="#93A6B8" FontSize="14" TextWrapping="Wrap" />
               </StackPanel>
               <Border Height="1" Background="#1B242D" />
 
+              <TextBlock Text="STARTUP" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
               <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Text="Launch EVE on Windows boot" Foreground="#D2DEEC" FontWeight="Bold" VerticalAlignment="Center" />
+                <StackPanel Spacing="2">
+                  <TextBlock Text="Launch EVE on Windows boot" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
+                  <TextBlock Text="Starts EVE automatically when you sign in to Windows." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                </StackPanel>
                 <ToggleSwitch Grid.Column="1" IsChecked="{Binding LaunchOnWindowsStartup}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
               </Grid>
               <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Text="Start minimized on boot" Foreground="#D2DEEC" FontWeight="Bold" VerticalAlignment="Center" />
+                <StackPanel Spacing="2">
+                  <TextBlock Text="Start minimized on boot" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
+                  <TextBlock Text="Opens straight to the tray instead of showing the main window." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                </StackPanel>
                 <ToggleSwitch Grid.Column="1" IsChecked="{Binding StartMinimizedToTray}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
               </Grid>
-            </StackPanel>
 
-            <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Detection}">
-              <StackPanel Spacing="4">
-                <TextBlock Text="GAME DETECTION" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
-                <TextBlock Text="Add a game EVE doesn't recognize yet by its .exe name, and optionally pick which capture backend it should always use." Foreground="#93A6B8" TextWrapping="Wrap" />
-              </StackPanel>
               <Border Height="1" Background="#1B242D" />
 
-              <Grid ColumnDefinitions="*,*,220,Auto" ColumnSpacing="10">
-                <TextBox Classes="settingsInput" Watermark="game.exe" Text="{Binding NewCustomGameExecutable}" />
-                <TextBox Grid.Column="1" Classes="settingsInput" Watermark="Display name (optional)" Text="{Binding NewCustomGameDisplayName}" />
-                <ComboBox Grid.Column="2" Classes="settingsInput" ItemsSource="{Binding ReplayBackends}" SelectedItem="{Binding SelectedCustomGameBackend}" HorizontalAlignment="Stretch" />
-                <Button Grid.Column="3" Content="Add Game" Click="AddCustomGameButton_OnClick" />
+              <TextBlock Text="LIBRARY" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Spacing="2">
+                  <TextBlock Text="Play a video preview when hovering over a clip" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
+                  <TextBlock Text="Shows a short muted preview when your cursor sits over a clip card." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                </StackPanel>
+                <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableClipHoverPreview}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
               </Grid>
 
-              <ItemsControl ItemsSource="{Binding CustomGames}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate>
-                    <Grid ColumnDefinitions="*,220,Auto" Margin="0,0,0,10">
-                      <StackPanel Spacing="2">
-                        <TextBlock Text="{Binding DisplayName}" Foreground="#D8E4F2" FontWeight="Bold" />
-                        <TextBlock Text="{Binding ExecutableName}" Foreground="#6B7C8C" FontSize="12" />
-                      </StackPanel>
-                      <TextBlock Grid.Column="1" Text="{Binding CaptureBackend}" Foreground="#93A6B8" VerticalAlignment="Center" />
-                      <Button Grid.Column="2" Content="Remove" Click="RemoveCustomGameButton_OnClick" />
-                    </Grid>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-            </StackPanel>
-
-            <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Library}">
-              <StackPanel Spacing="4">
-                <TextBlock Text="LIBRARY" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
-                <TextBlock Text="Preview behavior for clips in your library." Foreground="#93A6B8" TextWrapping="Wrap" />
-              </StackPanel>
               <Border Height="1" Background="#1B242D" />
 
+              <TextBlock Text="DIAGNOSTICS" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
               <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Text="Play a video preview when hovering over a clip" Foreground="#D2DEEC" FontWeight="Bold" VerticalAlignment="Center" />
-                <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableClipHoverPreview}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                <StackPanel Spacing="2">
+                  <TextBlock Text="Log folder" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
+                  <TextBlock Text="Open EVE's log files for troubleshooting a crash or capture issue." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                </StackPanel>
+                <Button Grid.Column="1" Content="Open Logs" Click="OpenLogsButton_OnClick" VerticalAlignment="Center" />
               </Grid>
             </StackPanel>
 
@@ -376,7 +359,7 @@
               <Border Height="1" Background="#1B242D" />
 
               <StackPanel Spacing="6">
-                <TextBlock Text="Chat Audio App" Foreground="#B8C7D8" FontWeight="Bold" />
+                <TextBlock Text="Chat Audio App" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
                   <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedChatProcess}" HorizontalAlignment="Stretch" />
                   <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
@@ -384,7 +367,7 @@
               </StackPanel>
 
               <StackPanel Spacing="6">
-                <TextBlock Text="Microphone" Foreground="#B8C7D8" FontWeight="Bold" />
+                <TextBlock Text="Microphone" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
                 <ComboBox Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" HorizontalAlignment="Stretch" />
               </StackPanel>
             </StackPanel>
@@ -417,17 +400,44 @@
               </ItemsControl>
             </StackPanel>
 
-            <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Diagnostics}">
-              <StackPanel Spacing="4">
-                <TextBlock Text="DIAGNOSTICS" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
-                <TextBlock Text="Open the log folder for troubleshooting." Foreground="#93A6B8" TextWrapping="Wrap" />
-              </StackPanel>
-              <Border Height="1" Background="#1B242D" />
-              <Button Content="Open Logs" Click="OpenLogsButton_OnClick" HorizontalAlignment="Left" />
-            </StackPanel>
-
           </StackPanel>
         </ScrollViewer>
+
+        <Border Grid.Column="2" Background="#0D1116" BorderBrush="#1E2A33" BorderThickness="1,0,0,0">
+          <StackPanel Margin="20,28" Spacing="16">
+            <TextBlock Text="STATUS" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
+            <Border Height="1" Background="#1B242D" />
+
+            <StackPanel Spacing="3">
+              <TextBlock Text="Replay buffer" Foreground="#6B7C8C" FontSize="11" FontWeight="Bold" />
+              <TextBlock Text="{Binding RecorderStatus}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
+            </StackPanel>
+
+            <StackPanel Spacing="3">
+              <TextBlock Text="Save hotkey" Foreground="#6B7C8C" FontSize="11" FontWeight="Bold" />
+              <TextBlock Text="{Binding HotkeyDisplay}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
+            </StackPanel>
+
+            <StackPanel Spacing="3">
+              <TextBlock Text="Resolution / FPS" Foreground="#6B7C8C" FontSize="11" FontWeight="Bold" />
+              <TextBlock Foreground="#D2DEEC" FontWeight="Bold" FontSize="15">
+                <Run Text="{Binding SelectedReplayResolution.Label}" /><Run Text=" @ " /><Run Text="{Binding SelectedReplayFrameRate}" /><Run Text="fps" />
+              </TextBlock>
+            </StackPanel>
+
+            <StackPanel Spacing="3">
+              <TextBlock Text="Capture backend" Foreground="#6B7C8C" FontSize="11" FontWeight="Bold" />
+              <TextBlock Text="{Binding SelectedReplayBackend.Label}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" TextWrapping="Wrap" />
+            </StackPanel>
+
+            <Border Height="1" Background="#1B242D" />
+
+            <StackPanel Spacing="3">
+              <TextBlock Text="Library folder" Foreground="#6B7C8C" FontSize="11" FontWeight="Bold" />
+              <TextBlock Text="{Binding LibraryLocationText}" Foreground="#93A6B8" FontSize="12" TextWrapping="Wrap" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
       </Grid>
     </Border>
 

@@ -127,6 +127,9 @@
     <Setter Property="BorderBrush" Value="#2C3B48" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="Padding" Value="14,10" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="MinHeight" Value="42" />
   </Style>
   <Style Selector="Button.settingsNavButton">
     <Setter Property="Background" Value="Transparent" />

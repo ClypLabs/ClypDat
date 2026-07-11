@@ -122,19 +122,6 @@ public sealed class ForegroundGameDetector
 
     public string DetectDisplayName() => Detect().DisplayName;
 
-    // Lets users cover games EVE's built-in catalog doesn't know about yet (settings ->
-    // Game Detection) without needing an app update - same catalog dictionary the
-    // built-in list and game-catalog.json both feed into, so a user-added game gets
-    // full catalog treatment (recognized even without a graphics-module check, etc).
-    public void SetCustomGames(IEnumerable<Eve.Core.Settings.CustomGameEntry> games)
-    {
-        foreach (var game in games)
-        {
-            if (string.IsNullOrWhiteSpace(game.ExecutableName) || string.IsNullOrWhiteSpace(game.DisplayName)) continue;
-            _catalog[game.ExecutableName] = game.DisplayName;
-        }
-    }
-
     private string _lastLoggedRejectedExe = string.Empty;
 
     private GameDetection DetectForeground()
