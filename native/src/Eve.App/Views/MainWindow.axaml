@@ -149,7 +149,7 @@
                             <Border Background="#16202A" Height="{Binding $parent[Window].DataContext.CardImageHeight}">
                               <Grid>
                                 <Image Source="{Binding PreviewImage}" Stretch="UniformToFill" />
-                                <Border Background="#665864E8" IsVisible="{Binding IsSelected}" IsHitTestVisible="False" />
+                                <Border Background="#661A2040" IsVisible="{Binding IsSelected}" IsHitTestVisible="False" />
                                 <TextBlock Text="{Binding SelectionOrder}"
                                            IsVisible="{Binding HasSelectionOrder}"
                                            Foreground="#FFFFFF"
