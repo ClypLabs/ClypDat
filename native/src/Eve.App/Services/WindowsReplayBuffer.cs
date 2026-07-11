@@ -1334,7 +1334,23 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             StandardOutputEncoding = Encoding.UTF8
         };
         foreach (var arg in args) info.ArgumentList.Add(arg);
-        return Process.Start(info) ?? throw new InvalidOperationException($"Could not start {fileName}.");
+        var process = Process.Start(info) ?? throw new InvalidOperationException($"Could not start {fileName}.");
+        try
+        {
+            // Concat/mux ffmpeg runs at full CPU priority by default, competing
+            // directly with whatever game is running - normally one quick pass per
+            // clip is barely noticeable, but queued auto-clip saves can run several
+            // of these back to back, which is what was making the whole system feel
+            // sluggish during a clip burst. BelowNormal still gets scheduled
+            // whenever a core is actually free, it just yields under contention.
+            process.PriorityClass = ProcessPriorityClass.BelowNormal;
+        }
+        catch
+        {
+            // Priority is a nice-to-have; never let it block starting the process.
+        }
+
+        return process;
     }
 
     private sealed record AudioRoutes(int[] ChatProcessIds, int[] ExcludedProcessIds, int[] GameProcessIds, bool UseProcessRouting, string RouteKey, string MicrophoneDeviceId);
