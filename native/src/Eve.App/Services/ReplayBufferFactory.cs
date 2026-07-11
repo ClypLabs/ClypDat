@@ -10,7 +10,10 @@ public static class ReplayBufferFactory
     private static readonly HashSet<string> AutoLegacyGames = new(StringComparer.OrdinalIgnoreCase)
     {
         "cs2.exe",
-        "Marvel-Win64-Shipping.exe"
+        "Marvel-Win64-Shipping.exe",
+        "FortniteClient-Win64-Shipping.exe",
+        "FortniteClient-Win64-Shipping_EAC.exe",
+        "FortniteClient-Win64-Shipping_EAC_EOS.exe"
     };
 
     public static IReplayBuffer Create(Func<ReplayBufferConfig> configProvider)
