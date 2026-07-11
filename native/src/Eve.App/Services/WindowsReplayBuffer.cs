@@ -891,8 +891,15 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             // frame, which for a replay buffer clip is imperceptible against the
             // seconds-to-tens-of-seconds this saves. Falls back to the old
             // decode+re-encode path only if the copy attempt itself fails.
+            // -ss before -i seeks the input but does NOT rebase the copied video
+            // stream's timestamps to start at 0 - it keeps its original offset from
+            // the source file, while the separately-built audio tracks start at 0.
+            // Two tracks starting from different timelines in the same container is
+            // exactly what caused the video-jumps/audio-desync symptom.
+            // -avoid_negative_ts make_zero normalizes everything back to a shared
+            // zero point on output.
             var copyArgs = new List<string> { "-y", "-ss", FormatSeconds(videoOffsetSeconds), "-i", videoPath, "-i", gamePath, "-i", chatPath, "-i", microphonePath };
-            copyArgs.AddRange(new[] { "-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-t", FormatSeconds(duration) });
+            copyArgs.AddRange(new[] { "-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-avoid_negative_ts", "make_zero", "-t", FormatSeconds(duration) });
             copyArgs.AddRange(metadataArgs);
             copyArgs.Add(outputPath);
             var result = await RunProcessAsync("ffmpeg", copyArgs, cancellationToken);
