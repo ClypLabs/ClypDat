@@ -74,7 +74,7 @@ public sealed partial class MainWindow : Window
             _globalHotkey?.Dispose();
             _gameDetectionTimer.Stop();
             _hoverPreviewDelay.Stop();
-            StopHoverPreview();
+            DisposeHoverPreview();
             _hoverPreviewLibVlc?.Dispose();
             if (_replayBuffer is not null) _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
             _replayBuffer?.Dispose();
@@ -528,19 +528,37 @@ public sealed partial class MainWindow : Window
         if (_hoverPreviewClip == clip) StopHoverPreview();
     }
 
+    private Media? _hoverPreviewMedia;
+
+    // A fresh MediaPlayer per hover (and disposing it on every exit) was blocking
+    // the UI thread hard enough to trip Windows' "(Not Responding)" state,
+    // especially when the mouse crossed several cards quickly - MediaPlayer
+    // construction/disposal binds/unbinds a native video output surface, which
+    // isn't cheap. Fixed by creating the MediaPlayer once and reusing it for
+    // every hover (only swapping which clip's Media it plays), so a hover only
+    // ever costs a Media swap + Play/Stop instead of a full player teardown.
+    private MediaPlayer EnsureHoverPreviewPlayer()
+    {
+        if (_hoverPreviewMediaPlayer is not null) return _hoverPreviewMediaPlayer;
+        _hoverPreviewLibVlc ??= new LibVLC("--quiet");
+        _hoverPreviewMediaPlayer = new MediaPlayer(_hoverPreviewLibVlc) { Mute = true, Volume = 0 };
+        _hoverPreviewMediaPlayer.EndReached += HoverPreview_OnEndReached;
+        return _hoverPreviewMediaPlayer;
+    }
+
     private void StartHoverPreview(ClipCardViewModel clip)
     {
         StopHoverPreview();
         try
         {
-            _hoverPreviewLibVlc ??= new LibVLC("--quiet");
-            var player = new MediaPlayer(_hoverPreviewLibVlc) { Mute = true, Volume = 0 };
-            using var media = new Media(_hoverPreviewLibVlc, new Uri(clip.Path));
+            var player = EnsureHoverPreviewPlayer();
+            var previousMedia = _hoverPreviewMedia;
+            var media = new Media(_hoverPreviewLibVlc!, new Uri(clip.Path));
             media.AddOption(":no-audio");
             player.Media = media;
-            player.EndReached += HoverPreview_OnEndReached;
+            _hoverPreviewMedia = media;
+            previousMedia?.Dispose();
             player.Play();
-            _hoverPreviewMediaPlayer = player;
             _hoverPreviewClip = clip;
             clip.HoverPreviewPlayer = player;
         }
@@ -571,13 +589,21 @@ public sealed partial class MainWindow : Window
             _hoverPreviewClip = null;
         }
 
+        _hoverPreviewMediaPlayer?.Stop();
+    }
+
+    private void DisposeHoverPreview()
+    {
+        StopHoverPreview();
         if (_hoverPreviewMediaPlayer is not null)
         {
             _hoverPreviewMediaPlayer.EndReached -= HoverPreview_OnEndReached;
-            _hoverPreviewMediaPlayer.Stop();
             _hoverPreviewMediaPlayer.Dispose();
             _hoverPreviewMediaPlayer = null;
         }
+
+        _hoverPreviewMedia?.Dispose();
+        _hoverPreviewMedia = null;
     }
 
     private void ClipCheckBox_OnClick(object? sender, RoutedEventArgs e)
