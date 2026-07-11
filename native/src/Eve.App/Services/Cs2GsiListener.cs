@@ -25,7 +25,11 @@ public sealed class Cs2GsiListener : IDisposable
     private readonly object _killClipLock = new();
     private Timer? _killClipDebounceTimer;
     private string? _pendingKillLabel;
-    private static readonly TimeSpan KillClipDebounce = TimeSpan.FromSeconds(4);
+    // 4s clipped real streaks short - a 5.9s gap between a 3rd and 4th kill (still
+    // very plausibly the same fight: reposition, reload, re-peek) let the 3K
+    // timer fire before the 4th kill even landed, producing two clips instead of
+    // one for the Ace.
+    private static readonly TimeSpan KillClipDebounce = TimeSpan.FromSeconds(8);
 
     public event EventHandler<string>? AutoClipTriggered;
 
