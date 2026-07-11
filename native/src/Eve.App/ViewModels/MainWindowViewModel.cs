@@ -278,9 +278,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (!SetProperty(ref _selectedReplayDurationPreset, value) || value is null) return;
             Settings.ReplayDurationSeconds = value.Seconds;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(ReplayLengthLongCaptureWarning));
             SaveSettings();
         }
     }
+
+    public bool ReplayLengthLongCaptureWarning =>
+        (SelectedReplayDurationPreset?.Seconds ?? 0) >= 600 && !ReplayBackendIsObs;
 
     public ResolutionOption? SelectedReplayResolution
     {
@@ -350,6 +354,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SaveSettings();
             ReplayBackendRestartRequired = !string.Equals(value.Value, _initialReplayBackend, StringComparison.OrdinalIgnoreCase);
             OnPropertyChanged(nameof(ReplayBackendIsObs));
+            OnPropertyChanged(nameof(ReplayLengthLongCaptureWarning));
         }
     }
 

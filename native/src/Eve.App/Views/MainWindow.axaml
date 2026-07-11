@@ -239,6 +239,9 @@
                     </DataTemplate>
                   </ListBox.ItemTemplate>
                 </ListBox>
+                <TextBlock Text="10 minutes and up on Windows Capture can take a significant amount of time to go from a black preview to a finished, playable clip."
+                           Foreground="#E5A00D" FontSize="12" FontWeight="Bold" TextWrapping="Wrap"
+                           IsVisible="{Binding ReplayLengthLongCaptureWarning}" />
               </StackPanel>
 
               <StackPanel Spacing="6">
