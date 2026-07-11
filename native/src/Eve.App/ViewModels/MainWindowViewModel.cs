@@ -1100,15 +1100,38 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ApplyGameSearchFilter();
     }
 
+    // Diffs into FilteredGameCaptureRows instead of Clear()-then-re-Add() so a row
+    // that stays visible across a keystroke keeps the same container instead of
+    // being torn down and rebuilt - a full reset was making per-row state (like the
+    // anti-cheat warning) flicker away while typing in the search box.
     private void ApplyGameSearchFilter()
     {
-        FilteredGameCaptureRows.Clear();
         var query = GameSearchText.Trim();
-        var matches = string.IsNullOrWhiteSpace(query)
+        var matches = (string.IsNullOrWhiteSpace(query)
             ? GameCaptureRows
             : GameCaptureRows.Where(row => row.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                                            row.ExecutableName.Contains(query, StringComparison.OrdinalIgnoreCase));
-        foreach (var row in matches) FilteredGameCaptureRows.Add(row);
+                                            row.ExecutableName.Contains(query, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
+        for (var i = FilteredGameCaptureRows.Count - 1; i >= 0; i--)
+        {
+            if (!matches.Contains(FilteredGameCaptureRows[i])) FilteredGameCaptureRows.RemoveAt(i);
+        }
+
+        for (var i = 0; i < matches.Count; i++)
+        {
+            if (i < FilteredGameCaptureRows.Count && FilteredGameCaptureRows[i] == matches[i]) continue;
+
+            var existingIndex = FilteredGameCaptureRows.IndexOf(matches[i]);
+            if (existingIndex >= 0)
+            {
+                FilteredGameCaptureRows.Move(existingIndex, i);
+            }
+            else
+            {
+                FilteredGameCaptureRows.Insert(i, matches[i]);
+            }
+        }
     }
 
     private void GameCaptureRow_OnPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
