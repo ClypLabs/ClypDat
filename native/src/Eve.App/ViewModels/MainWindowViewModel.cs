@@ -282,6 +282,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Settings.ReplayMaxHeight = value.Height;
             SaveSettings();
             UpdateReplayQualityRestartRequired();
+            OnPropertyChanged(nameof(ReplayQualityAboveDefault));
         }
     }
 
@@ -294,8 +295,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Settings.ReplayFrameRate = value;
             SaveSettings();
             UpdateReplayQualityRestartRequired();
+            OnPropertyChanged(nameof(ReplayQualityAboveDefault));
         }
     }
+
+    public bool ReplayQualityAboveDefault => Settings.ReplayMaxHeight > 1080 || Settings.ReplayFrameRate > 60;
 
     private void UpdateReplayQualityRestartRequired()
     {

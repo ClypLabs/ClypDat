@@ -215,6 +215,9 @@
                 <TextBlock Grid.Row="3" Text="Frame rate" Foreground="#93A6B8" VerticalAlignment="Center" />
                 <StackPanel Grid.Row="3" Grid.Column="1" Spacing="6">
                   <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}" Width="160" HorizontalAlignment="Left" />
+                  <TextBlock Text="Above 1080p60, Windows Capture clips take noticeably longer to process (the clip preview can sit black for a while before it loads)."
+                             Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" MaxWidth="420" HorizontalAlignment="Left"
+                             IsVisible="{Binding ReplayQualityAboveDefault}" />
                   <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding ReplayQualityRestartRequired}">
                     <TextBlock Text="Restart the replay buffer for the resolution/frame rate change to take effect." Foreground="#E5A00D" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="360" />
                     <Button Content="Restart Buffer" Click="RestartReplayBufferButton_OnClick" />
