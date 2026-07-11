@@ -571,8 +571,8 @@
                 <StackPanel>
                   <Button Classes="autoClipCardHeader" Click="ToggleCs2CardButton_OnClick">
                     <Grid ColumnDefinitions="56,*,Auto" ColumnSpacing="12">
-                      <Border Width="56" Height="56" CornerRadius="8" Background="#E8A33D">
-                        <TextBlock Text="CS2" Foreground="#171009" FontWeight="Bold" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                      <Border Width="56" Height="56" CornerRadius="8" ClipToBounds="True">
+                        <Image Source="/Assets/cs2-cover.jpg" Stretch="UniformToFill" />
                       </Border>
                       <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                         <TextBlock Text="Counter-Strike 2" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />

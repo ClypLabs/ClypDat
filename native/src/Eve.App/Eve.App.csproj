@@ -32,6 +32,7 @@
   <ItemGroup>
     <AvaloniaResource Include="..\..\..\assets\eve-icon*.png" Link="Assets\%(Filename)%(Extension)" />
     <AvaloniaResource Include="..\..\..\assets\eve-icon.ico" Link="Assets\eve-icon.ico" />
+    <AvaloniaResource Include="..\..\..\assets\cs2-cover.jpg" Link="Assets\cs2-cover.jpg" />
   </ItemGroup>
 
   <Target Name="CopyLibVlcRuntimeToPublish" AfterTargets="Publish">
