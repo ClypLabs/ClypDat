@@ -447,7 +447,7 @@
                   <StackPanel Spacing="6">
                     <TextBlock Text="Add a running game" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
                     <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
-                      <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedGameProcess}" HorizontalAlignment="Stretch" />
+                      <ComboBox Classes="settingsInput" ItemsSource="{Binding GameCandidateProcesses}" SelectedItem="{Binding SelectedGameProcess}" HorizontalAlignment="Stretch" />
                       <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
                       <Button Grid.Column="2" Content="Add" Click="AddGameFromProcessButton_OnClick" />
                     </Grid>

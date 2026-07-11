@@ -73,6 +73,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ChatAudioDevices = new ObservableCollection<AudioDeviceOption>();
         MicrophoneDevices = new ObservableCollection<AudioDeviceOption>();
         OpenProcesses = new ObservableCollection<ProcessOption>();
+        GameCandidateProcesses = new ObservableCollection<ProcessOption>();
         ReplayDurationPresets = new ObservableCollection<ReplayDurationPreset>
         {
             new("30s", 30),
@@ -140,6 +141,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<AudioDeviceOption> ChatAudioDevices { get; }
     public ObservableCollection<AudioDeviceOption> MicrophoneDevices { get; }
     public ObservableCollection<ProcessOption> OpenProcesses { get; }
+    // Narrower than OpenProcesses (which deliberately stays broad for the Chat
+    // Audio App / exclusions pickers, where a browser or Discord is a valid
+    // choice) - "Add a running game" only wants things that plausibly are a
+    // game: not a browser/launcher/communication app, and not something already
+    // tracked as a game (built-in catalog or an existing override).
+    public ObservableCollection<ProcessOption> GameCandidateProcesses { get; }
     public ObservableCollection<ReplayDurationPreset> ReplayDurationPresets { get; }
     public ObservableCollection<ResolutionOption> ReplayResolutions { get; }
     public ObservableCollection<int> ReplayFrameRates { get; }
@@ -1330,6 +1337,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ? Path.GetFileNameWithoutExtension(process.Name)
             : process.WindowTitle;
         AddCustomGame();
+        GameCandidateProcesses.Remove(process);
         SelectedGameProcess = null;
     }
 
@@ -1443,6 +1451,36 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedProcessExclusion =
             OpenProcesses.FirstOrDefault(process => string.Equals(process.Name, selectedName, StringComparison.OrdinalIgnoreCase)) ??
             OpenProcesses.FirstOrDefault();
+
+        var selectedGameName = SelectedGameProcess?.Name;
+        GameCandidateProcesses.Clear();
+        foreach (var process in OpenProcesses.Where(IsGameCandidate))
+        {
+            GameCandidateProcesses.Add(process);
+        }
+
+        SelectedGameProcess = GameCandidateProcesses.FirstOrDefault(process => string.Equals(process.Name, selectedGameName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // Common non-game apps that legitimately keep a visible titled window open
+    // (so ProcessListService's own filtering doesn't catch them) but that
+    // nobody is adding as a "game" from this picker.
+    private static readonly HashSet<string> NonGameExecutables = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "discord.exe", "discordcanary.exe", "discordptb.exe",
+        "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "zen.exe", "vivaldi.exe",
+        "spotify.exe", "slack.exe", "teams.exe", "zoom.exe", "telegram.exe", "whatsapp.exe",
+        "steam.exe", "steamwebhelper.exe", "epicgameslauncher.exe", "battle.net.exe",
+        "origin.exe", "eaapp.exe", "eadesktop.exe", "ubisoftconnect.exe", "upc.exe", "galaxyclient.exe",
+        "obs64.exe", "obs32.exe", "eve.exe", "code.exe", "notion.exe"
+    };
+
+    private bool IsGameCandidate(ProcessOption process)
+    {
+        if (NonGameExecutables.Contains(process.Name)) return false;
+        if (GameCatalog.BuiltIn.ContainsKey(process.Name)) return false;
+        if (Settings.GameCaptureOverrides.Any(g => string.Equals(g.ExecutableName, process.Name, StringComparison.OrdinalIgnoreCase))) return false;
+        return true;
     }
 
     public ReplayBufferConfig CreateReplayConfig()
