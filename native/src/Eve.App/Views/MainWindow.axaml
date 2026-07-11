@@ -170,6 +170,27 @@
                                         CornerRadius="18">
                                   <TextBlock Text="{Binding DurationLabel}" Foreground="#D8E2EE" FontSize="14" FontWeight="Bold" />
                                 </Border>
+                                <StackPanel HorizontalAlignment="Left"
+                                            VerticalAlignment="Bottom"
+                                            Orientation="Horizontal"
+                                            Spacing="6"
+                                            Margin="12"
+                                            IsVisible="{Binding HasAutoClipIcon}"
+                                            ToolTip.Tip="{Binding AutoClipEventTypeLabel}">
+                                  <Border Width="26" Height="26" Background="#1A2530" CornerRadius="13">
+                                    <Path Data="{Binding AutoClipIconGeometry}" Fill="{Binding AutoClipIconFill}" Width="13" Height="13" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                  </Border>
+                                  <TextBlock Text="{Binding AutoClipKillCount, StringFormat='x {0}'}"
+                                             IsVisible="{Binding HasAutoClipKillCount}"
+                                             Foreground="#FFFFFF"
+                                             FontSize="14"
+                                             FontWeight="Bold"
+                                             VerticalAlignment="Center">
+                                    <TextBlock.Effect>
+                                      <DropShadowEffect Color="#000000" BlurRadius="6" OffsetX="0" OffsetY="0" Opacity="0.7" />
+                                    </TextBlock.Effect>
+                                  </TextBlock>
+                                </StackPanel>
                                 <CheckBox HorizontalAlignment="Left"
                                           VerticalAlignment="Top"
                                           Margin="14"
@@ -181,11 +202,6 @@
 
                             <Border Grid.Row="1" Background="#1E2A35">
                               <StackPanel Spacing="6" Margin="16,13,16,13">
-                                <Border Width="22" Height="22" Background="#1A2530" CornerRadius="11" HorizontalAlignment="Left"
-                                        IsVisible="{Binding HasAutoClipIcon}"
-                                        ToolTip.Tip="{Binding AutoClipEventTypeLabel}">
-                                  <Path Data="{Binding AutoClipIconGeometry}" Fill="{Binding AutoClipIconFill}" Width="11" Height="11" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                </Border>
                                 <TextBlock Text="{Binding TileTopLabel}"
                                            Foreground="#8C98A7"
                                            FontSize="12"

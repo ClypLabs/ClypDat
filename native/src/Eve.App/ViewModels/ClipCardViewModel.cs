@@ -51,6 +51,22 @@ public sealed class ClipCardViewModel : ViewModelBase
     public string TileMainLabel => IsAutoClip ? GameNameLabel : ClipFromLabel;
     public string AutoClipEventTypeLabel => _clipInfo?.AutoClipEventType ?? string.Empty;
 
+    // Matches Cs2GsiListener's label format: "Kill", "2K".."4K", "Ace", each
+    // optionally prefixed "Headshot ". Death/Assist have no kill count.
+    public int AutoClipKillCount => _clipInfo?.AutoClipEventType switch
+    {
+        null => 0,
+        var type when type.EndsWith("Ace", StringComparison.OrdinalIgnoreCase) => 5,
+        var type when type.EndsWith("4K", StringComparison.OrdinalIgnoreCase) => 4,
+        var type when type.EndsWith("3K", StringComparison.OrdinalIgnoreCase) => 3,
+        var type when type.EndsWith("2K", StringComparison.OrdinalIgnoreCase) => 2,
+        var type when type.EndsWith("Kill", StringComparison.OrdinalIgnoreCase) => 1,
+        var type when type.Equals("Headshot", StringComparison.OrdinalIgnoreCase) => 1,
+        _ => 0
+    };
+
+    public bool HasAutoClipKillCount => AutoClipKillCount > 0;
+
     private static readonly (string Prefix, IBrush Fill)[] AutoClipIconStyles =
     {
         ("Headshot", Brush.Parse("#E5A00D")),
@@ -195,6 +211,8 @@ public sealed class ClipCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(AutoClipIconGeometry));
         OnPropertyChanged(nameof(AutoClipIconFill));
         OnPropertyChanged(nameof(AutoClipEventTypeLabel));
+        OnPropertyChanged(nameof(AutoClipKillCount));
+        OnPropertyChanged(nameof(HasAutoClipKillCount));
     }
 
     private void SetPreviewImage(string path)
