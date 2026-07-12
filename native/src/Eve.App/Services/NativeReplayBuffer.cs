@@ -273,6 +273,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             var encodeMs = 0.0;
             var framesEncodedSinceLog = 0;
             var stageStopwatch = new System.Diagnostics.Stopwatch();
+            var getFrameMs = 0.0;
+            var waitMs = 0.0;
+            var iterationsSinceLog = 0;
 
             while (!token.IsCancellationRequested)
             {
@@ -280,11 +283,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 {
                     lastDiagLog = stopwatch.Elapsed;
                     var n = Math.Max(1, framesEncodedSinceLog);
-                    AppLog.Info($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgEncodeMs={encodeMs / n:0.00}.");
+                    var m = Math.Max(1, iterationsSinceLog);
+                    AppLog.Info($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgEncodeMs={encodeMs / n:0.00}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, iterations={iterationsSinceLog}.");
                     copyMapMs = 0;
                     scaleMs = 0;
                     encodeMs = 0;
                     framesEncodedSinceLog = 0;
+                    waitMs = 0;
+                    getFrameMs = 0;
+                    iterationsSinceLog = 0;
                 }
 
                 // Re-check which window/monitor we should be capturing every second -
@@ -320,8 +327,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 // TryGetNextFrame() on a Sleep loop - the timeout is just a
                 // safety net (still re-checks cancellation/target/diag on a
                 // spurious/missed signal), not the normal wakeup path anymore.
+                iterationsSinceLog++;
+                stageStopwatch.Restart();
                 frameArrivedSignal.WaitOne(50);
+                waitMs += stageStopwatch.Elapsed.TotalMilliseconds;
+
+                stageStopwatch.Restart();
                 using var wgcFrame = framePool.TryGetNextFrame();
+                getFrameMs += stageStopwatch.Elapsed.TotalMilliseconds;
                 if (wgcFrame is null)
                 {
                     continue;
