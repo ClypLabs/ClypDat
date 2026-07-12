@@ -1989,7 +1989,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 clip.UpdateMedia(media);
-                if (string.Equals(SelectedVideoPath, clip.Path, StringComparison.OrdinalIgnoreCase))
+                // Guarded on IsEditorVisible too - AddOrUpdateLibraryClipAsync also
+                // calls this after the editor closes (to refresh the library card),
+                // and SelectedVideoPath still points at that clip at that point.
+                // Without the guard, OpenMedia's unconditional IsEditorVisible = true
+                // would pop the editor back open right after the user closed it.
+                if (IsEditorVisible && string.Equals(SelectedVideoPath, clip.Path, StringComparison.OrdinalIgnoreCase))
                 {
                     OpenMedia(media, preserveEditorText: true);
                 }

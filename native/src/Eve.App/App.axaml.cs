@@ -36,6 +36,7 @@ public sealed partial class App : Application
                 WindowState = WindowState.Normal,
                 ShowInTaskbar = !minimized
             };
+            _mainWindow.ApplySavedWindowBounds();
             desktop.MainWindow = _mainWindow;
             InitializeTrayIcon();
             if (minimized)

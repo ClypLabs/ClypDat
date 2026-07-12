@@ -45,7 +45,6 @@ public sealed partial class MainWindow : Window
         _gameDetectionTimer.Tick += (_, _) => UpdateDetectedGame();
         Opened += (_, _) =>
         {
-            ApplySavedWindowBounds();
             ViewModel?.UpdateCardLayout(Bounds.Width);
             InitializeReplayServices();
             UpdateDetectedGame();
@@ -1712,7 +1711,11 @@ public sealed partial class MainWindow : Window
         return position;
     }
 
-    private void ApplySavedWindowBounds()
+    // Called from App.axaml.cs right after DataContext is assigned but before the
+    // window is shown - applying saved bounds on the Opened event (after the
+    // window already rendered once at its XAML-default size) caused a visible
+    // flash-then-resize on every launch.
+    internal void ApplySavedWindowBounds()
     {
         if (ViewModel is null) return;
         var settings = ViewModel.Settings;
