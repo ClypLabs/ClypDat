@@ -1133,7 +1133,14 @@ public sealed partial class MainWindow : Window
         if (e.Property != Slider.ValueProperty || sender is not Slider { DataContext: TrackLaneViewModel track } slider) return;
         track.VolumePercent = Math.Clamp(slider.Value, 0, 150);
         UpdateVolumeBadgePosition(slider, track);
-        _playback?.SetTrackVolume(track.StreamIndex, track.VolumePercent);
+        _playback?.SetTrackVolume(track.StreamIndex, track.EffectiveVolumePercent);
+    }
+
+    private void TrackMuteButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: TrackLaneViewModel track }) return;
+        track.IsMuted = !track.IsMuted;
+        _playback?.SetTrackVolume(track.StreamIndex, track.EffectiveVolumePercent);
     }
 
     private static void UpdateVolumeBadgePosition(Slider slider, TrackLaneViewModel track, double? pointerX = null)

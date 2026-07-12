@@ -7,6 +7,7 @@ public sealed class TrackLaneViewModel : ViewModelBase
     private double _volumePercent = 100;
     private double _volumeBadgeX = 46;
     private bool _showVolumePercent;
+    private bool _isMuted;
     private IReadOnlyList<double> _waveformPeaks = Array.Empty<double>();
 
     public TrackLaneViewModel(int streamIndex, string label, string type, string color, bool canAdjustVolume, double volumePercent = 100)
@@ -40,6 +41,7 @@ public sealed class TrackLaneViewModel : ViewModelBase
             if (!SetProperty(ref _volumePercent, clamped)) return;
             OnPropertyChanged(nameof(VolumeLabel));
             OnPropertyChanged(nameof(VolumeBadgeMargin));
+            OnPropertyChanged(nameof(EffectiveVolumePercent));
         }
     }
 
@@ -48,6 +50,22 @@ public sealed class TrackLaneViewModel : ViewModelBase
         get => _showVolumePercent;
         set => SetProperty(ref _showVolumePercent, value);
     }
+
+    // Independent of VolumePercent so un-muting restores whatever level was set
+    // before, instead of the mute action itself forgetting the prior value.
+    public bool IsMuted
+    {
+        get => _isMuted;
+        set
+        {
+            if (!SetProperty(ref _isMuted, value)) return;
+            OnPropertyChanged(nameof(EffectiveVolumePercent));
+        }
+    }
+
+    // What the volume filter/preview should actually use - 0 while muted, the
+    // real percent otherwise.
+    public double EffectiveVolumePercent => IsMuted ? 0 : VolumePercent;
 
     public double VolumeBadgeX
     {

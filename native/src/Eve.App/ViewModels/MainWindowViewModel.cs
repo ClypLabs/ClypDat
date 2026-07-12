@@ -1621,7 +1621,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             args.Add("-map");
             args.Add($"0:{audioTracks[0].StreamIndex}?");
             args.Add("-af");
-            args.Add($"volume={VolumeMultiplier(audioTracks[0].VolumePercent):0.###}");
+            args.Add($"volume={VolumeMultiplier(audioTracks[0].EffectiveVolumePercent):0.###}");
         }
         else if (audioTracks.Length > 1)
         {
@@ -1630,7 +1630,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             foreach (var track in audioTracks)
             {
                 var label = $"a{track.StreamIndex}";
-                filter.Append($"[0:{track.StreamIndex}]volume={VolumeMultiplier(track.VolumePercent):0.###}[{label}];");
+                filter.Append($"[0:{track.StreamIndex}]volume={VolumeMultiplier(track.EffectiveVolumePercent):0.###}[{label}];");
                 labels.Add($"[{label}]");
             }
 
