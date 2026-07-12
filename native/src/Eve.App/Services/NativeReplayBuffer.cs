@@ -183,9 +183,40 @@ public sealed class NativeReplayBuffer : IReplayBuffer
 
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             var lastForcedKeyframe = TimeSpan.Zero;
+            var lastRectRefresh = TimeSpan.Zero;
 
             while (!token.IsCancellationRequested)
             {
+                // The crop rect is resolved once above from whatever window was
+                // foreground when capture started - if that wasn't the game yet (e.g.
+                // the buffer armed before the user tabbed in), it would otherwise stay
+                // wrong (full desktop) for the entire session, since this backend never
+                // rotates/restarts the way WindowsReplayBuffer does to naturally pick up
+                // fresh config. Re-resolve periodically instead.
+                if (stopwatch.Elapsed - lastRectRefresh >= TimeSpan.FromSeconds(1))
+                {
+                    lastRectRefresh = stopwatch.Elapsed;
+                    var freshRect = ResolveCaptureRect(_configProvider(), monitorWidth, monitorHeight);
+                    if (freshRect.Width != captureRect.Width || freshRect.Height != captureRect.Height)
+                    {
+                        // Crop size changed (different window/aspect) - rebuild the scaler
+                        // against the new source size, keeping the same output resolution
+                        // so the encoder doesn't need to be reopened (a same-size crop
+                        // move, the common case, only updates X/Y below, no rebuild).
+                        var newSws = ffmpeg.sws_getContext(
+                            freshRect.Width, freshRect.Height, AVPixelFormat.AV_PIX_FMT_BGRA,
+                            outputWidth, outputHeight, AVPixelFormat.AV_PIX_FMT_NV12,
+                            2 /* SWS_BILINEAR */, null, null, null);
+                        if (newSws is not null)
+                        {
+                            ffmpeg.sws_freeContext(swsContext);
+                            swsContext = newSws;
+                        }
+                    }
+
+                    captureRect = freshRect;
+                }
+
                 var acquireResult = duplication.AcquireNextFrame(500, out var frameInfo, out var resource);
                 if (acquireResult.Failure)
                 {
