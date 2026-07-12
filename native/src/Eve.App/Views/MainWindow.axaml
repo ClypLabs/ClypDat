@@ -1009,6 +1009,7 @@
                                    Text="{Binding Label}"
                                    Foreground="#D4E0EA"
                                    FontSize="11"
+                                   Margin="0,3,0,0"
                                    TextTrimming="CharacterEllipsis" />
                         <Border Grid.Row="1"
                                 Classes="trackMuteToggle"

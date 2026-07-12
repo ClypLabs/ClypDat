@@ -1515,7 +1515,7 @@ public sealed partial class MainWindow : Window
             _playbackTimer.Start();
             _ = LoadEditorAudioAsync(playback, ViewModel.SelectedVideoPath, audioTracks, cancellationToken);
             await Task.Delay(200, cancellationToken);
-            if (playback.Duration > TimeSpan.Zero)
+            if (playback.Duration > TimeSpan.Zero && IsPlausibleDuration(playback.Duration, ViewModel.Duration))
             {
                 ViewModel.SetDuration(playback.Duration);
             }
@@ -1576,11 +1576,26 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // The PlaybackSession is now reused across editor opens instead of rebuilt
+    // per-clip (see StartEditorPlaybackAsync) - LibVLC's VideoPlayer.Length can
+    // briefly still report the PREVIOUS clip's duration for a moment after
+    // LoadVideo() while it's still parsing the new file's metadata. Since this
+    // runs unconditionally every playback-timer tick, a stale multi-minute/hour
+    // reading (e.g. right after closing a long Full Session recording and
+    // opening a short clip) could get written over the already-correct
+    // ffprobe-sourced duration. Reject anything wildly different from what's
+    // already known instead of blindly trusting every VLC read.
+    private static bool IsPlausibleDuration(TimeSpan candidate, TimeSpan known)
+    {
+        if (known <= TimeSpan.Zero) return true;
+        return Math.Abs((candidate - known).TotalSeconds) < 5;
+    }
+
     private void SyncPlaybackPosition()
     {
         if (ViewModel is null || _playback is null) return;
         if (_timelineDragMode != TimelineDragMode.None) return;
-        if (_playback.Duration > TimeSpan.Zero)
+        if (_playback.Duration > TimeSpan.Zero && IsPlausibleDuration(_playback.Duration, ViewModel.Duration))
         {
             ViewModel.SetDuration(_playback.Duration);
         }
