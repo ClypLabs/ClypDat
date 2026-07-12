@@ -10,6 +10,29 @@
     existed, which is why they looked visually inconsistent with the rest
     of the app.
   -->
+  <!--
+    Default Fluent ScrollBar uses the system accent color for its thumb, which
+    stood out as an out-of-place bright blue against EVE's own dark palette
+    everywhere a ScrollViewer's drag handle showed up. Restyled to match the
+    app's neutral panel/border tones instead.
+  -->
+  <Style Selector="ScrollBar">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="ScrollBar /template/ Thumb">
+    <Setter Property="Background" Value="#2C3B48" />
+    <Setter Property="CornerRadius" Value="5" />
+  </Style>
+  <Style Selector="ScrollBar /template/ Thumb:pointerover">
+    <Setter Property="Background" Value="#3E5266" />
+  </Style>
+  <Style Selector="ScrollBar /template/ Thumb:pressed">
+    <Setter Property="Background" Value="#4A6178" />
+  </Style>
+  <Style Selector="ScrollBar /template/ RepeatButton">
+    <Setter Property="Opacity" Value="0" />
+  </Style>
+
   <Style Selector="Button.deleteButton">
     <Setter Property="Background" Value="#D85E61" />
     <Setter Property="Foreground" Value="#FFFFFF" />
