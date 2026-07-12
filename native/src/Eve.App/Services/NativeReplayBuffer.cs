@@ -856,7 +856,56 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             Vortice.Direct3D.FeatureLevel.Level_10_1,
         };
         D3D11.D3D11CreateDevice(null, DriverType.Hardware, DeviceCreationFlags.BgraSupport, levels, out var device, out _, out _).CheckError();
+
+        // Microsoft's own WGC samples explicitly mark the D3D11 device
+        // multithread-protected when it's touched from both the capture
+        // pool's internal thread and a consumer thread (exactly our setup -
+        // WGC's own frame production vs. our capture loop's CopyResource/Map
+        // calls on the same device). Without it, the driver can apply
+        // conservative cross-thread synchronization that serializes/throttles
+        // access - a plausible source of a fixed-ish fps ceiling that nothing
+        // on the consumption side (buffer depth, event vs. polling, timer
+        // resolution) could touch, since none of those affect device-level
+        // thread safety. Never tried before now; safe no-op if unsupported.
+        TryMarkDeviceMultithreadProtected(device!);
         return device!;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.StdCall)]
+    private delegate int SetMultithreadProtectedDelegate(IntPtr self, int bMTProtect);
+
+    // Vortice's ComObject.QueryInterface<T>() requires T to be a SharpGen-generated
+    // ComObject, which ID3D10Multithread isn't (Vortice.Direct3D11 doesn't define
+    // it) - falls back to a raw COM QueryInterface + manual vtable call instead.
+    // ID3D10Multithread's vtable, after IUnknown's QueryInterface/AddRef/Release
+    // (indices 0-2): Enter=3, Leave=4, SetMultithreadProtected=5, GetMultithreadProtected=6.
+    private static void TryMarkDeviceMultithreadProtected(ID3D11Device device)
+    {
+        var multithreadIid = new Guid("9B7E4E00-342C-4106-A19F-4F2704F689F0");
+        var multithreadPtr = IntPtr.Zero;
+        try
+        {
+            var hr = Marshal.QueryInterface(device.NativePointer, ref multithreadIid, out multithreadPtr);
+            if (hr != 0 || multithreadPtr == IntPtr.Zero)
+            {
+                AppLog.Info($"Native capture: D3D11 device does not support ID3D10Multithread (hr={hr}), continuing without it.");
+                return;
+            }
+
+            var vtable = Marshal.ReadIntPtr(multithreadPtr, 0);
+            var setMultithreadProtectedPtr = Marshal.ReadIntPtr(vtable, 5 * IntPtr.Size);
+            var setMultithreadProtected = Marshal.GetDelegateForFunctionPointer<SetMultithreadProtectedDelegate>(setMultithreadProtectedPtr);
+            setMultithreadProtected(multithreadPtr, 1);
+            AppLog.Info("Native capture: D3D11 device marked multithread-protected.");
+        }
+        catch (Exception error)
+        {
+            AppLog.Info($"Native capture: could not mark D3D11 device multithread-protected (non-fatal): {error.Message}");
+        }
+        finally
+        {
+            if (multithreadPtr != IntPtr.Zero) Marshal.Release(multithreadPtr);
+        }
     }
 
     // Windows' default system timer resolution is ~15.6ms unless a process
