@@ -761,6 +761,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public bool IsStatusAreaVisible
+    {
+        get => Settings.IsStatusAreaVisible;
+        set
+        {
+            if (Settings.IsStatusAreaVisible == value) return;
+            Settings.IsStatusAreaVisible = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
     public AudioDeviceOption? SelectedChatAudioDevice
     {
         get => _selectedChatAudioDevice;

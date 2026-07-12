@@ -13,6 +13,7 @@ public sealed class AppSettings
     public bool StartReplayOnLaunch { get; set; }
     public bool LaunchOnWindowsStartup { get; set; }
     public bool StartMinimizedToTray { get; set; }
+    public bool IsStatusAreaVisible { get; set; } = true;
     public string IgnoredUpdateVersion { get; set; } = string.Empty;
     public string ChatAudioDeviceId { get; set; } = string.Empty;
     // Single-selection fields - still the persisted choice while the matching

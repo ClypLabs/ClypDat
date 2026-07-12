@@ -70,11 +70,18 @@ public sealed partial class App : Application
     {
         if (Resources["AccentBrush"] is SolidColorBrush accentBrush) accentBrush.Color = accent;
         if (Resources["AccentBrushHover"] is SolidColorBrush hoverBrush) hoverBrush.Color = BlendWithWhite(accent, 0.18);
+        if (Resources["AccentBrushDark"] is SolidColorBrush darkBrush) darkBrush.Color = BlendWithBlack(accent, 0.32);
     }
 
     private static Color BlendWithWhite(Color color, double amount)
     {
         byte Blend(byte channel) => (byte)(channel + (255 - channel) * amount);
+        return Color.FromArgb(color.A, Blend(color.R), Blend(color.G), Blend(color.B));
+    }
+
+    private static Color BlendWithBlack(Color color, double amount)
+    {
+        byte Blend(byte channel) => (byte)(channel * (1 - amount));
         return Color.FromArgb(color.A, Blend(color.R), Blend(color.G), Blend(color.B));
     }
 

@@ -126,7 +126,7 @@
   <Style Selector="Button.playButton">
     <Setter Property="Width" Value="38" />
     <Setter Property="Height" Value="38" />
-    <Setter Property="CornerRadius" Value="19" />
+    <Setter Property="CornerRadius" Value="7" />
     <Setter Property="Background" Value="#2B3642" />
     <Setter Property="Padding" Value="0" />
     <Setter Property="BorderThickness" Value="0" />
@@ -141,6 +141,15 @@
   </Style>
   <Style Selector="Button.primaryButton:pointerover">
     <Setter Property="Background" Value="{StaticResource AccentBrushHover}" />
+  </Style>
+  <!-- Export uses the user's own Windows accent color like other primaryButtons,
+       but darkened - it's a secondary action next to the transport controls,
+       not meant to compete visually with the bright accent used elsewhere. -->
+  <Style Selector="Button.exportButton">
+    <Setter Property="Background" Value="{StaticResource AccentBrushDark}" />
+  </Style>
+  <Style Selector="Button.exportButton:pointerover">
+    <Setter Property="Background" Value="{StaticResource AccentBrush}" />
   </Style>
   <Style Selector="Button.deleteButton:pointerover">
     <Setter Property="Background" Value="#E16B6D" />

@@ -63,7 +63,13 @@ public sealed partial class MainWindow : Window
             }
         };
         KeyUp += MainWindow_OnKeyUp;
-        KeyDown += MainWindow_OnKeyDown;
+        // Tunnel, not bubble - a focused Button (Export, a transport button,
+        // anything clicked most recently) otherwise intercepts Space itself
+        // before this handler ever sees it (Button's own gesture recognizer
+        // treats focused+Space as "activate me"), so Space would trigger
+        // whatever was last clicked instead of always meaning play/pause.
+        // Tunnel fires on the way down to the focused element, winning the race.
+        AddHandler(KeyDownEvent, MainWindow_OnKeyDown, RoutingStrategies.Tunnel);
         Closing += (_, _) =>
         {
             SaveWindowBounds();
@@ -594,6 +600,27 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void ToggleStatusAreaButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        ViewModel.IsStatusAreaVisible = !ViewModel.IsStatusAreaVisible;
+    }
+
+    private WindowState _preFullscreenWindowState = WindowState.Normal;
+
+    private void FullscreenButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (WindowState == WindowState.FullScreen)
+        {
+            WindowState = _preFullscreenWindowState;
+        }
+        else
+        {
+            _preFullscreenWindowState = WindowState;
+            WindowState = WindowState.FullScreen;
+        }
+    }
+
     private void CloseEditorButton_OnClick(object? sender, RoutedEventArgs e)
     {
         ViewModel?.SaveSelectedClipEditState();
@@ -604,6 +631,15 @@ public sealed partial class MainWindow : Window
     private async void OpenSettingsButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
+
+        // The EVE logo button is a universal "go back to Library" while
+        // anywhere else in the app (editor or Settings), and only opens
+        // Settings when already sitting at the Library.
+        if (ViewModel.IsEditorVisible)
+        {
+            CloseEditorButton_OnClick(sender, e);
+            return;
+        }
 
         if (ViewModel.IsSettingsVisible)
         {

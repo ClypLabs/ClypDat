@@ -6,6 +6,7 @@
          Windows accent color when available (Settings > Personalization > Colors). -->
     <SolidColorBrush x:Key="AccentBrush" Color="#5864E8" />
     <SolidColorBrush x:Key="AccentBrushHover" Color="#6D77F0" />
+    <SolidColorBrush x:Key="AccentBrushDark" Color="#3B4299" />
   </Application.Resources>
   <Application.Styles>
     <FluentTheme />

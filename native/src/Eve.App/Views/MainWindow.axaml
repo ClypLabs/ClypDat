@@ -18,14 +18,20 @@
   <Grid RowDefinitions="48,*">
     <Border Grid.Row="0" Background="#171F27" BorderBrush="#1E2A33" BorderThickness="0,0,0,1">
       <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,0" VerticalAlignment="Center">
-        <Button Classes="brandButton" Click="OpenSettingsButton_OnClick">
-          <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-            <Image Source="/Assets/eve-icon-24.png" Width="24" Height="24" />
-            <TextBlock Text="EVE" FontSize="18" FontWeight="Bold" Foreground="#EDF4FB" />
-          </StackPanel>
-        </Button>
+        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+          <Button Classes="brandButton" Click="OpenSettingsButton_OnClick">
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+              <Image Source="/Assets/eve-icon-24.png" Width="24" Height="24" />
+              <TextBlock Text="EVE" FontSize="18" FontWeight="Bold" Foreground="#EDF4FB" />
+            </StackPanel>
+          </Button>
+          <Button Classes="brandButton" Click="ToggleStatusAreaButton_OnClick" Margin="10,0,0,0" ToolTip.Tip="Show/hide the status area">
+            <PathIcon Width="13" Height="13" Foreground="#647181" Data="M12,4.5C7,4.5,2.73,7.61,1,12c1.73,4.39,6,7.5,11,7.5s9.27-3.11,11-7.5C21.27,7.61,17,4.5,12,4.5z M12,17c-2.76,0-5-2.24-5-5s2.24-5,5-5s5,2.24,5,5S14.76,17,12,17z M12,9c-1.66,0-3,1.34-3,3s1.34,3,3,3s3-1.34,3-3S13.66,9,12,9z" />
+          </Button>
+        </StackPanel>
 
         <Grid Grid.Column="1"
+              IsVisible="{Binding IsStatusAreaVisible}"
               ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,1*,Auto,3*"
               Margin="18,0,0,0"
               VerticalAlignment="Center">
@@ -73,11 +79,12 @@
           <Button Content="Folder" Click="FolderButton_OnClick" />
           <Button Content="Refresh" Click="RefreshButton_OnClick" />
         </StackPanel>
-        <Button Grid.Column="2"
-                Content="X"
-                Classes="closeEditor"
-                Click="CloseEditorButton_OnClick"
-                IsVisible="{Binding IsEditorVisible}" />
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsEditorVisible}">
+          <Button Classes="transportButton" Click="FullscreenButton_OnClick" ToolTip.Tip="Fullscreen">
+            <PathIcon Width="14" Height="14" Foreground="#C8D6E6" Data="M7,14H5v5h5v-2H7V14z M5,10h2V7h3V5H5V10z M17,17h-3v2h5v-5h-2V17z M14,5v2h3v3h2V5H14z" />
+          </Button>
+          <Button Content="X" Classes="closeEditor" Click="CloseEditorButton_OnClick" />
+        </StackPanel>
         <Button Grid.Column="2"
                 Content="Back"
                 Classes="closeEditor"
@@ -970,9 +977,12 @@
             </StackPanel>
             <Button Grid.Column="2"
                     Content="{Binding ExportButtonText}"
-                    Classes="primaryButton"
+                    Classes="primaryButton exportButton"
                     Width="150"
                     Height="34"
+                    Padding="0"
+                    HorizontalContentAlignment="Center"
+                    VerticalContentAlignment="Center"
                     IsEnabled="{Binding !IsExporting}"
                     Click="ExportButton_OnClick" />
           </Grid>
