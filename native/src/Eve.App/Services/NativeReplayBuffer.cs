@@ -197,6 +197,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         AVPacket* packet = null;
         AVFormatContext* fullSessionFormatContext = null;
         AVStream* fullSessionStream = null;
+        var fullSessionTempVideoPath = string.Empty;
+        var fullSessionFinalOutputPath = string.Empty;
+        var fullSessionStartUtc = DateTime.UtcNow;
 
         try
         {
@@ -223,7 +226,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             codecContext = CreateEncoder(config, outputWidth, outputHeight, out var codecTimeBase);
             _timeBase = codecTimeBase;
 
-            InitFullSessionWriter(config, codecContext, out fullSessionFormatContext, out fullSessionStream);
+            if (InitFullSessionWriter(config, codecContext, out fullSessionFormatContext, out fullSessionStream, out fullSessionTempVideoPath, out fullSessionFinalOutputPath))
+            {
+                fullSessionStartUtc = DateTime.UtcNow;
+            }
 
             swsContext = CreateScaler(captureWidth, captureHeight, outputWidth, outputHeight);
 
@@ -368,6 +374,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             if (packet is not null) { var p = packet; ffmpeg.av_packet_free(&p); }
             if (swsContext is not null) ffmpeg.sws_freeContext(swsContext);
             FinalizeFullSessionWriter(fullSessionFormatContext);
+            if (!string.IsNullOrEmpty(fullSessionTempVideoPath))
+            {
+                FinalizeFullSessionRecording(_configProvider(), fullSessionStartUtc, fullSessionTempVideoPath, fullSessionFinalOutputPath);
+            }
             if (codecContext is not null) { var c = codecContext; ffmpeg.avcodec_free_context(&c); }
             session?.Dispose();
             framePool?.Dispose();
@@ -475,20 +485,27 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         }
     }
 
-    private static unsafe bool InitFullSessionWriter(ReplayBufferConfig config, AVCodecContext* codecContext, out AVFormatContext* resultFormatContext, out AVStream* resultStream)
+    // Writes to a temp path during the session (not the user's chosen folder directly) -
+    // final output only gets the audio-muxed file once the session ends, via
+    // FinalizeFullSessionRecording. The video itself is written incrementally as
+    // packets arrive (no separate encode pass), same as the ring buffer.
+    private static unsafe bool InitFullSessionWriter(ReplayBufferConfig config, AVCodecContext* codecContext, out AVFormatContext* resultFormatContext, out AVStream* resultStream, out string tempVideoPath, out string finalOutputPath)
     {
         resultFormatContext = null;
         resultStream = null;
+        tempVideoPath = string.Empty;
+        finalOutputPath = string.Empty;
         if (!config.FullSessionRecordingEnabled || string.IsNullOrWhiteSpace(config.FullSessionRecordingFolder)) return false;
 
         try
         {
             Directory.CreateDirectory(config.FullSessionRecordingFolder);
             var sessionLabel = string.IsNullOrWhiteSpace(config.GameDisplayName) ? "Session" : $"Session - {config.GameDisplayName}";
-            var outputPath = Path.Combine(config.FullSessionRecordingFolder, ClipFileNaming.BuildFileName(sessionLabel, DateTime.Now, "mp4"));
+            finalOutputPath = Path.Combine(config.FullSessionRecordingFolder, ClipFileNaming.BuildFileName(sessionLabel, DateTime.Now, "mp4"));
+            tempVideoPath = Path.Combine(Path.GetTempPath(), $"eve-full-session-video-{Guid.NewGuid():N}.mp4");
 
             AVFormatContext* formatContext = null;
-            ffmpeg.avformat_alloc_output_context2(&formatContext, null, "mp4", outputPath);
+            ffmpeg.avformat_alloc_output_context2(&formatContext, null, "mp4", tempVideoPath);
             if (formatContext is null) return false;
 
             var stream = ffmpeg.avformat_new_stream(formatContext, null);
@@ -502,7 +519,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             if ((formatContext->oformat->flags & ffmpeg.AVFMT_NOFILE) == 0)
             {
                 AVIOContext* ioContext;
-                if (ffmpeg.avio_open(&ioContext, outputPath, ffmpeg.AVIO_FLAG_WRITE) < 0)
+                if (ffmpeg.avio_open(&ioContext, tempVideoPath, ffmpeg.AVIO_FLAG_WRITE) < 0)
                 {
                     ffmpeg.avformat_free_context(formatContext);
                     return false;
@@ -516,7 +533,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 return false;
             }
 
-            AppLog.Info($"Native full session recording started: path={outputPath}.");
+            AppLog.Info($"Native full session recording started: temp={tempVideoPath}, final={finalOutputPath}.");
             resultFormatContext = formatContext;
             resultStream = stream;
             return true;
@@ -547,7 +564,61 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             }
 
             ffmpeg.avformat_free_context(formatContext);
-            AppLog.Info("Native full session recording finalized.");
+        }
+    }
+
+    // Runs once, after the temp video is fully written and closed - builds Game/Chat/
+    // Microphone tracks for the whole session's wall-clock window (same AudioCapturePipeline
+    // used for clip saves, already running the whole time regardless) and muxes them
+    // against the temp video into the user's chosen folder. -c:v copy keeps this fast
+    // even for a multi-hour session.
+    private void FinalizeFullSessionRecording(ReplayBufferConfig config, DateTime sessionStartUtc, string tempVideoPath, string finalOutputPath)
+    {
+        if (string.IsNullOrEmpty(tempVideoPath) || string.IsNullOrEmpty(finalOutputPath)) return;
+
+        var snapshots = new List<string>();
+        try
+        {
+            var durationSeconds = Math.Max(1, (DateTime.UtcNow - sessionStartUtc).TotalSeconds);
+            var segmentWindows = new List<(DateTime StartUtc, double DurationSeconds)> { (sessionStartUtc, durationSeconds) };
+
+            var (gamePath, chatPath, microphonePath) = _audio
+                .BuildAlignedTracksAsync(segmentWindows, config, snapshots, CancellationToken.None)
+                .GetAwaiter().GetResult();
+
+            var muxArgs = new[]
+            {
+                "-y",
+                "-i", tempVideoPath,
+                "-i", gamePath,
+                "-i", chatPath,
+                "-i", microphonePath,
+                "-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:a",
+                "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                "-metadata:s:a:0", "title=Game Audio",
+                "-metadata:s:a:1", "title=Chat Audio",
+                "-metadata:s:a:2", "title=Microphone",
+                "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("EVE Native Full Session")}",
+                finalOutputPath
+            };
+            var result = AudioCapturePipeline.RunProcessAsync("ffmpeg", muxArgs, CancellationToken.None).GetAwaiter().GetResult();
+            if (result.ExitCode != 0)
+            {
+                AppLog.Error($"Full session recording final mux failed: {result.Error}");
+            }
+            else
+            {
+                AppLog.Info($"Native full session recording saved: path={finalOutputPath}.");
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Full session recording finalize/mux failed", error);
+        }
+        finally
+        {
+            AudioCapturePipeline.TryDelete(tempVideoPath);
+            foreach (var snapshot in snapshots) AudioCapturePipeline.TryDelete(snapshot);
         }
     }
 
