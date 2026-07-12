@@ -34,11 +34,16 @@ public sealed class Cs2GsiListener : IDisposable
     private readonly object _killClipLock = new();
     private Timer? _killClipDebounceTimer;
     private string? _pendingKillLabel;
-    // 4s clipped real streaks short - a 5.9s gap between a 3rd and 4th kill (still
-    // very plausibly the same fight: reposition, reload, re-peek) let the 3K
-    // timer fire before the 4th kill even landed, producing two clips instead of
-    // one for the Ace.
-    private static readonly TimeSpan KillClipDebounce = TimeSpan.FromSeconds(8);
+    // Round-over and death (below) are the actual "this streak is done" signals
+    // and both flush immediately - this idle timer is only a fallback for when
+    // neither of those fires in a reasonable time (GSI stops updating, a very
+    // slow-paced round). 8s still split real streaks: a 17s gap between a 3rd
+    // and a later 4th kill (repositioning to a second engagement, still
+    // clearly the same round's streak) let the 3K timer fire and flush before
+    // the 4th kill landed, producing a separate "3K" + "4K" pair instead of
+    // one 4K clip. Long enough that round-over/death almost always win the
+    // race in practice.
+    private static readonly TimeSpan KillClipDebounce = TimeSpan.FromSeconds(25);
 
     public event EventHandler<string>? AutoClipTriggered;
 
