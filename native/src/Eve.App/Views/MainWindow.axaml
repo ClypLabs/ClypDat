@@ -71,7 +71,6 @@
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" IsVisible="{Binding ShowLibraryActions}">
           <Button Content="Folder" Click="FolderButton_OnClick" />
-          <Button Content="Open" Click="OpenButton_OnClick" />
           <Button Content="Refresh" Click="RefreshButton_OnClick" />
         </StackPanel>
         <Button Grid.Column="2"

@@ -212,29 +212,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void OpenButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = "Open video",
-            AllowMultiple = false,
-            FileTypeFilter = new[]
-            {
-                new FilePickerFileType("Video files")
-                {
-                    Patterns = new[] { "*.mp4", "*.mkv", "*.mov", "*.avi", "*.webm", "*.m4v", "*.wmv" }
-                }
-            }
-        });
-
-        var file = files.FirstOrDefault();
-        if (file?.Path.LocalPath is { Length: > 0 } path)
-        {
-            await ViewModel!.OpenVideoFileAsync(path);
-            QueueEditorPlayback();
-        }
-    }
-
     private async void RefreshButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is not null)
