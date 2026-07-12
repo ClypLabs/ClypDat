@@ -58,6 +58,10 @@ public sealed class ForegroundGameDetector
         "steamwebhelper.exe",
         "taskmgr.exe",
         "textinputhost.exe",
+        "vlc.exe",
+        "wmplayer.exe",
+        "mpc-hc.exe",
+        "mpc-hc64.exe",
         "windowsterminal.exe",
         "zen.exe"
     };
