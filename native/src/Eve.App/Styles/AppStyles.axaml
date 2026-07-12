@@ -72,6 +72,21 @@
     <Setter Property="Background" Value="#324255" />
   </Style>
 
+  <!-- Editor track lane mute toggle - a plain Border (not Button) so it never
+       inherits Fluent's press-scale animation, which made it visibly shrink/
+       jump on click. Hover/press feedback added here instead for polish. -->
+  <Style Selector="Border.trackMuteToggle">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.1" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Border.trackMuteToggle:pointerover">
+    <Setter Property="Background" Value="#26323E" />
+  </Style>
+
   <Style Selector="Button.deleteButton">
     <Setter Property="Background" Value="#D85E61" />
     <Setter Property="Foreground" Value="#FFFFFF" />
