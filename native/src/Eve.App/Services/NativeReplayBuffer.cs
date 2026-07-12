@@ -71,6 +71,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         var config = _configProvider();
         Duration = TimeSpan.FromSeconds(Math.Clamp(config.DurationSeconds, 30, 1200));
 
+        // Captured once per session from the fresh encoder's SPS/PPS (see
+        // CaptureLoop) - without resetting it here, a resolution change +
+        // Restart Buffer opens a new encoder at the new size but keeps muxing
+        // clips with the PREVIOUS session's stale extradata, which still
+        // declares the old resolution. The container's declared size then
+        // doesn't match the actual encoded frame data, producing exactly the
+        // stride-mismatch smearing/corruption reported after a resolution
+        // change.
+        _extraData = null;
+
         var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _captureCts = new CancellationTokenSource();
         var token = _captureCts.Token;
