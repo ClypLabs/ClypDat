@@ -80,6 +80,7 @@
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Padding" Value="0" />
     <Setter Property="Foreground" Value="#BDD4EE" />
+    <Setter Property="FontWeight" Value="Normal" />
     <Setter Property="HorizontalContentAlignment" Value="Left" />
   </Style>
   <Style Selector="Button.linkButton:pointerover">

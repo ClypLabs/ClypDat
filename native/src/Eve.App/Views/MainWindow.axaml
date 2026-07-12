@@ -767,21 +767,13 @@
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                       <DataTemplate>
-                        <TextBlock Foreground="#8EA1B6" FontSize="13" LineHeight="20" TextWrapping="Wrap">
-                          <Run Text="This software uses libraries from the " />
-                          <InlineUIContainer>
-                            <Button Classes="linkButton" Padding="0" MinHeight="0" VerticalAlignment="Center" Click="OpenLicenseLinkButton_OnClick" Tag="{Binding ProjectUrl}">
-                              <TextBlock Text="{Binding ProjectName}" Foreground="#BDD4EE" TextDecorations="Underline" FontSize="13" />
-                            </Button>
-                          </InlineUIContainer>
-                          <Run Text=" project under the " />
-                          <InlineUIContainer>
-                            <Button Classes="linkButton" Padding="0" MinHeight="0" VerticalAlignment="Center" Click="OpenLicenseLinkButton_OnClick" Tag="{Binding LicenseUrl}">
-                              <TextBlock Text="{Binding LicenseName}" Foreground="#BDD4EE" TextDecorations="Underline" FontSize="13" />
-                            </Button>
-                          </InlineUIContainer>
-                          <Run Text="." />
-                        </TextBlock>
+                        <WrapPanel>
+                          <TextBlock Text="This software uses libraries from the " Foreground="#8EA1B6" FontSize="13" />
+                          <TextBlock Text="{Binding ProjectName}" Foreground="#BDD4EE" TextDecorations="Underline" FontSize="13" Cursor="Hand" Tag="{Binding ProjectUrl}" PointerPressed="LicenseLinkText_OnPointerPressed" />
+                          <TextBlock Text=" project under the " Foreground="#8EA1B6" FontSize="13" />
+                          <TextBlock Text="{Binding LicenseName}" Foreground="#BDD4EE" TextDecorations="Underline" FontSize="13" Cursor="Hand" Tag="{Binding LicenseUrl}" PointerPressed="LicenseLinkText_OnPointerPressed" />
+                          <TextBlock Text="." Foreground="#8EA1B6" FontSize="13" />
+                        </WrapPanel>
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>

@@ -792,9 +792,9 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void OpenLicenseLinkButton_OnClick(object? sender, RoutedEventArgs e)
+    private void LicenseLinkText_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (sender is not Button { Tag: string url } || string.IsNullOrWhiteSpace(url)) return;
+        if (sender is not TextBlock { Tag: string url } || string.IsNullOrWhiteSpace(url)) return;
         try
         {
             Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
