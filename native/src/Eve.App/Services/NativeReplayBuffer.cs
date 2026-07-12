@@ -203,6 +203,17 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         var fullSessionFinalOutputPath = string.Empty;
         var fullSessionStartUtc = DateTime.UtcNow;
         var timerResolutionRaised = TimeBeginPeriod(1) == 0;
+        // Polling TryGetNextFrame() in a tight loop (with a Sleep between empty
+        // polls) measured a hard ~40-46fps ceiling regardless of resolution/
+        // target fps/timer resolution, even though the game itself was
+        // confirmed rendering much faster and our own copy/scale/encode stages
+        // have headroom for 80fps+ - none of which pointed at anything in our
+        // own processing. FrameArrived is the officially recommended WGC
+        // consumption model instead of polling; signaling a wait handle from
+        // it (rather than moving D3D11/encode work onto the WinRT callback
+        // thread) keeps every existing threading assumption intact while
+        // removing the poll-interval latency entirely.
+        using var frameArrivedSignal = new AutoResetEvent(false);
 
         try
         {
@@ -222,6 +233,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             staging = CreateStagingTexture(device, captureWidth, captureHeight);
             framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(
                 winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, item.Size);
+            framePool.FrameArrived += (_, _) => frameArrivedSignal.Set();
             session = framePool.CreateCaptureSession(item);
             TryDisableCaptureBorder(session);
             session.StartCapture();
@@ -295,6 +307,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                         staging = CreateStagingTexture(device, captureWidth, captureHeight);
                         framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(
                             winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, item.Size);
+                        framePool.FrameArrived += (_, _) => frameArrivedSignal.Set();
                         session = framePool.CreateCaptureSession(item);
                         TryDisableCaptureBorder(session);
                         session.StartCapture();
@@ -303,10 +316,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     }
                 }
 
+                // Waits for the FrameArrived signal instead of polling
+                // TryGetNextFrame() on a Sleep loop - the timeout is just a
+                // safety net (still re-checks cancellation/target/diag on a
+                // spurious/missed signal), not the normal wakeup path anymore.
+                frameArrivedSignal.WaitOne(50);
                 using var wgcFrame = framePool.TryGetNextFrame();
                 if (wgcFrame is null)
                 {
-                    Thread.Sleep(1);
                     continue;
                 }
                 framesSeen++;
