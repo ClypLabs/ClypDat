@@ -40,7 +40,9 @@ public sealed class ObsReplayBuffer : IReplayBuffer
         var config = _configProvider();
         Duration = TimeSpan.FromSeconds(Math.Clamp(config.DurationSeconds, 30, 1200));
         using var process = Process.GetCurrentProcess();
-        AppLog.Info($"OBS replay backend starting: pid={Environment.ProcessId}, process={process.ProcessName}, runtime={runtime.RootFolder}, maxHeight={config.MaxHeight}, fps={config.FrameRate}, duration={Duration.TotalSeconds:0}s, game={config.GameExecutableName}, chat={config.ChatAudioProcessName}, mic={config.MicrophoneDeviceName}.");
+        var chatAudioProcessName = config.ChatAudioProcessNames.FirstOrDefault() ?? string.Empty;
+        var microphoneDeviceId = config.MicrophoneDeviceIds.FirstOrDefault() ?? string.Empty;
+        AppLog.Info($"OBS replay backend starting: pid={Environment.ProcessId}, process={process.ProcessName}, runtime={runtime.RootFolder}, maxHeight={config.MaxHeight}, fps={config.FrameRate}, duration={Duration.TotalSeconds:0}s, game={config.GameExecutableName}, chat={chatAudioProcessName}, mic={config.MicrophoneDeviceName}.");
         try
         {
             _bridge.Initialize(
@@ -48,8 +50,8 @@ public sealed class ObsReplayBuffer : IReplayBuffer
                 config.MaxHeight,
                 config.FrameRate,
                 (int)Duration.TotalSeconds,
-                config.ChatAudioProcessName,
-                config.MicrophoneDeviceId,
+                chatAudioProcessName,
+                microphoneDeviceId,
                 config.GameExecutableName,
                 config.GameWindowTitle,
                 config.GameWindowClass,

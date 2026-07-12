@@ -951,18 +951,19 @@
                                    FontSize="11"
                                    TextTrimming="CharacterEllipsis" />
                         <Button Grid.Row="1"
-                                Classes="linkButton"
-                                Padding="0"
+                                Classes="trackMuteButton"
                                 MinHeight="0"
                                 Width="18"
                                 Height="18"
-                                HorizontalAlignment="Left"
+                                HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
                                 IsVisible="{Binding IsAudio}"
                                 Click="TrackMuteButton_OnClick"
                                 ToolTip.Tip="Mute/unmute this track">
                           <PathIcon Width="14"
                                     Height="14"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
                                     Foreground="{Binding IsMuted, Converter={x:Static opconv:BoolToMuteBrushConverter.Instance}}"
                                     Data="{Binding IsMuted, Converter={x:Static opconv:BoolToMuteIconConverter.Instance}}" />
                         </Button>
@@ -987,7 +988,7 @@
                                   Width="14"
                                   Height="14"
                                   Foreground="#D1DEE9"
-                                  HorizontalAlignment="Right"
+                                  HorizontalAlignment="Center"
                                   VerticalAlignment="Center"
                                   Data="M 3,8 L 6,8 L 11,4 L 11,16 L 6,12 L 3,12 Z M 13,7 C 15,9 15,11 13,13 M 15,5 C 18,8 18,12 15,15"
                                   IsVisible="{Binding IsAudio}" />

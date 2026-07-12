@@ -1535,6 +1535,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return true;
     }
 
+    private static IReadOnlyList<string> BuildSingleOrConfiguredList(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? Array.Empty<string>() : new[] { value };
+
     public ReplayBufferConfig CreateReplayConfig()
     {
         var gameOverride = Settings.GameCaptureOverrides
@@ -1554,8 +1557,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ReplayCaptureHeight,
             string.Empty,
             string.Empty,
-            SelectedChatProcess?.Name ?? Settings.ChatAudioProcessName,
-            SelectedMicrophoneDevice?.Id ?? string.Empty,
+            BuildSingleOrConfiguredList(SelectedChatProcess?.Name ?? Settings.ChatAudioProcessName),
+            BuildSingleOrConfiguredList(SelectedMicrophoneDevice?.Id),
             SelectedMicrophoneDevice?.Name ?? string.Empty,
             Settings.GameAudioExcludedProcesses.ToArray(),
             ActiveGameDetection.DisplayName,

@@ -137,23 +137,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             var windowDurationSeconds = Math.Max(1, (window[^1].WallClockUtc - windowStartUtc).TotalSeconds);
             var segmentWindows = new List<(DateTime StartUtc, double DurationSeconds)> { (windowStartUtc, windowDurationSeconds) };
 
-            var (gamePath, chatPath, microphonePath) = await _audio.BuildAlignedTracksAsync(segmentWindows, config, snapshots, cancellationToken);
+            var tracks = await _audio.BuildAlignedTracksAsync(segmentWindows, config, snapshots, cancellationToken);
 
-            var muxArgs = new[]
-            {
-                "-y",
-                "-i", tempVideoPath,
-                "-i", gamePath,
-                "-i", chatPath,
-                "-i", microphonePath,
-                "-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:a",
-                "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-                "-metadata:s:a:0", "title=Game Audio",
-                "-metadata:s:a:1", "title=Chat Audio",
-                "-metadata:s:a:2", "title=Microphone",
-                "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("EVE Native")}",
-                outputPath
-            };
+            var muxArgs = new List<string> { "-y", "-i", tempVideoPath };
+            foreach (var track in tracks) muxArgs.AddRange(new[] { "-i", track.Path });
+            muxArgs.AddRange(new[] { "-map", "0:v" });
+            for (var i = 0; i < tracks.Count; i++) muxArgs.AddRange(new[] { "-map", $"{i + 1}:a" });
+            muxArgs.AddRange(new[] { "-c:v", "copy", "-c:a", "aac", "-b:a", "192k" });
+            for (var i = 0; i < tracks.Count; i++) muxArgs.AddRange(new[] { $"-metadata:s:a:{i}", $"title={tracks[i].Label}" });
+            muxArgs.AddRange(new[] { "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("EVE Native")}", outputPath });
             var result = await AudioCapturePipeline.RunProcessAsync("ffmpeg", muxArgs, cancellationToken);
             if (result.ExitCode != 0)
             {
@@ -582,25 +574,17 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             var durationSeconds = Math.Max(1, (DateTime.UtcNow - sessionStartUtc).TotalSeconds);
             var segmentWindows = new List<(DateTime StartUtc, double DurationSeconds)> { (sessionStartUtc, durationSeconds) };
 
-            var (gamePath, chatPath, microphonePath) = _audio
+            var tracks = _audio
                 .BuildAlignedTracksAsync(segmentWindows, config, snapshots, CancellationToken.None)
                 .GetAwaiter().GetResult();
 
-            var muxArgs = new[]
-            {
-                "-y",
-                "-i", tempVideoPath,
-                "-i", gamePath,
-                "-i", chatPath,
-                "-i", microphonePath,
-                "-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:a",
-                "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-                "-metadata:s:a:0", "title=Game Audio",
-                "-metadata:s:a:1", "title=Chat Audio",
-                "-metadata:s:a:2", "title=Microphone",
-                "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("EVE Native Full Session")}",
-                finalOutputPath
-            };
+            var muxArgs = new List<string> { "-y", "-i", tempVideoPath };
+            foreach (var track in tracks) muxArgs.AddRange(new[] { "-i", track.Path });
+            muxArgs.AddRange(new[] { "-map", "0:v" });
+            for (var i = 0; i < tracks.Count; i++) muxArgs.AddRange(new[] { "-map", $"{i + 1}:a" });
+            muxArgs.AddRange(new[] { "-c:v", "copy", "-c:a", "aac", "-b:a", "192k" });
+            for (var i = 0; i < tracks.Count; i++) muxArgs.AddRange(new[] { $"-metadata:s:a:{i}", $"title={tracks[i].Label}" });
+            muxArgs.AddRange(new[] { "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("EVE Native Full Session")}", finalOutputPath });
             var result = AudioCapturePipeline.RunProcessAsync("ffmpeg", muxArgs, CancellationToken.None).GetAwaiter().GetResult();
             if (result.ExitCode != 0)
             {

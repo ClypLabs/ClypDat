@@ -641,16 +641,12 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
         try
         {
-            var (gamePath, chatPath, microphonePath) = await _audio.BuildAlignedTracksAsync(segmentWindows, config, snapshots, cancellationToken);
-            AppLog.Info($"Replay mux inputs: game={AudioFileLength(gamePath)}b, chat={AudioFileLength(chatPath)}b, microphone={AudioFileLength(microphonePath)}b.");
+            var tracks = await _audio.BuildAlignedTracksAsync(segmentWindows, config, snapshots, cancellationToken);
+            AppLog.Info($"Replay mux inputs: {string.Join(", ", tracks.Select(track => $"{track.Label}={AudioFileLength(track.Path)}b"))}.");
 
-            var metadataArgs = new[]
-            {
-                "-metadata:s:a:0", "title=Game Audio",
-                "-metadata:s:a:1", "title=Chat Audio",
-                "-metadata:s:a:2", "title=Microphone",
-                "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("Windows Capture")}"
-            };
+            var metadataArgs = new List<string>();
+            for (var i = 0; i < tracks.Count; i++) metadataArgs.AddRange(new[] { $"-metadata:s:a:{i}", $"title={tracks[i].Label}" });
+            metadataArgs.AddRange(new[] { "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("Windows Capture")}" });
 
             // Trimming via -filter_complex meant decoding and fully re-encoding the
             // clip's entire video track (NVENC/x264) just to get a frame-accurate cut
@@ -664,8 +660,11 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             (int ExitCode, string Output, string Error) result = (-1, string.Empty, string.Empty);
             if (useStreamCopy)
             {
-                var copyArgs = new List<string> { "-y", "-ss", FormatSeconds(effectiveOffsetSeconds), "-i", videoPath, "-i", gamePath, "-i", chatPath, "-i", microphonePath };
-                copyArgs.AddRange(new[] { "-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-avoid_negative_ts", "make_zero", "-t", FormatSeconds(effectiveDurationSeconds) });
+                var copyArgs = new List<string> { "-y", "-ss", FormatSeconds(effectiveOffsetSeconds), "-i", videoPath };
+                foreach (var track in tracks) copyArgs.AddRange(new[] { "-i", track.Path });
+                copyArgs.AddRange(new[] { "-map", "0:v" });
+                for (var i = 0; i < tracks.Count; i++) copyArgs.AddRange(new[] { "-map", $"{i + 1}:a" });
+                copyArgs.AddRange(new[] { "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-avoid_negative_ts", "make_zero", "-t", FormatSeconds(effectiveDurationSeconds) });
                 copyArgs.AddRange(metadataArgs);
                 copyArgs.Add(outputPath);
                 result = await RunProcessAsync("ffmpeg", copyArgs, cancellationToken);
@@ -674,20 +673,15 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
             if (result.ExitCode != 0)
             {
-                var reencodeBase = new List<string>
+                var reencodeBase = new List<string> { "-y", "-i", videoPath };
+                foreach (var track in tracks) reencodeBase.AddRange(new[] { "-i", track.Path });
+                reencodeBase.AddRange(new[]
                 {
-                    "-y",
-                    "-i", videoPath,
-                    "-i", gamePath,
-                    "-i", chatPath,
-                    "-i", microphonePath,
                     "-filter_complex", $"[0:v]trim=start={FormatSeconds(videoOffsetSeconds)}:duration={FormatSeconds(duration)},setpts=PTS-STARTPTS[vout]",
-                    "-map", "[vout]",
-                    "-map", "1:a",
-                    "-map", "2:a",
-                    "-map", "3:a",
-                    "-t", FormatSeconds(duration)
-                };
+                    "-map", "[vout]"
+                });
+                for (var i = 0; i < tracks.Count; i++) reencodeBase.AddRange(new[] { "-map", $"{i + 1}:a" });
+                reencodeBase.AddRange(new[] { "-t", FormatSeconds(duration) });
                 reencodeBase.AddRange(metadataArgs);
 
                 var args = reencodeBase.ToList();

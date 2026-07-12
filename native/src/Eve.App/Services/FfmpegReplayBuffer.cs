@@ -324,7 +324,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
                 StartLoopbackCapture(enumerator.GetDevice(config.ChatAudioDeviceId), "Chat Audio", "chat");
             }
 
-            var micDevice = ResolveMicrophoneDevice(enumerator, config.MicrophoneDeviceId);
+            var micDevice = ResolveMicrophoneDevice(enumerator, config.MicrophoneDeviceIds.FirstOrDefault() ?? string.Empty);
             if (micDevice is not null)
             {
                 StartMicrophoneCapture(micDevice, "Microphone", "microphone");
@@ -758,8 +758,8 @@ public sealed record ReplayBufferConfig(
     int CaptureHeight,
     string ChatAudioDeviceName,
     string ChatAudioDeviceId,
-    string ChatAudioProcessName,
-    string MicrophoneDeviceId,
+    IReadOnlyList<string> ChatAudioProcessNames,
+    IReadOnlyList<string> MicrophoneDeviceIds,
     string MicrophoneDeviceName,
     IReadOnlyList<string> GameAudioExcludedProcesses,
     string GameDisplayName,

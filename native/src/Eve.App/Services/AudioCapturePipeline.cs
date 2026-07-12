@@ -13,6 +13,12 @@ namespace Eve.App.Services;
 // instance of the same, already-battle-tested logic instead of duplicating it.
 // None of this was ever the source of the segment-rotation gap bug both backends
 // exist to work around - it only needs a target wall-clock window handed to it.
+//
+// Chat apps and microphones can each have multiple configured sources - every
+// configured chat app gets its own output track (not merged into one "Chat
+// Audio" track), and every configured microphone gets its own track too. Game
+// stays a single track (its own multi-process audio, if any, is still mixed
+// together - there's no user-facing concept of "multiple games").
 [SupportedOSPlatform("windows")]
 public sealed class AudioCapturePipeline : IDisposable
 {
@@ -60,10 +66,15 @@ public sealed class AudioCapturePipeline : IDisposable
         }
     }
 
-    // Builds one aligned WAV per segment window for each of Game/Chat/Microphone and
-    // returns the three finished track paths (caller mixes them against its own video).
-    // Paths are also added to `snapshots` so the caller can clean them up afterward.
-    public async Task<(string GamePath, string ChatPath, string MicrophonePath)> BuildAlignedTracksAsync(
+    // Builds one aligned WAV per segment window for Game (always exactly one
+    // track), each configured chat app (one track per app), and each configured
+    // microphone (one track per device) - returns the finished (Label, Path)
+    // pairs in the order they should appear as audio streams in the output.
+    // Paths are also added to `snapshots` so the caller can clean them up
+    // afterward. If nothing is configured for chat/mic, no track is emitted for
+    // that kind at all (no silent placeholder) - the output simply has fewer
+    // audio streams.
+    public async Task<List<(string Label, string Path)>> BuildAlignedTracksAsync(
         List<(DateTime StartUtc, double DurationSeconds)> segmentWindows,
         ReplayBufferConfig config,
         List<string> snapshots,
@@ -72,10 +83,30 @@ public sealed class AudioCapturePipeline : IDisposable
         ReplayAudioCapture[] captures;
         lock (_lock) captures = _audioCaptures.ToArray();
 
-        var gamePath = await BuildAlignedTrackAsync(AudioCaptureKind.Game, captures, segmentWindows, allowMix: true, snapshots, cancellationToken);
-        var chatPath = await BuildAlignedTrackAsync(AudioCaptureKind.Chat, captures, segmentWindows, allowMix: true, snapshots, cancellationToken);
-        var microphonePath = await BuildAlignedTrackAsync(AudioCaptureKind.Microphone, captures, segmentWindows, allowMix: false, snapshots, cancellationToken, config);
-        return (gamePath, chatPath, microphonePath);
+        var tracks = new List<(string Label, string Path)>();
+
+        var gamePath = await BuildAlignedTrackAsync(AudioCaptureKind.Game, captures, null, segmentWindows, allowMix: true, snapshots, cancellationToken);
+        tracks.Add(("Game Audio", gamePath));
+
+        var chatAppNames = NormalizedList(config.ChatAudioProcessNames);
+        foreach (var appName in chatAppNames)
+        {
+            var path = await BuildAlignedTrackAsync(AudioCaptureKind.Chat, captures, appName, segmentWindows, allowMix: true, snapshots, cancellationToken);
+            var label = chatAppNames.Count > 1 ? $"Chat Audio - {appName}" : "Chat Audio";
+            tracks.Add((label, path));
+        }
+
+        var micIds = NormalizedList(config.MicrophoneDeviceIds);
+        var micIndex = 0;
+        foreach (var micId in micIds)
+        {
+            micIndex++;
+            var path = await BuildAlignedTrackAsync(AudioCaptureKind.Microphone, captures, micId, segmentWindows, allowMix: false, snapshots, cancellationToken, config);
+            var label = micIds.Count > 1 ? $"Microphone {micIndex}" : "Microphone";
+            tracks.Add((label, path));
+        }
+
+        return tracks;
     }
 
     public void Dispose() => Stop();
@@ -83,20 +114,20 @@ public sealed class AudioCapturePipeline : IDisposable
     private void StartAudioCaptures(ReplayBufferConfig config)
     {
         using var enumerator = new MMDeviceEnumerator();
-        var resolvedMicDeviceId = ResolveMicrophoneDeviceId(enumerator, config.MicrophoneDeviceId);
-        var routes = ResolveAudioRoutes(config, resolvedMicDeviceId);
+        var resolvedMicDeviceIds = ResolveMicrophoneDeviceIds(enumerator, config.MicrophoneDeviceIds);
+        var routes = ResolveAudioRoutes(config, resolvedMicDeviceIds);
         _audioRouteKey = routes.RouteKey;
         AppLog.Info(
-            $"Audio route resolved: chat='{config.ChatAudioProcessName}', chatPids={FormatIds(routes.ChatProcessIds)}, exclusions='{string.Join(",", config.GameAudioExcludedProcesses)}', excludedPids={FormatIds(routes.ExcludedProcessIds)}, gamePids={FormatIds(routes.GameProcessIds)}.");
-        StopStaleAudioCaptures(routes, resolvedMicDeviceId);
+            $"Audio route resolved: chatApps={routes.ChatRoutes.Length}, exclusions='{string.Join(",", config.GameAudioExcludedProcesses)}', excludedPids={FormatIds(routes.ExcludedProcessIds)}, gamePids={FormatIds(routes.GameProcessIds)}, mics={resolvedMicDeviceIds.Length}.");
+        StopStaleAudioCaptures(routes);
         if (routes.UseProcessRouting)
         {
             foreach (var pid in routes.GameProcessIds)
             {
-                if (HasLiveCapture(AudioCaptureKind.Game, pid)) continue;
+                if (HasLiveCapture(AudioCaptureKind.Game, pid.ToString(CultureInfo.InvariantCulture))) continue;
                 try
                 {
-                    StartProcessLoopbackCapture(AudioCaptureKind.Game, pid, ProcessLoopbackCaptureMode.IncludeTargetProcessTree, "Game Audio");
+                    StartProcessLoopbackCapture(AudioCaptureKind.Game, pid, ProcessLoopbackCaptureMode.IncludeTargetProcessTree, "Game Audio", pid.ToString(CultureInfo.InvariantCulture));
                 }
                 catch (Exception error)
                 {
@@ -113,9 +144,9 @@ public sealed class AudioCapturePipeline : IDisposable
         {
             try
             {
-                if (!HasLiveCapture(AudioCaptureKind.Game, null))
+                if (!HasLiveCapture(AudioCaptureKind.Game, "default"))
                 {
-                    StartLoopbackCapture(enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia), AudioCaptureKind.Game, "Game Audio");
+                    StartLoopbackCapture(enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia), AudioCaptureKind.Game, "Game Audio", "default");
                 }
             }
             catch (Exception error)
@@ -124,59 +155,60 @@ public sealed class AudioCapturePipeline : IDisposable
             }
         }
 
-        foreach (var pid in routes.ChatProcessIds)
+        foreach (var route in routes.ChatRoutes)
         {
-            if (HasLiveCapture(AudioCaptureKind.Chat, pid)) continue;
+            if (HasLiveCapture(AudioCaptureKind.Chat, route.AppName)) continue;
             try
             {
-                StartProcessLoopbackCapture(AudioCaptureKind.Chat, pid, ProcessLoopbackCaptureMode.IncludeTargetProcessTree, "Chat Audio");
+                StartProcessLoopbackCapture(AudioCaptureKind.Chat, route.ProcessId, ProcessLoopbackCaptureMode.IncludeTargetProcessTree, $"Chat Audio - {route.AppName}", route.AppName);
             }
             catch (Exception error)
             {
-                AppLog.Error($"Chat audio capture failed: pid={pid}", error);
+                AppLog.Error($"Chat app audio capture failed: app={route.AppName}, pid={route.ProcessId}", error);
             }
         }
 
-        try
+        foreach (var micId in resolvedMicDeviceIds)
         {
-            if (!HasLiveCapture(AudioCaptureKind.Microphone, null) && !string.IsNullOrEmpty(resolvedMicDeviceId))
+            if (HasLiveCapture(AudioCaptureKind.Microphone, micId)) continue;
+            try
             {
-                var micDevice = enumerator.GetDevice(resolvedMicDeviceId);
-                StartMicrophoneCapture(micDevice, "Microphone");
+                var micDevice = enumerator.GetDevice(micId);
+                StartMicrophoneCapture(micDevice, $"Microphone - {micDevice.FriendlyName}", micId);
             }
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Microphone capture failed", error);
+            catch (Exception error)
+            {
+                AppLog.Error($"Microphone capture failed: device={micId}", error);
+            }
         }
 
         StartAudioRouteTimer();
     }
 
-    private void StartLoopbackCapture(MMDevice device, AudioCaptureKind kind, string title)
+    private void StartLoopbackCapture(MMDevice device, AudioCaptureKind kind, string title, string sourceKey)
     {
         var path = Path.Combine(_bufferFolder, $"{AudioKindPrefix(kind)}_{Guid.NewGuid():N}.wav");
         TryDelete(path);
         var capture = new WasapiLoopbackCapture(device);
-        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, kind, null, DateTime.UtcNow));
+        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, kind, null, DateTime.UtcNow, sourceKey));
         AppLog.Info($"Audio capture started: {title}, device={device.FriendlyName}.");
     }
 
-    private void StartProcessLoopbackCapture(AudioCaptureKind kind, int processId, ProcessLoopbackCaptureMode mode, string title)
+    private void StartProcessLoopbackCapture(AudioCaptureKind kind, int processId, ProcessLoopbackCaptureMode mode, string title, string sourceKey)
     {
         var path = Path.Combine(_bufferFolder, $"{AudioKindPrefix(kind)}_{processId}_{Guid.NewGuid():N}.wav");
         TryDelete(path);
         var capture = new ProcessLoopbackWaveIn(processId, mode);
-        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, kind, processId, DateTime.UtcNow));
+        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, kind, processId, DateTime.UtcNow, sourceKey));
         AppLog.Info($"Audio capture started: {title}, pid={processId}, mode={mode}.");
     }
 
-    private void StartMicrophoneCapture(MMDevice device, string title)
+    private void StartMicrophoneCapture(MMDevice device, string title, string sourceKey)
     {
         var path = Path.Combine(_bufferFolder, $"{AudioKindPrefix(AudioCaptureKind.Microphone)}_{Guid.NewGuid():N}.wav");
         TryDelete(path);
         var capture = new WasapiCapture(device);
-        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, AudioCaptureKind.Microphone, null, DateTime.UtcNow, device.ID));
+        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, AudioCaptureKind.Microphone, null, DateTime.UtcNow, sourceKey, device.ID));
         AppLog.Info($"Audio capture started: {title}, device={device.FriendlyName}.");
     }
 
@@ -188,14 +220,15 @@ public sealed class AudioCapturePipeline : IDisposable
         _ => "audio"
     };
 
-    private bool HasLiveCapture(AudioCaptureKind kind, int? processId)
+    private bool HasLiveCapture(AudioCaptureKind kind, string sourceKey)
     {
-        lock (_lock) return _audioCaptures.Any(capture => capture.EndedAtUtc is null && capture.Kind == kind && capture.ProcessId == processId);
+        lock (_lock) return _audioCaptures.Any(capture => capture.EndedAtUtc is null && capture.Kind == kind && string.Equals(capture.SourceKey, sourceKey, StringComparison.OrdinalIgnoreCase));
     }
 
-    private void StopStaleAudioCaptures(AudioRoutes routes, string resolvedMicDeviceId)
+    private void StopStaleAudioCaptures(AudioRoutes routes)
     {
-        var wantedChat = routes.ChatProcessIds.ToHashSet();
+        var wantedChat = routes.ChatRoutes.ToDictionary(route => route.AppName, route => route.ProcessId, StringComparer.OrdinalIgnoreCase);
+        var wantedMics = routes.MicrophoneDeviceIds.ToHashSet(StringComparer.Ordinal);
         var excluded = routes.ExcludedProcessIds.ToHashSet();
         ReplayAudioCapture[] live;
         lock (_lock) live = _audioCaptures.Where(capture => capture.EndedAtUtc is null).ToArray();
@@ -205,8 +238,11 @@ public sealed class AudioCapturePipeline : IDisposable
             {
                 AudioCaptureKind.Game when routes.UseProcessRouting => capture.ProcessId is int gamePid && !excluded.Contains(gamePid),
                 AudioCaptureKind.Game => capture.ProcessId is null,
-                AudioCaptureKind.Chat => capture.ProcessId is int chatPid && wantedChat.Contains(chatPid),
-                AudioCaptureKind.Microphone => string.Equals(capture.DeviceId, resolvedMicDeviceId, StringComparison.Ordinal),
+                // Keep only if this app is still configured AND its currently-resolved
+                // pid still matches - if the app restarted with a new pid, this capture
+                // is stale and a fresh one will start for the new pid.
+                AudioCaptureKind.Chat => wantedChat.TryGetValue(capture.SourceKey, out var wantedPid) && wantedPid == capture.ProcessId,
+                AudioCaptureKind.Microphone => wantedMics.Contains(capture.SourceKey),
                 _ => false
             };
 
@@ -254,8 +290,8 @@ public sealed class AudioCapturePipeline : IDisposable
             var config = _activeConfig;
             if (config is null) return;
             using var enumerator = new MMDeviceEnumerator();
-            var resolvedMicDeviceId = ResolveMicrophoneDeviceId(enumerator, config.MicrophoneDeviceId);
-            var routes = ResolveAudioRoutes(config, resolvedMicDeviceId);
+            var resolvedMicDeviceIds = ResolveMicrophoneDeviceIds(enumerator, config.MicrophoneDeviceIds);
+            var routes = ResolveAudioRoutes(config, resolvedMicDeviceIds);
             if (string.Equals(routes.RouteKey, _audioRouteKey, StringComparison.Ordinal)) return;
             try
             {
@@ -308,17 +344,47 @@ public sealed class AudioCapturePipeline : IDisposable
         }
     }
 
-    private static AudioRoutes ResolveAudioRoutes(ReplayBufferConfig config, string resolvedMicDeviceId)
+    private static string[] ResolveMicrophoneDeviceIds(MMDeviceEnumerator enumerator, IReadOnlyList<string>? configuredIds)
     {
+        var configured = NormalizedList(configuredIds);
+        var resolved = new List<string>();
+        foreach (var id in configured)
+        {
+            var resolvedId = ResolveMicrophoneDeviceId(enumerator, id);
+            if (!string.IsNullOrEmpty(resolvedId)) resolved.Add(resolvedId);
+        }
+
+        return resolved.Distinct(StringComparer.Ordinal).ToArray();
+    }
+
+    private static List<string> NormalizedList(IReadOnlyList<string>? values)
+    {
+        return (values ?? Array.Empty<string>())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static AudioRoutes ResolveAudioRoutes(ReplayBufferConfig config, string[] resolvedMicDeviceIds)
+    {
+        var chatAppNames = NormalizedList(config.ChatAudioProcessNames);
+
         // Multi-process apps (Discord, browsers, etc.) share one executable name across
         // several OS processes. StartProcessLoopbackCapture already uses
         // IncludeTargetProcessTree, so capturing more than one PID from the same app
         // captures its audio twice - the reported "chat audio doubled" bug. Only the
-        // lowest (typically root/parent) PID is used; its process tree covers the rest.
-        var chatPids = ResolveProcessIds(config.ChatAudioProcessName).OrderBy(pid => pid).Take(1).ToArray();
-        var useProcessRouting = chatPids.Length > 0 || config.GameAudioExcludedProcesses.Any(name => !string.IsNullOrWhiteSpace(name));
+        // lowest (typically root/parent) PID is used per app; its process tree covers
+        // the rest.
+        var chatRoutes = new List<ChatRoute>();
+        foreach (var appName in chatAppNames)
+        {
+            var pids = ResolveProcessIds(appName).OrderBy(pid => pid).ToArray();
+            if (pids.Length > 0) chatRoutes.Add(new ChatRoute(appName, pids[0]));
+        }
+
+        var useProcessRouting = chatRoutes.Count > 0 || config.GameAudioExcludedProcesses.Any(name => !string.IsNullOrWhiteSpace(name));
         var exclusionNames = config.GameAudioExcludedProcesses
-            .Append(config.ChatAudioProcessName)
+            .Concat(chatAppNames)
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -329,8 +395,8 @@ public sealed class AudioCapturePipeline : IDisposable
             .ToArray();
         var selfPid = Environment.ProcessId;
         var gamePids = useProcessRouting ? ResolveGameAudioProcessIds(config.GameExecutableName, excludedPids, selfPid) : Array.Empty<int>();
-        var key = $"{useProcessRouting}|{string.Join(',', chatPids.OrderBy(pid => pid))}|{string.Join(',', excludedPids)}|{string.Join(',', gamePids)}|{resolvedMicDeviceId}";
-        return new AudioRoutes(chatPids.OrderBy(pid => pid).ToArray(), excludedPids, gamePids, useProcessRouting, key, resolvedMicDeviceId);
+        var key = $"{useProcessRouting}|{string.Join(',', chatRoutes.OrderBy(route => route.AppName, StringComparer.OrdinalIgnoreCase).Select(route => $"{route.AppName}:{route.ProcessId}"))}|{string.Join(',', excludedPids)}|{string.Join(',', gamePids)}|{string.Join(',', resolvedMicDeviceIds.OrderBy(id => id, StringComparer.Ordinal))}";
+        return new AudioRoutes(chatRoutes.ToArray(), excludedPids, gamePids, useProcessRouting, key, resolvedMicDeviceIds);
     }
 
     private static string FormatIds(IEnumerable<int> ids)
@@ -485,6 +551,7 @@ public sealed class AudioCapturePipeline : IDisposable
     private async Task<string> BuildAlignedTrackAsync(
         AudioCaptureKind kind,
         ReplayAudioCapture[] captures,
+        string? sourceKey,
         List<(DateTime StartUtc, double DurationSeconds)> segmentWindows,
         bool allowMix,
         List<string> snapshots,
@@ -496,7 +563,9 @@ public sealed class AudioCapturePipeline : IDisposable
         {
             var endUtc = startUtc + TimeSpan.FromSeconds(durationSeconds);
             var overlapping = captures
-                .Where(capture => capture.Kind == kind && AudioCaptureOverlaps(capture, startUtc, endUtc))
+                .Where(capture => capture.Kind == kind
+                    && (sourceKey is null || string.Equals(capture.SourceKey, sourceKey, StringComparison.OrdinalIgnoreCase))
+                    && AudioCaptureOverlaps(capture, startUtc, endUtc))
                 .ToArray();
             if (!allowMix && overlapping.Length > 1)
             {
@@ -725,7 +794,9 @@ public sealed class AudioCapturePipeline : IDisposable
         return capture.EffectiveStartedAtUtc < windowEndUtc && captureEndUtc > windowStartUtc;
     }
 
-    public sealed record AudioRoutes(int[] ChatProcessIds, int[] ExcludedProcessIds, int[] GameProcessIds, bool UseProcessRouting, string RouteKey, string MicrophoneDeviceId);
+    public sealed record ChatRoute(string AppName, int ProcessId);
+
+    public sealed record AudioRoutes(ChatRoute[] ChatRoutes, int[] ExcludedProcessIds, int[] GameProcessIds, bool UseProcessRouting, string RouteKey, string[] MicrophoneDeviceIds);
 
     public enum AudioCaptureKind
     {
@@ -736,7 +807,7 @@ public sealed class AudioCapturePipeline : IDisposable
 
     private sealed class ReplayAudioCapture
     {
-        public ReplayAudioCapture(AudioCaptureSession session, string path, string title, AudioCaptureKind kind, int? processId, DateTime startedAtUtc, string? deviceId = null)
+        public ReplayAudioCapture(AudioCaptureSession session, string path, string title, AudioCaptureKind kind, int? processId, DateTime startedAtUtc, string sourceKey, string? deviceId = null)
         {
             Session = session;
             Path = path;
@@ -744,6 +815,7 @@ public sealed class AudioCapturePipeline : IDisposable
             Kind = kind;
             ProcessId = processId;
             StartedAtUtc = startedAtUtc;
+            SourceKey = sourceKey;
             DeviceId = deviceId;
         }
 
@@ -752,6 +824,11 @@ public sealed class AudioCapturePipeline : IDisposable
         public string Title { get; }
         public AudioCaptureKind Kind { get; }
         public int? ProcessId { get; }
+        // Identity of which configured source this capture belongs to - a game
+        // pid (or "default" for whole-desktop loopback), a configured chat app
+        // name, or a microphone device id. Used to match live captures back to
+        // Settings when resolving routes/building tracks.
+        public string SourceKey { get; }
         public string? DeviceId { get; }
         public DateTime StartedAtUtc { get; }
         public DateTime? EndedAtUtc { get; set; }

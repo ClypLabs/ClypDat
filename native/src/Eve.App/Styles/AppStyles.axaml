@@ -95,6 +95,27 @@
   <Style Selector="Button.brandButton:pointerover">
     <Setter Property="Background" Value="Transparent" />
   </Style>
+  <Style Selector="Button.trackMuteButton">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="RenderTransform" Value="none" />
+  </Style>
+  <Style Selector="Button.trackMuteButton:pointerover">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="RenderTransform" Value="none" />
+  </Style>
+  <Style Selector="Button.trackMuteButton:pressed">
+    <Setter Property="RenderTransform" Value="none" />
+  </Style>
+  <Style Selector="Button.trackMuteButton /template/ ContentPresenter">
+    <Setter Property="RenderTransform" Value="none" />
+  </Style>
+  <Style Selector="Button.trackMuteButton:pressed /template/ ContentPresenter">
+    <Setter Property="RenderTransform" Value="none" />
+  </Style>
   <Style Selector="Button.replayButton">
     <Setter Property="Background" Value="#1D2A36" />
     <Setter Property="Foreground" Value="#9FB0C3" />
