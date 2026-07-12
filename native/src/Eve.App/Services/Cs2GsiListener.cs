@@ -21,6 +21,15 @@ public sealed class Cs2GsiListener : IDisposable
     private int _lastMatchDeaths;
     private int _lastMatchAssists;
     private int _lastRoundNumber = -1;
+    // Set on a round-number change - the payload carrying that change (and
+    // sometimes the next one or two) can still report the *previous* round's
+    // final round_kills value due to GSI update lag, arriving after we've
+    // already reset the round-kill trackers to 0. Without this, that stale
+    // value reads as "N brand new kills" and schedules a duplicate clip for a
+    // streak that was already flushed (e.g. a real 5-kill Ace correctly
+    // clipped once, then a second phantom "Ace" clip from round 1's first
+    // payload still echoing round 0's round_kills=5).
+    private bool _suppressNextKillDelta;
     private string _lastMapName = string.Empty;
     private readonly object _killClipLock = new();
     private Timer? _killClipDebounceTimer;
@@ -157,6 +166,7 @@ public sealed class Cs2GsiListener : IDisposable
             _lastRoundNumber = roundNum;
             _lastRoundKills = 0;
             _lastRoundKillHs = 0;
+            _suppressNextKillDelta = true;
             // Used to flush any pending debounced clip here on the theory that
             // "no more kills are coming for the round that just ended" - but CS2
             // reports the round-ending kill itself under the *next* round's
@@ -223,7 +233,17 @@ public sealed class Cs2GsiListener : IDisposable
             AppLog.Info($"CS2 GSI: round={_lastRoundNumber}, round_kills={roundKills.Value} (was {_lastRoundKills}), round_killhs={roundKillHs}, match_kills={matchKills}.");
         }
 
-        if (roundKills.HasValue && roundKills.Value > _lastRoundKills)
+        if (_suppressNextKillDelta)
+        {
+            // First payload after a round change - round_kills here may still
+            // be the previous round's stale final value (see field doc
+            // comment on _suppressNextKillDelta). Sync trackers without
+            // treating it as new kills, then resume normal detection.
+            _suppressNextKillDelta = false;
+            if (roundKills.HasValue) _lastRoundKills = roundKills.Value;
+            if (roundKillHs.HasValue) _lastRoundKillHs = roundKillHs.Value;
+        }
+        else if (roundKills.HasValue && roundKills.Value > _lastRoundKills)
         {
             var isHeadshotKill = roundKillHs.HasValue && roundKillHs.Value > _lastRoundKillHs;
             var baseLabel = roundKills.Value switch
