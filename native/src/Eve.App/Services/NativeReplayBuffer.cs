@@ -165,6 +165,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(
                 winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, item.Size);
             session = framePool.CreateCaptureSession(item);
+            TryDisableCaptureBorder(session);
             session.StartCapture();
 
             codecContext = CreateEncoder(config, outputWidth, outputHeight, out var codecTimeBase);
@@ -221,6 +222,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                         framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(
                             winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, item.Size);
                         session = framePool.CreateCaptureSession(item);
+                        TryDisableCaptureBorder(session);
                         session.StartCapture();
                         ffmpeg.sws_freeContext(swsContext);
                         swsContext = CreateScaler(captureWidth, captureHeight, outputWidth, outputHeight);
@@ -343,6 +345,22 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             CPUAccessFlags = CpuAccessFlags.Read,
             BindFlags = BindFlags.None
         });
+    }
+
+    private static void TryDisableCaptureBorder(GraphicsCaptureSession session)
+    {
+        // Windows 11 draws a colored "this is being captured" border around the
+        // target window/monitor by default (same indicator screen-share tools show) -
+        // IsBorderRequired only exists on newer Windows builds (GraphicsCaptureSession3),
+        // so this is a best-effort no-op on older ones rather than a hard requirement.
+        try
+        {
+            session.IsBorderRequired = false;
+        }
+        catch
+        {
+            // Property unavailable on this Windows build - border stays, not fatal.
+        }
     }
 
     private static GraphicsCaptureItem CreateItemFor(nint windowHandle)
