@@ -16,6 +16,12 @@ public static class ReplayBufferFactory
             return new WindowsReplayBuffer(configProvider);
         }
 
+        if (backend == ReplayBackendOption.Native)
+        {
+            AppLog.Info("Replay backend selected: Native (experimental, video-only for now).");
+            return new NativeReplayBuffer(configProvider);
+        }
+
         if (backend == ReplayBackendOption.Obs || ObsRuntimeLocator.IsAvailable(out _, out _))
         {
             AppLog.Info("Replay backend selected: OBS.");

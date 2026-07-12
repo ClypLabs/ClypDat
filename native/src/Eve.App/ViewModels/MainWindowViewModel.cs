@@ -100,6 +100,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ReplayBackends = new ObservableCollection<ReplayBackendPreset>
         {
             new("Auto", "Auto", "Uses OBS if available, otherwise falls back automatically - also knows which games need Windows Capture due to anti-cheat and switches for you."),
+            new("EVE (experimental)", "Native", "EVE's own capture engine - a true rolling buffer with no stop/start gaps between segments. Experimental: video-only for now, no audio track yet."),
             new("OBS (best quality)", "Obs", "Highest quality and lowest overhead, but some anti-cheat games (e.g. CS2) need a launch option or may show a black/frozen capture."),
             new("Windows Capture (no game hook)", "Legacy", "Captures the screen directly with no process hook, so games with anti-cheat can get captured properly, at the cost of slightly higher overhead.")
         };

@@ -4,5 +4,6 @@ public enum ReplayBackendOption
 {
     Auto,
     Obs,
-    Legacy
+    Legacy,
+    Native
 }
