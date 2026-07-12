@@ -540,7 +540,7 @@
                             <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
                               <CheckBox IsChecked="{Binding IsSelected}" VerticalAlignment="Center" />
                               <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
-                                <TextBlock Text="{Binding RawTitle}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" />
+                                <TextBlock Text="{Binding DisplayTitle}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" />
                                 <TextBlock Foreground="#6B7C8C" FontSize="11">
                                   <Run Text="{Binding GameFolderName}" /><Run Text=" · " /><Run Text="{Binding CreatedAtLocal}" />
                                 </TextBlock>

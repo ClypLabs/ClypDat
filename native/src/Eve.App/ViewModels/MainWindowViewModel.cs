@@ -647,7 +647,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         foreach (var record in found.OrderByDescending(record => record.CreatedAtUtc))
         {
-            MedalImportRows.Add(new MedalImportRowViewModel(record));
+            MedalImportRows.Add(new MedalImportRowViewModel(record, MedalImportStripEmoji));
         }
 
         MedalScanStatusText = found.Count switch
@@ -675,14 +675,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             for (var i = 0; i < selected.Count; i++)
             {
                 var row = selected[i];
-                MedalImportStatusText = $"Importing {i + 1} of {selected.Count}: {row.RawTitle}";
+                MedalImportStatusText = $"Importing {i + 1} of {selected.Count}: {row.DisplayTitle}";
                 try
                 {
                     var title = MedalImportStripEmoji ? MedalImportService.StripEmoji(row.RawTitle) : row.RawTitle;
                     if (string.IsNullOrWhiteSpace(title)) title = row.GameFolderName;
                     var extension = Path.GetExtension(row.Record.VideoPath).TrimStart('.');
                     var fileName = ClipFileNaming.BuildFileName(title, row.CreatedAtLocal, extension);
-                    var destinationPath = Path.Combine(libraryFolder, fileName);
+                    var destinationDir = Path.Combine(libraryFolder, "Imported Clips", "Medal", ClipFileNaming.BuildBaseName(row.GameFolderName));
+                    var destinationPath = Path.Combine(destinationDir, fileName);
+
+                    if (File.Exists(destinationPath))
+                    {
+                        MedalImportRows.Remove(row);
+                        continue;
+                    }
+
+                    Directory.CreateDirectory(destinationDir);
 
                     await Task.Run(() =>
                     {
@@ -694,6 +703,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                         {
                             File.Move(row.Record.VideoPath, destinationPath);
                         }
+
+                        File.SetCreationTimeUtc(destinationPath, row.Record.CreatedAtUtc);
+                        File.SetLastWriteTimeUtc(destinationPath, row.Record.CreatedAtUtc);
                     });
 
                     await AddOrUpdateLibraryClipAsync(destinationPath);

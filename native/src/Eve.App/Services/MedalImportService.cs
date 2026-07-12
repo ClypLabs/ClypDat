@@ -41,7 +41,30 @@ public static class MedalImportService
             }
         }
 
-        return results;
+        return DedupeBySizeAndGame(results);
+    }
+
+    // Medal itself sometimes catalogs the same clip twice under different video_path
+    // entries (reported duplicate-clip bug) - path-string dedupe above won't catch
+    // that since the paths differ. Same file size within the same game folder is
+    // treated as the same clip; first occurrence wins.
+    private static List<MedalClipRecord> DedupeBySizeAndGame(List<MedalClipRecord> results)
+    {
+        var seen = new HashSet<(long Length, string GameFolder)>();
+        var deduped = new List<MedalClipRecord>();
+        foreach (var record in results)
+        {
+            long length;
+            try { length = new FileInfo(record.VideoPath).Length; }
+            catch { deduped.Add(record); continue; }
+
+            if (seen.Add((length, record.GameFolderName)))
+            {
+                deduped.Add(record);
+            }
+        }
+
+        return deduped;
     }
 
     private static void ReadDatabase(string dbPath, List<MedalClipRecord> results, HashSet<string> seenPaths)
