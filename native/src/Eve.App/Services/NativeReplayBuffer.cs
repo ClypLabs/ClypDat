@@ -582,7 +582,25 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         try
         {
             var durationSeconds = Math.Max(1, (DateTime.UtcNow - sessionStartUtc).TotalSeconds);
-            var segmentWindows = new List<(DateTime StartUtc, double DurationSeconds)> { (sessionStartUtc, durationSeconds) };
+            // One giant segment spanning the whole session let audio/video clock
+            // drift (real hardware sample clocks are never exactly 48000.000000Hz)
+            // accumulate uncorrected for the entire recording - fine for the first
+            // minute or two, audibly desynced well before a long session ends.
+            // Regular replay clips never hit this because WindowsReplayBuffer
+            // segments and independently re-anchors audio every ~60s; chunking the
+            // session the same way here gets the same periodic resync instead of
+            // one uncorrected multi-hour window.
+            const double SegmentChunkSeconds = 60;
+            var segmentWindows = new List<(DateTime StartUtc, double DurationSeconds)>();
+            var chunkStartUtc = sessionStartUtc;
+            var remainingSeconds = durationSeconds;
+            while (remainingSeconds > 0)
+            {
+                var chunkSeconds = Math.Min(SegmentChunkSeconds, remainingSeconds);
+                segmentWindows.Add((chunkStartUtc, chunkSeconds));
+                chunkStartUtc += TimeSpan.FromSeconds(chunkSeconds);
+                remainingSeconds -= chunkSeconds;
+            }
 
             var tracks = _audio
                 .BuildAlignedTracksAsync(segmentWindows, config, snapshots, CancellationToken.None)
