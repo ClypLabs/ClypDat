@@ -100,7 +100,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ReplayBackends = new ObservableCollection<ReplayBackendPreset>
         {
             new("Auto", "Auto", "Uses OBS if available, otherwise falls back automatically - also knows which games need Windows Capture due to anti-cheat and switches for you."),
-            new("EVE (experimental)", "Native", "EVE's own capture engine - a true rolling buffer with no stop/start gaps between segments. Experimental: video-only for now, no audio track yet."),
+            new("EVE (experimental)", "Native", "EVE's own capture engine - a true rolling buffer with no stop/start gaps between segments, and true per-window capture that keeps recording the game through alt-tabs and overlays."),
             new("OBS (best quality)", "Obs", "Highest quality and lowest overhead, but some anti-cheat games (e.g. CS2) need a launch option or may show a black/frozen capture."),
             new("Windows Capture (no game hook)", "Legacy", "Captures the screen directly with no process hook, so games with anti-cheat can get captured properly, at the cost of slightly higher overhead.")
         };
@@ -154,6 +154,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<GameBackendRowViewModel> GameCaptureRows { get; }
     public ObservableCollection<string> ClipOverlayPositions { get; }
     public ObservableCollection<string> ClipOverlayVolumes { get; }
+
+    public ObservableCollection<ThirdPartyLicenseEntry> ThirdPartyLicenseEntries { get; } = new()
+    {
+        new("OBS Studio", "https://github.com/obsproject/obs-studio", "GPLv2", "https://www.gnu.org/licenses/old-licenses/gpl-2.0.html"),
+        new("VideoLAN", "https://code.videolan.org/videolan/vlc", "LGPLv2.1", "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html"),
+        new("FFmpeg", "https://ffmpeg.org", "GPLv2", "https://www.gnu.org/licenses/old-licenses/gpl-2.0.html"),
+        new("ScreenRecorderLib", "https://github.com/sskodje/ScreenRecorderLib", "MIT License", "https://opensource.org/license/mit"),
+        new("Avalonia", "https://github.com/AvaloniaUI/Avalonia", "MIT License", "https://opensource.org/license/mit"),
+        new("NAudio", "https://github.com/naudio/NAudio", "MIT License", "https://opensource.org/license/mit"),
+        new("Vortice.Windows", "https://github.com/amerkoleci/Vortice.Windows", "MIT License", "https://opensource.org/license/mit"),
+        new("FFmpeg.AutoGen", "https://github.com/Ruslan-B/FFmpeg.AutoGen", "MIT License", "https://opensource.org/license/mit")
+    };
 
     public IEnumerable<ClipCardViewModel> AllClips => ClipGroups.SelectMany(group => group.Clips);
     public int ReplayCaptureX { get; set; }
