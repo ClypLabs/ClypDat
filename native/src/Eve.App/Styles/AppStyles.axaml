@@ -1,5 +1,43 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Styles.Resources>
+    <!--
+      Style Selector="ScrollBar" with a Template setter kept losing to
+      FluentTheme's own ScrollBar ControlTheme (which the ScrollViewer's
+      internal ScrollBar picks up via its Theme, not via type-selector
+      matching, so a plain Style never actually won). Registering our own
+      ControlTheme under the SAME implicit key FluentTheme uses
+      ({x:Type ScrollBar}) replaces it outright instead of trying to out-
+      specificity it - this is the supported way to fully re-skin a Fluent
+      control. No track box, no up/down buttons - just the draggable thumb.
+    -->
+    <ControlTheme x:Key="{x:Type ScrollBar}" TargetType="ScrollBar">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="MinWidth" Value="10" />
+      <Setter Property="MinHeight" Value="10" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Track Name="PART_Track"
+                 Minimum="{TemplateBinding Minimum}"
+                 Maximum="{TemplateBinding Maximum}"
+                 Value="{TemplateBinding Value, Mode=TwoWay}"
+                 ViewportSize="{TemplateBinding ViewportSize}"
+                 Orientation="{TemplateBinding Orientation}"
+                 IsDirectionReversed="True">
+            <Track.Thumb>
+              <Thumb Name="thumb" Classes="scrollThumb" />
+            </Track.Thumb>
+          </Track>
+        </ControlTemplate>
+      </Setter>
+      <Style Selector="^:vertical">
+        <Setter Property="Width" Value="10" />
+      </Style>
+      <Style Selector="^:horizontal">
+        <Setter Property="Height" Value="10" />
+      </Style>
+    </ControlTheme>
+  </Styles.Resources>
   <!--
     Shared control styles for the whole app. These must live at Application
     level (referenced from App.axaml), not inside MainWindow.axaml's own
@@ -11,26 +49,27 @@
     of the app.
   -->
   <!--
-    Default Fluent ScrollBar uses the system accent color for its thumb, which
-    stood out as an out-of-place bright blue against EVE's own dark palette
-    everywhere a ScrollViewer's drag handle showed up. Restyled to match the
-    app's neutral panel/border tones instead.
+    Thumb's own default Fluent template ignores plain Background/CornerRadius
+    Setters on the instance (its internal Border binds fixed theme resources,
+    not TemplateBinding), which is why the corner radius and color kept
+    getting lost - overriding Thumb's Template directly, scoped to this class
+    only, is the only way to actually control its appearance. Color matches
+    EVE's own dark background family rather than standing out - it's meant to
+    be a subtle scroll indicator, not a UI accent.
   -->
-  <Style Selector="ScrollBar">
-    <Setter Property="Background" Value="Transparent" />
+  <Style Selector="Thumb.scrollThumb">
+    <Setter Property="Background" Value="#1E2A35" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}" CornerRadius="5" />
+      </ControlTemplate>
+    </Setter>
   </Style>
-  <Style Selector="ScrollBar /template/ Thumb">
-    <Setter Property="Background" Value="#2C3B48" />
-    <Setter Property="CornerRadius" Value="5" />
+  <Style Selector="Thumb.scrollThumb:pointerover">
+    <Setter Property="Background" Value="#283744" />
   </Style>
-  <Style Selector="ScrollBar /template/ Thumb:pointerover">
-    <Setter Property="Background" Value="#3E5266" />
-  </Style>
-  <Style Selector="ScrollBar /template/ Thumb:pressed">
-    <Setter Property="Background" Value="#4A6178" />
-  </Style>
-  <Style Selector="ScrollBar /template/ RepeatButton">
-    <Setter Property="Opacity" Value="0" />
+  <Style Selector="Thumb.scrollThumb:pressed">
+    <Setter Property="Background" Value="#324255" />
   </Style>
 
   <Style Selector="Button.deleteButton">
