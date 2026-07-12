@@ -252,6 +252,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             var lastEncodedAt = TimeSpan.Zero;
             var targetFrameInterval = TimeSpan.FromSeconds(1.0 / Math.Clamp(config.FrameRate, 15, 240));
             var lastDiagLog = TimeSpan.Zero;
+            var lastRingTrim = TimeSpan.Zero;
             var framesSeen = 0;
             var framesEncoded = 0;
 
@@ -356,7 +357,20 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream);
                 }
 
-                TrimRingBuffer();
+                // Trimming every single frame meant List<RingPacket>.RemoveRange(0, ...)
+                // - an O(buffer size) shift of every remaining packet - ran on every
+                // frame too. With a long replay length (large buffer), that shift cost
+                // alone was enough to cap real throughput at a fixed rate regardless of
+                // the configured resolution/fps (confirmed: identical ~46fps at both
+                // 1440p/120fps and 1080p/60fps - a resolution-independent bottleneck).
+                // Trimming once a second instead of every frame cuts that O(n) cost by
+                // roughly the frame rate, while still keeping the buffer within ~1s of
+                // its target length (already has a 5s slack built into the cutoff).
+                if (stopwatch.Elapsed - lastRingTrim >= TimeSpan.FromSeconds(1))
+                {
+                    lastRingTrim = stopwatch.Elapsed;
+                    TrimRingBuffer();
+                }
             }
 
             // flush
