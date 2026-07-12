@@ -950,15 +950,15 @@
                                    Foreground="#D4E0EA"
                                    FontSize="11"
                                    TextTrimming="CharacterEllipsis" />
-                        <Button Grid.Row="1"
-                                Classes="trackMuteButton"
-                                MinHeight="0"
+                        <Border Grid.Row="1"
+                                Background="Transparent"
                                 Width="18"
                                 Height="18"
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
                                 IsVisible="{Binding IsAudio}"
-                                Click="TrackMuteButton_OnClick"
+                                PointerPressed="TrackMuteToggle_OnPointerPressed"
+                                Cursor="Hand"
                                 ToolTip.Tip="Mute/unmute this track">
                           <PathIcon Width="14"
                                     Height="14"
@@ -966,7 +966,7 @@
                                     VerticalAlignment="Center"
                                     Foreground="{Binding IsMuted, Converter={x:Static opconv:BoolToMuteBrushConverter.Instance}}"
                                     Data="{Binding IsMuted, Converter={x:Static opconv:BoolToMuteIconConverter.Instance}}" />
-                        </Button>
+                        </Border>
                         <Slider Grid.Row="1"
                                 Grid.Column="1"
                                 Classes="volumeSlider"
@@ -974,7 +974,9 @@
                                 Maximum="150"
                                 Height="36"
                                 MinHeight="36"
+                                Padding="0"
                                 VerticalAlignment="Center"
+                                Margin="0,3,0,0"
                                 Value="{Binding VolumePercent, Mode=TwoWay}"
                                 IsEnabled="{Binding CanAdjustVolume}"
                                 IsVisible="{Binding IsAudio}"

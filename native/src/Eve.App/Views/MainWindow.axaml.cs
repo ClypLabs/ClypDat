@@ -1136,11 +1136,12 @@ public sealed partial class MainWindow : Window
         _playback?.SetTrackVolume(track.StreamIndex, track.EffectiveVolumePercent);
     }
 
-    private void TrackMuteButton_OnClick(object? sender, RoutedEventArgs e)
+    private void TrackMuteToggle_OnPointerPressed(object? sender, Avalonia.Input.PointerPressedEventArgs e)
     {
-        if (sender is not Button { DataContext: TrackLaneViewModel track }) return;
+        if (sender is not Control { DataContext: TrackLaneViewModel track }) return;
         track.IsMuted = !track.IsMuted;
         _playback?.SetTrackVolume(track.StreamIndex, track.EffectiveVolumePercent);
+        e.Handled = true;
     }
 
     private static void UpdateVolumeBadgePosition(Slider slider, TrackLaneViewModel track, double? pointerX = null)
