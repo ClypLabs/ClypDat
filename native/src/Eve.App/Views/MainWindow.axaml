@@ -649,18 +649,48 @@
               <Border Classes="settingsCard">
                 <StackPanel Spacing="18">
                   <StackPanel Spacing="6">
-                    <TextBlock Text="Chat Audio App" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                    <TextBlock Text="Chat Audio Apps" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
+                    <TextBlock Text="Each app added here gets its own Chat Audio track in saved clips." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
                       <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedChatProcess}" HorizontalAlignment="Stretch" />
                       <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
+                      <Button Grid.Column="2" Content="Add" Click="AddSelectedChatProcessButton_OnClick" />
                     </Grid>
+                    <ItemsControl ItemsSource="{Binding ChatAudioApps}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Border Classes="settingsCard" Padding="14,10" Margin="0,8,0,0">
+                            <Grid ColumnDefinitions="*,Auto">
+                              <TextBlock Text="{Binding}" Foreground="#D8E4F2" VerticalAlignment="Center" />
+                              <Button Grid.Column="1" Content="Remove" Click="RemoveChatAudioAppButton_OnClick" />
+                            </Grid>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                   </StackPanel>
 
                   <Border Height="1" Background="#1B242D" />
 
                   <StackPanel Spacing="6">
-                    <TextBlock Text="Microphone" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
-                    <ComboBox Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" HorizontalAlignment="Stretch" />
+                    <TextBlock Text="Microphones" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
+                    <TextBlock Text="Each microphone added here gets its own track in saved clips." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                      <ComboBox Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" HorizontalAlignment="Stretch" />
+                      <Button Grid.Column="1" Content="Add" Click="AddSelectedMicrophoneButton_OnClick" />
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding SelectedMicrophones}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Border Classes="settingsCard" Padding="14,10" Margin="0,8,0,0">
+                            <Grid ColumnDefinitions="*,Auto">
+                              <TextBlock Text="{Binding Name}" Foreground="#D8E4F2" VerticalAlignment="Center" />
+                              <Button Grid.Column="1" Content="Remove" Click="RemoveMicrophoneButton_OnClick" />
+                            </Grid>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                   </StackPanel>
                 </StackPanel>
               </Border>
@@ -1182,15 +1212,21 @@
 
                 <StackPanel Spacing="6">
                   <TextBlock Text="Chat Audio App" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
-                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                  <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
                     <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedChatProcess}" HorizontalAlignment="Stretch" />
                     <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
+                    <Button Grid.Column="2" Content="Add" Click="AddSelectedChatProcessButton_OnClick" />
                   </Grid>
+                  <TextBlock Text="{Binding ChatAudioApps.Count, StringFormat='{}{0} app(s) added - more can be added later in Settings.'}" Foreground="#6B7C8C" FontSize="11" />
                 </StackPanel>
 
                 <StackPanel Spacing="6">
                   <TextBlock Text="Microphone" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
-                  <ComboBox Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" HorizontalAlignment="Stretch" />
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                    <ComboBox Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" HorizontalAlignment="Stretch" />
+                    <Button Grid.Column="1" Content="Add" Click="AddSelectedMicrophoneButton_OnClick" />
+                  </Grid>
+                  <TextBlock Text="{Binding SelectedMicrophones.Count, StringFormat='{}{0} microphone(s) added - more can be added later in Settings.'}" Foreground="#6B7C8C" FontSize="11" />
                 </StackPanel>
               </StackPanel>
 

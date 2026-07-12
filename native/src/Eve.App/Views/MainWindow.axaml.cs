@@ -850,6 +850,32 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void AddSelectedChatProcessButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel?.AddSelectedChatProcess();
+    }
+
+    private void RemoveChatAudioAppButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: string appName })
+        {
+            ViewModel?.RemoveChatAudioApp(appName);
+        }
+    }
+
+    private void AddSelectedMicrophoneButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel?.AddSelectedMicrophone();
+    }
+
+    private void RemoveMicrophoneButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: AudioDeviceOption device })
+        {
+            ViewModel?.RemoveMicrophone(device.Id);
+        }
+    }
+
 
     private void MainWindow_OnKeyDown(object? sender, KeyEventArgs e)
     {

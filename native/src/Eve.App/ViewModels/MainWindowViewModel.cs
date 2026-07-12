@@ -109,6 +109,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedClipOverlayPosition = ClipOverlayPositions.FirstOrDefault(position => string.Equals(position, Settings.ClipOverlayPosition, StringComparison.OrdinalIgnoreCase)) ?? "Top Right";
         _selectedClipOverlayVolume = ClipOverlayVolumes.FirstOrDefault(volume => string.Equals(volume, Settings.ClipOverlayVolume, StringComparison.OrdinalIgnoreCase)) ?? "Medium";
         ExcludedProcesses = new ObservableCollection<string>(Settings.GameAudioExcludedProcesses);
+        ChatAudioApps = new ObservableCollection<string>(Settings.ChatAudioProcessNames);
+        SelectedMicrophones = new ObservableCollection<AudioDeviceOption>();
         GameCaptureRows = new ObservableCollection<GameBackendRowViewModel>();
         RebuildGameCaptureRows();
         RefreshAudioDevices();
@@ -151,6 +153,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ReplayBackendPreset> ReplayBackends { get; }
     public ObservableCollection<ExportCodecOption> ExportCodecs { get; }
     public ObservableCollection<string> ExcludedProcesses { get; }
+    public ObservableCollection<string> ChatAudioApps { get; }
+    public ObservableCollection<AudioDeviceOption> SelectedMicrophones { get; }
     public ObservableCollection<GameBackendRowViewModel> GameCaptureRows { get; }
     public ObservableCollection<string> ClipOverlayPositions { get; }
     public ObservableCollection<string> ClipOverlayVolumes { get; }
@@ -780,26 +784,55 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // Picker for adding a new entry to ChatAudioApps - not itself persisted (the
+    // list is the persisted state, same relationship SelectedProcessExclusion has
+    // to ExcludedProcesses).
     public ProcessOption? SelectedChatProcess
     {
         get => _selectedChatProcess;
-        set
-        {
-            if (!SetProperty(ref _selectedChatProcess, value)) return;
-            Settings.ChatAudioProcessName = value?.Name ?? string.Empty;
-            SaveSettings();
-        }
+        set => SetProperty(ref _selectedChatProcess, value);
     }
 
+    // Picker for adding a new entry to SelectedMicrophones - not itself persisted.
     public AudioDeviceOption? SelectedMicrophoneDevice
     {
         get => _selectedMicrophoneDevice;
-        set
-        {
-            if (!SetProperty(ref _selectedMicrophoneDevice, value)) return;
-            Settings.MicrophoneDeviceId = value?.Id ?? string.Empty;
-            SaveSettings();
-        }
+        set => SetProperty(ref _selectedMicrophoneDevice, value);
+    }
+
+    public void AddSelectedChatProcess()
+    {
+        var name = SelectedChatProcess?.Name;
+        if (string.IsNullOrWhiteSpace(name)) return;
+        if (ChatAudioApps.Contains(name, StringComparer.OrdinalIgnoreCase)) return;
+        ChatAudioApps.Add(name);
+        Settings.ChatAudioProcessNames.Add(name);
+        SaveSettings();
+    }
+
+    public void RemoveChatAudioApp(string name)
+    {
+        ChatAudioApps.Remove(name);
+        Settings.ChatAudioProcessNames.RemoveAll(item => string.Equals(item, name, StringComparison.OrdinalIgnoreCase));
+        SaveSettings();
+    }
+
+    public void AddSelectedMicrophone()
+    {
+        var device = SelectedMicrophoneDevice;
+        if (device is null) return;
+        if (SelectedMicrophones.Any(existing => existing.Id == device.Id)) return;
+        SelectedMicrophones.Add(device);
+        Settings.MicrophoneDeviceIds.Add(device.Id);
+        SaveSettings();
+    }
+
+    public void RemoveMicrophone(string id)
+    {
+        var match = SelectedMicrophones.FirstOrDefault(device => device.Id == id);
+        if (match is not null) SelectedMicrophones.Remove(match);
+        Settings.MicrophoneDeviceIds.RemoveAll(item => item == id);
+        SaveSettings();
     }
 
     public ProcessOption? SelectedProcessExclusion
@@ -1484,11 +1517,30 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             AppLog.Info($"Saved microphone device '{Settings.MicrophoneDeviceId}' not found this pass; showing '{_selectedMicrophoneDevice?.Name}' without changing the saved setting.");
         }
+
+        // Refresh display names for already-configured microphones (a device's
+        // friendly name can change enumeration-to-enumeration) without dropping
+        // ones that are temporarily missing (same "don't lose a real choice over a
+        // transient re-enumeration" reasoning as above) - keep the prior entry as-is
+        // if it's not in this pass.
+        for (var i = 0; i < SelectedMicrophones.Count; i++)
+        {
+            var current = SelectedMicrophones[i];
+            var refreshed = MicrophoneDevices.FirstOrDefault(device => device.Id == current.Id);
+            if (refreshed is not null && refreshed.Name != current.Name) SelectedMicrophones[i] = refreshed;
+        }
+
+        foreach (var id in Settings.MicrophoneDeviceIds)
+        {
+            if (SelectedMicrophones.Any(device => device.Id == id)) continue;
+            var match = MicrophoneDevices.FirstOrDefault(device => device.Id == id);
+            SelectedMicrophones.Add(match ?? new AudioDeviceOption(id, id));
+        }
     }
 
     public async Task RefreshOpenProcessesAsync()
     {
-        var selectedChatName = SelectedChatProcess?.Name ?? Settings.ChatAudioProcessName;
+        var selectedChatName = SelectedChatProcess?.Name;
         var selectedName = SelectedProcessExclusion?.Name;
         var processes = await Task.Run(ProcessListService.GetOpenExecutables);
         OpenProcesses.Clear();
@@ -1535,9 +1587,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return true;
     }
 
-    private static IReadOnlyList<string> BuildSingleOrConfiguredList(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? Array.Empty<string>() : new[] { value };
-
     public ReplayBufferConfig CreateReplayConfig()
     {
         var gameOverride = Settings.GameCaptureOverrides
@@ -1557,9 +1606,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ReplayCaptureHeight,
             string.Empty,
             string.Empty,
-            BuildSingleOrConfiguredList(SelectedChatProcess?.Name ?? Settings.ChatAudioProcessName),
-            BuildSingleOrConfiguredList(SelectedMicrophoneDevice?.Id),
-            SelectedMicrophoneDevice?.Name ?? string.Empty,
+            ChatAudioApps.ToArray(),
+            SelectedMicrophones.Select(device => device.Id).ToArray(),
+            SelectedMicrophones.FirstOrDefault()?.Name ?? string.Empty,
             Settings.GameAudioExcludedProcesses.ToArray(),
             ActiveGameDetection.DisplayName,
             ActiveGameDetection.ExeName,

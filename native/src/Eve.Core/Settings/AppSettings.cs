@@ -15,8 +15,13 @@ public sealed class AppSettings
     public bool StartMinimizedToTray { get; set; }
     public string IgnoredUpdateVersion { get; set; } = string.Empty;
     public string ChatAudioDeviceId { get; set; } = string.Empty;
+    // Superseded by ChatAudioProcessNames (multi-select) - kept only so
+    // AppSettingsStore.Load can migrate an existing single selection into the
+    // new list on first read of an old settings.json.
     public string ChatAudioProcessName { get; set; } = string.Empty;
     public string MicrophoneDeviceId { get; set; } = "default";
+    public List<string> ChatAudioProcessNames { get; set; } = new();
+    public List<string> MicrophoneDeviceIds { get; set; } = new();
     public bool MicrophoneNoiseSuppressionEnabled { get; set; }
     // ffmpeg afftdn's nr= (noise reduction) parameter, in dB - higher cuts more
     // noise but risks eating into speech. afftdn's own valid range is 0.01-97;
