@@ -31,12 +31,14 @@ namespace Eve.App.Services;
 // occlusion - a fixed screen-region crop (the original approach) would instead show
 // whatever's on screen at that rectangle, including other apps. Falls back to capturing
 // the primary monitor when no game window is detected. NVENC only for now (no software
-// fallback - machines without NVENC should stay on Legacy/OBS). Audio is not yet wired
-// in (Phase 2) - saved clips are video-only until that lands.
+// fallback - machines without NVENC should stay on Legacy/OBS). Audio (Phase 2) reuses
+// AudioCapturePipeline - the same Game/Chat/Microphone routing, WASAPI capture, and mux
+// logic WindowsReplayBuffer uses, via its own independent instance.
 [SupportedOSPlatform("windows10.0.17763.0")]
 public sealed class NativeReplayBuffer : IReplayBuffer
 {
     private readonly Func<ReplayBufferConfig> _configProvider;
+    private readonly AudioCapturePipeline _audio;
     private readonly object _bufferLock = new();
     private readonly List<RingPacket> _packets = new();
 
@@ -51,6 +53,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer
     public NativeReplayBuffer(Func<ReplayBufferConfig> configProvider)
     {
         _configProvider = configProvider;
+        var bufferFolder = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "EVE",
+            "native-replay-buffer");
+        _audio = new AudioCapturePipeline(bufferFolder);
     }
 
     public bool IsRecording => _sessionActive;
@@ -73,6 +80,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             TaskCreationOptions.LongRunning,
             TaskScheduler.Default);
 
+        _audio.Start(config);
         _sessionActive = true;
         return ready.Task;
     }
@@ -88,6 +96,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             catch (OperationCanceledException) { }
         }
 
+        _audio.Stop();
         lock (_bufferLock) _packets.Clear();
     }
 
@@ -114,9 +123,50 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         var clipName = string.IsNullOrWhiteSpace(titleOverride) ? config.GameDisplayName : titleOverride;
         var outputPath = Path.Combine(outputFolder, ClipFileNaming.BuildFileName(clipName, DateTime.Now, "mp4"));
 
-        await Task.Run(() => RemuxWindowToMp4(window, outputPath), cancellationToken);
+        var tempVideoPath = Path.Combine(Path.GetTempPath(), $"eve-native-video-{Guid.NewGuid():N}.mp4");
+        var snapshots = new List<string>();
+        try
+        {
+            await Task.Run(() => RemuxWindowToMp4(window, tempVideoPath), cancellationToken);
 
-        AppLog.Info($"Native replay saved (video-only, audio not yet wired): path={outputPath}, packets={window.Length}.");
+            // The ring buffer already remuxes exactly the desired window starting at a
+            // real keyframe - no offset/trim needed here the way WindowsReplayBuffer's
+            // keyframe-seek fallback requires, so this is a single segment window
+            // spanning the whole saved clip.
+            var windowStartUtc = window[0].WallClockUtc;
+            var windowDurationSeconds = Math.Max(1, (window[^1].WallClockUtc - windowStartUtc).TotalSeconds);
+            var segmentWindows = new List<(DateTime StartUtc, double DurationSeconds)> { (windowStartUtc, windowDurationSeconds) };
+
+            var (gamePath, chatPath, microphonePath) = await _audio.BuildAlignedTracksAsync(segmentWindows, config, snapshots, cancellationToken);
+
+            var muxArgs = new[]
+            {
+                "-y",
+                "-i", tempVideoPath,
+                "-i", gamePath,
+                "-i", chatPath,
+                "-i", microphonePath,
+                "-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:a",
+                "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                "-metadata:s:a:0", "title=Game Audio",
+                "-metadata:s:a:1", "title=Chat Audio",
+                "-metadata:s:a:2", "title=Microphone",
+                "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("EVE Native")}",
+                outputPath
+            };
+            var result = await AudioCapturePipeline.RunProcessAsync("ffmpeg", muxArgs, cancellationToken);
+            if (result.ExitCode != 0)
+            {
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg mux failed." : result.Error);
+            }
+        }
+        finally
+        {
+            AudioCapturePipeline.TryDelete(tempVideoPath);
+            foreach (var snapshot in snapshots) AudioCapturePipeline.TryDelete(snapshot);
+        }
+
+        AppLog.Info($"Native replay saved: path={outputPath}, packets={window.Length}.");
         return outputPath;
     }
 

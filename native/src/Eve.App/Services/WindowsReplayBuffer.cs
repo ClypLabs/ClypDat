@@ -17,13 +17,12 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     private const double MinimumSegmentHealth = 0.80;
     private readonly Func<ReplayBufferConfig> _configProvider;
     private readonly string _bufferFolder;
+    private readonly AudioCapturePipeline _audio;
     private readonly object _lock = new();
     private Recorder? _recorder;
     private Timer? _rotationTimer;
-    private Timer? _audioRouteTimer;
     private string _activePath = string.Empty;
     private ReplayBufferConfig? _config;
-    private string _audioRouteKey = string.Empty;
     private DateTime _startedAtUtc;
     private DateTime _lastRecorderRestartUtc = DateTime.MinValue;
     // A kill-streak's debounced auto-clips (Assist, 3K, Headshot 4K, ...) tend to
@@ -38,7 +37,6 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     private static readonly TimeSpan MinRecorderRestartInterval = TimeSpan.FromSeconds(18);
     private TaskCompletionSource<string>? _completion;
     private readonly SemaphoreSlim _transition = new(1, 1);
-    private readonly List<ReplayAudioCapture> _audioCaptures = new();
     private readonly List<ReplayVideoSegment> _segments = new();
     private volatile bool _sessionActive;
 
@@ -49,6 +47,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "EVE",
             "windows-replay-buffer");
+        _audio = new AudioCapturePipeline(_bufferFolder);
     }
 
     // Deliberately not "_recorder is not null": rotation disposes the old recorder
@@ -73,7 +72,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         _config = _configProvider();
         Duration = TimeSpan.FromSeconds(Math.Clamp(_config.DurationSeconds, 30, 1200));
         StartRecorder();
-        StartAudioCaptures(_config);
+        _audio.Start(_config);
         AppLog.Info($"Replay buffer started: duration={Duration.TotalSeconds:0}s, quality={_config.MaxHeight}p{_config.FrameRate}.");
         return Task.CompletedTask;
     }
@@ -86,12 +85,10 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             _sessionActive = false;
             _rotationTimer?.Dispose();
             _rotationTimer = null;
-            _audioRouteTimer?.Dispose();
-            _audioRouteTimer = null;
             var recorder = _recorder;
             if (recorder is null)
             {
-                StopAudioCaptures();
+                _audio.Stop();
                 return;
             }
             var completion = _completion;
@@ -106,7 +103,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             foreach (var segment in _segments.ToArray()) TryDelete(segment.Path);
             _segments.Clear();
             _activePath = string.Empty;
-            StopAudioCaptures();
+            _audio.Stop();
         }
         finally
         {
@@ -373,79 +370,6 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         return value % 2 == 0 ? value : value + 1;
     }
 
-    private void StartAudioCaptures(ReplayBufferConfig config)
-    {
-        using var enumerator = new MMDeviceEnumerator();
-        var resolvedMicDeviceId = ResolveMicrophoneDeviceId(enumerator, config.MicrophoneDeviceId);
-        var routes = ResolveAudioRoutes(config, resolvedMicDeviceId);
-        _audioRouteKey = routes.RouteKey;
-        AppLog.Info(
-            $"Audio route resolved: chat='{config.ChatAudioProcessName}', chatPids={FormatIds(routes.ChatProcessIds)}, exclusions='{string.Join(",", config.GameAudioExcludedProcesses)}', excludedPids={FormatIds(routes.ExcludedProcessIds)}, gamePids={FormatIds(routes.GameProcessIds)}.");
-        StopStaleAudioCaptures(routes, resolvedMicDeviceId);
-        if (routes.UseProcessRouting)
-        {
-            foreach (var pid in routes.GameProcessIds)
-            {
-                if (HasLiveCapture(AudioCaptureKind.Game, pid)) continue;
-                try
-                {
-                    StartProcessLoopbackCapture(AudioCaptureKind.Game, pid, ProcessLoopbackCaptureMode.IncludeTargetProcessTree, "Game Audio");
-                }
-                catch (Exception error)
-                {
-                    AppLog.Error($"Game app audio capture failed: pid={pid}", error);
-                }
-            }
-
-            if (routes.GameProcessIds.Length == 0)
-            {
-                AppLog.Info("Game audio process routing active but no allowed audio apps found; Game Audio track will be silent.");
-            }
-        }
-        else
-        {
-            try
-            {
-                if (!HasLiveCapture(AudioCaptureKind.Game, null))
-                {
-                    StartLoopbackCapture(enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia), AudioCaptureKind.Game, "Game Audio");
-                }
-            }
-            catch (Exception error)
-            {
-                AppLog.Error("Game audio capture failed", error);
-            }
-        }
-
-        foreach (var pid in routes.ChatProcessIds)
-        {
-            if (HasLiveCapture(AudioCaptureKind.Chat, pid)) continue;
-            try
-            {
-                StartProcessLoopbackCapture(AudioCaptureKind.Chat, pid, ProcessLoopbackCaptureMode.IncludeTargetProcessTree, "Chat Audio");
-            }
-            catch (Exception error)
-            {
-                AppLog.Error($"Chat audio capture failed: pid={pid}", error);
-            }
-        }
-
-        try
-        {
-            if (!HasLiveCapture(AudioCaptureKind.Microphone, null) && !string.IsNullOrEmpty(resolvedMicDeviceId))
-            {
-                var micDevice = enumerator.GetDevice(resolvedMicDeviceId);
-                StartMicrophoneCapture(micDevice, "Microphone");
-            }
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Microphone capture failed", error);
-        }
-
-        StartAudioRouteTimer();
-    }
-
     private ReplayVideoSegment[] GetReplaySegments()
     {
         var cutoff = DateTime.UtcNow - Duration - TimeSpan.FromSeconds(2);
@@ -469,11 +393,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             TryDelete(segment.Path);
         }
 
-        foreach (var capture in _audioCaptures.Where(capture => capture.EndedAtUtc is not null && capture.EndedAtUtc < cutoff).ToArray())
-        {
-            _audioCaptures.Remove(capture);
-            TryDelete(capture.Path);
-        }
+        _audio.PruneOlderThan(cutoff);
     }
 
     private async Task<ReplayVideoSegment[]> HydrateSegmentDurationsAsync(ReplayVideoSegment[] segments, CancellationToken cancellationToken)
@@ -676,231 +596,11 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         return path.Replace("\\", "/", StringComparison.Ordinal).Replace("'", "'\\''", StringComparison.Ordinal);
     }
 
-    private string SnapshotAudioFile(ReplayAudioCapture? capture, DateTime windowStartUtc, double durationSeconds, ICollection<string> snapshots, ReplayBufferConfig? config = null)
-    {
-        if (capture is null || !IsUsableAudioFile(capture.Path)) return string.Empty;
-        var captureEndUtc = capture.EndedAtUtc ?? DateTime.UtcNow;
-        var windowEndUtc = windowStartUtc + TimeSpan.FromSeconds(durationSeconds);
-        var effectiveStartUtc = capture.EffectiveStartedAtUtc;
-        var overlapStartUtc = effectiveStartUtc > windowStartUtc ? effectiveStartUtc : windowStartUtc;
-        var overlapEndUtc = captureEndUtc < windowEndUtc ? captureEndUtc : windowEndUtc;
-        if (overlapEndUtc <= overlapStartUtc) return string.Empty;
-
-        var sourceSnapshotPath = Path.Combine(_bufferFolder, $"audio_source_{Guid.NewGuid():N}.wav");
-        var snapshotPath = Path.Combine(_bufferFolder, $"audio_{Guid.NewGuid():N}.wav");
-        try
-        {
-            var copied = capture.EndedAtUtc is null
-                ? capture.Session.SnapshotTo(sourceSnapshotPath)
-                : CopyAudioFile(capture.Path, sourceSnapshotPath);
-            if (!copied || !IsUsableAudioFile(sourceSnapshotPath))
-            {
-                TryDelete(sourceSnapshotPath);
-                TryDelete(snapshotPath);
-                return string.Empty;
-            }
-
-            snapshots.Add(sourceSnapshotPath);
-            var trimStart = Math.Max(0, (overlapStartUtc - effectiveStartUtc).TotalSeconds);
-            var overlapDuration = Math.Max(0, (overlapEndUtc - overlapStartUtc).TotalSeconds);
-            var delayMs = Math.Max(0, (int)Math.Round((overlapStartUtc - windowStartUtc).TotalMilliseconds));
-            // Noise suppression only makes sense on the mic track - Game/Chat audio
-            // is line-level/desktop audio, not a noisy room signal. afftdn's nr= is
-            // in dB; the settings UI clamps to 0-30 (its own valid range is wider,
-            // but higher than ~20 starts eating into speech on typical mic noise).
-            var noiseSuppressionFilter = capture.Kind == AudioCaptureKind.Microphone && config?.MicrophoneNoiseSuppressionEnabled == true
-                ? $"afftdn=nr={FormatSeconds(Math.Clamp(config.MicrophoneNoiseSuppressionStrength, 0, 30))},"
-                : string.Empty;
-            var filters = $"[0:a]atrim=start={FormatSeconds(trimStart)}:duration={FormatSeconds(overlapDuration)},asetpts=PTS-STARTPTS,aresample=48000,{noiseSuppressionFilter}adelay={delayMs}|{delayMs},apad=whole_dur={FormatSeconds(durationSeconds)},atrim=0:{FormatSeconds(durationSeconds)}[out]";
-            AppLog.Info($"Replay audio overlap: kind={capture.Kind}, pid={capture.ProcessId?.ToString() ?? "none"}, trim={trimStart:0.###}s, overlap={overlapDuration:0.###}s, delay={delayMs}ms, bytes={AudioFileLength(capture.Path)}.");
-
-            var result = RunProcessAsync("ffmpeg", new[]
-            {
-                "-y",
-                "-v", "error",
-                "-i", sourceSnapshotPath,
-                "-filter_complex", filters.ToString(),
-                "-map", "[out]",
-                "-ac", "2",
-                "-c:a", "pcm_s16le",
-                snapshotPath
-            }, CancellationToken.None).GetAwaiter().GetResult();
-            if (result.ExitCode != 0 || !IsUsableAudioFile(snapshotPath))
-            {
-                TryDelete(snapshotPath);
-                return string.Empty;
-            }
-
-            snapshots.Add(snapshotPath);
-            return snapshotPath;
-        }
-        catch
-        {
-            TryDelete(sourceSnapshotPath);
-            TryDelete(snapshotPath);
-            return string.Empty;
-        }
-    }
-
-    private string SnapshotAudioFile(ReplayAudioCapture capture, ICollection<string> snapshots)
-    {
-        if (!IsUsableAudioFile(capture.Path)) return string.Empty;
-        var snapshotPath = Path.Combine(_bufferFolder, $"audio_{Guid.NewGuid():N}.wav");
-        try
-        {
-            if (!capture.Session.SnapshotTo(snapshotPath) || !IsUsableAudioFile(snapshotPath))
-            {
-                TryDelete(snapshotPath);
-                return string.Empty;
-            }
-
-            snapshots.Add(snapshotPath);
-            return snapshotPath;
-        }
-        catch
-        {
-            TryDelete(snapshotPath);
-            return string.Empty;
-        }
-    }
-
     private static string FormatDuration(TimeSpan duration)
     {
         return duration.TotalSeconds < 1
             ? "0s"
             : $"{Math.Floor(duration.TotalSeconds):0}s";
-    }
-
-    private void StartLoopbackCapture(MMDevice device, AudioCaptureKind kind, string title)
-    {
-        var path = Path.Combine(_bufferFolder, $"{AudioKindPrefix(kind)}_{Guid.NewGuid():N}.wav");
-        TryDelete(path);
-        var capture = new WasapiLoopbackCapture(device);
-        _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, kind, null, DateTime.UtcNow));
-        AppLog.Info($"Audio capture started: {title}, device={device.FriendlyName}.");
-    }
-
-    private void StartProcessLoopbackCapture(AudioCaptureKind kind, int processId, ProcessLoopbackCaptureMode mode, string title)
-    {
-        var path = Path.Combine(_bufferFolder, $"{AudioKindPrefix(kind)}_{processId}_{Guid.NewGuid():N}.wav");
-        TryDelete(path);
-        var capture = new ProcessLoopbackWaveIn(processId, mode);
-        _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, kind, processId, DateTime.UtcNow));
-        AppLog.Info($"Audio capture started: {title}, pid={processId}, mode={mode}.");
-    }
-
-    // Resolves to the actual endpoint ID (not the "default" sentinel) so the caller can
-    // detect a live default-device swap (e.g. user changes default mic in Windows Sound
-    // settings) by comparing this against the device ID the running capture was opened
-    // with - WASAPI capture stays bound to whatever device it started on and never
-    // follows the system default on its own.
-    private static string ResolveMicrophoneDeviceId(MMDeviceEnumerator enumerator, string microphoneDeviceId)
-    {
-        if (string.IsNullOrWhiteSpace(microphoneDeviceId) || microphoneDeviceId == AudioDeviceOption.DefaultDeviceId)
-        {
-            try
-            {
-                return enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications).ID;
-            }
-            catch
-            {
-                return string.Empty;
-            }
-        }
-
-        try
-        {
-            return enumerator.GetDevice(microphoneDeviceId).ID;
-        }
-        catch
-        {
-            return string.Empty;
-        }
-    }
-
-    private void StartMicrophoneCapture(MMDevice device, string title)
-    {
-        var path = Path.Combine(_bufferFolder, $"{AudioKindPrefix(AudioCaptureKind.Microphone)}_{Guid.NewGuid():N}.wav");
-        TryDelete(path);
-        var capture = new WasapiCapture(device);
-        _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, AudioCaptureKind.Microphone, null, DateTime.UtcNow, device.ID));
-        AppLog.Info($"Audio capture started: {title}, device={device.FriendlyName}.");
-    }
-
-    private static string AudioKindPrefix(AudioCaptureKind kind) => kind switch
-    {
-        AudioCaptureKind.Game => "game",
-        AudioCaptureKind.Chat => "chat",
-        AudioCaptureKind.Microphone => "microphone",
-        _ => "audio"
-    };
-
-    private bool HasLiveCapture(AudioCaptureKind kind, int? processId)
-    {
-        return _audioCaptures.Any(capture => capture.EndedAtUtc is null && capture.Kind == kind && capture.ProcessId == processId);
-    }
-
-    private void StopStaleAudioCaptures(AudioRoutes routes, string resolvedMicDeviceId)
-    {
-        var wantedChat = routes.ChatProcessIds.ToHashSet();
-        var excluded = routes.ExcludedProcessIds.ToHashSet();
-        foreach (var capture in _audioCaptures.Where(capture => capture.EndedAtUtc is null).ToArray())
-        {
-            var keep = capture.Kind switch
-            {
-                AudioCaptureKind.Game when routes.UseProcessRouting => capture.ProcessId is int gamePid && !excluded.Contains(gamePid),
-                AudioCaptureKind.Game => capture.ProcessId is null,
-                AudioCaptureKind.Chat => capture.ProcessId is int chatPid && wantedChat.Contains(chatPid),
-                AudioCaptureKind.Microphone => string.Equals(capture.DeviceId, resolvedMicDeviceId, StringComparison.Ordinal),
-                _ => false
-            };
-
-            if (!keep || (capture.ProcessId is int processId && !IsProcessAlive(processId)))
-            {
-                StopAudioCapture(capture);
-            }
-        }
-    }
-
-    private static bool IsProcessAlive(int processId)
-    {
-        try
-        {
-            using var process = Process.GetProcessById(processId);
-            return !process.HasExited;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static void StopAudioCapture(ReplayAudioCapture capture)
-    {
-        if (capture.EndedAtUtc is not null) return;
-        capture.EndedAtUtc = DateTime.UtcNow;
-        try
-        {
-            capture.Session.Dispose();
-        }
-        catch
-        {
-            // Stop best effort.
-        }
-
-        AppLog.Info($"Audio capture stopped: {capture.Title}, pid={capture.ProcessId?.ToString() ?? "none"}, start={capture.StartedAtUtc:o}, end={capture.EndedAtUtc:o}, bytes={AudioFileLength(capture.Path)}.");
-    }
-
-    private void StopAudioCaptures()
-    {
-        _audioRouteTimer?.Dispose();
-        _audioRouteTimer = null;
-        foreach (var capture in _audioCaptures.ToArray())
-        {
-            StopAudioCapture(capture);
-        }
-
-        _audioCaptures.Clear();
     }
 
     // Video segments are only ever wall-clock-accurate individually (each one's
@@ -921,7 +621,6 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     {
         var snapshots = new List<string>();
         var duration = Math.Max(1, clipDurationSeconds);
-        var captures = _audioCaptures.ToArray();
 
         // -ss + -c:v copy seeks to the nearest keyframe AT OR BEFORE videoOffsetSeconds,
         // not videoOffsetSeconds itself - the container timestamps end up perfectly
@@ -938,13 +637,11 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         var effectiveDurationSeconds = duration + (videoOffsetSeconds - effectiveOffsetSeconds);
 
         var segmentWindows = BuildSegmentWindows(sourceSegments, effectiveOffsetSeconds);
-        AppLog.Info($"Replay mux start: videoOffset={videoOffsetSeconds:0.###}s, keyframeOffset={effectiveOffsetSeconds:0.###}s, duration={effectiveDurationSeconds:0.###}s, captures={captures.Length}, segments={segmentWindows.Count}.");
+        AppLog.Info($"Replay mux start: videoOffset={videoOffsetSeconds:0.###}s, keyframeOffset={effectiveOffsetSeconds:0.###}s, duration={effectiveDurationSeconds:0.###}s, segments={segmentWindows.Count}.");
 
         try
         {
-            var gamePath = await BuildAlignedTrackAsync(AudioCaptureKind.Game, captures, segmentWindows, allowMix: true, snapshots, cancellationToken);
-            var chatPath = await BuildAlignedTrackAsync(AudioCaptureKind.Chat, captures, segmentWindows, allowMix: true, snapshots, cancellationToken);
-            var microphonePath = await BuildAlignedTrackAsync(AudioCaptureKind.Microphone, captures, segmentWindows, allowMix: false, snapshots, cancellationToken, config);
+            var (gamePath, chatPath, microphonePath) = await _audio.BuildAlignedTracksAsync(segmentWindows, config, snapshots, cancellationToken);
             AppLog.Info($"Replay mux inputs: game={AudioFileLength(gamePath)}b, chat={AudioFileLength(chatPath)}b, microphone={AudioFileLength(microphonePath)}b.");
 
             var metadataArgs = new[]
@@ -1032,130 +729,6 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         return windows;
     }
 
-    private async Task<string> BuildAlignedTrackAsync(
-        AudioCaptureKind kind,
-        ReplayAudioCapture[] captures,
-        List<(DateTime StartUtc, double DurationSeconds)> segmentWindows,
-        bool allowMix,
-        List<string> snapshots,
-        CancellationToken cancellationToken,
-        ReplayBufferConfig? config = null)
-    {
-        var segmentClips = new List<string>();
-        foreach (var (startUtc, durationSeconds) in segmentWindows)
-        {
-            var endUtc = startUtc + TimeSpan.FromSeconds(durationSeconds);
-            var overlapping = captures
-                .Where(capture => capture.Kind == kind && AudioCaptureOverlaps(capture, startUtc, endUtc))
-                .ToArray();
-            if (!allowMix && overlapping.Length > 1)
-            {
-                overlapping = new[] { overlapping[^1] };
-            }
-
-            var clipPaths = overlapping
-                .Select(capture => SnapshotAudioFile(capture, startUtc, durationSeconds, snapshots, config))
-                .Where(IsUsableAudioFile)
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-
-            string segmentClip;
-            if (clipPaths.Length == 0)
-            {
-                segmentClip = await CreateSilentClipAsync(durationSeconds, snapshots, cancellationToken);
-            }
-            else if (clipPaths.Length == 1)
-            {
-                segmentClip = clipPaths[0];
-            }
-            else
-            {
-                segmentClip = await MixClipsAsync(clipPaths, durationSeconds, snapshots, cancellationToken);
-            }
-
-            segmentClips.Add(segmentClip);
-        }
-
-        if (segmentClips.Count == 0)
-        {
-            var totalDuration = segmentWindows.Sum(window => window.DurationSeconds);
-            return await CreateSilentClipAsync(totalDuration, snapshots, cancellationToken);
-        }
-
-        return segmentClips.Count == 1
-            ? segmentClips[0]
-            : await ConcatClipsAsync(segmentClips, snapshots, cancellationToken);
-    }
-
-    private async Task<string> CreateSilentClipAsync(double durationSeconds, ICollection<string> snapshots, CancellationToken cancellationToken)
-    {
-        var path = Path.Combine(_bufferFolder, $"audio_silent_{Guid.NewGuid():N}.wav");
-        var result = await RunProcessAsync("ffmpeg", new[]
-        {
-            "-y", "-v", "error",
-            "-f", "lavfi", "-t", FormatSeconds(durationSeconds), "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
-            "-c:a", "pcm_s16le",
-            path
-        }, cancellationToken);
-        if (result.ExitCode != 0 || !IsUsableAudioFile(path))
-        {
-            AppLog.Error($"Silent clip generation failed: duration={durationSeconds:0.###}s, error={result.Error}");
-        }
-
-        snapshots.Add(path);
-        return path;
-    }
-
-    private async Task<string> MixClipsAsync(IReadOnlyList<string> clipPaths, double durationSeconds, ICollection<string> snapshots, CancellationToken cancellationToken)
-    {
-        var path = Path.Combine(_bufferFolder, $"audio_mix_{Guid.NewGuid():N}.wav");
-        var args = new List<string> { "-y", "-v", "error" };
-        foreach (var clipPath in clipPaths)
-        {
-            args.AddRange(new[] { "-i", clipPath });
-        }
-
-        var labels = string.Concat(Enumerable.Range(0, clipPaths.Count).Select(index => $"[{index}:a]"));
-        args.AddRange(new[]
-        {
-            "-filter_complex", $"{labels}amix=inputs={clipPaths.Count}:normalize=0,atrim=0:{FormatSeconds(durationSeconds)},asetpts=PTS-STARTPTS[out]",
-            "-map", "[out]",
-            "-c:a", "pcm_s16le",
-            path
-        });
-        var result = await RunProcessAsync("ffmpeg", args, cancellationToken);
-        if (result.ExitCode != 0 || !IsUsableAudioFile(path))
-        {
-            AppLog.Error($"Audio mix failed: clips={clipPaths.Count}, error={result.Error}");
-            return await CreateSilentClipAsync(durationSeconds, snapshots, cancellationToken);
-        }
-
-        snapshots.Add(path);
-        return path;
-    }
-
-    private async Task<string> ConcatClipsAsync(IReadOnlyList<string> clipPaths, ICollection<string> snapshots, CancellationToken cancellationToken)
-    {
-        var concatPath = Path.Combine(_bufferFolder, $"audio_concat_{Guid.NewGuid():N}.txt");
-        var outputPath = Path.Combine(_bufferFolder, $"audio_concat_{Guid.NewGuid():N}.wav");
-        await File.WriteAllLinesAsync(concatPath, clipPaths.Select(path => $"file '{EscapeConcatPath(path)}'"), cancellationToken);
-        try
-        {
-            var result = await RunProcessAsync("ffmpeg", new[] { "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", concatPath, "-c", "copy", outputPath }, cancellationToken);
-            if (result.ExitCode != 0 || !IsUsableAudioFile(outputPath))
-            {
-                AppLog.Error($"Audio concat failed: clips={clipPaths.Count}, error={result.Error}");
-            }
-        }
-        finally
-        {
-            TryDelete(concatPath);
-        }
-
-        snapshots.Add(outputPath);
-        return outputPath;
-    }
-
     private static string FormatSeconds(double seconds)
     {
         return seconds.ToString("0.###", CultureInfo.InvariantCulture);
@@ -1215,154 +788,6 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             _sessionActive = false;
             RecordingStopped?.Invoke(this, EventArgs.Empty);
         }
-    }
-
-    private void RefreshAudioRoutes()
-    {
-        if (!_transition.Wait(0)) return;
-        try
-        {
-            var config = _config;
-            if (config is null || !IsRecording) return;
-            var latestConfig = _configProvider();
-            using var enumerator = new MMDeviceEnumerator();
-            var resolvedMicDeviceId = ResolveMicrophoneDeviceId(enumerator, latestConfig.MicrophoneDeviceId);
-            var routes = ResolveAudioRoutes(latestConfig, resolvedMicDeviceId);
-            if (string.Equals(routes.RouteKey, _audioRouteKey, StringComparison.Ordinal)) return;
-            try
-            {
-                _config = latestConfig;
-                AppLog.Info("Audio route changed; restarting replay audio captures.");
-                StartAudioCaptures(latestConfig);
-            }
-            catch (Exception error)
-            {
-                AppLog.Error("Audio route refresh failed", error);
-            }
-        }
-        finally
-        {
-            _transition.Release();
-        }
-    }
-
-    private void StartAudioRouteTimer()
-    {
-        _audioRouteTimer?.Dispose();
-        _audioRouteTimer = new Timer(_ => RefreshAudioRoutes(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
-    }
-
-    private static AudioRoutes ResolveAudioRoutes(ReplayBufferConfig config, string resolvedMicDeviceId)
-    {
-        // Multi-process apps (Discord, browsers, etc.) share one executable name across
-        // several OS processes. StartProcessLoopbackCapture already uses
-        // IncludeTargetProcessTree, so capturing more than one PID from the same app
-        // captures its audio twice - the reported "chat audio doubled" bug. Only the
-        // lowest (typically root/parent) PID is used; its process tree covers the rest.
-        var chatPids = ResolveProcessIds(config.ChatAudioProcessName).OrderBy(pid => pid).Take(1).ToArray();
-        var useProcessRouting = chatPids.Length > 0 || config.GameAudioExcludedProcesses.Any(name => !string.IsNullOrWhiteSpace(name));
-        var exclusionNames = config.GameAudioExcludedProcesses
-            .Append(config.ChatAudioProcessName)
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        var excludedPids = exclusionNames
-            .SelectMany(ResolveProcessIds)
-            .Distinct()
-            .OrderBy(pid => pid)
-            .ToArray();
-        var selfPid = Environment.ProcessId;
-        var gamePids = useProcessRouting ? ResolveGameAudioProcessIds(config.GameExecutableName, excludedPids, selfPid) : Array.Empty<int>();
-        var key = $"{useProcessRouting}|{string.Join(',', chatPids.OrderBy(pid => pid))}|{string.Join(',', excludedPids)}|{string.Join(',', gamePids)}|{resolvedMicDeviceId}";
-        return new AudioRoutes(chatPids.OrderBy(pid => pid).ToArray(), excludedPids, gamePids, useProcessRouting, key, resolvedMicDeviceId);
-    }
-
-    private static string FormatIds(IEnumerable<int> ids)
-    {
-        var values = ids.ToArray();
-        return values.Length == 0 ? "none" : string.Join(",", values);
-    }
-
-    private static IEnumerable<int> ResolveProcessIds(string processName)
-    {
-        var normalized = Path.GetFileNameWithoutExtension(processName ?? string.Empty);
-        if (string.IsNullOrWhiteSpace(normalized)) return Array.Empty<int>();
-        var ids = new List<int>();
-        foreach (var process in Process.GetProcessesByName(normalized))
-        {
-            using (process)
-            {
-                try
-                {
-                    if (!process.HasExited) ids.Add(process.Id);
-                }
-                catch
-                {
-                    // Process can exit while enumerating.
-                }
-            }
-        }
-
-        return ids;
-    }
-
-    // Was "every currently-audio-active process except excluded ones" - meant to
-    // catch a game whose audio comes from a differently-named helper process,
-    // but in practice swept in ANY other app making noise at the same time
-    // (another background app, a stray notification) and mixed it into "Game
-    // Audio" alongside the actual game. cs2.exe having exactly one PID while
-    // 4 got captured as Game Audio for a single clip is what surfaced this -
-    // reported as the clip's audio sounding "a little off".
-    //
-    // Prefer the detected game's own PID(s) when they're actually among the
-    // currently-active audio sessions - only fall back to the broad sweep
-    // when the game isn't known or its own process isn't the one producing
-    // sound (some games do route audio through an unnamed child/launcher
-    // process), so that case still works.
-    private static int[] ResolveGameAudioProcessIds(string gameExecutableName, int[] excludedPids, int selfPid)
-    {
-        var activeAudioPids = ResolveActiveAudioProcessIds()
-            .Where(pid => pid != selfPid)
-            .Except(excludedPids)
-            .ToHashSet();
-
-        var gameNamePids = ResolveProcessIds(gameExecutableName).ToHashSet();
-        var matched = activeAudioPids.Where(gameNamePids.Contains).OrderBy(pid => pid).ToArray();
-        return matched.Length > 0 ? matched : activeAudioPids.OrderBy(pid => pid).ToArray();
-    }
-
-    private static IEnumerable<int> ResolveActiveAudioProcessIds()
-    {
-        var ids = new HashSet<int>();
-        try
-        {
-            using var enumerator = new MMDeviceEnumerator();
-            using var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-            var sessions = device.AudioSessionManager.Sessions;
-            for (var index = 0; index < sessions.Count; index++)
-            {
-                using var session = sessions[index];
-                try
-                {
-                    if (session.IsSystemSoundsSession) continue;
-                    if (session.State != NAudio.CoreAudioApi.Interfaces.AudioSessionState.AudioSessionStateActive) continue;
-                    var processId = (int)session.GetProcessID;
-                    if (processId <= 0) continue;
-                    using var process = Process.GetProcessById(processId);
-                    if (!process.HasExited) ids.Add(processId);
-                }
-                catch
-                {
-                    // Audio sessions can disappear while enumerating.
-                }
-            }
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Active audio process resolve failed", error);
-        }
-
-        return ids;
     }
 
     private void Recorder_OnRecordingComplete(object? sender, RecordingCompleteEventArgs e)
@@ -1475,46 +900,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         return process;
     }
 
-    private sealed record AudioRoutes(int[] ChatProcessIds, int[] ExcludedProcessIds, int[] GameProcessIds, bool UseProcessRouting, string RouteKey, string MicrophoneDeviceId);
-
     private sealed record ReplayVideoSegment(string Path, DateTime StartedAtUtc, DateTime EndedAtUtc, TimeSpan VideoDuration);
-
-    private enum AudioCaptureKind
-    {
-        Game,
-        Chat,
-        Microphone
-    }
-
-    private sealed class ReplayAudioCapture
-    {
-        public ReplayAudioCapture(AudioCaptureSession session, string path, string title, AudioCaptureKind kind, int? processId, DateTime startedAtUtc, string? deviceId = null)
-        {
-            Session = session;
-            Path = path;
-            Title = title;
-            Kind = kind;
-            ProcessId = processId;
-            StartedAtUtc = startedAtUtc;
-            DeviceId = deviceId;
-        }
-
-        public AudioCaptureSession Session { get; }
-        public string Path { get; }
-        public string Title { get; }
-        public AudioCaptureKind Kind { get; }
-        public int? ProcessId { get; }
-        public string? DeviceId { get; }
-        public DateTime StartedAtUtc { get; }
-        public DateTime? EndedAtUtc { get; set; }
-
-        // Prefer the first-real-sample timestamp once known - closes the gap between
-        // when StartRecording() was called and when the device actually began
-        // delivering audio, which otherwise makes Game Audio (WASAPI endpoint
-        // loopback) lead the video by however much longer its startup latency is
-        // versus Chat/Microphone.
-        public DateTime EffectiveStartedAtUtc => Session.FirstSampleUtc ?? StartedAtUtc;
-    }
 
     private static bool IsUsableAudioFile(string path)
     {
@@ -1524,26 +910,5 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     private static long AudioFileLength(string path)
     {
         return IsUsableAudioFile(path) ? new FileInfo(path).Length : 0;
-    }
-
-    private static bool AudioCaptureOverlaps(ReplayAudioCapture capture, DateTime windowStartUtc, DateTime windowEndUtc)
-    {
-        var captureEndUtc = capture.EndedAtUtc ?? DateTime.UtcNow;
-        return capture.EffectiveStartedAtUtc < windowEndUtc && captureEndUtc > windowStartUtc;
-    }
-
-    private static bool CopyAudioFile(string source, string destination)
-    {
-        try
-        {
-            using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
-            input.CopyTo(output);
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
     }
 }
