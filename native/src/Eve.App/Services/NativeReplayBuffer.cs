@@ -263,7 +263,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer
 
             packet = ffmpeg.av_packet_alloc();
 
-            AppLog.Info($"Native capture started (Windows.Graphics.Capture): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}.");
+            // Six different fixes targeting the capture pipeline itself all measured
+            // zero effect - logging the actual config.FrameRate value the pacing
+            // gate uses now, since that's never actually been confirmed and would
+            // make every other finding moot if it's not what the UI shows.
+            AppLog.Info($"Native capture started (Windows.Graphics.Capture): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, configFrameRate={config.FrameRate}.");
             ready.TrySetResult();
 
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
