@@ -1055,9 +1055,10 @@
 
                 <StackPanel Spacing="6">
                   <TextBlock Text="Library folder" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
-                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-                    <TextBlock Text="{Binding Settings.LibraryFolder}" Foreground="#6B7C8C" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                    <Button Grid.Column="1" Content="Change Folder" Click="FolderButton_OnClick" />
+                  <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                    <TextBlock Text="{Binding LibraryFolderDisplay}" Foreground="#6B7C8C" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <Button Grid.Column="1" Content="Use Default" Click="ResetLibraryFolderButton_OnClick" />
+                    <Button Grid.Column="2" Content="Change Folder" Click="FolderButton_OnClick" />
                   </Grid>
                 </StackPanel>
 

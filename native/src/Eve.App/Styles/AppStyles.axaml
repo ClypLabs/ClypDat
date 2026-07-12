@@ -55,7 +55,7 @@
     <Setter Property="BorderThickness" Value="0" />
   </Style>
   <Style Selector="Button.primaryButton">
-    <Setter Property="Background" Value="#5864E8" />
+    <Setter Property="Background" Value="{StaticResource AccentBrush}" />
     <Setter Property="Foreground" Value="#FFFFFF" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="7" />
@@ -63,7 +63,7 @@
     <Setter Property="HorizontalContentAlignment" Value="Center" />
   </Style>
   <Style Selector="Button.primaryButton:pointerover">
-    <Setter Property="Background" Value="#6D77F0" />
+    <Setter Property="Background" Value="{StaticResource AccentBrushHover}" />
   </Style>
   <Style Selector="Button.deleteButton:pointerover">
     <Setter Property="Background" Value="#E16B6D" />
@@ -158,7 +158,7 @@
     <Setter Property="Foreground" Value="#D8E4F2" />
   </Style>
   <Style Selector="ComboBox.settingsInput ComboBoxItem:selected">
-    <Setter Property="Background" Value="#5864E8" />
+    <Setter Property="Background" Value="{StaticResource AccentBrush}" />
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
   <Style Selector="ListBox.pillGroup">
@@ -187,11 +187,11 @@
     <Setter Property="Background" Value="#263544" />
   </Style>
   <Style Selector="ListBox.pillGroup ListBoxItem:selected">
-    <Setter Property="Background" Value="#5864E8" />
+    <Setter Property="Background" Value="{StaticResource AccentBrush}" />
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
   <Style Selector="ListBox.pillGroup ListBoxItem:selected:pointerover">
-    <Setter Property="Background" Value="#6D77F0" />
+    <Setter Property="Background" Value="{StaticResource AccentBrushHover}" />
   </Style>
   <Style Selector="Button.autoClipCardHeader">
     <Setter Property="Background" Value="Transparent" />
@@ -232,7 +232,7 @@
   <Style Selector="Button.settingsNavButton.active">
     <Setter Property="Background" Value="#1B2A3D" />
     <Setter Property="Foreground" Value="#EDF4FB" />
-    <Setter Property="BorderBrush" Value="#5864E8" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
   </Style>
   <Style Selector="Button.settingsNavButton.active:pointerover">
     <Setter Property="Background" Value="#1B2A3D" />

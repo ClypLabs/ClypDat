@@ -1,6 +1,12 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="Eve.App.App">
+  <Application.Resources>
+    <!-- Fallback colors; overwritten at startup in App.axaml.cs with the live
+         Windows accent color when available (Settings > Personalization > Colors). -->
+    <SolidColorBrush x:Key="AccentBrush" Color="#5864E8" />
+    <SolidColorBrush x:Key="AccentBrushHover" Color="#6D77F0" />
+  </Application.Resources>
   <Application.Styles>
     <FluentTheme />
     <StyleInclude Source="avares://EVE/Styles/AppStyles.axaml" />

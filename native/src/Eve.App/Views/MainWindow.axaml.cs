@@ -188,6 +188,15 @@ public sealed partial class MainWindow : Window
         _activeReplayBackend = desired;
     }
 
+    private async void ResetLibraryFolderButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        var path = DefaultLibraryFolder();
+        Directory.CreateDirectory(path);
+        Directory.CreateDirectory(Path.Combine(path, "Saved Clips"));
+        await ViewModel.LoadLibraryFolderAsync(path);
+    }
+
     private async void FolderButton_OnClick(object? sender, RoutedEventArgs e)
     {
         var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions

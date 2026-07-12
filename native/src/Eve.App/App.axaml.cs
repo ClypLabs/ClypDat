@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Media;
 using Avalonia.Platform;
 using System.Diagnostics;
 using Eve.App.Services;
@@ -41,9 +42,39 @@ public sealed partial class App : Application
             {
                 _mainWindow.Opened += (_, _) => _mainWindow.Hide();
             }
+
+            InitializeAccentColor();
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private void InitializeAccentColor()
+    {
+        try
+        {
+            var settings = PlatformSettings;
+            if (settings is null) return;
+
+            ApplyAccentColor(settings.GetColorValues().AccentColor1);
+            settings.ColorValuesChanged += (_, values) => ApplyAccentColor(values.AccentColor1);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Accent color unavailable, using default", error);
+        }
+    }
+
+    private void ApplyAccentColor(Color accent)
+    {
+        if (Resources["AccentBrush"] is SolidColorBrush accentBrush) accentBrush.Color = accent;
+        if (Resources["AccentBrushHover"] is SolidColorBrush hoverBrush) hoverBrush.Color = BlendWithWhite(accent, 0.18);
+    }
+
+    private static Color BlendWithWhite(Color color, double amount)
+    {
+        byte Blend(byte channel) => (byte)(channel + (255 - channel) * amount);
+        return Color.FromArgb(color.A, Blend(color.R), Blend(color.G), Blend(color.B));
     }
 
     private void InitializeTrayIcon()
