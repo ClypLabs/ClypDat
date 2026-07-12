@@ -507,7 +507,7 @@
                           </ComboBox>
                           <Button Grid.Column="2" Content="Remove" Width="80" IsVisible="{Binding IsCustom}" VerticalAlignment="Center" Click="RemoveCustomGameButton_OnClick" />
                         </Grid>
-                        <TextBlock Text="⚠ If this game has anti-cheat, OBS may black out or freeze the capture (or get the game closed) - Auto or Windows Capture are safer."
+                        <TextBlock Text="⚠ Needs Windows Capture for anti-cheat compatibility - switching away may black out clips or get the game closed."
                                    Foreground="#E5A00D" FontSize="11" FontWeight="Bold" TextWrapping="Wrap"
                                    IsVisible="{Binding ShowAntiCheatWarning}" />
                       </StackPanel>
