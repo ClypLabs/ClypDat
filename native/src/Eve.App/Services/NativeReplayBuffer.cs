@@ -510,6 +510,23 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         {
             // Property unavailable on this Windows build - border stays, not fatal.
         }
+
+        // WGC composites the mouse cursor onto every frame by default
+        // (GraphicsCaptureSession2.IsCursorCaptureEnabled) - a well-documented
+        // source of real per-frame overhead in other capture tools' issue
+        // trackers, and untested here despite every other capture-pipeline
+        // lever (buffer depth, event-driven consumption, device threading)
+        // measuring zero effect on the fps ceiling. EVE draws its own
+        // click/keypress overlay separately if needed, so WGC compositing the
+        // OS cursor into the recorded frames isn't needed either way.
+        try
+        {
+            session.IsCursorCaptureEnabled = false;
+        }
+        catch
+        {
+            // Property unavailable on this Windows build - cursor stays captured, not fatal.
+        }
     }
 
     private static GraphicsCaptureItem CreateItemFor(nint windowHandle)
