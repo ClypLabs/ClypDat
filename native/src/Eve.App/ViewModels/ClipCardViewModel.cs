@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Avalonia.Media.Imaging;
 using Avalonia.Media;
 using Eve.App.Services;
+using Eve.Core.Settings;
 
 namespace Eve.App.ViewModels;
 
@@ -13,12 +14,14 @@ public sealed class ClipCardViewModel : ViewModelBase
     private string _previewImagePath;
     private Bitmap? _previewImage;
     private ClipInfo? _clipInfo;
+    private ClipEditSettings? _clipEdit;
 
     public ClipCardViewModel(MediaFileInfo media)
     {
         _media = media;
         _previewImagePath = media.ThumbnailPath;
         _clipInfo = ClipInfoSidecar.Load(media.Path);
+        _clipEdit = ClipEditSidecar.Load(media.Path);
         SetPreviewImage(_previewImagePath);
     }
 
@@ -121,7 +124,24 @@ public sealed class ClipCardViewModel : ViewModelBase
             return CreatedAt.ToString("MMM d, yyyy");
         }
     }
-    public string DurationLabel => Duration > TimeSpan.Zero ? Duration.ToString("m\\:ss") : "0:00";
+    // If the clip has saved trim edits, show the trimmed length (what export
+    // would actually produce) instead of the raw file's duration - with a
+    // pencil indicator next to it so it's clear the number isn't the file's
+    // full length.
+    public TimeSpan TrimmedDuration
+    {
+        get
+        {
+            if (_clipEdit is null || Duration <= TimeSpan.Zero) return Duration;
+            var start = TimeSpan.FromSeconds(Math.Clamp(_clipEdit.TrimStartSeconds, 0, Duration.TotalSeconds));
+            var end = TimeSpan.FromSeconds(Math.Clamp(_clipEdit.TrimEndSeconds, 0, Duration.TotalSeconds));
+            if (end <= TimeSpan.Zero || end < start) end = Duration;
+            return end - start;
+        }
+    }
+
+    public bool HasTrimEdit => _clipEdit is not null && Duration - TrimmedDuration > TimeSpan.FromMilliseconds(50);
+    public string DurationLabel => TrimmedDuration > TimeSpan.Zero ? TrimmedDuration.ToString("m\\:ss") : "0:00";
     public string GameLabel => "VIDEO";
     public string CaptureBackendLabel => string.IsNullOrWhiteSpace(Media.CaptureBackend) ? string.Empty : $"Captured with: {Media.CaptureBackend}";
     public bool HasCaptureBackendLabel => !string.IsNullOrWhiteSpace(CaptureBackendLabel);
@@ -191,6 +211,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     {
         _media = media;
         _clipInfo = ClipInfoSidecar.Load(media.Path);
+        _clipEdit = ClipEditSidecar.Load(media.Path);
         PreviewImagePath = media.ThumbnailPath;
         OnPropertyChanged(nameof(Media));
         OnPropertyChanged(nameof(Name));
@@ -201,6 +222,8 @@ public sealed class ClipCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(RelativeDateLabel));
         OnPropertyChanged(nameof(ClipFromLabel));
         OnPropertyChanged(nameof(GameNameLabel));
+        OnPropertyChanged(nameof(TrimmedDuration));
+        OnPropertyChanged(nameof(HasTrimEdit));
         OnPropertyChanged(nameof(DurationLabel));
         OnPropertyChanged(nameof(CaptureBackendLabel));
         OnPropertyChanged(nameof(HasCaptureBackendLabel));

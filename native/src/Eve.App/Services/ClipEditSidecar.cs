@@ -11,13 +11,22 @@ public static class ClipEditSidecar
 {
     private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = false };
 
-    public static string SidecarPath(string clipPath) => clipPath + ".eve.json";
+    // Lives in a "Clip Info" subfolder next to the clip instead of directly beside
+    // it - same reasoning as ClipInfoSidecar, keeps the library folder from filling
+    // up with clip.mp4 + clip.mp4.eve.json pairs.
+    public static string SidecarPath(string clipPath)
+    {
+        var directory = Path.GetDirectoryName(clipPath) ?? string.Empty;
+        return Path.Combine(directory, "Clip Info", Path.GetFileName(clipPath) + ".eve.json");
+    }
 
     public static void Save(string clipPath, ClipEditSettings edit)
     {
         try
         {
-            File.WriteAllText(SidecarPath(clipPath), JsonSerializer.Serialize(edit, SerializerOptions));
+            var sidecarPath = SidecarPath(clipPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(sidecarPath)!);
+            File.WriteAllText(sidecarPath, JsonSerializer.Serialize(edit, SerializerOptions));
         }
         catch (Exception error)
         {
