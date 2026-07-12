@@ -318,7 +318,7 @@
                     </ListBox.ItemTemplate>
                   </ListBox>
                   <TextBlock Text="{Binding SelectedReplayBackend.Description}" Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
-                  <TextBlock Text="Games with anti-cheat (EAC, BattlEye, Ricochet, etc.) often block OBS's game hook, causing a black or frozen capture. If a game doesn't record properly on OBS, switch to Auto (recommended) or Windows Capture instead."
+                  <TextBlock Text="Games with anti-cheat (EAC, BattlEye, Ricochet, etc.) often block OBS's game hook, causing a black or frozen capture. If a game doesn't record properly on OBS, switch to Auto (recommended)."
                              Foreground="#E5A00D" FontSize="12" FontWeight="Bold" TextWrapping="Wrap"
                              IsVisible="{Binding ReplayBackendIsObs}" />
                   <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding ReplayBackendRestartRequired}">
@@ -1125,7 +1125,7 @@
 
               <StackPanel Spacing="16" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Capture Backend}">
                 <TextBlock Text="Capture backend" Foreground="#EDF4FB" FontWeight="Bold" FontSize="18" />
-                <TextBlock Text="&quot;Auto&quot; picks the best backend per game. Anti-cheat-sensitive games are steered to Windows Capture automatically - per-game overrides live in Settings &gt; Game Detection if you need one later." Foreground="#B9C6D4" FontSize="13" TextWrapping="Wrap" />
+                <TextBlock Text="&quot;Auto&quot; (recommended) uses EVE's own capture engine for every game - no process hook, so it's safe for anti-cheat too. Per-game overrides live in Settings &gt; Game Detection if you need one later." Foreground="#B9C6D4" FontSize="13" TextWrapping="Wrap" />
                 <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayBackends}" SelectedItem="{Binding SelectedReplayBackend}">
                   <ListBox.ItemTemplate>
                     <DataTemplate>

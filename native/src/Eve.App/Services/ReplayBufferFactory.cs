@@ -22,7 +22,7 @@ public static class ReplayBufferFactory
             return new NativeReplayBuffer(configProvider);
         }
 
-        if (backend == ReplayBackendOption.Obs || ObsRuntimeLocator.IsAvailable(out _, out _))
+        if (ObsRuntimeLocator.IsAvailable(out _, out _))
         {
             AppLog.Info("Replay backend selected: OBS.");
             return new ObsReplayBuffer(configProvider);
@@ -33,15 +33,14 @@ public static class ReplayBufferFactory
         return new WindowsReplayBuffer(configProvider);
     }
 
+    // Auto always means EVE (Native) - it never hooks the game process, so unlike
+    // OBS it has nothing for anti-cheat to block or object to, and unlike Legacy
+    // (ScreenRecorderLib's stop/start segment rotation) it has no gap at rotation
+    // boundaries. Only an explicit Obs/Legacy/Native choice overrides this.
     public static ReplayBackendOption ResolveEffectiveBackend(ReplayBufferConfig config)
     {
         var backend = ParseBackend(config.Backend);
-        if (backend == ReplayBackendOption.Auto && GameCatalog.AntiCheatSensitive.Contains(config.GameExecutableName))
-        {
-            return ReplayBackendOption.Native;
-        }
-
-        return backend;
+        return backend == ReplayBackendOption.Auto ? ReplayBackendOption.Native : backend;
     }
 
     private static ReplayBackendOption ParseBackend(string value)

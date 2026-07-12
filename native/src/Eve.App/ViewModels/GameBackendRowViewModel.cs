@@ -44,11 +44,11 @@ public sealed class GameBackendRowViewModel : ViewModelBase
         }
     }
 
-    // Anti-cheat-sensitive games default to Windows Capture for a reason (OBS's
-    // hook gets blocked or the game's anti-cheat closes it outright) - warn
-    // instead of silently letting the user walk into a black/frozen clip or a
-    // closed game.
+    // Only OBS's process-hook capture is actually at risk from anti-cheat (it can
+    // get blocked, or the game's anti-cheat can close the game outright) - Legacy
+    // (Windows Capture) and EVE (Native) never hook the game process, so they're
+    // both anti-cheat-safe and don't need this warning.
     public bool ShowAntiCheatWarning => IsAntiCheatSensitive &&
         SelectedBackend is not null &&
-        !string.Equals(SelectedBackend.Value, "Legacy", StringComparison.OrdinalIgnoreCase);
+        string.Equals(SelectedBackend.Value, "Obs", StringComparison.OrdinalIgnoreCase);
 }
