@@ -139,7 +139,15 @@
     <Setter Property="FontWeight" Value="Bold" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
   </Style>
-  <Style Selector="Button.primaryButton:pointerover">
+  <!--
+    Selector="Button.primaryButton:pointerover" alone kept losing to the
+    generic "Button:not(ToggleSwitch):pointerover" rule above it (every
+    primaryButton - Export, Import Selected, Check Now, etc. - showed that
+    grey hover instead of the accent color). Matching the same :not(ToggleSwitch)
+    shape as the generic rule (plus the extra class) makes this an
+    unambiguous superset that reliably wins.
+  -->
+  <Style Selector="Button.primaryButton:not(ToggleSwitch):pointerover">
     <Setter Property="Background" Value="{StaticResource AccentBrushHover}" />
   </Style>
   <Style Selector="Button.deleteButton:pointerover">
