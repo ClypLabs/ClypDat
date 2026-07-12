@@ -600,12 +600,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void ToggleStatusAreaButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        if (ViewModel is null) return;
-        ViewModel.IsStatusAreaVisible = !ViewModel.IsStatusAreaVisible;
-    }
-
     private WindowState _preFullscreenWindowState = WindowState.Normal;
 
     private void FullscreenButton_OnClick(object? sender, RoutedEventArgs e)
@@ -978,16 +972,34 @@ public sealed partial class MainWindow : Window
 
     private void MainWindow_OnKeyUp(object? sender, KeyEventArgs e)
     {
-        if (ViewModel?.IsCapturingHotkey != true) return;
-        if (_capturedHotkeyKeys.Count == 0) return;
-
-        var hotkey = HotkeyCombo.Normalize(_capturedHotkeyKeys);
-        if (!string.IsNullOrWhiteSpace(hotkey))
+        if (ViewModel?.IsCapturingHotkey == true)
         {
-            ViewModel.SetHotkey(hotkey);
-            _globalHotkey?.SetHotkey(hotkey);
+            if (_capturedHotkeyKeys.Count == 0) return;
+
+            var hotkey = HotkeyCombo.Normalize(_capturedHotkeyKeys);
+            if (!string.IsNullOrWhiteSpace(hotkey))
+            {
+                ViewModel.SetHotkey(hotkey);
+                _globalHotkey?.SetHotkey(hotkey);
+            }
+            e.Handled = true;
+            return;
         }
-        e.Handled = true;
+
+        // Avalonia's Button activates Space on KeyUp, not KeyDown - suppressing
+        // Space only in MainWindow_OnKeyDown (which already does the actual
+        // play/pause) wasn't enough, since the focused Button's own KeyUp
+        // handling still ran afterward and fired its own Click too (whatever
+        // was last clicked - Export, a transport button - "opened" again).
+        // Swallowing Space here on Tunnel, same as KeyDown, closes that gap.
+        if (e.Key == Key.Space &&
+            ViewModel is not null &&
+            ViewModel.IsEditorVisible &&
+            ViewModel.Settings.EnableEditorKeyboardShortcuts &&
+            !IsTypingInTextInput(e.Source))
+        {
+            e.Handled = true;
+        }
     }
 
     private async void PlayPauseButton_OnClick(object? sender, RoutedEventArgs e)
