@@ -784,20 +784,57 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    // Picker for adding a new entry to ChatAudioApps - not itself persisted (the
-    // list is the persisted state, same relationship SelectedProcessExclusion has
-    // to ExcludedProcesses).
+    // Single pick, persisted directly - this is what's actually used while
+    // MultiChatAppEnabled is off (the common "at most one chat app" case), and
+    // doubles as the picker for adding a new entry to ChatAudioApps once the
+    // toggle is on.
     public ProcessOption? SelectedChatProcess
     {
         get => _selectedChatProcess;
-        set => SetProperty(ref _selectedChatProcess, value);
+        set
+        {
+            if (!SetProperty(ref _selectedChatProcess, value)) return;
+            Settings.ChatAudioProcessName = value?.Name ?? string.Empty;
+            SaveSettings();
+        }
     }
 
-    // Picker for adding a new entry to SelectedMicrophones - not itself persisted.
+    // Single pick, persisted directly - used while MultiMicrophoneEnabled is off
+    // (the common one-microphone case), and doubles as the picker for adding a
+    // new entry to SelectedMicrophones once the toggle is on.
     public AudioDeviceOption? SelectedMicrophoneDevice
     {
         get => _selectedMicrophoneDevice;
-        set => SetProperty(ref _selectedMicrophoneDevice, value);
+        set
+        {
+            if (!SetProperty(ref _selectedMicrophoneDevice, value)) return;
+            Settings.MicrophoneDeviceId = value?.Id ?? string.Empty;
+            SaveSettings();
+        }
+    }
+
+    public bool MultiChatAppEnabled
+    {
+        get => Settings.MultiChatAppEnabled;
+        set
+        {
+            if (Settings.MultiChatAppEnabled == value) return;
+            Settings.MultiChatAppEnabled = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    public bool MultiMicrophoneEnabled
+    {
+        get => Settings.MultiMicrophoneEnabled;
+        set
+        {
+            if (Settings.MultiMicrophoneEnabled == value) return;
+            Settings.MultiMicrophoneEnabled = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
     }
 
     public void AddSelectedChatProcess()
@@ -1540,7 +1577,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public async Task RefreshOpenProcessesAsync()
     {
-        var selectedChatName = SelectedChatProcess?.Name;
+        var selectedChatName = SelectedChatProcess?.Name ?? Settings.ChatAudioProcessName;
         var selectedName = SelectedProcessExclusion?.Name;
         var processes = await Task.Run(ProcessListService.GetOpenExecutables);
         OpenProcesses.Clear();
@@ -1596,6 +1633,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ? gameOverride.CaptureBackend
             : Settings.ReplayBackend;
 
+        var chatAudioProcessNames = Settings.MultiChatAppEnabled
+            ? ChatAudioApps.ToArray()
+            : (string.IsNullOrWhiteSpace(SelectedChatProcess?.Name) ? Array.Empty<string>() : new[] { SelectedChatProcess.Name });
+        var microphoneDeviceIds = Settings.MultiMicrophoneEnabled
+            ? SelectedMicrophones.Select(device => device.Id).ToArray()
+            : (SelectedMicrophoneDevice is null ? Array.Empty<string>() : new[] { SelectedMicrophoneDevice.Id });
+        var microphoneDeviceName = Settings.MultiMicrophoneEnabled
+            ? SelectedMicrophones.FirstOrDefault()?.Name ?? string.Empty
+            : SelectedMicrophoneDevice?.Name ?? string.Empty;
+
         return new ReplayBufferConfig(
             SelectedReplayDurationPreset?.Seconds ?? Settings.ReplayDurationSeconds,
             Settings.ReplayMaxHeight,
@@ -1606,9 +1653,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ReplayCaptureHeight,
             string.Empty,
             string.Empty,
-            ChatAudioApps.ToArray(),
-            SelectedMicrophones.Select(device => device.Id).ToArray(),
-            SelectedMicrophones.FirstOrDefault()?.Name ?? string.Empty,
+            chatAudioProcessNames,
+            microphoneDeviceIds,
+            microphoneDeviceName,
             Settings.GameAudioExcludedProcesses.ToArray(),
             ActiveGameDetection.DisplayName,
             ActiveGameDetection.ExeName,

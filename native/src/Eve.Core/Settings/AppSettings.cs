@@ -15,11 +15,14 @@ public sealed class AppSettings
     public bool StartMinimizedToTray { get; set; }
     public string IgnoredUpdateVersion { get; set; } = string.Empty;
     public string ChatAudioDeviceId { get; set; } = string.Empty;
-    // Superseded by ChatAudioProcessNames (multi-select) - kept only so
-    // AppSettingsStore.Load can migrate an existing single selection into the
-    // new list on first read of an old settings.json.
+    // Single-selection fields - still the persisted choice while the matching
+    // Multi*Enabled toggle below is off, so most users (one mic, at most one
+    // chat app) never need to touch the multi-select add/remove list at all.
     public string ChatAudioProcessName { get; set; } = string.Empty;
     public string MicrophoneDeviceId { get; set; } = "default";
+    // Multi-select lists - only consulted when the matching toggle is on.
+    public bool MultiChatAppEnabled { get; set; }
+    public bool MultiMicrophoneEnabled { get; set; }
     public List<string> ChatAudioProcessNames { get; set; } = new();
     public List<string> MicrophoneDeviceIds { get; set; } = new();
     public bool MicrophoneNoiseSuppressionEnabled { get; set; }

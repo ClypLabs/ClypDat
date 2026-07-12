@@ -27,19 +27,6 @@ public static class AppSettingsStore
             settings.ChatAudioProcessName ??= string.Empty;
             settings.ChatAudioProcessNames ??= new List<string>();
             settings.MicrophoneDeviceIds ??= new List<string>();
-            // Migrate a pre-multi-select single choice into the new list, once -
-            // only when the list is empty so it doesn't re-add something the user
-            // has since removed.
-            if (settings.ChatAudioProcessNames.Count == 0 && !string.IsNullOrWhiteSpace(settings.ChatAudioProcessName))
-            {
-                settings.ChatAudioProcessNames.Add(settings.ChatAudioProcessName);
-            }
-
-            if (settings.MicrophoneDeviceIds.Count == 0 && !string.IsNullOrWhiteSpace(settings.MicrophoneDeviceId) && settings.MicrophoneDeviceId != "default")
-            {
-                settings.MicrophoneDeviceIds.Add(settings.MicrophoneDeviceId);
-            }
-
             return settings;
         }
         catch
