@@ -212,6 +212,21 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private async void FullSessionRecordingFolderButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select full session recording folder",
+            AllowMultiple = false
+        });
+
+        var folder = folders.FirstOrDefault();
+        if (folder?.Path.LocalPath is { Length: > 0 } path && ViewModel is not null)
+        {
+            ViewModel.FullSessionRecordingFolder = path;
+        }
+    }
+
     private async void RefreshButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is not null)

@@ -828,6 +828,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set { Settings.MicrophoneNoiseSuppressionStrength = Math.Clamp(value, 0, 30); OnPropertyChanged(); SaveSettings(); }
     }
 
+    public bool FullSessionRecordingEnabled
+    {
+        get => Settings.FullSessionRecordingEnabled;
+        set { Settings.FullSessionRecordingEnabled = value; OnPropertyChanged(); SaveSettings(); }
+    }
+
+    public string FullSessionRecordingFolder
+    {
+        get => Settings.FullSessionRecordingFolder;
+        set { Settings.FullSessionRecordingFolder = value; OnPropertyChanged(); OnPropertyChanged(nameof(FullSessionRecordingFolderDisplay)); SaveSettings(); }
+    }
+
+    public string FullSessionRecordingFolderDisplay =>
+        string.IsNullOrWhiteSpace(FullSessionRecordingFolder) ? "Choose a folder" : FullSessionRecordingFolder;
+
     public string SelectedVideoName
     {
         get => _selectedVideoName;
@@ -1540,7 +1555,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             effectiveBackend,
             GameWindowHandle: ActiveGameDetection.WindowHandle,
             MicrophoneNoiseSuppressionEnabled: Settings.MicrophoneNoiseSuppressionEnabled,
-            MicrophoneNoiseSuppressionStrength: Settings.MicrophoneNoiseSuppressionStrength);
+            MicrophoneNoiseSuppressionStrength: Settings.MicrophoneNoiseSuppressionStrength,
+            FullSessionRecordingEnabled: Settings.FullSessionRecordingEnabled,
+            FullSessionRecordingFolder: Settings.FullSessionRecordingFolder);
     }
 
     public void SetDuration(TimeSpan duration)

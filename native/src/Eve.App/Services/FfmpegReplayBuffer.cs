@@ -769,7 +769,9 @@ public sealed record ReplayBufferConfig(
     string Backend = "Auto",
     nint GameWindowHandle = 0,
     bool MicrophoneNoiseSuppressionEnabled = false,
-    double MicrophoneNoiseSuppressionStrength = 12.0);
+    double MicrophoneNoiseSuppressionStrength = 12.0,
+    bool FullSessionRecordingEnabled = false,
+    string FullSessionRecordingFolder = "");
 
 internal sealed class AudioCaptureSession : IDisposable
 {

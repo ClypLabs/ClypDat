@@ -27,7 +27,9 @@ internal static class NativeReplayBufferSmokeTest
             GameDisplayName: "Native Capture Test",
             GameExecutableName: string.Empty,
             GameWindowTitle: string.Empty,
-            GameWindowClass: string.Empty);
+            GameWindowClass: string.Empty,
+            FullSessionRecordingEnabled: true,
+            FullSessionRecordingFolder: Path.Combine(Path.GetTempPath(), "eve-native-full-session-test"));
 
         var buffer = new NativeReplayBuffer(() => config);
 

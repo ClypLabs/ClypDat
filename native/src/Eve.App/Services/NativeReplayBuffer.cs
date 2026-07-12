@@ -195,6 +195,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         SwsContext* swsContext = null;
         AVFrame* frame = null;
         AVPacket* packet = null;
+        AVFormatContext* fullSessionFormatContext = null;
+        AVStream* fullSessionStream = null;
 
         try
         {
@@ -220,6 +222,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer
 
             codecContext = CreateEncoder(config, outputWidth, outputHeight, out var codecTimeBase);
             _timeBase = codecTimeBase;
+
+            InitFullSessionWriter(config, codecContext, out fullSessionFormatContext, out fullSessionStream);
 
             swsContext = CreateScaler(captureWidth, captureHeight, outputWidth, outputHeight);
 
@@ -341,7 +345,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
 
                 if (ffmpeg.avcodec_send_frame(codecContext, frame) == 0)
                 {
-                    DrainToRingBuffer(codecContext, packet);
+                    DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream);
                 }
 
                 TrimRingBuffer();
@@ -349,7 +353,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
 
             // flush
             ffmpeg.avcodec_send_frame(codecContext, null);
-            DrainToRingBuffer(codecContext, packet);
+            DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream);
         }
         catch (Exception error)
         {
@@ -363,6 +367,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             if (frame is not null) { var f = frame; ffmpeg.av_frame_free(&f); }
             if (packet is not null) { var p = packet; ffmpeg.av_packet_free(&p); }
             if (swsContext is not null) ffmpeg.sws_freeContext(swsContext);
+            FinalizeFullSessionWriter(fullSessionFormatContext);
             if (codecContext is not null) { var c = codecContext; ffmpeg.avcodec_free_context(&c); }
             session?.Dispose();
             framePool?.Dispose();
@@ -431,7 +436,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         return MonitorFromPoint(default, MONITOR_DEFAULTTOPRIMARY);
     }
 
-    private unsafe void DrainToRingBuffer(AVCodecContext* codecContext, AVPacket* packet)
+    private unsafe void DrainToRingBuffer(AVCodecContext* codecContext, AVPacket* packet, AVFormatContext* fullSessionFormatContext, AVStream* fullSessionStream)
     {
         while (true)
         {
@@ -454,7 +459,95 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 _packets.Add(new RingPacket(data, packet->pts, isKeyframe, DateTime.UtcNow));
             }
 
+            if (fullSessionFormatContext is not null)
+            {
+                var clonedPacket = ffmpeg.av_packet_clone(packet);
+                if (clonedPacket is not null)
+                {
+                    clonedPacket->stream_index = fullSessionStream->index;
+                    ffmpeg.av_interleaved_write_frame(fullSessionFormatContext, clonedPacket);
+                    var cp = clonedPacket;
+                    ffmpeg.av_packet_free(&cp);
+                }
+            }
+
             ffmpeg.av_packet_unref(packet);
+        }
+    }
+
+    private static unsafe bool InitFullSessionWriter(ReplayBufferConfig config, AVCodecContext* codecContext, out AVFormatContext* resultFormatContext, out AVStream* resultStream)
+    {
+        resultFormatContext = null;
+        resultStream = null;
+        if (!config.FullSessionRecordingEnabled || string.IsNullOrWhiteSpace(config.FullSessionRecordingFolder)) return false;
+
+        try
+        {
+            Directory.CreateDirectory(config.FullSessionRecordingFolder);
+            var sessionLabel = string.IsNullOrWhiteSpace(config.GameDisplayName) ? "Session" : $"Session - {config.GameDisplayName}";
+            var outputPath = Path.Combine(config.FullSessionRecordingFolder, ClipFileNaming.BuildFileName(sessionLabel, DateTime.Now, "mp4"));
+
+            AVFormatContext* formatContext = null;
+            ffmpeg.avformat_alloc_output_context2(&formatContext, null, "mp4", outputPath);
+            if (formatContext is null) return false;
+
+            var stream = ffmpeg.avformat_new_stream(formatContext, null);
+            if (ffmpeg.avcodec_parameters_from_context(stream->codecpar, codecContext) < 0)
+            {
+                ffmpeg.avformat_free_context(formatContext);
+                return false;
+            }
+            stream->time_base = codecContext->time_base;
+
+            if ((formatContext->oformat->flags & ffmpeg.AVFMT_NOFILE) == 0)
+            {
+                AVIOContext* ioContext;
+                if (ffmpeg.avio_open(&ioContext, outputPath, ffmpeg.AVIO_FLAG_WRITE) < 0)
+                {
+                    ffmpeg.avformat_free_context(formatContext);
+                    return false;
+                }
+                formatContext->pb = ioContext;
+            }
+
+            if (ffmpeg.avformat_write_header(formatContext, null) < 0)
+            {
+                ffmpeg.avformat_free_context(formatContext);
+                return false;
+            }
+
+            AppLog.Info($"Native full session recording started: path={outputPath}.");
+            resultFormatContext = formatContext;
+            resultStream = stream;
+            return true;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Full session recording init failed", error);
+            return false;
+        }
+    }
+
+    private static unsafe void FinalizeFullSessionWriter(AVFormatContext* formatContext)
+    {
+        if (formatContext is null) return;
+        try
+        {
+            ffmpeg.av_write_trailer(formatContext);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Full session recording finalize failed", error);
+        }
+        finally
+        {
+            if ((formatContext->oformat->flags & ffmpeg.AVFMT_NOFILE) == 0 && formatContext->pb is not null)
+            {
+                ffmpeg.avio_closep(&formatContext->pb);
+            }
+
+            ffmpeg.avformat_free_context(formatContext);
+            AppLog.Info("Native full session recording finalized.");
         }
     }
 

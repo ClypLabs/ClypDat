@@ -44,6 +44,12 @@ public sealed class AppSettings
     // fresh install (no settings.json at all, see AppSettingsStore.Load) gets it
     // explicitly set to false.
     public bool HasSeenOnboarding { get; set; } = true;
+    // Off by default and requires an explicit destination folder - the EVE (Native)
+    // backend's continuous encoder can also write the whole session to disk
+    // alongside the rolling replay buffer, separate from clip saves. Native only
+    // for now; Legacy/OBS would need their own, larger wiring.
+    public bool FullSessionRecordingEnabled { get; set; }
+    public string FullSessionRecordingFolder { get; set; } = string.Empty;
 }
 
 public sealed class ClipEditSettings

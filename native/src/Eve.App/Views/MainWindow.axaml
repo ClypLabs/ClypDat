@@ -337,6 +337,25 @@
                   <ToggleSwitch Grid.Column="1" IsChecked="{Binding StartReplayOnLaunch}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                 </Grid>
               </Border>
+
+              <Border Classes="settingsCard">
+                <StackPanel Spacing="14">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="Full session recording" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
+                      <TextBlock Text="Also writes the entire session's video to disk, separate from your saved clips. EVE (Native) backend only for now, video-only (no audio track yet) - off by default, needs a destination folder." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding FullSessionRecordingEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                  </Grid>
+                  <StackPanel Spacing="6" IsVisible="{Binding FullSessionRecordingEnabled}">
+                    <TextBlock Text="Destination folder" Foreground="#B8C7D8" FontWeight="Bold" FontSize="13" />
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                      <TextBlock Text="{Binding FullSessionRecordingFolderDisplay}" Foreground="#6B7C8C" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                      <Button Grid.Column="1" Content="Change Folder" Click="FullSessionRecordingFolderButton_OnClick" />
+                    </Grid>
+                  </StackPanel>
+                </StackPanel>
+              </Border>
             </StackPanel>
 
             <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Overlays and Notifications}">
