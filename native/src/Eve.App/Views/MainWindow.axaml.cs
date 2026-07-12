@@ -1485,7 +1485,13 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            var playback = new PlaybackSession();
+            // Reused across editor opens instead of constructing a fresh
+            // PlaybackSession every time - PlaybackSession's constructor spins up a
+            // whole new LibVLC engine + MediaPlayer, which was the bulk of the
+            // "video stays black for a moment" delay on every single clip open.
+            // LoadVideo() already fully tears down and replaces the previous Media
+            // internally, so the same instance is safe to reuse.
+            var playback = _playback ?? new PlaybackSession();
             playback.LoadVideo(ViewModel.SelectedVideoPath);
             _playback = playback;
             AppLog.Info($"Editor open: {ViewModel.SelectedVideoPath}");
@@ -1553,13 +1559,11 @@ public sealed partial class MainWindow : Window
         _playbackTimer.Stop();
         _playheadClock.Stop();
         _endedAtTrimBoundary = false;
-        var playback = _playback;
-        _playback = null;
+        // Stop and detach the view instead of disposing - the session (and its
+        // underlying LibVLC engine) stays alive and gets reused on the next
+        // editor open instead of being torn down and rebuilt from scratch.
+        _playback?.Stop();
         EditorVideoView.MediaPlayer = null;
-        if (playback is not null)
-        {
-            playback.Dispose();
-        }
         if (ViewModel is not null)
         {
             ViewModel.IsPlaying = false;
