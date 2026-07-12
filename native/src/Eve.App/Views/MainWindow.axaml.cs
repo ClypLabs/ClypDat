@@ -1466,19 +1466,25 @@ public sealed partial class MainWindow : Window
         var cts = new CancellationTokenSource();
         _playbackStartCts = cts;
 
+        // Background priority deliberately deprioritized the actual video decode
+        // start until after the editor panel had already finished rendering -
+        // meant to keep the open transition feeling snappy, but it meant nothing
+        // even started loading the clip until the (now-empty) editor was already
+        // on screen. Default runs it as soon as pending input/layout work is
+        // done instead of waiting for a full render pass, so decode starts
+        // essentially in parallel with the panel appearing instead of after it.
         Dispatcher.UIThread.Post(
             async () =>
             {
                 if (cts.IsCancellationRequested) return;
                 await StartEditorPlaybackAsync(cts.Token);
             },
-            DispatcherPriority.Background);
+            DispatcherPriority.Default);
     }
 
     private async Task StartEditorPlaybackAsync(CancellationToken cancellationToken)
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
-        await Task.Yield();
         if (cancellationToken.IsCancellationRequested) return;
 
         StopEditorPlayback(cancelQueuedStart: false);
