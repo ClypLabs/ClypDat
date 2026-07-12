@@ -47,8 +47,11 @@ public sealed class GameBackendRowViewModel : ViewModelBase
     // Only OBS's process-hook capture is actually at risk from anti-cheat (it can
     // get blocked, or the game's anti-cheat can close the game outright) - Legacy
     // (Windows Capture) and EVE (Native) never hook the game process, so they're
-    // both anti-cheat-safe and don't need this warning.
-    public bool ShowAntiCheatWarning => IsAntiCheatSensitive &&
+    // both anti-cheat-safe and don't need this warning. Custom (user-added) games
+    // also warn - GameCatalog.AntiCheatSensitive only covers the built-in catalog,
+    // so a manually-added game's anti-cheat status is unknown and the safer
+    // default is to flag it rather than silently assume it's fine.
+    public bool ShowAntiCheatWarning => (IsAntiCheatSensitive || IsCustom) &&
         SelectedBackend is not null &&
         string.Equals(SelectedBackend.Value, "Obs", StringComparison.OrdinalIgnoreCase);
 }
