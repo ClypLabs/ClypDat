@@ -184,6 +184,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             var lastForcedKeyframe = TimeSpan.Zero;
             var lastRectRefresh = TimeSpan.Zero;
+            var lastEncodedAt = TimeSpan.Zero;
+            var targetFrameInterval = TimeSpan.FromSeconds(1.0 / Math.Clamp(config.FrameRate, 15, 240));
 
             while (!token.IsCancellationRequested)
             {
@@ -233,6 +235,20 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     AppLog.Error($"Native capture: AcquireNextFrame failed ({acquireResult}).", null);
                     break;
                 }
+
+                // DXGI signals a new frame on ANY screen change (cursor movement,
+                // animations, etc.), which can be far more often than the target frame
+                // rate - especially on high refresh-rate monitors. Encoding every single
+                // one oversaturates NVENC and, worse, the synchronous GPU->CPU staging
+                // readback below, which was making capture fall behind real time
+                // ("sluggish"/laggy output) instead of just dropping the excess frames.
+                if (stopwatch.Elapsed - lastEncodedAt < targetFrameInterval)
+                {
+                    resource.Dispose();
+                    duplication.ReleaseFrame();
+                    continue;
+                }
+                lastEncodedAt = stopwatch.Elapsed;
 
                 using (resource)
                 {
