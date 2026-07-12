@@ -4,6 +4,9 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Vortice.Direct3D;
 using Vortice.DXGI;
+using Windows.Graphics.Capture;
+using Windows.Graphics.DirectX;
+using Windows.Graphics.DirectX.Direct3D11;
 using ID3D11Device = Vortice.Direct3D11.ID3D11Device;
 using ID3D11Texture2D = Vortice.Direct3D11.ID3D11Texture2D;
 using MapFlags = Vortice.Direct3D11.MapFlags;
@@ -17,17 +20,20 @@ using DeviceCreationFlags = Vortice.Direct3D11.DeviceCreationFlags;
 
 namespace Eve.App.Services;
 
-// Phase 1 of the native capture engine (see plan): raw DXGI Desktop Duplication capture,
-// direct h264_nvenc encode via libavcodec (FFmpeg.AutoGen P/Invoke), and a true in-memory
-// packet ring buffer - replacing WindowsReplayBuffer's stop/start ScreenRecorderLib segment
-// rotation (and the real-time gap that model has at every rotation boundary) with an encoder
-// that never stops during normal operation.
+// Phase 1 of the native capture engine (see plan): true per-window capture via
+// Windows.Graphics.Capture, direct h264_nvenc encode via libavcodec (FFmpeg.AutoGen
+// P/Invoke), and a true in-memory packet ring buffer - replacing WindowsReplayBuffer's
+// stop/start ScreenRecorderLib segment rotation (and the real-time gap that model has at
+// every rotation boundary) with an encoder that never stops during normal operation.
 //
-// Scope of this first cut: primary monitor only, cropped to the detected game window's rect
-// when the window lives on the primary monitor (falls back to full monitor otherwise), NVENC
-// only (no software fallback yet - machines without NVENC should stay on Legacy/OBS for now).
-// Audio is not yet wired in (Phase 2) - saved clips are video-only until that lands.
-[SupportedOSPlatform("windows")]
+// WGC (not raw DXGI Desktop Duplication) captures the game window's actual content
+// directly, so it keeps recording the game specifically through alt-tabs/overlays/
+// occlusion - a fixed screen-region crop (the original approach) would instead show
+// whatever's on screen at that rectangle, including other apps. Falls back to capturing
+// the primary monitor when no game window is detected. NVENC only for now (no software
+// fallback - machines without NVENC should stay on Legacy/OBS). Audio is not yet wired
+// in (Phase 2) - saved clips are video-only until that lands.
+[SupportedOSPlatform("windows10.0.17763.0")]
 public sealed class NativeReplayBuffer : IReplayBuffer
 {
     private readonly Func<ReplayBufferConfig> _configProvider;
@@ -131,7 +137,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer
     {
         ID3D11Device? device = null;
         ID3D11Texture2D? staging = null;
-        IDXGIOutputDuplication? duplication = null;
+        IDirect3DDevice? winrtDevice = null;
+        GraphicsCaptureItem? item = null;
+        Direct3D11CaptureFramePool? framePool = null;
+        GraphicsCaptureSession? session = null;
         AVCodecContext* codecContext = null;
         SwsContext* swsContext = null;
         AVFrame* frame = null;
@@ -141,34 +150,27 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         {
             var config = _configProvider();
             device = CreateD3D11Device();
-            duplication = CreateOutputDuplication(device, out var monitorWidth, out var monitorHeight);
+            winrtDevice = CaptureInterop.CreateDirect3DDevice(device);
 
-            var captureRect = ResolveCaptureRect(config, monitorWidth, monitorHeight);
-            var (outputWidth, outputHeight) = CaptureOutputSize(config, captureRect.Width, captureRect.Height);
+            var targetHandle = ResolveTargetWindow(config);
+            item = CreateItemFor(targetHandle);
+            var captureWidth = item.Size.Width;
+            var captureHeight = item.Size.Height;
+
+            var (outputWidth, outputHeight) = CaptureOutputSize(config, captureWidth, captureHeight);
             _outputWidth = outputWidth;
             _outputHeight = outputHeight;
 
-            staging = device.CreateTexture2D(new Texture2DDescription
-            {
-                Width = (uint)monitorWidth,
-                Height = (uint)monitorHeight,
-                MipLevels = 1,
-                ArraySize = 1,
-                Format = Format.B8G8R8A8_UNorm,
-                SampleDescription = new SampleDescription(1, 0),
-                Usage = ResourceUsage.Staging,
-                CPUAccessFlags = CpuAccessFlags.Read,
-                BindFlags = BindFlags.None
-            });
+            staging = CreateStagingTexture(device, captureWidth, captureHeight);
+            framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(
+                winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, item.Size);
+            session = framePool.CreateCaptureSession(item);
+            session.StartCapture();
 
             codecContext = CreateEncoder(config, outputWidth, outputHeight, out var codecTimeBase);
             _timeBase = codecTimeBase;
 
-            swsContext = ffmpeg.sws_getContext(
-                captureRect.Width, captureRect.Height, AVPixelFormat.AV_PIX_FMT_BGRA,
-                outputWidth, outputHeight, AVPixelFormat.AV_PIX_FMT_NV12,
-                2 /* SWS_BILINEAR */, null, null, null);
-            if (swsContext is null) throw new InvalidOperationException("sws_getContext failed.");
+            swsContext = CreateScaler(captureWidth, captureHeight, outputWidth, outputHeight);
 
             frame = ffmpeg.av_frame_alloc();
             frame->format = (int)AVPixelFormat.AV_PIX_FMT_NV12;
@@ -178,92 +180,92 @@ public sealed class NativeReplayBuffer : IReplayBuffer
 
             packet = ffmpeg.av_packet_alloc();
 
-            AppLog.Info($"Native capture started: monitor={monitorWidth}x{monitorHeight}, crop={captureRect.Width}x{captureRect.Height}, output={outputWidth}x{outputHeight}.");
+            AppLog.Info($"Native capture started (Windows.Graphics.Capture): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}.");
             ready.TrySetResult();
 
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             var lastForcedKeyframe = TimeSpan.Zero;
-            var lastRectRefresh = TimeSpan.Zero;
+            var lastTargetRefresh = TimeSpan.Zero;
             var lastEncodedAt = TimeSpan.Zero;
             var targetFrameInterval = TimeSpan.FromSeconds(1.0 / Math.Clamp(config.FrameRate, 15, 240));
+            var lastDiagLog = TimeSpan.Zero;
+            var framesSeen = 0;
+            var framesEncoded = 0;
 
             while (!token.IsCancellationRequested)
             {
-                // The crop rect is resolved once above from whatever window was
-                // foreground when capture started - if that wasn't the game yet (e.g.
-                // the buffer armed before the user tabbed in), it would otherwise stay
-                // wrong (full desktop) for the entire session, since this backend never
-                // rotates/restarts the way WindowsReplayBuffer does to naturally pick up
-                // fresh config. Re-resolve periodically instead.
-                if (stopwatch.Elapsed - lastRectRefresh >= TimeSpan.FromSeconds(1))
+                if (stopwatch.Elapsed - lastDiagLog >= TimeSpan.FromSeconds(2))
                 {
-                    lastRectRefresh = stopwatch.Elapsed;
-                    var freshRect = ResolveCaptureRect(_configProvider(), monitorWidth, monitorHeight);
-                    if (freshRect.Width != captureRect.Width || freshRect.Height != captureRect.Height)
-                    {
-                        // Crop size changed (different window/aspect) - rebuild the scaler
-                        // against the new source size, keeping the same output resolution
-                        // so the encoder doesn't need to be reopened (a same-size crop
-                        // move, the common case, only updates X/Y below, no rebuild).
-                        var newSws = ffmpeg.sws_getContext(
-                            freshRect.Width, freshRect.Height, AVPixelFormat.AV_PIX_FMT_BGRA,
-                            outputWidth, outputHeight, AVPixelFormat.AV_PIX_FMT_NV12,
-                            2 /* SWS_BILINEAR */, null, null, null);
-                        if (newSws is not null)
-                        {
-                            ffmpeg.sws_freeContext(swsContext);
-                            swsContext = newSws;
-                        }
-                    }
-
-                    captureRect = freshRect;
+                    lastDiagLog = stopwatch.Elapsed;
+                    AppLog.Info($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}.");
                 }
 
-                var acquireResult = duplication.AcquireNextFrame(500, out var frameInfo, out var resource);
-                if (acquireResult.Failure)
+                // Re-check which window/monitor we should be capturing every second -
+                // the detected game can change (switch games, close the game) mid-session,
+                // and this backend never rotates/restarts the way WindowsReplayBuffer does
+                // to naturally pick up fresh config.
+                if (stopwatch.Elapsed - lastTargetRefresh >= TimeSpan.FromSeconds(1))
                 {
-                    if (acquireResult.Code == Vortice.DXGI.ResultCode.WaitTimeout.Code) continue;
-
-                    if (acquireResult.Code == Vortice.DXGI.ResultCode.AccessLost.Code)
+                    lastTargetRefresh = stopwatch.Elapsed;
+                    var freshHandle = ResolveTargetWindow(_configProvider());
+                    if (freshHandle != targetHandle)
                     {
-                        AppLog.Info("Native capture: DXGI access lost, recreating duplication.");
-                        duplication.Dispose();
-                        duplication = CreateOutputDuplication(device, out _, out _);
-                        continue;
+                        targetHandle = freshHandle;
+                        session.Dispose();
+                        framePool.Dispose();
+                        item = CreateItemFor(targetHandle);
+                        captureWidth = item.Size.Width;
+                        captureHeight = item.Size.Height;
+                        staging.Dispose();
+                        staging = CreateStagingTexture(device, captureWidth, captureHeight);
+                        framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(
+                            winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, item.Size);
+                        session = framePool.CreateCaptureSession(item);
+                        session.StartCapture();
+                        ffmpeg.sws_freeContext(swsContext);
+                        swsContext = CreateScaler(captureWidth, captureHeight, outputWidth, outputHeight);
                     }
-
-                    AppLog.Error($"Native capture: AcquireNextFrame failed ({acquireResult}).", null);
-                    break;
                 }
 
-                // DXGI signals a new frame on ANY screen change (cursor movement,
-                // animations, etc.), which can be far more often than the target frame
-                // rate - especially on high refresh-rate monitors. Encoding every single
-                // one oversaturates NVENC and, worse, the synchronous GPU->CPU staging
-                // readback below, which was making capture fall behind real time
-                // ("sluggish"/laggy output) instead of just dropping the excess frames.
-                if (stopwatch.Elapsed - lastEncodedAt < targetFrameInterval)
+                using var wgcFrame = framePool.TryGetNextFrame();
+                if (wgcFrame is null)
                 {
-                    resource.Dispose();
-                    duplication.ReleaseFrame();
+                    Thread.Sleep(4);
                     continue;
                 }
-                lastEncodedAt = stopwatch.Elapsed;
+                framesSeen++;
 
-                using (resource)
+                if (wgcFrame.ContentSize.Width != captureWidth || wgcFrame.ContentSize.Height != captureHeight)
                 {
-                    using var texture = resource.QueryInterface<ID3D11Texture2D>();
+                    // Window resized - rebuild the scaler/frame pool/staging texture against
+                    // the new source size, keeping the same output resolution so the encoder
+                    // doesn't need to be reopened (may letterbox/stretch slightly until the
+                    // next resize, acceptable for this experimental backend).
+                    captureWidth = wgcFrame.ContentSize.Width;
+                    captureHeight = wgcFrame.ContentSize.Height;
+                    framePool.Recreate(winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, wgcFrame.ContentSize);
+                    staging.Dispose();
+                    staging = CreateStagingTexture(device, captureWidth, captureHeight);
+                    ffmpeg.sws_freeContext(swsContext);
+                    swsContext = CreateScaler(captureWidth, captureHeight, outputWidth, outputHeight);
+                    continue;
+                }
+
+                if (stopwatch.Elapsed - lastEncodedAt < targetFrameInterval) continue;
+                lastEncodedAt = stopwatch.Elapsed;
+                framesEncoded++;
+
+                using (var texture = CaptureInterop.GetTexture(wgcFrame.Surface))
+                {
                     device.ImmediateContext.CopyResource(staging, texture);
                 }
-                duplication.ReleaseFrame();
 
                 var mapped = device.ImmediateContext.Map(staging, 0, MapMode.Read, MapFlags.None);
                 try
                 {
-                    var srcPointer = (byte*)mapped.DataPointer + captureRect.Y * (int)mapped.RowPitch + captureRect.X * 4;
-                    var srcData = new byte*[1] { srcPointer };
+                    var srcData = new byte*[1] { (byte*)mapped.DataPointer };
                     var srcStride = new int[1] { (int)mapped.RowPitch };
-                    ffmpeg.sws_scale(swsContext, srcData, srcStride, 0, captureRect.Height, frame->data, frame->linesize);
+                    ffmpeg.sws_scale(swsContext, srcData, srcStride, 0, captureHeight, frame->data, frame->linesize);
                 }
                 finally
                 {
@@ -310,10 +312,55 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             if (packet is not null) { var p = packet; ffmpeg.av_packet_free(&p); }
             if (swsContext is not null) ffmpeg.sws_freeContext(swsContext);
             if (codecContext is not null) { var c = codecContext; ffmpeg.avcodec_free_context(&c); }
-            duplication?.Dispose();
+            session?.Dispose();
+            framePool?.Dispose();
             staging?.Dispose();
             device?.Dispose();
         }
+    }
+
+    private static unsafe SwsContext* CreateScaler(int sourceWidth, int sourceHeight, int outputWidth, int outputHeight)
+    {
+        var swsContext = ffmpeg.sws_getContext(
+            sourceWidth, sourceHeight, AVPixelFormat.AV_PIX_FMT_BGRA,
+            outputWidth, outputHeight, AVPixelFormat.AV_PIX_FMT_NV12,
+            2 /* SWS_BILINEAR */, null, null, null);
+        if (swsContext is null) throw new InvalidOperationException("sws_getContext failed.");
+        return swsContext;
+    }
+
+    private static ID3D11Texture2D CreateStagingTexture(ID3D11Device device, int width, int height)
+    {
+        return device.CreateTexture2D(new Texture2DDescription
+        {
+            Width = (uint)Math.Max(1, width),
+            Height = (uint)Math.Max(1, height),
+            MipLevels = 1,
+            ArraySize = 1,
+            Format = Format.B8G8R8A8_UNorm,
+            SampleDescription = new SampleDescription(1, 0),
+            Usage = ResourceUsage.Staging,
+            CPUAccessFlags = CpuAccessFlags.Read,
+            BindFlags = BindFlags.None
+        });
+    }
+
+    private static GraphicsCaptureItem CreateItemFor(nint windowHandle)
+    {
+        return windowHandle != 0
+            ? CaptureInterop.CreateItemForWindow(windowHandle)
+            : CaptureInterop.CreateItemForMonitor(GetPrimaryMonitorHandle());
+    }
+
+    private static nint ResolveTargetWindow(ReplayBufferConfig config)
+    {
+        return config.GameWindowHandle != 0 && IsWindow(config.GameWindowHandle) ? config.GameWindowHandle : 0;
+    }
+
+    private static nint GetPrimaryMonitorHandle()
+    {
+        const uint MONITOR_DEFAULTTOPRIMARY = 1;
+        return MonitorFromPoint(default, MONITOR_DEFAULTTOPRIMARY);
     }
 
     private unsafe void DrainToRingBuffer(AVCodecContext* codecContext, AVPacket* packet)
@@ -478,20 +525,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         return value % 2 == 0 ? value : value + 1;
     }
 
-    private static CaptureRect ResolveCaptureRect(ReplayBufferConfig config, int monitorWidth, int monitorHeight)
-    {
-        if (config.GameWindowHandle != 0 && IsWindow(config.GameWindowHandle) && GetWindowRect(config.GameWindowHandle, out var rect))
-        {
-            var x = Math.Clamp(rect.Left, 0, monitorWidth - 1);
-            var y = Math.Clamp(rect.Top, 0, monitorHeight - 1);
-            var width = Math.Clamp(rect.Right - rect.Left, 2, monitorWidth - x);
-            var height = Math.Clamp(rect.Bottom - rect.Top, 2, monitorHeight - y);
-            if (width > 16 && height > 16) return new CaptureRect(x, y, MakeEven(width), MakeEven(height));
-        }
-
-        return new CaptureRect(0, 0, monitorWidth, monitorHeight);
-    }
-
     private static ID3D11Device CreateD3D11Device()
     {
         var levels = new[]
@@ -504,34 +537,17 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         return device!;
     }
 
-    private static IDXGIOutputDuplication CreateOutputDuplication(ID3D11Device device, out int width, out int height)
-    {
-        using var dxgiDevice = device.QueryInterface<IDXGIDevice>();
-        using var adapter = dxgiDevice.GetParent<IDXGIAdapter>();
-        adapter.EnumOutputs(0, out var output).CheckError();
-        using var _output = output;
-        using var output1 = output.QueryInterface<IDXGIOutput1>();
-        var desc = output.Description;
-        width = desc.DesktopCoordinates.Right - desc.DesktopCoordinates.Left;
-        height = desc.DesktopCoordinates.Bottom - desc.DesktopCoordinates.Top;
-        return output1.DuplicateOutput(device);
-    }
-
     [DllImport("user32.dll")]
     private static extern bool IsWindow(nint hWnd);
 
     [DllImport("user32.dll")]
-    private static extern bool GetWindowRect(nint hWnd, out RectStruct rect);
-
-    private readonly record struct CaptureRect(int X, int Y, int Width, int Height);
+    private static extern nint MonitorFromPoint(PointStruct pt, uint dwFlags);
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct RectStruct
+    private struct PointStruct
     {
-        public int Left;
-        public int Top;
-        public int Right;
-        public int Bottom;
+        public int X;
+        public int Y;
     }
 
     private readonly record struct RingPacket(byte[] Data, long PtsMs, bool IsKeyframe, DateTime WallClockUtc);

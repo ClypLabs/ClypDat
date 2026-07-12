@@ -35,18 +35,29 @@ internal static class NativeReplayBufferSmokeTest
         await buffer.StartAsync();
         Console.WriteLine($"Recording: {buffer.IsRecording}");
 
-        Console.WriteLine("Letting ring buffer accumulate for 8 seconds...");
-        await Task.Delay(TimeSpan.FromSeconds(8));
+        Console.WriteLine("Letting ring buffer accumulate for 8 seconds (moving the mouse to guarantee on-screen activity)...");
+        for (var i = 0; i < 8; i++)
+        {
+            Console.WriteLine($"...tick {i + 1}/8 at {DateTime.Now:HH:mm:ss.fff}");
+            await Task.Delay(TimeSpan.FromSeconds(1));
+        }
 
-        var outputFolder = Path.Combine(Path.GetTempPath(), "eve-native-capture-test");
-        Directory.CreateDirectory(outputFolder);
+        try
+        {
+            var outputFolder = Path.Combine(Path.GetTempPath(), "eve-native-capture-test");
+            Directory.CreateDirectory(outputFolder);
 
-        Console.WriteLine("Saving replay...");
-        var outputPath = await buffer.SaveReplayAsync(outputFolder);
-        Console.WriteLine($"Saved: {outputPath}");
+            Console.WriteLine("Saving replay...");
+            var outputPath = await buffer.SaveReplayAsync(outputFolder);
+            Console.WriteLine($"Saved: {outputPath}");
 
-        var fileInfo = new FileInfo(outputPath);
-        Console.WriteLine($"File size: {fileInfo.Length} bytes");
+            var fileInfo = new FileInfo(outputPath);
+            Console.WriteLine($"File size: {fileInfo.Length} bytes");
+        }
+        catch (Exception error)
+        {
+            Console.WriteLine($"Save failed: {error}");
+        }
 
         Console.WriteLine("Stopping capture...");
         await buffer.StopAsync();

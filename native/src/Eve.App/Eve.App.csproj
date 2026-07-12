@@ -5,6 +5,13 @@
     <RootNamespace>Eve.App</RootNamespace>
     <ApplicationIcon>..\..\..\assets\eve-icon.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Windows-versioned TFM (overriding Directory.Build.props' plain net8.0, scoped
+         to just this project) so Windows.Graphics.Capture's WinRT types are available
+         to NativeReplayBuffer for true per-window capture, instead of DXGI Desktop
+         Duplication's fixed-screen-region capture (which shows whatever's on screen
+         during alt-tab, not the game specifically). -->
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <PlatformTarget>x64</PlatformTarget>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
