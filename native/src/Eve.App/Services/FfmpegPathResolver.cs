@@ -16,6 +16,11 @@ public static class FfmpegPathResolver
         var bundledFolder = Path.Combine(AppContext.BaseDirectory, "ffmpeg");
         if (!Directory.Exists(bundledFolder)) return;
 
+        // NativeReplayBuffer P/Invokes libavcodec/libavformat directly (FFmpeg.AutoGen)
+        // rather than shelling out, so it needs the shared DLLs' folder explicitly -
+        // this doesn't come from PATH resolution like the ffmpeg.exe/ffprobe.exe calls do.
+        FFmpeg.AutoGen.ffmpeg.RootPath = bundledFolder;
+
         var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
         var entries = path.Split(Path.PathSeparator);
         if (entries.Contains(bundledFolder, StringComparer.OrdinalIgnoreCase)) return;
