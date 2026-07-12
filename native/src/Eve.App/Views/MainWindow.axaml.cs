@@ -143,12 +143,9 @@ public sealed partial class MainWindow : Window
             // Global hotkey failure should not block editor startup.
         }
 
-        if (ViewModel.Settings.StartReplayOnLaunch)
-        {
-            _replayArmed = true;
-            ViewModel.RecorderStatus = "Replay Armed";
-            UpdateDetectedGame();
-        }
+        _replayArmed = true;
+        ViewModel.RecorderStatus = "Replay Armed";
+        UpdateDetectedGame();
     }
 
     private void RestartAppButton_OnClick(object? sender, RoutedEventArgs e)

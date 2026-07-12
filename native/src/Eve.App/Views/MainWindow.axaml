@@ -336,16 +336,6 @@
               </Border>
 
               <Border Classes="settingsCard">
-                <Grid ColumnDefinitions="*,Auto">
-                  <StackPanel Spacing="2">
-                    <TextBlock Text="Start replay buffer when EVE opens" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
-                    <TextBlock Text="Automatically starts recording in the background as soon as EVE launches." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
-                  </StackPanel>
-                  <ToggleSwitch Grid.Column="1" IsChecked="{Binding StartReplayOnLaunch}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-                </Grid>
-              </Border>
-
-              <Border Classes="settingsCard">
                 <StackPanel Spacing="14">
                   <Grid ColumnDefinitions="*,Auto">
                     <StackPanel Spacing="2">
@@ -1224,10 +1214,6 @@
                 <TextBlock Text="Startup behavior" Foreground="#EDF4FB" FontWeight="Bold" FontSize="18" />
                 <TextBlock Text="How EVE behaves when it launches." Foreground="#B9C6D4" FontSize="13" TextWrapping="Wrap" />
 
-                <Grid ColumnDefinitions="*,Auto">
-                  <TextBlock Text="Start replay buffer when EVE opens" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" />
-                  <ToggleSwitch Grid.Column="1" IsChecked="{Binding StartReplayOnLaunch}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-                </Grid>
                 <Grid ColumnDefinitions="*,Auto">
                   <TextBlock Text="Launch EVE on Windows boot" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" />
                   <ToggleSwitch Grid.Column="1" IsChecked="{Binding LaunchOnWindowsStartup}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />

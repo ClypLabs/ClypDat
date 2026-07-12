@@ -424,18 +424,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public bool StartReplayOnLaunch
-    {
-        get => Settings.StartReplayOnLaunch;
-        set
-        {
-            if (Settings.StartReplayOnLaunch == value) return;
-            Settings.StartReplayOnLaunch = value;
-            OnPropertyChanged();
-            SaveSettings();
-        }
-    }
-
     public bool EnableClipOverlay
     {
         get => Settings.EnableClipOverlay;
