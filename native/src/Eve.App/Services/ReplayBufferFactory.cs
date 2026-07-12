@@ -18,7 +18,7 @@ public static class ReplayBufferFactory
 
         if (backend == ReplayBackendOption.Native)
         {
-            AppLog.Info("Replay backend selected: Native (experimental, video-only for now).");
+            AppLog.Info("Replay backend selected: Native (EVE).");
             return new NativeReplayBuffer(configProvider);
         }
 
@@ -38,7 +38,7 @@ public static class ReplayBufferFactory
         var backend = ParseBackend(config.Backend);
         if (backend == ReplayBackendOption.Auto && GameCatalog.AntiCheatSensitive.Contains(config.GameExecutableName))
         {
-            return ReplayBackendOption.Legacy;
+            return ReplayBackendOption.Native;
         }
 
         return backend;
