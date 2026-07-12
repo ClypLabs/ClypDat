@@ -1294,6 +1294,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         IsPlaying = false;
         IsEditorVisible = false;
         SelectedCaptureBackend = string.Empty;
+
+        // Trim edits are saved live to the sidecar as the user drags the trim
+        // handles (SaveClipEditState), but the library card's pencil icon/trimmed
+        // duration only reads that sidecar via ClipCardViewModel.UpdateMedia - so
+        // without this, they'd stay stale until the next full library refresh
+        // (app restart or manual Refresh).
+        var editedClipPath = SelectedVideoPath;
+        if (!string.IsNullOrWhiteSpace(editedClipPath)) _ = AddOrUpdateLibraryClipAsync(editedClipPath);
     }
 
     public void OpenSettings()
