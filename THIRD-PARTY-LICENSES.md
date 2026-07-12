@@ -79,6 +79,31 @@ per-component breakdown for this exact configuration.
   section below.
 - EVE does not modify these binaries.
 
+EVE's experimental "EVE" capture backend additionally bundles the
+**shared-library** build of the same ffmpeg version (`avcodec-62.dll`,
+`avformat-62.dll`, `avutil-60.dll`, `swscale-9.dll`, `swresample-6.dll`,
+also from gyan.dev), P/Invoked directly (via `FFmpeg.AutoGen`) instead of
+shelled out to as a separate process. Same GPLv2/libx264 build
+configuration and terms as above; EVE is GPLv3-licensed itself (see
+`LICENSE`), so directly linking a GPL component is not a licensing
+conflict.
+
+## Vortice.Windows (MIT)
+
+The native capture backend's DXGI/Direct3D11 interop (`Vortice.Direct3D11`,
+`Vortice.DXGI`) uses Vortice.Windows, licensed under the **MIT License**.
+
+- Project: https://github.com/amerkoleci/Vortice.Windows
+
+## FFmpeg.AutoGen (MIT)
+
+The native capture backend's direct libavcodec/libavformat P/Invoke
+bindings use FFmpeg.AutoGen, licensed under the **MIT License**. This
+covers only the C# binding code itself; the underlying ffmpeg binaries it
+calls into are covered under "ffmpeg / ffprobe (GPL)" above.
+
+- Project: https://github.com/Ruslan-B/FFmpeg.AutoGen
+
 ---
 
 ## GPLv2 full text
