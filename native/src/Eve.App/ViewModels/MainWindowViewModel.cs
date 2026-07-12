@@ -1299,9 +1299,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // handles (SaveClipEditState), but the library card's pencil icon/trimmed
         // duration only reads that sidecar via ClipCardViewModel.UpdateMedia - so
         // without this, they'd stay stale until the next full library refresh
-        // (app restart or manual Refresh).
+        // (app restart or manual Refresh). Posted instead of run inline so this
+        // (and its ffprobe re-hydrate) happens after the close transition has
+        // already rendered, instead of stalling it.
         var editedClipPath = SelectedVideoPath;
-        if (!string.IsNullOrWhiteSpace(editedClipPath)) _ = AddOrUpdateLibraryClipAsync(editedClipPath);
+        if (!string.IsNullOrWhiteSpace(editedClipPath))
+        {
+            Dispatcher.UIThread.Post(() => _ = AddOrUpdateLibraryClipAsync(editedClipPath));
+        }
     }
 
     public void OpenSettings()
