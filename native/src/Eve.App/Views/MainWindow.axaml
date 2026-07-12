@@ -984,7 +984,7 @@
             </StackPanel>
             <Button Grid.Column="2"
                     Content="{Binding ExportButtonText}"
-                    Classes="primaryButton exportButton"
+                    Classes="primaryButton"
                     Width="150"
                     Height="34"
                     Padding="0"

@@ -142,15 +142,6 @@
   <Style Selector="Button.primaryButton:pointerover">
     <Setter Property="Background" Value="{StaticResource AccentBrushHover}" />
   </Style>
-  <!-- Export uses the user's own Windows accent color like other primaryButtons,
-       but darkened - it's a secondary action next to the transport controls,
-       not meant to compete visually with the bright accent used elsewhere. -->
-  <Style Selector="Button.primaryButton.exportButton">
-    <Setter Property="Background" Value="{StaticResource AccentBrushDark}" />
-  </Style>
-  <Style Selector="Button.primaryButton.exportButton:pointerover">
-    <Setter Property="Background" Value="{StaticResource AccentBrush}" />
-  </Style>
   <Style Selector="Button.deleteButton:pointerover">
     <Setter Property="Background" Value="#E16B6D" />
   </Style>

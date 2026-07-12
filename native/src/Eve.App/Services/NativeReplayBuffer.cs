@@ -255,13 +255,23 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             var lastRingTrim = TimeSpan.Zero;
             var framesSeen = 0;
             var framesEncoded = 0;
+            var copyMapMs = 0.0;
+            var scaleMs = 0.0;
+            var encodeMs = 0.0;
+            var framesEncodedSinceLog = 0;
+            var stageStopwatch = new System.Diagnostics.Stopwatch();
 
             while (!token.IsCancellationRequested)
             {
                 if (stopwatch.Elapsed - lastDiagLog >= TimeSpan.FromSeconds(2))
                 {
                     lastDiagLog = stopwatch.Elapsed;
-                    AppLog.Info($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}.");
+                    var n = Math.Max(1, framesEncodedSinceLog);
+                    AppLog.Info($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgEncodeMs={encodeMs / n:0.00}.");
+                    copyMapMs = 0;
+                    scaleMs = 0;
+                    encodeMs = 0;
+                    framesEncodedSinceLog = 0;
                 }
 
                 // Re-check which window/monitor we should be capturing every second -
@@ -319,13 +329,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 if (stopwatch.Elapsed - lastEncodedAt < targetFrameInterval) continue;
                 lastEncodedAt = stopwatch.Elapsed;
                 framesEncoded++;
+                framesEncodedSinceLog++;
 
+                stageStopwatch.Restart();
                 using (var texture = CaptureInterop.GetTexture(wgcFrame.Surface))
                 {
                     device.ImmediateContext.CopyResource(staging, texture);
                 }
 
                 var mapped = device.ImmediateContext.Map(staging, 0, MapMode.Read, MapFlags.None);
+                copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
+
+                stageStopwatch.Restart();
                 try
                 {
                     var srcData = new byte*[1] { (byte*)mapped.DataPointer };
@@ -336,6 +351,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 {
                     device.ImmediateContext.Unmap(staging, 0);
                 }
+                scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
 
                 frame->pts = stopwatch.ElapsedTicks * 1_000_000L / System.Diagnostics.Stopwatch.Frequency;
 
@@ -352,10 +368,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     frame->pict_type = AVPictureType.AV_PICTURE_TYPE_NONE;
                 }
 
+                stageStopwatch.Restart();
                 if (ffmpeg.avcodec_send_frame(codecContext, frame) == 0)
                 {
                     DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream);
                 }
+                encodeMs += stageStopwatch.Elapsed.TotalMilliseconds;
 
                 // Trimming every single frame meant List<RingPacket>.RemoveRange(0, ...)
                 // - an O(buffer size) shift of every remaining packet - ran on every

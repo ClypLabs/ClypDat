@@ -1646,12 +1646,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ? gameOverride.CaptureBackend
             : Settings.ReplayBackend;
 
+        // SelectedChatProcess/SelectedMicrophoneDevice reflect whatever the
+        // ComboBox last resolved to, and can legitimately be transiently null
+        // (e.g. mid-refresh) even though a real choice is persisted in
+        // Settings. CreateReplayConfig is called fresh on every single clip
+        // save (not just once at buffer start), so a transient null here
+        // silently dropped the mic/chat track from that one clip instead of
+        // falling back to the last known-good persisted choice.
+        var chatAudioProcessName = SelectedChatProcess?.Name;
+        if (string.IsNullOrWhiteSpace(chatAudioProcessName)) chatAudioProcessName = Settings.ChatAudioProcessName;
         var chatAudioProcessNames = Settings.MultiChatAppEnabled
             ? ChatAudioApps.ToArray()
-            : (string.IsNullOrWhiteSpace(SelectedChatProcess?.Name) ? Array.Empty<string>() : new[] { SelectedChatProcess.Name });
+            : (string.IsNullOrWhiteSpace(chatAudioProcessName) ? Array.Empty<string>() : new[] { chatAudioProcessName });
+
+        var microphoneDeviceId = SelectedMicrophoneDevice?.Id;
+        if (string.IsNullOrWhiteSpace(microphoneDeviceId)) microphoneDeviceId = Settings.MicrophoneDeviceId;
         var microphoneDeviceIds = Settings.MultiMicrophoneEnabled
             ? SelectedMicrophones.Select(device => device.Id).ToArray()
-            : (SelectedMicrophoneDevice is null ? Array.Empty<string>() : new[] { SelectedMicrophoneDevice.Id });
+            : (string.IsNullOrWhiteSpace(microphoneDeviceId) ? Array.Empty<string>() : new[] { microphoneDeviceId });
         var microphoneDeviceName = Settings.MultiMicrophoneEnabled
             ? SelectedMicrophones.FirstOrDefault()?.Name ?? string.Empty
             : SelectedMicrophoneDevice?.Name ?? string.Empty;
