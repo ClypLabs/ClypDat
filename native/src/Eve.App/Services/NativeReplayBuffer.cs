@@ -232,7 +232,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer
 
             staging = CreateStagingTexture(device, captureWidth, captureHeight);
             framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(
-                winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, item.Size);
+                // 2 buffer slots meant WGC could only ever get 2 frames ahead of us
+                // before it stopped producing new ones and throttled to match our
+                // exact consumption pace - confirmed via timing: avgWaitMs (~11ms)
+                // plus per-frame processing (~11ms) summed to the observed ~44fps
+                // ceiling, while the individual stages all had headroom for 80fps+
+                // in isolation. A deeper pool lets WGC keep capturing at the
+                // source's real rate independently of our momentary processing time.
+                winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 6, item.Size);
             framePool.FrameArrived += (_, _) => frameArrivedSignal.Set();
             session = framePool.CreateCaptureSession(item);
             TryDisableCaptureBorder(session);
@@ -313,7 +320,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                         staging.Dispose();
                         staging = CreateStagingTexture(device, captureWidth, captureHeight);
                         framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(
-                            winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, item.Size);
+                            // 2 buffer slots meant WGC could only ever get 2 frames ahead of us
+                // before it stopped producing new ones and throttled to match our
+                // exact consumption pace - confirmed via timing: avgWaitMs (~11ms)
+                // plus per-frame processing (~11ms) summed to the observed ~44fps
+                // ceiling, while the individual stages all had headroom for 80fps+
+                // in isolation. A deeper pool lets WGC keep capturing at the
+                // source's real rate independently of our momentary processing time.
+                winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 6, item.Size);
                         framePool.FrameArrived += (_, _) => frameArrivedSignal.Set();
                         session = framePool.CreateCaptureSession(item);
                         TryDisableCaptureBorder(session);
@@ -349,7 +363,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     // next resize, acceptable for this experimental backend).
                     captureWidth = wgcFrame.ContentSize.Width;
                     captureHeight = wgcFrame.ContentSize.Height;
-                    framePool.Recreate(winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, wgcFrame.ContentSize);
+                    framePool.Recreate(winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 6, wgcFrame.ContentSize);
                     staging.Dispose();
                     staging = CreateStagingTexture(device, captureWidth, captureHeight);
                     ffmpeg.sws_freeContext(swsContext);
