@@ -792,6 +792,19 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void OpenLicenseLinkButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string url } || string.IsNullOrWhiteSpace(url)) return;
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Open license link failed: {url}", error);
+        }
+    }
+
     private void LibraryPathButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.Settings.LibraryFolder)) return;
