@@ -202,6 +202,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         var fullSessionTempVideoPath = string.Empty;
         var fullSessionFinalOutputPath = string.Empty;
         var fullSessionStartUtc = DateTime.UtcNow;
+        var timerResolutionRaised = TimeBeginPeriod(1) == 0;
 
         try
         {
@@ -305,7 +306,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 using var wgcFrame = framePool.TryGetNextFrame();
                 if (wgcFrame is null)
                 {
-                    Thread.Sleep(4);
+                    Thread.Sleep(1);
                     continue;
                 }
                 framesSeen++;
@@ -417,6 +418,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             framePool?.Dispose();
             staging?.Dispose();
             device?.Dispose();
+            if (timerResolutionRaised) TimeEndPeriod(1);
         }
     }
 
@@ -812,6 +814,23 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         D3D11.D3D11CreateDevice(null, DriverType.Hardware, DeviceCreationFlags.BgraSupport, levels, out var device, out _, out _).CheckError();
         return device!;
     }
+
+    // Windows' default system timer resolution is ~15.6ms unless a process
+    // explicitly requests better - Thread.Sleep(4) in CaptureLoop's empty-poll
+    // fallback commonly actually sleeps ~15.6ms on an unraised system (rounds
+    // up to the next scheduler tick), not 4ms. That's a hard, resolution-
+    // independent ceiling of ~64 loop iterations/sec regardless of encode
+    // settings - consistent with what testing showed (same ~35-46fps whether
+    // targeting 1080p60 or 1440p120, with the encode/scale/copy stages
+    // themselves proven to have headroom for 80fps+). Raising it to 1ms for
+    // the life of the capture session is the standard fix for latency-
+    // sensitive polling loops on Windows (the same thing games/capture
+    // software normally do).
+    [DllImport("winmm.dll", EntryPoint = "timeBeginPeriod")]
+    private static extern uint TimeBeginPeriod(uint uMilliseconds);
+
+    [DllImport("winmm.dll", EntryPoint = "timeEndPeriod")]
+    private static extern uint TimeEndPeriod(uint uMilliseconds);
 
     [DllImport("user32.dll")]
     private static extern bool IsWindow(nint hWnd);
