@@ -101,8 +101,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             new("Auto (recommended)", "Auto", "Uses EVE's own capture engine for every game - no process hook, so it's safe for anti-cheat-protected games too, with no stop/start gaps between segments."),
             new("EVE", "Native", "EVE's own capture engine - a true rolling buffer with no stop/start gaps between segments, and true per-window capture that keeps recording the game through alt-tabs and overlays. Used automatically on Auto."),
-            new("OBS (best quality)", "Obs", "Highest quality and lowest overhead, but some anti-cheat games (e.g. CS2) need a launch option or may show a black/frozen capture."),
-            new("Windows Capture (no game hook)", "Legacy", "Captures the screen directly with no process hook, so games with anti-cheat can get captured properly, at the cost of slightly higher overhead.")
+            new("OBS", "Obs", "Highest quality and lowest overhead, but some anti-cheat games (e.g. CS2) need a launch option or may show a black/frozen capture."),
+            new("Windows Capture", "Legacy", "Captures the screen directly with no process hook, so games with anti-cheat can get captured properly, at the cost of slightly higher overhead.")
         };
         ClipOverlayPositions = new ObservableCollection<string> { "Top Left", "Top Right" };
         ClipOverlayVolumes = new ObservableCollection<string> { "Low", "Medium", "High" };
