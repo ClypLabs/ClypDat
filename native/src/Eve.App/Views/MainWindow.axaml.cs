@@ -223,7 +223,12 @@ public sealed partial class MainWindow : Window
         var folder = folders.FirstOrDefault();
         if (folder?.Path.LocalPath is { Length: > 0 } path && ViewModel is not null)
         {
-            ViewModel.FullSessionRecordingFolder = path;
+            // Always land in a "Full Sessions" subfolder of whatever the user picks,
+            // instead of dumping full-session files directly into a shared folder.
+            var subfolder = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            ViewModel.FullSessionRecordingFolder = string.Equals(subfolder, "Full Sessions", StringComparison.OrdinalIgnoreCase)
+                ? path
+                : Path.Combine(path, "Full Sessions");
         }
     }
 
@@ -1361,7 +1366,7 @@ public sealed partial class MainWindow : Window
         };
 
         var notesPanel = new StackPanel { Spacing = 6, IsVisible = update.ReleaseNotes.Count > 0 };
-        foreach (var note in update.ReleaseNotes.Take(8))
+        foreach (var note in update.ReleaseNotes)
         {
             notesPanel.Children.Add(new TextBlock
             {
@@ -1404,12 +1409,14 @@ public sealed partial class MainWindow : Window
             }
         };
 
+        var notesScroll = new ScrollViewer { Content = body, MaxHeight = 520 };
+
         window.Content = new DockPanel
         {
             Children =
             {
                 titleBar,
-                new ScrollViewer { Content = body }
+                notesScroll
             }
         };
         DockPanel.SetDock(titleBar, Dock.Top);

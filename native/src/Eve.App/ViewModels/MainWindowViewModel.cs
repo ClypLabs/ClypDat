@@ -831,7 +831,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool FullSessionRecordingEnabled
     {
         get => Settings.FullSessionRecordingEnabled;
-        set { Settings.FullSessionRecordingEnabled = value; OnPropertyChanged(); SaveSettings(); }
+        set
+        {
+            Settings.FullSessionRecordingEnabled = value;
+            if (value && string.IsNullOrWhiteSpace(Settings.FullSessionRecordingFolder) && !string.IsNullOrWhiteSpace(Settings.LibraryFolder))
+            {
+                FullSessionRecordingFolder = Path.Combine(Settings.LibraryFolder, "Full Sessions");
+            }
+
+            OnPropertyChanged();
+            SaveSettings();
+        }
     }
 
     public string FullSessionRecordingFolder

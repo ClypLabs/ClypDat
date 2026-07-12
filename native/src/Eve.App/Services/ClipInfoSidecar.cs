@@ -13,13 +13,21 @@ public static class ClipInfoSidecar
 {
     private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = false };
 
-    public static string SidecarPath(string clipPath) => clipPath + ".info.json";
+    // Lives in a "Clip Info" subfolder next to the clip instead of directly beside
+    // it - a folder full of clip.mp4 + clip.mp4.info.json pairs looked cluttered.
+    public static string SidecarPath(string clipPath)
+    {
+        var directory = Path.GetDirectoryName(clipPath) ?? string.Empty;
+        return Path.Combine(directory, "Clip Info", Path.GetFileName(clipPath) + ".info.json");
+    }
 
     public static void Save(string clipPath, ClipInfo info)
     {
         try
         {
-            File.WriteAllText(SidecarPath(clipPath), JsonSerializer.Serialize(info, SerializerOptions));
+            var sidecarPath = SidecarPath(clipPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(sidecarPath)!);
+            File.WriteAllText(sidecarPath, JsonSerializer.Serialize(info, SerializerOptions));
         }
         catch (Exception error)
         {

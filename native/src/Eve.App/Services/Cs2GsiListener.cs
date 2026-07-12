@@ -137,6 +137,17 @@ public sealed class Cs2GsiListener : IDisposable
         var root = doc.RootElement;
         if (!root.TryGetProperty("player", out var player)) return;
 
+        // A kill-streak in progress can take longer than the debounce window to
+        // reach its final kill (repositioning, waiting out a peek) - if the round
+        // ends first, there are no more kills coming for it regardless, so flush
+        // immediately instead of making the clip wait out the rest of the timer.
+        if (root.TryGetProperty("round", out var roundElement) &&
+            roundElement.TryGetProperty("phase", out var roundPhaseElement) &&
+            string.Equals(roundPhaseElement.GetString(), "over", StringComparison.OrdinalIgnoreCase))
+        {
+            FirePendingKillClip();
+        }
+
         if (root.TryGetProperty("map", out var map) &&
             map.TryGetProperty("round", out var roundNumElement) &&
             roundNumElement.TryGetInt32(out var roundNum) &&
@@ -247,6 +258,14 @@ public sealed class Cs2GsiListener : IDisposable
         string? label = null;
 
         var deaths = GetInt(matchStats, "deaths");
+        // Dying always ends whatever kill streak was in progress, regardless of
+        // whether the "Death" auto-clip type itself is enabled - same reasoning
+        // as the round-end flush above.
+        if (deaths.HasValue && deaths.Value > _lastMatchDeaths)
+        {
+            FirePendingKillClip();
+        }
+
         if (settings.Death && deaths.HasValue && deaths.Value > _lastMatchDeaths)
         {
             label = "Death";
