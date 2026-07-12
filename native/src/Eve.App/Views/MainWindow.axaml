@@ -562,6 +562,9 @@
                   <StackPanel Spacing="14" IsVisible="{Binding MedalScanned}">
                     <Border Height="1" Background="#1B242D" />
 
+                    <Button Content="Import Selected" Click="ImportMedalButton_OnClick" HorizontalAlignment="Left" Classes="primaryButton"
+                            IsEnabled="{Binding !MedalImportInProgress}" />
+
                     <ItemsControl ItemsSource="{Binding MedalImportRows}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate>
@@ -579,9 +582,6 @@
                         </DataTemplate>
                       </ItemsControl.ItemTemplate>
                     </ItemsControl>
-
-                    <Button Content="Import Selected" Click="ImportMedalButton_OnClick" HorizontalAlignment="Left" Classes="primaryButton"
-                            IsEnabled="{Binding !MedalImportInProgress}" />
                   </StackPanel>
                 </StackPanel>
               </Border>
