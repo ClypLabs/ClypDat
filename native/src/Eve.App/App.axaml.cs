@@ -113,6 +113,11 @@ public sealed partial class App : Application
         }
     }
 
+    // Called from Program.cs's single-instance listener thread, which is not
+    // the UI thread, so this has to marshal over instead of touching the
+    // window directly.
+    public void ShowMainWindowFromExternalRequest() => Avalonia.Threading.Dispatcher.UIThread.Post(RestoreMainWindow);
+
     private void RestoreMainWindow()
     {
         if (_mainWindow is null) return;
