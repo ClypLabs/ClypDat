@@ -10,14 +10,21 @@ where development happens. (Electron prototype will probably get shit-canned tom
 
 ## Capture
 
-Two capture backends, switchable in Settings:
+Three capture backends, switchable in Settings (default is Auto):
 
+- **EVE (Native)**: EVE's own capture engine, built directly on DXGI Desktop
+  Duplication with GPU-side downscaling (`native/src/Eve.App/Services/NativeReplayBuffer.cs`).
+  No process hook, so anti-cheat can't object to it, with true per-window
+  capture that keeps recording through alt-tabs/overlays and no stop/start
+  gap between rolling-buffer segments. Encodes with NVENC, falling back to
+  AMD AMF, then software libx264, so it isn't NVIDIA-only. Selected
+  automatically on Auto.
 - **OBS**: a trimmed OBS Studio runtime (32.1.2) loaded through a custom
   C++ bridge (`native/src/Eve.ObsBridge`) via `LoadLibrary`/`GetProcAddress`,
   not static linking. Uses NVENC for encoding.
-- **Windows Capture**: `ScreenRecorderLib`, backed by Windows Graphics
-  Capture / DXGI desktop duplication. Doesn't inject into the target
-  process, so anti-cheat can't block it the way it blocks OBS's hook.
+- **Windows Capture (Legacy)**: `ScreenRecorderLib`, backed by Windows
+  Graphics Capture / DXGI desktop duplication. Doesn't inject into the
+  target process either, kept around as a fallback alongside EVE's own engine.
 
 Foreground-window polling drives game detection: a catalog of known
 executables plus a fallback that accepts any window whose
@@ -36,6 +43,23 @@ are coalesced into a single clip for the final milestone (e.g. a 3K
 followed quickly by a 4K only saves once, as the 4K) instead of one
 clip per kill.
 
+## Full Session recording
+
+Optionally records the entire time the replay buffer is running to a
+single file (Settings > Replay Buffer > Full Session Recording), separate
+from the rolling clip buffer, which keeps working at the same time. Audio
+is periodically resynced in 60s chunks so multi-hour sessions don't drift.
+If the game window loses focus mid-session (or mid-clip), the last real
+frame freezes instead of recording whatever's now on screen, and the
+editor shows a "Recording Paused" badge over those stretches.
+
+## Importing from Medal
+
+Settings > Import from Medal scans Medal's local database for clips and
+copies (or moves) them into your EVE library, keeping Medal's own titles.
+If Medal's database is missing or corrupted, it also falls back to
+scanning Medal's default clips folder directly so nothing gets lost.
+
 ## First-time setup
 
 A one-time interactive setup wizard runs on first launch (library
@@ -44,10 +68,14 @@ replayed any time from Settings > About > Show Walkthrough.
 
 ## Editor
 
-Trim start/end, set per-track audio volume, scrub a thumbnail preview, view
-a waveform, export to MP4. Video playback runs on LibVLC; audio runs on a
-separate NAudio/WASAPI pipeline. They are not synchronized to a shared
-clock, so long clips can drift out of sync during playback.
+Trim start/end, set per-track audio volume (including separate chat/mic
+tracks), scrub a thumbnail preview, view a waveform, export to MP4. Video
+playback runs on LibVLC; audio runs on a separate NAudio/WASAPI pipeline.
+They are not synchronized to a shared clock, so long clips can drift out
+of sync during playback.
+
+The Library groups clips by day and supports filtering to a single game
+by clicking the dropdown on that game's most recent clip tile.
 
 ## Auto-update
 
@@ -60,8 +88,9 @@ running install via a PowerShell helper that waits for the process to exit.
 
 - Windows 10 or 11, x64
 - .NET SDK 8+ to build from source
-- An NVIDIA GPU. The OBS backend's encoder is NVENC-only; there is no
-  software or non-NVIDIA fallback. (Will add AMD encoder soon! Don't worry!)
+- The EVE (Native) backend works on NVIDIA, AMD, and (as a last-resort
+  software fallback) any GPU-less machine. The OBS backend's encoder is
+  still NVENC-only, with no AMD/software fallback.
 
 ## Building
 
@@ -90,16 +119,16 @@ portable exe, an NSIS installer, and an MSI.
 
 ## Future Updates
 
-- Will add support to use AMD GPU's for OBS
-- Seamless replay buffer rotation for the Windows Capture backend (no
-  stop/restart gap between segments)
+- AMD/software fallback for the OBS backend too (Native already has it)
+- Seamless replay buffer rotation for the Legacy Windows Capture backend
+  (no stop/restart gap between segments - EVE's own backend already has this)
 - I'll update this when I get more ideas lol
 
 
 ## Known limitations
 
 - Windows only.
-- NVENC-only encoding in the OBS backend.
+- NVENC-only encoding in the OBS backend specifically.
 
 ## Bugs
 If you stumble across any issues or bugs, please create a "Issue" post and I'll make sure to fix them ASAP, want EVE to be perfect for everybody!
