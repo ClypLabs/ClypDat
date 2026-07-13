@@ -70,6 +70,12 @@
         </Grid>
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" IsVisible="{Binding ShowLibraryActions}">
+          <Border Background="#1A2530" CornerRadius="16" Padding="10,6" IsVisible="{Binding IsGameFilterActive}">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <TextBlock Text="{Binding ActiveGameFilterLabel}" Foreground="#D2DEEC" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
+              <Button Classes="linkButton" Content="X" Click="ClearGameFilterButton_OnClick" Foreground="#8C98A7" FontSize="11" VerticalAlignment="Center" />
+            </StackPanel>
+          </Border>
           <Button Content="Folder" Click="FolderButton_OnClick" />
           <Button Content="Refresh" Click="RefreshButton_OnClick" />
         </StackPanel>
@@ -111,7 +117,7 @@
           <ItemsControl ItemsSource="{Binding ClipGroups}">
             <ItemsControl.ItemTemplate>
               <DataTemplate>
-                <StackPanel Margin="0,0,0,24">
+                <StackPanel Margin="0,0,0,24" IsVisible="{Binding HasVisibleClips}">
                   <StackPanel Orientation="Horizontal" Spacing="10" Margin="4,0,0,12">
                     <CheckBox IsChecked="{Binding IsSelected}" Click="GroupCheckBox_OnClick" Margin="0,0,6,0" />
                     <TextBlock Text="{Binding Label}"
@@ -134,6 +140,7 @@
                                 Background="#24303A"
                                 CornerRadius="12"
                                 BoxShadow="0 6 18 -6 #66000000"
+                                IsVisible="{Binding IsMatchedByGameFilter}"
                                 PointerPressed="ClipCard_OnPointerPressed"
                                 PointerEntered="ClipCard_OnPointerEntered"
                                 PointerExited="ClipCard_OnPointerExited">
@@ -193,7 +200,26 @@
                                            FontSize="12"
                                            FontWeight="Bold"
                                            TextTrimming="CharacterEllipsis"
-                                           ToolTip.Tip="{Binding TileTopLabel}" />
+                                           ToolTip.Tip="{Binding TileTopLabel}"
+                                           IsVisible="{Binding !IsMostRecentForGame}" />
+                                <!-- Shows in place of the plain label above, only on
+                                     each game's newest clip - filters the whole
+                                     library to just that game when confirmed. -->
+                                <Button Classes="gameFilterBadge" IsVisible="{Binding IsMostRecentForGame}">
+                                  <Button.Flyout>
+                                    <MenuFlyout Placement="BottomEdgeAlignedLeft">
+                                      <MenuItem Header="{Binding GameFilterMenuLabel}" Click="GameFilterMenuItem_OnClick" />
+                                    </MenuFlyout>
+                                  </Button.Flyout>
+                                  <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding TileTopLabel}"
+                                               Foreground="#8C98A7"
+                                               FontSize="12"
+                                               FontWeight="Bold"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <PathIcon Data="M7,10L12,15L17,10Z" Width="10" Height="10" Foreground="#8C98A7" />
+                                  </StackPanel>
+                                </Button>
                                 <TextBlock Text="{Binding TileMainLabel}"
                                            Foreground="#EDF4FB"
                                            FontSize="15"

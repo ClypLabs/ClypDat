@@ -1940,6 +1940,70 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(LibraryFolderDisplay));
         OnPropertyChanged(nameof(LibraryLocationText));
         NotifySelectionChrome();
+        RecomputeGameFilterBadges();
+    }
+
+    private string? _activeGameFilter;
+
+    public string? ActiveGameFilter => _activeGameFilter;
+    public bool IsGameFilterActive => !string.IsNullOrEmpty(_activeGameFilter);
+    public string ActiveGameFilterLabel => _activeGameFilter ?? string.Empty;
+
+    // Marks exactly one card per distinct game (the newest, across the whole
+    // library regardless of date group) as where that game's filter dropdown
+    // badge shows, and gives every card an up-to-date total count for its
+    // game - works the same for EVE-recorded and Medal-imported clips since
+    // both resolve GameFilterKey (TileTopLabel) the same way. Re-run any time
+    // the library's clip set changes, not just once.
+    private void RecomputeGameFilterBadges()
+    {
+        var seenGames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var countsByGame = AllClips
+            .GroupBy(clip => clip.GameFilterKey, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+
+        // ClipGroups is already ordered newest-date-first and each group's
+        // own Clips newest-first, so the first time a game name is seen here
+        // is genuinely its most recent clip.
+        foreach (var clip in ClipGroups.SelectMany(group => group.Clips))
+        {
+            var hasGame = !string.IsNullOrWhiteSpace(clip.GameFilterKey);
+            clip.GameClipCount = hasGame && countsByGame.TryGetValue(clip.GameFilterKey, out var count) ? count : 0;
+            clip.IsMostRecentForGame = hasGame && seenGames.Add(clip.GameFilterKey);
+        }
+
+        // A previously-active filter's target game can disappear entirely
+        // (its last clip got deleted) - clear rather than leave the library
+        // showing zero clips with no visible way to tell why.
+        if (_activeGameFilter is not null && !countsByGame.ContainsKey(_activeGameFilter))
+        {
+            SetGameFilter(null);
+        }
+    }
+
+    public void ToggleGameFilter(string gameName)
+    {
+        SetGameFilter(string.Equals(_activeGameFilter, gameName, StringComparison.OrdinalIgnoreCase) ? null : gameName);
+    }
+
+    public void SetGameFilter(string? gameName)
+    {
+        if (string.Equals(_activeGameFilter, gameName, StringComparison.OrdinalIgnoreCase)) return;
+        _activeGameFilter = gameName;
+
+        foreach (var group in ClipGroups)
+        {
+            foreach (var clip in group.Clips)
+            {
+                clip.IsMatchedByGameFilter = gameName is null || string.Equals(clip.GameFilterKey, gameName, StringComparison.OrdinalIgnoreCase);
+            }
+
+            group.NotifyGameFilterChanged();
+        }
+
+        OnPropertyChanged(nameof(ActiveGameFilter));
+        OnPropertyChanged(nameof(IsGameFilterActive));
+        OnPropertyChanged(nameof(ActiveGameFilterLabel));
     }
 
     private void NotifySelectionChrome()

@@ -146,6 +146,45 @@ public sealed class ClipCardViewModel : ViewModelBase
     public string CaptureBackendLabel => string.IsNullOrWhiteSpace(Media.CaptureBackend) ? string.Empty : $"Captured with: {Media.CaptureBackend}";
     public bool HasCaptureBackendLabel => !string.IsNullOrWhiteSpace(CaptureBackendLabel);
 
+    // The per-game filter's grouping key - reuses TileTopLabel since that
+    // already resolves to the real game name for both auto-clips (sidecar's
+    // GameDisplayName) and everything else (filename-parsed), for both
+    // EVE-recorded and Medal-imported clips.
+    public string GameFilterKey => TileTopLabel;
+
+    private bool _isMostRecentForGame;
+    private int _gameClipCount;
+    private bool _isMatchedByGameFilter = true;
+
+    // Set by MainWindowViewModel.RecomputeGameFilterBadges() - true only for
+    // the chronologically newest clip of each distinct game, which is where
+    // the filter dropdown badge shows (one per game, not one per clip).
+    public bool IsMostRecentForGame
+    {
+        get => _isMostRecentForGame;
+        set => SetProperty(ref _isMostRecentForGame, value);
+    }
+
+    public int GameClipCount
+    {
+        get => _gameClipCount;
+        set
+        {
+            if (!SetProperty(ref _gameClipCount, value)) return;
+            OnPropertyChanged(nameof(GameFilterMenuLabel));
+        }
+    }
+
+    public string GameFilterMenuLabel => $"{GameFilterKey} ({GameClipCount})";
+
+    // Drives this card's own visibility when a game filter is active -
+    // toggled by MainWindowViewModel.SetGameFilter(), not by anything local.
+    public bool IsMatchedByGameFilter
+    {
+        get => _isMatchedByGameFilter;
+        set => SetProperty(ref _isMatchedByGameFilter, value);
+    }
+
     public string PreviewImagePath
     {
         get => _previewImagePath;
@@ -236,6 +275,8 @@ public sealed class ClipCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(AutoClipEventTypeLabel));
         OnPropertyChanged(nameof(AutoClipKillCount));
         OnPropertyChanged(nameof(HasAutoClipKillCount));
+        OnPropertyChanged(nameof(GameFilterKey));
+        OnPropertyChanged(nameof(GameFilterMenuLabel));
     }
 
     private void SetPreviewImage(string path)

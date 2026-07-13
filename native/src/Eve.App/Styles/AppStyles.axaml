@@ -190,6 +190,22 @@
   <Style Selector="Button.brandButton:pointerover">
     <Setter Property="Background" Value="Transparent" />
   </Style>
+  <Style Selector="Button.gameFilterBadge">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
+  </Style>
+  <Style Selector="Button.gameFilterBadge:pointerover">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.gameFilterBadge:pointerover TextBlock">
+    <Setter Property="Foreground" Value="#D2DEEC" />
+  </Style>
+  <Style Selector="Button.gameFilterBadge:pointerover PathIcon">
+    <Setter Property="Foreground" Value="#D2DEEC" />
+  </Style>
   <Style Selector="Button.replayButton">
     <Setter Property="Background" Value="#1D2A36" />
     <Setter Property="Foreground" Value="#9FB0C3" />
