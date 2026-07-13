@@ -96,13 +96,20 @@ public sealed class AudioCapturePipeline : IDisposable
             tracks.Add((label, path));
         }
 
-        var micIds = NormalizedList(config.MicrophoneDeviceIds);
+        // config.MicrophoneDeviceIds carries the raw configured value (e.g. the
+        // literal "default" placeholder), but StartAudioCaptures resolves that
+        // through ResolveMicrophoneDeviceIds into the real WASAPI endpoint ID
+        // before using it as a capture's SourceKey. Matching against the raw,
+        // unresolved value here meant "default" never equalled the real GUID
+        // SourceKey, so the mic track always fell back to a silent clip.
+        using var micEnumerator = new MMDeviceEnumerator();
+        var micIds = ResolveMicrophoneDeviceIds(micEnumerator, config.MicrophoneDeviceIds);
         var micIndex = 0;
         foreach (var micId in micIds)
         {
             micIndex++;
             var path = await BuildAlignedTrackAsync(AudioCaptureKind.Microphone, captures, micId, segmentWindows, allowMix: false, snapshots, cancellationToken, config);
-            var label = micIds.Count > 1 ? $"Microphone {micIndex}" : "Microphone";
+            var label = micIds.Length > 1 ? $"Microphone {micIndex}" : "Microphone";
             tracks.Add((label, path));
         }
 

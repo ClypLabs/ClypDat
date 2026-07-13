@@ -773,6 +773,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public bool ShowRecordingPausedIndicator
+    {
+        get => Settings.ShowRecordingPausedIndicator;
+        set
+        {
+            if (Settings.ShowRecordingPausedIndicator == value) return;
+            Settings.ShowRecordingPausedIndicator = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
     public AudioDeviceOption? SelectedChatAudioDevice
     {
         get => _selectedChatAudioDevice;

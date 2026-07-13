@@ -14,6 +14,7 @@ public sealed class AppSettings
     public bool LaunchOnWindowsStartup { get; set; }
     public bool StartMinimizedToTray { get; set; }
     public bool IsStatusAreaVisible { get; set; } = true;
+    public bool ShowRecordingPausedIndicator { get; set; } = true;
     public string IgnoredUpdateVersion { get; set; } = string.Empty;
     public string ChatAudioDeviceId { get; set; } = string.Empty;
     // Single-selection fields - still the persisted choice while the matching
