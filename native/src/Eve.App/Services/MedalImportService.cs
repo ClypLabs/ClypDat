@@ -147,14 +147,14 @@ public static class MedalImportService
     }
 
     // Medal's default (non-trimmed) export filename is "MedalTV<GameTitle>
-    // <yyyyMMddHHmmss>" with no separators at all - e.g.
-    // "MedalTVCounterStrike220250626224059" - which is both a genuinely
+    // <yyyyMMddHHmmss><milliseconds>" with no separators at all - e.g.
+    // "MedalTVCounterStrike220250626224059123" - which is both a genuinely
     // unreadable title when there's no DB title to use instead, and (since it's
     // the exact moment Medal itself recorded, unlike the file's own Windows
     // timestamp which can drift if the file was ever copied/moved) a better
     // source for the clip's date than anything else available in that case.
     private static readonly Regex RawFilenameTimestampPattern = new(
-        @"MedalTV(?<game>.*?)(?<ts>\d{14})(?:[-_].*)?$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        @"^MedalTV(?<game>.*?)(?<ts>20\d{12})(?<milliseconds>\d{3})?(?:[-_].*)?$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly Dictionary<string, string> GameAliases = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -169,7 +169,8 @@ public static class MedalImportService
     public static bool TryResolveGameFromFileName(string fileNameWithoutExtension, out string gameDisplayName, out DateTime localTimestamp)
     {
         var match = RawFilenameTimestampPattern.Match(fileNameWithoutExtension);
-        if (match.Success && DateTime.TryParseExact(match.Groups["ts"].Value, "yyyyMMddHHmmss", CultureInfo.InvariantCulture, DateTimeStyles.None, out localTimestamp))
+        if (match.Success && DateTime.TryParseExact(match.Groups["ts"].Value, "yyyyMMddHHmmss", CultureInfo.InvariantCulture, DateTimeStyles.None, out localTimestamp) &&
+            localTimestamp <= DateTime.Now.AddDays(2))
         {
             gameDisplayName = ResolveGameDisplayName(match.Groups["game"].Value);
             return !string.IsNullOrWhiteSpace(gameDisplayName);
@@ -184,6 +185,9 @@ public static class MedalImportService
     {
         "Medal", "Edits", "exports", "render", "editor", "editor-clips", "editor-active-drafts", "Screen Recording", "Video-Editor", "Reels", "Temp", "Thumbnails", "Saved Clips"
     }.Contains(name, StringComparer.OrdinalIgnoreCase);
+
+    public static bool IsLegacyMisparsedCounterStrike2Name(string? name) =>
+        string.Equals(name, "Counter Strike2202", StringComparison.OrdinalIgnoreCase);
 
     private static string ResolveGameDisplayName(string compactName)
     {

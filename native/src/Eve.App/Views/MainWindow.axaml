@@ -627,12 +627,13 @@
                         <DataTemplate>
                           <Border Background="#0F171E" BorderBrush="#1E2A33" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,0,8">
                             <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
-                              <CheckBox IsChecked="{Binding IsSelected}" VerticalAlignment="Center" />
+                              <CheckBox IsChecked="{Binding IsSelected}" IsEnabled="{Binding CanImport}" VerticalAlignment="Center" />
                               <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
                                 <TextBlock Text="{Binding DisplayTitle}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" FontFamily="Segoe UI,Segoe UI Emoji" />
                                 <TextBlock Foreground="#6B7C8C" FontSize="11">
                                   <Run Text="{Binding GameFolderName}" /><Run Text=" · " /><Run Text="{Binding CreatedAtLocal}" />
                                 </TextBlock>
+                                <TextBlock Text="{Binding ValidationMessage}" Foreground="#D85E61" FontSize="11" TextWrapping="Wrap" IsVisible="{Binding HasValidationMessage}" />
                               </StackPanel>
                             </Grid>
                           </Border>
