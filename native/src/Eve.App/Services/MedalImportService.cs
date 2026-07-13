@@ -24,24 +24,90 @@ public static class MedalImportService
     public static IReadOnlyList<MedalClipRecord> ScanForClips()
     {
         var medalRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Medal");
-        if (!Directory.Exists(medalRoot)) return Array.Empty<MedalClipRecord>();
-
         var results = new List<MedalClipRecord>();
         var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var dbPath in Directory.EnumerateFiles(medalRoot, "medal-*.db"))
+        if (Directory.Exists(medalRoot))
         {
-            try
+            foreach (var dbPath in Directory.EnumerateFiles(medalRoot, "medal-*.db"))
             {
-                ReadDatabase(dbPath, results, seenPaths);
-            }
-            catch (Exception error)
-            {
-                AppLog.Error($"Medal import: failed reading {dbPath}", error);
+                try
+                {
+                    ReadDatabase(dbPath, results, seenPaths);
+                }
+                catch (Exception error)
+                {
+                    AppLog.Error($"Medal import: failed reading {dbPath}", error);
+                }
             }
         }
 
+        ScanClipsFolderFallback(results, seenPaths);
+
         return DedupeBySizeAndGame(results);
+    }
+
+    // Medal's own catalog (medal-*.db) can go missing or get corrupted - a
+    // reported real case: a user's entire database was lost, and every clip
+    // still sitting in Medal's own clips folder on disk (confirmed present in
+    // File Explorer) stopped showing up in EVE's import list, because the DB
+    // pass above is the only thing that ever looked for clips. This scans
+    // Medal's actual clips folder directly for video files the DB pass didn't
+    // already find, so losing the DB only costs the nice DB-sourced titles,
+    // not the clips themselves. Medal's default save location; if a user
+    // customized it in Medal's own settings this won't see those, but there's
+    // no DB left to read a custom path from either in the scenario this
+    // exists for.
+    private static void ScanClipsFolderFallback(List<MedalClipRecord> results, HashSet<string> seenPaths)
+    {
+        var clipsRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "Medal");
+        if (!Directory.Exists(clipsRoot)) return;
+
+        var videoExtensions = new[] { ".mp4", ".mov", ".mkv" };
+        IEnumerable<string> files;
+        try
+        {
+            files = Directory.EnumerateFiles(clipsRoot, "*.*", SearchOption.AllDirectories);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Medal import: failed scanning clips folder {clipsRoot}", error);
+            return;
+        }
+
+        foreach (var videoPath in files)
+        {
+            if (!videoExtensions.Contains(Path.GetExtension(videoPath), StringComparer.OrdinalIgnoreCase)) continue;
+            if (!seenPaths.Add(videoPath)) continue;
+
+            var gameFolder = Path.GetFileName(Path.GetDirectoryName(videoPath)) ?? "Medal";
+            // No DB row for this file (missing/corrupt DB, or Medal just
+            // never cataloged it) - the file's own Windows timestamp is the
+            // only real signal available for when it was actually recorded.
+            DateTime createdAtUtc;
+            try { createdAtUtc = File.GetCreationTimeUtc(videoPath); }
+            catch { createdAtUtc = DateTime.UtcNow; }
+
+            var title = TryParseTrimTitle(Path.GetFileNameWithoutExtension(videoPath), gameFolder);
+            results.Add(new MedalClipRecord(videoPath, null, gameFolder, createdAtUtc, title));
+        }
+    }
+
+    // Medal names a trimmed export "MedalTV<GameTitle><yyyy-MM-dd HH-mm-ss>-trim-<n>"
+    // with no DB metadata blob for the trimmed file itself in the cases seen
+    // (the trim is a separate export, not the original cataloged clip) - the
+    // raw filename stem is genuinely ugly as a title, so this swaps in the
+    // already-reliable game-folder name instead. Not the same as recovering
+    // Medal's own custom title (that data doesn't appear to exist for a trim
+    // export to recover from), but a real improvement over the raw filename.
+    private static readonly Regex TrimFilenamePattern = new(
+        @"^MedalTV.*?\d{4}-\d{2}-\d{2}[ _]\d{2}-\d{2}-\d{2}.*-trim-\d+$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    internal static string? TryParseTrimTitle(string fileNameWithoutExtension, string gameFolder)
+    {
+        if (!TrimFilenamePattern.IsMatch(fileNameWithoutExtension)) return null;
+        return string.IsNullOrWhiteSpace(gameFolder) ? "Trimmed Clip" : $"{gameFolder} (Trimmed)";
     }
 
     // Medal itself sometimes catalogs the same clip twice under different video_path
