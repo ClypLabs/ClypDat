@@ -271,7 +271,17 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         ID3D11VideoProcessor? videoProcessor = null;
         ID3D11Texture2D? croppedTexture = null;
         ID3D11Texture2D? nv12Output = null;
-        ID3D11Texture2D? nv12Staging = null;
+        // Two staging textures instead of one, alternated each frame: Map()
+        // without DoNotWait blocks until the GPU finishes EVERYTHING queued
+        // before it, and mapping the texture we just issued a CopyResource
+        // into forces exactly that stall (measured 12-14ms, wildly variable
+        // with GPU load - defeating much of the point of GPU scale). Copying
+        // into one slot while mapping the OTHER slot (whose copy had a full
+        // iteration's worth of async time to actually finish) avoids the
+        // stall entirely - standard double-buffered GPU readback.
+        ID3D11Texture2D[]? nv12StagingRing = null;
+        var nv12StagingIndex = 0;
+        var nv12RingPrimed = false;
         ID3D11VideoProcessorOutputView? outputView = null;
         ID3D11VideoProcessorInputView? inputView = null;
         var useGpuScale = false;
@@ -316,7 +326,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             // false and the CPU sws_scale path above still works normally.
             try
             {
-                (videoDevice, videoContext, vpEnumerator, videoProcessor, nv12Output, nv12Staging, outputView) =
+                (videoDevice, videoContext, vpEnumerator, videoProcessor, nv12Output, nv12StagingRing, outputView) =
                     CreateGpuScaler(device, captureWidth, captureHeight, outputWidth, outputHeight, config.FrameRate);
                 (croppedTexture, inputView) = CreateGpuCropInputView(device, videoDevice, vpEnumerator, captureWidth, captureHeight);
                 useGpuScale = true;
@@ -358,10 +368,22 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             ready.TrySetResult();
 
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            // Anchors packet->pts (a Stopwatch-based, accurate-to-the-real-
+            // capture-moment value) back to a real wall-clock instant, so
             var lastForcedKeyframe = TimeSpan.Zero;
             var lastTargetRefresh = TimeSpan.Zero;
             var lastEncodedAt = TimeSpan.Zero;
             var targetFrameInterval = TimeSpan.FromSeconds(1.0 / Math.Clamp(config.FrameRate, 15, 240));
+            // Counts encoded frames (including duplicate/padding ones) so
+            // frame->pts can be assigned an IDEAL, constant-rate timestamp
+            // (index * exact interval) rather than real elapsed time - see
+            // the pacing gate below for why. RingPacket.WallClockUtc (used
+            // only for audio alignment) is tracked completely separately via
+            // a real DateTime.UtcNow captured at each actual encode, passed
+            // straight into DrainToRingBuffer, so idealizing video's own
+            // timeline can't drag audio sync off with it.
+            var encodedFrameIndex = 0L;
+            var idealFrameIntervalMicroseconds = 1_000_000.0 / Math.Clamp(config.FrameRate, 15, 240);
             // Short enough to stay well under even a 240fps target interval
             // (4.17ms) so the pacing gate below is never blocked waiting on
             // this call - see its call site for why that matters now. Lower
@@ -572,20 +594,37 @@ public sealed class NativeReplayBuffer : IReplayBuffer
 
                                     var stream = new VideoProcessorStream { Enable = true, InputSurface = inputView };
                                     videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, new[] { stream });
-                                    device.ImmediateContext.CopyResource(nv12Staging, nv12Output);
+                                    var currentRingIndex = nv12StagingIndex;
+                                    device.ImmediateContext.CopyResource(nv12StagingRing![currentRingIndex], nv12Output);
                                     copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
 
-                                    stageStopwatch.Restart();
-                                    var mapped = device.ImmediateContext.Map(nv12Staging!, 0, MapMode.Read, MapFlags.None);
-                                    try
+                                    // Reads the OTHER ring slot - the copy issued for it last
+                                    // time has had a full iteration's worth of async time to
+                                    // actually finish, so this Map() doesn't stall waiting on
+                                    // the CopyResource that was JUST issued above. First real
+                                    // frame has no previous slot ready yet, so it's skipped
+                                    // (frame->data keeps its FillFrameBlack content for that
+                                    // one frame - same as any other single-frame freeze).
+                                    if (nv12RingPrimed)
                                     {
-                                        CopyNv12PlanesToFrame(mapped, outputWidth, outputHeight, frame);
+                                        var previousRingIndex = 1 - currentRingIndex;
+                                        stageStopwatch.Restart();
+                                        var mapped = device.ImmediateContext.Map(nv12StagingRing[previousRingIndex], 0, MapMode.Read, MapFlags.None);
+                                        try
+                                        {
+                                            CopyNv12PlanesToFrame(mapped, outputWidth, outputHeight, frame);
+                                        }
+                                        finally
+                                        {
+                                            device.ImmediateContext.Unmap(nv12StagingRing[previousRingIndex], 0);
+                                        }
+                                        scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
                                     }
-                                    finally
+                                    else
                                     {
-                                        device.ImmediateContext.Unmap(nv12Staging, 0);
+                                        nv12RingPrimed = true;
                                     }
-                                    scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
+                                    nv12StagingIndex = 1 - currentRingIndex;
                                 }
                                 else
                                 {
@@ -672,32 +711,51 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 // in time to keep actual encoded fps locked to the target; this now
                 // does the same, reusing frame->data unchanged (identical mechanism
                 // to the existing occlusion freeze) whenever nothing fresh landed.
-                if (stopwatch.Elapsed - lastEncodedAt < targetFrameInterval) continue;
-                lastEncodedAt = stopwatch.Elapsed;
-                framesEncoded++;
-                framesEncodedSinceLog++;
-
-                frame->pts = stopwatch.ElapsedTicks * 1_000_000L / System.Diagnostics.Stopwatch.Frequency;
-
-                // Force a keyframe periodically so the ring buffer always has a nearby
-                // point to start a save-window at without waiting on the encoder's own
-                // GOP schedule.
-                if (stopwatch.Elapsed - lastForcedKeyframe >= TimeSpan.FromSeconds(2))
+                //
+                // A `while` here (not `if`) instead of jumping lastEncodedAt to
+                // "now" catches up with MULTIPLE duplicate-encoded frames if a
+                // real stall (e.g. an AccessLost recreation, a Thread.Sleep(50)
+                // backoff) ever eats more than one interval's worth of real time,
+                // so the declared/ideal timeline below never silently falls behind
+                // real elapsed time.
+                while (stopwatch.Elapsed - lastEncodedAt >= targetFrameInterval)
                 {
-                    frame->pict_type = AVPictureType.AV_PICTURE_TYPE_I;
-                    lastForcedKeyframe = stopwatch.Elapsed;
-                }
-                else
-                {
-                    frame->pict_type = AVPictureType.AV_PICTURE_TYPE_NONE;
-                }
+                    lastEncodedAt += targetFrameInterval;
+                    framesEncoded++;
+                    framesEncodedSinceLog++;
 
-                stageStopwatch.Restart();
-                if (ffmpeg.avcodec_send_frame(codecContext, frame) == 0)
-                {
-                    DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream);
+                    // An ideal, constant-rate timestamp (frame index * the exact
+                    // target interval) instead of real elapsed time - the file's
+                    // computed average frame rate (what File Explorer/players
+                    // show) is then EXACTLY the configured target by construction,
+                    // instead of a close-but-jittery approximation from real
+                    // scheduler timing. Audio alignment doesn't use this - it gets
+                    // its own real wall-clock timestamp below, specifically so
+                    // idealizing video's timeline can't reintroduce the audio-sync
+                    // bug that was just fixed.
+                    frame->pts = (long)Math.Round(encodedFrameIndex * idealFrameIntervalMicroseconds);
+                    encodedFrameIndex++;
+
+                    // Force a keyframe periodically so the ring buffer always has a nearby
+                    // point to start a save-window at without waiting on the encoder's own
+                    // GOP schedule.
+                    if (stopwatch.Elapsed - lastForcedKeyframe >= TimeSpan.FromSeconds(2))
+                    {
+                        frame->pict_type = AVPictureType.AV_PICTURE_TYPE_I;
+                        lastForcedKeyframe = stopwatch.Elapsed;
+                    }
+                    else
+                    {
+                        frame->pict_type = AVPictureType.AV_PICTURE_TYPE_NONE;
+                    }
+
+                    stageStopwatch.Restart();
+                    if (ffmpeg.avcodec_send_frame(codecContext, frame) == 0)
+                    {
+                        DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, DateTime.UtcNow);
+                    }
+                    encodeMs += stageStopwatch.Elapsed.TotalMilliseconds;
                 }
-                encodeMs += stageStopwatch.Elapsed.TotalMilliseconds;
 
                 if (stopwatch.Elapsed - lastRingTrim >= TimeSpan.FromSeconds(1))
                 {
@@ -708,7 +766,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
 
             // flush
             ffmpeg.avcodec_send_frame(codecContext, null);
-            DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream);
+            DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, DateTime.UtcNow);
         }
         catch (Exception error)
         {
@@ -733,7 +791,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             inputView?.Dispose();
             croppedTexture?.Dispose();
             outputView?.Dispose();
-            nv12Staging?.Dispose();
+            if (nv12StagingRing is not null) foreach (var t in nv12StagingRing) t.Dispose();
             nv12Output?.Dispose();
             videoProcessor?.Dispose();
             vpEnumerator?.Dispose();
@@ -787,7 +845,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
     // (often 4K) every single frame. Throws on any failure - caller treats
     // that as "not supported on this hardware/driver" and falls back to CPU
     // scale, so nothing here needs to be defensive beyond that.
-    private static (ID3D11VideoDevice VideoDevice, ID3D11VideoContext VideoContext, ID3D11VideoProcessorEnumerator Enumerator, ID3D11VideoProcessor Processor, ID3D11Texture2D Nv12Output, ID3D11Texture2D Nv12Staging, ID3D11VideoProcessorOutputView OutputView)
+    private static (ID3D11VideoDevice VideoDevice, ID3D11VideoContext VideoContext, ID3D11VideoProcessorEnumerator Enumerator, ID3D11VideoProcessor Processor, ID3D11Texture2D Nv12Output, ID3D11Texture2D[] Nv12StagingRing, ID3D11VideoProcessorOutputView OutputView)
         CreateGpuScaler(ID3D11Device device, int captureWidth, int captureHeight, int outputWidth, int outputHeight, int frameRate)
     {
         var videoDevice = device.QueryInterface<ID3D11VideoDevice>();
@@ -862,10 +920,21 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             throw new InvalidOperationException($"CreateVideoProcessorOutputView failed: {error.Message}", error);
         }
 
-        var nv12Staging = device.CreateTexture2D(new Texture2DDescription
+        var nv12StagingRing = new[]
         {
-            Width = (uint)outputWidth,
-            Height = (uint)outputHeight,
+            CreateNv12StagingTexture(device, outputWidth, outputHeight),
+            CreateNv12StagingTexture(device, outputWidth, outputHeight)
+        };
+
+        return (videoDevice, videoContext, enumerator, processor, nv12Output, nv12StagingRing, outputView);
+    }
+
+    private static ID3D11Texture2D CreateNv12StagingTexture(ID3D11Device device, int width, int height)
+    {
+        return device.CreateTexture2D(new Texture2DDescription
+        {
+            Width = (uint)width,
+            Height = (uint)height,
             MipLevels = 1,
             ArraySize = 1,
             Format = Format.NV12,
@@ -874,8 +943,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             CPUAccessFlags = CpuAccessFlags.Read,
             BindFlags = BindFlags.None
         });
-
-        return (videoDevice, videoContext, enumerator, processor, nv12Output, nv12Staging, outputView);
     }
 
     // The crop-sized GPU-only source texture the Video Processor reads from,
@@ -1027,7 +1094,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         return MonitorFromPoint(default, MONITOR_DEFAULTTOPRIMARY);
     }
 
-    private unsafe void DrainToRingBuffer(AVCodecContext* codecContext, AVPacket* packet, AVFormatContext* fullSessionFormatContext, AVStream* fullSessionStream)
+    private unsafe void DrainToRingBuffer(AVCodecContext* codecContext, AVPacket* packet, AVFormatContext* fullSessionFormatContext, AVStream* fullSessionStream, DateTime realWallClockUtc)
     {
         while (true)
         {
@@ -1045,9 +1112,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 Marshal.Copy((IntPtr)codecContext->extradata, _extraData, 0, codecContext->extradata_size);
             }
 
+            // realWallClockUtc is captured by the caller at the moment this
+            // frame was actually queued for encoding (real elapsed time),
+            // completely separate from packet->pts (now an IDEAL,
+            // constant-rate timestamp - see the pacing gate in CaptureLoop)
+            // specifically so audio alignment isn't affected by video's
+            // timeline being idealized for an exact declared frame rate.
             lock (_bufferLock)
             {
-                _packets.Add(new RingPacket(data, packet->pts, isKeyframe, DateTime.UtcNow));
+                _packets.Add(new RingPacket(data, packet->pts, isKeyframe, realWallClockUtc));
             }
 
             if (fullSessionFormatContext is not null)
