@@ -32,9 +32,11 @@
       </Setter>
       <Style Selector="^:vertical">
         <Setter Property="Width" Value="10" />
+        <Setter Property="Margin" Value="0,6,5,6" />
       </Style>
       <Style Selector="^:horizontal">
         <Setter Property="Height" Value="10" />
+        <Setter Property="Margin" Value="6,0,6,5" />
       </Style>
     </ControlTheme>
   </Styles.Resources>
@@ -205,6 +207,28 @@
   </Style>
   <Style Selector="Button.gameFilterBadge:pointerover PathIcon">
     <Setter Property="Foreground" Value="#D2DEEC" />
+  </Style>
+  <Style Selector="MenuFlyoutPresenter">
+    <Setter Property="Background" Value="#141D24" />
+    <Setter Property="BorderBrush" Value="#2C3B48" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Padding" Value="4" />
+    <Setter Property="MinWidth" Value="140" />
+  </Style>
+  <Style Selector="MenuItem">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="#B8C7D8" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="Padding" Value="10,7" />
+  </Style>
+  <Style Selector="MenuItem:pointerover">
+    <Setter Property="Background" Value="#263544" />
+    <Setter Property="Foreground" Value="#D8E4F2" />
+  </Style>
+  <Style Selector="MenuItem:pointerover /template/ Border#PART_LayoutRoot">
+    <Setter Property="Background" Value="#263544" />
   </Style>
   <Style Selector="Button.replayButton">
     <Setter Property="Background" Value="#1D2A36" />

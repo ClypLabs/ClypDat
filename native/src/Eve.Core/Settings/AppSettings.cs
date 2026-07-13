@@ -53,7 +53,7 @@ public sealed class AppSettings
     public bool EnableClipOverlaySound { get; set; } = true;
     public List<GameCaptureOverride> GameCaptureOverrides { get; set; } = new();
     public Cs2AutoClipSettings Cs2AutoClip { get; set; } = new();
-    public bool MedalImportStripEmoji { get; set; } = true;
+    public bool MedalImportStripEmoji { get; set; } = false;
     public bool MedalImportCopyNotMove { get; set; } = true;
     // Defaults true so upgrading an existing install (settings.json already exists,
     // this key just isn't in it yet) never shows the walkthrough - only a genuinely

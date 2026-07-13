@@ -14,6 +14,7 @@
         MinHeight="620"
         Background="#0D1116"
         Icon="/Assets/eve-icon.ico"
+        FontFamily="Segoe UI,Segoe UI Emoji"
         SizeChanged="Window_OnSizeChanged">
   <Grid RowDefinitions="48,*">
     <Border Grid.Row="0" Background="#171F27" BorderBrush="#1E2A33" BorderThickness="0,0,0,1">
