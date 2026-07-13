@@ -182,7 +182,7 @@ public static class MedalImportService
 
     public static bool IsStructuralFolderName(string name) => new[]
     {
-        "Medal", "Edits", "exports", "render", "editor", "editor-clips", "editor-active-drafts", "Screen Recording", "Video-Editor", "Reels", "Temp", "Thumbnails"
+        "Medal", "Edits", "exports", "render", "editor", "editor-clips", "editor-active-drafts", "Screen Recording", "Video-Editor", "Reels", "Temp", "Thumbnails", "Saved Clips"
     }.Contains(name, StringComparer.OrdinalIgnoreCase);
 
     private static string ResolveGameDisplayName(string compactName)

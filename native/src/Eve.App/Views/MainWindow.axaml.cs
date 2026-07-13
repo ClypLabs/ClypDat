@@ -551,7 +551,7 @@ public sealed partial class MainWindow : Window
 
         var path = DefaultLibraryFolder();
         Directory.CreateDirectory(path);
-        Directory.CreateDirectory(Path.Combine(path, "Saved Clips"));
+        LibraryLayout.EnsureRoots(path);
         await ViewModel.LoadLibraryFolderAsync(path);
     }
 
@@ -1269,19 +1269,29 @@ public sealed partial class MainWindow : Window
     private async void ExportButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
-        var safeName = string.Join("_", ViewModel.EditorTitle.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
-        if (string.IsNullOrWhiteSpace(safeName)) safeName = Path.GetFileNameWithoutExtension(ViewModel.SelectedVideoPath);
+        var libraryRoot = string.IsNullOrWhiteSpace(ViewModel.Settings.LibraryFolder)
+            ? DefaultLibraryFolder()
+            : ViewModel.Settings.LibraryFolder;
+        LibraryLayout.EnsureRoots(libraryRoot);
 
-        var savedClipsFolder = Path.Combine(
-            string.IsNullOrWhiteSpace(ViewModel.Settings.LibraryFolder) ? DefaultLibraryFolder() : ViewModel.Settings.LibraryFolder,
-            "Saved Clips");
-        Directory.CreateDirectory(savedClipsFolder);
-        var suggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(savedClipsFolder);
+        var sourceInfo = ClipInfoSidecar.Load(libraryRoot, ViewModel.SelectedVideoPath);
+        var game = ResolveExportGame(ViewModel.SelectedVideoPath, sourceInfo);
+        var exportFolder = Path.Combine(LibraryLayout.ClipsRoot(libraryRoot), ClipFileNaming.BuildBaseName(game));
+        Directory.CreateDirectory(exportFolder);
+        var suggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(exportFolder);
+        var exportTimestamp = DateTime.Now;
+        var suggestedFileName = ClipFileNaming.BuildFileName(
+            ViewModel.EditorTitle,
+            exportTimestamp,
+            ".mp4",
+            ViewModel.Settings.ClipFileNameScheme,
+            ViewModel.Settings.CustomClipFileNameTemplate,
+            game);
 
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "Export clip",
-            SuggestedFileName = $"{safeName}-trim.mp4",
+            SuggestedFileName = suggestedFileName,
             SuggestedStartLocation = suggestedStartLocation,
             FileTypeChoices = new[]
             {
@@ -1307,6 +1317,8 @@ public sealed partial class MainWindow : Window
             }
             else
             {
+                ClipInfoSidecar.Save(libraryRoot, outputPath, new ClipInfo(game, null, ViewModel.EditorTitle, exportTimestamp));
+                if (IsPathWithinLibrary(outputPath, libraryRoot)) await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
                 OpenInExplorer(outputPath, selectFile: true);
             }
         }
@@ -1314,6 +1326,28 @@ public sealed partial class MainWindow : Window
         {
             ViewModel.IsExporting = false;
         }
+    }
+
+    private static string ResolveExportGame(string sourcePath, ClipInfo? sourceInfo)
+    {
+        if (!string.IsNullOrWhiteSpace(sourceInfo?.GameDisplayName) && !MedalImportService.IsStructuralFolderName(sourceInfo.GameDisplayName))
+        {
+            return sourceInfo.GameDisplayName;
+        }
+
+        var parent = Path.GetFileName(Path.GetDirectoryName(sourcePath));
+        return string.IsNullOrWhiteSpace(parent) ||
+               MedalImportService.IsStructuralFolderName(parent) ||
+               string.Equals(parent, "Clips", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(parent, "VODs", StringComparison.OrdinalIgnoreCase)
+            ? "Unknown Game"
+            : parent;
+    }
+
+    private static bool IsPathWithinLibrary(string path, string libraryRoot)
+    {
+        var relative = Path.GetRelativePath(libraryRoot, path);
+        return !relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative);
     }
 
     private async Task<bool> ConfirmDeleteAsync(string summary)

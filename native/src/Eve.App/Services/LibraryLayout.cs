@@ -6,7 +6,9 @@ namespace Eve.App.Services;
 public static class LibraryLayout
 {
     public const double ClipMaximumDurationSeconds = 300;
-    public const int CurrentVersion = 1;
+    // Version 2 folds the former "Saved Clips" editor-export folder into the
+    // normal per-game Clips layout.
+    public const int CurrentVersion = 2;
 
     public static string ClipsRoot(string libraryRoot) => Path.Combine(libraryRoot, "Clips");
     public static string VodsRoot(string libraryRoot) => Path.Combine(libraryRoot, "VODs");
