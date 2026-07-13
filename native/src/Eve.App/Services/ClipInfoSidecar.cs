@@ -7,7 +7,11 @@ namespace Eve.App.Services;
 // time so the library can show the actual game name and a per-event icon on
 // the tile instead of parsing it back out of the clip's filename, which for a
 // manual clip is just the game name and for an auto-clip is "<event> - <map>".
-public sealed record ClipInfo(string? GameDisplayName, string? AutoClipEventType);
+public sealed record ClipInfo(
+    string? GameDisplayName,
+    string? AutoClipEventType,
+    string? FileTitle = null,
+    DateTimeOffset? CapturedAt = null);
 
 public static class ClipInfoSidecar
 {

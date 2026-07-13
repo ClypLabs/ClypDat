@@ -38,6 +38,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _replayQualityRestartRequired;
     private string _selectedClipOverlayPosition = "Top Right";
     private string _selectedClipOverlayVolume = "Medium";
+    private string _selectedClipFileNameScheme = ClipFileNaming.StandardScheme;
+    private string _customClipFileNameTemplate = string.Empty;
+    private string _clipFileNamePreview = string.Empty;
+    private string _clipFileNameTemplateError = string.Empty;
+    private bool _isRenamingAllClips;
+    private string _renameAllClipsStatus = string.Empty;
     private ExportCodecOption? _selectedExportCodec;
     private string _recorderStatus = "Replay Off";
     private string _activeGame = "No game detected";
@@ -106,8 +112,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
         ClipOverlayPositions = new ObservableCollection<string> { "Top Left", "Top Right" };
         ClipOverlayVolumes = new ObservableCollection<string> { "Low", "Medium", "High" };
+        ClipFileNameSchemes = new ObservableCollection<FileNameSchemeOption>
+        {
+            new("Standard", ClipFileNaming.StandardScheme),
+            new("Readable", ClipFileNaming.ReadableScheme),
+            new("Custom", ClipFileNaming.CustomScheme)
+        };
         _selectedClipOverlayPosition = ClipOverlayPositions.FirstOrDefault(position => string.Equals(position, Settings.ClipOverlayPosition, StringComparison.OrdinalIgnoreCase)) ?? "Top Right";
         _selectedClipOverlayVolume = ClipOverlayVolumes.FirstOrDefault(volume => string.Equals(volume, Settings.ClipOverlayVolume, StringComparison.OrdinalIgnoreCase)) ?? "Medium";
+        _selectedClipFileNameScheme = ClipFileNameSchemes.FirstOrDefault(item => string.Equals(item.Value, Settings.ClipFileNameScheme, StringComparison.OrdinalIgnoreCase))?.Value ?? ClipFileNaming.StandardScheme;
+        _customClipFileNameTemplate = Settings.CustomClipFileNameTemplate;
+        UpdateClipFileNamePreview();
         ExcludedProcesses = new ObservableCollection<string>(Settings.GameAudioExcludedProcesses);
         ChatAudioApps = new ObservableCollection<string>(Settings.ChatAudioProcessNames);
         SelectedMicrophones = new ObservableCollection<AudioDeviceOption>();
@@ -158,6 +173,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<GameBackendRowViewModel> GameCaptureRows { get; }
     public ObservableCollection<string> ClipOverlayPositions { get; }
     public ObservableCollection<string> ClipOverlayVolumes { get; }
+    public ObservableCollection<FileNameSchemeOption> ClipFileNameSchemes { get; }
 
     public ObservableCollection<ThirdPartyLicenseEntry> ThirdPartyLicenseEntries { get; } = new()
     {
@@ -424,6 +440,58 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public string SelectedClipFileNameScheme
+    {
+        get => _selectedClipFileNameScheme;
+        set
+        {
+            if (!SetProperty(ref _selectedClipFileNameScheme, value)) return;
+            Settings.ClipFileNameScheme = value;
+            UpdateClipFileNamePreview();
+            SaveSettings();
+            OnPropertyChanged(nameof(IsCustomClipFileNameScheme));
+        }
+    }
+
+    public bool IsCustomClipFileNameScheme => string.Equals(SelectedClipFileNameScheme, ClipFileNaming.CustomScheme, StringComparison.OrdinalIgnoreCase);
+
+    public string CustomClipFileNameTemplate
+    {
+        get => _customClipFileNameTemplate;
+        set
+        {
+            if (!SetProperty(ref _customClipFileNameTemplate, value)) return;
+            UpdateClipFileNamePreview();
+            if (string.IsNullOrEmpty(ClipFileNameTemplateError))
+            {
+                Settings.CustomClipFileNameTemplate = value;
+                SaveSettings();
+            }
+        }
+    }
+
+    public string ClipFileNamePreview
+    {
+        get => _clipFileNamePreview;
+        private set => SetProperty(ref _clipFileNamePreview, value);
+    }
+
+    public string ClipFileNameTemplateError
+    {
+        get => _clipFileNameTemplateError;
+        private set
+        {
+            if (!SetProperty(ref _clipFileNameTemplateError, value)) return;
+            OnPropertyChanged(nameof(HasClipFileNameTemplateError));
+            OnPropertyChanged(nameof(CanRenameAllClips));
+        }
+    }
+
+    public bool HasClipFileNameTemplateError => !string.IsNullOrWhiteSpace(ClipFileNameTemplateError);
+    public bool IsRenamingAllClips { get => _isRenamingAllClips; private set { if (SetProperty(ref _isRenamingAllClips, value)) OnPropertyChanged(nameof(CanRenameAllClips)); } }
+    public string RenameAllClipsStatus { get => _renameAllClipsStatus; private set => SetProperty(ref _renameAllClipsStatus, value); }
+    public bool CanRenameAllClips => !IsRenamingAllClips && !HasClipFileNameTemplateError && !string.IsNullOrWhiteSpace(Settings.LibraryFolder) && Directory.Exists(Settings.LibraryFolder);
+
     public bool EnableClipOverlay
     {
         get => Settings.EnableClipOverlay;
@@ -686,17 +754,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     var title = MedalImportStripEmoji ? MedalImportService.StripEmoji(row.RawTitle) : row.RawTitle;
                     if (string.IsNullOrWhiteSpace(title)) title = row.GameFolderName;
                     var extension = Path.GetExtension(row.Record.VideoPath).TrimStart('.');
-                    var fileName = ClipFileNaming.BuildFileName(title, row.CreatedAtLocal, extension);
+                    var fileName = ClipFileNaming.BuildFileName(title, row.CreatedAtLocal, extension, Settings.ClipFileNameScheme, Settings.CustomClipFileNameTemplate, row.GameFolderName);
                     var destinationDir = Path.Combine(libraryFolder, "Imported Clips", "Medal", ClipFileNaming.BuildBaseName(row.GameFolderName));
-                    var destinationPath = Path.Combine(destinationDir, fileName);
-
-                    if (File.Exists(destinationPath))
-                    {
-                        MedalImportRows.Remove(row);
-                        continue;
-                    }
-
                     Directory.CreateDirectory(destinationDir);
+                    var destinationPath = ClipFileNaming.BuildUniquePath(destinationDir, fileName);
 
                     await Task.Run(() =>
                     {
@@ -712,6 +773,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                         File.SetCreationTimeUtc(destinationPath, row.Record.CreatedAtUtc);
                         File.SetLastWriteTimeUtc(destinationPath, row.Record.CreatedAtUtc);
                     });
+
+                    ClipInfoSidecar.Save(destinationPath, new ClipInfo(row.GameFolderName, null, title, row.Record.CreatedAtUtc));
 
                     await AddOrUpdateLibraryClipAsync(destinationPath);
                     imported++;
@@ -1117,6 +1180,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         Settings.LibraryFolder = folderPath;
         SaveSettings();
+        OnPropertyChanged(nameof(CanRenameAllClips));
         await RefreshLibraryAsync();
         IsEditorVisible = false;
         SelectedCaptureBackend = string.Empty;
@@ -1125,6 +1189,110 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public void SaveSettings()
     {
         AppSettingsStore.Save(Settings);
+    }
+
+    public async Task RenameAllClipsAsync()
+    {
+        if (!CanRenameAllClips) return;
+        IsRenamingAllClips = true;
+        RenameAllClipsStatus = "Renaming library files...";
+        try
+        {
+            var result = await Task.Run(() => RenameLibraryFiles());
+            foreach (var (oldPath, newPath) in result.MovedPaths)
+            {
+                var oldKey = ClipEditKey(oldPath);
+                if (Settings.ClipEdits.Remove(oldKey, out var edit)) Settings.ClipEdits[ClipEditKey(newPath)] = edit;
+            }
+
+            SaveSettings();
+            RenameAllClipsStatus = $"Updated {result.Renamed} file(s); {result.Skipped} already matched; {result.Failed} failed.";
+            await RefreshLibraryAsync();
+        }
+        finally
+        {
+            IsRenamingAllClips = false;
+        }
+    }
+
+    private (int Renamed, int Skipped, int Failed, List<(string OldPath, string NewPath)> MovedPaths) RenameLibraryFiles()
+    {
+        var movedPaths = new List<(string OldPath, string NewPath)>();
+        var renamed = 0;
+        var skipped = 0;
+        var failed = 0;
+        string[] paths;
+        try
+        {
+            paths = Directory.EnumerateFiles(Settings.LibraryFolder, "*.*", SearchOption.AllDirectories)
+                .Where(MediaProbeService.IsVideoFile)
+                .ToArray();
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Clip filename migration: failed listing library files.", error);
+            return (0, 0, 1, movedPaths);
+        }
+
+        foreach (var sourcePath in paths)
+        {
+            try
+            {
+                var card = new ClipCardViewModel(_mediaProbe.CreateLibraryStub(sourcePath));
+                var info = ClipInfoSidecar.Load(sourcePath);
+                var title = info?.FileTitle ?? card.GameNameLabel;
+                var game = info?.GameDisplayName ?? card.GameFilterKey;
+                var timestamp = info?.CapturedAt?.LocalDateTime ?? File.GetCreationTime(sourcePath);
+                var directory = Path.GetDirectoryName(sourcePath) ?? Settings.LibraryFolder;
+                var fileName = ClipFileNaming.BuildFileName(title, timestamp, Path.GetExtension(sourcePath), Settings.ClipFileNameScheme, Settings.CustomClipFileNameTemplate, game);
+                var targetPath = Path.Combine(directory, fileName);
+                if (string.Equals(sourcePath, targetPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    skipped++;
+                    continue;
+                }
+
+                targetPath = ClipFileNaming.BuildUniquePath(directory, fileName);
+                // Store naming metadata before moving so future scheme changes do
+                // not have to reverse-engineer a user-defined template.
+                ClipInfoSidecar.Save(sourcePath, new ClipInfo(game, info?.AutoClipEventType, title, timestamp));
+                File.Move(sourcePath, targetPath);
+                MoveClipSidecars(sourcePath, targetPath);
+                _mediaProbe.DeleteCacheFor(sourcePath);
+                movedPaths.Add((sourcePath, targetPath));
+                renamed++;
+            }
+            catch (Exception error)
+            {
+                AppLog.Error($"Clip filename migration: failed renaming {sourcePath}", error);
+                failed++;
+            }
+        }
+
+        return (renamed, skipped, failed, movedPaths);
+    }
+
+    private void UpdateClipFileNamePreview()
+    {
+        var timestamp = new DateTime(2025, 6, 26, 22, 40, 59);
+        if (string.Equals(SelectedClipFileNameScheme, ClipFileNaming.CustomScheme, StringComparison.OrdinalIgnoreCase))
+        {
+            if (ClipFileNaming.TryBuildPreview(CustomClipFileNameTemplate, timestamp, "Counter Strike 2", "Counter Strike 2", out var preview, out var error))
+            {
+                ClipFileNamePreview = $"{preview}.mp4";
+                ClipFileNameTemplateError = string.Empty;
+            }
+            else
+            {
+                ClipFileNamePreview = "Invalid template";
+                ClipFileNameTemplateError = error;
+            }
+
+            return;
+        }
+
+        ClipFileNamePreview = ClipFileNaming.BuildFileName("Counter Strike 2", timestamp, "mp4", SelectedClipFileNameScheme, Settings.CustomClipFileNameTemplate, "Counter Strike 2");
+        ClipFileNameTemplateError = string.Empty;
     }
 
     public void SaveSelectedClipEditState()
@@ -1808,7 +1976,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             MicrophoneNoiseSuppressionStrength: Settings.MicrophoneNoiseSuppressionStrength,
             FullSessionRecordingEnabled: Settings.FullSessionRecordingEnabled,
             FullSessionRecordingFolder: Settings.FullSessionRecordingFolder,
-            AudioSyncOffsetMs: Settings.AudioSyncOffsetMs);
+            AudioSyncOffsetMs: Settings.AudioSyncOffsetMs,
+            ClipFileNameScheme: Settings.ClipFileNameScheme,
+            CustomClipFileNameTemplate: Settings.CustomClipFileNameTemplate);
     }
 
     public void SetDuration(TimeSpan duration)

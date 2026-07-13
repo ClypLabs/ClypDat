@@ -171,7 +171,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             var clipName = string.IsNullOrWhiteSpace(titleOverride) ? config.GameDisplayName : titleOverride;
             var gameFolder = Path.Combine(outputFolder, ClipFileNaming.BuildBaseName(config.GameDisplayName));
             Directory.CreateDirectory(gameFolder);
-            outputPath = Path.Combine(gameFolder, ClipFileNaming.BuildFileName(clipName, DateTime.Now, "mp4"));
+            outputPath = ClipFileNaming.BuildUniquePath(gameFolder, ClipFileNaming.BuildFileName(clipName, DateTime.Now, "mp4", config.ClipFileNameScheme, config.CustomClipFileNameTemplate, config.GameDisplayName));
             await MuxAudioTracksAsync(sourcePath, outputPath, videoOffsetSeconds, sourceSegments, clipDurationSeconds, config, cancellationToken);
         }
         finally

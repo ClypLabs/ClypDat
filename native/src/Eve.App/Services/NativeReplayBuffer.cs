@@ -165,7 +165,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         var clipName = string.IsNullOrWhiteSpace(titleOverride) ? config.GameDisplayName : titleOverride;
         var gameFolder = Path.Combine(outputFolder, ClipFileNaming.BuildBaseName(config.GameDisplayName));
         Directory.CreateDirectory(gameFolder);
-        var outputPath = Path.Combine(gameFolder, ClipFileNaming.BuildFileName(clipName, DateTime.Now, "mp4"));
+        var outputPath = ClipFileNaming.BuildUniquePath(gameFolder, ClipFileNaming.BuildFileName(clipName, DateTime.Now, "mp4", config.ClipFileNameScheme, config.CustomClipFileNameTemplate, config.GameDisplayName));
 
         var tempVideoPath = Path.Combine(Path.GetTempPath(), $"eve-native-video-{Guid.NewGuid():N}.mp4");
         var snapshots = new List<string>();
@@ -1180,7 +1180,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         {
             Directory.CreateDirectory(config.FullSessionRecordingFolder);
             var sessionLabel = string.IsNullOrWhiteSpace(config.GameDisplayName) ? "Session" : $"Session - {config.GameDisplayName}";
-            finalOutputPath = Path.Combine(config.FullSessionRecordingFolder, ClipFileNaming.BuildFileName(sessionLabel, DateTime.Now, "mp4"));
+            finalOutputPath = ClipFileNaming.BuildUniquePath(config.FullSessionRecordingFolder, ClipFileNaming.BuildFileName(sessionLabel, DateTime.Now, "mp4", config.ClipFileNameScheme, config.CustomClipFileNameTemplate, config.GameDisplayName));
             tempVideoPath = Path.Combine(Path.GetTempPath(), $"eve-full-session-video-{Guid.NewGuid():N}.mp4");
 
             AVFormatContext* formatContext = null;
@@ -1301,6 +1301,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             }
             else
             {
+                ClipInfoSidecar.Save(finalOutputPath, new ClipInfo(config.GameDisplayName, null, $"{config.GameDisplayName} Full Session", sessionStartUtc));
                 AppLog.Info($"Native full session recording saved: path={finalOutputPath}.");
             }
         }

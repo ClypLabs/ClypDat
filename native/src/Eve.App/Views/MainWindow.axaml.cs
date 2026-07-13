@@ -437,7 +437,11 @@ public sealed partial class MainWindow : Window
                 // "3K - Mirage" -> event type "3K", map dropped - the game name
                 // (not the map) is what belongs next to it as the game label.
                 var autoClipEventType = autoClipLabel?.Split(" - ", 2)[0];
-                ClipInfoSidecar.Save(outputPath, new ClipInfo(ViewModel.ActiveGameDetection.DisplayName, autoClipEventType));
+                ClipInfoSidecar.Save(outputPath, new ClipInfo(
+                    ViewModel.ActiveGameDetection.DisplayName,
+                    autoClipEventType,
+                    autoClipLabel ?? ViewModel.ActiveGameDetection.DisplayName,
+                    File.GetCreationTimeUtc(outputPath)));
                 await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
                 if (!notifiedEarly) ShowClipSavedNotification();
             }
@@ -641,6 +645,14 @@ public sealed partial class MainWindow : Window
         {
             await ShowMessageAsync("Delete failed", error.Message);
         }
+    }
+
+    private async void RenameAllClipsButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null || !ViewModel.CanRenameAllClips) return;
+        var dialog = CreateDialog("Rename all clips?", "This renames every video in the current library to the selected filename scheme. Existing files are never overwritten.", true);
+        if (!await dialog.ShowDialog<bool>(this)) return;
+        await ViewModel.RenameAllClipsAsync();
     }
 
     private WindowState _preFullscreenWindowState = WindowState.Normal;
