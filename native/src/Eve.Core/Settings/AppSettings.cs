@@ -67,6 +67,7 @@ public sealed class AppSettings
     // root get moved into per-game subfolders the first library refresh
     // after this shipped. False (unset) on any settings.json predating it.
     public bool ClipsMigratedToGameFolders { get; set; }
+    public int LibraryLayoutVersion { get; set; }
     // Defaults true so upgrading an existing install (settings.json already exists,
     // this key just isn't in it yet) never shows the walkthrough - only a genuinely
     // fresh install (no settings.json at all, see AppSettingsStore.Load) gets it

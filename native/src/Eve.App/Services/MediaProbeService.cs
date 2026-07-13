@@ -51,6 +51,20 @@ public sealed class MediaProbeService
             0);
     }
 
+    public async Task<TimeSpan> GetDurationAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        var result = await RunProcessAsync("ffprobe", new[]
+        {
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=nw=1:nk=1",
+            filePath
+        }, cancellationToken);
+        return result.ExitCode == 0 && double.TryParse(result.Output.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var seconds)
+            ? TimeSpan.FromSeconds(Math.Max(0, seconds))
+            : TimeSpan.Zero;
+    }
+
     public async Task<MediaFileInfo> ProbeAsync(string filePath)
     {
         var info = new FileInfo(filePath);

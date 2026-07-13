@@ -18,19 +18,16 @@ public static class ClipInfoSidecar
 {
     private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = false };
 
-    // Lives in a "Clip Info" subfolder next to the clip instead of directly beside
-    // it - a folder full of clip.mp4 + clip.mp4.info.json pairs looked cluttered.
-    public static string SidecarPath(string clipPath)
+    public static string SidecarPath(string libraryRoot, string clipPath)
     {
-        var directory = Path.GetDirectoryName(clipPath) ?? string.Empty;
-        return Path.Combine(directory, "Clip Info", Path.GetFileName(clipPath) + ".info.json");
+        return LibraryLayout.SidecarPath(libraryRoot, clipPath, ".info.json");
     }
 
-    public static void Save(string clipPath, ClipInfo info)
+    public static void Save(string libraryRoot, string clipPath, ClipInfo info)
     {
         try
         {
-            var sidecarPath = SidecarPath(clipPath);
+            var sidecarPath = SidecarPath(libraryRoot, clipPath);
             Directory.CreateDirectory(Path.GetDirectoryName(sidecarPath)!);
             File.WriteAllText(sidecarPath, JsonSerializer.Serialize(info, SerializerOptions));
         }
@@ -40,9 +37,10 @@ public static class ClipInfoSidecar
         }
     }
 
-    public static ClipInfo? Load(string clipPath)
+    public static ClipInfo? Load(string libraryRoot, string clipPath)
     {
-        var path = SidecarPath(clipPath);
+        var path = SidecarPath(libraryRoot, clipPath);
+        if (!File.Exists(path)) path = LibraryLayout.LegacySidecarPath(clipPath, ".info.json");
         if (!File.Exists(path)) return null;
         try
         {
@@ -55,12 +53,12 @@ public static class ClipInfoSidecar
         }
     }
 
-    public static void Delete(string clipPath)
+    public static void Delete(string libraryRoot, string clipPath)
     {
         try
         {
-            var path = SidecarPath(clipPath);
-            if (File.Exists(path)) File.Delete(path);
+            var paths = new[] { SidecarPath(libraryRoot, clipPath), LibraryLayout.LegacySidecarPath(clipPath, ".info.json") };
+            foreach (var path in paths.Where(File.Exists)) File.Delete(path);
         }
         catch (Exception error)
         {

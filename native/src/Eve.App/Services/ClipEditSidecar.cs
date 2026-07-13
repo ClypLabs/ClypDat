@@ -11,20 +11,16 @@ public static class ClipEditSidecar
 {
     private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = false };
 
-    // Lives in a "Clip Info" subfolder next to the clip instead of directly beside
-    // it - same reasoning as ClipInfoSidecar, keeps the library folder from filling
-    // up with clip.mp4 + clip.mp4.eve.json pairs.
-    public static string SidecarPath(string clipPath)
+    public static string SidecarPath(string libraryRoot, string clipPath)
     {
-        var directory = Path.GetDirectoryName(clipPath) ?? string.Empty;
-        return Path.Combine(directory, "Clip Info", Path.GetFileName(clipPath) + ".eve.json");
+        return LibraryLayout.SidecarPath(libraryRoot, clipPath, ".eve.json");
     }
 
-    public static void Save(string clipPath, ClipEditSettings edit)
+    public static void Save(string libraryRoot, string clipPath, ClipEditSettings edit)
     {
         try
         {
-            var sidecarPath = SidecarPath(clipPath);
+            var sidecarPath = SidecarPath(libraryRoot, clipPath);
             Directory.CreateDirectory(Path.GetDirectoryName(sidecarPath)!);
             File.WriteAllText(sidecarPath, JsonSerializer.Serialize(edit, SerializerOptions));
         }
@@ -34,9 +30,10 @@ public static class ClipEditSidecar
         }
     }
 
-    public static ClipEditSettings? Load(string clipPath)
+    public static ClipEditSettings? Load(string libraryRoot, string clipPath)
     {
-        var path = SidecarPath(clipPath);
+        var path = SidecarPath(libraryRoot, clipPath);
+        if (!File.Exists(path)) path = LibraryLayout.LegacySidecarPath(clipPath, ".eve.json");
         if (!File.Exists(path)) return null;
         try
         {
@@ -49,12 +46,12 @@ public static class ClipEditSidecar
         }
     }
 
-    public static void Delete(string clipPath)
+    public static void Delete(string libraryRoot, string clipPath)
     {
         try
         {
-            var path = SidecarPath(clipPath);
-            if (File.Exists(path)) File.Delete(path);
+            var paths = new[] { SidecarPath(libraryRoot, clipPath), LibraryLayout.LegacySidecarPath(clipPath, ".eve.json") };
+            foreach (var path in paths.Where(File.Exists)) File.Delete(path);
         }
         catch (Exception error)
         {

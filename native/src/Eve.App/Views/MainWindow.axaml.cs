@@ -211,7 +211,7 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null) return;
         var path = DefaultLibraryFolder();
         Directory.CreateDirectory(path);
-        Directory.CreateDirectory(Path.Combine(path, "Saved Clips"));
+        LibraryLayout.EnsureRoots(path);
         await ViewModel.LoadLibraryFolderAsync(path);
     }
 
@@ -239,26 +239,6 @@ public sealed partial class MainWindow : Window
         if (folder?.Path.LocalPath is { Length: > 0 } path)
         {
             await ViewModel!.LoadLibraryFolderAsync(path);
-        }
-    }
-
-    private async void FullSessionRecordingFolderButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = "Select full session recording folder",
-            AllowMultiple = false
-        });
-
-        var folder = folders.FirstOrDefault();
-        if (folder?.Path.LocalPath is { Length: > 0 } path && ViewModel is not null)
-        {
-            // Always land in a "Full Sessions" subfolder of whatever the user picks,
-            // instead of dumping full-session files directly into a shared folder.
-            var subfolder = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-            ViewModel.FullSessionRecordingFolder = string.Equals(subfolder, "Full Sessions", StringComparison.OrdinalIgnoreCase)
-                ? path
-                : Path.Combine(path, "Full Sessions");
         }
     }
 
@@ -423,6 +403,8 @@ public sealed partial class MainWindow : Window
                     await EnsureLibraryFolderAsync();
                     outputFolder = ViewModel.Settings.LibraryFolder;
                 }
+                LibraryLayout.EnsureRoots(outputFolder);
+                outputFolder = LibraryLayout.ClipsRoot(outputFolder);
 
                 AppLog.Info(isAutoClip ? $"Auto-clip triggered: {autoClipLabel}." : "Replay clip save requested.");
 
@@ -437,7 +419,7 @@ public sealed partial class MainWindow : Window
                 // "3K - Mirage" -> event type "3K", map dropped - the game name
                 // (not the map) is what belongs next to it as the game label.
                 var autoClipEventType = autoClipLabel?.Split(" - ", 2)[0];
-                ClipInfoSidecar.Save(outputPath, new ClipInfo(
+                ClipInfoSidecar.Save(ViewModel.Settings.LibraryFolder, outputPath, new ClipInfo(
                     ViewModel.ActiveGameDetection.DisplayName,
                     autoClipEventType,
                     autoClipLabel ?? ViewModel.ActiveGameDetection.DisplayName,
@@ -573,9 +555,8 @@ public sealed partial class MainWindow : Window
         await ViewModel.LoadLibraryFolderAsync(path);
     }
 
-    // First run: EVE gets a Videos\EVE folder with no prompt, so clips just start
-    // landing somewhere sane instead of blocking recording behind a folder picker.
-    // "Saved Clips" underneath is the default export destination.
+    // First run: EVE gets a Videos\EVE folder with the standard Clips/VODs
+    // layout, so recording never blocks behind a folder picker.
     private static string DefaultLibraryFolder() => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.MyVideos),
         "EVE");
@@ -1716,18 +1697,13 @@ public sealed partial class MainWindow : Window
     // wasn't foreground for part of the recording (see class summary there).
     // Missing sidecar (Legacy/OBS backend clips, or no pauses occurred) just
     // means no badge ever shows - not an error.
-    private static List<(double StartSeconds, double EndSeconds)> LoadPausedRanges(string videoPath)
+    private List<(double StartSeconds, double EndSeconds)> LoadPausedRanges(string videoPath)
     {
-        var directory = Path.GetDirectoryName(videoPath) ?? string.Empty;
-        var fileName = Path.GetFileName(videoPath) + ".paused.json";
-        // Clips saved now write this into a "Clip Info" subfolder instead of
-        // directly alongside the video - the plain adjacent path is still
-        // checked as a fallback so clips saved before that change (or a
-        // clip's own sidecar not yet moved) still show the badge.
-        var sidecarPath = Path.Combine(directory, "Clip Info", fileName);
+        var sidecarPath = ViewModel is null ? string.Empty : LibraryLayout.SidecarPath(ViewModel.Settings.LibraryFolder, videoPath, ".paused.json");
         if (!File.Exists(sidecarPath))
         {
-            sidecarPath = Path.Combine(directory, fileName);
+            sidecarPath = LibraryLayout.LegacySidecarPath(videoPath, ".paused.json");
+            if (!File.Exists(sidecarPath)) sidecarPath = LibraryLayout.LegacyAdjacentPausedPath(videoPath);
             if (!File.Exists(sidecarPath)) return new();
         }
 

@@ -30,13 +30,16 @@ public static class MedalImportService
         long length;
         try { length = new FileInfo(record.VideoPath).Length; }
         catch { length = -1; }
-        return GetImportKey(record.GameFolderName, record.CreatedAtUtc, length);
+        return GetImportKey(record.CreatedAtUtc, length);
     }
 
-    public static string GetImportKey(string gameFolderName, DateTime createdAtUtc, long length)
+    public static string GetImportKey(DateTime createdAtUtc, long length)
     {
-        return $"{NormalizeForComparison(gameFolderName)}|{createdAtUtc.ToUniversalTime().Ticks}|{length}";
+        return $"v2|{createdAtUtc.ToUniversalTime().Ticks}|{length}";
     }
+
+    public static string GetLegacyImportKey(string gameFolderName, DateTime createdAtUtc, long length) =>
+        $"{NormalizeForComparison(gameFolderName)}|{createdAtUtc.ToUniversalTime().Ticks}|{length}";
 
     public static IReadOnlyList<MedalClipRecord> ScanForClips()
     {
@@ -97,18 +100,19 @@ public static class MedalImportService
             if (!videoExtensions.Contains(Path.GetExtension(videoPath), StringComparer.OrdinalIgnoreCase)) continue;
             if (!seenPaths.Add(videoPath)) continue;
 
-            var gameFolder = Path.GetFileName(Path.GetDirectoryName(videoPath)) ?? "Medal";
+            var gameFolder = Path.GetFileName(Path.GetDirectoryName(videoPath)) ?? "Unknown Game";
             var fileStem = Path.GetFileNameWithoutExtension(videoPath);
 
             DateTime createdAtUtc;
             string? title;
-            if (TryParseRawFilenameTimestamp(fileStem, out var embeddedLocalTimestamp))
+            if (TryResolveGameFromFileName(fileStem, out var inferredGame, out var embeddedLocalTimestamp))
             {
                 // The embedded timestamp is the real recording moment Medal itself
                 // encoded - more trustworthy than the file's own Windows metadata,
                 // which can drift if the file was ever copied or moved.
                 createdAtUtc = DateTime.SpecifyKind(embeddedLocalTimestamp, DateTimeKind.Local).ToUniversalTime();
-                title = IsRawFilenameJustGameAndTimestamp(fileStem, gameFolder) ? gameFolder : null;
+                gameFolder = inferredGame;
+                title = inferredGame;
             }
             else
             {
@@ -118,6 +122,7 @@ public static class MedalImportService
                 try { createdAtUtc = File.GetCreationTimeUtc(videoPath); }
                 catch { createdAtUtc = DateTime.UtcNow; }
                 title = TryParseTrimTitle(fileStem, gameFolder);
+                if (IsStructuralFolderName(gameFolder)) gameFolder = "Unknown Game";
             }
 
             results.Add(new MedalClipRecord(videoPath, null, gameFolder, createdAtUtc, title));
@@ -149,20 +154,49 @@ public static class MedalImportService
     // timestamp which can drift if the file was ever copied/moved) a better
     // source for the clip's date than anything else available in that case.
     private static readonly Regex RawFilenameTimestampPattern = new(
-        @"^MedalTV(?<game>.*?)(?<ts>\d{14})$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        @"MedalTV(?<game>.*?)(?<ts>\d{14})(?:[-_].*)?$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Dictionary<string, string> GameAliases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["beatsaber"] = "Beat Saber",
+        ["rocketleague"] = "Rocket League",
+        ["vrchat"] = "VR Chat",
+        ["amongus"] = "Among Us",
+        ["splitgatearenawarfare"] = "Splitgate: Arena Warfare",
+        ["uno"] = "UNO"
+    };
+
+    public static bool TryResolveGameFromFileName(string fileNameWithoutExtension, out string gameDisplayName, out DateTime localTimestamp)
+    {
+        var match = RawFilenameTimestampPattern.Match(fileNameWithoutExtension);
+        if (match.Success && DateTime.TryParseExact(match.Groups["ts"].Value, "yyyyMMddHHmmss", CultureInfo.InvariantCulture, DateTimeStyles.None, out localTimestamp))
+        {
+            gameDisplayName = ResolveGameDisplayName(match.Groups["game"].Value);
+            return !string.IsNullOrWhiteSpace(gameDisplayName);
+        }
+
+        gameDisplayName = string.Empty;
+        localTimestamp = default;
+        return false;
+    }
+
+    public static bool IsStructuralFolderName(string name) => new[]
+    {
+        "Medal", "Edits", "exports", "render", "editor", "editor-clips", "editor-active-drafts", "Screen Recording", "Video-Editor", "Reels", "Temp", "Thumbnails"
+    }.Contains(name, StringComparer.OrdinalIgnoreCase);
+
+    private static string ResolveGameDisplayName(string compactName)
+    {
+        var normalized = NormalizeForComparison(compactName);
+        if (GameAliases.TryGetValue(normalized, out var alias)) return alias;
+        var known = GameCatalog.BuiltIn.Values.FirstOrDefault(value => NormalizeForComparison(value) == normalized);
+        if (!string.IsNullOrWhiteSpace(known)) return known;
+        return Regex.Replace(compactName, @"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ").Trim();
+    }
 
     internal static bool TryParseRawFilenameTimestamp(string fileNameWithoutExtension, out DateTime localTimestamp)
     {
-        var match = RawFilenameTimestampPattern.Match(fileNameWithoutExtension);
-        if (match.Success && DateTime.TryParseExact(
-                match.Groups["ts"].Value, "yyyyMMddHHmmss",
-                CultureInfo.InvariantCulture, DateTimeStyles.None, out localTimestamp))
-        {
-            return true;
-        }
-
-        localTimestamp = default;
-        return false;
+        return TryResolveGameFromFileName(fileNameWithoutExtension, out _, out localTimestamp);
     }
 
     // Only safe to swap in the plain game-folder name when the filename's
@@ -229,14 +263,15 @@ public static class MedalImportService
             var createdAtUtc = createdAtUnix > 0 ? DateTimeOffset.FromUnixTimeSeconds(createdAtUnix).UtcDateTime : File.GetCreationTimeUtc(videoPath);
             var metadata = reader.IsDBNull(3) ? null : (byte[])reader.GetValue(3);
             var title = metadata is null ? null : TryExtractTitle(metadata);
-            var gameFolder = Path.GetFileName(Path.GetDirectoryName(videoPath)) ?? "Medal";
+            var gameFolder = Path.GetFileName(Path.GetDirectoryName(videoPath)) ?? "Unknown Game";
+            var fileStem = Path.GetFileNameWithoutExtension(videoPath);
+            if (TryResolveGameFromFileName(fileStem, out var inferredGame, out _)) gameFolder = inferredGame;
 
             // No usable DB title (metadata missing or didn't decode) - falling
             // through to the raw filename stem would otherwise surface Medal's
             // own "MedalTV<Game><timestamp>" export name verbatim.
             if (title is null)
             {
-                var fileStem = Path.GetFileNameWithoutExtension(videoPath);
                 title = IsRawFilenameJustGameAndTimestamp(fileStem, gameFolder) ? gameFolder : TryParseTrimTitle(fileStem, gameFolder);
             }
 

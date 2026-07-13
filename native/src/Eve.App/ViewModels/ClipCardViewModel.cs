@@ -11,17 +11,19 @@ public sealed class ClipCardViewModel : ViewModelBase
     private bool _isSelected;
     private bool _isHovered;
     private MediaFileInfo _media;
+    private readonly string _libraryRoot;
     private string _previewImagePath;
     private Bitmap? _previewImage;
     private ClipInfo? _clipInfo;
     private ClipEditSettings? _clipEdit;
 
-    public ClipCardViewModel(MediaFileInfo media)
+    public ClipCardViewModel(MediaFileInfo media, string libraryRoot)
     {
         _media = media;
+        _libraryRoot = libraryRoot;
         _previewImagePath = media.ThumbnailPath;
-        _clipInfo = ClipInfoSidecar.Load(media.Path);
-        _clipEdit = ClipEditSidecar.Load(media.Path);
+        _clipInfo = ClipInfoSidecar.Load(_libraryRoot, media.Path);
+        _clipEdit = ClipEditSidecar.Load(_libraryRoot, media.Path);
         SetPreviewImage(_previewImagePath);
     }
 
@@ -254,8 +256,8 @@ public sealed class ClipCardViewModel : ViewModelBase
     public void UpdateMedia(MediaFileInfo media)
     {
         _media = media;
-        _clipInfo = ClipInfoSidecar.Load(media.Path);
-        _clipEdit = ClipEditSidecar.Load(media.Path);
+        _clipInfo = ClipInfoSidecar.Load(_libraryRoot, media.Path);
+        _clipEdit = ClipEditSidecar.Load(_libraryRoot, media.Path);
         PreviewImagePath = media.ThumbnailPath;
         OnPropertyChanged(nameof(Media));
         OnPropertyChanged(nameof(Name));
