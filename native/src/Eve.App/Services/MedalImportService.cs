@@ -92,7 +92,7 @@ public static class MedalImportService
                 // encoded - more trustworthy than the file's own Windows metadata,
                 // which can drift if the file was ever copied or moved.
                 createdAtUtc = DateTime.SpecifyKind(embeddedLocalTimestamp, DateTimeKind.Local).ToUniversalTime();
-                title = gameFolder;
+                title = IsRawFilenameJustGameAndTimestamp(fileStem, gameFolder) ? gameFolder : null;
             }
             else
             {
@@ -133,7 +133,7 @@ public static class MedalImportService
     // timestamp which can drift if the file was ever copied/moved) a better
     // source for the clip's date than anything else available in that case.
     private static readonly Regex RawFilenameTimestampPattern = new(
-        @"^MedalTV.*?(?<ts>\d{14})$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        @"^MedalTV(?<game>.*?)(?<ts>\d{14})$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     internal static bool TryParseRawFilenameTimestamp(string fileNameWithoutExtension, out DateTime localTimestamp)
     {
@@ -148,6 +148,22 @@ public static class MedalImportService
         localTimestamp = default;
         return false;
     }
+
+    // Only safe to swap in the plain game-folder name when the filename's
+    // middle segment IS just the game's own name with the spaces/punctuation
+    // stripped (Medal's default, uninformative export name). If it's anything
+    // else - e.g. a highlight-style label - that's actual signal (matches
+    // EVE's own auto-clip titles like "4K - Mirage"), not junk, and must be
+    // left alone rather than flattened to just the game name.
+    internal static bool IsRawFilenameJustGameAndTimestamp(string fileNameWithoutExtension, string gameFolder)
+    {
+        var match = RawFilenameTimestampPattern.Match(fileNameWithoutExtension);
+        if (!match.Success) return false;
+        return NormalizeForComparison(match.Groups["game"].Value) == NormalizeForComparison(gameFolder);
+    }
+
+    private static string NormalizeForComparison(string value) =>
+        new string(value.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
 
     // Medal itself sometimes catalogs the same clip twice under different video_path
     // entries (reported duplicate-clip bug) - path-string dedupe above won't catch
@@ -205,7 +221,7 @@ public static class MedalImportService
             if (title is null)
             {
                 var fileStem = Path.GetFileNameWithoutExtension(videoPath);
-                title = TryParseRawFilenameTimestamp(fileStem, out _) ? gameFolder : TryParseTrimTitle(fileStem, gameFolder);
+                title = IsRawFilenameJustGameAndTimestamp(fileStem, gameFolder) ? gameFolder : TryParseTrimTitle(fileStem, gameFolder);
             }
 
             results.Add(new MedalClipRecord(videoPath, thumbnailPath, gameFolder, createdAtUtc, title));
