@@ -5,9 +5,13 @@ using System.Runtime.Versioning;
 using System.Text.Json;
 using SharpGen.Runtime;
 using Vortice.Direct3D;
+using Vortice.Direct3D11;
 using Vortice.DXGI;
 using ID3D11Device = Vortice.Direct3D11.ID3D11Device;
 using ID3D11Texture2D = Vortice.Direct3D11.ID3D11Texture2D;
+using ID3D11VideoDevice = Vortice.Direct3D11.ID3D11VideoDevice;
+using ID3D11VideoContext = Vortice.Direct3D11.ID3D11VideoContext;
+using ResultCode = Vortice.DXGI.ResultCode;
 using MapFlags = Vortice.Direct3D11.MapFlags;
 using CpuAccessFlags = Vortice.Direct3D11.CpuAccessFlags;
 using BindFlags = Vortice.Direct3D11.BindFlags;
@@ -19,7 +23,7 @@ using DeviceCreationFlags = Vortice.Direct3D11.DeviceCreationFlags;
 
 namespace Eve.App.Services;
 
-// Native capture engine: direct h264_nvenc encode via libavcodec
+// Native capture engine: direct h264_nvenc/amf/libx264 encode via libavcodec
 // (FFmpeg.AutoGen P/Invoke) and a true in-memory packet ring buffer - replacing
 // WindowsReplayBuffer's stop/start ScreenRecorderLib segment rotation (and the
 // real-time gap that model has at every rotation boundary) with an encoder that
@@ -220,6 +224,20 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         ID3D11Device? device = null;
         ID3D11Texture2D? staging = null;
         IDXGIOutputDuplication? duplication = null;
+        // GPU-side downscale path (see TrySetupGpuScale) - only actually used
+        // when useGpuScale ends up true; `staging`/swsContext above always
+        // still get created too so there's a guaranteed-working fallback if
+        // GPU scale setup fails on this hardware/driver.
+        ID3D11VideoDevice? videoDevice = null;
+        ID3D11VideoContext? videoContext = null;
+        ID3D11VideoProcessorEnumerator? vpEnumerator = null;
+        ID3D11VideoProcessor? videoProcessor = null;
+        ID3D11Texture2D? croppedTexture = null;
+        ID3D11Texture2D? nv12Output = null;
+        ID3D11Texture2D? nv12Staging = null;
+        ID3D11VideoProcessorOutputView? outputView = null;
+        ID3D11VideoProcessorInputView? inputView = null;
+        var useGpuScale = false;
         AVCodecContext* codecContext = null;
         SwsContext* swsContext = null;
         AVFrame* frame = null;
@@ -249,6 +267,29 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             _outputHeight = outputHeight;
 
             staging = CreateStagingTexture(device, captureWidth, captureHeight);
+
+            // Copying+CPU-scaling the full captured crop (often the game's
+            // native 4K render size) down to the output resolution every
+            // frame measured ~17-18ms/frame by itself - most of a 60fps
+            // frame budget - and is what's actually capping fps now that
+            // Desktop Duplication itself isn't the bottleneck anymore.
+            // Scaling on the GPU instead means only the already-small output
+            // resolution ever gets read back to the CPU. Best-effort: if
+            // this hardware/driver doesn't support it, useGpuScale stays
+            // false and the CPU sws_scale path above still works normally.
+            try
+            {
+                (videoDevice, videoContext, vpEnumerator, videoProcessor, nv12Output, nv12Staging, outputView) =
+                    CreateGpuScaler(device, captureWidth, captureHeight, outputWidth, outputHeight, config.FrameRate);
+                (croppedTexture, inputView) = CreateGpuCropInputView(device, videoDevice, vpEnumerator, captureWidth, captureHeight);
+                useGpuScale = true;
+                AppLog.Info("Native capture: GPU downscale (D3D11 Video Processor) available, using it.");
+            }
+            catch (Exception error)
+            {
+                AppLog.Info($"Native capture: GPU downscale unavailable, falling back to CPU scale: {error.Message}");
+                useGpuScale = false;
+            }
 
             codecContext = CreateEncoder(config, outputWidth, outputHeight, out var codecTimeBase);
             _timeBase = codecTimeBase;
@@ -422,6 +463,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                         staging = CreateStagingTexture(device, captureWidth, captureHeight);
                         ffmpeg.sws_freeContext(swsContext);
                         swsContext = CreateScaler(captureWidth, captureHeight, outputWidth, outputHeight);
+
+                        if (useGpuScale)
+                        {
+                            inputView!.Dispose();
+                            croppedTexture!.Dispose();
+                            (croppedTexture, inputView) = CreateGpuCropInputView(device, videoDevice!, vpEnumerator!, captureWidth, captureHeight);
+                        }
                     }
 
                     if (stopwatch.Elapsed - lastEncodedAt < targetFrameInterval) continue;
@@ -431,30 +479,67 @@ public sealed class NativeReplayBuffer : IReplayBuffer
 
                     if (!occluded)
                     {
+                        // NVENC's actual encode runs asynchronously - avcodec_send_frame
+                        // can return before the encoder has finished reading a PREVIOUS
+                        // submission of this same reused AVFrame's buffer. Without this,
+                        // overwriting frame->data here for the next real frame could race
+                        // the encoder still reading the last one, corrupting whatever it
+                        // was mid-read on (observed as the frozen/occluded frame coming
+                        // out black instead of the real last frame). Only actually makes
+                        // a copy if something else still references the old buffer.
                         ffmpeg.av_frame_make_writable(frame);
 
-                        stageStopwatch.Restart();
-                        using (var desktopTexture = desktopResource!.QueryInterface<ID3D11Texture2D>())
+                        if (useGpuScale)
                         {
-                            var box = new Vortice.Mathematics.Box(cropLeft, cropTop, 0, cropLeft + captureWidth, cropTop + captureHeight, 1);
-                            device.ImmediateContext.CopySubresourceRegion(staging, 0, 0, 0, 0, desktopTexture, 0, box);
-                        }
+                            stageStopwatch.Restart();
+                            using (var desktopTexture = desktopResource!.QueryInterface<ID3D11Texture2D>())
+                            {
+                                var box = new Vortice.Mathematics.Box(cropLeft, cropTop, 0, cropLeft + captureWidth, cropTop + captureHeight, 1);
+                                device.ImmediateContext.CopySubresourceRegion(croppedTexture, 0, 0, 0, 0, desktopTexture, 0, box);
+                            }
 
-                        var mapped = device.ImmediateContext.Map(staging, 0, MapMode.Read, MapFlags.None);
-                        copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
+                            var stream = new VideoProcessorStream { Enable = true, InputSurface = inputView };
+                            videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, new[] { stream });
+                            device.ImmediateContext.CopyResource(nv12Staging, nv12Output);
+                            copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
 
-                        stageStopwatch.Restart();
-                        try
-                        {
-                            var srcData = new byte*[1] { (byte*)mapped.DataPointer };
-                            var srcStride = new int[1] { (int)mapped.RowPitch };
-                            ffmpeg.sws_scale(swsContext, srcData, srcStride, 0, captureHeight, frame->data, frame->linesize);
+                            stageStopwatch.Restart();
+                            var mapped = device.ImmediateContext.Map(nv12Staging!, 0, MapMode.Read, MapFlags.None);
+                            try
+                            {
+                                CopyNv12PlanesToFrame(mapped, outputWidth, outputHeight, frame);
+                            }
+                            finally
+                            {
+                                device.ImmediateContext.Unmap(nv12Staging, 0);
+                            }
+                            scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
                         }
-                        finally
+                        else
                         {
-                            device.ImmediateContext.Unmap(staging, 0);
+                            stageStopwatch.Restart();
+                            using (var desktopTexture = desktopResource!.QueryInterface<ID3D11Texture2D>())
+                            {
+                                var box = new Vortice.Mathematics.Box(cropLeft, cropTop, 0, cropLeft + captureWidth, cropTop + captureHeight, 1);
+                                device.ImmediateContext.CopySubresourceRegion(staging, 0, 0, 0, 0, desktopTexture, 0, box);
+                            }
+
+                            var mapped = device.ImmediateContext.Map(staging, 0, MapMode.Read, MapFlags.None);
+                            copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
+
+                            stageStopwatch.Restart();
+                            try
+                            {
+                                var srcData = new byte*[1] { (byte*)mapped.DataPointer };
+                                var srcStride = new int[1] { (int)mapped.RowPitch };
+                                ffmpeg.sws_scale(swsContext, srcData, srcStride, 0, captureHeight, frame->data, frame->linesize);
+                            }
+                            finally
+                            {
+                                device.ImmediateContext.Unmap(staging, 0);
+                            }
+                            scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
                         }
-                        scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
                     }
                     // else: occluded - frame->data still holds the last successfully
                     // scaled content, re-encoded unchanged below (visual freeze).
@@ -518,6 +603,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             if (codecContext is not null) { var c = codecContext; ffmpeg.avcodec_free_context(&c); }
             duplication?.Dispose();
             staging?.Dispose();
+            inputView?.Dispose();
+            croppedTexture?.Dispose();
+            outputView?.Dispose();
+            nv12Staging?.Dispose();
+            nv12Output?.Dispose();
+            videoProcessor?.Dispose();
+            vpEnumerator?.Dispose();
+            videoContext?.Dispose();
+            videoDevice?.Dispose();
             device?.Dispose();
             if (timerResolutionRaised) TimeEndPeriod(1);
         }
@@ -557,6 +651,160 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             CPUAccessFlags = CpuAccessFlags.Read,
             BindFlags = BindFlags.None
         });
+    }
+
+    // Sets up the D3D11 Video Processor to do the crop->NV12-downscale that
+    // sws_scale otherwise does on the CPU, entirely on the GPU. Only the
+    // final small output-resolution NV12 texture ever gets read back to the
+    // CPU afterward (via nv12Staging), instead of the full captured crop
+    // (often 4K) every single frame. Throws on any failure - caller treats
+    // that as "not supported on this hardware/driver" and falls back to CPU
+    // scale, so nothing here needs to be defensive beyond that.
+    private static (ID3D11VideoDevice VideoDevice, ID3D11VideoContext VideoContext, ID3D11VideoProcessorEnumerator Enumerator, ID3D11VideoProcessor Processor, ID3D11Texture2D Nv12Output, ID3D11Texture2D Nv12Staging, ID3D11VideoProcessorOutputView OutputView)
+        CreateGpuScaler(ID3D11Device device, int captureWidth, int captureHeight, int outputWidth, int outputHeight, int frameRate)
+    {
+        var videoDevice = device.QueryInterface<ID3D11VideoDevice>();
+        var videoContext = device.ImmediateContext.QueryInterface<ID3D11VideoContext>();
+
+        var contentDescription = new VideoProcessorContentDescription
+        {
+            InputFrameFormat = VideoFrameFormat.Progressive,
+            InputWidth = (uint)captureWidth,
+            InputHeight = (uint)captureHeight,
+            OutputWidth = (uint)outputWidth,
+            OutputHeight = (uint)outputHeight,
+            InputFrameRate = new Rational((uint)Math.Clamp(frameRate, 15, 240), 1),
+            OutputFrameRate = new Rational((uint)Math.Clamp(frameRate, 15, 240), 1),
+            Usage = VideoUsage.PlaybackNormal
+        };
+        ID3D11VideoProcessorEnumerator enumerator;
+        try
+        {
+            enumerator = videoDevice.CreateVideoProcessorEnumerator(contentDescription);
+        }
+        catch (Exception error)
+        {
+            throw new InvalidOperationException($"CreateVideoProcessorEnumerator failed: {error.Message}", error);
+        }
+
+        ID3D11VideoProcessor processor;
+        try
+        {
+            processor = videoDevice.CreateVideoProcessor(enumerator, 0);
+        }
+        catch (Exception error)
+        {
+            throw new InvalidOperationException($"CreateVideoProcessor failed: {error.Message}", error);
+        }
+
+        // Many D3D11 video processing samples create the VP output resource
+        // with BindFlags.RenderTarget even though nothing ever binds it as
+        // one - some drivers reject CreateVideoProcessorOutputView with
+        // E_INVALIDARG on a plain BindFlags.None Default texture otherwise.
+        ID3D11Texture2D nv12Output;
+        try
+        {
+            nv12Output = device.CreateTexture2D(new Texture2DDescription
+            {
+                Width = (uint)outputWidth,
+                Height = (uint)outputHeight,
+                MipLevels = 1,
+                ArraySize = 1,
+                Format = Format.NV12,
+                SampleDescription = new SampleDescription(1, 0),
+                Usage = ResourceUsage.Default,
+                CPUAccessFlags = CpuAccessFlags.None,
+                BindFlags = BindFlags.RenderTarget
+            });
+        }
+        catch (Exception error)
+        {
+            throw new InvalidOperationException($"CreateTexture2D (nv12Output) failed: {error.Message}", error);
+        }
+
+        ID3D11VideoProcessorOutputView outputView;
+        try
+        {
+            outputView = videoDevice.CreateVideoProcessorOutputView(nv12Output, enumerator, new VideoProcessorOutputViewDescription
+            {
+                ViewDimension = VideoProcessorOutputViewDimension.Texture2D
+            });
+        }
+        catch (Exception error)
+        {
+            throw new InvalidOperationException($"CreateVideoProcessorOutputView failed: {error.Message}", error);
+        }
+
+        var nv12Staging = device.CreateTexture2D(new Texture2DDescription
+        {
+            Width = (uint)outputWidth,
+            Height = (uint)outputHeight,
+            MipLevels = 1,
+            ArraySize = 1,
+            Format = Format.NV12,
+            SampleDescription = new SampleDescription(1, 0),
+            Usage = ResourceUsage.Staging,
+            CPUAccessFlags = CpuAccessFlags.Read,
+            BindFlags = BindFlags.None
+        });
+
+        return (videoDevice, videoContext, enumerator, processor, nv12Output, nv12Staging, outputView);
+    }
+
+    // The crop-sized GPU-only source texture the Video Processor reads from,
+    // and its input view - rebuilt whenever the crop size changes (window
+    // resize), same as the CPU path's staging texture/swsContext.
+    private static (ID3D11Texture2D CroppedTexture, ID3D11VideoProcessorInputView InputView) CreateGpuCropInputView(
+        ID3D11Device device, ID3D11VideoDevice videoDevice, ID3D11VideoProcessorEnumerator enumerator, int width, int height)
+    {
+        var croppedTexture = device.CreateTexture2D(new Texture2DDescription
+        {
+            Width = (uint)Math.Max(1, width),
+            Height = (uint)Math.Max(1, height),
+            MipLevels = 1,
+            ArraySize = 1,
+            Format = Format.B8G8R8A8_UNorm,
+            SampleDescription = new SampleDescription(1, 0),
+            Usage = ResourceUsage.Default,
+            CPUAccessFlags = CpuAccessFlags.None,
+            BindFlags = BindFlags.None
+        });
+
+        var inputView = videoDevice.CreateVideoProcessorInputView(croppedTexture, enumerator, new VideoProcessorInputViewDescription
+        {
+            FourCC = 0,
+            ViewDimension = VideoProcessorInputViewDimension.Texture2D,
+            Texture2D = new Texture2DVideoProcessorInputView { MipSlice = 0, ArraySlice = 0 }
+        });
+
+        return (croppedTexture, inputView);
+    }
+
+    // D3D11's NV12 textures map as a single contiguous surface: the luma (Y)
+    // plane's rows first, then the chroma (interleaved UV) plane's rows
+    // immediately after, both using the SAME row pitch - not two separate
+    // Map calls. Copied per-row since the D3D11 stride (mapped.RowPitch) and
+    // ffmpeg's own allocated stride (frame->linesize) are aligned
+    // differently and can't just be bulk-memcpy'd as one block.
+    private static unsafe void CopyNv12PlanesToFrame(MappedSubresource mapped, int width, int height, AVFrame* frame)
+    {
+        var srcStride = (int)mapped.RowPitch;
+        var ySrc = (byte*)mapped.DataPointer;
+        var yDst = frame->data[0];
+        var yDstStride = frame->linesize[0];
+        for (var row = 0; row < height; row++)
+        {
+            Buffer.MemoryCopy(ySrc + row * srcStride, yDst + row * yDstStride, yDstStride, width);
+        }
+
+        var uvHeight = (height + 1) / 2;
+        var uvSrc = ySrc + srcStride * height;
+        var uvDst = frame->data[1];
+        var uvDstStride = frame->linesize[1];
+        for (var row = 0; row < uvHeight; row++)
+        {
+            Buffer.MemoryCopy(uvSrc + row * srcStride, uvDst + row * uvDstStride, uvDstStride, width);
+        }
     }
 
     // Finds the DXGI output covering whichever monitor the target window (or the
