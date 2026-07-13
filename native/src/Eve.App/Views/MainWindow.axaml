@@ -939,28 +939,7 @@
     <Grid Grid.Row="1" RowDefinitions="*,320" IsVisible="{Binding IsEditorVisible}">
       <Grid Background="#0E141A" ColumnDefinitions="*,300">
         <Border Background="#05080B">
-          <Grid>
-            <vlc:VideoView x:Name="EditorVideoView" />
-            <!-- LibVLCSharp's VideoView renders via a native (non-Avalonia) hwnd
-                 surface on Windows, which always paints above sibling
-                 Avalonia-rendered visuals regardless of XAML z-order - a plain
-                 Border here would never actually be visible over the video. A
-                 Popup is its own top-level OS window, so it layers above the
-                 video surface instead. -->
-            <Popup PlacementTarget="EditorVideoView"
-                   Placement="Center"
-                   IsOpen="{Binding ShowRecordingPausedBadge}"
-                   IsLightDismissEnabled="False"
-                   Focusable="False">
-              <Border Padding="16,10" Background="#B3000000" CornerRadius="10" IsHitTestVisible="False">
-                <TextBlock Text="Recording Paused" Foreground="#FFFFFF" FontSize="20" FontWeight="Bold" Opacity="0.92">
-                  <TextBlock.Effect>
-                    <DropShadowEffect Color="#000000" BlurRadius="10" OffsetX="0" OffsetY="0" Opacity="0.6" />
-                  </TextBlock.Effect>
-                </TextBlock>
-              </Border>
-            </Popup>
-          </Grid>
+          <vlc:VideoView x:Name="EditorVideoView" />
         </Border>
         <Border Grid.Column="1" Background="#101820" BorderBrush="#1F2B34" BorderThickness="1,0,0,0">
           <StackPanel Margin="20" Spacing="14">

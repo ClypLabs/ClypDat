@@ -2,6 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
+using Avalonia.Media;
 using Avalonia;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
@@ -37,6 +38,7 @@ public sealed partial class MainWindow : Window
     private readonly SemaphoreSlim _clipSaveLock = new(1, 1);
     private bool _updateDialogOpen;
     private List<(double StartSeconds, double EndSeconds)> _pausedRanges = new();
+    private Window? _recordingPausedOverlay;
     public MainWindow()
     {
         InitializeComponent();
@@ -84,6 +86,7 @@ public sealed partial class MainWindow : Window
             if (_replayBuffer is not null) _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
             _replayBuffer?.Dispose();
             _playback?.Dispose();
+            _recordingPausedOverlay?.Close();
             ViewModel?.Dispose();
         };
         AddHandler(PointerPressedEvent, VolumeSlider_OnPointerPressedAny, RoutingStrategies.Tunnel, true);
@@ -1618,9 +1621,11 @@ public sealed partial class MainWindow : Window
         // editor open instead of being torn down and rebuilt from scratch.
         _playback?.Stop();
         EditorVideoView.MediaPlayer = null;
+        _recordingPausedOverlay?.Hide();
         if (ViewModel is not null)
         {
             ViewModel.IsPlaying = false;
+            ViewModel.IsRecordingPausedAtCurrentTime = false;
         }
     }
 
@@ -1663,6 +1668,65 @@ public sealed partial class MainWindow : Window
 
     private sealed record PausedRangeEntry(double start, double end);
 
+    // A plain in-tree Border never actually rendered over the video because
+    // LibVLCSharp's VideoView is backed by a native (non-Avalonia) hwnd
+    // surface on Windows, which always paints above sibling Avalonia visuals
+    // regardless of XAML z-order. A bare Avalonia Popup does get promoted to
+    // a real top-level OS window to get above that surface, but Avalonia's
+    // popup windows go always-on-top globally (visible over every other app,
+    // and even while EVE itself is minimized) instead of being scoped to
+    // EVE. An owned Window (Owner = this, no Topmost) gets normal Win32
+    // owned-window z-order behavior instead: always directly above its
+    // owner, hidden/minimized together with it, never floating above
+    // unrelated other windows.
+    private Window EnsureRecordingPausedOverlay()
+    {
+        if (_recordingPausedOverlay is not null) return _recordingPausedOverlay;
+
+        var overlay = new Window
+        {
+            SystemDecorations = SystemDecorations.None,
+            ShowInTaskbar = false,
+            CanResize = false,
+            ShowActivated = false,
+            Topmost = false,
+            Background = Brushes.Transparent,
+            TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
+            Content = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(0xB3, 0, 0, 0)),
+                Child = new TextBlock
+                {
+                    Text = "Recording Paused",
+                    Foreground = Brushes.White,
+                    FontSize = 28,
+                    FontWeight = FontWeight.Bold,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                }
+            }
+        };
+        _recordingPausedOverlay = overlay;
+        return overlay;
+    }
+
+    private void UpdateRecordingPausedOverlay(bool shouldShow)
+    {
+        if (!shouldShow)
+        {
+            _recordingPausedOverlay?.Hide();
+            return;
+        }
+
+        var overlay = EnsureRecordingPausedOverlay();
+        var topLeft = EditorVideoView.PointToScreen(new Point(0, 0));
+        var bottomRight = EditorVideoView.PointToScreen(new Point(EditorVideoView.Bounds.Width, EditorVideoView.Bounds.Height));
+        overlay.Position = topLeft;
+        overlay.Width = Math.Max(1, (bottomRight.X - topLeft.X) / overlay.RenderScaling);
+        overlay.Height = Math.Max(1, (bottomRight.Y - topLeft.Y) / overlay.RenderScaling);
+        if (!overlay.IsVisible) overlay.Show(this);
+    }
+
     private void SyncPlaybackPosition()
     {
         if (ViewModel is null || _playback is null) return;
@@ -1687,6 +1751,7 @@ public sealed partial class MainWindow : Window
             var currentSeconds = ViewModel.CurrentTime.TotalSeconds;
             ViewModel.IsRecordingPausedAtCurrentTime = _pausedRanges.Any(r => currentSeconds >= r.StartSeconds && currentSeconds < r.EndSeconds);
         }
+        UpdateRecordingPausedOverlay(ViewModel.ShowRecordingPausedBadge);
         if (ViewModel.TrimEnd > TimeSpan.Zero && ViewModel.CurrentTime >= ViewModel.TrimEnd)
         {
             _playback.Pause();
