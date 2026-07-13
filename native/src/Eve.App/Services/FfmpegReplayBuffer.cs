@@ -140,7 +140,9 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         var concatPath = Path.Combine(_bufferFolder, $"concat_{Guid.NewGuid():N}.txt");
         var tempVideoPath = Path.Combine(_bufferFolder, $"replay_video_{Guid.NewGuid():N}.mkv");
         var clipName = string.IsNullOrWhiteSpace(titleOverride) ? config?.GameDisplayName ?? string.Empty : titleOverride;
-        var outputPath = Path.Combine(outputFolder, ClipFileNaming.BuildFileName(clipName, DateTime.Now, "mkv"));
+        var gameFolder = Path.Combine(outputFolder, ClipFileNaming.BuildBaseName(config?.GameDisplayName ?? string.Empty));
+        Directory.CreateDirectory(gameFolder);
+        var outputPath = Path.Combine(gameFolder, ClipFileNaming.BuildFileName(clipName, DateTime.Now, "mkv"));
         await File.WriteAllLinesAsync(
             concatPath,
             files.Select(file => $"file '{EscapeConcatPath(file.FullName)}'"),

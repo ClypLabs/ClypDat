@@ -118,6 +118,27 @@ public sealed class ObsReplayBuffer : IReplayBuffer
         AppLog.Info($"OBS replay saved: {output}.");
         output = await ClipMetadataTagger.TagCaptureBackendAsync(output, "OBS", cancellationToken);
         if (!string.IsNullOrWhiteSpace(titleOverride)) output = ApplyTitleOverride(output, titleOverride);
+
+        // OBS itself picks the exact save path/filename, so the per-game
+        // subfolder can only be applied as a move afterward, not up front like
+        // the other backends.
+        var config = _configProvider();
+        if (!string.IsNullOrWhiteSpace(config.GameDisplayName))
+        {
+            try
+            {
+                var gameFolder = Path.Combine(outputFolder, ClipFileNaming.BuildBaseName(config.GameDisplayName));
+                Directory.CreateDirectory(gameFolder);
+                var relocated = Path.Combine(gameFolder, Path.GetFileName(output));
+                File.Move(output, relocated);
+                output = relocated;
+            }
+            catch (Exception error)
+            {
+                AppLog.Error($"OBS replay: failed moving into per-game folder, leaving at {output}.", error);
+            }
+        }
+
         return output;
     }
 

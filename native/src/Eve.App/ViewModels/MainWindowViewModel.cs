@@ -1157,6 +1157,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return Task.CompletedTask;
         }
 
+        if (!Settings.ClipsMigratedToGameFolders)
+        {
+            MigrateFlatClipsIntoGameFolders();
+            Settings.ClipsMigratedToGameFolders = true;
+            SaveSettings();
+        }
+
         var clips = _mediaProbe.EnumerateVideos(Settings.LibraryFolder)
             .Select(file => new ClipCardViewModel(_mediaProbe.CreateLibraryStub(file)))
             .ToArray();
@@ -1173,6 +1180,76 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         StartLibraryHydration(clips);
         AppLog.Info($"Library refresh: {clips.Length} clips in {scanClock.ElapsedMilliseconds}ms.");
         return Task.CompletedTask;
+    }
+
+    // One-time reorganization for clips saved before per-game subfolders
+    // existed: only files sitting directly in the library root (Medal imports
+    // and Full Sessions already live in their own subfolders and are left
+    // alone). Reuses ClipCardViewModel's own game-name resolution (auto-clip
+    // sidecar's GameDisplayName, or the filename-parsed name otherwise) so the
+    // destination folder always matches what the game filter dropdown groups
+    // by. Sidecars (edit state, clip info, paused ranges) move along with the
+    // video; a name collision at the destination just leaves that one file
+    // where it was instead of overwriting anything.
+    private void MigrateFlatClipsIntoGameFolders()
+    {
+        var libraryFolder = Settings.LibraryFolder;
+        if (string.IsNullOrWhiteSpace(libraryFolder) || !Directory.Exists(libraryFolder)) return;
+
+        string[] topLevelVideos;
+        try
+        {
+            topLevelVideos = Directory.EnumerateFiles(libraryFolder, "*.*", SearchOption.TopDirectoryOnly)
+                .Where(MediaProbeService.IsVideoFile)
+                .ToArray();
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Clip game-folder migration: failed listing library folder.", error);
+            return;
+        }
+
+        var moved = 0;
+        foreach (var videoPath in topLevelVideos)
+        {
+            try
+            {
+                var card = new ClipCardViewModel(_mediaProbe.CreateLibraryStub(videoPath));
+                var gameFolderName = ClipFileNaming.BuildBaseName(card.GameFilterKey);
+                if (string.IsNullOrWhiteSpace(gameFolderName)) continue;
+
+                var destinationDir = Path.Combine(libraryFolder, gameFolderName);
+                var destinationPath = Path.Combine(destinationDir, Path.GetFileName(videoPath));
+                if (File.Exists(destinationPath)) continue;
+
+                Directory.CreateDirectory(destinationDir);
+                File.Move(videoPath, destinationPath);
+                MoveClipSidecars(videoPath, destinationPath);
+                moved++;
+            }
+            catch (Exception error)
+            {
+                AppLog.Error($"Clip game-folder migration: failed moving {videoPath}", error);
+            }
+        }
+
+        if (moved > 0) AppLog.Info($"Clip game-folder migration: moved {moved} clip(s) into per-game folders.");
+    }
+
+    private static void MoveClipSidecars(string oldVideoPath, string newVideoPath)
+    {
+        var oldInfoDir = Path.Combine(Path.GetDirectoryName(oldVideoPath) ?? string.Empty, "Clip Info");
+        var newInfoDir = Path.Combine(Path.GetDirectoryName(newVideoPath) ?? string.Empty, "Clip Info");
+        var oldFileName = Path.GetFileName(oldVideoPath);
+        foreach (var suffix in new[] { ".eve.json", ".info.json", ".paused.json" })
+        {
+            var oldSidecar = Path.Combine(oldInfoDir, oldFileName + suffix);
+            if (!File.Exists(oldSidecar)) continue;
+            var newSidecar = Path.Combine(newInfoDir, oldFileName + suffix);
+            if (File.Exists(newSidecar)) continue;
+            Directory.CreateDirectory(newInfoDir);
+            File.Move(oldSidecar, newSidecar);
+        }
     }
 
     public async Task AddOrUpdateLibraryClipAsync(string filePath)
