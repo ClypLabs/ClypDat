@@ -36,6 +36,7 @@ public sealed partial class MainWindow : Window
     private bool _replayArmed;
     private readonly SemaphoreSlim _clipSaveLock = new(1, 1);
     private bool _updateDialogOpen;
+    private List<(double StartSeconds, double EndSeconds)> _pausedRanges = new();
     public MainWindow()
     {
         InitializeComponent();
@@ -1545,6 +1546,8 @@ public sealed partial class MainWindow : Window
             var playback = _playback ?? new PlaybackSession();
             playback.LoadVideo(ViewModel.SelectedVideoPath);
             _playback = playback;
+            _pausedRanges = LoadPausedRanges(ViewModel.SelectedVideoPath);
+            ViewModel.IsRecordingPausedAtCurrentTime = false;
             AppLog.Info($"Editor open: {ViewModel.SelectedVideoPath}");
             EditorVideoView.MediaPlayer = playback.VideoPlayer;
             var audioTracks = ViewModel.TimelineTracks
@@ -1636,6 +1639,30 @@ public sealed partial class MainWindow : Window
         return Math.Abs((candidate - known).TotalSeconds) < 5;
     }
 
+    // Reads the ".paused.json" sidecar NativeReplayBuffer writes next to a
+    // clip when it recorded via DXGI Desktop Duplication and the game window
+    // wasn't foreground for part of the recording (see class summary there).
+    // Missing sidecar (Legacy/OBS backend clips, or no pauses occurred) just
+    // means no badge ever shows - not an error.
+    private static List<(double StartSeconds, double EndSeconds)> LoadPausedRanges(string videoPath)
+    {
+        var sidecarPath = videoPath + ".paused.json";
+        if (!File.Exists(sidecarPath)) return new();
+
+        try
+        {
+            var entries = System.Text.Json.JsonSerializer.Deserialize<List<PausedRangeEntry>>(File.ReadAllText(sidecarPath));
+            return entries?.Select(e => (e.start, e.end)).ToList() ?? new();
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Failed to read recording-paused sidecar.", error);
+            return new();
+        }
+    }
+
+    private sealed record PausedRangeEntry(double start, double end);
+
     private void SyncPlaybackPosition()
     {
         if (ViewModel is null || _playback is null) return;
@@ -1655,6 +1682,11 @@ public sealed partial class MainWindow : Window
             _playback.EnsurePausedIfNeeded();
         }
         UpdateTimelineChrome();
+        if (_pausedRanges.Count > 0)
+        {
+            var currentSeconds = ViewModel.CurrentTime.TotalSeconds;
+            ViewModel.IsRecordingPausedAtCurrentTime = _pausedRanges.Any(r => currentSeconds >= r.StartSeconds && currentSeconds < r.EndSeconds);
+        }
         if (ViewModel.TrimEnd > TimeSpan.Zero && ViewModel.CurrentTime >= ViewModel.TrimEnd)
         {
             _playback.Pause();

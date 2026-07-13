@@ -781,9 +781,30 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (Settings.ShowRecordingPausedIndicator == value) return;
             Settings.ShowRecordingPausedIndicator = value;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(ShowRecordingPausedBadge));
             SaveSettings();
         }
     }
+
+    private bool _isRecordingPausedAtCurrentTime;
+
+    // Driven from MainWindow.axaml.cs's SyncPlaybackPosition against the
+    // paused ranges loaded from the current clip's ".paused.json" sidecar
+    // (see NativeReplayBuffer's DXGI Desktop Duplication capture - written
+    // whenever the game window wasn't foreground during recording).
+    public bool IsRecordingPausedAtCurrentTime
+    {
+        get => _isRecordingPausedAtCurrentTime;
+        set
+        {
+            if (_isRecordingPausedAtCurrentTime == value) return;
+            _isRecordingPausedAtCurrentTime = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ShowRecordingPausedBadge));
+        }
+    }
+
+    public bool ShowRecordingPausedBadge => IsRecordingPausedAtCurrentTime && ShowRecordingPausedIndicator;
 
     public AudioDeviceOption? SelectedChatAudioDevice
     {

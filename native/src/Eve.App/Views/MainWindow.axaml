@@ -939,7 +939,22 @@
     <Grid Grid.Row="1" RowDefinitions="*,320" IsVisible="{Binding IsEditorVisible}">
       <Grid Background="#0E141A" ColumnDefinitions="*,300">
         <Border Background="#05080B">
-          <vlc:VideoView x:Name="EditorVideoView" />
+          <Grid>
+            <vlc:VideoView x:Name="EditorVideoView" />
+            <Border HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Padding="16,10"
+                    Background="#B3000000"
+                    CornerRadius="10"
+                    IsHitTestVisible="False"
+                    IsVisible="{Binding ShowRecordingPausedBadge}">
+              <TextBlock Text="Recording Paused" Foreground="#FFFFFF" FontSize="20" FontWeight="Bold" Opacity="0.92">
+                <TextBlock.Effect>
+                  <DropShadowEffect Color="#000000" BlurRadius="10" OffsetX="0" OffsetY="0" Opacity="0.6" />
+                </TextBlock.Effect>
+              </TextBlock>
+            </Border>
+          </Grid>
         </Border>
         <Border Grid.Column="1" Background="#101820" BorderBrush="#1F2B34" BorderThickness="1,0,0,0">
           <StackPanel Margin="20" Spacing="14">
