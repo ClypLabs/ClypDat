@@ -857,7 +857,7 @@
                       <TextBlock Text="Check for updates" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
                       <TextBlock Text="EVE also checks automatically on launch." Foreground="#6B7C8C" FontSize="12" />
                     </StackPanel>
-                    <Button Grid.Column="1" Content="Check Now" Classes="primaryButton" Click="CheckUpdatesButton_OnClick" VerticalAlignment="Center" />
+                    <Button Name="CheckNowButton" Grid.Column="1" Content="Check Now" Classes="primaryButton" Click="CheckUpdatesButton_OnClick" VerticalAlignment="Center" />
                   </Grid>
                 </StackPanel>
               </Border>

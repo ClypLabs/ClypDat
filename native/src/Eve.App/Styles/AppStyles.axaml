@@ -154,13 +154,33 @@
     <Setter Property="Background" Value="{StaticResource AccentBrushHover}" />
   </Style>
   <!--
-    The class-based rule above kept losing again for the Export button
-    specifically despite matching the same selector shape that fixed every
-    OTHER primaryButton - a Name selector is the highest specificity tier
-    Avalonia has, unambiguous regardless of whatever's causing the class-based
-    one to intermittently lose here.
+    Both rules above still lost for Export specifically. Root cause: Fluent's
+    own Button ControlTemplate has its OWN internal pointerover visual state
+    painting a template part from a theme resource, not from the Button's
+    Background property via TemplateBinding - no external Style setting
+    Background, at ANY specificity, can out-compete a template painting
+    something that was never wired to Background in the first place. Giving
+    the button its own minimal template (Border+ContentPresenter, Background
+    via TemplateBinding) removes Fluent's template from the equation
+    entirely, so the plain :pointerover Background setter below actually has
+    something to reach. Same fix applied to Check Now and Update Now, which
+    hit the identical issue.
   -->
-  <Style Selector="Button#ExportButton:pointerover">
+  <Style Selector="Button#ExportButton, Button#CheckNowButton, Button#UpdateNowButton">
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="{TemplateBinding CornerRadius}">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                             HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                             VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <Style Selector="Button#ExportButton:pointerover, Button#CheckNowButton:pointerover, Button#UpdateNowButton:pointerover">
     <Setter Property="Background" Value="{StaticResource AccentBrushHover}" />
   </Style>
   <Style Selector="Button.deleteButton:pointerover">

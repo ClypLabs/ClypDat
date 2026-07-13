@@ -37,6 +37,12 @@ public sealed partial class MainWindow : Window
     private bool _replayArmed;
     private readonly SemaphoreSlim _clipSaveLock = new(1, 1);
     private bool _updateDialogOpen;
+    // Closing the window (the X button) hides to the tray instead of quitting,
+    // so the replay buffer/Full Session keeps recording - matches the tray
+    // icon's own "Open"/"Quit" menu, which otherwise had no way to actually be
+    // reached since the X button always fully exited first. Only the tray's
+    // own Quit item sets this true before closing for real.
+    public bool AllowRealClose { get; set; }
     private List<(double StartSeconds, double EndSeconds)> _pausedRanges = new();
     private Window? _recordingPausedOverlay;
     public MainWindow()
@@ -73,10 +79,16 @@ public sealed partial class MainWindow : Window
         // whatever was last clicked instead of always meaning play/pause.
         // Tunnel fires on the way down to the focused element, winning the race.
         AddHandler(KeyDownEvent, MainWindow_OnKeyDown, RoutingStrategies.Tunnel);
-        Closing += (_, _) =>
+        Closing += (_, e) =>
         {
             SaveWindowBounds();
             ViewModel?.SaveSettings();
+            if (!AllowRealClose)
+            {
+                e.Cancel = true;
+                Hide();
+                ShowInTaskbar = false;
+            }
         };
         Closed += (_, _) =>
         {
@@ -1437,7 +1449,7 @@ public sealed partial class MainWindow : Window
         };
         var progressBar = new ProgressBar { IsVisible = false, Minimum = 0, Maximum = 100, CornerRadius = new Avalonia.CornerRadius(3), Height = 6 };
 
-        var updateButton = new Button { Content = "Update Now", Width = 120, HorizontalContentAlignment = HorizontalAlignment.Center, Classes = { "primaryButton" } };
+        var updateButton = new Button { Name = "UpdateNowButton", Content = "Update Now", Width = 120, HorizontalContentAlignment = HorizontalAlignment.Center, Classes = { "primaryButton" } };
         var laterButton = new Button { Content = "Remind Me Later", Width = 140, HorizontalContentAlignment = HorizontalAlignment.Center };
         var ignoreButton = new Button { Content = "Skip This Version", HorizontalContentAlignment = HorizontalAlignment.Center };
 

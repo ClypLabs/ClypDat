@@ -92,6 +92,7 @@ public sealed partial class App : Application
             quitItem.Click += (_, _) =>
             {
                 _trayIcon?.Dispose();
+                if (_mainWindow is not null) _mainWindow.AllowRealClose = true;
                 if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
                 {
                     desktop.Shutdown();
