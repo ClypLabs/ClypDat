@@ -32,11 +32,9 @@
       </Setter>
       <Style Selector="^:vertical">
         <Setter Property="Width" Value="10" />
-        <Setter Property="Margin" Value="0,6,5,6" />
       </Style>
       <Style Selector="^:horizontal">
         <Setter Property="Height" Value="10" />
-        <Setter Property="Margin" Value="6,0,6,5" />
       </Style>
     </ControlTheme>
   </Styles.Resources>
@@ -59,6 +57,9 @@
     EVE's own dark background family rather than standing out - it's meant to
     be a subtle scroll indicator, not a UI accent.
   -->
+  <Style Selector="ScrollViewer.settingsScroll ScrollBar:vertical">
+    <Setter Property="Margin" Value="0,6,5,6" />
+  </Style>
   <Style Selector="Thumb.scrollThumb">
     <Setter Property="Background" Value="#1E2A35" />
     <Setter Property="Template">

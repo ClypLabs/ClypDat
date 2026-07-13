@@ -278,7 +278,7 @@
           </StackPanel>
         </Border>
 
-        <ScrollViewer Grid.Column="1">
+        <ScrollViewer Grid.Column="1" Classes="settingsScroll">
           <StackPanel Margin="36,28,36,40" Spacing="22">
 
             <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Replay Buffer}">
