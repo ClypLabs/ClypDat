@@ -325,6 +325,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             var lastTargetRefresh = TimeSpan.Zero;
             var lastEncodedAt = TimeSpan.Zero;
             var targetFrameInterval = TimeSpan.FromSeconds(1.0 / Math.Clamp(config.FrameRate, 15, 240));
+            // Short enough to stay well under even a 240fps target interval
+            // (4.17ms) so the pacing gate below is never blocked waiting on
+            // this call - see its call site for why that matters now.
+            const uint AcquireTimeoutMs = 2;
             var lastDiagLog = TimeSpan.Zero;
             var lastRingTrim = TimeSpan.Zero;
             var framesSeen = 0;
@@ -337,6 +341,23 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             var getFrameMs = 0.0;
             var waitMs = 0.0;
             var iterationsSinceLog = 0;
+            // AcquireNextFrame's OutduplFrameInfo was previously discarded
+            // entirely (`out _`) - LastPresentTime==0 specifically means the
+            // desktop IMAGE didn't actually change (e.g. only the OS cursor
+            // moved), and AccumulatedFrames>1 means the OS coalesced more
+            // than one real present into this single delivery because we
+            // weren't keeping up. Both were being silently treated as "a new
+            // real frame" before, which could burn pacing-gate slots on
+            // duplicate content instead of genuinely new ones. Tracked here
+            // to find out which is actually happening on this hardware
+            // instead of continuing to guess.
+            var zeroPresentSkips = 0;
+            var accumulatedFramesSum = 0L;
+            var accumulatedFramesMax = 0L;
+            var lastRealPresentTicks = 0L;
+            var presentGapSumMs = 0.0;
+            var presentGapCount = 0;
+            var presentGapMaxMs = 0.0;
             // Whether the target window is currently NOT foreground/visible - the
             // capture keeps encoding through this (re-submitting the last good
             // frame, see below) instead of stopping, so the ring buffer/full
@@ -352,7 +373,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     lastDiagLog = stopwatch.Elapsed;
                     var n = Math.Max(1, framesEncodedSinceLog);
                     var m = Math.Max(1, iterationsSinceLog);
-                    AppLog.Info($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgEncodeMs={encodeMs / n:0.00}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, iterations={iterationsSinceLog}.");
+                    var realFrameCount = Math.Max(1, iterationsSinceLog - zeroPresentSkips);
+                    var presentGapDenom = Math.Max(1, presentGapCount);
+                    AppLog.Info($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgEncodeMs={encodeMs / n:0.00}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, iterations={iterationsSinceLog}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}.");
                     copyMapMs = 0;
                     scaleMs = 0;
                     encodeMs = 0;
@@ -360,6 +383,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     waitMs = 0;
                     getFrameMs = 0;
                     iterationsSinceLog = 0;
+                    zeroPresentSkips = 0;
+                    accumulatedFramesSum = 0;
+                    accumulatedFramesMax = 0;
+                    presentGapSumMs = 0;
+                    presentGapCount = 0;
+                    presentGapMaxMs = 0;
                 }
 
                 // Re-check which window/monitor we should be capturing every second -
@@ -394,17 +423,169 @@ public sealed class NativeReplayBuffer : IReplayBuffer
 
                 iterationsSinceLog++;
                 stageStopwatch.Restart();
-                var acquireResult = duplication.AcquireNextFrame(500, out _, out var desktopResource);
+                // A long (500ms) timeout meant this call itself blocked well
+                // past a single frame interval whenever the source hadn't
+                // produced anything new yet, so the pacing-gate/encode step
+                // below (which only ran AFTER a successful acquire) could
+                // fall arbitrarily far behind wall-clock time during any lull
+                // in the source's own present rate - confirmed via
+                // avgPresentGapMs/avgAccumulatedFrames staying ~1 (we were
+                // never actually behind the source) while encoded fps still
+                // measured well under target, meaning frames were being
+                // skipped rather than duplicated to fill those gaps, unlike
+                // every other capture tool (OBS, ScreenRecorderLib), which
+                // pads with the last frame instead. A short timeout keeps
+                // this loop returning often enough for the pacing gate below
+                // (now unconditional, not gated on a successful acquire) to
+                // actually catch up and duplicate-encode on schedule.
+                var acquireResult = duplication.AcquireNextFrame(AcquireTimeoutMs, out var frameInfo, out var desktopResource);
                 waitMs += stageStopwatch.Elapsed.TotalMilliseconds;
 
-                if (acquireResult.Failure)
+                var occluded = !isMonitorMode && !IsWindowForegroundAndVisible(targetHandle);
+
+                if (acquireResult.Success)
+                {
+                    // LastPresentTime is 0 when the desktop IMAGE itself hasn't
+                    // actually changed since the last delivered frame (e.g. only
+                    // the OS cursor moved) - AcquireNextFrame still "succeeds" for
+                    // these, so without this check every one of them was being
+                    // treated as fresh content: cropped, GPU-scaled, and burning a
+                    // pacing-gate slot on byte-identical data instead of the next
+                    // genuinely new frame.
+                    if (frameInfo.LastPresentTime == 0)
+                    {
+                        zeroPresentSkips++;
+                        duplication.ReleaseFrame();
+                        desktopResource.Dispose();
+                    }
+                    else
+                    {
+                        accumulatedFramesSum += frameInfo.AccumulatedFrames;
+                        if (frameInfo.AccumulatedFrames > accumulatedFramesMax) accumulatedFramesMax = frameInfo.AccumulatedFrames;
+                        if (lastRealPresentTicks != 0)
+                        {
+                            var gapMs = (frameInfo.LastPresentTime - lastRealPresentTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                            presentGapSumMs += gapMs;
+                            presentGapCount++;
+                            if (gapMs > presentGapMaxMs) presentGapMaxMs = gapMs;
+                        }
+                        lastRealPresentTicks = frameInfo.LastPresentTime;
+
+                        try
+                        {
+                            framesSeen++;
+
+                            stageStopwatch.Restart();
+                            int cropLeft = 0, cropTop = 0, cropWidth = captureWidth, cropHeight = captureHeight;
+                            if (isMonitorMode)
+                            {
+                                cropWidth = desktopBounds.Right - desktopBounds.Left;
+                                cropHeight = desktopBounds.Bottom - desktopBounds.Top;
+                            }
+                            else if (!occluded && !TryGetWindowCropRect(targetHandle, desktopBounds, out cropLeft, out cropTop, out cropWidth, out cropHeight))
+                            {
+                                // Window rect lookup failed transiently (e.g. mid-move/resize) -
+                                // treat this frame as occluded/frozen instead of risking a bad copy.
+                                occluded = true;
+                                cropWidth = captureWidth;
+                                cropHeight = captureHeight;
+                            }
+                            getFrameMs += stageStopwatch.Elapsed.TotalMilliseconds;
+
+                            if (!occluded && (cropWidth != captureWidth || cropHeight != captureHeight))
+                            {
+                                captureWidth = Math.Max(2, cropWidth);
+                                captureHeight = Math.Max(2, cropHeight);
+                                staging.Dispose();
+                                staging = CreateStagingTexture(device, captureWidth, captureHeight);
+                                ffmpeg.sws_freeContext(swsContext);
+                                swsContext = CreateScaler(captureWidth, captureHeight, outputWidth, outputHeight);
+
+                                if (useGpuScale)
+                                {
+                                    inputView!.Dispose();
+                                    croppedTexture!.Dispose();
+                                    (croppedTexture, inputView) = CreateGpuCropInputView(device, videoDevice!, vpEnumerator!, captureWidth, captureHeight);
+                                }
+                            }
+
+                            if (!occluded)
+                            {
+                                // NVENC's actual encode runs asynchronously - avcodec_send_frame
+                                // can return before the encoder has finished reading a PREVIOUS
+                                // submission of this same reused AVFrame's buffer. Without this,
+                                // overwriting frame->data here for the next real frame could race
+                                // the encoder still reading the last one, corrupting whatever it
+                                // was mid-read on (observed as the frozen/occluded frame coming
+                                // out black instead of the real last frame). Only actually makes
+                                // a copy if something else still references the old buffer.
+                                ffmpeg.av_frame_make_writable(frame);
+
+                                if (useGpuScale)
+                                {
+                                    stageStopwatch.Restart();
+                                    using (var desktopTexture = desktopResource.QueryInterface<ID3D11Texture2D>())
+                                    {
+                                        var box = new Vortice.Mathematics.Box(cropLeft, cropTop, 0, cropLeft + captureWidth, cropTop + captureHeight, 1);
+                                        device.ImmediateContext.CopySubresourceRegion(croppedTexture, 0, 0, 0, 0, desktopTexture, 0, box);
+                                    }
+
+                                    var stream = new VideoProcessorStream { Enable = true, InputSurface = inputView };
+                                    videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, new[] { stream });
+                                    device.ImmediateContext.CopyResource(nv12Staging, nv12Output);
+                                    copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
+
+                                    stageStopwatch.Restart();
+                                    var mapped = device.ImmediateContext.Map(nv12Staging!, 0, MapMode.Read, MapFlags.None);
+                                    try
+                                    {
+                                        CopyNv12PlanesToFrame(mapped, outputWidth, outputHeight, frame);
+                                    }
+                                    finally
+                                    {
+                                        device.ImmediateContext.Unmap(nv12Staging, 0);
+                                    }
+                                    scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
+                                }
+                                else
+                                {
+                                    stageStopwatch.Restart();
+                                    using (var desktopTexture = desktopResource.QueryInterface<ID3D11Texture2D>())
+                                    {
+                                        var box = new Vortice.Mathematics.Box(cropLeft, cropTop, 0, cropLeft + captureWidth, cropTop + captureHeight, 1);
+                                        device.ImmediateContext.CopySubresourceRegion(staging, 0, 0, 0, 0, desktopTexture, 0, box);
+                                    }
+
+                                    var mapped = device.ImmediateContext.Map(staging, 0, MapMode.Read, MapFlags.None);
+                                    copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
+
+                                    stageStopwatch.Restart();
+                                    try
+                                    {
+                                        var srcData = new byte*[1] { (byte*)mapped.DataPointer };
+                                        var srcStride = new int[1] { (int)mapped.RowPitch };
+                                        ffmpeg.sws_scale(swsContext, srcData, srcStride, 0, captureHeight, frame->data, frame->linesize);
+                                    }
+                                    finally
+                                    {
+                                        device.ImmediateContext.Unmap(staging, 0);
+                                    }
+                                    scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
+                                }
+                            }
+                            // else: occluded - frame->data still holds the last successfully
+                            // scaled content, re-encoded unchanged below (visual freeze).
+                        }
+                        finally
+                        {
+                            duplication.ReleaseFrame();
+                            desktopResource.Dispose();
+                        }
+                    }
+                }
+                else
                 {
                     desktopResource?.Dispose();
-                    if (acquireResult.Code == ResultCode.WaitTimeout.Code)
-                    {
-                        continue;
-                    }
-
                     if (acquireResult.Code == ResultCode.AccessLost.Code)
                     {
                         AppLog.Info("Native capture: DXGI duplication access lost, recreating.");
@@ -418,164 +599,70 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                             AppLog.Error("Native capture: failed to recreate DXGI duplication after access loss.", error);
                             Thread.Sleep(200);
                         }
-                        continue;
                     }
-
-                    // Transient failure (e.g. desktop switch) - brief backoff, retry.
-                    Thread.Sleep(50);
-                    continue;
+                    else if (acquireResult.Code != ResultCode.WaitTimeout.Code)
+                    {
+                        // Transient failure (e.g. desktop switch) - brief backoff, retry.
+                        Thread.Sleep(50);
+                    }
+                    // WaitTimeout: genuinely nothing new from the source yet this
+                    // cycle - fall through to the pacing gate below exactly like a
+                    // successful-but-occluded frame would, so frame->data's last
+                    // real content still gets duplicate-encoded on schedule instead
+                    // of the encoded frame rate just falling behind.
                 }
 
-                try
+                if (occluded != isPaused)
                 {
-                    framesSeen++;
-
-                    stageStopwatch.Restart();
-                    var occluded = !isMonitorMode && !IsWindowForegroundAndVisible(targetHandle);
-                    int cropLeft = 0, cropTop = 0, cropWidth = captureWidth, cropHeight = captureHeight;
-                    if (isMonitorMode)
-                    {
-                        cropWidth = desktopBounds.Right - desktopBounds.Left;
-                        cropHeight = desktopBounds.Bottom - desktopBounds.Top;
-                    }
-                    else if (!occluded && !TryGetWindowCropRect(targetHandle, desktopBounds, out cropLeft, out cropTop, out cropWidth, out cropHeight))
-                    {
-                        // Window rect lookup failed transiently (e.g. mid-move/resize) -
-                        // treat this frame as occluded/frozen instead of risking a bad copy.
-                        occluded = true;
-                        cropWidth = captureWidth;
-                        cropHeight = captureHeight;
-                    }
-                    getFrameMs += stageStopwatch.Elapsed.TotalMilliseconds;
-
-                    if (occluded != isPaused)
-                    {
-                        isPaused = occluded;
-                        lock (_bufferLock) _pauseEvents.Add(new PauseEvent(DateTime.UtcNow, isPaused));
-                        AppLog.Info($"Native capture: recording {(isPaused ? "paused (window not foreground)" : "resumed")}.");
-                    }
-
-                    if (!occluded && (cropWidth != captureWidth || cropHeight != captureHeight))
-                    {
-                        captureWidth = Math.Max(2, cropWidth);
-                        captureHeight = Math.Max(2, cropHeight);
-                        staging.Dispose();
-                        staging = CreateStagingTexture(device, captureWidth, captureHeight);
-                        ffmpeg.sws_freeContext(swsContext);
-                        swsContext = CreateScaler(captureWidth, captureHeight, outputWidth, outputHeight);
-
-                        if (useGpuScale)
-                        {
-                            inputView!.Dispose();
-                            croppedTexture!.Dispose();
-                            (croppedTexture, inputView) = CreateGpuCropInputView(device, videoDevice!, vpEnumerator!, captureWidth, captureHeight);
-                        }
-                    }
-
-                    if (stopwatch.Elapsed - lastEncodedAt < targetFrameInterval) continue;
-                    lastEncodedAt = stopwatch.Elapsed;
-                    framesEncoded++;
-                    framesEncodedSinceLog++;
-
-                    if (!occluded)
-                    {
-                        // NVENC's actual encode runs asynchronously - avcodec_send_frame
-                        // can return before the encoder has finished reading a PREVIOUS
-                        // submission of this same reused AVFrame's buffer. Without this,
-                        // overwriting frame->data here for the next real frame could race
-                        // the encoder still reading the last one, corrupting whatever it
-                        // was mid-read on (observed as the frozen/occluded frame coming
-                        // out black instead of the real last frame). Only actually makes
-                        // a copy if something else still references the old buffer.
-                        ffmpeg.av_frame_make_writable(frame);
-
-                        if (useGpuScale)
-                        {
-                            stageStopwatch.Restart();
-                            using (var desktopTexture = desktopResource!.QueryInterface<ID3D11Texture2D>())
-                            {
-                                var box = new Vortice.Mathematics.Box(cropLeft, cropTop, 0, cropLeft + captureWidth, cropTop + captureHeight, 1);
-                                device.ImmediateContext.CopySubresourceRegion(croppedTexture, 0, 0, 0, 0, desktopTexture, 0, box);
-                            }
-
-                            var stream = new VideoProcessorStream { Enable = true, InputSurface = inputView };
-                            videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, new[] { stream });
-                            device.ImmediateContext.CopyResource(nv12Staging, nv12Output);
-                            copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
-
-                            stageStopwatch.Restart();
-                            var mapped = device.ImmediateContext.Map(nv12Staging!, 0, MapMode.Read, MapFlags.None);
-                            try
-                            {
-                                CopyNv12PlanesToFrame(mapped, outputWidth, outputHeight, frame);
-                            }
-                            finally
-                            {
-                                device.ImmediateContext.Unmap(nv12Staging, 0);
-                            }
-                            scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
-                        }
-                        else
-                        {
-                            stageStopwatch.Restart();
-                            using (var desktopTexture = desktopResource!.QueryInterface<ID3D11Texture2D>())
-                            {
-                                var box = new Vortice.Mathematics.Box(cropLeft, cropTop, 0, cropLeft + captureWidth, cropTop + captureHeight, 1);
-                                device.ImmediateContext.CopySubresourceRegion(staging, 0, 0, 0, 0, desktopTexture, 0, box);
-                            }
-
-                            var mapped = device.ImmediateContext.Map(staging, 0, MapMode.Read, MapFlags.None);
-                            copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
-
-                            stageStopwatch.Restart();
-                            try
-                            {
-                                var srcData = new byte*[1] { (byte*)mapped.DataPointer };
-                                var srcStride = new int[1] { (int)mapped.RowPitch };
-                                ffmpeg.sws_scale(swsContext, srcData, srcStride, 0, captureHeight, frame->data, frame->linesize);
-                            }
-                            finally
-                            {
-                                device.ImmediateContext.Unmap(staging, 0);
-                            }
-                            scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
-                        }
-                    }
-                    // else: occluded - frame->data still holds the last successfully
-                    // scaled content, re-encoded unchanged below (visual freeze).
-
-                    frame->pts = stopwatch.ElapsedTicks * 1_000_000L / System.Diagnostics.Stopwatch.Frequency;
-
-                    // Force a keyframe periodically so the ring buffer always has a nearby
-                    // point to start a save-window at without waiting on the encoder's own
-                    // GOP schedule.
-                    if (stopwatch.Elapsed - lastForcedKeyframe >= TimeSpan.FromSeconds(2))
-                    {
-                        frame->pict_type = AVPictureType.AV_PICTURE_TYPE_I;
-                        lastForcedKeyframe = stopwatch.Elapsed;
-                    }
-                    else
-                    {
-                        frame->pict_type = AVPictureType.AV_PICTURE_TYPE_NONE;
-                    }
-
-                    stageStopwatch.Restart();
-                    if (ffmpeg.avcodec_send_frame(codecContext, frame) == 0)
-                    {
-                        DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream);
-                    }
-                    encodeMs += stageStopwatch.Elapsed.TotalMilliseconds;
-
-                    if (stopwatch.Elapsed - lastRingTrim >= TimeSpan.FromSeconds(1))
-                    {
-                        lastRingTrim = stopwatch.Elapsed;
-                        TrimRingBuffer();
-                    }
+                    isPaused = occluded;
+                    lock (_bufferLock) _pauseEvents.Add(new PauseEvent(DateTime.UtcNow, isPaused));
+                    AppLog.Info($"Native capture: recording {(isPaused ? "paused (window not foreground)" : "resumed")}.");
                 }
-                finally
+
+                // Pacing/encode gate - now evaluated every iteration regardless of
+                // whether this exact cycle produced fresh content, instead of only
+                // running inside the successful-real-frame branch. Previously the
+                // encoded frame RATE was capped by however fast the SOURCE happened
+                // to deliver genuinely new presents (measured via LastPresentTime:
+                // averaging ~45fps with real bursts past 150fps and lulls near
+                // 40fps, while avgAccumulatedFrames stayed ~1 the whole time -
+                // proof this loop was never actually falling behind the source, it
+                // was just refusing to pad for it). Every other capture tool pads
+                // with a duplicate of the last frame when nothing new has arrived
+                // in time to keep actual encoded fps locked to the target; this now
+                // does the same, reusing frame->data unchanged (identical mechanism
+                // to the existing occlusion freeze) whenever nothing fresh landed.
+                if (stopwatch.Elapsed - lastEncodedAt < targetFrameInterval) continue;
+                lastEncodedAt = stopwatch.Elapsed;
+                framesEncoded++;
+                framesEncodedSinceLog++;
+
+                frame->pts = stopwatch.ElapsedTicks * 1_000_000L / System.Diagnostics.Stopwatch.Frequency;
+
+                // Force a keyframe periodically so the ring buffer always has a nearby
+                // point to start a save-window at without waiting on the encoder's own
+                // GOP schedule.
+                if (stopwatch.Elapsed - lastForcedKeyframe >= TimeSpan.FromSeconds(2))
                 {
-                    duplication.ReleaseFrame();
-                    desktopResource?.Dispose();
+                    frame->pict_type = AVPictureType.AV_PICTURE_TYPE_I;
+                    lastForcedKeyframe = stopwatch.Elapsed;
+                }
+                else
+                {
+                    frame->pict_type = AVPictureType.AV_PICTURE_TYPE_NONE;
+                }
+
+                stageStopwatch.Restart();
+                if (ffmpeg.avcodec_send_frame(codecContext, frame) == 0)
+                {
+                    DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream);
+                }
+                encodeMs += stageStopwatch.Elapsed.TotalMilliseconds;
+
+                if (stopwatch.Elapsed - lastRingTrim >= TimeSpan.FromSeconds(1))
+                {
+                    lastRingTrim = stopwatch.Elapsed;
+                    TrimRingBuffer();
                 }
             }
 
