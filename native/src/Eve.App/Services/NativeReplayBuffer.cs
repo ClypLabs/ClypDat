@@ -265,6 +265,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             frame->width = outputWidth;
             frame->height = outputHeight;
             ffmpeg.av_frame_get_buffer(frame, 32);
+            // av_frame_get_buffer leaves the buffer uninitialized - if the
+            // target window starts occluded (recording begins before the game
+            // has focus, common when starting the buffer from EVE's own
+            // window), the very first frames get encoded straight from that
+            // garbage NV12 data before any real capture ever lands in it,
+            // which renders as solid green (Y/U/V all near zero decodes to
+            // bright green in YUV->RGB). Fill it to black up front instead.
+            FillFrameBlack(frame, outputHeight);
 
             packet = ffmpeg.av_packet_alloc();
 
@@ -511,6 +519,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             device?.Dispose();
             if (timerResolutionRaised) TimeEndPeriod(1);
         }
+    }
+
+    private static unsafe void FillFrameBlack(AVFrame* frame, int height)
+    {
+        var ySize = (uint)(frame->linesize[0] * height);
+        System.Runtime.CompilerServices.Unsafe.InitBlockUnaligned((void*)frame->data[0], 16, ySize);
+
+        var uvHeight = (height + 1) / 2;
+        var uvSize = (uint)(frame->linesize[1] * uvHeight);
+        System.Runtime.CompilerServices.Unsafe.InitBlockUnaligned((void*)frame->data[1], 128, uvSize);
     }
 
     private static unsafe SwsContext* CreateScaler(int sourceWidth, int sourceHeight, int outputWidth, int outputHeight)
