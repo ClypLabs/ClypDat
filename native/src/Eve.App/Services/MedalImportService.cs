@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
@@ -81,14 +82,28 @@ public static class MedalImportService
             if (!seenPaths.Add(videoPath)) continue;
 
             var gameFolder = Path.GetFileName(Path.GetDirectoryName(videoPath)) ?? "Medal";
-            // No DB row for this file (missing/corrupt DB, or Medal just
-            // never cataloged it) - the file's own Windows timestamp is the
-            // only real signal available for when it was actually recorded.
-            DateTime createdAtUtc;
-            try { createdAtUtc = File.GetCreationTimeUtc(videoPath); }
-            catch { createdAtUtc = DateTime.UtcNow; }
+            var fileStem = Path.GetFileNameWithoutExtension(videoPath);
 
-            var title = TryParseTrimTitle(Path.GetFileNameWithoutExtension(videoPath), gameFolder);
+            DateTime createdAtUtc;
+            string? title;
+            if (TryParseRawFilenameTimestamp(fileStem, out var embeddedLocalTimestamp))
+            {
+                // The embedded timestamp is the real recording moment Medal itself
+                // encoded - more trustworthy than the file's own Windows metadata,
+                // which can drift if the file was ever copied or moved.
+                createdAtUtc = DateTime.SpecifyKind(embeddedLocalTimestamp, DateTimeKind.Local).ToUniversalTime();
+                title = gameFolder;
+            }
+            else
+            {
+                // No DB row for this file (missing/corrupt DB, or Medal just
+                // never cataloged it) - the file's own Windows timestamp is the
+                // only real signal available for when it was actually recorded.
+                try { createdAtUtc = File.GetCreationTimeUtc(videoPath); }
+                catch { createdAtUtc = DateTime.UtcNow; }
+                title = TryParseTrimTitle(fileStem, gameFolder);
+            }
+
             results.Add(new MedalClipRecord(videoPath, null, gameFolder, createdAtUtc, title));
         }
     }
@@ -108,6 +123,30 @@ public static class MedalImportService
     {
         if (!TrimFilenamePattern.IsMatch(fileNameWithoutExtension)) return null;
         return string.IsNullOrWhiteSpace(gameFolder) ? "Trimmed Clip" : $"{gameFolder} (Trimmed)";
+    }
+
+    // Medal's default (non-trimmed) export filename is "MedalTV<GameTitle>
+    // <yyyyMMddHHmmss>" with no separators at all - e.g.
+    // "MedalTVCounterStrike220250626224059" - which is both a genuinely
+    // unreadable title when there's no DB title to use instead, and (since it's
+    // the exact moment Medal itself recorded, unlike the file's own Windows
+    // timestamp which can drift if the file was ever copied/moved) a better
+    // source for the clip's date than anything else available in that case.
+    private static readonly Regex RawFilenameTimestampPattern = new(
+        @"^MedalTV.*?(?<ts>\d{14})$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    internal static bool TryParseRawFilenameTimestamp(string fileNameWithoutExtension, out DateTime localTimestamp)
+    {
+        var match = RawFilenameTimestampPattern.Match(fileNameWithoutExtension);
+        if (match.Success && DateTime.TryParseExact(
+                match.Groups["ts"].Value, "yyyyMMddHHmmss",
+                CultureInfo.InvariantCulture, DateTimeStyles.None, out localTimestamp))
+        {
+            return true;
+        }
+
+        localTimestamp = default;
+        return false;
     }
 
     // Medal itself sometimes catalogs the same clip twice under different video_path
@@ -159,6 +198,15 @@ public static class MedalImportService
             var metadata = reader.IsDBNull(3) ? null : (byte[])reader.GetValue(3);
             var title = metadata is null ? null : TryExtractTitle(metadata);
             var gameFolder = Path.GetFileName(Path.GetDirectoryName(videoPath)) ?? "Medal";
+
+            // No usable DB title (metadata missing or didn't decode) - falling
+            // through to the raw filename stem would otherwise surface Medal's
+            // own "MedalTV<Game><timestamp>" export name verbatim.
+            if (title is null)
+            {
+                var fileStem = Path.GetFileNameWithoutExtension(videoPath);
+                title = TryParseRawFilenameTimestamp(fileStem, out _) ? gameFolder : TryParseTrimTitle(fileStem, gameFolder);
+            }
 
             results.Add(new MedalClipRecord(videoPath, thumbnailPath, gameFolder, createdAtUtc, title));
         }
