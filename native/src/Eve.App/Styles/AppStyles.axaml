@@ -150,6 +150,16 @@
   <Style Selector="Button.primaryButton:not(ToggleSwitch):pointerover">
     <Setter Property="Background" Value="{StaticResource AccentBrushHover}" />
   </Style>
+  <!--
+    The class-based rule above kept losing again for the Export button
+    specifically despite matching the same selector shape that fixed every
+    OTHER primaryButton - a Name selector is the highest specificity tier
+    Avalonia has, unambiguous regardless of whatever's causing the class-based
+    one to intermittently lose here.
+  -->
+  <Style Selector="Button#ExportButton:pointerover">
+    <Setter Property="Background" Value="{StaticResource AccentBrushHover}" />
+  </Style>
   <Style Selector="Button.deleteButton:pointerover">
     <Setter Property="Background" Value="#E16B6D" />
   </Style>

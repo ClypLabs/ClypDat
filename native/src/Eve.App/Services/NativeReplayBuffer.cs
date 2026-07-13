@@ -384,6 +384,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             // timeline can't drag audio sync off with it.
             var encodedFrameIndex = 0L;
             var idealFrameIntervalMicroseconds = 1_000_000.0 / Math.Clamp(config.FrameRate, 15, 240);
+            // FIFO of real capture-moment timestamps, one enqueued per
+            // avcodec_send_frame call, dequeued one-for-one as packets
+            // actually come out - see the enqueue call site for why this
+            // (not just "now" at drain time) is what actually fixes audio
+            // sync regardless of encoder internal buffering depth.
+            var pendingFrameWallClocks = new Queue<DateTime>();
             // Short enough to stay well under even a 240fps target interval
             // (4.17ms) so the pacing gate below is never blocked waiting on
             // this call - see its call site for why that matters now. Lower
@@ -749,10 +755,22 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                         frame->pict_type = AVPictureType.AV_PICTURE_TYPE_NONE;
                     }
 
+                    // Enqueued BEFORE send_frame, dequeued inside DrainToRingBuffer
+                    // once PER PACKET actually received - NVENC (or any encoder)
+                    // can hold frames internally for a call or two before
+                    // releasing output, so whichever packet THIS drain call
+                    // happens to receive doesn't necessarily correspond to the
+                    // frame just sent. A plain "now" here (tried first) still
+                    // has that same skew the ORIGINAL audio-sync fix targeted -
+                    // this FIFO guarantees each packet gets the real timestamp
+                    // of the specific frame it actually came from, regardless of
+                    // how deep the encoder's internal buffering is.
+                    pendingFrameWallClocks.Enqueue(DateTime.UtcNow);
+
                     stageStopwatch.Restart();
                     if (ffmpeg.avcodec_send_frame(codecContext, frame) == 0)
                     {
-                        DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, DateTime.UtcNow);
+                        DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrameWallClocks);
                     }
                     encodeMs += stageStopwatch.Elapsed.TotalMilliseconds;
                 }
@@ -764,9 +782,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 }
             }
 
-            // flush
+            // flush - any packets still buffered inside the encoder drain here;
+            // their real timestamps are already sitting in the queue from when
+            // they were originally sent, nothing new to enqueue for a null frame.
             ffmpeg.avcodec_send_frame(codecContext, null);
-            DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, DateTime.UtcNow);
+            DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrameWallClocks);
         }
         catch (Exception error)
         {
@@ -1094,7 +1114,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         return MonitorFromPoint(default, MONITOR_DEFAULTTOPRIMARY);
     }
 
-    private unsafe void DrainToRingBuffer(AVCodecContext* codecContext, AVPacket* packet, AVFormatContext* fullSessionFormatContext, AVStream* fullSessionStream, DateTime realWallClockUtc)
+    private unsafe void DrainToRingBuffer(AVCodecContext* codecContext, AVPacket* packet, AVFormatContext* fullSessionFormatContext, AVStream* fullSessionStream, Queue<DateTime> pendingFrameWallClocks)
     {
         while (true)
         {
@@ -1112,12 +1132,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 Marshal.Copy((IntPtr)codecContext->extradata, _extraData, 0, codecContext->extradata_size);
             }
 
-            // realWallClockUtc is captured by the caller at the moment this
-            // frame was actually queued for encoding (real elapsed time),
-            // completely separate from packet->pts (now an IDEAL,
-            // constant-rate timestamp - see the pacing gate in CaptureLoop)
-            // specifically so audio alignment isn't affected by video's
-            // timeline being idealized for an exact declared frame rate.
+            // Dequeues the real timestamp of whichever frame THIS packet
+            // actually corresponds to (FIFO order, matching the encoder's own
+            // in-order output guarantee with max_b_frames=0) - not just "now",
+            // since the encoder can hold frames internally for a call or two
+            // before releasing output, and packet->pts is now an IDEAL,
+            // constant-rate timestamp (see the pacing gate in CaptureLoop) so
+            // it can't be used to derive this the way it used to be.
+            var realWallClockUtc = pendingFrameWallClocks.Count > 0 ? pendingFrameWallClocks.Dequeue() : DateTime.UtcNow;
+
             lock (_bufferLock)
             {
                 _packets.Add(new RingPacket(data, packet->pts, isKeyframe, realWallClockUtc));
@@ -1369,12 +1392,24 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         try
         {
             var payload = ranges.Select(r => new { start = Math.Round(r.StartSeconds, 2), end = Math.Round(r.EndSeconds, 2) }).ToArray();
-            File.WriteAllText(outputPath + ".paused.json", JsonSerializer.Serialize(payload));
+            File.WriteAllText(GetPausedSidecarPath(outputPath), JsonSerializer.Serialize(payload));
         }
         catch (Exception error)
         {
             AppLog.Error("Failed to write recording-paused sidecar.", error);
         }
+    }
+
+    // Sits in a "Clip Info" subfolder next to the clip instead of directly
+    // alongside it - one more file per clip cluttering the same folder as the
+    // actual videos in File Explorer wasn't worth it for something the editor
+    // reads on its own.
+    private static string GetPausedSidecarPath(string videoPath)
+    {
+        var directory = Path.GetDirectoryName(videoPath) ?? string.Empty;
+        var infoDirectory = Path.Combine(directory, "Clip Info");
+        Directory.CreateDirectory(infoDirectory);
+        return Path.Combine(infoDirectory, Path.GetFileName(videoPath) + ".paused.json");
     }
 
     private unsafe void RemuxWindowToMp4(RingPacket[] window, string outputPath)

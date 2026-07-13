@@ -44,7 +44,14 @@ public sealed class TimelineRulerControl : Control
             DrawTick(context, time, seconds, width, bottom, time % 10 == 0, minorPen, majorPen, textBrush);
         }
 
-        if (seconds % 5 > 0.5)
+        // Real clip durations are almost never an exact multiple of 5s (e.g.
+        // 60.99s, not 60.00s) - the old > 0.5 threshold still drew this extra
+        // "true end" tick right on top of the regular one at the nearest
+        // multiple of 5 below it, and their text labels overlapped into
+        // garbage like "1:00:00" instead of a clean "1:00". Only draw it when
+        // there's enough real separation from that last regular tick to not
+        // visually collide.
+        if (seconds % 5 > 2.0)
         {
             DrawTick(context, seconds, seconds, width, bottom, true, minorPen, majorPen, textBrush);
         }

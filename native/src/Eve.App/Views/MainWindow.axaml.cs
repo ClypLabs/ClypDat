@@ -255,6 +255,14 @@ public sealed partial class MainWindow : Window
     private async void ReplayButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
+        // Stopping a Full Session recording can take real time (ffmpeg muxing
+        // the whole session's audio) - without this guard, a click that
+        // landed while a previous stop was still finalizing would see
+        // IsRecording already false (it flips early, before the slow
+        // finalization work) and start a SECOND recording session on top of
+        // the first one's still-running finalization, which is exactly what
+        // "won't turn off, repeated clicks freeze it" was.
+        if (_replayTransitioning) return;
         InitializeReplayServices();
         if (_replayBuffer is null) return;
 
@@ -278,6 +286,13 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null || _replayBuffer is null || _replayTransitioning) return;
         _replayTransitioning = true;
+        // Full Session recording's finalization (ffmpeg muxing the whole
+        // session's audio against the video, "-c:v copy" but still real time
+        // for a long session) runs inside _replayBuffer.StopAsync() below -
+        // shown so a long stop reads as "still working" instead of looking
+        // stuck and inviting more clicks.
+        var wasFullSessionRecording = ViewModel.Settings.FullSessionRecordingEnabled;
+        if (wasFullSessionRecording) ViewModel.RecorderStatus = "Saving Session...";
         try
         {
             if (_replayBuffer.IsRecording) await _replayBuffer.StopAsync();
@@ -1551,6 +1566,14 @@ public sealed partial class MainWindow : Window
             _playback = playback;
             _pausedRanges = LoadPausedRanges(ViewModel.SelectedVideoPath);
             ViewModel.IsRecordingPausedAtCurrentTime = false;
+            // Redundant with StopEditorPlayback's own Hide() above, but closes
+            // a real race: a timer tick already queued/dispatched right before
+            // _playbackTimer.Stop() took effect can still fire once more using
+            // the PREVIOUS clip's now-stale _pausedRanges, briefly reshowing
+            // the overlay with wrong data - right as the editor's own layout
+            // (EditorVideoView's bounds) may not have settled yet either,
+            // which is exactly the "flickers over the library grid" symptom.
+            _recordingPausedOverlay?.Hide();
             AppLog.Info($"Editor open: {ViewModel.SelectedVideoPath}");
             EditorVideoView.MediaPlayer = playback.VideoPlayer;
             var audioTracks = ViewModel.TimelineTracks
@@ -1651,8 +1674,18 @@ public sealed partial class MainWindow : Window
     // means no badge ever shows - not an error.
     private static List<(double StartSeconds, double EndSeconds)> LoadPausedRanges(string videoPath)
     {
-        var sidecarPath = videoPath + ".paused.json";
-        if (!File.Exists(sidecarPath)) return new();
+        var directory = Path.GetDirectoryName(videoPath) ?? string.Empty;
+        var fileName = Path.GetFileName(videoPath) + ".paused.json";
+        // Clips saved now write this into a "Clip Info" subfolder instead of
+        // directly alongside the video - the plain adjacent path is still
+        // checked as a fallback so clips saved before that change (or a
+        // clip's own sidecar not yet moved) still show the badge.
+        var sidecarPath = Path.Combine(directory, "Clip Info", fileName);
+        if (!File.Exists(sidecarPath))
+        {
+            sidecarPath = Path.Combine(directory, fileName);
+            if (!File.Exists(sidecarPath)) return new();
+        }
 
         try
         {
@@ -1712,7 +1745,11 @@ public sealed partial class MainWindow : Window
 
     private void UpdateRecordingPausedOverlay(bool shouldShow)
     {
-        if (!shouldShow)
+        // Extra guard against a stale/queued timer tick reshowing this over
+        // whatever's currently on screen (e.g. the library, mid-transition)
+        // if it ever fires after the editor's already been left - only the
+        // editor being genuinely visible right now is allowed to show it.
+        if (!shouldShow || ViewModel is null || !ViewModel.IsEditorVisible)
         {
             _recordingPausedOverlay?.Hide();
             return;
