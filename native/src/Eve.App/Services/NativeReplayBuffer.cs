@@ -338,7 +338,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 useGpuScale = false;
             }
 
-            codecContext = CreateEncoder(config, outputWidth, outputHeight, out var codecTimeBase);
+            codecContext = CreateEncoder(config, outputWidth, outputHeight, out var codecTimeBase, out var encoderName);
             _timeBase = codecTimeBase;
 
             if (InitFullSessionWriter(config, codecContext, out fullSessionFormatContext, out fullSessionStream, out fullSessionTempVideoPath, out fullSessionFinalOutputPath))
@@ -364,7 +364,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
 
             packet = ffmpeg.av_packet_alloc();
 
-            AppLog.Info($"Native capture started (DXGI Desktop Duplication): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, encoder=h264_nvenc, configFrameRate={config.FrameRate}.");
+            AppLog.Info($"Native capture started (DXGI Desktop Duplication): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, encoder={encoderName}, configFrameRate={config.FrameRate}.");
             ready.TrySetResult();
 
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -1496,27 +1496,53 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         }
     }
 
-    private static unsafe AVCodecContext* CreateEncoder(ReplayBufferConfig config, int width, int height, out AVRational timeBase)
+    // Tries hardware encoders in order, falling back to the next if the named encoder
+    // either isn't present in this ffmpeg build or fails to open (no matching GPU/driver
+    // present - e.g. h264_nvenc exists in the binary on any machine, but avcodec_open2
+    // only succeeds if an actual NVIDIA GPU/driver answers it). h264_amf is AMD's
+    // equivalent via the AMF SDK; libx264 is the last-resort CPU fallback so capture
+    // still works even with no usable hardware encoder at all.
+    private static readonly string[] EncoderCandidates = { "h264_nvenc", "h264_amf", "libx264" };
+
+    private static unsafe AVCodecContext* CreateEncoder(ReplayBufferConfig config, int width, int height, out AVRational timeBase, out string encoderName)
     {
-        var codec = ffmpeg.avcodec_find_encoder_by_name("h264_nvenc");
-        if (codec is null) throw new InvalidOperationException("h264_nvenc encoder not available on this machine.");
-
         timeBase = new AVRational { num = 1, den = 1_000_000 };
-        var codecContext = ffmpeg.avcodec_alloc_context3(codec);
-        codecContext->width = width;
-        codecContext->height = height;
-        codecContext->time_base = timeBase;
-        codecContext->framerate = new AVRational { num = Math.Clamp(config.FrameRate, 15, 240), den = 1 };
-        codecContext->pix_fmt = AVPixelFormat.AV_PIX_FMT_NV12;
-        codecContext->bit_rate = CaptureBitrate(config);
-        codecContext->gop_size = 240;
-        codecContext->max_b_frames = 0;
-        codecContext->flags |= ffmpeg.AV_CODEC_FLAG_GLOBAL_HEADER;
+        encoderName = string.Empty;
 
-        var openResult = ffmpeg.avcodec_open2(codecContext, codec, null);
-        if (openResult < 0) throw new InvalidOperationException($"avcodec_open2 failed ({openResult}).");
+        foreach (var candidateName in EncoderCandidates)
+        {
+            var candidateCodec = ffmpeg.avcodec_find_encoder_by_name(candidateName);
+            if (candidateCodec is null)
+            {
+                AppLog.Info($"Native encoder probe: {candidateName} not present in this ffmpeg build, skipping.");
+                continue;
+            }
 
-        return codecContext;
+            var codecContext = ffmpeg.avcodec_alloc_context3(candidateCodec);
+            codecContext->width = width;
+            codecContext->height = height;
+            codecContext->time_base = timeBase;
+            codecContext->framerate = new AVRational { num = Math.Clamp(config.FrameRate, 15, 240), den = 1 };
+            codecContext->pix_fmt = AVPixelFormat.AV_PIX_FMT_NV12;
+            codecContext->bit_rate = CaptureBitrate(config);
+            codecContext->gop_size = 240;
+            codecContext->max_b_frames = 0;
+            codecContext->flags |= ffmpeg.AV_CODEC_FLAG_GLOBAL_HEADER;
+
+            var openResult = ffmpeg.avcodec_open2(codecContext, candidateCodec, null);
+            if (openResult == 0)
+            {
+                encoderName = candidateName;
+                AppLog.Info($"Native encoder probe: {candidateName} opened successfully.");
+                return codecContext;
+            }
+
+            AppLog.Info($"Native encoder probe: {candidateName} failed to open (error {openResult}) - no matching GPU/driver, trying next.");
+            var failedContext = codecContext;
+            ffmpeg.avcodec_free_context(&failedContext);
+        }
+
+        throw new InvalidOperationException("No usable H.264 encoder found (tried NVENC, AMD AMF, software libx264).");
     }
 
     private static int CaptureBitrate(ReplayBufferConfig config)
