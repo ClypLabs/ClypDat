@@ -173,11 +173,30 @@ public sealed class NativeReplayBuffer : IReplayBuffer
 
             // The ring buffer already remuxes exactly the desired window starting at a
             // real keyframe - no offset/trim needed here the way WindowsReplayBuffer's
-            // keyframe-seek fallback requires, so this is a single segment window
-            // spanning the whole saved clip.
+            // keyframe-seek fallback requires.
             var windowStartUtc = window[0].WallClockUtc;
             var windowDurationSeconds = Math.Max(1, (window[^1].WallClockUtc - windowStartUtc).TotalSeconds);
-            var segmentWindows = new List<(DateTime StartUtc, double DurationSeconds)> { (windowStartUtc, windowDurationSeconds) };
+
+            // One giant segment spanning the whole saved window let audio/video
+            // clock drift (real hardware sample clocks are never exactly
+            // 48000.000000Hz) accumulate uncorrected across the entire clip -
+            // FinalizeFullSessionRecording already chunks its (much longer)
+            // window into 60s segments with a periodic resync for exactly this
+            // reason, but a regular clip save at the default 60s replay length
+            // is long enough to hit the same drift, just less obviously since
+            // it's usually the ONLY segment. Chunking here the same way fixes it
+            // for any configured replay length, not just multi-hour sessions.
+            const double SegmentChunkSeconds = 60;
+            var segmentWindows = new List<(DateTime StartUtc, double DurationSeconds)>();
+            var chunkStartUtc = windowStartUtc;
+            var remainingSeconds = windowDurationSeconds;
+            while (remainingSeconds > 0)
+            {
+                var chunkSeconds = Math.Min(SegmentChunkSeconds, remainingSeconds);
+                segmentWindows.Add((chunkStartUtc, chunkSeconds));
+                chunkStartUtc += TimeSpan.FromSeconds(chunkSeconds);
+                remainingSeconds -= chunkSeconds;
+            }
 
             WritePausedRangesSidecar(outputPath, ComputePausedRangesSeconds(GetOrderedPauseEvents(), windowStartUtc, windowStartUtc + TimeSpan.FromSeconds(windowDurationSeconds)));
 
