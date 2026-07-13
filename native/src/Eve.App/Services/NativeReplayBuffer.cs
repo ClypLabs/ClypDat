@@ -431,6 +431,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer
 
                     if (!occluded)
                     {
+                        ffmpeg.av_frame_make_writable(frame);
+
                         stageStopwatch.Restart();
                         using (var desktopTexture = desktopResource!.QueryInterface<ID3D11Texture2D>())
                         {
