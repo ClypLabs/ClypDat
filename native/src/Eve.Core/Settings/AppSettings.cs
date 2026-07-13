@@ -15,6 +15,12 @@ public sealed class AppSettings
     public bool StartMinimizedToTray { get; set; }
     public bool IsStatusAreaVisible { get; set; } = true;
     public bool ShowRecordingPausedIndicator { get; set; } = true;
+    // Positive shifts audio EARLIER relative to video (fixes audio sounding
+    // delayed/late); negative shifts audio LATER (fixes audio sounding
+    // ahead). Exact WASAPI/hardware-encoder latency varies too much by
+    // machine to hardcode a correction - OBS exposes the same kind of
+    // manual per-source sync offset for this exact reason.
+    public int AudioSyncOffsetMs { get; set; }
     public string IgnoredUpdateVersion { get; set; } = string.Empty;
     public string ChatAudioDeviceId { get; set; } = string.Empty;
     // Single-selection fields - still the persisted choice while the matching

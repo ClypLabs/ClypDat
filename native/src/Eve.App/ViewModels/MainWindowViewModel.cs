@@ -931,6 +931,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set { Settings.MicrophoneNoiseSuppressionStrength = Math.Clamp(value, 0, 30); OnPropertyChanged(); SaveSettings(); }
     }
 
+    public double AudioSyncOffsetMs
+    {
+        get => Settings.AudioSyncOffsetMs;
+        set { Settings.AudioSyncOffsetMs = (int)Math.Clamp(value, -1000, 1000); OnPropertyChanged(); SaveSettings(); }
+    }
+
     public bool FullSessionRecordingEnabled
     {
         get => Settings.FullSessionRecordingEnabled;
@@ -1724,7 +1730,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             MicrophoneNoiseSuppressionEnabled: Settings.MicrophoneNoiseSuppressionEnabled,
             MicrophoneNoiseSuppressionStrength: Settings.MicrophoneNoiseSuppressionStrength,
             FullSessionRecordingEnabled: Settings.FullSessionRecordingEnabled,
-            FullSessionRecordingFolder: Settings.FullSessionRecordingFolder);
+            FullSessionRecordingFolder: Settings.FullSessionRecordingFolder,
+            AudioSyncOffsetMs: Settings.AudioSyncOffsetMs);
     }
 
     public void SetDuration(TimeSpan duration)

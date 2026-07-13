@@ -177,6 +177,17 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             var windowStartUtc = window[0].WallClockUtc;
             var windowDurationSeconds = Math.Max(1, (window[^1].WallClockUtc - windowStartUtc).TotalSeconds);
 
+            // Diagnostic only (see audio-desync investigation) - video's own
+            // internal duration comes from Stopwatch-based PTS (monotonic,
+            // high precision), while the audio segment above is sized from
+            // wall-clock (DateTime.UtcNow) deltas between the same two
+            // packets. If these disagree by more than a few ms, the audio
+            // track gets built to a different total length than the video
+            // actually has, which wouldn't just be a start offset - it'd get
+            // worse toward the end of the clip.
+            var videoDurationSeconds = (window[^1].PtsMs - window[0].PtsMs) / 1_000_000.0;
+            AppLog.Info($"Native replay audio/video duration check: videoDurationSeconds={videoDurationSeconds:0.000}, audioWindowDurationSeconds={windowDurationSeconds:0.000}, deltaMs={(windowDurationSeconds - videoDurationSeconds) * 1000:0.0}, packetCount={window.Length}.");
+
             // One giant segment spanning the whole saved window let audio/video
             // clock drift (real hardware sample clocks are never exactly
             // 48000.000000Hz) accumulate uncorrected across the entire clip -
@@ -188,7 +199,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             // for any configured replay length, not just multi-hour sessions.
             const double SegmentChunkSeconds = 60;
             var segmentWindows = new List<(DateTime StartUtc, double DurationSeconds)>();
-            var chunkStartUtc = windowStartUtc;
+            // Positive AudioSyncOffsetMs pulls the audio SOURCE window earlier
+            // in real time (while keeping each segment's requested duration
+            // the same) - the resulting output audio then plays content that
+            // was actually captured slightly earlier at the same point in the
+            // timeline, which is what "audio sounds delayed relative to
+            // video" needs. Deliberately only shifts the audio side - video's
+            // own PTS/paused-ranges timeline is untouched.
+            var chunkStartUtc = windowStartUtc - TimeSpan.FromMilliseconds(config.AudioSyncOffsetMs);
             var remainingSeconds = windowDurationSeconds;
             while (remainingSeconds > 0)
             {
@@ -346,8 +364,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             var targetFrameInterval = TimeSpan.FromSeconds(1.0 / Math.Clamp(config.FrameRate, 15, 240));
             // Short enough to stay well under even a 240fps target interval
             // (4.17ms) so the pacing gate below is never blocked waiting on
-            // this call - see its call site for why that matters now.
-            const uint AcquireTimeoutMs = 2;
+            // this call - see its call site for why that matters now. Lower
+            // than this measured no further benefit and just adds pure
+            // syscall/COM-marshaling overhead from calling AcquireNextFrame
+            // more often for no timing gain.
+            const uint AcquireTimeoutMs = 1;
             var lastDiagLog = TimeSpan.Zero;
             var lastRingTrim = TimeSpan.Zero;
             var framesSeen = 0;
@@ -1152,7 +1173,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             // one uncorrected multi-hour window.
             const double SegmentChunkSeconds = 60;
             var segmentWindows = new List<(DateTime StartUtc, double DurationSeconds)>();
-            var chunkStartUtc = sessionStartUtc;
+            // See SaveReplayAsync's identical comment - shifts only the audio
+            // source window, video's own timeline is untouched.
+            var chunkStartUtc = sessionStartUtc - TimeSpan.FromMilliseconds(config.AudioSyncOffsetMs);
             var remainingSeconds = durationSeconds;
             while (remainingSeconds > 0)
             {

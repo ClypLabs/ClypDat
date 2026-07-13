@@ -771,7 +771,8 @@ public sealed record ReplayBufferConfig(
     bool MicrophoneNoiseSuppressionEnabled = false,
     double MicrophoneNoiseSuppressionStrength = 12.0,
     bool FullSessionRecordingEnabled = false,
-    string FullSessionRecordingFolder = "");
+    string FullSessionRecordingFolder = "",
+    int AudioSyncOffsetMs = 0);
 
 internal sealed class AudioCaptureSession : IDisposable
 {

@@ -756,6 +756,17 @@
                   </StackPanel>
                 </StackPanel>
               </Border>
+
+              <Border Classes="settingsCard">
+                <StackPanel Spacing="6">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Text="Audio sync offset" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
+                    <TextBlock Grid.Column="1" Text="{Binding AudioSyncOffsetMs, StringFormat={}{0:0} ms}" Foreground="#8C98A7" FontSize="12" />
+                  </Grid>
+                  <TextBlock Text="Exact audio/video latency varies by hardware. If audio sounds delayed in your saved clips, raise this; if audio sounds ahead, lower it." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                  <Slider Minimum="-500" Maximum="500" Value="{Binding AudioSyncOffsetMs}" TickFrequency="10" />
+                </StackPanel>
+              </Border>
             </StackPanel>
 
             <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Audio Exclusions}">
