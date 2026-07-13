@@ -25,7 +25,12 @@ public sealed class ClipCardViewModel : ViewModelBase
         SetPreviewImage(_previewImagePath);
     }
 
-    private static readonly Regex TrailingTimestampPattern = new(@"\s\d{4}-\d{2}-\d{2}\s\d{2}-\d{2}-\d{2}$", RegexOptions.Compiled);
+    // Matches both the current "<name> - MMM-dd-yyyy - HH-mm-ss" suffix and the
+    // older "<name> yyyy-MM-dd HH-mm-ss" one, so clips saved before the naming
+    // format changed still display cleanly instead of showing the raw date.
+    private static readonly Regex TrailingTimestampPattern = new(
+        @"(\s-\s[A-Za-z]{3}-\d{2}-\d{4}\s-\s\d{2}-\d{2}-\d{2}|\s\d{4}-\d{2}-\d{2}\s\d{2}-\d{2}-\d{2})$",
+        RegexOptions.Compiled);
 
     public MediaFileInfo Media => _media;
     public string Name => Media.Name;

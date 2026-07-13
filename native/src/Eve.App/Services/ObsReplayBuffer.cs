@@ -128,8 +128,8 @@ public sealed class ObsReplayBuffer : IReplayBuffer
         try
         {
             var directory = Path.GetDirectoryName(path) ?? string.Empty;
-            var extension = Path.GetExtension(path);
-            var renamed = Path.Combine(directory, $"{ClipFileNaming.BuildBaseName(title)} {DateTime.Now:yyyy-MM-dd HH-mm-ss}{extension}");
+            var extension = Path.GetExtension(path).TrimStart('.');
+            var renamed = Path.Combine(directory, ClipFileNaming.BuildFileName(title, DateTime.Now, extension));
             File.Move(path, renamed);
             return renamed;
         }

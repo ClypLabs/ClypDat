@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Eve.App.Services;
 
 public static class ClipFileNaming
@@ -13,8 +15,10 @@ public static class ClipFileNaming
         return name;
     }
 
+    // "Counter-Strike 2 - Jul-27-2026 - 17-38-06" - InvariantCulture so the
+    // month abbreviation stays "Jul" regardless of the machine's locale.
     public static string BuildFileName(string gameDisplayName, DateTime timestamp, string extension)
     {
-        return $"{BuildBaseName(gameDisplayName)} {timestamp:yyyy-MM-dd HH-mm-ss}.{extension.TrimStart('.')}";
+        return $"{BuildBaseName(gameDisplayName)} - {timestamp.ToString("MMM-dd-yyyy", CultureInfo.InvariantCulture)} - {timestamp:HH-mm-ss}.{extension.TrimStart('.')}";
     }
 }
