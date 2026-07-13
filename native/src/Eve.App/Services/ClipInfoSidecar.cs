@@ -11,7 +11,8 @@ public sealed record ClipInfo(
     string? GameDisplayName,
     string? AutoClipEventType,
     string? FileTitle = null,
-    DateTimeOffset? CapturedAt = null);
+    DateTimeOffset? CapturedAt = null,
+    string? MedalImportKey = null);
 
 public static class ClipInfoSidecar
 {

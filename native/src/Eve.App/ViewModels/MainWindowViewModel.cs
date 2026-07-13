@@ -718,18 +718,68 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        foreach (var record in found.OrderByDescending(record => record.CreatedAtUtc))
+        var importedKeys = new HashSet<string>(Settings.ImportedMedalClipKeys, StringComparer.Ordinal);
+        AddExistingMedalImportKeys(importedKeys);
+        var settingsChanged = false;
+        foreach (var key in importedKeys)
+        {
+            if (Settings.ImportedMedalClipKeys.Contains(key, StringComparer.Ordinal)) continue;
+            Settings.ImportedMedalClipKeys.Add(key);
+            settingsChanged = true;
+        }
+        if (settingsChanged) SaveSettings();
+
+        var candidates = found
+            .GroupBy(MedalImportService.GetImportKey, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToArray();
+        var available = candidates
+            .Where(record => !importedKeys.Contains(MedalImportService.GetImportKey(record)))
+            .OrderByDescending(record => record.CreatedAtUtc)
+            .ToArray();
+
+        foreach (var record in available)
         {
             MedalImportRows.Add(new MedalImportRowViewModel(record, MedalImportStripEmoji));
         }
 
-        MedalScanStatusText = found.Count switch
+        var alreadyImported = candidates.Length - available.Length;
+        MedalScanStatusText = available.Length switch
         {
+            0 when alreadyImported > 0 => $"No new Medal clips found ({alreadyImported} already imported).",
             0 => "No Medal clips found.",
-            1 => "1 Medal clip found.",
-            _ => $"{found.Count} Medal clips found."
+            1 => alreadyImported > 0 ? $"1 new Medal clip found ({alreadyImported} already imported)." : "1 new Medal clip found.",
+            _ => alreadyImported > 0 ? $"{available.Length} new Medal clips found ({alreadyImported} already imported)." : $"{available.Length} new Medal clips found."
         };
         MedalScanned = true;
+    }
+
+    private void AddExistingMedalImportKeys(ISet<string> importedKeys)
+    {
+        if (string.IsNullOrWhiteSpace(Settings.LibraryFolder)) return;
+        var medalFolder = Path.Combine(Settings.LibraryFolder, "Imported Clips", "Medal");
+        if (!Directory.Exists(medalFolder)) return;
+
+        try
+        {
+            foreach (var path in Directory.EnumerateFiles(medalFolder, "*.*", SearchOption.AllDirectories).Where(MediaProbeService.IsVideoFile))
+            {
+                var sidecarKey = ClipInfoSidecar.Load(path)?.MedalImportKey;
+                if (!string.IsNullOrWhiteSpace(sidecarKey))
+                {
+                    importedKeys.Add(sidecarKey);
+                    continue;
+                }
+
+                var info = new FileInfo(path);
+                var game = Path.GetFileName(Path.GetDirectoryName(path)) ?? "Medal";
+                importedKeys.Add(MedalImportService.GetImportKey(game, info.CreationTimeUtc, info.Length));
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Medal import: failed reading existing imported clips.", error);
+        }
     }
 
     public async Task ImportSelectedMedalClipsAsync()
@@ -774,7 +824,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                         File.SetLastWriteTimeUtc(destinationPath, row.Record.CreatedAtUtc);
                     });
 
-                    ClipInfoSidecar.Save(destinationPath, new ClipInfo(row.GameFolderName, null, title, row.Record.CreatedAtUtc));
+                    var importKey = MedalImportService.GetImportKey(row.Record);
+                    ClipInfoSidecar.Save(destinationPath, new ClipInfo(row.GameFolderName, null, title, row.Record.CreatedAtUtc, importKey));
+                    if (!Settings.ImportedMedalClipKeys.Contains(importKey, StringComparer.Ordinal))
+                    {
+                        Settings.ImportedMedalClipKeys.Add(importKey);
+                        SaveSettings();
+                    }
 
                     await AddOrUpdateLibraryClipAsync(destinationPath);
                     imported++;
@@ -1255,7 +1311,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 targetPath = ClipFileNaming.BuildUniquePath(directory, fileName);
                 // Store naming metadata before moving so future scheme changes do
                 // not have to reverse-engineer a user-defined template.
-                ClipInfoSidecar.Save(sourcePath, new ClipInfo(game, info?.AutoClipEventType, title, timestamp));
+                ClipInfoSidecar.Save(sourcePath, new ClipInfo(game, info?.AutoClipEventType, title, timestamp, info?.MedalImportKey));
                 File.Move(sourcePath, targetPath);
                 MoveClipSidecars(sourcePath, targetPath);
                 _mediaProbe.DeleteCacheFor(sourcePath);

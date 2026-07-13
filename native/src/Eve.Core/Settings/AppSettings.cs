@@ -60,6 +60,9 @@ public sealed class AppSettings
     public Cs2AutoClipSettings Cs2AutoClip { get; set; } = new();
     public bool MedalImportStripEmoji { get; set; } = false;
     public bool MedalImportCopyNotMove { get; set; } = true;
+    // Stable identities for Medal clips that EVE has already imported. This is
+    // intentionally global rather than tied to a particular library folder.
+    public List<string> ImportedMedalClipKeys { get; set; } = new();
     // One-time migration flag: existing clips sitting flat in the library
     // root get moved into per-game subfolders the first library refresh
     // after this shipped. False (unset) on any settings.json predating it.

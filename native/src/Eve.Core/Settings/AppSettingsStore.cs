@@ -20,6 +20,7 @@ public static class AppSettingsStore
             var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
             settings.ClipEdits ??= new Dictionary<string, ClipEditSettings>(StringComparer.OrdinalIgnoreCase);
             settings.GameAudioExcludedProcesses ??= new List<string>();
+            settings.ImportedMedalClipKeys ??= new List<string>();
             if (string.IsNullOrWhiteSpace(settings.ClipFileNameScheme)) settings.ClipFileNameScheme = "Standard";
             if (string.IsNullOrWhiteSpace(settings.CustomClipFileNameTemplate)) settings.CustomClipFileNameTemplate = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}";
             if (string.IsNullOrWhiteSpace(settings.ReplayQualityPreset)) settings.ReplayQualityPreset = "Balanced";

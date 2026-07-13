@@ -22,6 +22,22 @@ public sealed record MedalClipRecord(
 // still importable, just without a nice title.
 public static class MedalImportService
 {
+    // Medal can move or rename its source files, so source paths are not a
+    // durable import identity. The catalog timestamp, game and byte length
+    // survive those changes without having to hash multi-gigabyte videos.
+    public static string GetImportKey(MedalClipRecord record)
+    {
+        long length;
+        try { length = new FileInfo(record.VideoPath).Length; }
+        catch { length = -1; }
+        return GetImportKey(record.GameFolderName, record.CreatedAtUtc, length);
+    }
+
+    public static string GetImportKey(string gameFolderName, DateTime createdAtUtc, long length)
+    {
+        return $"{NormalizeForComparison(gameFolderName)}|{createdAtUtc.ToUniversalTime().Ticks}|{length}";
+    }
+
     public static IReadOnlyList<MedalClipRecord> ScanForClips()
     {
         var medalRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Medal");
