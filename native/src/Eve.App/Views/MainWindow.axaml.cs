@@ -1167,21 +1167,29 @@ public sealed partial class MainWindow : Window
     {
         if (_timelineDragMode == TimelineDragMode.None) return;
         var mode = _timelineDragMode;
+        var wasPlaying = _timelineWasPlayingBeforeDrag;
         UpdateTimelineFromPointer(e, _timelineDragMode);
-        if (mode == TimelineDragMode.Playhead && ViewModel is not null)
-        {
-            await ApplyTimelineSeekAsync(ViewModel.CurrentTime, _timelineWasPlayingBeforeDrag);
-        }
-        else if (ViewModel is not null)
-        {
-            await ApplyTimelineSeekAsync(ViewModel.CurrentTime, _timelineWasPlayingBeforeDrag);
-            ViewModel.SaveSelectedClipEditState();
-        }
 
+        // Drag mode/capture must clear BEFORE the seek await below, not after -
+        // otherwise the gesture is still "active" for the whole async seek
+        // (TimelineSurface_OnPointerMoved keeps acting on it, and the pointer is
+        // still captured), so any mouse movement during that window keeps
+        // dragging the seeker with no button held. Seeking right at/near a
+        // clip's end is the slow case that made this window wide enough to hit.
         _timelineDragMode = TimelineDragMode.None;
         _timelineWasPlayingBeforeDrag = false;
         e.Pointer.Capture(null);
         e.Handled = true;
+
+        if (mode == TimelineDragMode.Playhead && ViewModel is not null)
+        {
+            await ApplyTimelineSeekAsync(ViewModel.CurrentTime, wasPlaying);
+        }
+        else if (ViewModel is not null)
+        {
+            await ApplyTimelineSeekAsync(ViewModel.CurrentTime, wasPlaying);
+            ViewModel.SaveSelectedClipEditState();
+        }
     }
 
     private void TrackVolume_OnPointerPressed(object? sender, PointerPressedEventArgs e)

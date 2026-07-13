@@ -778,7 +778,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 if (stopwatch.Elapsed - lastRingTrim >= TimeSpan.FromSeconds(1))
                 {
                     lastRingTrim = stopwatch.Elapsed;
-                    TrimRingBuffer();
+                    TrimRingBuffer(fullSessionFormatContext is not null ? fullSessionStartUtc : (DateTime?)null);
                 }
             }
 
@@ -1313,7 +1313,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         }
     }
 
-    private void TrimRingBuffer()
+    private void TrimRingBuffer(DateTime? fullSessionStartUtc)
     {
         var cutoff = DateTime.UtcNow - Duration - TimeSpan.FromSeconds(5);
         lock (_bufferLock)
@@ -1322,13 +1322,25 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             while (removeCount < _packets.Count && _packets[removeCount].WallClockUtc < cutoff) removeCount++;
             if (removeCount > 0) _packets.RemoveRange(0, removeCount);
 
+            // _pauseEvents is shared between ring-buffer clip saves (which only
+            // ever need the last Duration worth of history) and a running Full
+            // Session recording, which can span hours - trimming to the same
+            // Duration-based cutoff used for _packets silently dropped any pause
+            // event older than that, so a session-start alt-tab was gone from
+            // the sidecar by the time a multi-hour session finished. While a
+            // Full Session is active, nothing older than its own start is
+            // eligible for trimming.
+            var pauseEventCutoff = fullSessionStartUtc is { } sessionStart && sessionStart < cutoff
+                ? sessionStart
+                : cutoff;
+
             // Keeps at most one event before the cutoff (needed so
             // ComputePausedRangesSeconds can still tell what state a save
             // window started in) and drops everything older than that.
             var keepFromIndex = 0;
             for (var i = _pauseEvents.Count - 1; i >= 0; i--)
             {
-                if (_pauseEvents[i].WallClockUtc < cutoff) { keepFromIndex = i; break; }
+                if (_pauseEvents[i].WallClockUtc < pauseEventCutoff) { keepFromIndex = i; break; }
             }
             if (keepFromIndex > 0) _pauseEvents.RemoveRange(0, keepFromIndex);
         }
