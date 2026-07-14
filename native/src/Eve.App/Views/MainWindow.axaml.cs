@@ -810,7 +810,8 @@ public sealed partial class MainWindow : Window
 
         if (update is null)
         {
-            await ShowMessageAsync("You're up to date", $"EVE {AppUpdateService.CurrentVersion} is the latest version.");
+            var current = AppUpdateService.CurrentVersion;
+            await ShowMessageAsync("You're up to date", $"EVE {current.Major}.{current.Minor}.{current.Build} is the latest version.");
             return;
         }
 

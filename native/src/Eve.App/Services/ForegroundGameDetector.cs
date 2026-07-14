@@ -56,6 +56,7 @@ public sealed class ForegroundGameDetector
         "spotify.exe",
         "steam.exe",
         "steamwebhelper.exe",
+        "streamdeck.exe",
         "taskmgr.exe",
         "textinputhost.exe",
         "vlc.exe",
