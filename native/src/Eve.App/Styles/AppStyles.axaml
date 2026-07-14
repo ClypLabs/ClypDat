@@ -218,15 +218,21 @@
     <Setter Property="Background" Value="Transparent" />
   </Style>
   <Style Selector="Button.librarySettingsButton">
-    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Background" Value="#182029" />
     <Setter Property="Foreground" Value="#93A6B8" />
     <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="CornerRadius" Value="7" />
-    <Setter Property="Padding" Value="10,8" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Padding" Value="0" />
   </Style>
   <Style Selector="Button.librarySettingsButton:pointerover">
-    <Setter Property="Background" Value="#182029" />
+    <Setter Property="Background" Value="#22303C" />
     <Setter Property="Foreground" Value="#D8E4F2" />
+  </Style>
+  <Style Selector="Button.librarySettingsButton PathIcon.settingsGearIcon">
+    <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
+  </Style>
+  <Style Selector="Button.librarySettingsButton:pointerover PathIcon.settingsGearIcon">
+    <Setter Property="RenderTransform" Value="rotate(360deg)" />
   </Style>
   <Style Selector="Button.gameFilterBadge">
     <Setter Property="Background" Value="Transparent" />
