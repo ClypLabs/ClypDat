@@ -71,14 +71,18 @@ public sealed partial class MainWindow : Window
                 UpdateCs2AutoClipState();
             }
         };
-        KeyUp += MainWindow_OnKeyUp;
         // Tunnel, not bubble - a focused Button (Export, a transport button,
         // anything clicked most recently) otherwise intercepts Space itself
         // before this handler ever sees it (Button's own gesture recognizer
         // treats focused+Space as "activate me"), so Space would trigger
         // whatever was last clicked instead of always meaning play/pause.
         // Tunnel fires on the way down to the focused element, winning the race.
+        // Avalonia's Button activates Space on KeyUp specifically, so KeyUp
+        // needs the same Tunnel treatment as KeyDown - a plain (bubble) KeyUp
+        // handler runs AFTER the focused Button's own KeyUp already fired
+        // Click, too late to swallow it.
         AddHandler(KeyDownEvent, MainWindow_OnKeyDown, RoutingStrategies.Tunnel);
+        AddHandler(KeyUpEvent, MainWindow_OnKeyUp, RoutingStrategies.Tunnel);
         Closing += (_, e) =>
         {
             SaveWindowBounds();
@@ -980,6 +984,16 @@ public sealed partial class MainWindow : Window
             }
         }
 
+        // Space is reserved app-wide for play/pause and must never activate
+        // whatever control currently has keyboard focus instead (a Settings
+        // toggle, "Refresh", whatever was last clicked) - swallow it here
+        // unconditionally, before the Editor-only guard below decides whether
+        // it actually does anything.
+        if (e.Key == Key.Space && ViewModel is not null && !IsTypingInTextInput(e.Source))
+        {
+            e.Handled = true;
+        }
+
         if (ViewModel is null ||
             !ViewModel.IsEditorVisible ||
             !ViewModel.Settings.EnableEditorKeyboardShortcuts ||
@@ -1033,11 +1047,10 @@ public sealed partial class MainWindow : Window
         // handling still ran afterward and fired its own Click too (whatever
         // was last clicked - Export, a transport button - "opened" again).
         // Swallowing Space here on Tunnel, same as KeyDown, closes that gap.
-        if (e.Key == Key.Space &&
-            ViewModel is not null &&
-            ViewModel.IsEditorVisible &&
-            ViewModel.Settings.EnableEditorKeyboardShortcuts &&
-            !IsTypingInTextInput(e.Source))
+        // Unconditional (not gated to Editor) for the same reason as the
+        // KeyDown swallow - Space must never activate whatever control has
+        // focus anywhere in the app, not just in the Editor.
+        if (e.Key == Key.Space && ViewModel is not null && !IsTypingInTextInput(e.Source))
         {
             e.Handled = true;
         }
