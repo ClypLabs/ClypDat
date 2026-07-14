@@ -166,7 +166,7 @@
     something to reach. Same fix applied to Check Now and Update Now, which
     hit the identical issue.
   -->
-  <Style Selector="Button#ExportButton, Button#CheckNowButton, Button#UpdateNowButton">
+  <Style Selector="Button#ExportButton, Button#CheckNowButton, Button#UpdateNowButton, Button.librarySettingsButton">
     <Setter Property="Template">
       <ControlTemplate>
         <Border Background="{TemplateBinding Background}"
@@ -218,7 +218,15 @@
     <Setter Property="Background" Value="Transparent" />
   </Style>
   <Style Selector="Button.librarySettingsButton">
+    <Setter Property="Background" Value="#1D2A36" />
+    <Setter Property="Foreground" Value="#93A6B8" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="10" />
     <Setter Property="Padding" Value="0" />
+  </Style>
+  <Style Selector="Button.librarySettingsButton:pointerover">
+    <Setter Property="Background" Value="#293B4C" />
+    <Setter Property="Foreground" Value="#D8E4F2" />
   </Style>
   <Style Selector="Button.gameFilterBadge">
     <Setter Property="Background" Value="Transparent" />

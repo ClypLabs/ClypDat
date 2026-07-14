@@ -684,8 +684,6 @@ public sealed partial class MainWindow : Window
         await ViewModel.RefreshOpenProcessesAsync();
     }
 
-    private void SettingsGearButton_OnPointerEntered(object? sender, PointerEventArgs e) => ((RotateTransform)SettingsGearIcon.RenderTransform!).Angle = 360;
-    private void SettingsGearButton_OnPointerExited(object? sender, PointerEventArgs e) => ((RotateTransform)SettingsGearIcon.RenderTransform!).Angle = 0;
 
     private void CloseSettingsButton_OnClick(object? sender, RoutedEventArgs e)
     {
