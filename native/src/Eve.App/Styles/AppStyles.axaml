@@ -230,6 +230,7 @@
   </Style>
   <Style Selector="Button.librarySettingsButton PathIcon.settingsGearIcon">
     <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
+    <Setter Property="RenderTransform" Value="rotate(0deg)" />
   </Style>
   <Style Selector="Button.librarySettingsButton:pointerover PathIcon.settingsGearIcon">
     <Setter Property="RenderTransform" Value="rotate(360deg)" />
