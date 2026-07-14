@@ -196,6 +196,7 @@
                             <Border Grid.Row="1" Background="#1E2A35">
                                 <StackPanel Spacing="6" Margin="16,13,16,13">
                                 <TextBlock Text="{Binding TileTopLabel}"
+                                           FontFamily="Segoe UI,Segoe UI Emoji"
                                            Foreground="#8C98A7"
                                            FontSize="12"
                                            FontWeight="Bold"
@@ -213,6 +214,7 @@
                                   </Button.Flyout>
                                   <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
                                     <TextBlock Text="{Binding TileTopLabel}"
+                                               FontFamily="Segoe UI,Segoe UI Emoji"
                                                Foreground="#8C98A7"
                                                FontSize="12"
                                                FontWeight="Bold"
@@ -221,6 +223,7 @@
                                   </StackPanel>
                                 </Button>
                                 <TextBlock Text="{Binding TileMainLabel}"
+                                           FontFamily="Segoe UI,Segoe UI Emoji"
                                            Foreground="#EDF4FB"
                                            FontSize="15"
                                            FontWeight="Bold"
@@ -496,7 +499,9 @@
                     <TextBlock Text="Date/time format help: Microsoft Learn" Tag="https://learn.microsoft.com/en-us/dotnet/standard/base-types/custom-date-and-time-format-strings" PointerPressed="LicenseLinkText_OnPointerPressed" Foreground="#75B8F0" FontSize="12" />
                   </StackPanel>
                   <TextBlock Text="Preview" Foreground="#93A6B8" FontSize="12" />
-                  <TextBlock Text="{Binding ClipFileNamePreview}" Foreground="#D2DEEC" FontSize="13" TextWrapping="Wrap" />
+                  <Border Background="#1D2A36" BorderBrush="#2C3B48" BorderThickness="1" CornerRadius="7" Padding="14,10">
+                    <TextBlock Text="{Binding ClipFileNamePreview}" FontFamily="Segoe UI,Segoe UI Emoji" Foreground="#D2DEEC" FontSize="13" TextWrapping="Wrap" />
+                  </Border>
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Text="Apply the current scheme to every video in this library, including imports and Full Sessions stored here." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
                     <Button Grid.Column="1" Content="Rename all to updated scheme" Click="RenameAllClipsButton_OnClick" IsEnabled="{Binding CanRenameAllClips}" VerticalAlignment="Center" />
@@ -1007,7 +1012,7 @@
           <StackPanel Margin="20" Spacing="14">
             <TextBlock Text="CLIP DETAILS" Foreground="#C4D9F2" FontSize="13" FontWeight="Bold" />
             <TextBlock Text="Title" Foreground="#93A6B8" FontSize="12" />
-            <TextBox Text="{Binding EditorTitle}" Foreground="#EDF4FB" FontSize="14" FontWeight="Bold" Background="#0D151C" BorderBrush="#17232D" />
+            <TextBox Text="{Binding EditorTitle}" FontFamily="Segoe UI,Segoe UI Emoji" Foreground="#EDF4FB" FontSize="14" FontWeight="Bold" Background="#0D151C" BorderBrush="#17232D" />
             <TextBlock Text="Description" Foreground="#93A6B8" FontSize="12" />
             <TextBox Text="{Binding EditorDescription}"
                      MinHeight="86"
