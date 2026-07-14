@@ -166,7 +166,7 @@
     something to reach. Same fix applied to Check Now and Update Now, which
     hit the identical issue.
   -->
-  <Style Selector="Button#ExportButton, Button#CheckNowButton, Button#UpdateNowButton">
+  <Style Selector="Button#ExportButton, Button#CheckNowButton, Button#UpdateNowButton, Button.librarySettingsButton">
     <Setter Property="Template">
       <ControlTemplate>
         <Border Background="{TemplateBinding Background}"
@@ -184,7 +184,7 @@
       </ControlTemplate>
     </Setter>
   </Style>
-  <Style Selector="Button#ExportButton:pointerover, Button#CheckNowButton:pointerover, Button#UpdateNowButton:pointerover">
+  <Style Selector="Button#ExportButton:pointerover, Button#CheckNowButton:pointerover, Button#UpdateNowButton:pointerover, Button.librarySettingsButton:pointerover">
     <Setter Property="Background" Value="{StaticResource AccentBrushHover}" />
   </Style>
   <Style Selector="Button.deleteButton:pointerover">
@@ -218,15 +218,11 @@
     <Setter Property="Background" Value="Transparent" />
   </Style>
   <Style Selector="Button.librarySettingsButton">
-    <Setter Property="Background" Value="#182029" />
-    <Setter Property="Foreground" Value="#93A6B8" />
+    <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
     <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="CornerRadius" Value="10" />
     <Setter Property="Padding" Value="0" />
-  </Style>
-  <Style Selector="Button.librarySettingsButton:pointerover">
-    <Setter Property="Background" Value="#22303C" />
-    <Setter Property="Foreground" Value="#D8E4F2" />
   </Style>
   <Style Selector="Button.librarySettingsButton PathIcon.settingsGearIcon">
     <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
