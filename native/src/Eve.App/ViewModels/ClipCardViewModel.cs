@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Avalonia.Media.Imaging;
 using Avalonia.Media;
 using Eve.App.Services;
@@ -27,13 +26,6 @@ public sealed class ClipCardViewModel : ViewModelBase
         SetPreviewImage(_previewImagePath);
     }
 
-    // Matches both the current "<name> - MMM-dd-yyyy - HH-mm-ss" suffix and the
-    // older "<name> yyyy-MM-dd HH-mm-ss" one, so clips saved before the naming
-    // format changed still display cleanly instead of showing the raw date.
-    private static readonly Regex TrailingTimestampPattern = new(
-        @"(\s-\s[A-Za-z]{3}-\d{2}-\d{4}\s-\s\d{2}-\d{2}-\d{2}|\s\d{4}-\d{2}-\d{2}\s\d{2}-\d{2}-\d{2})$",
-        RegexOptions.Compiled);
-
     public MediaFileInfo Media => _media;
     public string Name => Media.Name;
     public string Path => Media.Path;
@@ -46,7 +38,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     // auto-clip label plus a " yyyy-MM-dd HH-mm-ss" timestamp appended for
     // uniqueness on disk (e.g. "Marvel Rivals 2026-07-11 22-16-11"). Strip that
     // suffix back off for display; there's no separately stored game field.
-    public string GameNameLabel => _clipInfo?.FileTitle ?? TrailingTimestampPattern.Replace(Name, string.Empty);
+    public string GameNameLabel => _clipInfo?.FileTitle ?? ClipFileNaming.StripTimestampSuffix(Name);
 
     public string ClipFromLabel => $"Clip from {CreatedAt:MMM d, yyyy}";
 

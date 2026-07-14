@@ -1659,7 +1659,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private static string ResolveLibraryTitle(string videoPath, ClipInfo? info, string game, bool inferredGame)
     {
-        var title = info?.FileTitle ?? Path.GetFileNameWithoutExtension(videoPath);
+        var title = info?.FileTitle ?? ClipFileNaming.StripTimestampSuffix(Path.GetFileNameWithoutExtension(videoPath));
         return inferredGame && title.Contains("MedalTV", StringComparison.OrdinalIgnoreCase) ? game : title;
     }
 

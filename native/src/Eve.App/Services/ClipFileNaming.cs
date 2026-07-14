@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace Eve.App.Services;
 
@@ -7,6 +8,18 @@ public static class ClipFileNaming
     public const string StandardScheme = "Standard";
     public const string ReadableScheme = "Readable";
     public const string CustomScheme = "Custom";
+
+    // Matches a trailing date/time this class itself appended under either the
+    // current "<title> - MMM-dd-yyyy - HH-mm-ss" scheme or the older
+    // "<title> yyyy-MM-dd HH-mm-ss" one, so a title re-derived from a filename
+    // that already has one of these suffixes doesn't carry the date along as
+    // part of the "title".
+    private static readonly Regex TrailingTimestampPattern = new(
+        @"(\s-\s[A-Za-z]{3}-\d{2}-\d{4}\s-\s\d{2}-\d{2}-\d{2}|\s\d{4}-\d{2}-\d{2}\s\d{2}-\d{2}-\d{2})$",
+        RegexOptions.Compiled);
+
+    public static string StripTimestampSuffix(string nameWithoutExtension) =>
+        TrailingTimestampPattern.Replace(nameWithoutExtension, string.Empty);
 
     public static string BuildBaseName(string gameDisplayName)
     {
