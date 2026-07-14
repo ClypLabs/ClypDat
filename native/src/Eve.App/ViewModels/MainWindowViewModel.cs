@@ -491,7 +491,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool HasClipFileNameTemplateError => !string.IsNullOrWhiteSpace(ClipFileNameTemplateError);
     public bool IsRenamingAllClips { get => _isRenamingAllClips; private set { if (SetProperty(ref _isRenamingAllClips, value)) OnPropertyChanged(nameof(CanRenameAllClips)); } }
-    public string RenameAllClipsStatus { get => _renameAllClipsStatus; private set => SetProperty(ref _renameAllClipsStatus, value); }
+    public string RenameAllClipsStatus
+    {
+        get => _renameAllClipsStatus;
+        private set
+        {
+            if (!SetProperty(ref _renameAllClipsStatus, value)) return;
+            OnPropertyChanged(nameof(HasRenameAllClipsStatus));
+        }
+    }
+    public bool HasRenameAllClipsStatus => !string.IsNullOrWhiteSpace(RenameAllClipsStatus);
     public bool CanRenameAllClips => !IsRenamingAllClips && !HasClipFileNameTemplateError && !string.IsNullOrWhiteSpace(Settings.LibraryFolder) && Directory.Exists(Settings.LibraryFolder);
 
     public bool EnableClipOverlay

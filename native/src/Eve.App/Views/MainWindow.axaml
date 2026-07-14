@@ -434,7 +434,7 @@
             <StackPanel Spacing="22" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=General}">
               <StackPanel Spacing="4">
                 <TextBlock Text="GENERAL" Foreground="#5C6D7E" FontSize="13" FontWeight="Bold" />
-                <TextBlock Text="Startup behavior, library preview, and diagnostics." Foreground="#93A6B8" FontSize="14" TextWrapping="Wrap" />
+                <TextBlock Text="Startup behavior, layout, and clip filenames." Foreground="#93A6B8" FontSize="14" TextWrapping="Wrap" />
               </StackPanel>
 
               <Border Classes="settingsCard">
@@ -501,20 +501,7 @@
                     <TextBlock Text="Apply the current scheme to every video in this library, including imports and Full Sessions stored here." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
                     <Button Grid.Column="1" Content="Rename all to updated scheme" Click="RenameAllClipsButton_OnClick" IsEnabled="{Binding CanRenameAllClips}" VerticalAlignment="Center" />
                   </Grid>
-                  <TextBlock Text="{Binding RenameAllClipsStatus}" Foreground="#93A6B8" FontSize="12" TextWrapping="Wrap" />
-                </StackPanel>
-              </Border>
-
-              <Border Classes="settingsCard">
-                <StackPanel Spacing="18">
-                  <TextBlock Text="DIAGNOSTICS" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" />
-                  <Grid ColumnDefinitions="*,Auto">
-                    <StackPanel Spacing="2">
-                      <TextBlock Text="Log folder" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
-                      <TextBlock Text="Open EVE's log files for troubleshooting a crash or capture issue." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
-                    </StackPanel>
-                    <Button Grid.Column="1" Content="Open Logs" Click="OpenLogsButton_OnClick" VerticalAlignment="Center" />
-                  </Grid>
+                  <TextBlock Text="{Binding RenameAllClipsStatus}" Foreground="#93A6B8" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding HasRenameAllClipsStatus}" />
                 </StackPanel>
               </Border>
             </StackPanel>
@@ -896,6 +883,19 @@
                       <TextBlock Text="Source code, releases, and issue tracker." Foreground="#6B7C8C" FontSize="12" />
                     </StackPanel>
                     <Button Grid.Column="1" Content="Open GitHub" Click="OpenGitHubButton_OnClick" VerticalAlignment="Center" />
+                  </Grid>
+                </StackPanel>
+              </Border>
+
+              <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="10" Padding="18">
+                <StackPanel Spacing="16">
+                  <TextBlock Text="DIAGNOSTICS" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" />
+                  <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="Log folder" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
+                      <TextBlock Text="Open EVE's log files for troubleshooting a crash or capture issue." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="Open Logs" Click="OpenLogsButton_OnClick" VerticalAlignment="Center" />
                   </Grid>
                 </StackPanel>
               </Border>
