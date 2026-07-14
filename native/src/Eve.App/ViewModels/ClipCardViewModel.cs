@@ -11,17 +11,19 @@ public sealed class ClipCardViewModel : ViewModelBase
     private bool _isSelected;
     private bool _isHovered;
     private MediaFileInfo _media;
+    private readonly string _libraryRoot;
     private string _previewImagePath;
     private Bitmap? _previewImage;
     private ClipInfo? _clipInfo;
     private ClipEditSettings? _clipEdit;
 
-    public ClipCardViewModel(MediaFileInfo media)
+    public ClipCardViewModel(MediaFileInfo media, string libraryRoot)
     {
         _media = media;
+        _libraryRoot = libraryRoot;
         _previewImagePath = media.ThumbnailPath;
-        _clipInfo = ClipInfoSidecar.Load(media.Path);
-        _clipEdit = ClipEditSidecar.Load(media.Path);
+        _clipInfo = ClipInfoSidecar.Load(_libraryRoot, media.Path);
+        _clipEdit = ClipEditSidecar.Load(_libraryRoot, media.Path);
         SetPreviewImage(_previewImagePath);
     }
 
@@ -44,7 +46,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     // auto-clip label plus a " yyyy-MM-dd HH-mm-ss" timestamp appended for
     // uniqueness on disk (e.g. "Marvel Rivals 2026-07-11 22-16-11"). Strip that
     // suffix back off for display; there's no separately stored game field.
-    public string GameNameLabel => TrailingTimestampPattern.Replace(Name, string.Empty);
+    public string GameNameLabel => _clipInfo?.FileTitle ?? TrailingTimestampPattern.Replace(Name, string.Empty);
 
     public string ClipFromLabel => $"Clip from {CreatedAt:MMM d, yyyy}";
 
@@ -155,7 +157,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     // already resolves to the real game name for both auto-clips (sidecar's
     // GameDisplayName) and everything else (filename-parsed), for both
     // EVE-recorded and Medal-imported clips.
-    public string GameFilterKey => TileTopLabel;
+    public string GameFilterKey => _clipInfo?.GameDisplayName ?? TileTopLabel;
 
     private bool _isMostRecentForGame;
     private int _gameClipCount;
@@ -254,8 +256,8 @@ public sealed class ClipCardViewModel : ViewModelBase
     public void UpdateMedia(MediaFileInfo media)
     {
         _media = media;
-        _clipInfo = ClipInfoSidecar.Load(media.Path);
-        _clipEdit = ClipEditSidecar.Load(media.Path);
+        _clipInfo = ClipInfoSidecar.Load(_libraryRoot, media.Path);
+        _clipEdit = ClipEditSidecar.Load(_libraryRoot, media.Path);
         PreviewImagePath = media.ThumbnailPath;
         OnPropertyChanged(nameof(Media));
         OnPropertyChanged(nameof(Name));

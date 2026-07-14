@@ -165,7 +165,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         var clipName = string.IsNullOrWhiteSpace(titleOverride) ? config.GameDisplayName : titleOverride;
         var gameFolder = Path.Combine(outputFolder, ClipFileNaming.BuildBaseName(config.GameDisplayName));
         Directory.CreateDirectory(gameFolder);
-        var outputPath = Path.Combine(gameFolder, ClipFileNaming.BuildFileName(clipName, DateTime.Now, "mp4"));
+        var outputPath = ClipFileNaming.BuildUniquePath(gameFolder, ClipFileNaming.BuildFileName(clipName, DateTime.Now, "mp4", config.ClipFileNameScheme, config.CustomClipFileNameTemplate, config.GameDisplayName));
 
         var tempVideoPath = Path.Combine(Path.GetTempPath(), $"eve-native-video-{Guid.NewGuid():N}.mp4");
         var snapshots = new List<string>();
@@ -218,7 +218,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 remainingSeconds -= chunkSeconds;
             }
 
-            WritePausedRangesSidecar(outputPath, ComputePausedRangesSeconds(GetOrderedPauseEvents(), windowStartUtc, windowStartUtc + TimeSpan.FromSeconds(windowDurationSeconds)));
+            WritePausedRangesSidecar(config.LibraryFolder, outputPath, ComputePausedRangesSeconds(GetOrderedPauseEvents(), windowStartUtc, windowStartUtc + TimeSpan.FromSeconds(windowDurationSeconds)));
 
             var tracks = await _audio.BuildAlignedTracksAsync(segmentWindows, config, snapshots, cancellationToken);
 
@@ -1180,7 +1180,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         {
             Directory.CreateDirectory(config.FullSessionRecordingFolder);
             var sessionLabel = string.IsNullOrWhiteSpace(config.GameDisplayName) ? "Session" : $"Session - {config.GameDisplayName}";
-            finalOutputPath = Path.Combine(config.FullSessionRecordingFolder, ClipFileNaming.BuildFileName(sessionLabel, DateTime.Now, "mp4"));
+            finalOutputPath = ClipFileNaming.BuildUniquePath(config.FullSessionRecordingFolder, ClipFileNaming.BuildFileName(sessionLabel, DateTime.Now, "mp4", config.ClipFileNameScheme, config.CustomClipFileNameTemplate, config.GameDisplayName));
             tempVideoPath = Path.Combine(Path.GetTempPath(), $"eve-full-session-video-{Guid.NewGuid():N}.mp4");
 
             AVFormatContext* formatContext = null;
@@ -1260,7 +1260,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         {
             var sessionEndUtc = DateTime.UtcNow;
             var durationSeconds = Math.Max(1, (sessionEndUtc - sessionStartUtc).TotalSeconds);
-            WritePausedRangesSidecar(finalOutputPath, ComputePausedRangesSeconds(GetOrderedPauseEvents(), sessionStartUtc, sessionEndUtc));
+            WritePausedRangesSidecar(config.LibraryFolder, finalOutputPath, ComputePausedRangesSeconds(GetOrderedPauseEvents(), sessionStartUtc, sessionEndUtc));
             // One giant segment spanning the whole session let audio/video clock
             // drift (real hardware sample clocks are never exactly 48000.000000Hz)
             // accumulate uncorrected for the entire recording - fine for the first
@@ -1301,6 +1301,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             }
             else
             {
+                ClipInfoSidecar.Save(config.LibraryFolder, finalOutputPath, new ClipInfo(config.GameDisplayName, null, $"{config.GameDisplayName} Full Session", sessionStartUtc));
                 AppLog.Info($"Native full session recording saved: path={finalOutputPath}.");
             }
         }
@@ -1400,30 +1401,20 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         return ranges;
     }
 
-    private static void WritePausedRangesSidecar(string outputPath, List<(double StartSeconds, double EndSeconds)> ranges)
+    private static void WritePausedRangesSidecar(string libraryRoot, string outputPath, List<(double StartSeconds, double EndSeconds)> ranges)
     {
         if (ranges.Count == 0) return;
         try
         {
             var payload = ranges.Select(r => new { start = Math.Round(r.StartSeconds, 2), end = Math.Round(r.EndSeconds, 2) }).ToArray();
-            File.WriteAllText(GetPausedSidecarPath(outputPath), JsonSerializer.Serialize(payload));
+            var sidecarPath = LibraryLayout.SidecarPath(libraryRoot, outputPath, ".paused.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(sidecarPath)!);
+            File.WriteAllText(sidecarPath, JsonSerializer.Serialize(payload));
         }
         catch (Exception error)
         {
             AppLog.Error("Failed to write recording-paused sidecar.", error);
         }
-    }
-
-    // Sits in a "Clip Info" subfolder next to the clip instead of directly
-    // alongside it - one more file per clip cluttering the same folder as the
-    // actual videos in File Explorer wasn't worth it for something the editor
-    // reads on its own.
-    private static string GetPausedSidecarPath(string videoPath)
-    {
-        var directory = Path.GetDirectoryName(videoPath) ?? string.Empty;
-        var infoDirectory = Path.Combine(directory, "Clip Info");
-        Directory.CreateDirectory(infoDirectory);
-        return Path.Combine(infoDirectory, Path.GetFileName(videoPath) + ".paused.json");
     }
 
     private unsafe void RemuxWindowToMp4(RingPacket[] window, string outputPath)

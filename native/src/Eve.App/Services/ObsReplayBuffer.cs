@@ -117,7 +117,6 @@ public sealed class ObsReplayBuffer : IReplayBuffer
         if (string.IsNullOrWhiteSpace(output)) throw new InvalidOperationException("OBS replay backend returned no output path.");
         AppLog.Info($"OBS replay saved: {output}.");
         output = await ClipMetadataTagger.TagCaptureBackendAsync(output, "OBS", cancellationToken);
-        if (!string.IsNullOrWhiteSpace(titleOverride)) output = ApplyTitleOverride(output, titleOverride);
 
         // OBS itself picks the exact save path/filename, so the per-game
         // subfolder can only be applied as a move afterward, not up front like
@@ -139,18 +138,20 @@ public sealed class ObsReplayBuffer : IReplayBuffer
             }
         }
 
+        output = ApplyFileNamingScheme(output, string.IsNullOrWhiteSpace(titleOverride) ? config.GameDisplayName : titleOverride, config);
+
         return output;
     }
 
     // OBS names the file itself when it saves the replay buffer, so a title
     // override (e.g. "4K - Inferno") can only be applied by renaming after the fact.
-    internal static string ApplyTitleOverride(string path, string title)
+    internal static string ApplyFileNamingScheme(string path, string title, ReplayBufferConfig config)
     {
         try
         {
             var directory = Path.GetDirectoryName(path) ?? string.Empty;
             var extension = Path.GetExtension(path).TrimStart('.');
-            var renamed = Path.Combine(directory, ClipFileNaming.BuildFileName(title, DateTime.Now, extension));
+            var renamed = ClipFileNaming.BuildUniquePath(directory, ClipFileNaming.BuildFileName(title, DateTime.Now, extension, config.ClipFileNameScheme, config.CustomClipFileNameTemplate, config.GameDisplayName));
             File.Move(path, renamed);
             return renamed;
         }

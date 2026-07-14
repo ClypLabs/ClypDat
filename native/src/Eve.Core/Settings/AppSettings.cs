@@ -3,6 +3,11 @@ namespace Eve.Core.Settings;
 public sealed class AppSettings
 {
     public string LibraryFolder { get; set; } = string.Empty;
+    // Standard preserves the filename layout used before filename schemes were
+    // configurable.  The custom template is deliberately kept separately so a
+    // user can switch presets without losing their work-in-progress template.
+    public string ClipFileNameScheme { get; set; } = "Standard";
+    public string CustomClipFileNameTemplate { get; set; } = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}";
     public int ReplayDurationSeconds { get; set; } = 60;
     public string ReplayQualityPreset { get; set; } = "Balanced";
     public int ReplayFrameRate { get; set; } = 60;
@@ -55,10 +60,14 @@ public sealed class AppSettings
     public Cs2AutoClipSettings Cs2AutoClip { get; set; } = new();
     public bool MedalImportStripEmoji { get; set; } = false;
     public bool MedalImportCopyNotMove { get; set; } = true;
+    // Stable identities for Medal clips that EVE has already imported. This is
+    // intentionally global rather than tied to a particular library folder.
+    public List<string> ImportedMedalClipKeys { get; set; } = new();
     // One-time migration flag: existing clips sitting flat in the library
     // root get moved into per-game subfolders the first library refresh
     // after this shipped. False (unset) on any settings.json predating it.
     public bool ClipsMigratedToGameFolders { get; set; }
+    public int LibraryLayoutVersion { get; set; }
     // Defaults true so upgrading an existing install (settings.json already exists,
     // this key just isn't in it yet) never shows the walkthrough - only a genuinely
     // fresh install (no settings.json at all, see AppSettingsStore.Load) gets it

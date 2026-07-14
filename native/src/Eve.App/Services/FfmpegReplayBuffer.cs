@@ -142,7 +142,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         var clipName = string.IsNullOrWhiteSpace(titleOverride) ? config?.GameDisplayName ?? string.Empty : titleOverride;
         var gameFolder = Path.Combine(outputFolder, ClipFileNaming.BuildBaseName(config?.GameDisplayName ?? string.Empty));
         Directory.CreateDirectory(gameFolder);
-        var outputPath = Path.Combine(gameFolder, ClipFileNaming.BuildFileName(clipName, DateTime.Now, "mkv"));
+        var outputPath = ClipFileNaming.BuildUniquePath(gameFolder, ClipFileNaming.BuildFileName(clipName, DateTime.Now, "mkv", config?.ClipFileNameScheme ?? ClipFileNaming.StandardScheme, config?.CustomClipFileNameTemplate ?? string.Empty, config?.GameDisplayName));
         await File.WriteAllLinesAsync(
             concatPath,
             files.Select(file => $"file '{EscapeConcatPath(file.FullName)}'"),
@@ -774,7 +774,10 @@ public sealed record ReplayBufferConfig(
     double MicrophoneNoiseSuppressionStrength = 12.0,
     bool FullSessionRecordingEnabled = false,
     string FullSessionRecordingFolder = "",
-    int AudioSyncOffsetMs = 0);
+    int AudioSyncOffsetMs = 0,
+    string ClipFileNameScheme = "Standard",
+    string CustomClipFileNameTemplate = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}",
+    string LibraryFolder = "");
 
 internal sealed class AudioCaptureSession : IDisposable
 {

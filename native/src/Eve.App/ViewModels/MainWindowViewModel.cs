@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Security.Cryptography;
 using Avalonia.Threading;
 using Eve.App.Services;
 using Eve.Core.Settings;
@@ -13,6 +14,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private CancellationTokenSource? _waveformCts;
     private FileSystemWatcher? _libraryWatcher;
     private readonly DispatcherTimer _libraryRefreshDebounce;
+    private readonly SemaphoreSlim _libraryLayoutMigrationLock = new(1, 1);
     private readonly AudioDeviceService _audioDevices = new();
     private bool _isReplayRecording;
     private bool _isEditorVisible;
@@ -38,6 +40,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _replayQualityRestartRequired;
     private string _selectedClipOverlayPosition = "Top Right";
     private string _selectedClipOverlayVolume = "Medium";
+    private string _selectedClipFileNameScheme = ClipFileNaming.StandardScheme;
+    private string _customClipFileNameTemplate = string.Empty;
+    private string _clipFileNamePreview = string.Empty;
+    private string _clipFileNameTemplateError = string.Empty;
+    private bool _isRenamingAllClips;
+    private string _renameAllClipsStatus = string.Empty;
     private ExportCodecOption? _selectedExportCodec;
     private string _recorderStatus = "Replay Off";
     private string _activeGame = "No game detected";
@@ -106,8 +114,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
         ClipOverlayPositions = new ObservableCollection<string> { "Top Left", "Top Right" };
         ClipOverlayVolumes = new ObservableCollection<string> { "Low", "Medium", "High" };
+        ClipFileNameSchemes = new ObservableCollection<FileNameSchemeOption>
+        {
+            new("Standard", ClipFileNaming.StandardScheme),
+            new("Readable", ClipFileNaming.ReadableScheme),
+            new("Custom", ClipFileNaming.CustomScheme)
+        };
         _selectedClipOverlayPosition = ClipOverlayPositions.FirstOrDefault(position => string.Equals(position, Settings.ClipOverlayPosition, StringComparison.OrdinalIgnoreCase)) ?? "Top Right";
         _selectedClipOverlayVolume = ClipOverlayVolumes.FirstOrDefault(volume => string.Equals(volume, Settings.ClipOverlayVolume, StringComparison.OrdinalIgnoreCase)) ?? "Medium";
+        _selectedClipFileNameScheme = ClipFileNameSchemes.FirstOrDefault(item => string.Equals(item.Value, Settings.ClipFileNameScheme, StringComparison.OrdinalIgnoreCase))?.Value ?? ClipFileNaming.StandardScheme;
+        _customClipFileNameTemplate = Settings.CustomClipFileNameTemplate;
+        UpdateClipFileNamePreview();
         ExcludedProcesses = new ObservableCollection<string>(Settings.GameAudioExcludedProcesses);
         ChatAudioApps = new ObservableCollection<string>(Settings.ChatAudioProcessNames);
         SelectedMicrophones = new ObservableCollection<AudioDeviceOption>();
@@ -158,6 +175,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<GameBackendRowViewModel> GameCaptureRows { get; }
     public ObservableCollection<string> ClipOverlayPositions { get; }
     public ObservableCollection<string> ClipOverlayVolumes { get; }
+    public ObservableCollection<FileNameSchemeOption> ClipFileNameSchemes { get; }
 
     public ObservableCollection<ThirdPartyLicenseEntry> ThirdPartyLicenseEntries { get; } = new()
     {
@@ -424,6 +442,58 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public string SelectedClipFileNameScheme
+    {
+        get => _selectedClipFileNameScheme;
+        set
+        {
+            if (!SetProperty(ref _selectedClipFileNameScheme, value)) return;
+            Settings.ClipFileNameScheme = value;
+            UpdateClipFileNamePreview();
+            SaveSettings();
+            OnPropertyChanged(nameof(IsCustomClipFileNameScheme));
+        }
+    }
+
+    public bool IsCustomClipFileNameScheme => string.Equals(SelectedClipFileNameScheme, ClipFileNaming.CustomScheme, StringComparison.OrdinalIgnoreCase);
+
+    public string CustomClipFileNameTemplate
+    {
+        get => _customClipFileNameTemplate;
+        set
+        {
+            if (!SetProperty(ref _customClipFileNameTemplate, value)) return;
+            UpdateClipFileNamePreview();
+            if (string.IsNullOrEmpty(ClipFileNameTemplateError))
+            {
+                Settings.CustomClipFileNameTemplate = value;
+                SaveSettings();
+            }
+        }
+    }
+
+    public string ClipFileNamePreview
+    {
+        get => _clipFileNamePreview;
+        private set => SetProperty(ref _clipFileNamePreview, value);
+    }
+
+    public string ClipFileNameTemplateError
+    {
+        get => _clipFileNameTemplateError;
+        private set
+        {
+            if (!SetProperty(ref _clipFileNameTemplateError, value)) return;
+            OnPropertyChanged(nameof(HasClipFileNameTemplateError));
+            OnPropertyChanged(nameof(CanRenameAllClips));
+        }
+    }
+
+    public bool HasClipFileNameTemplateError => !string.IsNullOrWhiteSpace(ClipFileNameTemplateError);
+    public bool IsRenamingAllClips { get => _isRenamingAllClips; private set { if (SetProperty(ref _isRenamingAllClips, value)) OnPropertyChanged(nameof(CanRenameAllClips)); } }
+    public string RenameAllClipsStatus { get => _renameAllClipsStatus; private set => SetProperty(ref _renameAllClipsStatus, value); }
+    public bool CanRenameAllClips => !IsRenamingAllClips && !HasClipFileNameTemplateError && !string.IsNullOrWhiteSpace(Settings.LibraryFolder) && Directory.Exists(Settings.LibraryFolder);
+
     public bool EnableClipOverlay
     {
         get => Settings.EnableClipOverlay;
@@ -635,38 +705,242 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set { Settings.MedalImportCopyNotMove = value; OnPropertyChanged(); SaveSettings(); }
     }
 
-    public void ScanForMedalClips()
+    public async Task ScanForMedalClipsAsync()
     {
         MedalImportRows.Clear();
         IReadOnlyList<MedalClipRecord> found;
+        MedalImportInProgress = true;
+        MedalImportStatusText = "Scanning Medal clips...";
         try
         {
-            found = MedalImportService.ScanForClips();
+            found = await Task.Run(MedalImportService.ScanForClips);
         }
         catch (Exception error)
         {
             MedalScanStatusText = $"Scan failed: {error.Message}";
             MedalScanned = true;
+            MedalImportInProgress = false;
             return;
         }
 
-        foreach (var record in found.OrderByDescending(record => record.CreatedAtUtc))
+        try
         {
-            MedalImportRows.Add(new MedalImportRowViewModel(record, MedalImportStripEmoji));
+            var repaired = await RepairMalformedMedalImportsAsync(found);
+            var importedKeys = new HashSet<string>(Settings.ImportedMedalClipKeys, StringComparer.Ordinal);
+            AddExistingMedalImportKeys(importedKeys);
+            var settingsChanged = false;
+            foreach (var key in importedKeys)
+            {
+                if (Settings.ImportedMedalClipKeys.Contains(key, StringComparer.Ordinal)) continue;
+                Settings.ImportedMedalClipKeys.Add(key);
+                settingsChanged = true;
+            }
+            if (settingsChanged) SaveSettings();
+
+            var candidates = found
+                .GroupBy(MedalImportService.GetImportKey, StringComparer.Ordinal)
+                .Select(group => group.First())
+                .ToArray();
+            var available = candidates
+                .Where(record => !IsKnownMedalImport(record, importedKeys))
+                .OrderByDescending(record => record.CreatedAtUtc)
+                .ToArray();
+            var validations = await ValidateMedalCandidatesAsync(available);
+
+            foreach (var validation in validations)
+            {
+                MedalImportRows.Add(new MedalImportRowViewModel(validation.Record, MedalImportStripEmoji, validation.Probe.Duration, validation.ValidationMessage));
+            }
+
+            var unreadable = validations.Count(validation => !string.IsNullOrWhiteSpace(validation.ValidationMessage));
+            var alreadyImported = candidates.Length - available.Length;
+            var status = available.Length switch
+            {
+                0 when alreadyImported > 0 => $"No new Medal clips found ({alreadyImported} already imported).",
+                0 => "No Medal clips found.",
+                1 => alreadyImported > 0 ? $"1 new Medal clip found ({alreadyImported} already imported)." : "1 new Medal clip found.",
+                _ => alreadyImported > 0 ? $"{available.Length} new Medal clips found ({alreadyImported} already imported)." : $"{available.Length} new Medal clips found."
+            };
+            if (unreadable > 0) status += $" {unreadable} unreadable file{(unreadable == 1 ? "" : "s")} shown but disabled.";
+            if (repaired > 0) status += $" Repaired {repaired} malformed imported clip{(repaired == 1 ? "" : "s")}.";
+            MedalScanStatusText = status;
+            MedalScanned = true;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Medal import: scan processing failed.", error);
+            MedalScanStatusText = $"Scan failed: {error.Message}";
+            MedalScanned = true;
+        }
+        finally
+        {
+            MedalImportInProgress = false;
+            MedalImportStatusText = string.Empty;
+        }
+    }
+
+    private async Task<IReadOnlyList<MedalCandidateValidation>> ValidateMedalCandidatesAsync(IReadOnlyList<MedalClipRecord> records)
+    {
+        using var semaphore = new SemaphoreSlim(4, 4);
+        var tasks = records.Select(async record =>
+        {
+            await semaphore.WaitAsync();
+            try
+            {
+                var probe = await _mediaProbe.ProbeDurationAsync(record.VideoPath);
+                var message = probe.Duration > TimeSpan.Zero
+                    ? string.Empty
+                    : "Unreadable or incomplete video; Medal did not finish writing its metadata.";
+                if (!string.IsNullOrWhiteSpace(message)) AppLog.Error($"Medal import: unreadable source {record.VideoPath}: {probe.Error}");
+                return new MedalCandidateValidation(record, probe, message);
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+        return await Task.WhenAll(tasks);
+    }
+
+    private async Task<int> RepairMalformedMedalImportsAsync(IReadOnlyList<MedalClipRecord> sources)
+    {
+        if (string.IsNullOrWhiteSpace(Settings.LibraryFolder) || !Directory.Exists(Settings.LibraryFolder)) return 0;
+
+        var libraryRoot = Settings.LibraryFolder;
+        var repaired = 0;
+        foreach (var videoPath in Directory.EnumerateFiles(libraryRoot, "*.*", SearchOption.AllDirectories).Where(MediaProbeService.IsVideoFile))
+        {
+            var info = ClipInfoSidecar.Load(libraryRoot, videoPath);
+            if (!NeedsMedalImportRepair(info)) continue;
+
+            MedalClipRecord? source = null;
+            try
+            {
+                var length = new FileInfo(videoPath).Length;
+                foreach (var candidate in sources.Where(record => File.Exists(record.VideoPath) && new FileInfo(record.VideoPath).Length == length))
+                {
+                    if (await FilesMatchAsync(videoPath, candidate.VideoPath))
+                    {
+                        source = candidate;
+                        break;
+                    }
+                }
+            }
+            catch (Exception error)
+            {
+                AppLog.Error($"Medal import repair: failed matching {videoPath}", error);
+                continue;
+            }
+
+            if (source is null)
+            {
+                AppLog.Info($"Medal import repair: left unmatched clip unchanged: {videoPath}");
+                continue;
+            }
+
+            try
+            {
+                var duration = await _mediaProbe.GetDurationAsync(videoPath);
+                if (duration <= TimeSpan.Zero) throw new InvalidOperationException("Could not read the imported clip duration.");
+
+                var title = string.IsNullOrWhiteSpace(info?.FileTitle) || MedalImportService.IsLegacyMisparsedCounterStrike2Name(info.FileTitle)
+                    ? source.Title ?? source.GameFolderName
+                    : info.FileTitle;
+                var destinationDirectory = LibraryLayout.VideoDirectory(libraryRoot, duration, source.GameFolderName);
+                Directory.CreateDirectory(destinationDirectory);
+                var fileName = ClipFileNaming.BuildFileName(title, source.CreatedAtUtc.ToLocalTime(), Path.GetExtension(videoPath), Settings.ClipFileNameScheme, Settings.CustomClipFileNameTemplate, source.GameFolderName);
+                var destinationPath = ClipFileNaming.BuildUniquePath(destinationDirectory, fileName);
+                var oldKey = info!.MedalImportKey;
+
+                File.Move(videoPath, destinationPath);
+                LibraryLayout.MoveSidecars(libraryRoot, videoPath, destinationPath);
+                File.SetCreationTimeUtc(destinationPath, source.CreatedAtUtc);
+                File.SetLastWriteTimeUtc(destinationPath, source.CreatedAtUtc);
+                _mediaProbe.DeleteCacheFor(videoPath);
+                if (Settings.ClipEdits.Remove(ClipEditKey(videoPath), out var edit)) Settings.ClipEdits[ClipEditKey(destinationPath)] = edit;
+
+                var newKey = MedalImportService.GetImportKey(source);
+                ClipInfoSidecar.Save(libraryRoot, destinationPath, new ClipInfo(source.GameFolderName, info.AutoClipEventType, title, source.CreatedAtUtc, newKey));
+                Settings.ImportedMedalClipKeys.RemoveAll(key => string.Equals(key, oldKey, StringComparison.Ordinal));
+                if (!Settings.ImportedMedalClipKeys.Contains(newKey, StringComparer.Ordinal)) Settings.ImportedMedalClipKeys.Add(newKey);
+                repaired++;
+            }
+            catch (Exception error)
+            {
+                AppLog.Error($"Medal import repair: failed repairing {videoPath}", error);
+            }
         }
 
-        MedalScanStatusText = found.Count switch
+        if (repaired > 0)
         {
-            0 => "No Medal clips found.",
-            1 => "1 Medal clip found.",
-            _ => $"{found.Count} Medal clips found."
-        };
-        MedalScanned = true;
+            SaveSettings();
+            await RefreshLibraryAsync();
+        }
+        return repaired;
+    }
+
+    private static bool NeedsMedalImportRepair(ClipInfo? info) =>
+        !string.IsNullOrWhiteSpace(info?.MedalImportKey) &&
+        (MedalImportService.IsLegacyMisparsedCounterStrike2Name(info.GameDisplayName) ||
+         info.CapturedAt is { } captured && (captured.Year < 2000 || captured > DateTimeOffset.UtcNow.AddDays(2)));
+
+    private static async Task<bool> FilesMatchAsync(string leftPath, string rightPath)
+    {
+        await using var left = File.OpenRead(leftPath);
+        await using var right = File.OpenRead(rightPath);
+        var leftHash = await SHA256.HashDataAsync(left);
+        var rightHash = await SHA256.HashDataAsync(right);
+        return leftHash.AsSpan().SequenceEqual(rightHash);
+    }
+
+    private sealed record MedalCandidateValidation(MedalClipRecord Record, MediaDurationProbeResult Probe, string ValidationMessage);
+
+    private void AddExistingMedalImportKeys(ISet<string> importedKeys)
+    {
+        if (string.IsNullOrWhiteSpace(Settings.LibraryFolder)) return;
+        var libraryRoot = Settings.LibraryFolder;
+
+        try
+        {
+            foreach (var path in Directory.EnumerateFiles(libraryRoot, "*.*", SearchOption.AllDirectories).Where(MediaProbeService.IsVideoFile))
+            {
+                var sidecarKey = ClipInfoSidecar.Load(Settings.LibraryFolder, path)?.MedalImportKey;
+                if (!string.IsNullOrWhiteSpace(sidecarKey))
+                {
+                    importedKeys.Add(sidecarKey);
+                    continue;
+                }
+
+                var legacyRoot = Path.Combine(libraryRoot, "Imported Clips", "Medal");
+                if (!path.StartsWith(legacyRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) continue;
+
+                var info = new FileInfo(path);
+                var game = Path.GetFileName(Path.GetDirectoryName(path)) ?? "Medal";
+                importedKeys.Add(MedalImportService.GetImportKey(info.CreationTimeUtc, info.Length));
+                importedKeys.Add(MedalImportService.GetLegacyImportKey(game, info.CreationTimeUtc, info.Length));
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Medal import: failed reading existing imported clips.", error);
+        }
+    }
+
+    private static bool IsKnownMedalImport(MedalClipRecord record, ISet<string> importedKeys)
+    {
+        var key = MedalImportService.GetImportKey(record);
+        if (importedKeys.Contains(key)) return true;
+
+        long length;
+        try { length = new FileInfo(record.VideoPath).Length; }
+        catch { return false; }
+        return importedKeys.Contains(MedalImportService.GetLegacyImportKey(record.GameFolderName, record.CreatedAtUtc, length)) ||
+               importedKeys.Contains(MedalImportService.GetLegacyImportKey("Medal", record.CreatedAtUtc, length));
     }
 
     public async Task ImportSelectedMedalClipsAsync()
     {
-        var selected = MedalImportRows.Where(row => row.IsSelected).ToList();
+        var selected = MedalImportRows.Where(row => row.IsSelected && row.CanImport).ToList();
         if (selected.Count == 0) return;
 
         MedalImportInProgress = true;
@@ -686,17 +960,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     var title = MedalImportStripEmoji ? MedalImportService.StripEmoji(row.RawTitle) : row.RawTitle;
                     if (string.IsNullOrWhiteSpace(title)) title = row.GameFolderName;
                     var extension = Path.GetExtension(row.Record.VideoPath).TrimStart('.');
-                    var fileName = ClipFileNaming.BuildFileName(title, row.CreatedAtLocal, extension);
-                    var destinationDir = Path.Combine(libraryFolder, "Imported Clips", "Medal", ClipFileNaming.BuildBaseName(row.GameFolderName));
-                    var destinationPath = Path.Combine(destinationDir, fileName);
-
-                    if (File.Exists(destinationPath))
-                    {
-                        MedalImportRows.Remove(row);
-                        continue;
-                    }
-
+                    var fileName = ClipFileNaming.BuildFileName(title, row.CreatedAtLocal, extension, Settings.ClipFileNameScheme, Settings.CustomClipFileNameTemplate, row.GameFolderName);
+                    var destinationDir = LibraryLayout.VideoDirectory(libraryFolder, row.Duration, row.GameFolderName);
                     Directory.CreateDirectory(destinationDir);
+                    var destinationPath = ClipFileNaming.BuildUniquePath(destinationDir, fileName);
 
                     await Task.Run(() =>
                     {
@@ -712,6 +979,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                         File.SetCreationTimeUtc(destinationPath, row.Record.CreatedAtUtc);
                         File.SetLastWriteTimeUtc(destinationPath, row.Record.CreatedAtUtc);
                     });
+
+                    var importKey = MedalImportService.GetImportKey(row.Record);
+                    ClipInfoSidecar.Save(Settings.LibraryFolder, destinationPath, new ClipInfo(row.GameFolderName, null, title, row.Record.CreatedAtUtc, importKey));
+                    if (!Settings.ImportedMedalClipKeys.Contains(importKey, StringComparer.Ordinal))
+                    {
+                        Settings.ImportedMedalClipKeys.Add(importKey);
+                        SaveSettings();
+                    }
 
                     await AddOrUpdateLibraryClipAsync(destinationPath);
                     imported++;
@@ -943,11 +1218,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set
         {
             Settings.FullSessionRecordingEnabled = value;
-            if (value && string.IsNullOrWhiteSpace(Settings.FullSessionRecordingFolder) && !string.IsNullOrWhiteSpace(Settings.LibraryFolder))
-            {
-                FullSessionRecordingFolder = Path.Combine(Settings.LibraryFolder, "Full Sessions");
-            }
-
             OnPropertyChanged();
             SaveSettings();
         }
@@ -955,12 +1225,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string FullSessionRecordingFolder
     {
-        get => Settings.FullSessionRecordingFolder;
-        set { Settings.FullSessionRecordingFolder = value; OnPropertyChanged(); OnPropertyChanged(nameof(FullSessionRecordingFolderDisplay)); SaveSettings(); }
+        get => string.IsNullOrWhiteSpace(Settings.LibraryFolder) ? string.Empty : LibraryLayout.VodsRoot(Settings.LibraryFolder);
+        set { }
     }
 
     public string FullSessionRecordingFolderDisplay =>
-        string.IsNullOrWhiteSpace(FullSessionRecordingFolder) ? "Choose a folder" : FullSessionRecordingFolder;
+        string.IsNullOrWhiteSpace(FullSessionRecordingFolder) ? "Choose a library folder" : FullSessionRecordingFolder;
 
     public string SelectedVideoName
     {
@@ -1117,6 +1387,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         Settings.LibraryFolder = folderPath;
         SaveSettings();
+        OnPropertyChanged(nameof(CanRenameAllClips));
         await RefreshLibraryAsync();
         IsEditorVisible = false;
         SelectedCaptureBackend = string.Empty;
@@ -1127,10 +1398,114 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         AppSettingsStore.Save(Settings);
     }
 
+    public async Task RenameAllClipsAsync()
+    {
+        if (!CanRenameAllClips) return;
+        IsRenamingAllClips = true;
+        RenameAllClipsStatus = "Renaming library files...";
+        try
+        {
+            var result = await Task.Run(() => RenameLibraryFiles());
+            foreach (var (oldPath, newPath) in result.MovedPaths)
+            {
+                var oldKey = ClipEditKey(oldPath);
+                if (Settings.ClipEdits.Remove(oldKey, out var edit)) Settings.ClipEdits[ClipEditKey(newPath)] = edit;
+            }
+
+            SaveSettings();
+            RenameAllClipsStatus = $"Updated {result.Renamed} file(s); {result.Skipped} already matched; {result.Failed} failed.";
+            await RefreshLibraryAsync();
+        }
+        finally
+        {
+            IsRenamingAllClips = false;
+        }
+    }
+
+    private (int Renamed, int Skipped, int Failed, List<(string OldPath, string NewPath)> MovedPaths) RenameLibraryFiles()
+    {
+        var movedPaths = new List<(string OldPath, string NewPath)>();
+        var renamed = 0;
+        var skipped = 0;
+        var failed = 0;
+        string[] paths;
+        try
+        {
+            paths = Directory.EnumerateFiles(Settings.LibraryFolder, "*.*", SearchOption.AllDirectories)
+                .Where(MediaProbeService.IsVideoFile)
+                .ToArray();
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Clip filename migration: failed listing library files.", error);
+            return (0, 0, 1, movedPaths);
+        }
+
+        foreach (var sourcePath in paths)
+        {
+            try
+            {
+                var card = new ClipCardViewModel(_mediaProbe.CreateLibraryStub(sourcePath), Settings.LibraryFolder);
+                var info = ClipInfoSidecar.Load(Settings.LibraryFolder, sourcePath);
+                var title = info?.FileTitle ?? card.GameNameLabel;
+                var game = info?.GameDisplayName ?? card.GameFilterKey;
+                var timestamp = info?.CapturedAt?.LocalDateTime ?? File.GetCreationTime(sourcePath);
+                var directory = Path.GetDirectoryName(sourcePath) ?? Settings.LibraryFolder;
+                var fileName = ClipFileNaming.BuildFileName(title, timestamp, Path.GetExtension(sourcePath), Settings.ClipFileNameScheme, Settings.CustomClipFileNameTemplate, game);
+                var targetPath = Path.Combine(directory, fileName);
+                if (string.Equals(sourcePath, targetPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    skipped++;
+                    continue;
+                }
+
+                targetPath = ClipFileNaming.BuildUniquePath(directory, fileName);
+                // Store naming metadata before moving so future scheme changes do
+                // not have to reverse-engineer a user-defined template.
+                ClipInfoSidecar.Save(Settings.LibraryFolder, sourcePath, new ClipInfo(game, info?.AutoClipEventType, title, timestamp, info?.MedalImportKey));
+                File.Move(sourcePath, targetPath);
+                MoveClipSidecars(sourcePath, targetPath);
+                _mediaProbe.DeleteCacheFor(sourcePath);
+                movedPaths.Add((sourcePath, targetPath));
+                renamed++;
+            }
+            catch (Exception error)
+            {
+                AppLog.Error($"Clip filename migration: failed renaming {sourcePath}", error);
+                failed++;
+            }
+        }
+
+        return (renamed, skipped, failed, movedPaths);
+    }
+
+    private void UpdateClipFileNamePreview()
+    {
+        var timestamp = new DateTime(2025, 6, 26, 22, 40, 59);
+        if (string.Equals(SelectedClipFileNameScheme, ClipFileNaming.CustomScheme, StringComparison.OrdinalIgnoreCase))
+        {
+            if (ClipFileNaming.TryBuildPreview(CustomClipFileNameTemplate, timestamp, "Counter Strike 2", "Counter Strike 2", out var preview, out var error))
+            {
+                ClipFileNamePreview = $"{preview}.mp4";
+                ClipFileNameTemplateError = string.Empty;
+            }
+            else
+            {
+                ClipFileNamePreview = "Invalid template";
+                ClipFileNameTemplateError = error;
+            }
+
+            return;
+        }
+
+        ClipFileNamePreview = ClipFileNaming.BuildFileName("Counter Strike 2", timestamp, "mp4", SelectedClipFileNameScheme, Settings.CustomClipFileNameTemplate, "Counter Strike 2");
+        ClipFileNameTemplateError = string.Empty;
+    }
+
     public void SaveSelectedClipEditState()
     {
         if (string.IsNullOrWhiteSpace(SelectedVideoPath)) return;
-        ClipEditSidecar.Save(SelectedVideoPath, new ClipEditSettings
+        ClipEditSidecar.Save(Settings.LibraryFolder, SelectedVideoPath, new ClipEditSettings
         {
             TrimStartSeconds = Math.Max(0, TrimStart.TotalSeconds),
             TrimEndSeconds = Math.Max(0, TrimEnd.TotalSeconds),
@@ -1144,28 +1519,28 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (Settings.ClipEdits.Remove(ClipEditKey(SelectedVideoPath))) SaveSettings();
     }
 
-    public Task RefreshLibraryAsync()
+    public async Task RefreshLibraryAsync()
     {
         var scanClock = System.Diagnostics.Stopwatch.StartNew();
         ClipGroups.Clear();
         ClearSelection();
-        StartLibraryWatcher();
 
         if (string.IsNullOrWhiteSpace(Settings.LibraryFolder) || !Directory.Exists(Settings.LibraryFolder))
         {
+            StartLibraryWatcher();
             NotifyLibraryChrome();
-            return Task.CompletedTask;
+            return;
         }
 
-        if (!Settings.ClipsMigratedToGameFolders)
+        LibraryLayout.EnsureRoots(Settings.LibraryFolder);
+        if (Settings.LibraryLayoutVersion < LibraryLayout.CurrentVersion)
         {
-            MigrateFlatClipsIntoGameFolders();
-            Settings.ClipsMigratedToGameFolders = true;
-            SaveSettings();
+            await MigrateLibraryLayoutAsync();
         }
+        StartLibraryWatcher();
 
         var clips = _mediaProbe.EnumerateVideos(Settings.LibraryFolder)
-            .Select(file => new ClipCardViewModel(_mediaProbe.CreateLibraryStub(file)))
+            .Select(file => new ClipCardViewModel(_mediaProbe.CreateLibraryStub(file), Settings.LibraryFolder))
             .ToArray();
 
         foreach (var group in clips
@@ -1179,7 +1554,104 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         NotifyLibraryChrome();
         StartLibraryHydration(clips);
         AppLog.Info($"Library refresh: {clips.Length} clips in {scanClock.ElapsedMilliseconds}ms.");
-        return Task.CompletedTask;
+    }
+
+    private async Task MigrateLibraryLayoutAsync()
+    {
+        if (!await _libraryLayoutMigrationLock.WaitAsync(0)) return;
+        try
+        {
+            var libraryRoot = Settings.LibraryFolder;
+            var paths = Directory.EnumerateFiles(libraryRoot, "*.*", SearchOption.AllDirectories)
+                .Where(MediaProbeService.IsVideoFile)
+                .ToArray();
+            var moved = 0;
+            var failed = 0;
+            foreach (var sourcePath in paths)
+            {
+                try
+                {
+                    var duration = await _mediaProbe.GetDurationAsync(sourcePath);
+                    if (duration <= TimeSpan.Zero) throw new InvalidOperationException("Could not read the video duration.");
+                    var info = ClipInfoSidecar.Load(libraryRoot, sourcePath);
+                    var (game, inferredGame) = ResolveLibraryGame(sourcePath, info);
+                    var title = ResolveLibraryTitle(sourcePath, info, game, inferredGame);
+                    var timestamp = info?.CapturedAt?.LocalDateTime ?? File.GetCreationTime(sourcePath);
+                    var destinationDir = LibraryLayout.VideoDirectory(libraryRoot, duration, game);
+                    Directory.CreateDirectory(destinationDir);
+                    var fileName = ClipFileNaming.BuildFileName(title, timestamp, Path.GetExtension(sourcePath), Settings.ClipFileNameScheme, Settings.CustomClipFileNameTemplate, game);
+                    var desiredPath = Path.Combine(destinationDir, fileName);
+                    var destinationPath = string.Equals(sourcePath, desiredPath, StringComparison.OrdinalIgnoreCase)
+                        ? sourcePath
+                        : ClipFileNaming.BuildUniquePath(destinationDir, fileName);
+
+                    if (!string.Equals(sourcePath, destinationPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        File.Move(sourcePath, destinationPath);
+                        MoveClipSidecars(sourcePath, destinationPath);
+                        _mediaProbe.DeleteCacheFor(sourcePath);
+                        if (Settings.ClipEdits.Remove(ClipEditKey(sourcePath), out var edit)) Settings.ClipEdits[ClipEditKey(destinationPath)] = edit;
+                        moved++;
+                    }
+                    else
+                    {
+                        LibraryLayout.MoveSidecars(libraryRoot, sourcePath, destinationPath);
+                    }
+
+                    var medalKey = info?.MedalImportKey;
+                    if (string.IsNullOrWhiteSpace(medalKey) && MedalImportService.TryResolveGameFromFileName(Path.GetFileNameWithoutExtension(sourcePath), out _, out _))
+                    {
+                        medalKey = MedalImportService.GetImportKey(timestamp.ToUniversalTime(), new FileInfo(destinationPath).Length);
+                    }
+                    ClipInfoSidecar.Save(libraryRoot, destinationPath, new ClipInfo(game, info?.AutoClipEventType, title, timestamp, medalKey));
+                }
+                catch (Exception error)
+                {
+                    AppLog.Error($"Library layout migration: failed moving {sourcePath}", error);
+                    failed++;
+                }
+            }
+
+            if (failed == 0)
+            {
+                Settings.LibraryLayoutVersion = LibraryLayout.CurrentVersion;
+                Settings.ClipsMigratedToGameFolders = true;
+            }
+            SaveSettings();
+            AppLog.Info($"Library layout migration: moved={moved}, failed={failed}.");
+        }
+        finally
+        {
+            _libraryLayoutMigrationLock.Release();
+        }
+    }
+
+    private static (string Game, bool Inferred) ResolveLibraryGame(string videoPath, ClipInfo? info)
+    {
+        if (!string.IsNullOrWhiteSpace(info?.GameDisplayName) && !MedalImportService.IsStructuralFolderName(info.GameDisplayName))
+        {
+            return (info.GameDisplayName, false);
+        }
+
+        var sourceName = info?.FileTitle ?? Path.GetFileNameWithoutExtension(videoPath);
+        if (MedalImportService.TryResolveGameFromFileName(sourceName, out var inferredGame, out _)) return (inferredGame, true);
+
+        var parent = Path.GetFileName(Path.GetDirectoryName(videoPath));
+        if (!string.IsNullOrWhiteSpace(parent) &&
+            !MedalImportService.IsStructuralFolderName(parent) &&
+            !string.Equals(parent, "Clips", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(parent, "VODs", StringComparison.OrdinalIgnoreCase))
+        {
+            return (parent, false);
+        }
+
+        return ("Unknown Game", false);
+    }
+
+    private static string ResolveLibraryTitle(string videoPath, ClipInfo? info, string game, bool inferredGame)
+    {
+        var title = info?.FileTitle ?? Path.GetFileNameWithoutExtension(videoPath);
+        return inferredGame && title.Contains("MedalTV", StringComparison.OrdinalIgnoreCase) ? game : title;
     }
 
     // One-time reorganization for clips saved before per-game subfolders
@@ -1214,7 +1686,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             try
             {
-                var card = new ClipCardViewModel(_mediaProbe.CreateLibraryStub(videoPath));
+                var card = new ClipCardViewModel(_mediaProbe.CreateLibraryStub(videoPath), Settings.LibraryFolder);
                 var gameFolderName = ClipFileNaming.BuildBaseName(card.GameFilterKey);
                 if (string.IsNullOrWhiteSpace(gameFolderName)) continue;
 
@@ -1236,20 +1708,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (moved > 0) AppLog.Info($"Clip game-folder migration: moved {moved} clip(s) into per-game folders.");
     }
 
-    private static void MoveClipSidecars(string oldVideoPath, string newVideoPath)
+    private void MoveClipSidecars(string oldVideoPath, string newVideoPath)
     {
-        var oldInfoDir = Path.Combine(Path.GetDirectoryName(oldVideoPath) ?? string.Empty, "Clip Info");
-        var newInfoDir = Path.Combine(Path.GetDirectoryName(newVideoPath) ?? string.Empty, "Clip Info");
-        var oldFileName = Path.GetFileName(oldVideoPath);
-        foreach (var suffix in new[] { ".eve.json", ".info.json", ".paused.json" })
-        {
-            var oldSidecar = Path.Combine(oldInfoDir, oldFileName + suffix);
-            if (!File.Exists(oldSidecar)) continue;
-            var newSidecar = Path.Combine(newInfoDir, oldFileName + suffix);
-            if (File.Exists(newSidecar)) continue;
-            Directory.CreateDirectory(newInfoDir);
-            File.Move(oldSidecar, newSidecar);
-        }
+        LibraryLayout.MoveSidecars(Settings.LibraryFolder, oldVideoPath, newVideoPath);
     }
 
     public async Task AddOrUpdateLibraryClipAsync(string filePath)
@@ -1264,7 +1725,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         else
         {
-            var clip = new ClipCardViewModel(media);
+            var clip = new ClipCardViewModel(media, Settings.LibraryFolder);
             var date = clip.CreatedAt.ToLocalTime().Date;
             var key = date.ToString("yyyy-MM-dd");
             var group = ClipGroups.FirstOrDefault(item => item.Key == key);
@@ -1392,8 +1853,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             File.Delete(clip.Path);
             _mediaProbe.DeleteCacheFor(clip.Path);
-            ClipEditSidecar.Delete(clip.Path);
-            ClipInfoSidecar.Delete(clip.Path);
+            ClipEditSidecar.Delete(Settings.LibraryFolder, clip.Path);
+            ClipInfoSidecar.Delete(Settings.LibraryFolder, clip.Path);
             Settings.ClipEdits.Remove(ClipEditKey(clip.Path));
         }
 
@@ -1807,8 +2268,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             MicrophoneNoiseSuppressionEnabled: Settings.MicrophoneNoiseSuppressionEnabled,
             MicrophoneNoiseSuppressionStrength: Settings.MicrophoneNoiseSuppressionStrength,
             FullSessionRecordingEnabled: Settings.FullSessionRecordingEnabled,
-            FullSessionRecordingFolder: Settings.FullSessionRecordingFolder,
-            AudioSyncOffsetMs: Settings.AudioSyncOffsetMs);
+            FullSessionRecordingFolder: LibraryLayout.VodDirectory(Settings.LibraryFolder, ActiveGameDetection.DisplayName),
+            AudioSyncOffsetMs: Settings.AudioSyncOffsetMs,
+            ClipFileNameScheme: Settings.ClipFileNameScheme,
+            CustomClipFileNameTemplate: Settings.CustomClipFileNameTemplate,
+            LibraryFolder: Settings.LibraryFolder);
     }
 
     public void SetDuration(TimeSpan duration)
@@ -1962,13 +2426,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void ApplyClipEditState(string path)
     {
-        var edit = ClipEditSidecar.Load(path);
+        var edit = ClipEditSidecar.Load(Settings.LibraryFolder, path);
         if (edit is null)
         {
             if (!Settings.ClipEdits.TryGetValue(ClipEditKey(path), out edit)) return;
             // Migrate this clip's edit state out of settings.json and into its own
             // sidecar file the first time it's opened after upgrading.
-            ClipEditSidecar.Save(path, edit);
+            ClipEditSidecar.Save(Settings.LibraryFolder, path, edit);
             Settings.ClipEdits.Remove(ClipEditKey(path));
             SaveSettings();
         }

@@ -211,7 +211,7 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null) return;
         var path = DefaultLibraryFolder();
         Directory.CreateDirectory(path);
-        Directory.CreateDirectory(Path.Combine(path, "Saved Clips"));
+        LibraryLayout.EnsureRoots(path);
         await ViewModel.LoadLibraryFolderAsync(path);
     }
 
@@ -239,26 +239,6 @@ public sealed partial class MainWindow : Window
         if (folder?.Path.LocalPath is { Length: > 0 } path)
         {
             await ViewModel!.LoadLibraryFolderAsync(path);
-        }
-    }
-
-    private async void FullSessionRecordingFolderButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = "Select full session recording folder",
-            AllowMultiple = false
-        });
-
-        var folder = folders.FirstOrDefault();
-        if (folder?.Path.LocalPath is { Length: > 0 } path && ViewModel is not null)
-        {
-            // Always land in a "Full Sessions" subfolder of whatever the user picks,
-            // instead of dumping full-session files directly into a shared folder.
-            var subfolder = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-            ViewModel.FullSessionRecordingFolder = string.Equals(subfolder, "Full Sessions", StringComparison.OrdinalIgnoreCase)
-                ? path
-                : Path.Combine(path, "Full Sessions");
         }
     }
 
@@ -423,6 +403,8 @@ public sealed partial class MainWindow : Window
                     await EnsureLibraryFolderAsync();
                     outputFolder = ViewModel.Settings.LibraryFolder;
                 }
+                LibraryLayout.EnsureRoots(outputFolder);
+                outputFolder = LibraryLayout.ClipsRoot(outputFolder);
 
                 AppLog.Info(isAutoClip ? $"Auto-clip triggered: {autoClipLabel}." : "Replay clip save requested.");
 
@@ -437,7 +419,11 @@ public sealed partial class MainWindow : Window
                 // "3K - Mirage" -> event type "3K", map dropped - the game name
                 // (not the map) is what belongs next to it as the game label.
                 var autoClipEventType = autoClipLabel?.Split(" - ", 2)[0];
-                ClipInfoSidecar.Save(outputPath, new ClipInfo(ViewModel.ActiveGameDetection.DisplayName, autoClipEventType));
+                ClipInfoSidecar.Save(ViewModel.Settings.LibraryFolder, outputPath, new ClipInfo(
+                    ViewModel.ActiveGameDetection.DisplayName,
+                    autoClipEventType,
+                    autoClipLabel ?? ViewModel.ActiveGameDetection.DisplayName,
+                    File.GetCreationTimeUtc(outputPath)));
                 await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
                 if (!notifiedEarly) ShowClipSavedNotification();
             }
@@ -565,13 +551,12 @@ public sealed partial class MainWindow : Window
 
         var path = DefaultLibraryFolder();
         Directory.CreateDirectory(path);
-        Directory.CreateDirectory(Path.Combine(path, "Saved Clips"));
+        LibraryLayout.EnsureRoots(path);
         await ViewModel.LoadLibraryFolderAsync(path);
     }
 
-    // First run: EVE gets a Videos\EVE folder with no prompt, so clips just start
-    // landing somewhere sane instead of blocking recording behind a folder picker.
-    // "Saved Clips" underneath is the default export destination.
+    // First run: EVE gets a Videos\EVE folder with the standard Clips/VODs
+    // layout, so recording never blocks behind a folder picker.
     private static string DefaultLibraryFolder() => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.MyVideos),
         "EVE");
@@ -641,6 +626,14 @@ public sealed partial class MainWindow : Window
         {
             await ShowMessageAsync("Delete failed", error.Message);
         }
+    }
+
+    private async void RenameAllClipsButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null || !ViewModel.CanRenameAllClips) return;
+        var dialog = CreateDialog("Rename all clips?", "This renames every video in the current library to the selected filename scheme. Existing files are never overwritten.", true);
+        if (!await dialog.ShowDialog<bool>(this)) return;
+        await ViewModel.RenameAllClipsAsync();
     }
 
     private WindowState _preFullscreenWindowState = WindowState.Normal;
@@ -716,9 +709,9 @@ public sealed partial class MainWindow : Window
         if (ViewModel is not null) ViewModel.Cs2AllKillsExpanded = !ViewModel.Cs2AllKillsExpanded;
     }
 
-    private void ScanMedalButton_OnClick(object? sender, RoutedEventArgs e)
+    private async void ScanMedalButton_OnClick(object? sender, RoutedEventArgs e)
     {
-        ViewModel?.ScanForMedalClips();
+        if (ViewModel is not null) await ViewModel.ScanForMedalClipsAsync();
     }
 
     private async void ImportMedalButton_OnClick(object? sender, RoutedEventArgs e)
@@ -1276,19 +1269,29 @@ public sealed partial class MainWindow : Window
     private async void ExportButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
-        var safeName = string.Join("_", ViewModel.EditorTitle.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
-        if (string.IsNullOrWhiteSpace(safeName)) safeName = Path.GetFileNameWithoutExtension(ViewModel.SelectedVideoPath);
+        var libraryRoot = string.IsNullOrWhiteSpace(ViewModel.Settings.LibraryFolder)
+            ? DefaultLibraryFolder()
+            : ViewModel.Settings.LibraryFolder;
+        LibraryLayout.EnsureRoots(libraryRoot);
 
-        var savedClipsFolder = Path.Combine(
-            string.IsNullOrWhiteSpace(ViewModel.Settings.LibraryFolder) ? DefaultLibraryFolder() : ViewModel.Settings.LibraryFolder,
-            "Saved Clips");
-        Directory.CreateDirectory(savedClipsFolder);
-        var suggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(savedClipsFolder);
+        var sourceInfo = ClipInfoSidecar.Load(libraryRoot, ViewModel.SelectedVideoPath);
+        var game = ResolveExportGame(ViewModel.SelectedVideoPath, sourceInfo);
+        var exportFolder = Path.Combine(LibraryLayout.ClipsRoot(libraryRoot), ClipFileNaming.BuildBaseName(game));
+        Directory.CreateDirectory(exportFolder);
+        var suggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(exportFolder);
+        var exportTimestamp = DateTime.Now;
+        var suggestedFileName = ClipFileNaming.BuildFileName(
+            ViewModel.EditorTitle,
+            exportTimestamp,
+            ".mp4",
+            ViewModel.Settings.ClipFileNameScheme,
+            ViewModel.Settings.CustomClipFileNameTemplate,
+            game);
 
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "Export clip",
-            SuggestedFileName = $"{safeName}-trim.mp4",
+            SuggestedFileName = suggestedFileName,
             SuggestedStartLocation = suggestedStartLocation,
             FileTypeChoices = new[]
             {
@@ -1314,6 +1317,8 @@ public sealed partial class MainWindow : Window
             }
             else
             {
+                ClipInfoSidecar.Save(libraryRoot, outputPath, new ClipInfo(game, null, ViewModel.EditorTitle, exportTimestamp));
+                if (IsPathWithinLibrary(outputPath, libraryRoot)) await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
                 OpenInExplorer(outputPath, selectFile: true);
             }
         }
@@ -1321,6 +1326,28 @@ public sealed partial class MainWindow : Window
         {
             ViewModel.IsExporting = false;
         }
+    }
+
+    private static string ResolveExportGame(string sourcePath, ClipInfo? sourceInfo)
+    {
+        if (!string.IsNullOrWhiteSpace(sourceInfo?.GameDisplayName) && !MedalImportService.IsStructuralFolderName(sourceInfo.GameDisplayName))
+        {
+            return sourceInfo.GameDisplayName;
+        }
+
+        var parent = Path.GetFileName(Path.GetDirectoryName(sourcePath));
+        return string.IsNullOrWhiteSpace(parent) ||
+               MedalImportService.IsStructuralFolderName(parent) ||
+               string.Equals(parent, "Clips", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(parent, "VODs", StringComparison.OrdinalIgnoreCase)
+            ? "Unknown Game"
+            : parent;
+    }
+
+    private static bool IsPathWithinLibrary(string path, string libraryRoot)
+    {
+        var relative = Path.GetRelativePath(libraryRoot, path);
+        return !relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative);
     }
 
     private async Task<bool> ConfirmDeleteAsync(string summary)
@@ -1704,18 +1731,13 @@ public sealed partial class MainWindow : Window
     // wasn't foreground for part of the recording (see class summary there).
     // Missing sidecar (Legacy/OBS backend clips, or no pauses occurred) just
     // means no badge ever shows - not an error.
-    private static List<(double StartSeconds, double EndSeconds)> LoadPausedRanges(string videoPath)
+    private List<(double StartSeconds, double EndSeconds)> LoadPausedRanges(string videoPath)
     {
-        var directory = Path.GetDirectoryName(videoPath) ?? string.Empty;
-        var fileName = Path.GetFileName(videoPath) + ".paused.json";
-        // Clips saved now write this into a "Clip Info" subfolder instead of
-        // directly alongside the video - the plain adjacent path is still
-        // checked as a fallback so clips saved before that change (or a
-        // clip's own sidecar not yet moved) still show the badge.
-        var sidecarPath = Path.Combine(directory, "Clip Info", fileName);
+        var sidecarPath = ViewModel is null ? string.Empty : LibraryLayout.SidecarPath(ViewModel.Settings.LibraryFolder, videoPath, ".paused.json");
         if (!File.Exists(sidecarPath))
         {
-            sidecarPath = Path.Combine(directory, fileName);
+            sidecarPath = LibraryLayout.LegacySidecarPath(videoPath, ".paused.json");
+            if (!File.Exists(sidecarPath)) sidecarPath = LibraryLayout.LegacyAdjacentPausedPath(videoPath);
             if (!File.Exists(sidecarPath)) return new();
         }
 

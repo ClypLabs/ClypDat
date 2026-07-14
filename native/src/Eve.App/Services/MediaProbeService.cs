@@ -51,6 +51,28 @@ public sealed class MediaProbeService
             0);
     }
 
+    public async Task<TimeSpan> GetDurationAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        return (await ProbeDurationAsync(filePath, cancellationToken)).Duration;
+    }
+
+    public async Task<MediaDurationProbeResult> ProbeDurationAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        var result = await RunProcessAsync("ffprobe", new[]
+        {
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=nw=1:nk=1",
+            filePath
+        }, cancellationToken);
+        if (result.ExitCode == 0 && double.TryParse(result.Output.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var seconds) && seconds > 0)
+        {
+            return new MediaDurationProbeResult(TimeSpan.FromSeconds(seconds), string.Empty);
+        }
+
+        return new MediaDurationProbeResult(TimeSpan.Zero, string.IsNullOrWhiteSpace(result.Error) ? "ffprobe could not read a duration." : result.Error.Trim());
+    }
+
     public async Task<MediaFileInfo> ProbeAsync(string filePath)
     {
         var info = new FileInfo(filePath);
@@ -514,6 +536,8 @@ public sealed record MediaFileInfo(
     string CaptureBackend = "");
 
 public sealed record MediaTrackInfo(int Index, string Type, string Codec, string Label, double VolumePercent = 100);
+
+public sealed record MediaDurationProbeResult(TimeSpan Duration, string Error);
 
 internal sealed record SteelSeriesAudioTrack(string Name, double Volume, bool Muted);
 
