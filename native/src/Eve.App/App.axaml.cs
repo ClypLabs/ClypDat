@@ -41,7 +41,16 @@ public sealed partial class App : Application
             InitializeTrayIcon();
             if (minimized)
             {
-                _mainWindow.Opened += (_, _) => _mainWindow.Hide();
+                // Opened re-fires on every subsequent Show() after a Hide(), not
+                // just the first launch - must unsubscribe after firing once or
+                // this keeps hiding the window every time the user reopens it
+                // from the tray.
+                void HideOnFirstOpen(object? _, EventArgs __)
+                {
+                    _mainWindow.Opened -= HideOnFirstOpen;
+                    _mainWindow.Hide();
+                }
+                _mainWindow.Opened += HideOnFirstOpen;
             }
 
             InitializeAccentColor();
