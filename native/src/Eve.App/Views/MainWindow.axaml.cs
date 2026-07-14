@@ -658,13 +658,13 @@ public sealed partial class MainWindow : Window
         ViewModel?.CloseEditor();
     }
 
-    private async void OpenSettingsButton_OnClick(object? sender, RoutedEventArgs e)
+    // The EVE logo button is a universal "go back to Library" from anywhere
+    // else in the app (editor or Settings). Opening Settings has its own
+    // dedicated button now (bottom-left of the Library).
+    private void LibraryHomeButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
 
-        // The EVE logo button is a universal "go back to Library" while
-        // anywhere else in the app (editor or Settings), and only opens
-        // Settings when already sitting at the Library.
         if (ViewModel.IsEditorVisible)
         {
             CloseEditorButton_OnClick(sender, e);
@@ -674,9 +674,12 @@ public sealed partial class MainWindow : Window
         if (ViewModel.IsSettingsVisible)
         {
             ViewModel.CloseSettings();
-            return;
         }
+    }
 
+    private async void OpenSettingsButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
         ViewModel.OpenSettings();
         await ViewModel.RefreshOpenProcessesAsync();
     }
