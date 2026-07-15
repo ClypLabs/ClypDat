@@ -745,8 +745,25 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 // backoff) ever eats more than one interval's worth of real time,
                 // so the declared/ideal timeline below never silently falls behind
                 // real elapsed time.
+                //
+                // Capped, though - a genuine multi-minute stall (seen under heavy
+                // GPU load/driver hiccups) would otherwise make this loop pad
+                // through the ENTIRE gap as thousands of duplicate-encoded copies
+                // of one frozen frame, ballooning both encoded frame count and the
+                // clip's own PTS-derived duration far past what was requested (a
+                // "1 minute" replay length saving a 7+ minute, almost entirely
+                // static clip). Past a couple of seconds' worth of padding, snap
+                // the ideal timeline forward to now instead of mechanically
+                // filling every missed slot.
+                var catchUpFramesRemaining = Math.Clamp(config.FrameRate, 15, 240) * 2;
                 while (stopwatch.Elapsed - lastEncodedAt >= targetFrameInterval)
                 {
+                    if (catchUpFramesRemaining-- <= 0)
+                    {
+                        AppLog.Info($"Native capture: pacing gap of {(stopwatch.Elapsed - lastEncodedAt).TotalSeconds:0.0}s exceeded catch-up cap - snapping timeline forward instead of padding with duplicate frames.");
+                        lastEncodedAt = stopwatch.Elapsed;
+                        break;
+                    }
                     lastEncodedAt += targetFrameInterval;
                     framesEncoded++;
                     framesEncodedSinceLog++;
