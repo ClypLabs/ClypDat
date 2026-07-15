@@ -190,6 +190,25 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             var videoDurationSeconds = (window[^1].PtsMs - window[0].PtsMs) / 1_000_000.0;
             AppLog.Info($"Native replay audio/video duration check: videoDurationSeconds={videoDurationSeconds:0.000}, audioWindowDurationSeconds={windowDurationSeconds:0.000}, deltaMs={(windowDurationSeconds - videoDurationSeconds) * 1000:0.0}, packetCount={window.Length}.");
 
+            // A capture stall (the loop goes an extended stretch without
+            // acquiring/encoding a frame - seen under heavy GPU load, driver
+            // hiccups, etc.) leaves real gaps in the ring buffer: fewer video
+            // packets than wall-clock time would suggest, while audio (an
+            // entirely separate capture pipeline) keeps recording the whole
+            // window regardless. Left uncorrected, the saved clip gets an
+            // audio track much longer than its video track, which plays back
+            // as "video freezes, audio keeps going" for however long the
+            // shortfall is. Trimming the audio window down to the real video
+            // length (keeping the END - the moment closest to the save
+            // request - and cutting from the front) turns that into a
+            // shorter but correctly synced clip instead.
+            if (windowDurationSeconds - videoDurationSeconds > 1.0)
+            {
+                AppLog.Info($"Native replay: video came up short ({videoDurationSeconds:0.0}s of {windowDurationSeconds:0.0}s requested, likely a capture stall) - trimming audio to match.");
+                windowStartUtc = window[^1].WallClockUtc - TimeSpan.FromSeconds(videoDurationSeconds);
+                windowDurationSeconds = videoDurationSeconds;
+            }
+
             // One giant segment spanning the whole saved window let audio/video
             // clock drift (real hardware sample clocks are never exactly
             // 48000.000000Hz) accumulate uncorrected across the entire clip -
