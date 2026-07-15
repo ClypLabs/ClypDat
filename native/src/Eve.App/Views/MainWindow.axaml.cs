@@ -29,6 +29,15 @@ public sealed partial class MainWindow : Window
     private bool _timelineWasPlayingBeforeDrag;
     private readonly Stopwatch _playheadClock = new();
     private TimeSpan _playheadBaseTime = TimeSpan.Zero;
+    // Live-previews the actual video frame while dragging the playhead instead
+    // of only updating the marker and seeking once on release - throttled since
+    // PointerMoved can fire far faster than a LibVLC seek+settle round-trip can
+    // keep up with; ApplyTimelineSeekAsync/PlaybackSession.SeekAsync already
+    // cancel/supersede a still-in-flight seek when a newer one arrives, so a
+    // throttle here just caps how often that cancel-and-restart happens rather
+    // than needing any new synchronization of its own.
+    private readonly Stopwatch _timelineScrubThrottle = new();
+    private static readonly TimeSpan TimelineScrubMinInterval = TimeSpan.FromMilliseconds(120);
     private IReplayBuffer? _replayBuffer;
     private ReplayBackendOption _activeReplayBackend = ReplayBackendOption.Auto;
     private GlobalHotkeyService? _globalHotkey;
@@ -1142,6 +1151,7 @@ public sealed partial class MainWindow : Window
             _playbackTimer.Stop();
         }
         UpdateTimelineFromPointer(e, TimelineDragMode.Playhead);
+        _timelineScrubThrottle.Restart();
         e.Pointer.Capture(TimelineSurface);
         e.Handled = true;
     }
@@ -1159,6 +1169,7 @@ public sealed partial class MainWindow : Window
             _playbackTimer.Stop();
         }
         UpdateTimelineFromPointer(e, TimelineDragMode.TrimStart);
+        _timelineScrubThrottle.Restart();
         e.Pointer.Capture(TimelineSurface);
         e.Handled = true;
     }
@@ -1176,14 +1187,24 @@ public sealed partial class MainWindow : Window
             _playbackTimer.Stop();
         }
         UpdateTimelineFromPointer(e, TimelineDragMode.TrimEnd);
+        _timelineScrubThrottle.Restart();
         e.Pointer.Capture(TimelineSurface);
         e.Handled = true;
     }
 
     private void TimelineSurface_OnPointerMoved(object? sender, PointerEventArgs e)
     {
-        if (_timelineDragMode == TimelineDragMode.None) return;
+        if (_timelineDragMode == TimelineDragMode.None || ViewModel is null) return;
         UpdateTimelineFromPointer(e, _timelineDragMode);
+
+        // Live-preview the actual frame while dragging instead of leaving the
+        // video dead until release - always paused/silent (resumePlayback:
+        // false) during the drag itself, matching the pause-on-drag-start
+        // behavior above; PointerReleased below issues the real, resume-aware
+        // seek once the user lets go.
+        if (_timelineScrubThrottle.Elapsed < TimelineScrubMinInterval) return;
+        _timelineScrubThrottle.Restart();
+        _ = ApplyTimelineSeekAsync(ViewModel.CurrentTime, resumePlayback: false);
     }
 
     private async void TimelineSurface_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
