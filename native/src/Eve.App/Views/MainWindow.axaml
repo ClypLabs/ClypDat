@@ -256,18 +256,6 @@
         </ScrollViewer>
         </DockPanel>
 
-        <!-- Masks whatever partial card the scroll position happens to cut off at
-             the bottom - without this, a card's label footer (a different, lighter
-             color than the image above it) could be left peeking through as a
-             stray colored strip. Matches the Border above's own Background so the
-             seam is invisible - clips just look like they cleanly end at the
-             window edge instead. Sized to fully cover a card's label footer
-             height (image + margins), not just the settings button itself. -->
-        <Border Background="#101820"
-                Height="96"
-                VerticalAlignment="Bottom"
-                IsHitTestVisible="False" />
-
         <Button Classes="librarySettingsButton"
                 HorizontalAlignment="Left"
                 VerticalAlignment="Bottom"
