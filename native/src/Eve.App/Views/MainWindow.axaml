@@ -652,6 +652,7 @@
               <StackPanel Spacing="4">
                 <TextBlock Text="AUTO-CLIPPING" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
                 <TextBlock Text="EVE reads a game's own event feed to save a clip the instant one of these happens - no voice or screen analysis involved." Foreground="#93A6B8" TextWrapping="Wrap" />
+                <TextBlock Text="⚠ Experimental - still being worked on and can miss events, mislabel clips, or misbehave." Foreground="#E5A00D" FontSize="11" FontWeight="Bold" TextWrapping="Wrap" Margin="0,4,0,0" />
               </StackPanel>
 
               <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="8">
