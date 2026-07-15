@@ -1533,6 +1533,47 @@ public sealed class NativeReplayBuffer : IReplayBuffer
     // still works even with no usable hardware encoder at all.
     private static readonly string[] EncoderCandidates = { "h264_nvenc", "h264_amf", "libx264" };
 
+    // Real-time screen capture needs the encoder's fastest/lowest-latency
+    // preset, not whatever balanced default ships with it - h264_nvenc's
+    // default preset does real per-frame rate-distortion search, which
+    // measured a sustained ~59-60ms/frame (vs. ~0.5ms on the fast preset)
+    // during actual Dead by Daylight matches specifically, where the same GPU
+    // is also under its heaviest rendering load of the whole session. That
+    // 100x-per-frame cost is what turns "GPU is busy, a few frames get
+    // dropped" into sustained near-1fps capture for minutes at a time. Applied
+    // to priv_data before avcodec_open2 - these are encoder-specific options,
+    // not real AVCodecContext fields, so they have to land before open, not
+    // after. Best-effort: an unsupported option name just logs and moves on
+    // instead of failing the whole encoder open, since exact option support
+    // varies by ffmpeg build/driver version.
+    private static unsafe void ApplyLowLatencyEncoderOptions(AVCodecContext* codecContext, string candidateName)
+    {
+        void TrySet(string name, string value)
+        {
+            var result = ffmpeg.av_opt_set(codecContext->priv_data, name, value, 0);
+            if (result < 0)
+            {
+                AppLog.Info($"Native encoder probe: {candidateName} option {name}={value} not supported (error {result}), skipping.");
+            }
+        }
+
+        switch (candidateName)
+        {
+            case "h264_nvenc":
+                TrySet("preset", "p1");
+                TrySet("tune", "ll");
+                break;
+            case "h264_amf":
+                TrySet("usage", "ultralowlatency");
+                TrySet("quality", "speed");
+                break;
+            case "libx264":
+                TrySet("preset", "ultrafast");
+                TrySet("tune", "zerolatency");
+                break;
+        }
+    }
+
     private static unsafe AVCodecContext* CreateEncoder(ReplayBufferConfig config, int width, int height, out AVRational timeBase, out string encoderName)
     {
         timeBase = new AVRational { num = 1, den = 1_000_000 };
@@ -1557,6 +1598,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             codecContext->gop_size = 240;
             codecContext->max_b_frames = 0;
             codecContext->flags |= ffmpeg.AV_CODEC_FLAG_GLOBAL_HEADER;
+            ApplyLowLatencyEncoderOptions(codecContext, candidateName);
 
             var openResult = ffmpeg.avcodec_open2(codecContext, candidateCodec, null);
             if (openResult == 0)
