@@ -114,7 +114,12 @@
 
           </Grid>
 
-          <ScrollViewer Margin="-4,14,-4,0">
+          <!-- Bottom padding reserves clear space for the floating settings
+               button (52px tall, anchored bottom-left) so the last row of
+               clips never renders underneath/behind it - the button overlapping
+               live thumbnail content (not just a scroll-cutoff sliver) was the
+               actual bug, not just a visual one. -->
+          <ScrollViewer Margin="-4,14,-4,0" Padding="0,0,0,68">
             <ItemsControl ItemsSource="{Binding ClipGroups}">
             <ItemsControl.ItemTemplate>
               <DataTemplate>
