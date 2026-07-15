@@ -1680,6 +1680,26 @@ public sealed partial class MainWindow : Window
                 .ToArray();
             if (cancellationToken.IsCancellationRequested) return;
 
+            ViewModel.IsEditorVideoLoading = true;
+            // LibVLC's Playing event fires once it actually starts rendering
+            // frames (as opposed to Play()/PlayFrom() returning immediately,
+            // well before the first real frame is ready) - that's the signal
+            // to swap the thumbnail placeholder out for the real video.
+            // Scoped to this one load attempt (not a persistent subscription
+            // on the reused PlaybackSession) so a superseded/cancelled open's
+            // late-firing event can't wrongly clear a NEWER open's loading
+            // flag - the cancellation check below guards that.
+            void OnPlaying(object? _, EventArgs __)
+            {
+                playback.VideoPlayer.Playing -= OnPlaying;
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (cancellationToken.IsCancellationRequested) return;
+                    if (ViewModel is not null) ViewModel.IsEditorVideoLoading = false;
+                });
+            }
+            playback.VideoPlayer.Playing += OnPlaying;
+
             playback.PlayFrom(ViewModel.CurrentTime);
             StartPlayheadClock(ViewModel.CurrentTime);
             _endedAtTrimBoundary = false;

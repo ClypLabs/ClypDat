@@ -54,6 +54,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _selectedVideoPath = string.Empty;
     private string _selectedThumbnailPath = string.Empty;
     private Avalonia.Media.Imaging.Bitmap? _selectedThumbnail;
+    private bool _isEditorVideoLoading;
     private string _selectedMetadata = string.Empty;
     private string _selectedCreated = "Created: No clip loaded";
     private string _selectedQuality = "Video Quality: Unknown";
@@ -1265,6 +1266,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         private set => SetProperty(ref _selectedThumbnail, value);
     }
 
+    // Drives a thumbnail placeholder over the editor's VideoView so opening a
+    // clip shows its (already-decoded) thumbnail immediately instead of a
+    // black frame for the second or so LibVLC needs to actually start
+    // rendering - see StartEditorPlaybackAsync/the VideoPlayer.Playing hookup
+    // in MainWindow.axaml.cs for where this gets set back to false.
+    public bool IsEditorVideoLoading
+    {
+        get => _isEditorVideoLoading;
+        set => SetProperty(ref _isEditorVideoLoading, value);
+    }
+
     public string SelectedMetadata
     {
         get => _selectedMetadata;
@@ -2385,6 +2397,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedVideoPath = media.Path;
         SelectedThumbnailPath = media.ThumbnailPath;
         SelectedThumbnail = LoadBitmap(media.ThumbnailPath);
+        // Set here, synchronously, so the thumbnail placeholder is already
+        // showing by the moment IsEditorVisible flips true below - the actual
+        // video load/decode is deferred a tick later (QueueEditorPlayback),
+        // and without this the editor would briefly show an empty/black
+        // VideoView in between.
+        IsEditorVideoLoading = true;
         if (!preserveEditorText)
         {
             EditorTitle = media.Name;

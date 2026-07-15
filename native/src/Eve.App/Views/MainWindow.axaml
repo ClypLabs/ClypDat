@@ -1017,7 +1017,13 @@
     <Grid Grid.Row="1" RowDefinitions="*,320" IsVisible="{Binding IsEditorVisible}">
       <Grid Background="#0E141A" ColumnDefinitions="*,300">
         <Border Background="#05080B">
-          <vlc:VideoView x:Name="EditorVideoView" />
+          <Grid>
+            <vlc:VideoView x:Name="EditorVideoView" />
+            <Image Source="{Binding SelectedThumbnail}"
+                   Stretch="Uniform"
+                   IsVisible="{Binding IsEditorVideoLoading}"
+                   IsHitTestVisible="False" />
+          </Grid>
         </Border>
         <Border Grid.Column="1" Background="#101820" BorderBrush="#1F2B34" BorderThickness="1,0,0,0">
           <StackPanel Margin="20" Spacing="14">
