@@ -36,6 +36,8 @@ browsing for an executable directly.
 
 ## Auto-clipping
 
+Currently EVE only has CS2 auto-clipping (Experimental), so expect issues!
+
 For CS2, EVE listens to the game's own Game State Integration feed (no
 screen/voice analysis) and can automatically save a clip on kills, a
 headshot, a death, or an assist. Rapid kills within a debounce window
