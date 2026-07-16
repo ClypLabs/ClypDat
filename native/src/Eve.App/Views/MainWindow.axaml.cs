@@ -1591,7 +1591,11 @@ public sealed partial class MainWindow : Window
             {
                 progressBar.IsIndeterminate = false;
                 progressBar.Value = Math.Clamp(fraction * 100, 0, 100);
-                statusText.Text = $"Exporting clip... {progressBar.Value:0}%";
+                // Figure-space (U+2007, digit-width) padding keeps the status
+                // the same width from "4%" through "100%", so the divider/ETA
+                // to its right never shift - without needing a MinWidth that
+                // leaves a big empty gap at low percentages.
+                statusText.Text = $"Exporting clip... {progressBar.Value.ToString("0").PadLeft(3, ' ')}%";
                 // Simple elapsed/fraction extrapolation; below a few percent
                 // one early sample would wildly overshoot, so hold off.
                 if (fraction > 0.03)
@@ -2553,11 +2557,7 @@ public sealed partial class MainWindow : Window
     {
         var (window, body) = CreateChromelessDialog(titleBarLabel);
 
-        // MinWidth pins the divider/ETA that sit to the right of this text in
-        // place - without it the status's own width changes as the percentage
-        // ticks up ("5%" vs "45%"), shuffling everything after it sideways on
-        // every progress update.
-        var statusText = new TextBlock { Text = heading, Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"), FontSize = 13, MinWidth = 160 };
+        var statusText = new TextBlock { Text = heading, Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"), FontSize = 13 };
         var etaText = new TextBlock { Text = string.Empty, Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"), FontSize = 13, IsVisible = false };
         var progressBar = new ProgressBar
         {
