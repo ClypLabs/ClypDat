@@ -1579,7 +1579,7 @@ public sealed partial class MainWindow : Window
 
         ViewModel.IsExporting = true;
         var progressCts = new CancellationTokenSource();
-        var (progressWindow, progressBar, statusText, etaText) = CreateProgressDialog("Exporting clip", "Exporting clip...", () => progressCts.Cancel());
+        var (progressWindow, progressBar, statusText, percentText, etaText) = CreateProgressDialog("Exporting clip", "Exporting clip...", () => progressCts.Cancel());
         var progressDialogTask = progressWindow.ShowDialog(this);
         try
         {
@@ -1591,11 +1591,7 @@ public sealed partial class MainWindow : Window
             {
                 progressBar.IsIndeterminate = false;
                 progressBar.Value = Math.Clamp(fraction * 100, 0, 100);
-                // Figure-space (U+2007, digit-width) padding keeps the status
-                // the same width from "4%" through "100%", so the divider/ETA
-                // to its right never shift - without needing a MinWidth that
-                // leaves a big empty gap at low percentages.
-                statusText.Text = $"Exporting clip... {progressBar.Value.ToString("0").PadLeft(3, ' ')}%";
+                percentText.Text = $"{progressBar.Value:0}%";
                 // Simple elapsed/fraction extrapolation; below a few percent
                 // one early sample would wildly overshoot, so hold off.
                 if (fraction > 0.03)
@@ -1613,6 +1609,7 @@ public sealed partial class MainWindow : Window
                 AppLog.Info($"Export: NVENC encode failed, retrying with CPU encoder. ffmpeg said: {result.Error}");
                 progressBar.IsIndeterminate = true;
                 statusText.Text = "Exporting clip (CPU encoder)...";
+                percentText.Text = string.Empty;
                 etaText.IsVisible = false;
                 encodeClock.Restart();
                 result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildExportArguments(outputPath, useHardwareEncoder: false), exportDuration, progress, progressCts.Token);
@@ -2553,11 +2550,14 @@ public sealed partial class MainWindow : Window
         return new ProcessResult(process.ExitCode, outputBuilder.ToString(), await errorTask);
     }
 
-    private static (Window Window, ProgressBar Bar, TextBlock Status, TextBlock Eta) CreateProgressDialog(string titleBarLabel, string heading, Action onCancel)
+    private static (Window Window, ProgressBar Bar, TextBlock Status, TextBlock Percent, TextBlock Eta) CreateProgressDialog(string titleBarLabel, string heading, Action onCancel)
     {
         var (window, body) = CreateChromelessDialog(titleBarLabel);
 
         var statusText = new TextBlock { Text = heading, Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"), FontSize = 13 };
+        // Fixed-width slot for the live percentage so its digit count changing
+        // (4% -> 45% -> 100%) can never shift the divider/ETA sitting after it.
+        var percentText = new TextBlock { Text = string.Empty, Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"), FontSize = 13, Width = 38, Margin = new Avalonia.Thickness(5, 0, 0, 0) };
         var etaText = new TextBlock { Text = string.Empty, Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"), FontSize = 13, IsVisible = false };
         var progressBar = new ProgressBar
         {
@@ -2592,11 +2592,11 @@ public sealed partial class MainWindow : Window
         body.Children.Add(new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Children = { statusText, divider, etaText }
+            Children = { statusText, percentText, divider, etaText }
         });
         body.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Children = { cancelButton } });
 
-        return (window, progressBar, statusText, etaText);
+        return (window, progressBar, statusText, percentText, etaText);
     }
 
     private static string FormatEta(TimeSpan remaining)
