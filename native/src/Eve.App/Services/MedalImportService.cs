@@ -12,6 +12,8 @@ public sealed record MedalClipRecord(
     DateTime CreatedAtUtc,
     string? Title);
 
+public sealed record MedalScanProgress(double Percent, string Status);
+
 // Medal stores its local clip catalog in %AppData%\Medal\medal-<accountId>.db (one
 // per account ever signed into, plus medal-guest.db) - a SQLite database with a
 // "contents" table holding the plain file paths directly as columns, but the clip
@@ -41,16 +43,30 @@ public static class MedalImportService
     public static string GetLegacyImportKey(string gameFolderName, DateTime createdAtUtc, long length) =>
         $"{NormalizeForComparison(gameFolderName)}|{createdAtUtc.ToUniversalTime().Ticks}|{length}";
 
-    public static IReadOnlyList<MedalClipRecord> ScanForClips()
+    public static IReadOnlyList<MedalClipRecord> ScanForClips(IProgress<MedalScanProgress>? progress = null)
     {
         var medalRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Medal");
         var results = new List<MedalClipRecord>();
         var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        progress?.Report(new MedalScanProgress(0, "Finding Medal clip catalogs..."));
 
         if (Directory.Exists(medalRoot))
         {
-            foreach (var dbPath in Directory.EnumerateFiles(medalRoot, "medal-*.db"))
+            string[] databases;
+            try
             {
+                databases = Directory.EnumerateFiles(medalRoot, "medal-*.db").ToArray();
+            }
+            catch (Exception error)
+            {
+                AppLog.Error($"Medal import: failed finding catalogs in {medalRoot}", error);
+                databases = Array.Empty<string>();
+            }
+
+            for (var i = 0; i < databases.Length; i++)
+            {
+                var dbPath = databases[i];
+                progress?.Report(new MedalScanProgress(15.0 * i / Math.Max(1, databases.Length), $"Reading Medal catalog {i + 1} of {databases.Length}..."));
                 try
                 {
                     ReadDatabase(dbPath, results, seenPaths);
@@ -62,8 +78,10 @@ public static class MedalImportService
             }
         }
 
-        ScanClipsFolderFallback(results, seenPaths);
+        progress?.Report(new MedalScanProgress(15, "Finding Medal video files..."));
+        ScanClipsFolderFallback(results, seenPaths, progress);
 
+        progress?.Report(new MedalScanProgress(25, "Medal source scan complete."));
         return DedupeBySizeAndGame(results);
     }
 
@@ -78,16 +96,18 @@ public static class MedalImportService
     // customized it in Medal's own settings this won't see those, but there's
     // no DB left to read a custom path from either in the scenario this
     // exists for.
-    private static void ScanClipsFolderFallback(List<MedalClipRecord> results, HashSet<string> seenPaths)
+    private static void ScanClipsFolderFallback(List<MedalClipRecord> results, HashSet<string> seenPaths, IProgress<MedalScanProgress>? progress)
     {
         var clipsRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "Medal");
         if (!Directory.Exists(clipsRoot)) return;
 
         var videoExtensions = new[] { ".mp4", ".mov", ".mkv" };
-        IEnumerable<string> files;
+        string[] files;
         try
         {
-            files = Directory.EnumerateFiles(clipsRoot, "*.*", SearchOption.AllDirectories);
+            files = Directory.EnumerateFiles(clipsRoot, "*.*", SearchOption.AllDirectories)
+                .Where(path => videoExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
+                .ToArray();
         }
         catch (Exception error)
         {
@@ -95,9 +115,10 @@ public static class MedalImportService
             return;
         }
 
-        foreach (var videoPath in files)
+        for (var i = 0; i < files.Length; i++)
         {
-            if (!videoExtensions.Contains(Path.GetExtension(videoPath), StringComparer.OrdinalIgnoreCase)) continue;
+            var videoPath = files[i];
+            progress?.Report(new MedalScanProgress(15 + 10.0 * (i + 1) / Math.Max(1, files.Length), $"Scanning Medal video {i + 1} of {files.Length}..."));
             if (!seenPaths.Add(videoPath)) continue;
 
             var gameFolder = Path.GetFileName(Path.GetDirectoryName(videoPath)) ?? "Unknown Game";
