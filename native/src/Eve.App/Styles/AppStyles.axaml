@@ -316,6 +316,14 @@
        needed. First position-animated hover effect in this codebase (every
        other Transitions usage here only animates Background color). -->
   <Style Selector="CheckBox.dayCheck">
+    <!-- Collapsed default state lives here as Style setters, not as local
+         XAML attributes on the element - a local attribute value always
+         wins over a Style setter for the same property regardless of
+         selector specificity, which would permanently block the
+         :pointerover rule below from ever taking effect. -->
+    <Setter Property="Width" Value="0" />
+    <Setter Property="Opacity" Value="0" />
+    <Setter Property="IsHitTestVisible" Value="False" />
     <Setter Property="Transitions">
       <Transitions>
         <DoubleTransition Property="Width" Duration="0:0:0.15" />

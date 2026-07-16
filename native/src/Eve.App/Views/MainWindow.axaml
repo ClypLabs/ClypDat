@@ -179,50 +179,56 @@
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
-                  <Border Width="{Binding $parent[Window].DataContext.CardWidth}"
-                          Margin="4,4,20,24"
-                          Background="#24303A"
-                          CornerRadius="12"
-                          BoxShadow="0 6 18 -6 #66000000"
-                          IsVisible="{Binding IsVisibleInLibrary}"
-                          PointerPressed="ClipCard_OnPointerPressed"
-                          PointerEntered="ClipCard_OnPointerEntered"
-                          PointerExited="ClipCard_OnPointerExited">
-                    <Border.ContextMenu>
-                      <ContextMenu>
-                        <MenuItem Header="Export" Click="ClipContextExport_OnClick" />
-                        <MenuItem Header="Open" Click="ClipContextOpen_OnClick" />
-                        <MenuItem Header="Rename" Click="ClipContextRename_OnClick" />
-                        <MenuItem Header="Open file location" Click="ClipContextOpenLocation_OnClick" />
-                        <Separator />
-                        <MenuItem Header="Delete" Click="ClipContextDelete_OnClick" Foreground="#D85E61" />
-                      </ContextMenu>
-                    </Border.ContextMenu>
-                    <StackPanel>
-                      <!-- Per-card date header, replacing the old shared
-                           per-day group header. Hovering this row reveals a
-                           checkbox (Border.clipDateRow:pointerover
-                           CheckBox.dayCheck in AppStyles.axaml) that selects
-                           every clip sharing this date, not just this card -
-                           the date text is pushed right by ordinary
-                           StackPanel flow as the checkbox's own Width
-                           transitions open, no RenderTransform needed. -->
-                      <Border Classes="clipDateRow" Background="Transparent" Padding="4,0,4,8">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                          <CheckBox Classes="dayCheck"
-                                    Width="0"
-                                    Opacity="0"
-                                    IsHitTestVisible="False"
-                                    IsChecked="{Binding IsDaySelected}"
-                                    Click="ClipDayCheckBox_OnClick"
-                                    VerticalAlignment="Center" />
-                          <TextBlock Text="{Binding DateHeaderLabel}"
-                                     Foreground="#B8C7D8"
-                                     FontSize="13"
-                                     FontWeight="Bold"
-                                     VerticalAlignment="Center" />
-                        </StackPanel>
-                      </Border>
+                  <StackPanel Width="{Binding $parent[Window].DataContext.CardWidth}"
+                              Margin="4,4,20,24"
+                              IsVisible="{Binding IsVisibleInLibrary}">
+                    <!-- Per-card date header, replacing the old shared
+                         per-day group header - only rendered on the first
+                         (topmost) clip of each date, not repeated on every
+                         card sharing it. Sits OUTSIDE/above the card's own
+                         bordered box (a sibling here, not nested inside it)
+                         so it shows the page's own background behind it
+                         instead of the card's #24303A - nesting it inside
+                         the card previously made it look like a mismatched
+                         "lip" stuck on top of the rounded card. Hovering
+                         this row reveals a checkbox (styled entirely via
+                         AppStyles.axaml's CheckBox.dayCheck rules, not local
+                         attributes here - a local Width/Opacity/
+                         IsHitTestVisible value on the element itself would
+                         always beat the :pointerover style override) that
+                         selects every clip sharing this date, not just this
+                         card - the date text is pushed right by ordinary
+                         StackPanel flow as the checkbox's own Width
+                         transitions open, no RenderTransform needed. -->
+                    <Border Classes="clipDateRow" Background="Transparent" Padding="4,0,4,8" IsVisible="{Binding IsFirstOfDate}">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <CheckBox Classes="dayCheck"
+                                  IsChecked="{Binding IsDaySelected}"
+                                  Click="ClipDayCheckBox_OnClick"
+                                  VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding DateHeaderLabel}"
+                                   Foreground="#B8C7D8"
+                                   FontSize="13"
+                                   FontWeight="Bold"
+                                   VerticalAlignment="Center" />
+                      </StackPanel>
+                    </Border>
+                    <Border Background="#24303A"
+                            CornerRadius="12"
+                            BoxShadow="0 6 18 -6 #66000000"
+                            PointerPressed="ClipCard_OnPointerPressed"
+                            PointerEntered="ClipCard_OnPointerEntered"
+                            PointerExited="ClipCard_OnPointerExited">
+                      <Border.ContextMenu>
+                        <ContextMenu>
+                          <MenuItem Header="Export" Click="ClipContextExport_OnClick" />
+                          <MenuItem Header="Open" Click="ClipContextOpen_OnClick" />
+                          <MenuItem Header="Rename" Click="ClipContextRename_OnClick" />
+                          <MenuItem Header="Open file location" Click="ClipContextOpenLocation_OnClick" />
+                          <Separator />
+                          <MenuItem Header="Delete" Click="ClipContextDelete_OnClick" Foreground="#D85E61" />
+                        </ContextMenu>
+                      </Border.ContextMenu>
                       <Border CornerRadius="12" ClipToBounds="True">
                           <Grid RowDefinitions="Auto,Auto">
                             <Border Grid.RowSpan="2"
@@ -304,8 +310,8 @@
                             </Border>
                           </Grid>
                           </Border>
-                    </StackPanel>
-                  </Border>
+                    </Border>
+                  </StackPanel>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>

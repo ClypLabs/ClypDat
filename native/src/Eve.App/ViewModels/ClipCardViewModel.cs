@@ -263,6 +263,20 @@ public sealed class ClipCardViewModel : ViewModelBase
         set => SetProperty(ref _isDaySelected, value);
     }
 
+    private bool _isFirstOfDate;
+
+    // Set by MainWindowViewModel - true only for the first (topmost, since
+    // AllClips is sorted newest-first) clip of each distinct date. The
+    // per-card date header only renders on that one card, not repeated on
+    // every clip sharing the date - matches the old shared per-day group
+    // header's single-header-per-day behavior, just relocated onto whichever
+    // card happens to be first instead of a separate row of its own.
+    public bool IsFirstOfDate
+    {
+        get => _isFirstOfDate;
+        set => SetProperty(ref _isFirstOfDate, value);
+    }
+
     // Set by MainWindowViewModel to reflect the order clips were selected in
     // (1-based; 0 = not selected), shown as a big number overlay like GG's
     // clip picker so a multi-select shows which clip you tapped 1st, 2nd, etc.

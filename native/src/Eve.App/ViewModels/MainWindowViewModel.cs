@@ -2536,6 +2536,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(LibraryLocationText));
         NotifySelectionChrome();
         RecomputeGameFilterBadges();
+        UpdateFirstOfDateFlags();
+    }
+
+    // AllClips is always sorted newest-first, so the first clip encountered
+    // per distinct date is the one the date header should render on -
+    // matches where the old shared per-day group header used to sit (the
+    // top of that day's clips).
+    private void UpdateFirstOfDateFlags()
+    {
+        var seenDates = new HashSet<DateTime>();
+        foreach (var clip in AllClips)
+        {
+            clip.IsFirstOfDate = seenDates.Add(clip.CreatedAt.ToLocalTime().Date);
+        }
     }
 
     private readonly HashSet<string> _activeGameFilters = new(StringComparer.OrdinalIgnoreCase);
