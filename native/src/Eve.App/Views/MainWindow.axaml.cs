@@ -1621,14 +1621,7 @@ public sealed partial class MainWindow : Window
 
     private async Task<string?> PromptRenameAsync(string currentTitle)
     {
-        var window = new Window
-        {
-            Title = "Rename clip",
-            Width = 420,
-            Height = 200,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Background = Avalonia.Media.Brush.Parse("#111920")
-        };
+        var (window, body) = CreateChromelessDialog("Rename clip");
 
         var textBox = new TextBox
         {
@@ -1639,10 +1632,12 @@ public sealed partial class MainWindow : Window
         var rename = new Button
         {
             Content = "Rename",
-            Width = 96,
-            HorizontalContentAlignment = HorizontalAlignment.Center
+            Width = 100,
+            Height = 34,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            Classes = { "primaryButton" }
         };
-        var cancel = new Button { Content = "Cancel", Width = 96 };
+        var cancel = new Button { Content = "Cancel", Width = 100, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center };
 
         rename.Click += (_, _) => window.Close(textBox.Text);
         cancel.Click += (_, _) => window.Close(null);
@@ -1660,23 +1655,15 @@ public sealed partial class MainWindow : Window
             Children = { cancel, rename }
         };
 
-        window.Content = new StackPanel
+        body.Children.Add(new TextBlock
         {
-            Margin = new Avalonia.Thickness(22),
-            Spacing = 20,
-            Children =
-            {
-                new TextBlock
-                {
-                    Text = "Rename clip",
-                    Foreground = Avalonia.Media.Brush.Parse("#DDE8F5"),
-                    FontWeight = Avalonia.Media.FontWeight.Bold,
-                    FontSize = 16
-                },
-                textBox,
-                buttons
-            }
-        };
+            Text = "Rename clip",
+            Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
+            FontWeight = Avalonia.Media.FontWeight.Bold,
+            FontSize = 18
+        });
+        body.Children.Add(textBox);
+        body.Children.Add(buttons);
 
         window.Opened += (_, _) =>
         {
@@ -2439,27 +2426,108 @@ public sealed partial class MainWindow : Window
         return new ProcessResult(process.ExitCode, await outputTask, await errorTask);
     }
 
-    private static Window CreateDialog(string title, string message, bool showCancel, string confirmLabel = "Delete", bool destructive = true)
+    // Shared chrome for every small utility popup (confirm/message/rename) -
+    // a plain Window here used the OS's own title bar (minimize/maximize/close,
+    // usually light-themed on Windows), which looked jarring against the rest
+    // of the app's own dark, chromeless windows (see CreateUpdateDialog). This
+    // gives every popup that same slim custom title bar instead: just an icon,
+    // a label, and a single close button - no minimize/maximize at all.
+    private static (Window Window, Panel Body) CreateChromelessDialog(string titleBarLabel)
     {
         var window = new Window
         {
-            Title = title,
             Width = 420,
-            Height = 220,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Background = Avalonia.Media.Brush.Parse("#111920")
+            Background = Avalonia.Media.Brush.Parse("#111920"),
+            SystemDecorations = SystemDecorations.Full,
+            ExtendClientAreaToDecorationsHint = true,
+            ExtendClientAreaTitleBarHeightHint = -1,
+            ExtendClientAreaChromeHints = Avalonia.Platform.ExtendClientAreaChromeHints.NoChrome,
+            TransparencyLevelHint = new[] { Avalonia.Controls.WindowTransparencyLevel.None }
         };
+
+        var titleBar = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
+            Height = 40,
+            Background = Avalonia.Media.Brush.Parse("#0C1319")
+        };
+        titleBar.PointerPressed += (_, e) =>
+        {
+            if (e.GetCurrentPoint(titleBar).Properties.IsLeftButtonPressed) window.BeginMoveDrag(e);
+        };
+        var titleIcon = new Image
+        {
+            Source = new Avalonia.Media.Imaging.Bitmap(Avalonia.Platform.AssetLoader.Open(new Uri("avares://EVE/Assets/eve-icon-24.png"))),
+            Width = 16,
+            Height = 16,
+            Margin = new Avalonia.Thickness(14, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var titleText = new TextBlock
+        {
+            Text = titleBarLabel,
+            Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"),
+            FontSize = 12,
+            FontWeight = Avalonia.Media.FontWeight.SemiBold,
+            Margin = new Avalonia.Thickness(8, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var titleLeft = new StackPanel { Orientation = Orientation.Horizontal, Children = { titleIcon, titleText } };
+        Grid.SetColumn(titleLeft, 0);
+        var closeButton = new Button
+        {
+            Content = "✕",
+            Width = 40,
+            Height = 40,
+            Padding = new Avalonia.Thickness(0),
+            Background = Avalonia.Media.Brushes.Transparent,
+            BorderThickness = new Avalonia.Thickness(0),
+            CornerRadius = new Avalonia.CornerRadius(0),
+            Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"),
+            FontSize = 12,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center
+        };
+        closeButton.Click += (_, _) => window.Close();
+        Grid.SetColumn(closeButton, 2);
+        titleBar.Children.Add(titleLeft);
+        titleBar.Children.Add(closeButton);
+
+        var body = new StackPanel { Margin = new Avalonia.Thickness(22, 20, 22, 22), Spacing = 16 };
+
+        window.Content = new DockPanel { Children = { titleBar, body } };
+        DockPanel.SetDock(titleBar, Dock.Top);
+
+        window.KeyDown += (_, keyArgs) =>
+        {
+            if (keyArgs.Key == Key.Escape) window.Close();
+        };
+
+        return (window, body);
+    }
+
+    private static Window CreateDialog(string title, string message, bool showCancel, string confirmLabel = "Delete", bool destructive = true)
+    {
+        var (window, body) = CreateChromelessDialog(title);
 
         var ok = new Button
         {
             Content = showCancel ? confirmLabel : "OK",
-            Width = 96,
+            Width = 100,
+            Height = 34,
             HorizontalContentAlignment = HorizontalAlignment.Center
         };
         if (showCancel && destructive)
         {
             ok.Background = Avalonia.Media.Brush.Parse("#D95B62");
             ok.Foreground = Avalonia.Media.Brush.Parse("#FFFFFF");
+        }
+        else
+        {
+            ok.Classes.Add("primaryButton");
         }
         ok.Click += (_, _) => window.Close(true);
 
@@ -2472,35 +2540,28 @@ public sealed partial class MainWindow : Window
 
         if (showCancel)
         {
-            var cancel = new Button { Content = "Cancel", Width = 96 };
+            var cancel = new Button { Content = "Cancel", Width = 100, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center };
             cancel.Click += (_, _) => window.Close(false);
             buttons.Children.Add(cancel);
         }
 
         buttons.Children.Add(ok);
 
-        window.Content = new StackPanel
+        body.Children.Add(new TextBlock
         {
-            Margin = new Avalonia.Thickness(22),
-            Spacing = 20,
-            Children =
-            {
-                new TextBlock
-                {
-                    Text = title,
-                    Foreground = Avalonia.Media.Brush.Parse("#DDE8F5"),
-                    FontWeight = Avalonia.Media.FontWeight.Bold,
-                    FontSize = 16
-                },
-                new TextBlock
-                {
-                    Text = message,
-                    Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"),
-                    TextWrapping = Avalonia.Media.TextWrapping.Wrap
-                },
-                buttons
-            }
-        };
+            Text = title,
+            Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
+            FontWeight = Avalonia.Media.FontWeight.Bold,
+            FontSize = 18
+        });
+        body.Children.Add(new TextBlock
+        {
+            Text = message,
+            Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"),
+            FontSize = 13,
+            TextWrapping = Avalonia.Media.TextWrapping.Wrap
+        });
+        body.Children.Add(buttons);
 
         return window;
     }
