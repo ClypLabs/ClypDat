@@ -340,6 +340,15 @@
     <Setter Property="Opacity" Value="1" />
     <Setter Property="IsHitTestVisible" Value="True" />
   </Style>
+  <!-- Stays revealed once checked, independent of hover - unchecking it
+       (still requires hovering back over the row first, since it's hidden
+       again once unchecked and the mouse has moved away) reverts to the
+       hover-only reveal above. -->
+  <Style Selector="CheckBox.dayCheck:checked">
+    <Setter Property="Width" Value="26" />
+    <Setter Property="Opacity" Value="1" />
+    <Setter Property="IsHitTestVisible" Value="True" />
+  </Style>
   <Style Selector="MenuFlyoutPresenter">
     <Setter Property="Background" Value="#141D24" />
     <Setter Property="BorderBrush" Value="#2C3B48" />

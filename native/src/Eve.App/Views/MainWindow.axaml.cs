@@ -1838,16 +1838,24 @@ public sealed partial class MainWindow : Window
                 Dispatcher.UIThread.Post(() =>
                 {
                     if (cancellationToken.IsCancellationRequested) return;
-                    if (ViewModel is not null) ViewModel.IsEditorVideoLoading = false;
+                    if (ViewModel is null) return;
+                    ViewModel.IsEditorVideoLoading = false;
+                    // The playhead/timeline seeker previously started moving
+                    // the instant PlayFrom was called, well before the video
+                    // itself had a real frame to show - the seeker visibly
+                    // crept forward over a still-"Loading" placeholder.
+                    // Starting it here instead, atomically with clearing the
+                    // loading flag, means nothing on the timeline moves
+                    // until there's an actual frame for it to correspond to.
+                    StartPlayheadClock(ViewModel.CurrentTime);
+                    _endedAtTrimBoundary = false;
+                    ViewModel.IsPlaying = true;
+                    _playbackTimer.Start();
                 });
             }
             playback.VideoPlayer.TimeChanged += OnTimeChanged;
 
             playback.PlayFrom(ViewModel.CurrentTime);
-            StartPlayheadClock(ViewModel.CurrentTime);
-            _endedAtTrimBoundary = false;
-            ViewModel.IsPlaying = true;
-            _playbackTimer.Start();
             _ = LoadEditorAudioAsync(playback, ViewModel.SelectedVideoPath, audioTracks, videoReady.Task, cancellationToken);
             await Task.Delay(200, cancellationToken);
             if (playback.Duration > TimeSpan.Zero && IsPlausibleDuration(playback.Duration, ViewModel.Duration))
