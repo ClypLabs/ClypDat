@@ -18,10 +18,10 @@
   <Grid RowDefinitions="48,*">
     <Border Grid.Row="0" Background="#171F27" BorderBrush="#1E2A33" BorderThickness="0,0,0,1">
       <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,0" VerticalAlignment="Center">
-        <Button Classes="brandButton" Click="LibraryHomeButton_OnClick" ToolTip.Tip="Library">
+        <Button Classes="brandButton" Padding="4,5,8,5" Click="LibraryHomeButton_OnClick" ToolTip.Tip="Library">
           <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-            <Image Source="/Assets/eve-icon-24.png" Width="24" Height="24" />
-            <TextBlock Text="EVE" FontSize="18" FontWeight="Bold" Foreground="#EDF4FB" />
+            <Image Source="/Assets/eve-icon-24.png" Width="28" Height="28" />
+            <TextBlock Text="EVE" FontSize="18" FontWeight="Bold" Foreground="#EDF4FB" Margin="0,3,0,0" />
           </StackPanel>
         </Button>
 
