@@ -1024,34 +1024,71 @@
         <Border Background="#05080B">
           <Grid>
             <vlc:VideoView x:Name="EditorVideoView" IsVisible="{Binding !IsEditorVideoLoading}" />
-            <Path Data="M12,6V9L16,5L12,1V4A8,8 0 0,0 4,12C4,13.57 4.46,15.03 5.24,16.26L6.7,14.8C6.25,13.97 6,13 6,12A6,6 0 0,1 12,6M18.76,7.74L17.3,9.2C17.74,10.04 18,10.99 18,12A6,6 0 0,1 12,18V15L8,19L12,23V20A8,8 0 0,0 20,12C20,10.43 19.54,8.97 18.76,7.74Z"
-                  Fill="#5C6D7E"
-                  Width="40"
-                  Height="40"
-                  Stretch="Uniform"
+            <!-- Two full ellipses, not partial-arc icon glyphs - an Ellipse's
+                 layout bounding box is always exactly centered on the shape
+                 regardless of how much of its stroke is actually drawn via
+                 StrokeDashArray, so RenderTransformOrigin="0.5,0.5" rotates
+                 each one cleanly in place around its own center. A
+                 hand-drawn arc/icon's bounding box is NOT centered on the
+                 circle it depicts (the missing wedge shifts it), which is
+                 what made an earlier icon-based version of this wobble. -->
+            <Grid IsVisible="{Binding IsEditorVideoLoading}"
                   HorizontalAlignment="Center"
                   VerticalAlignment="Center"
-                  RenderTransformOrigin="0.5,0.5"
-                  IsVisible="{Binding IsEditorVideoLoading}"
                   IsHitTestVisible="False">
-              <Path.RenderTransform>
-                <RotateTransform />
-              </Path.RenderTransform>
-              <Path.Styles>
-                <Style Selector="Path">
-                  <Style.Animations>
-                    <Animation Duration="0:0:1" IterationCount="INFINITE">
-                      <KeyFrame Cue="0%">
-                        <Setter Property="RotateTransform.Angle" Value="0" />
-                      </KeyFrame>
-                      <KeyFrame Cue="100%">
-                        <Setter Property="RotateTransform.Angle" Value="360" />
-                      </KeyFrame>
-                    </Animation>
-                  </Style.Animations>
-                </Style>
-              </Path.Styles>
-            </Path>
+              <Ellipse Width="40"
+                       Height="40"
+                       Stroke="#5C6D7E"
+                       StrokeThickness="4"
+                       StrokeDashArray="14,14"
+                       StrokeLineCap="Round"
+                       RenderTransformOrigin="0.5,0.5">
+                <Ellipse.RenderTransform>
+                  <RotateTransform />
+                </Ellipse.RenderTransform>
+                <Ellipse.Styles>
+                  <Style Selector="Ellipse">
+                    <Style.Animations>
+                      <Animation Duration="0:0:1.4" IterationCount="INFINITE" Easing="LinearEasing">
+                        <KeyFrame Cue="0%">
+                          <Setter Property="RotateTransform.Angle" Value="0" />
+                        </KeyFrame>
+                        <KeyFrame Cue="100%">
+                          <Setter Property="RotateTransform.Angle" Value="-360" />
+                        </KeyFrame>
+                      </Animation>
+                    </Style.Animations>
+                  </Style>
+                </Ellipse.Styles>
+              </Ellipse>
+              <Ellipse Width="22"
+                       Height="22"
+                       Stroke="#93A6B8"
+                       StrokeThickness="3"
+                       StrokeDashArray="9,9"
+                       StrokeLineCap="Round"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       RenderTransformOrigin="0.5,0.5">
+                <Ellipse.RenderTransform>
+                  <RotateTransform />
+                </Ellipse.RenderTransform>
+                <Ellipse.Styles>
+                  <Style Selector="Ellipse">
+                    <Style.Animations>
+                      <Animation Duration="0:0:0.9" IterationCount="INFINITE" Easing="LinearEasing">
+                        <KeyFrame Cue="0%">
+                          <Setter Property="RotateTransform.Angle" Value="0" />
+                        </KeyFrame>
+                        <KeyFrame Cue="100%">
+                          <Setter Property="RotateTransform.Angle" Value="360" />
+                        </KeyFrame>
+                      </Animation>
+                    </Style.Animations>
+                  </Style>
+                </Ellipse.Styles>
+              </Ellipse>
+            </Grid>
           </Grid>
         </Border>
         <Border Grid.Column="1" Background="#101820" BorderBrush="#1F2B34" BorderThickness="1,0,0,0">
