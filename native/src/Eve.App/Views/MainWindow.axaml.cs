@@ -2329,20 +2329,30 @@ public sealed partial class MainWindow : Window
 
     private static void OpenInExplorer(string path, bool selectFile)
     {
-        try
+        // Process.Start with UseShellExecute=true goes through ShellExecuteEx,
+        // which can genuinely block for real time (shell extension/icon
+        // overlay enumeration, AV scanning the target, a cold Explorer
+        // launch with no window already open) - called synchronously on the
+        // UI thread this froze the whole app for however long that took.
+        // Fire-and-forget on a background thread instead; there's no
+        // follow-up state to update once Explorer's asked to open.
+        Task.Run(() =>
         {
-            var info = new ProcessStartInfo("explorer.exe")
+            try
             {
-                UseShellExecute = true,
-                Arguments = selectFile ? $"/select,\"{path}\"" : $"\"{path}\""
-            };
+                var info = new ProcessStartInfo("explorer.exe")
+                {
+                    UseShellExecute = true,
+                    Arguments = selectFile ? $"/select,\"{path}\"" : $"\"{path}\""
+                };
 
-            Process.Start(info);
-        }
-        catch
-        {
-            // Explorer links are convenience-only.
-        }
+                Process.Start(info);
+            }
+            catch
+            {
+                // Explorer links are convenience-only.
+            }
+        });
     }
 
     private static bool IsTypingInTextInput(object? source)
