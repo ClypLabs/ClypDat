@@ -132,9 +132,6 @@ portable exe, an NSIS installer, and an MSI.
 - Windows only.
 - NVENC-only encoding in the OBS backend specifically.
 
-## Bugs
-- When saving a session thats ~2h long, EVE can do it, but it tends to make other applications run slow. and this problem is worse if you've changed from the default 1080p@60 option.
-If you stumble across any issues or bugs, please create a "Issue" post and I'll make sure to fix them ASAP, want EVE to be perfect for everybody!
 
 ## Third-party licenses
 
