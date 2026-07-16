@@ -1338,6 +1338,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         private set => SetProperty(ref _selectedCreated, value);
     }
 
+    // The actual timestamp behind SelectedCreated's display string - Export
+    // uses this (not DateTime.Now) so the filename's date suffix always
+    // reflects when the clip was actually recorded, not whenever Export
+    // happened to be clicked.
+    public DateTime SelectedCreatedAtLocal { get; private set; }
+
     public string SelectedQuality
     {
         get => _selectedQuality;
@@ -2531,7 +2537,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             EditorTitle = media.Name;
             EditorDescription = string.Empty;
         }
-        SelectedCreated = $"Created: {media.CreatedAt.ToLocalTime():d MMM yyyy, H:mm}";
+        SelectedCreatedAtLocal = media.CreatedAt.ToLocalTime().DateTime;
+        SelectedCreated = $"Created: {SelectedCreatedAtLocal:d MMM yyyy, H:mm}";
         SelectedQuality = media.Height > 0
             ? $"Video Quality: {ResolutionLabel(media.Height)}"
             : "Video Quality: Unknown";

@@ -1535,7 +1535,12 @@ public sealed partial class MainWindow : Window
         var exportFolder = Path.Combine(LibraryLayout.ClipsRoot(libraryRoot), ClipFileNaming.BuildBaseName(game));
         Directory.CreateDirectory(exportFolder);
         var suggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(exportFolder);
-        var exportTimestamp = DateTime.Now;
+        // The clip's actual recording date (matches "Created:" in the editor's
+        // top bar), not whenever Export happened to be clicked - using
+        // DateTime.Now here produced filenames with today's date tacked onto
+        // an already date-stamped title, e.g. "Marvel Rivals - Jul-11-2026 -
+        // 22-54-55 - Jul-17-2026 - 05-20-02.mp4".
+        var exportTimestamp = ViewModel.SelectedCreatedAtLocal > default(DateTime) ? ViewModel.SelectedCreatedAtLocal : DateTime.Now;
         var suggestedFileName = ClipFileNaming.BuildFileName(
             ViewModel.EditorTitle,
             exportTimestamp,
