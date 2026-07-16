@@ -715,15 +715,37 @@ public sealed partial class MainWindow : Window
 
     private void FullscreenButton_OnClick(object? sender, RoutedEventArgs e)
     {
-        if (WindowState == WindowState.FullScreen)
+        if (ViewModel?.IsVideoFullscreen == true)
         {
-            WindowState = _preFullscreenWindowState;
+            ExitVideoFullscreen();
+            return;
         }
-        else
+
+        _preFullscreenWindowState = WindowState;
+        WindowState = WindowState.FullScreen;
+
+        if (_playback is not null)
         {
-            _preFullscreenWindowState = WindowState;
-            WindowState = WindowState.FullScreen;
+            EditorVideoView.MediaPlayer = null;
+            FullscreenVideoView.MediaPlayer = _playback.VideoPlayer;
         }
+
+        ViewModel?.SetVideoFullscreen(true);
+    }
+
+    private void ExitVideoFullscreenButton_OnClick(object? sender, RoutedEventArgs e) => ExitVideoFullscreen();
+
+    private void ExitVideoFullscreen()
+    {
+        WindowState = _preFullscreenWindowState;
+
+        if (_playback is not null)
+        {
+            FullscreenVideoView.MediaPlayer = null;
+            EditorVideoView.MediaPlayer = _playback.VideoPlayer;
+        }
+
+        ViewModel?.SetVideoFullscreen(false);
     }
 
     private void CloseEditorButton_OnClick(object? sender, RoutedEventArgs e)
@@ -1038,6 +1060,13 @@ public sealed partial class MainWindow : Window
 
         if (e.Key == Key.Escape && ViewModel is not null && !IsTypingInTextInput(e.Source))
         {
+            if (ViewModel.IsVideoFullscreen)
+            {
+                ExitVideoFullscreen();
+                e.Handled = true;
+                return;
+            }
+
             if (ViewModel.IsSettingsVisible)
             {
                 ViewModel.CloseSettings();

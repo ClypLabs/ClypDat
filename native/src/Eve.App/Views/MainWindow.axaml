@@ -87,9 +87,6 @@
           <Button Content="Refresh" Click="RefreshButton_OnClick" />
         </StackPanel>
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsEditorVisible}">
-          <Button Classes="transportButton" Click="FullscreenButton_OnClick" ToolTip.Tip="Fullscreen">
-            <PathIcon Width="14" Height="14" Foreground="#C8D6E6" Data="M7,14H5v5h5v-2H7V14z M5,10h2V7h3V5H5V10z M17,17h-3v2h5v-5h-2V17z M14,5v2h3v3h2V5H14z" />
-          </Button>
           <Button Content="X" Classes="closeEditor" Click="CloseEditorButton_OnClick" />
         </StackPanel>
         <Button Grid.Column="2"
@@ -1157,6 +1154,9 @@
               <Button Classes="transportButton" Click="EndButton_OnClick">
                 <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 15,3 L 17,3 L 17,17 L 15,17 Z M 4,4 L 13,10 L 4,16 Z" />
               </Button>
+              <Button Classes="transportButton" Click="FullscreenButton_OnClick" ToolTip.Tip="Fullscreen">
+                <PathIcon Width="14" Height="14" Foreground="#C8D6E6" Data="M7,14H5v5h5v-2H7V14z M5,10h2V7h3V5H5V10z M17,17h-3v2h5v-5h-2V17z M14,5v2h3v3h2V5H14z" />
+              </Button>
             </StackPanel>
             <Button Name="ExportButton"
                     Grid.Column="2"
@@ -1466,6 +1466,47 @@
           </ScrollViewer>
         </DockPanel>
       </Border>
+    </Border>
+
+    <!-- Video-only fullscreen overlay - a SECOND VideoView, not the editor's
+         own EditorVideoView reparented (moving a live LibVLC render target
+         in the visual tree is risky; repointing MediaPlayer between two
+         VideoView instances, which MainWindow.axaml.cs already does
+         routinely for the editor's own open/close, is proven-safe instead).
+         Grid.RowSpan="2" + last child of the root Grid, same pattern as the
+         onboarding overlay above, so this covers the header row too despite
+         its fixed 48px height. -->
+    <Border Grid.RowSpan="2" Background="Black" IsVisible="{Binding IsVideoFullscreen}">
+      <Grid>
+        <vlc:VideoView x:Name="FullscreenVideoView" />
+        <Border VerticalAlignment="Bottom" Background="#D90B1016" Padding="16,12">
+          <Grid ColumnDefinitions="*,Auto,*">
+            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="7">
+              <Button Classes="transportButton" Click="RestartButton_OnClick">
+                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 5,3 L 7,3 L 7,17 L 5,17 Z M 17,4 L 17,16 L 8,10 Z" />
+              </Button>
+              <Button Classes="transportButton" Click="StepBackButton_OnClick">
+                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 15,4 L 15,16 L 6,10 Z" />
+              </Button>
+              <Button Classes="playButton" Click="PlayPauseButton_OnClick">
+                <Grid>
+                  <PathIcon Width="16" Height="16" Foreground="#DDE8F6" Data="M 7,4 L 17,10 L 7,16 Z" IsVisible="{Binding !IsPlaying}" />
+                  <PathIcon Width="16" Height="16" Foreground="#DDE8F6" Data="M 6,4 L 9,4 L 9,16 L 6,16 Z M 12,4 L 15,4 L 15,16 L 12,16 Z" IsVisible="{Binding IsPlaying}" />
+                </Grid>
+              </Button>
+              <Button Classes="transportButton" Click="StepForwardButton_OnClick">
+                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 5,4 L 14,10 L 5,16 Z" />
+              </Button>
+              <Button Classes="transportButton" Click="EndButton_OnClick">
+                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 15,3 L 17,3 L 17,17 L 15,17 Z M 4,4 L 13,10 L 4,16 Z" />
+              </Button>
+            </StackPanel>
+            <Button Grid.Column="2" Classes="transportButton" HorizontalAlignment="Right" Click="ExitVideoFullscreenButton_OnClick" ToolTip.Tip="Exit fullscreen">
+              <PathIcon Width="14" Height="14" Foreground="#C8D6E6" Data="M5,16h3v3h2v-5H5V16z M8,5H5v2h3v3h2V5H8z M14,20v-3h3v-2h-5v5H14z M14,5v3h3v2h-5V5H14z" />
+            </Button>
+          </Grid>
+        </Border>
+      </Grid>
     </Border>
   </Grid>
 </Window>

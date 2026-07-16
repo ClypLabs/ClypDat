@@ -299,6 +299,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool IsLibraryVisible => !IsEditorVisible && !IsSettingsVisible;
 
+    private bool _isVideoFullscreen;
+
+    // True while the video-only fullscreen overlay (a second VideoView +
+    // floating playbar, MainWindow.axaml) is showing - set by the view via
+    // SetVideoFullscreen, not toggled directly from XAML.
+    public bool IsVideoFullscreen
+    {
+        get => _isVideoFullscreen;
+        private set => SetProperty(ref _isVideoFullscreen, value);
+    }
+
+    public void SetVideoFullscreen(bool value) => IsVideoFullscreen = value;
+
     // AppUpdateService.CurrentVersion is a System.Version, always 4 components -
     // our own <Version> in the csproj is 3-part (e.g. "0.1.1"), so the SDK-
     // generated AssemblyVersion pads a trailing ".0" that ToString() would show.
@@ -1939,6 +1952,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _waveformCts = null;
         IsPlaying = false;
         IsEditorVisible = false;
+        IsVideoFullscreen = false;
         SelectedCaptureBackend = string.Empty;
 
         // Trim edits are saved live to the sidecar as the user drags the trim
