@@ -94,14 +94,18 @@ public sealed class AudioCapturePipeline : IDisposable
         lock (_lock) captures = _audioCaptures.ToArray();
 
         var tracks = new List<(string Label, string Path)>();
+        // Shared across every track/segment of this one save - see
+        // GetOrCreateSourceSnapshot for why this must be per-save, not
+        // per-chunk.
+        var sourceSnapshotCache = new Dictionary<ReplayAudioCapture, string>();
 
-        var gamePath = await BuildAlignedTrackAsync(AudioCaptureKind.Game, captures, null, segmentWindows, allowMix: true, snapshots, cancellationToken);
+        var gamePath = await BuildAlignedTrackAsync(AudioCaptureKind.Game, captures, null, segmentWindows, allowMix: true, snapshots, sourceSnapshotCache, cancellationToken);
         tracks.Add(("Game Audio", gamePath));
 
         var chatAppNames = NormalizedList(config.ChatAudioProcessNames);
         foreach (var appName in chatAppNames)
         {
-            var path = await BuildAlignedTrackAsync(AudioCaptureKind.Chat, captures, appName, segmentWindows, allowMix: true, snapshots, cancellationToken);
+            var path = await BuildAlignedTrackAsync(AudioCaptureKind.Chat, captures, appName, segmentWindows, allowMix: true, snapshots, sourceSnapshotCache, cancellationToken);
             var label = chatAppNames.Count > 1 ? $"Chat Audio - {appName}" : "Chat Audio";
             tracks.Add((label, path));
         }
@@ -118,7 +122,7 @@ public sealed class AudioCapturePipeline : IDisposable
         foreach (var micId in micIds)
         {
             micIndex++;
-            var path = await BuildAlignedTrackAsync(AudioCaptureKind.Microphone, captures, micId, segmentWindows, allowMix: false, snapshots, cancellationToken, config);
+            var path = await BuildAlignedTrackAsync(AudioCaptureKind.Microphone, captures, micId, segmentWindows, allowMix: false, snapshots, sourceSnapshotCache, cancellationToken, config);
             var label = micIds.Length > 1 ? $"Microphone {micIndex}" : "Microphone";
             tracks.Add((label, path));
         }
@@ -499,7 +503,35 @@ public sealed class AudioCapturePipeline : IDisposable
         return ids;
     }
 
-    private string SnapshotAudioFile(ReplayAudioCapture? capture, DateTime windowStartUtc, double durationSeconds, ICollection<string> snapshots, ReplayBufferConfig? config = null)
+    // One full copy of a capture's WAV per save operation, shared by every
+    // segment window - this used to happen inside SnapshotAudioFile, once per
+    // 60s chunk, which for a multi-hour Full Session finalize meant copying
+    // the same multi-GB source WAV hundreds of times (per track!). That
+    // quadratic disk churn is what made the whole PC crawl during session
+    // muxing. The single snapshot is taken up front, so every chunk window
+    // (all of which end at-or-before the moment the save started) is fully
+    // covered by it.
+    private string GetOrCreateSourceSnapshot(ReplayAudioCapture capture, ICollection<string> snapshots, Dictionary<ReplayAudioCapture, string> sourceSnapshotCache)
+    {
+        if (sourceSnapshotCache.TryGetValue(capture, out var existing)) return existing;
+
+        var sourceSnapshotPath = Path.Combine(_bufferFolder, $"audio_source_{Guid.NewGuid():N}.wav");
+        var copied = capture.EndedAtUtc is null
+            ? capture.Session.SnapshotTo(sourceSnapshotPath)
+            : CopyAudioFile(capture.Path, sourceSnapshotPath);
+        if (!copied || !IsUsableAudioFile(sourceSnapshotPath))
+        {
+            TryDelete(sourceSnapshotPath);
+            sourceSnapshotCache[capture] = string.Empty;
+            return string.Empty;
+        }
+
+        snapshots.Add(sourceSnapshotPath);
+        sourceSnapshotCache[capture] = sourceSnapshotPath;
+        return sourceSnapshotPath;
+    }
+
+    private string SnapshotAudioFile(ReplayAudioCapture? capture, DateTime windowStartUtc, double durationSeconds, ICollection<string> snapshots, Dictionary<ReplayAudioCapture, string> sourceSnapshotCache, ReplayBufferConfig? config = null)
     {
         if (capture is null || !IsUsableAudioFile(capture.Path)) return string.Empty;
         var captureEndUtc = capture.EndedAtUtc ?? DateTime.UtcNow;
@@ -509,21 +541,12 @@ public sealed class AudioCapturePipeline : IDisposable
         var overlapEndUtc = captureEndUtc < windowEndUtc ? captureEndUtc : windowEndUtc;
         if (overlapEndUtc <= overlapStartUtc) return string.Empty;
 
-        var sourceSnapshotPath = Path.Combine(_bufferFolder, $"audio_source_{Guid.NewGuid():N}.wav");
         var snapshotPath = Path.Combine(_bufferFolder, $"audio_{Guid.NewGuid():N}.wav");
         try
         {
-            var copied = capture.EndedAtUtc is null
-                ? capture.Session.SnapshotTo(sourceSnapshotPath)
-                : CopyAudioFile(capture.Path, sourceSnapshotPath);
-            if (!copied || !IsUsableAudioFile(sourceSnapshotPath))
-            {
-                TryDelete(sourceSnapshotPath);
-                TryDelete(snapshotPath);
-                return string.Empty;
-            }
+            var sourceSnapshotPath = GetOrCreateSourceSnapshot(capture, snapshots, sourceSnapshotCache);
+            if (string.IsNullOrEmpty(sourceSnapshotPath)) return string.Empty;
 
-            snapshots.Add(sourceSnapshotPath);
             var trimStart = Math.Max(0, (overlapStartUtc - effectiveStartUtc).TotalSeconds);
             var overlapDuration = Math.Max(0, (overlapEndUtc - overlapStartUtc).TotalSeconds);
             var delayMs = Math.Max(0, (int)Math.Round((overlapStartUtc - windowStartUtc).TotalMilliseconds));
@@ -534,13 +557,20 @@ public sealed class AudioCapturePipeline : IDisposable
             var noiseSuppressionFilter = capture.Kind == AudioCaptureKind.Microphone && config?.MicrophoneNoiseSuppressionEnabled == true
                 ? $"afftdn=nr={FormatSeconds(Math.Clamp(config.MicrophoneNoiseSuppressionStrength, 0, 30))},"
                 : string.Empty;
-            var filters = $"[0:a]atrim=start={FormatSeconds(trimStart)}:duration={FormatSeconds(overlapDuration)},asetpts=PTS-STARTPTS,aresample=48000,{noiseSuppressionFilter}adelay={delayMs}|{delayMs},apad=whole_dur={FormatSeconds(durationSeconds)},atrim=0:{FormatSeconds(durationSeconds)}[out]";
+            // -ss/-t as INPUT options: WAV is constant-bitrate, so ffmpeg seeks
+            // straight to the byte offset and reads only this window's worth of
+            // the (potentially hours-long) source snapshot, instead of the old
+            // atrim filter approach that decoded the file from the top every
+            // chunk.
+            var filters = $"[0:a]asetpts=PTS-STARTPTS,aresample=48000,{noiseSuppressionFilter}adelay={delayMs}|{delayMs},apad=whole_dur={FormatSeconds(durationSeconds)},atrim=0:{FormatSeconds(durationSeconds)}[out]";
             AppLog.Info($"Replay audio overlap: kind={capture.Kind}, pid={capture.ProcessId?.ToString() ?? "none"}, trim={trimStart:0.###}s, overlap={overlapDuration:0.###}s, delay={delayMs}ms, bytes={AudioFileLength(capture.Path)}.");
 
             var result = RunProcessAsync("ffmpeg", new[]
             {
                 "-y",
                 "-v", "error",
+                "-ss", FormatSeconds(trimStart),
+                "-t", FormatSeconds(overlapDuration),
                 "-i", sourceSnapshotPath,
                 "-filter_complex", filters,
                 "-map", "[out]",
@@ -559,7 +589,6 @@ public sealed class AudioCapturePipeline : IDisposable
         }
         catch
         {
-            TryDelete(sourceSnapshotPath);
             TryDelete(snapshotPath);
             return string.Empty;
         }
@@ -572,6 +601,7 @@ public sealed class AudioCapturePipeline : IDisposable
         List<(DateTime StartUtc, double DurationSeconds)> segmentWindows,
         bool allowMix,
         List<string> snapshots,
+        Dictionary<ReplayAudioCapture, string> sourceSnapshotCache,
         CancellationToken cancellationToken,
         ReplayBufferConfig? config = null)
     {
@@ -590,7 +620,7 @@ public sealed class AudioCapturePipeline : IDisposable
             }
 
             var clipPaths = overlapping
-                .Select(capture => SnapshotAudioFile(capture, startUtc, durationSeconds, snapshots, config))
+                .Select(capture => SnapshotAudioFile(capture, startUtc, durationSeconds, snapshots, sourceSnapshotCache, config))
                 .Where(IsUsableAudioFile)
                 .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
