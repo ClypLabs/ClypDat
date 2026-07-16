@@ -77,7 +77,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public MainWindowViewModel()
     {
         Settings = AppSettingsStore.Load();
-        ClipGroups = new ObservableCollection<ClipGroupViewModel>();
+        AllClips = new ObservableCollection<ClipCardViewModel>();
         TimelineTracks = new ObservableCollection<TrackLaneViewModel>();
         ChatAudioDevices = new ObservableCollection<AudioDeviceOption>();
         MicrophoneDevices = new ObservableCollection<AudioDeviceOption>();
@@ -154,7 +154,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public AppSettings Settings { get; }
-    public ObservableCollection<ClipGroupViewModel> ClipGroups { get; }
+    public ObservableCollection<ClipCardViewModel> AllClips { get; }
     public ObservableCollection<TrackLaneViewModel> TimelineTracks { get; }
     public ObservableCollection<AudioDeviceOption> ChatAudioDevices { get; }
     public ObservableCollection<AudioDeviceOption> MicrophoneDevices { get; }
@@ -190,14 +190,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         new("FFmpeg.AutoGen", "https://github.com/Ruslan-B/FFmpeg.AutoGen", "MIT License", "https://opensource.org/license/mit")
     };
 
-    public IEnumerable<ClipCardViewModel> AllClips => ClipGroups.SelectMany(group => group.Clips);
     public int ReplayCaptureX { get; set; }
     public int ReplayCaptureY { get; set; }
     public int ReplayCaptureWidth { get; set; } = 1920;
     public int ReplayCaptureHeight { get; set; } = 1080;
 
-    public string LibraryHeaderDate => ClipGroups.Count > 0 ? ClipGroups[0].Label : "LIBRARY";
-    public string LibraryHeaderGame => ClipGroups.Count > 0 ? "Videos" : "No folder selected";
+    public string LibraryHeaderDate => AllClips.Count > 0 ? AllClips[0].DateHeaderLabel : "LIBRARY";
+    public string LibraryHeaderGame => AllClips.Count > 0 ? "Videos" : "No folder selected";
     public string LibraryTitle => "Clips";
     public string LibraryFolderDisplay => string.IsNullOrWhiteSpace(Settings.LibraryFolder)
         ? "Choose a folder"
@@ -1543,7 +1542,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public async Task RefreshLibraryAsync()
     {
         var scanClock = System.Diagnostics.Stopwatch.StartNew();
-        ClipGroups.Clear();
+        AllClips.Clear();
         ClearSelection();
 
         if (string.IsNullOrWhiteSpace(Settings.LibraryFolder) || !Directory.Exists(Settings.LibraryFolder))
@@ -1562,15 +1561,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         var clips = _mediaProbe.EnumerateVideos(Settings.LibraryFolder)
             .Select(file => new ClipCardViewModel(_mediaProbe.CreateLibraryStub(file), Settings.LibraryFolder))
+            .OrderByDescending(clip => clip.CreatedAt)
             .ToArray();
 
-        foreach (var group in clips
-                     .GroupBy(clip => clip.CreatedAt.ToLocalTime().Date)
-                     .OrderByDescending(group => group.Key))
-        {
-            var label = group.Key.ToString("ddd, MMM d").ToUpperInvariant();
-            ClipGroups.Add(new ClipGroupViewModel(group.Key.ToString("yyyy-MM-dd"), label, group));
-        }
+        foreach (var clip in clips) AllClips.Add(clip);
 
         NotifyLibraryChrome();
         StartLibraryHydration(clips);
@@ -1747,22 +1741,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         else
         {
             var clip = new ClipCardViewModel(media, Settings.LibraryFolder);
-            var date = clip.CreatedAt.ToLocalTime().Date;
-            var key = date.ToString("yyyy-MM-dd");
-            var group = ClipGroups.FirstOrDefault(item => item.Key == key);
-            if (group is null)
-            {
-                group = new ClipGroupViewModel(key, date.ToString("ddd, MMM d").ToUpperInvariant(), new[] { clip });
-                var insertIndex = 0;
-                while (insertIndex < ClipGroups.Count && string.CompareOrdinal(ClipGroups[insertIndex].Key, key) > 0) insertIndex++;
-                ClipGroups.Insert(insertIndex, group);
-            }
-            else
-            {
-                var insertIndex = 0;
-                while (insertIndex < group.Clips.Count && group.Clips[insertIndex].CreatedAt > clip.CreatedAt) insertIndex++;
-                group.Clips.Insert(insertIndex, clip);
-            }
+            var insertIndex = 0;
+            while (insertIndex < AllClips.Count && AllClips[insertIndex].CreatedAt > clip.CreatedAt) insertIndex++;
+            AllClips.Insert(insertIndex, clip);
         }
 
         NotifyLibraryChrome();
@@ -1823,21 +1804,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (selected) _selectedPaths.Add(clip.Path);
         else _selectedPaths.Remove(clip.Path);
         UpdateSelectionOrder(clip, selected);
-        UpdateGroups();
+        UpdateDaySelectionStates();
         NotifySelectionChrome();
     }
 
-    public void ToggleGroupSelection(ClipGroupViewModel group, bool selected)
+    // Selects/deselects every clip sharing clip's date, not just clip itself -
+    // the per-card date-header checkbox's job (replaces the old shared
+    // per-day group header's select-all checkbox).
+    public void ToggleDaySelection(ClipCardViewModel clip, bool selected)
     {
-        foreach (var clip in group.Clips)
+        var date = clip.CreatedAt.ToLocalTime().Date;
+        foreach (var sibling in AllClips.Where(c => c.CreatedAt.ToLocalTime().Date == date))
         {
-            clip.IsSelected = selected;
-            if (selected) _selectedPaths.Add(clip.Path);
-            else _selectedPaths.Remove(clip.Path);
-            UpdateSelectionOrder(clip, selected);
+            sibling.IsSelected = selected;
+            if (selected) _selectedPaths.Add(sibling.Path);
+            else _selectedPaths.Remove(sibling.Path);
+            UpdateSelectionOrder(sibling, selected);
         }
 
-        UpdateGroups();
+        UpdateDaySelectionStates();
         NotifySelectionChrome();
     }
 
@@ -2530,13 +2515,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         NotifySelectionChrome();
     }
 
-    private void UpdateGroups()
+    // Recomputes each card's IsDaySelected (true only when every clip
+    // sharing its date is currently selected) - drives the checked state of
+    // the per-card date-header checkbox.
+    private void UpdateDaySelectionStates()
     {
-        foreach (var group in ClipGroups)
+        foreach (var dayGroup in AllClips.GroupBy(clip => clip.CreatedAt.ToLocalTime().Date))
         {
-            var selectedCount = group.Clips.Count(clip => clip.IsSelected);
-            group.IsSelected = selectedCount == group.Clips.Count && group.Clips.Count > 0;
-            group.IsPartiallySelected = selectedCount > 0 && selectedCount < group.Clips.Count;
+            var allSelected = dayGroup.All(clip => clip.IsSelected);
+            foreach (var clip in dayGroup) clip.IsDaySelected = allSelected;
         }
     }
 
@@ -2643,27 +2630,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void ApplyGameFilters()
     {
-        foreach (var group in ClipGroups)
+        foreach (var clip in AllClips)
         {
-            foreach (var clip in group.Clips)
-            {
-                clip.IsMatchedByGameFilter = _activeGameFilters.Count == 0 || _activeGameFilters.Contains(clip.GameFilterKey);
-            }
-
-            group.NotifyFilterChanged();
+            clip.IsMatchedByGameFilter = _activeGameFilters.Count == 0 || _activeGameFilters.Contains(clip.GameFilterKey);
         }
     }
 
     private void ApplyClipTypeFilters()
     {
-        foreach (var group in ClipGroups)
+        foreach (var clip in AllClips)
         {
-            foreach (var clip in group.Clips)
-            {
-                clip.IsMatchedByClipTypeFilter = _activeClipTypeFilters.Count == 0 || MatchesClipTypeFilter(clip);
-            }
-
-            group.NotifyFilterChanged();
+            clip.IsMatchedByClipTypeFilter = _activeClipTypeFilters.Count == 0 || MatchesClipTypeFilter(clip);
         }
     }
 

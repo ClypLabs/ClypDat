@@ -163,56 +163,67 @@
           </Grid>
 
           <ScrollViewer Margin="-4,14,-4,0">
-            <ItemsControl ItemsSource="{Binding ClipGroups}">
-            <ItemsControl.ItemTemplate>
-              <DataTemplate>
-                <StackPanel Margin="0,0,0,24" IsVisible="{Binding HasVisibleClips}">
-                  <StackPanel Orientation="Horizontal" Spacing="10" Margin="4,0,0,12">
-                    <CheckBox IsChecked="{Binding IsSelected}" Click="GroupCheckBox_OnClick" Margin="0,0,6,0" />
-                    <TextBlock Text="{Binding Label}"
-                               Foreground="#B8C7D8"
-                               FontSize="14"
-                               FontWeight="Bold"
-                               VerticalAlignment="Center" />
-                  </StackPanel>
-
-                  <ItemsControl ItemsSource="{Binding Clips}">
-                    <!-- WrapPanel, not UniformGrid - UniformGrid pre-computes
-                         its row/column count from the total child count
-                         (including IsVisible="False" filtered-out cards) and
-                         still reserves each one's grid cell, leaving gaps
-                         above whatever's left visible when most of a date
-                         group is filtered out. WrapPanel properly skips
-                         invisible children during layout so visible cards
-                         compact together - each card's own CardWidth still
-                         lands 3-per-row the same as before. -->
-                      <ItemsControl.ItemsPanel>
-                      <ItemsPanelTemplate>
-                        <WrapPanel Orientation="Horizontal" />
-                      </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                      <DataTemplate>
-                        <Border Width="{Binding $parent[Window].DataContext.CardWidth}"
-                                Margin="4,4,20,24"
-                                Background="#24303A"
-                                CornerRadius="12"
-                                BoxShadow="0 6 18 -6 #66000000"
-                                IsVisible="{Binding IsVisibleInLibrary}"
-                                PointerPressed="ClipCard_OnPointerPressed"
-                                PointerEntered="ClipCard_OnPointerEntered"
-                                PointerExited="ClipCard_OnPointerExited">
-                          <Border.ContextMenu>
-                            <ContextMenu>
-                              <MenuItem Header="Export" Click="ClipContextExport_OnClick" />
-                              <MenuItem Header="Open" Click="ClipContextOpen_OnClick" />
-                              <MenuItem Header="Rename" Click="ClipContextRename_OnClick" />
-                              <MenuItem Header="Open file location" Click="ClipContextOpenLocation_OnClick" />
-                              <Separator />
-                              <MenuItem Header="Delete" Click="ClipContextDelete_OnClick" Foreground="#D85E61" />
-                            </ContextMenu>
-                          </Border.ContextMenu>
-                          <Border CornerRadius="12" ClipToBounds="True">
+            <ItemsControl ItemsSource="{Binding AllClips}">
+              <!-- WrapPanel, not UniformGrid - UniformGrid pre-computes its
+                   row/column count from the total child count (including
+                   IsVisible="False" filtered-out cards) and still reserves
+                   each one's grid cell, leaving gaps above whatever's left
+                   visible when most of the library is filtered out.
+                   WrapPanel properly skips invisible children during layout
+                   so visible cards compact together - each card's own
+                   CardWidth still lands 3-per-row the same as before. -->
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <WrapPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border Width="{Binding $parent[Window].DataContext.CardWidth}"
+                          Margin="4,4,20,24"
+                          Background="#24303A"
+                          CornerRadius="12"
+                          BoxShadow="0 6 18 -6 #66000000"
+                          IsVisible="{Binding IsVisibleInLibrary}"
+                          PointerPressed="ClipCard_OnPointerPressed"
+                          PointerEntered="ClipCard_OnPointerEntered"
+                          PointerExited="ClipCard_OnPointerExited">
+                    <Border.ContextMenu>
+                      <ContextMenu>
+                        <MenuItem Header="Export" Click="ClipContextExport_OnClick" />
+                        <MenuItem Header="Open" Click="ClipContextOpen_OnClick" />
+                        <MenuItem Header="Rename" Click="ClipContextRename_OnClick" />
+                        <MenuItem Header="Open file location" Click="ClipContextOpenLocation_OnClick" />
+                        <Separator />
+                        <MenuItem Header="Delete" Click="ClipContextDelete_OnClick" Foreground="#D85E61" />
+                      </ContextMenu>
+                    </Border.ContextMenu>
+                    <StackPanel>
+                      <!-- Per-card date header, replacing the old shared
+                           per-day group header. Hovering this row reveals a
+                           checkbox (Border.clipDateRow:pointerover
+                           CheckBox.dayCheck in AppStyles.axaml) that selects
+                           every clip sharing this date, not just this card -
+                           the date text is pushed right by ordinary
+                           StackPanel flow as the checkbox's own Width
+                           transitions open, no RenderTransform needed. -->
+                      <Border Classes="clipDateRow" Padding="4,0,4,8">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <CheckBox Classes="dayCheck"
+                                    Width="0"
+                                    Opacity="0"
+                                    IsHitTestVisible="False"
+                                    IsChecked="{Binding IsDaySelected}"
+                                    Click="ClipDayCheckBox_OnClick"
+                                    VerticalAlignment="Center" />
+                          <TextBlock Text="{Binding DateHeaderLabel}"
+                                     Foreground="#B8C7D8"
+                                     FontSize="13"
+                                     FontWeight="Bold"
+                                     VerticalAlignment="Center" />
+                        </StackPanel>
+                      </Border>
+                      <Border CornerRadius="12" ClipToBounds="True">
                           <Grid RowDefinitions="Auto,Auto">
                             <Border Grid.RowSpan="2"
                                     BorderBrush="{Binding SelectionBorderBrush}"
@@ -293,14 +304,11 @@
                             </Border>
                           </Grid>
                           </Border>
-                        </Border>
-                      </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                  </ItemsControl>
-                </StackPanel>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
         </ScrollViewer>
         </DockPanel>
       </Grid>

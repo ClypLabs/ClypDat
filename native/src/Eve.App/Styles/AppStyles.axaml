@@ -308,6 +308,26 @@
   <Style Selector="Button.gameFilterBadge:pointerover PathIcon">
     <Setter Property="Foreground" Value="#D2DEEC" />
   </Style>
+  <!-- Per-card date-header "select whole day" checkbox - hidden (zero width,
+       transparent, non-hit-testable) until hovering the date row itself,
+       then slides open. The date TextBlock is a later sibling in the same
+       horizontal StackPanel, so it gets pushed right by ordinary layout
+       flow as the checkbox's Width transitions from 0 - no RenderTransform
+       needed. First position-animated hover effect in this codebase (every
+       other Transitions usage here only animates Background color). -->
+  <Style Selector="CheckBox.dayCheck">
+    <Setter Property="Transitions">
+      <Transitions>
+        <DoubleTransition Property="Width" Duration="0:0:0.15" />
+        <DoubleTransition Property="Opacity" Duration="0:0:0.15" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Border.clipDateRow:pointerover CheckBox.dayCheck">
+    <Setter Property="Width" Value="18" />
+    <Setter Property="Opacity" Value="1" />
+    <Setter Property="IsHitTestVisible" Value="True" />
+  </Style>
   <Style Selector="MenuFlyoutPresenter">
     <Setter Property="Background" Value="#141D24" />
     <Setter Property="BorderBrush" Value="#2C3B48" />

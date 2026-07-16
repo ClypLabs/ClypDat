@@ -49,6 +49,10 @@ public sealed class ClipCardViewModel : ViewModelBase
     public long SizeBytes => Media.SizeBytes;
     public string DateLabel => CreatedAt.ToString("MMM d, yyyy h:mm tt");
 
+    // Per-card date header shown above the thumbnail (replaces the old
+    // shared per-day group header's Label - same format, "SAT, JUL 11").
+    public string DateHeaderLabel => CreatedAt.ToLocalTime().ToString("ddd, MMM d").ToUpperInvariant();
+
     // Name is the filename ClipFileNaming.BuildFileName produced - the game/
     // auto-clip label plus a " yyyy-MM-dd HH-mm-ss" timestamp appended for
     // uniqueness on disk (e.g. "Marvel Rivals 2026-07-11 22-16-11"). Strip that
@@ -200,9 +204,9 @@ public sealed class ClipCardViewModel : ViewModelBase
         }
     }
 
-    // What the card's own Border.IsVisible and ClipGroupViewModel.HasVisibleClips
-    // actually bind to - both the game and clip-type filter groups have to
-    // match (AND across groups; each group's own set membership is an OR).
+    // What the card's own Border.IsVisible binds to - both the game and
+    // clip-type filter groups have to match (AND across groups; each
+    // group's own set membership is an OR).
     public bool IsVisibleInLibrary => IsMatchedByGameFilter && IsMatchedByClipTypeFilter;
 
     public string PreviewImagePath
@@ -245,6 +249,18 @@ public sealed class ClipCardViewModel : ViewModelBase
             OnPropertyChanged(nameof(SelectionBorderBrush));
             OnPropertyChanged(nameof(SelectionBorderThickness));
         }
+    }
+
+    private bool _isDaySelected;
+
+    // Set by MainWindowViewModel.UpdateDaySelectionStates() - true only when
+    // every clip sharing this card's date is currently selected. Drives the
+    // checked state of the per-card date-header checkbox, which selects the
+    // whole day at once (ToggleDaySelection), not just this one card.
+    public bool IsDaySelected
+    {
+        get => _isDaySelected;
+        set => SetProperty(ref _isDaySelected, value);
     }
 
     // Set by MainWindowViewModel to reflect the order clips were selected in

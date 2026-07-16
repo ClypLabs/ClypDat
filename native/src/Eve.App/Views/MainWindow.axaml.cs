@@ -669,12 +669,12 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void GroupCheckBox_OnClick(object? sender, RoutedEventArgs e)
+    private void ClipDayCheckBox_OnClick(object? sender, RoutedEventArgs e)
     {
         e.Handled = true;
-        if (sender is CheckBox { DataContext: ClipGroupViewModel group, IsChecked: var isChecked } && ViewModel is not null)
+        if (sender is CheckBox { DataContext: ClipCardViewModel clip, IsChecked: var isChecked } && ViewModel is not null)
         {
-            ViewModel.ToggleGroupSelection(group, isChecked == true);
+            ViewModel.ToggleDaySelection(clip, isChecked == true);
         }
     }
 
