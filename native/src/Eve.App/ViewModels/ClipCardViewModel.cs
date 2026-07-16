@@ -274,8 +274,21 @@ public sealed class ClipCardViewModel : ViewModelBase
     public bool IsFirstOfDate
     {
         get => _isFirstOfDate;
-        set => SetProperty(ref _isFirstOfDate, value);
+        set
+        {
+            if (!SetProperty(ref _isFirstOfDate, value)) return;
+            OnPropertyChanged(nameof(DateHeaderOpacity));
+        }
     }
+
+    // The date row's own Opacity/IsHitTestVisible (not IsVisible) drives
+    // whether it's shown - IsVisible="False" would collapse the row's
+    // layout space entirely, so a non-first-of-date card's thumbnail would
+    // start higher than its siblings sharing the same WrapPanel row (an
+    // uneven, misaligned-looking grid). Keeping the row's height reserved
+    // on every card, just visually empty and non-interactive on the ones
+    // that aren't first, keeps every card in a row the same height.
+    public double DateHeaderOpacity => IsFirstOfDate ? 1.0 : 0.0;
 
     // Set by MainWindowViewModel to reflect the order clips were selected in
     // (1-based; 0 = not selected), shown as a big number overlay like GG's

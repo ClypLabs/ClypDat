@@ -332,7 +332,11 @@
     </Setter>
   </Style>
   <Style Selector="Border.clipDateRow:pointerover CheckBox.dayCheck">
-    <Setter Property="Width" Value="18" />
+    <!-- Wider than the checkbox glyph itself looks like it needs - Fluent's
+         default CheckBox template reserves its own internal padding/margin
+         around the glyph regardless of Width, so a tight Width here clips
+         the checkbox against the text sitting right next to it. -->
+    <Setter Property="Width" Value="26" />
     <Setter Property="Opacity" Value="1" />
     <Setter Property="IsHitTestVisible" Value="True" />
   </Style>

@@ -200,8 +200,12 @@
                          card - the date text is pushed right by ordinary
                          StackPanel flow as the checkbox's own Width
                          transitions open, no RenderTransform needed. -->
-                    <Border Classes="clipDateRow" Background="Transparent" Padding="4,0,4,8" IsVisible="{Binding IsFirstOfDate}">
-                      <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Border Classes="clipDateRow"
+                            Background="Transparent"
+                            Padding="0,0,4,8"
+                            Opacity="{Binding DateHeaderOpacity}"
+                            IsHitTestVisible="{Binding IsFirstOfDate}">
+                      <StackPanel Orientation="Horizontal" Spacing="8">
                         <CheckBox Classes="dayCheck"
                                   IsChecked="{Binding IsDaySelected}"
                                   Click="ClipDayCheckBox_OnClick"
