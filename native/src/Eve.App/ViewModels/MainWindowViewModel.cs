@@ -131,6 +131,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedMicrophones = new ObservableCollection<AudioDeviceOption>();
         GameCaptureRows = new ObservableCollection<GameBackendRowViewModel>();
         RebuildGameCaptureRows();
+        SyncIgnoredGameExecutableRows();
         RefreshAudioDevices();
         SelectedReplayDurationPreset = ReplayDurationPresets.FirstOrDefault(preset => preset.Seconds == Settings.ReplayDurationSeconds) ??
                                        ReplayDurationPresets.First(preset => preset.Seconds == 60);
@@ -2152,6 +2153,43 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public event EventHandler? GameCatalogChanged;
+
+    // Settings > Game Detection's "excluded from detection" list - mirrors
+    // Settings.IgnoredGameExecutables so removals from the settings page and
+    // additions from the header's detected-game flyout stay in sync.
+    public ObservableCollection<string> IgnoredGameExecutableRows { get; } = new();
+
+    public void SyncIgnoredGameExecutableRows()
+    {
+        IgnoredGameExecutableRows.Clear();
+        foreach (var exe in Settings.IgnoredGameExecutables.OrderBy(name => name, StringComparer.OrdinalIgnoreCase))
+        {
+            IgnoredGameExecutableRows.Add(exe);
+        }
+        OnPropertyChanged(nameof(HasIgnoredGameExecutables));
+    }
+
+    public bool HasIgnoredGameExecutables => Settings.IgnoredGameExecutables.Count > 0;
+
+    public void AddIgnoredGameExecutable(string executableName)
+    {
+        if (string.IsNullOrWhiteSpace(executableName)) return;
+        if (Settings.IgnoredGameExecutables.Contains(executableName, StringComparer.OrdinalIgnoreCase)) return;
+        Settings.IgnoredGameExecutables.Add(executableName);
+        SaveSettings();
+        SyncIgnoredGameExecutableRows();
+        GameCatalogChanged?.Invoke(this, EventArgs.Empty);
+        AppLog.Info($"Game detection: user excluded {executableName}.");
+    }
+
+    public void RemoveIgnoredGameExecutable(string executableName)
+    {
+        if (Settings.IgnoredGameExecutables.RemoveAll(name => string.Equals(name, executableName, StringComparison.OrdinalIgnoreCase)) == 0) return;
+        SaveSettings();
+        SyncIgnoredGameExecutableRows();
+        GameCatalogChanged?.Invoke(this, EventArgs.Empty);
+        AppLog.Info($"Game detection: user un-excluded {executableName}.");
+    }
 
     public void AddCustomGame()
     {

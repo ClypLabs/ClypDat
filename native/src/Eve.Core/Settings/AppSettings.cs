@@ -57,6 +57,11 @@ public sealed class AppSettings
     public bool EnableClipOverlay { get; set; } = true;
     public bool EnableClipOverlaySound { get; set; } = true;
     public List<GameCaptureOverride> GameCaptureOverrides { get; set; } = new();
+    // Executables the user explicitly told game detection to skip (via the
+    // detected-game header flyout or Settings > Game Detection) - on top of
+    // the built-in ignored list, which covers common non-game apps but can
+    // never cover everything.
+    public List<string> IgnoredGameExecutables { get; set; } = new();
     public Cs2AutoClipSettings Cs2AutoClip { get; set; } = new();
     public bool MedalImportStripEmoji { get; set; } = false;
     public bool MedalImportCopyNotMove { get; set; } = true;

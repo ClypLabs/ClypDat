@@ -78,7 +78,12 @@ public sealed partial class MainWindow : Window
             if (ViewModel is not null)
             {
                 _gameDetector.ApplyCustomGameNames(ViewModel.Settings.GameCaptureOverrides);
-                ViewModel.GameCatalogChanged += (_, _) => _gameDetector.ApplyCustomGameNames(ViewModel.Settings.GameCaptureOverrides);
+                _gameDetector.ApplyUserIgnoredExecutables(ViewModel.Settings.IgnoredGameExecutables);
+                ViewModel.GameCatalogChanged += (_, _) =>
+                {
+                    _gameDetector.ApplyCustomGameNames(ViewModel.Settings.GameCaptureOverrides);
+                    _gameDetector.ApplyUserIgnoredExecutables(ViewModel.Settings.IgnoredGameExecutables);
+                };
                 ViewModel.PropertyChanged += (_, e) =>
                 {
                     if (e.PropertyName == nameof(MainWindowViewModel.Cs2AutoClipEnabled)) UpdateCs2AutoClipState();
@@ -165,6 +170,36 @@ public sealed partial class MainWindow : Window
         }
 
         UpdateCapturePauseState(detection);
+    }
+
+    // The header's detected-game text - clicking it offers "Don't detect X as
+    // a game" so a wrongly-detected app (the built-in ignore list can't cover
+    // everything) can be excluded on the spot instead of digging through
+    // settings.
+    private void ActiveGameButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || ViewModel is null) return;
+        var detection = ViewModel.ActiveGameDetection;
+        if (detection is not { IsDetected: true } || string.IsNullOrWhiteSpace(detection.ExeName)) return;
+
+        var flyout = new MenuFlyout();
+        var exclude = new MenuItem { Header = $"Don't detect \"{detection.DisplayName}\" ({detection.ExeName}) as a game" };
+        exclude.Click += (_, _) =>
+        {
+            ViewModel.AddIgnoredGameExecutable(detection.ExeName);
+            _gameDetector.ApplyUserIgnoredExecutables(ViewModel.Settings.IgnoredGameExecutables);
+            UpdateDetectedGame();
+        };
+        flyout.Items.Add(exclude);
+        flyout.ShowAt(button);
+    }
+
+    private void RemoveIgnoredGameButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: string executableName } || ViewModel is null) return;
+        ViewModel.RemoveIgnoredGameExecutable(executableName);
+        _gameDetector.ApplyUserIgnoredExecutables(ViewModel.Settings.IgnoredGameExecutables);
+        UpdateDetectedGame();
     }
 
     private void UpdateCapturePauseState(GameDetection detection)

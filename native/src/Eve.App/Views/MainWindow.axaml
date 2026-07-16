@@ -33,7 +33,9 @@
           <Button Grid.Column="1" Content="Clip" IsEnabled="{Binding IsReplayRecording}" Click="ClipButton_OnClick" Margin="10,0,0,0" />
           <TextBlock Grid.Column="2" Text="{Binding HotkeyDisplay}" Foreground="#93A6B8" FontWeight="Bold" VerticalAlignment="Center" Margin="10,0,0,0" />
           <Border Grid.Column="3" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding ShowLibraryStatus}" Margin="10,0,0,0" />
-          <TextBlock Grid.Column="4" Text="{Binding ActiveGame}" Foreground="#BDD4EE" VerticalAlignment="Center" IsVisible="{Binding ShowLibraryStatus}" Margin="10,0,0,0" />
+          <Button Grid.Column="4" Classes="linkButton" Click="ActiveGameButton_OnClick" IsVisible="{Binding ShowLibraryStatus}" Margin="10,0,0,0" ToolTip.Tip="Click for detection options">
+            <TextBlock Text="{Binding ActiveGame}" Foreground="#BDD4EE" VerticalAlignment="Center" />
+          </Button>
           <Border Grid.Column="5" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding HasSelection}" Margin="10,0,0,0" />
           <TextBlock Grid.Column="6"
                      Text="{Binding SelectionSummary}"
@@ -603,6 +605,25 @@
                   <Border Height="1" Background="#1B242D" />
 
                   <TextBox Classes="settingsInput" Watermark="Search games" Text="{Binding GameSearchText}" />
+                </StackPanel>
+              </Border>
+
+              <Border Classes="settingsCard" IsVisible="{Binding HasIgnoredGameExecutables}">
+                <StackPanel Spacing="10">
+                  <StackPanel Spacing="2">
+                    <TextBlock Text="Excluded from detection" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
+                    <TextBlock Text="Apps you told EVE not to treat as games (click the detected game in the header to add one)." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <ItemsControl ItemsSource="{Binding IgnoredGameExecutableRows}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                          <TextBlock Text="{Binding}" Foreground="#D2DEEC" FontSize="13" VerticalAlignment="Center" />
+                          <Button Grid.Column="1" Content="Remove" Width="80" Click="RemoveIgnoredGameButton_OnClick" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
                 </StackPanel>
               </Border>
 

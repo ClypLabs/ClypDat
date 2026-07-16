@@ -74,7 +74,21 @@ public sealed class ForegroundGameDetector
 
     private readonly Dictionary<string, string> _catalog = new(GameCatalog.BuiltIn, StringComparer.OrdinalIgnoreCase);
 
+    // User-chosen exclusions on top of the built-in IgnoredExecutables list -
+    // the built-ins can never cover every non-game app a machine runs, so the
+    // user can exclude anything wrongly detected from the header's
+    // detected-game flyout (or Settings > Game Detection). Swapped atomically
+    // as a whole set since Detect() runs on a background thread.
+    private volatile HashSet<string> _userIgnoredExecutables = new(StringComparer.OrdinalIgnoreCase);
+
     private GameDetection _lastGame = GameDetection.None;
+
+    public void ApplyUserIgnoredExecutables(IEnumerable<string> executableNames)
+    {
+        _userIgnoredExecutables = new HashSet<string>(
+            executableNames.Where(name => !string.IsNullOrWhiteSpace(name)),
+            StringComparer.OrdinalIgnoreCase);
+    }
 
     public ForegroundGameDetector()
     {
@@ -89,6 +103,14 @@ public sealed class ForegroundGameDetector
         {
             _lastGame = foreground with { IsForeground = true };
             return _lastGame;
+        }
+
+        // The sticky last-game path below never re-runs BuildDetection, so a
+        // just-excluded exe would otherwise stay "detected" until its window
+        // closed.
+        if (_lastGame.IsDetected && _userIgnoredExecutables.Contains(_lastGame.ExeName))
+        {
+            _lastGame = GameDetection.None;
         }
 
         if (_lastGame.IsDetected && IsStillUsable(_lastGame))
@@ -170,6 +192,11 @@ public sealed class ForegroundGameDetector
             if (IgnoredExecutables.Contains(exeName))
             {
                 rejectReason = "on the ignored-executables list";
+                return GameDetection.None;
+            }
+            if (_userIgnoredExecutables.Contains(exeName))
+            {
+                rejectReason = "excluded by the user";
                 return GameDetection.None;
             }
             var isCatalogGame = _catalog.TryGetValue(exeName, out var catalogName) && !string.IsNullOrWhiteSpace(catalogName);
