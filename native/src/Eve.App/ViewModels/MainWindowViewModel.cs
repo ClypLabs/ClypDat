@@ -2423,6 +2423,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         CurrentTime = TrimStart;
     }
 
+    // The actual length of what BuildExportArguments will encode - used by the
+    // export progress popup to turn ffmpeg's "out_time" into a percentage.
+    public TimeSpan ExportDuration
+    {
+        get
+        {
+            var end = TrimEnd > TrimStart ? TrimEnd : Duration;
+            return TimeSpan.FromSeconds(Math.Max(0.1, (end - TrimStart).TotalSeconds));
+        }
+    }
+
     public IReadOnlyList<string> BuildExportArguments(string outputPath)
     {
         var startSeconds = Math.Max(0, TrimStart.TotalSeconds);
@@ -2431,6 +2442,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var args = new List<string>
         {
             "-y",
+            // Machine-readable progress lines on stdout (key=value, one per
+            // encoded frame/chunk) - lets the export progress popup show a real
+            // percentage instead of just spinning indefinitely.
+            "-progress", "pipe:1",
+            "-nostats",
             "-ss", startSeconds.ToString("0.###"),
             "-t", durationSeconds.ToString("0.###"),
             "-i", SelectedVideoPath

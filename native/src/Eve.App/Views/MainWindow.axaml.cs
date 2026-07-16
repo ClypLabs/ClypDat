@@ -1561,13 +1561,28 @@ public sealed partial class MainWindow : Window
         }
 
         ViewModel.IsExporting = true;
+        var progressCts = new CancellationTokenSource();
+        var (progressWindow, progressBar, statusText) = CreateProgressDialog("Exporting clip", "Exporting clip...", () => progressCts.Cancel());
+        var progressDialogTask = progressWindow.ShowDialog(this);
         try
         {
             _playback?.Pause();
             ViewModel.IsPlaying = false;
             var args = ViewModel.BuildExportArguments(outputPath);
-            var result = await RunProcessAsync("ffmpeg", args);
-            if (result.ExitCode != 0)
+            var exportDuration = ViewModel.ExportDuration;
+            var progress = new Progress<double>(fraction =>
+            {
+                progressBar.IsIndeterminate = false;
+                progressBar.Value = Math.Clamp(fraction * 100, 0, 100);
+                statusText.Text = $"Exporting clip... {progressBar.Value:0}%";
+            });
+            var result = await RunProcessWithProgressAsync("ffmpeg", args, exportDuration, progress, progressCts.Token);
+            progressWindow.Close();
+            if (progressCts.IsCancellationRequested)
+            {
+                AudioCapturePipeline.TryDelete(outputPath);
+            }
+            else if (result.ExitCode != 0)
             {
                 await ShowMessageAsync("Export failed", string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg failed." : result.Error);
             }
@@ -1580,6 +1595,9 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
+            if (progressWindow.IsVisible) progressWindow.Close();
+            await progressDialogTask;
+            progressCts.Dispose();
             ViewModel.IsExporting = false;
         }
     }
@@ -2435,6 +2453,96 @@ public sealed partial class MainWindow : Window
         var errorTask = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
         return new ProcessResult(process.ExitCode, await outputTask, await errorTask);
+    }
+
+    // Same as RunProcessAsync, but built for ffmpeg specifically - reads stdout
+    // line by line instead of buffering it all, watching for the "-progress
+    // pipe:1" key=value lines BuildExportArguments already asks ffmpeg to emit
+    // (one "out_time_us=<microseconds>" per encoded chunk) to report real
+    // percentage progress back to the caller instead of an indefinite spinner.
+    private static async Task<ProcessResult> RunProcessWithProgressAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        TimeSpan totalDuration,
+        IProgress<double>? progress,
+        CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo(fileName)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(startInfo);
+        if (process is null) return new ProcessResult(-1, string.Empty, "Failed to start process.");
+
+        var errorTask = process.StandardError.ReadToEndAsync();
+        var outputBuilder = new System.Text.StringBuilder();
+
+        try
+        {
+            string? line;
+            while ((line = await process.StandardOutput.ReadLineAsync(cancellationToken)) is not null)
+            {
+                outputBuilder.AppendLine(line);
+                if (progress is not null && totalDuration > TimeSpan.Zero && line.StartsWith("out_time_us=", StringComparison.Ordinal)
+                    && long.TryParse(line.AsSpan("out_time_us=".Length), out var microseconds))
+                {
+                    progress.Report(Math.Clamp(microseconds / 1000.0 / totalDuration.TotalMilliseconds, 0, 1));
+                }
+            }
+
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { /* best effort */ }
+            return new ProcessResult(-1, outputBuilder.ToString(), "Cancelled.");
+        }
+
+        return new ProcessResult(process.ExitCode, outputBuilder.ToString(), await errorTask);
+    }
+
+    private static (Window Window, ProgressBar Bar, TextBlock Status) CreateProgressDialog(string titleBarLabel, string heading, Action onCancel)
+    {
+        var (window, body) = CreateChromelessDialog(titleBarLabel);
+
+        var statusText = new TextBlock { Text = heading, Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"), FontSize = 13 };
+        var progressBar = new ProgressBar
+        {
+            Minimum = 0,
+            Maximum = 100,
+            Height = 6,
+            CornerRadius = new Avalonia.CornerRadius(3),
+            IsIndeterminate = true
+        };
+        var cancelButton = new Button { Content = "Cancel", Width = 100, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+        cancelButton.Click += (_, _) =>
+        {
+            cancelButton.IsEnabled = false;
+            statusText.Text = "Cancelling...";
+            onCancel();
+        };
+
+        body.Children.Add(new TextBlock
+        {
+            Text = titleBarLabel,
+            Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
+            FontWeight = Avalonia.Media.FontWeight.Bold,
+            FontSize = 18
+        });
+        body.Children.Add(progressBar);
+        body.Children.Add(statusText);
+        body.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Children = { cancelButton } });
+
+        return (window, progressBar, statusText);
     }
 
     // Shared chrome for every small utility popup (confirm/message/rename) -
