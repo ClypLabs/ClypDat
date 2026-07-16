@@ -1095,7 +1095,7 @@
     <Grid Grid.Row="1" RowDefinitions="*,320" IsVisible="{Binding IsEditorVisible}">
       <Grid Background="#0E141A" ColumnDefinitions="*,300">
         <Border Background="#05080B">
-          <Grid>
+          <Grid x:Name="EditorVideoHost">
             <vlc:VideoView x:Name="EditorVideoView" IsVisible="{Binding IsEditorVideoAreaVisible}" />
             <TextBlock Text="Loading"
                        Foreground="#93A6B8"
@@ -1468,14 +1468,9 @@
       </Border>
     </Border>
 
-    <!-- Video-only fullscreen overlay - a SECOND VideoView, not the editor's
-         own EditorVideoView reparented (moving a live LibVLC render target
-         in the visual tree is risky; repointing MediaPlayer between two
-         VideoView instances, which MainWindow.axaml.cs already does
-         routinely for the editor's own open/close, is proven-safe instead).
-         Grid.RowSpan="2" + last child of the root Grid, same pattern as the
-         onboarding overlay above, so this covers the header row too despite
-         its fixed 48px height. -->
+    <!-- Video-only fullscreen overlay. Grid.RowSpan="2" + last child of the
+         root Grid, same pattern as the onboarding overlay above, so this
+         covers the header row too despite its fixed 48px height. -->
     <Border Grid.RowSpan="2" Background="Black" IsVisible="{Binding IsVideoFullscreen}">
       <!--
         Video row (star) and controls row (auto) are non-overlapping on
@@ -1486,13 +1481,23 @@
         bounds becomes invisible and unclickable. Keeping the playbar in
         its own row below the video (not floating on top of it) sidesteps
         the problem entirely instead of fighting it.
+
+        FullscreenVideoHost starts empty - MainWindow.axaml.cs moves the
+        SAME EditorVideoView control into it on entry (and back on exit)
+        instead of using a second VideoView. Hot-swapping MediaPlayer
+        between two separate native VideoView surfaces never actually
+        rendered a frame into the new one; reparenting the one control
+        that's already playing sidesteps that entirely.
       -->
       <Grid RowDefinitions="*,Auto">
-        <vlc:VideoView x:Name="FullscreenVideoView" Grid.Row="0" />
+        <Grid x:Name="FullscreenVideoHost" Grid.Row="0" />
         <StackPanel Grid.Row="1">
-          <ProgressBar Minimum="0" Maximum="{Binding Duration.TotalSeconds}" Value="{Binding CurrentTime.TotalSeconds}"
-                       Height="3" Padding="0" BorderThickness="0" CornerRadius="0"
-                       Background="#33FFFFFF" Foreground="{StaticResource AccentBrush}" />
+          <Border Height="14" Background="Transparent" Cursor="Hand"
+                  PointerPressed="FullscreenProgressBar_OnPointerPressed" VerticalAlignment="Center">
+            <ProgressBar Minimum="0" Maximum="{Binding Duration.TotalSeconds}" Value="{Binding CurrentTime.TotalSeconds}"
+                         Height="3" Padding="0" BorderThickness="0" CornerRadius="0" VerticalAlignment="Center"
+                         Background="#33FFFFFF" Foreground="{StaticResource AccentBrush}" IsHitTestVisible="False" />
+          </Border>
           <Border Background="#0B0F14" Padding="14,10">
             <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
               <Button Classes="transportButton" Click="RestartButton_OnClick" ToolTip.Tip="Restart">
@@ -1515,7 +1520,7 @@
               </Button>
               <Border Width="1" Height="20" Background="#26FFFFFF" Margin="4,0" />
               <Button Classes="transportButton" Click="ExitVideoFullscreenButton_OnClick" ToolTip.Tip="Exit fullscreen">
-                <PathIcon Width="14" Height="14" Foreground="#C8D6E6" Data="M5,16h3v3h2v-5H5V16z M8,5H5v2h3v3h2V5H8z M14,20v-3h3v-2h-5v5H14z M14,5v3h3v2h-5V5H14z" />
+                <PathIcon Width="17" Height="17" Foreground="#C8D6E6" Data="M5,16h3v3h2v-5H5V16z M8,5H5v2h3v3h2V5H8z M14,20v-3h3v-2h-5v5H14z M14,5v3h3v2h-5V5H14z" />
               </Button>
             </StackPanel>
           </Border>

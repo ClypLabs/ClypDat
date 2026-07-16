@@ -301,27 +301,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private bool _isVideoFullscreen;
 
-    // True while the video-only fullscreen overlay (a second VideoView +
-    // floating playbar, MainWindow.axaml) is showing - set by the view via
-    // SetVideoFullscreen, not toggled directly from XAML.
+    // True while the video-only fullscreen overlay (MainWindow.axaml) is
+    // showing - set by the view via SetVideoFullscreen, not toggled
+    // directly from XAML. The overlay reparents the SAME EditorVideoView
+    // control into its own host rather than using a second VideoView -
+    // hot-swapping MediaPlayer between two native video surfaces proved
+    // unreliable (LibVLC never rendered a frame into the new one), and
+    // running two live native surfaces at once raced for on-top-ness
+    // (native surfaces don't respect Avalonia's managed z-order).
     public bool IsVideoFullscreen
     {
         get => _isVideoFullscreen;
-        private set
-        {
-            if (!SetProperty(ref _isVideoFullscreen, value)) return;
-            OnPropertyChanged(nameof(IsEditorVideoAreaVisible));
-        }
+        private set => SetProperty(ref _isVideoFullscreen, value);
     }
 
     public void SetVideoFullscreen(bool value) => IsVideoFullscreen = value;
 
-    // EditorVideoView must be hidden while the fullscreen overlay's own
-    // FullscreenVideoView is showing - two native VideoView surfaces alive
-    // and visible at once race for on-top-ness (native surfaces don't
-    // respect Avalonia's managed visual z-order), which was silently
-    // eating the fullscreen playbar's clicks/visibility.
-    public bool IsEditorVideoAreaVisible => !IsEditorVideoLoading && !IsVideoFullscreen;
+    public bool IsEditorVideoAreaVisible => !IsEditorVideoLoading;
 
     // AppUpdateService.CurrentVersion is a System.Version, always 4 components -
     // our own <Version> in the csproj is 3-part (e.g. "0.1.1"), so the SDK-

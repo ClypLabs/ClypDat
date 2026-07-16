@@ -725,19 +725,14 @@ public sealed partial class MainWindow : Window
         WindowState = WindowState.FullScreen;
         ViewModel?.SetVideoFullscreen(true);
 
-        // FullscreenVideoView was IsVisible=False (zero layout bounds) up to
-        // this point, and the window itself hasn't finished resizing to the
-        // monitor yet either - assigning MediaPlayer synchronously here hands
-        // LibVLC a stale/zero-sized native surface and it never recovers
-        // (stuck black). Post past the pending layout pass so the control
-        // has real, final-size bounds before LibVLC attaches to it.
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (_playback is null) return;
-            EditorVideoView.MediaPlayer = null;
-            FullscreenVideoView.MediaPlayer = _playback.VideoPlayer;
-            AppLog.Info("Video fullscreen entered: MediaPlayer repointed to FullscreenVideoView.");
-        }, DispatcherPriority.Loaded);
+        // Move the SAME EditorVideoView (already playing) into the
+        // fullscreen host instead of hot-swapping MediaPlayer onto a second
+        // VideoView - that never actually rendered a frame into the new
+        // surface (tried twice, confirmed via logs the swap ran but stayed
+        // black). The control's MediaPlayer is never touched here.
+        EditorVideoHost.Children.Remove(EditorVideoView);
+        FullscreenVideoHost.Children.Add(EditorVideoView);
+        AppLog.Info("Video fullscreen entered: EditorVideoView reparented into FullscreenVideoHost.");
     }
 
     private void ExitVideoFullscreenButton_OnClick(object? sender, RoutedEventArgs e) => ExitVideoFullscreen();
@@ -747,16 +742,20 @@ public sealed partial class MainWindow : Window
         WindowState = _preFullscreenWindowState;
         ViewModel?.SetVideoFullscreen(false);
 
-        // Same reasoning as FullscreenButton_OnClick, in reverse - EditorVideoView
-        // collapsed to zero bounds while hidden and needs a layout pass at the
-        // restored window size before it can take the MediaPlayer back.
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (_playback is null) return;
-            FullscreenVideoView.MediaPlayer = null;
-            EditorVideoView.MediaPlayer = _playback.VideoPlayer;
-            AppLog.Info("Video fullscreen exited: MediaPlayer repointed to EditorVideoView.");
-        }, DispatcherPriority.Loaded);
+        FullscreenVideoHost.Children.Remove(EditorVideoView);
+        EditorVideoHost.Children.Insert(0, EditorVideoView);
+        AppLog.Info("Video fullscreen exited: EditorVideoView reparented back into EditorVideoHost.");
+    }
+
+    private void FullscreenProgressBar_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (ViewModel is null || sender is not Control control || ViewModel.Duration <= TimeSpan.Zero) return;
+        var wasPlaying = ViewModel.IsPlaying;
+        var fraction = Math.Clamp(e.GetPosition(control).X / Math.Max(1, control.Bounds.Width), 0, 1);
+        ViewModel.CurrentTime = TimeSpan.FromMilliseconds(ViewModel.Duration.TotalMilliseconds * fraction);
+        ResetPlayheadClockAfterSeek(ViewModel.CurrentTime);
+        _ = ApplyTimelineSeekAsync(ViewModel.CurrentTime, wasPlaying);
+        e.Handled = true;
     }
 
     private void CloseEditorButton_OnClick(object? sender, RoutedEventArgs e)
