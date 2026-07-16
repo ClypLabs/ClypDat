@@ -114,6 +114,15 @@ public static class MedalImportService
                 gameFolder = inferredGame;
                 title = inferredGame;
             }
+            else if (TryParseDescriptiveTitle(fileStem, out var descriptiveGame, out var descriptiveLocalTimestamp))
+            {
+                // See DescriptiveTitlePattern - Medal's exported filename can
+                // itself carry the "{Date} - {Time} - {Game}" convention when
+                // there's no DB row for this file at all.
+                createdAtUtc = DateTime.SpecifyKind(descriptiveLocalTimestamp, DateTimeKind.Local).ToUniversalTime();
+                gameFolder = descriptiveGame;
+                title = descriptiveGame;
+            }
             else
             {
                 // No DB row for this file (missing/corrupt DB, or Medal just
@@ -178,6 +187,67 @@ public static class MedalImportService
 
         gameDisplayName = string.Empty;
         localTimestamp = default;
+        return false;
+    }
+
+    // Medal auto-names a clip "{Month} {day}{ordinal}, {yyyy} - HH-mm-ss - {Game}"
+    // (e.g. "October 22nd, 2024 - 19-18-09 - Valorant") whenever the user never
+    // gave it a custom title - both the DB's own title metadata and the exported
+    // filename can carry this format. Left unparsed, this whole descriptive
+    // string was getting used verbatim as the clip's title (showing "October
+    // 22nd, 2024 - 19-18-09 - Valorant" instead of just "Valorant"), and the
+    // DB's created_at column - the only other date source available - can be
+    // stale for these (it reflects when Medal's DB row was last touched, not
+    // necessarily when the clip was actually recorded); the timestamp embedded
+    // in this title is the real recording moment and takes priority over both.
+    private static readonly Regex DescriptiveTitlePattern = new(
+        @"^(?<month>[A-Za-z]+)\s+(?<day>\d{1,2})(?:st|nd|rd|th)?,\s*(?<year>\d{4})\s*-\s*(?<hh>\d{2})-(?<mm>\d{2})-(?<ss>\d{2})\s*-\s*(?<game>.+)$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    public static bool IsDescriptiveTitle(string? text) =>
+        !string.IsNullOrWhiteSpace(text) && TryParseDescriptiveTitle(text, out _, out _);
+
+    public static bool TryParseDescriptiveTitle(string text, out string gameDisplayName, out DateTime localTimestamp)
+    {
+        var match = DescriptiveTitlePattern.Match(text.Trim());
+        if (match.Success)
+        {
+            var day = int.Parse(match.Groups["day"].Value, CultureInfo.InvariantCulture);
+            var year = int.Parse(match.Groups["year"].Value, CultureInfo.InvariantCulture);
+            var hour = int.Parse(match.Groups["hh"].Value, CultureInfo.InvariantCulture);
+            var minute = int.Parse(match.Groups["mm"].Value, CultureInfo.InvariantCulture);
+            var second = int.Parse(match.Groups["ss"].Value, CultureInfo.InvariantCulture);
+            if (TryParseMonthName(match.Groups["month"].Value, out var month))
+            {
+                try
+                {
+                    localTimestamp = new DateTime(year, month, day, hour, minute, second);
+                    gameDisplayName = match.Groups["game"].Value.Trim();
+                    return !string.IsNullOrWhiteSpace(gameDisplayName);
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    // Falls through to the failure return below.
+                }
+            }
+        }
+
+        gameDisplayName = string.Empty;
+        localTimestamp = default;
+        return false;
+    }
+
+    private static bool TryParseMonthName(string monthText, out int month)
+    {
+        for (month = 1; month <= 12; month++)
+        {
+            if (string.Equals(CultureInfo.InvariantCulture.DateTimeFormat.GetMonthName(month), monthText, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        month = 0;
         return false;
     }
 
@@ -277,6 +347,17 @@ public static class MedalImportService
             if (title is null)
             {
                 title = IsRawFilenameJustGameAndTimestamp(fileStem, gameFolder) ? gameFolder : TryParseTrimTitle(fileStem, gameFolder);
+            }
+
+            // See DescriptiveTitlePattern - overrides both the title (down to
+            // just the game name) and the created-at timestamp (down to the
+            // real recording moment, in place of the DB's own possibly-stale
+            // created_at column) whenever the title matches that convention.
+            if (TryParseDescriptiveTitle(title ?? fileStem, out var descriptiveGame, out var descriptiveLocalTimestamp))
+            {
+                title = descriptiveGame;
+                gameFolder = descriptiveGame;
+                createdAtUtc = DateTime.SpecifyKind(descriptiveLocalTimestamp, DateTimeKind.Local).ToUniversalTime();
             }
 
             results.Add(new MedalClipRecord(videoPath, thumbnailPath, gameFolder, createdAtUtc, title));

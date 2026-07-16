@@ -895,7 +895,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 var duration = await _mediaProbe.GetDurationAsync(videoPath);
                 if (duration <= TimeSpan.Zero) throw new InvalidOperationException("Could not read the imported clip duration.");
 
-                var title = string.IsNullOrWhiteSpace(info?.FileTitle) || MedalImportService.IsLegacyMisparsedCounterStrike2Name(info.FileTitle)
+                var title = string.IsNullOrWhiteSpace(info?.FileTitle)
+                    || MedalImportService.IsLegacyMisparsedCounterStrike2Name(info.FileTitle)
+                    || MedalImportService.IsDescriptiveTitle(info.FileTitle)
                     ? source.Title ?? source.GameFolderName
                     : info.FileTitle;
                 var destinationDirectory = LibraryLayout.VideoDirectory(libraryRoot, duration, source.GameFolderName);
@@ -934,6 +936,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private static bool NeedsMedalImportRepair(ClipInfo? info) =>
         !string.IsNullOrWhiteSpace(info?.MedalImportKey) &&
         (MedalImportService.IsLegacyMisparsedCounterStrike2Name(info.GameDisplayName) ||
+         MedalImportService.IsDescriptiveTitle(info.FileTitle) ||
          info.CapturedAt is { } captured && (captured.Year < 2000 || captured > DateTimeOffset.UtcNow.AddDays(2)));
 
     private static async Task<bool> FilesMatchAsync(string leftPath, string rightPath)
@@ -2504,7 +2507,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ? $"Video Quality: {ResolutionLabel(media.Height)}"
             : "Video Quality: Unknown";
         SelectedSize = $"Size: {FormatBytes(media.SizeBytes)}";
-        SelectedCaptureBackend = string.IsNullOrWhiteSpace(media.CaptureBackend) ? string.Empty : $"Captured with: {media.CaptureBackend}";
+        var isMedalImport = !string.IsNullOrWhiteSpace(ClipInfoSidecar.Load(Settings.LibraryFolder, media.Path)?.MedalImportKey);
+        SelectedCaptureBackend = isMedalImport
+            ? "Imported from Medal"
+            : (string.IsNullOrWhiteSpace(media.CaptureBackend) ? string.Empty : $"Captured with: {media.CaptureBackend}");
         SelectedMetadata = $"{SelectedQuality} - {SelectedSize}";
         Duration = media.Duration;
         CurrentTime = TimeSpan.Zero;
