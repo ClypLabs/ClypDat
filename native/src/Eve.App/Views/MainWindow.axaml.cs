@@ -2553,7 +2553,11 @@ public sealed partial class MainWindow : Window
     {
         var (window, body) = CreateChromelessDialog(titleBarLabel);
 
-        var statusText = new TextBlock { Text = heading, Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"), FontSize = 13 };
+        // MinWidth pins the divider/ETA that sit to the right of this text in
+        // place - without it the status's own width changes as the percentage
+        // ticks up ("5%" vs "45%"), shuffling everything after it sideways on
+        // every progress update.
+        var statusText = new TextBlock { Text = heading, Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"), FontSize = 13, MinWidth = 160 };
         var etaText = new TextBlock { Text = string.Empty, Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"), FontSize = 13, IsVisible = false };
         var progressBar = new ProgressBar
         {
