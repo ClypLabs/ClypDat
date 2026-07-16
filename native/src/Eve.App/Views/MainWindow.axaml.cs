@@ -105,6 +105,15 @@ public sealed partial class MainWindow : Window
             if (!AllowRealClose)
             {
                 e.Cancel = true;
+                // Hiding to tray keeps the app (and replay buffer) running,
+                // but PlaybackSession itself - LibVLC's video output and the
+                // NAudio WasapiOut mixer - has nothing to do with the window
+                // being visible. Without this, a clip actively playing in
+                // the editor when the window closes just kept playing audio
+                // (and technically video, decoding for nobody) indefinitely
+                // in the background. A real quit already covers this via
+                // _playback?.Dispose() in Closed below.
+                StopEditorPlayback(stopPlaybackAsync: true);
                 Hide();
                 ShowInTaskbar = false;
             }
