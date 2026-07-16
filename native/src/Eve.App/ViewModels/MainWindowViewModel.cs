@@ -2450,8 +2450,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             "-y",
             // Machine-readable progress lines on stdout (key=value, one per
             // encoded frame/chunk) - lets the export progress popup show a real
-            // percentage instead of just spinning indefinitely.
+            // percentage instead of just spinning indefinitely. stats_period
+            // drops ffmpeg's default 0.5s reporting interval to 100ms so the
+            // bar moves smoothly instead of jumping forward twice a second.
             "-progress", "pipe:1",
+            "-stats_period", "0.1",
             "-nostats",
             "-ss", startSeconds.ToString("0.###"),
             "-t", durationSeconds.ToString("0.###"),

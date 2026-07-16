@@ -1579,18 +1579,27 @@ public sealed partial class MainWindow : Window
 
         ViewModel.IsExporting = true;
         var progressCts = new CancellationTokenSource();
-        var (progressWindow, progressBar, statusText) = CreateProgressDialog("Exporting clip", "Exporting clip...", () => progressCts.Cancel());
+        var (progressWindow, progressBar, statusText, etaText) = CreateProgressDialog("Exporting clip", "Exporting clip...", () => progressCts.Cancel());
         var progressDialogTask = progressWindow.ShowDialog(this);
         try
         {
             _playback?.Pause();
             ViewModel.IsPlaying = false;
             var exportDuration = ViewModel.ExportDuration;
+            var encodeClock = System.Diagnostics.Stopwatch.StartNew();
             var progress = new Progress<double>(fraction =>
             {
                 progressBar.IsIndeterminate = false;
                 progressBar.Value = Math.Clamp(fraction * 100, 0, 100);
                 statusText.Text = $"Exporting clip... {progressBar.Value:0}%";
+                // Simple elapsed/fraction extrapolation; below a few percent
+                // one early sample would wildly overshoot, so hold off.
+                if (fraction > 0.03)
+                {
+                    var remaining = TimeSpan.FromMilliseconds(encodeClock.ElapsedMilliseconds * (1 - fraction) / fraction);
+                    etaText.Text = $"Estimated: {FormatEta(remaining)}";
+                    etaText.IsVisible = true;
+                }
             });
             var result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildExportArguments(outputPath), exportDuration, progress, progressCts.Token);
             if (result.ExitCode != 0 && !progressCts.IsCancellationRequested)
@@ -1600,6 +1609,8 @@ public sealed partial class MainWindow : Window
                 AppLog.Info($"Export: NVENC encode failed, retrying with CPU encoder. ffmpeg said: {result.Error}");
                 progressBar.IsIndeterminate = true;
                 statusText.Text = "Exporting clip (CPU encoder)...";
+                etaText.IsVisible = false;
+                encodeClock.Restart();
                 result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildExportArguments(outputPath, useHardwareEncoder: false), exportDuration, progress, progressCts.Token);
             }
             progressWindow.Close();
@@ -1813,7 +1824,10 @@ public sealed partial class MainWindow : Window
             if (e.GetCurrentPoint(titleBar).Properties.IsLeftButtonPressed) window.BeginMoveDrag(e);
         };
         var titleIcon = new Image { Source = new Avalonia.Media.Imaging.Bitmap(Avalonia.Platform.AssetLoader.Open(new Uri("avares://EVE/Assets/eve-icon-24.png"))), Width = 16, Height = 16, Margin = new Avalonia.Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
-        var titleText = new TextBlock { Text = "Update available", Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"), FontSize = 12, FontWeight = Avalonia.Media.FontWeight.SemiBold, Margin = new Avalonia.Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        // 2px down: TextBlock's cap height sits visually higher than the icon's
+        // optical center at this size, reading as misaligned despite both being
+        // VerticalAlignment=Center.
+        var titleText = new TextBlock { Text = "Update available", Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"), FontSize = 12, FontWeight = Avalonia.Media.FontWeight.SemiBold, Margin = new Avalonia.Thickness(8, 2, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         var titleLeft = new StackPanel { Orientation = Orientation.Horizontal, Children = { titleIcon, titleText } };
         Grid.SetColumn(titleLeft, 0);
         var closeButton = new Button { Content = "✕", Width = 40, Height = 40, Padding = new Avalonia.Thickness(0), Background = Avalonia.Media.Brushes.Transparent, BorderThickness = new Avalonia.Thickness(0), CornerRadius = new Avalonia.CornerRadius(0), Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
@@ -2535,11 +2549,12 @@ public sealed partial class MainWindow : Window
         return new ProcessResult(process.ExitCode, outputBuilder.ToString(), await errorTask);
     }
 
-    private static (Window Window, ProgressBar Bar, TextBlock Status) CreateProgressDialog(string titleBarLabel, string heading, Action onCancel)
+    private static (Window Window, ProgressBar Bar, TextBlock Status, TextBlock Eta) CreateProgressDialog(string titleBarLabel, string heading, Action onCancel)
     {
         var (window, body) = CreateChromelessDialog(titleBarLabel);
 
         var statusText = new TextBlock { Text = heading, Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"), FontSize = 13 };
+        var etaText = new TextBlock { Text = string.Empty, Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"), FontSize = 13, IsVisible = false };
         var progressBar = new ProgressBar
         {
             Minimum = 0,
@@ -2565,9 +2580,18 @@ public sealed partial class MainWindow : Window
         });
         body.Children.Add(progressBar);
         body.Children.Add(statusText);
+        body.Children.Add(etaText);
         body.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Children = { cancelButton } });
 
-        return (window, progressBar, statusText);
+        return (window, progressBar, statusText, etaText);
+    }
+
+    private static string FormatEta(TimeSpan remaining)
+    {
+        if (remaining.TotalSeconds < 1) return "less than a second";
+        return remaining.TotalSeconds < 60
+            ? $"{remaining.TotalSeconds:0}s"
+            : $"{(int)remaining.TotalMinutes}m {remaining.Seconds:00}s";
     }
 
     // Shared chrome for every small utility popup (confirm/message/rename) -
@@ -2616,7 +2640,8 @@ public sealed partial class MainWindow : Window
             Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"),
             FontSize = 12,
             FontWeight = Avalonia.Media.FontWeight.SemiBold,
-            Margin = new Avalonia.Thickness(8, 0, 0, 0),
+            // 2px down to sit on the icon's optical center - see CreateUpdateDialog.
+            Margin = new Avalonia.Thickness(8, 2, 0, 0),
             VerticalAlignment = VerticalAlignment.Center
         };
         var titleLeft = new StackPanel { Orientation = Orientation.Horizontal, Children = { titleIcon, titleText } };
