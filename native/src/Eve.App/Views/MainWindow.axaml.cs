@@ -2064,9 +2064,13 @@ public sealed partial class MainWindow : Window
     private void UpdateSpinnerRotation()
     {
         var elapsedSeconds = _spinnerClock.Elapsed.TotalSeconds;
-        if (SpinnerRing.RenderTransform is RotateTransform rotate)
+        if (SpinnerOuterRing.RenderTransform is RotateTransform outerRotate)
         {
-            rotate.Angle = (elapsedSeconds / 1.2 * 360.0) % 360.0;
+            outerRotate.Angle = -(elapsedSeconds / 1.4 * 360.0) % 360.0;
+        }
+        if (SpinnerInnerRing.RenderTransform is RotateTransform innerRotate)
+        {
+            innerRotate.Angle = (elapsedSeconds / 0.9 * 360.0) % 360.0;
         }
     }
 
