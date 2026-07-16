@@ -49,7 +49,17 @@ public sealed class AudioCapturePipeline : IDisposable
         _audioRouteTimer = null;
         lock (_lock)
         {
-            foreach (var capture in _audioCaptures.ToArray()) StopAudioCapture(capture);
+            // StopAudioCapture only closes the file handle (EndedAtUtc marks it
+            // stale for PruneOlderThan, which callers that keep running after a
+            // route change rely on to actually delete it later). Once the whole
+            // session is stopping, nothing will call PruneOlderThan again for
+            // these, so the raw WAV files must be deleted here or they sit in
+            // the buffer folder forever.
+            foreach (var capture in _audioCaptures.ToArray())
+            {
+                StopAudioCapture(capture);
+                TryDelete(capture.Path);
+            }
             _audioCaptures.Clear();
         }
     }

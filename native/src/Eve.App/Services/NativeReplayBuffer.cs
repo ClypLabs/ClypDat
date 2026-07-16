@@ -62,6 +62,7 @@ namespace Eve.App.Services;
 public sealed class NativeReplayBuffer : IReplayBuffer
 {
     private readonly Func<ReplayBufferConfig> _configProvider;
+    private readonly string _bufferFolder;
     private readonly AudioCapturePipeline _audio;
     private readonly object _bufferLock = new();
     private readonly List<RingPacket> _packets = new();
@@ -80,11 +81,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer
     public NativeReplayBuffer(Func<ReplayBufferConfig> configProvider)
     {
         _configProvider = configProvider;
-        var bufferFolder = Path.Combine(
+        _bufferFolder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "EVE",
             "native-replay-buffer");
-        _audio = new AudioCapturePipeline(bufferFolder);
+        _audio = new AudioCapturePipeline(_bufferFolder);
     }
 
     public bool IsRecording => _sessionActive;
@@ -94,6 +95,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer
     public Task StartAsync(CancellationToken cancellationToken = default)
     {
         if (_sessionActive) return Task.CompletedTask;
+
+        Directory.CreateDirectory(_bufferFolder);
+        CleanupOldFiles();
 
         var config = _configProvider();
         Duration = TimeSpan.FromSeconds(Math.Clamp(config.DurationSeconds, 30, 1200));
@@ -121,6 +125,23 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         _audio.Start(config);
         _sessionActive = true;
         return ready.Task;
+    }
+
+    // Sweeps orphaned raw audio WAVs left behind by an ungraceful shutdown
+    // (crash, Task Manager kill, power loss) - the normal Stop()/PruneOlderThan
+    // paths delete these as they go, but neither runs if the process never got
+    // to call them. Safe to run unconditionally at StartAsync: nothing is
+    // actively writing to this folder yet since no capture has started.
+    private void CleanupOldFiles()
+    {
+        foreach (var file in Directory.EnumerateFiles(_bufferFolder, "game_*.wav")
+                     .Concat(Directory.EnumerateFiles(_bufferFolder, "chat_*.wav"))
+                     .Concat(Directory.EnumerateFiles(_bufferFolder, "microphone_*.wav"))
+                     .Concat(Directory.EnumerateFiles(_bufferFolder, "audio_*.wav"))
+                     .Concat(Directory.EnumerateFiles(_bufferFolder, "audio_*.txt")))
+        {
+            AudioCapturePipeline.TryDelete(file);
+        }
     }
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
@@ -817,6 +838,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 {
                     lastRingTrim = stopwatch.Elapsed;
                     TrimRingBuffer(fullSessionFormatContext is not null ? fullSessionStartUtc : (DateTime?)null);
+                    // Audio captures ended mid-session (e.g. a route change when the
+                    // game/chat app/mic changes - see AudioCapturePipeline.
+                    // StopStaleAudioCaptures) only get their file handle closed, not
+                    // deleted; without this the raw WAV files pile up on disk for the
+                    // entire lifetime of a long-running session instead of being
+                    // cleaned up as soon as they're no longer needed.
+                    _audio.PruneOlderThan(DateTime.UtcNow - Duration - TimeSpan.FromSeconds(5));
                 }
             }
 
