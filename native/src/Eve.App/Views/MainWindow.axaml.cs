@@ -2578,9 +2578,18 @@ public sealed partial class MainWindow : Window
             FontWeight = Avalonia.Media.FontWeight.Bold,
             FontSize = 18
         });
+        // Status and ETA share one line ("Exporting clip... 45% | Estimated:
+        // 12s") - the divider tracks the ETA's own visibility so it only shows
+        // once there's an estimate to divide from.
+        var divider = new Border { Width = 1, Height = 14, Background = Avalonia.Media.Brush.Parse("#26FFFFFF"), Margin = new Avalonia.Thickness(10, 0), VerticalAlignment = VerticalAlignment.Center };
+        divider.Bind(IsVisibleProperty, etaText.GetObservable(IsVisibleProperty));
+
         body.Children.Add(progressBar);
-        body.Children.Add(statusText);
-        body.Children.Add(etaText);
+        body.Children.Add(new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Children = { statusText, divider, etaText }
+        });
         body.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Children = { cancelButton } });
 
         return (window, progressBar, statusText, etaText);
