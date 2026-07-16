@@ -723,6 +723,7 @@ public sealed partial class MainWindow : Window
 
         _preFullscreenWindowState = WindowState;
         WindowState = WindowState.FullScreen;
+        ViewModel?.SetVideoFullscreen(true);
 
         if (_playback is not null)
         {
@@ -730,7 +731,7 @@ public sealed partial class MainWindow : Window
             FullscreenVideoView.MediaPlayer = _playback.VideoPlayer;
         }
 
-        ViewModel?.SetVideoFullscreen(true);
+        AppLog.Info($"Video fullscreen entered: playback={_playback is not null}.");
     }
 
     private void ExitVideoFullscreenButton_OnClick(object? sender, RoutedEventArgs e) => ExitVideoFullscreen();
@@ -738,6 +739,7 @@ public sealed partial class MainWindow : Window
     private void ExitVideoFullscreen()
     {
         WindowState = _preFullscreenWindowState;
+        ViewModel?.SetVideoFullscreen(false);
 
         if (_playback is not null)
         {
@@ -745,7 +747,7 @@ public sealed partial class MainWindow : Window
             EditorVideoView.MediaPlayer = _playback.VideoPlayer;
         }
 
-        ViewModel?.SetVideoFullscreen(false);
+        AppLog.Info($"Video fullscreen exited: playback={_playback is not null}.");
     }
 
     private void CloseEditorButton_OnClick(object? sender, RoutedEventArgs e)

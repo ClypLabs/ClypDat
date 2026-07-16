@@ -307,10 +307,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsVideoFullscreen
     {
         get => _isVideoFullscreen;
-        private set => SetProperty(ref _isVideoFullscreen, value);
+        private set
+        {
+            if (!SetProperty(ref _isVideoFullscreen, value)) return;
+            OnPropertyChanged(nameof(IsEditorVideoAreaVisible));
+        }
     }
 
     public void SetVideoFullscreen(bool value) => IsVideoFullscreen = value;
+
+    // EditorVideoView must be hidden while the fullscreen overlay's own
+    // FullscreenVideoView is showing - two native VideoView surfaces alive
+    // and visible at once race for on-top-ness (native surfaces don't
+    // respect Avalonia's managed visual z-order), which was silently
+    // eating the fullscreen playbar's clicks/visibility.
+    public bool IsEditorVideoAreaVisible => !IsEditorVideoLoading && !IsVideoFullscreen;
 
     // AppUpdateService.CurrentVersion is a System.Version, always 4 components -
     // our own <Version> in the csproj is 3-part (e.g. "0.1.1"), so the SDK-
@@ -1309,7 +1320,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsEditorVideoLoading
     {
         get => _isEditorVideoLoading;
-        set => SetProperty(ref _isEditorVideoLoading, value);
+        set
+        {
+            if (!SetProperty(ref _isEditorVideoLoading, value)) return;
+            OnPropertyChanged(nameof(IsEditorVideoAreaVisible));
+        }
     }
 
     public string SelectedMetadata
