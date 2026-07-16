@@ -22,6 +22,7 @@ public sealed class PlaybackSession : IDisposable
     private bool _isSeeking;
     private bool _shouldPlay;
     private long _seekVersion;
+    private long _playVersion;
     private TimeSpan _lastRequestedPosition = TimeSpan.Zero;
     private readonly SemaphoreSlim _seekLock = new(1, 1);
     private readonly object _transportLock = new();
@@ -139,6 +140,7 @@ public sealed class PlaybackSession : IDisposable
 
     public void PlayFrom(TimeSpan time)
     {
+        var playVersion = Interlocked.Increment(ref _playVersion);
         var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
         var wasStoppedOrEnded = IsEnded || VideoPlayer.State == VLCState.Stopped;
         AppLog.Info($"Editor play from requested={time.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}, ended={IsEnded}.");
@@ -172,13 +174,61 @@ public sealed class PlaybackSession : IDisposable
             if (needsSeek) SeekAudio(time);
             VideoPlayer.Play();
             VideoPlayer.SetPause(false);
+            // A plain resume-from-pause needs no seek, so audio can start
+            // immediately below alongside video. A real seek is deferred to
+            // StartAudioOnceVideoCatchesUpAsync instead of starting here -
+            // otherwise audio starts the instant the seek is *issued*, well
+            // before the video actually lands there, and sounds like it's
+            // racing ahead of a video that's still visually snapping into
+            // place.
+            if (!needsSeek) _audioOutput?.Play();
+        }
+
+        if (needsSeek)
+        {
+            _ = StartAudioOnceVideoCatchesUpAsync(playVersion, milliseconds);
+        }
+
+        AppLog.Info($"Editor play from requested={time.TotalSeconds:0.###}s (seek={needsSeek}), vlc after={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}.");
+    }
+
+    // Holds audio back until the video has actually reached the seek target
+    // (confirmed via TimeChanged - same signal SeekAndWaitAsync uses), bounded
+    // so a seek that never confirms doesn't leave audio silent forever.
+    // Guarded by playVersion (and _shouldPlay) so a Pause/Stop/newer PlayFrom
+    // that happens before this fires can't have it wrongly start audio out
+    // from under whatever state the session has since moved on to.
+    private async Task StartAudioOnceVideoCatchesUpAsync(long playVersion, long targetMs)
+    {
+        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnTimeChanged(object? sender, MediaPlayerTimeChangedEventArgs args)
+        {
+            if (Math.Abs(args.Time - targetMs) < 650) ready.TrySetResult();
+        }
+
+        VideoPlayer.TimeChanged += OnTimeChanged;
+        try
+        {
+            await ready.Task.WaitAsync(TimeSpan.FromMilliseconds(900)).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+        }
+        finally
+        {
+            VideoPlayer.TimeChanged -= OnTimeChanged;
+        }
+
+        if (Interlocked.Read(ref _playVersion) != playVersion || !_shouldPlay) return;
+        lock (_transportLock)
+        {
             _audioOutput?.Play();
         }
-        AppLog.Info($"Editor play from requested={time.TotalSeconds:0.###}s (seek={needsSeek}), vlc after={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}.");
     }
 
     public void Pause()
     {
+        Interlocked.Increment(ref _playVersion);
         _shouldPlay = false;
         lock (_transportLock)
         {
@@ -192,6 +242,7 @@ public sealed class PlaybackSession : IDisposable
     {
         try
         {
+            Interlocked.Increment(ref _playVersion);
             lock (_transportLock)
             {
                 _audioOutput?.Stop();

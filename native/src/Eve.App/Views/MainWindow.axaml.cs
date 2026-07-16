@@ -1223,7 +1223,17 @@ public sealed partial class MainWindow : Window
 
         if (ViewModel.IsPlaying)
         {
-            var pauseTime = ViewModel.CurrentTime;
+            // ViewModel.CurrentTime while playing is SmoothPlaybackPosition() -
+            // a software stopwatch projection kept smooth for the UI, not
+            // reconciled against libvlc's actual decode position on every
+            // tick. It can drift from the real position by more than
+            // PlayFrom's 150ms needsSeek threshold over a longer playback
+            // stretch, which was turning an ordinary pause-then-resume into
+            // an unwanted real seek - the ~1s "snap" the video visibly does
+            // before landing. Pausing at the actual position instead of the
+            // smoothed estimate keeps resume within that threshold so it can
+            // stay a plain unpause.
+            var pauseTime = _playback.Position;
             _playback.Pause();
             ViewModel.CurrentTime = pauseTime;
             SetPlayheadBase(pauseTime);
