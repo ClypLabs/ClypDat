@@ -76,8 +76,8 @@ public sealed class ClipCardViewModel : ViewModelBase
     public bool IsVod => _isVod;
     public bool IsMedalImport => !string.IsNullOrWhiteSpace(_clipInfo?.MedalImportKey);
     public bool IsManualClip => !IsAutoClip && !IsVod && !IsMedalImport;
-    public string TileTopLabel => IsAutoClip ? (_clipInfo!.GameDisplayName ?? GameNameLabel) : GameNameLabel;
-    public string TileMainLabel => IsAutoClip ? GameNameLabel : (CustomTitle ?? ClipFromLabel);
+    public string TileTopLabel => IsAutoClip || IsMedalImport ? (_clipInfo!.GameDisplayName ?? GameNameLabel) : GameNameLabel;
+    public string TileMainLabel => IsAutoClip || IsMedalImport ? GameNameLabel : (CustomTitle ?? ClipFromLabel);
     public string AutoClipEventTypeLabel => _clipInfo?.AutoClipEventType ?? string.Empty;
 
     // Matches Cs2GsiListener's label format: "Kill", "2K".."4K", "Ace", each

@@ -5,14 +5,14 @@ namespace Eve.App.ViewModels;
 public sealed class MedalImportRowViewModel : ViewModelBase
 {
     private bool _isSelected;
+    private TimeSpan _duration;
+    private string _validationMessage = string.Empty;
 
-    public MedalImportRowViewModel(MedalClipRecord record, bool stripEmoji, TimeSpan duration, string validationMessage)
+    public MedalImportRowViewModel(MedalClipRecord record, bool stripEmoji)
     {
         Record = record;
-        Duration = duration;
-        ValidationMessage = validationMessage;
         DisplayTitle = stripEmoji ? MedalImportService.StripEmoji(RawTitle) : RawTitle;
-        _isSelected = CanImport;
+        _isSelected = true;
     }
 
     public MedalClipRecord Record { get; }
@@ -20,10 +20,23 @@ public sealed class MedalImportRowViewModel : ViewModelBase
     public DateTime CreatedAtLocal => Record.CreatedAtUtc.ToLocalTime();
     public string RawTitle => string.IsNullOrWhiteSpace(Record.Title) ? Path.GetFileNameWithoutExtension(Record.VideoPath) : Record.Title;
     public string DisplayTitle { get; }
-    public TimeSpan Duration { get; }
-    public string ValidationMessage { get; }
-    public bool CanImport => Duration > TimeSpan.Zero && string.IsNullOrWhiteSpace(ValidationMessage);
+    public TimeSpan Duration => _duration;
+    public string ValidationMessage => _validationMessage;
+    public bool CanImport => string.IsNullOrWhiteSpace(ValidationMessage);
     public bool HasValidationMessage => !string.IsNullOrWhiteSpace(ValidationMessage);
+
+    public void SetValidatedDuration(TimeSpan duration)
+    {
+        if (!SetProperty(ref _duration, duration, nameof(Duration))) return;
+    }
+
+    public void SetValidationError(string message)
+    {
+        if (!SetProperty(ref _validationMessage, message, nameof(ValidationMessage))) return;
+        IsSelected = false;
+        OnPropertyChanged(nameof(HasValidationMessage));
+        OnPropertyChanged(nameof(CanImport));
+    }
 
     public bool IsSelected
     {

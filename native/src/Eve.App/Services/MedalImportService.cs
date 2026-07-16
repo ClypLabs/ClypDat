@@ -66,7 +66,7 @@ public static class MedalImportService
             for (var i = 0; i < databases.Length; i++)
             {
                 var dbPath = databases[i];
-                progress?.Report(new MedalScanProgress(15.0 * i / Math.Max(1, databases.Length), $"Reading Medal catalog {i + 1} of {databases.Length}..."));
+                progress?.Report(new MedalScanProgress(35.0 * i / Math.Max(1, databases.Length), $"Reading Medal catalog {i + 1} of {databases.Length}..."));
                 try
                 {
                     ReadDatabase(dbPath, results, seenPaths);
@@ -78,10 +78,10 @@ public static class MedalImportService
             }
         }
 
-        progress?.Report(new MedalScanProgress(15, "Finding Medal video files..."));
+        progress?.Report(new MedalScanProgress(35, "Finding Medal video files..."));
         ScanClipsFolderFallback(results, seenPaths, progress);
 
-        progress?.Report(new MedalScanProgress(25, "Medal source scan complete."));
+        progress?.Report(new MedalScanProgress(55, "Medal source scan complete."));
         return DedupeBySizeAndGame(results);
     }
 
@@ -118,7 +118,7 @@ public static class MedalImportService
         for (var i = 0; i < files.Length; i++)
         {
             var videoPath = files[i];
-            progress?.Report(new MedalScanProgress(15 + 10.0 * (i + 1) / Math.Max(1, files.Length), $"Scanning Medal video {i + 1} of {files.Length}..."));
+            progress?.Report(new MedalScanProgress(35 + 20.0 * (i + 1) / Math.Max(1, files.Length), $"Scanning Medal video {i + 1} of {files.Length}..."));
             if (!seenPaths.Add(videoPath)) continue;
 
             var gameFolder = Path.GetFileName(Path.GetDirectoryName(videoPath)) ?? "Unknown Game";
