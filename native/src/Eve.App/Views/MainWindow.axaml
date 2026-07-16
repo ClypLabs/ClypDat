@@ -21,7 +21,7 @@
         <Button Classes="brandButton" Padding="4,5,8,5" Click="LibraryHomeButton_OnClick" ToolTip.Tip="Library">
           <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
             <Image Source="/Assets/eve-icon-24.png" Width="28" Height="28" />
-            <TextBlock Text="EVE" FontSize="18" FontWeight="Bold" Foreground="#EDF4FB" Margin="0,5,0,0" />
+            <TextBlock Text="EVE" FontSize="18" FontWeight="Bold" Foreground="#EDF4FB" Margin="0,4,0,0" />
           </StackPanel>
         </Button>
 
@@ -739,10 +739,10 @@
                     <Border Height="1" Background="#1B242D" />
 
                     <StackPanel>
-                      <Button Classes="autoClipCardHeader" Click="ToggleCs2AllKillsButton_OnClick" Padding="0,4">
+                      <Button Classes="autoClipCardHeader allKillsHeader" Click="ToggleCs2AllKillsButton_OnClick">
                         <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
-                          <CheckBox IsChecked="{Binding Cs2AllKills}" IsHitTestVisible="False" />
-                          <TextBlock Grid.Column="1" Text="All Kills" Foreground="#D2DEEC" VerticalAlignment="Center" />
+                          <CheckBox IsThreeState="True" IsChecked="{Binding Cs2AllKills}" IsHitTestVisible="False" />
+                          <TextBlock Grid.Column="1" Text="All Kills" Foreground="#D2DEEC" FontWeight="SemiBold" VerticalAlignment="Center" />
                           <TextBlock Grid.Column="2" Text="{Binding Cs2AllKillsExpanded, Converter={x:Static opconv:BoolToChevronConverter.Instance}}" Foreground="#6B7C8C" FontSize="13" VerticalAlignment="Center" />
                         </Grid>
                       </Button>

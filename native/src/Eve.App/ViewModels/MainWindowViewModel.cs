@@ -547,16 +547,30 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public bool Cs2AllKills
+    // Three-state: true only when all five are on, false only when none are,
+    // null (indeterminate - rendered as a filled box with a dash) for any
+    // partial mix. IsHitTestVisible="False" in the XAML means this is purely
+    // a reflected/decorative summary of the five sub-checkboxes below, not
+    // itself directly clickable - the setter exists for completeness but
+    // isn't reachable from the UI today.
+    public bool? Cs2AllKills
     {
-        get => Settings.Cs2AutoClip is { Kill: true, TwoKill: true, ThreeKill: true, FourKill: true, Ace: true };
+        get
+        {
+            var kills = Settings.Cs2AutoClip;
+            var selectedCount = new[] { kills.Kill, kills.TwoKill, kills.ThreeKill, kills.FourKill, kills.Ace }.Count(selected => selected);
+            if (selectedCount == 0) return false;
+            if (selectedCount == 5) return true;
+            return null;
+        }
         set
         {
-            Settings.Cs2AutoClip.Kill = value;
-            Settings.Cs2AutoClip.TwoKill = value;
-            Settings.Cs2AutoClip.ThreeKill = value;
-            Settings.Cs2AutoClip.FourKill = value;
-            Settings.Cs2AutoClip.Ace = value;
+            var apply = value == true;
+            Settings.Cs2AutoClip.Kill = apply;
+            Settings.Cs2AutoClip.TwoKill = apply;
+            Settings.Cs2AutoClip.ThreeKill = apply;
+            Settings.Cs2AutoClip.FourKill = apply;
+            Settings.Cs2AutoClip.Ace = apply;
             OnPropertyChanged();
             OnPropertyChanged(nameof(Cs2Kill));
             OnPropertyChanged(nameof(Cs2TwoKill));

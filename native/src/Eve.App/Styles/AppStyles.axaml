@@ -500,6 +500,20 @@
   <Style Selector="Button.autoClipCardHeader:pointerover">
     <Setter Property="Background" Value="#182029" />
   </Style>
+  <!-- "All Kills" sub-header - previously fully transparent at rest (only
+       colored on hover, same as the outer CS2 card header), which read as
+       plain floating text rather than an actual control. Gets its own
+       resting background so it looks like a distinct nested row. Combined
+       class selector (not a separate Button.allKillsHeader rule) so it
+       reliably wins over the plain autoClipCardHeader rule above for the
+       same Background property. -->
+  <Style Selector="Button.autoClipCardHeader.allKillsHeader">
+    <Setter Property="Background" Value="#161F28" />
+    <Setter Property="Padding" Value="12,10" />
+  </Style>
+  <Style Selector="Button.autoClipCardHeader.allKillsHeader:pointerover">
+    <Setter Property="Background" Value="#1C2733" />
+  </Style>
   <Style Selector="Button.settingsNavButton">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="#93A6B8" />
