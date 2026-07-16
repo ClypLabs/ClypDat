@@ -1541,8 +1541,15 @@ public sealed partial class MainWindow : Window
         // an already date-stamped title, e.g. "Marvel Rivals - Jul-11-2026 -
         // 22-54-55 - Jul-17-2026 - 05-20-02.mp4".
         var exportTimestamp = ViewModel.SelectedCreatedAtLocal > default(DateTime) ? ViewModel.SelectedCreatedAtLocal : DateTime.Now;
+        // EditorTitle defaults to the clip's filename stem, which already ends
+        // in the date/time this naming scheme appended when the clip was saved -
+        // running that through BuildFileName unchanged appends a SECOND
+        // timestamp ("Fortnite - Jul-14-2026 - 01-17-03 - Jul-14-2026 -
+        // 01-17-03.mp4"). Strip the existing suffix off first; the scheme adds
+        // the (correct, recording-date) one back.
+        var exportTitle = ClipFileNaming.StripTimestampSuffix(ViewModel.EditorTitle);
         var suggestedFileName = ClipFileNaming.BuildFileName(
-            ViewModel.EditorTitle,
+            exportTitle,
             exportTimestamp,
             ".mp4",
             ViewModel.Settings.ClipFileNameScheme,
@@ -1593,7 +1600,7 @@ public sealed partial class MainWindow : Window
             }
             else
             {
-                ClipInfoSidecar.Save(libraryRoot, outputPath, new ClipInfo(game, null, ViewModel.EditorTitle, exportTimestamp));
+                ClipInfoSidecar.Save(libraryRoot, outputPath, new ClipInfo(game, null, exportTitle, exportTimestamp));
                 if (IsPathWithinLibrary(outputPath, libraryRoot)) await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
                 OpenInExplorer(outputPath, selectFile: true);
             }
