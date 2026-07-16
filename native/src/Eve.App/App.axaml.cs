@@ -26,6 +26,7 @@ public sealed partial class App : Application
     {
         AppLog.Startup();
         _ = Task.Run(PlaybackSession.WarmUp);
+        _ = Task.Run(StorageJanitor.CleanupAtStartup);
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {

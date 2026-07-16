@@ -20,6 +20,34 @@ public sealed class MediaProbeService
             "EVE",
             "thumbnails");
         Directory.CreateDirectory(_cacheFolder);
+        Task.Run(PruneStaleCache);
+    }
+
+    // Thumbnails (and cached probe metadata) are keyed by clip path+size, so
+    // entries for deleted/moved clips can never be hit again yet stayed on
+    // disk forever. Same retention approach as the preview-audio cache: sweep
+    // anything not used in 30 days; CreateLibraryStub bumps LastWriteTime on
+    // every hit, so clips still in the library always stay fresh (a library
+    // refresh touches every visible clip's thumbnail). Regeneration on a
+    // wrongly-evicted entry is just one ffmpeg frame grab, so a stale sweep
+    // is cheap to be wrong about.
+    private void PruneStaleCache()
+    {
+        try
+        {
+            var cutoff = DateTime.UtcNow.AddDays(-30);
+            foreach (var file in Directory.EnumerateFiles(_cacheFolder))
+            {
+                if (File.GetLastWriteTimeUtc(file) < cutoff)
+                {
+                    try { File.Delete(file); } catch { /* best effort */ }
+                }
+            }
+        }
+        catch
+        {
+            // Cache pruning must never block startup.
+        }
     }
 
     public static bool IsVideoFile(string path)
@@ -38,6 +66,11 @@ public sealed class MediaProbeService
     {
         var info = new FileInfo(filePath);
         var thumbnailPath = GetThumbnailPath(filePath);
+        if (File.Exists(thumbnailPath))
+        {
+            // Recency marker for PruneStaleCache - see its comment.
+            try { File.SetLastWriteTimeUtc(thumbnailPath, DateTime.UtcNow); } catch { }
+        }
         return new MediaFileInfo(
             Path.GetFileNameWithoutExtension(filePath),
             filePath,

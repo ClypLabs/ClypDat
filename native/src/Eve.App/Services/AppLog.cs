@@ -42,7 +42,7 @@ public static class AppLog
     // grows forever (a real case measured several MB/day). Called once at
     // startup, not per-write, so this is a cheap one-time sweep, not a cost
     // paid on every log line.
-    private const int LogRetentionDays = 14;
+    private const int LogRetentionDays = 7;
 
     private static void PruneOldLogs()
     {
