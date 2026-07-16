@@ -197,35 +197,82 @@
     <Setter Property="CornerRadius" Value="7" />
     <Setter Property="Padding" Value="12,8" />
   </Style>
+  <!--
+    linkButton/brandButton/gameFilterBadge all used Padding="0" +
+    Background="Transparent" on :pointerover, meaning "no visible hover pill
+    at all" was the intent - but Fluent's own Button ControlTemplate paints
+    its OWN internal pointerover highlight from a theme resource, never wired
+    to the Button's Background property (same root cause already diagnosed
+    and fixed for Export/Check Now/Update Now above), so a small, badly-sized
+    highlight showed regardless of what these styles set. Giving each its own
+    minimal Border+ContentPresenter template removes Fluent's template from
+    the equation, so a real, content-sized hover pill can be painted instead.
+  -->
   <Style Selector="Button.linkButton">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="Padding" Value="0" />
+    <Setter Property="Padding" Value="6,3" />
+    <Setter Property="CornerRadius" Value="6" />
     <Setter Property="Foreground" Value="#BDD4EE" />
     <Setter Property="FontWeight" Value="Normal" />
     <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}" CornerRadius="{TemplateBinding CornerRadius}">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                             Padding="{TemplateBinding Padding}"
+                             Foreground="{TemplateBinding Foreground}"
+                             FontSize="{TemplateBinding FontSize}"
+                             FontWeight="{TemplateBinding FontWeight}"
+                             HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                             VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
   </Style>
   <Style Selector="Button.linkButton:pointerover">
-    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Background" Value="#1D2A36" />
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
   <Style Selector="Button.brandButton">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="Padding" Value="0" />
+    <Setter Property="Padding" Value="8,5" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}" CornerRadius="{TemplateBinding CornerRadius}">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                             Padding="{TemplateBinding Padding}"
+                             HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                             VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
   </Style>
   <Style Selector="Button.brandButton:pointerover">
-    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Background" Value="#1D2A36" />
   </Style>
   <Style Selector="Button.gameFilterBadge">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="Padding" Value="0" />
+    <Setter Property="Padding" Value="6,3" />
+    <Setter Property="CornerRadius" Value="6" />
     <Setter Property="HorizontalContentAlignment" Value="Left" />
     <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}" CornerRadius="{TemplateBinding CornerRadius}">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                             Padding="{TemplateBinding Padding}"
+                             HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                             VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
   </Style>
   <Style Selector="Button.gameFilterBadge:pointerover">
-    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Background" Value="#1D2A36" />
   </Style>
   <Style Selector="Button.gameFilterBadge:pointerover TextBlock">
     <Setter Property="Foreground" Value="#D2DEEC" />
