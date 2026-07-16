@@ -1782,7 +1782,7 @@ public sealed partial class MainWindow : Window
 
         var body = new StackPanel
         {
-            Margin = new Avalonia.Thickness(22, 20, 22, 22),
+            Margin = new Avalonia.Thickness(22, 20, 22, 16),
             Spacing = 16,
             Children =
             {
@@ -1799,7 +1799,20 @@ public sealed partial class MainWindow : Window
                     Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"),
                     FontSize = 13
                 },
-                notesPanel,
+                notesPanel
+            }
+        };
+
+        // Status/progress/buttons live in a fixed footer outside the
+        // ScrollViewer - previously they were the last children of the same
+        // scrolled `body`, so a long release-notes list pushed Update Now/
+        // Later/Skip below the fold and the user had to scroll to reach them.
+        var footer = new StackPanel
+        {
+            Margin = new Avalonia.Thickness(22, 0, 22, 20),
+            Spacing = 10,
+            Children =
+            {
                 statusText,
                 progressBar,
                 new StackPanel
@@ -1812,17 +1825,19 @@ public sealed partial class MainWindow : Window
             }
         };
 
-        var notesScroll = new ScrollViewer { Content = body, MaxHeight = 520 };
+        var notesScroll = new ScrollViewer { Content = body, MaxHeight = 440 };
 
         window.Content = new DockPanel
         {
             Children =
             {
                 titleBar,
+                footer,
                 notesScroll
             }
         };
         DockPanel.SetDock(titleBar, Dock.Top);
+        DockPanel.SetDock(footer, Dock.Bottom);
 
         return window;
     }
