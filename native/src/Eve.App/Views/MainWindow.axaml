@@ -741,7 +741,30 @@
                     <StackPanel>
                       <Button Classes="autoClipCardHeader allKillsHeader" Click="ToggleCs2AllKillsButton_OnClick">
                         <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
-                          <CheckBox IsThreeState="True" IsChecked="{Binding Cs2AllKills}" IsHitTestVisible="False" />
+                          <!-- Hand-drawn instead of a real CheckBox - Fluent's
+                               own indeterminate glyph is a filled square, not
+                               a dash, and this stays purely decorative
+                               (IsHitTestVisible=False further down was on the
+                               old CheckBox; this Grid has no click handling
+                               either) reflecting Cs2AllKillsChecked/
+                               Cs2AllKillsIndeterminate. -->
+                          <Grid Width="18" Height="18" VerticalAlignment="Center">
+                            <Border BorderBrush="#5C6D7E" BorderThickness="1.5" CornerRadius="4" />
+                            <Border Background="{StaticResource AccentBrush}"
+                                    CornerRadius="4"
+                                    IsVisible="{Binding Cs2AllKillsChecked}" />
+                            <Border Background="{StaticResource AccentBrush}"
+                                    CornerRadius="4"
+                                    IsVisible="{Binding Cs2AllKillsIndeterminate}" />
+                            <PathIcon Data="M9,16.17L4.83,12l-1.41,1.41L9,19L21,7l-1.41-1.41z"
+                                      Width="11" Height="11"
+                                      Foreground="White"
+                                      IsVisible="{Binding Cs2AllKillsChecked}" />
+                            <Border Background="White"
+                                    Width="10" Height="2"
+                                    CornerRadius="1"
+                                    IsVisible="{Binding Cs2AllKillsIndeterminate}" />
+                          </Grid>
                           <TextBlock Grid.Column="1" Text="All Kills" Foreground="#D2DEEC" FontWeight="SemiBold" VerticalAlignment="Center" />
                           <TextBlock Grid.Column="2" Text="{Binding Cs2AllKillsExpanded, Converter={x:Static opconv:BoolToChevronConverter.Instance}}" Foreground="#6B7C8C" FontSize="13" VerticalAlignment="Center" />
                         </Grid>

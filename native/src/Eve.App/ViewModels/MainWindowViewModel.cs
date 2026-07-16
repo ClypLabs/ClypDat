@@ -577,39 +577,48 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(Cs2ThreeKill));
             OnPropertyChanged(nameof(Cs2FourKill));
             OnPropertyChanged(nameof(Cs2Ace));
+            OnPropertyChanged(nameof(Cs2AllKillsChecked));
+            OnPropertyChanged(nameof(Cs2AllKillsIndeterminate));
             OnPropertyChanged(nameof(Cs2EventsSummary));
             SaveSettings();
         }
     }
 
+    // Fluent's own indeterminate CheckBox glyph renders as a filled square,
+    // not a dash - hand-drawn in XAML instead (checkmark/dash/empty-outline
+    // Border+Path elements toggled by these) for a look that's actually a
+    // dash, not dependent on the theme's own glyph choice.
+    public bool Cs2AllKillsChecked => Cs2AllKills == true;
+    public bool Cs2AllKillsIndeterminate => Cs2AllKills is null;
+
     public bool Cs2Kill
     {
         get => Settings.Cs2AutoClip.Kill;
-        set { Settings.Cs2AutoClip.Kill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
+        set { Settings.Cs2AutoClip.Kill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); OnPropertyChanged(nameof(Cs2AllKillsChecked)); OnPropertyChanged(nameof(Cs2AllKillsIndeterminate)); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
     }
 
     public bool Cs2TwoKill
     {
         get => Settings.Cs2AutoClip.TwoKill;
-        set { Settings.Cs2AutoClip.TwoKill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
+        set { Settings.Cs2AutoClip.TwoKill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); OnPropertyChanged(nameof(Cs2AllKillsChecked)); OnPropertyChanged(nameof(Cs2AllKillsIndeterminate)); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
     }
 
     public bool Cs2ThreeKill
     {
         get => Settings.Cs2AutoClip.ThreeKill;
-        set { Settings.Cs2AutoClip.ThreeKill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
+        set { Settings.Cs2AutoClip.ThreeKill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); OnPropertyChanged(nameof(Cs2AllKillsChecked)); OnPropertyChanged(nameof(Cs2AllKillsIndeterminate)); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
     }
 
     public bool Cs2FourKill
     {
         get => Settings.Cs2AutoClip.FourKill;
-        set { Settings.Cs2AutoClip.FourKill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
+        set { Settings.Cs2AutoClip.FourKill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); OnPropertyChanged(nameof(Cs2AllKillsChecked)); OnPropertyChanged(nameof(Cs2AllKillsIndeterminate)); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
     }
 
     public bool Cs2Ace
     {
         get => Settings.Cs2AutoClip.Ace;
-        set { Settings.Cs2AutoClip.Ace = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
+        set { Settings.Cs2AutoClip.Ace = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); OnPropertyChanged(nameof(Cs2AllKillsChecked)); OnPropertyChanged(nameof(Cs2AllKillsIndeterminate)); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
     }
 
     public bool Cs2Headshot
