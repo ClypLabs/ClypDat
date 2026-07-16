@@ -1477,14 +1477,24 @@
          onboarding overlay above, so this covers the header row too despite
          its fixed 48px height. -->
     <Border Grid.RowSpan="2" Background="Black" IsVisible="{Binding IsVideoFullscreen}">
-      <Grid>
-        <vlc:VideoView x:Name="FullscreenVideoView" />
-        <StackPanel VerticalAlignment="Bottom">
+      <!--
+        Video row (star) and controls row (auto) are non-overlapping on
+        purpose. VideoView hosts LibVLC's video output as a real native
+        child window on Windows - native surfaces always paint on top of
+        Avalonia-rendered siblings regardless of visual-tree/Panel order
+        ("airspace"), so any Avalonia control physically overlapping its
+        bounds becomes invisible and unclickable. Keeping the playbar in
+        its own row below the video (not floating on top of it) sidesteps
+        the problem entirely instead of fighting it.
+      -->
+      <Grid RowDefinitions="*,Auto">
+        <vlc:VideoView x:Name="FullscreenVideoView" Grid.Row="0" />
+        <StackPanel Grid.Row="1">
           <ProgressBar Minimum="0" Maximum="{Binding Duration.TotalSeconds}" Value="{Binding CurrentTime.TotalSeconds}"
                        Height="3" Padding="0" BorderThickness="0" CornerRadius="0"
                        Background="#33FFFFFF" Foreground="{StaticResource AccentBrush}" />
-          <Border Background="#D90B1016" Padding="14,8">
-            <StackPanel Orientation="Horizontal" Spacing="6">
+          <Border Background="#0B0F14" Padding="14,10">
+            <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
               <Button Classes="transportButton" Click="RestartButton_OnClick" ToolTip.Tip="Restart">
                 <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 5,3 L 7,3 L 7,17 L 5,17 Z M 17,4 L 17,16 L 8,10 Z" />
               </Button>

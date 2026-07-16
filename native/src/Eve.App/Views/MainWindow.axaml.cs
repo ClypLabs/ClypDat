@@ -725,13 +725,19 @@ public sealed partial class MainWindow : Window
         WindowState = WindowState.FullScreen;
         ViewModel?.SetVideoFullscreen(true);
 
-        if (_playback is not null)
+        // FullscreenVideoView was IsVisible=False (zero layout bounds) up to
+        // this point, and the window itself hasn't finished resizing to the
+        // monitor yet either - assigning MediaPlayer synchronously here hands
+        // LibVLC a stale/zero-sized native surface and it never recovers
+        // (stuck black). Post past the pending layout pass so the control
+        // has real, final-size bounds before LibVLC attaches to it.
+        Dispatcher.UIThread.Post(() =>
         {
+            if (_playback is null) return;
             EditorVideoView.MediaPlayer = null;
             FullscreenVideoView.MediaPlayer = _playback.VideoPlayer;
-        }
-
-        AppLog.Info($"Video fullscreen entered: playback={_playback is not null}.");
+            AppLog.Info("Video fullscreen entered: MediaPlayer repointed to FullscreenVideoView.");
+        }, DispatcherPriority.Loaded);
     }
 
     private void ExitVideoFullscreenButton_OnClick(object? sender, RoutedEventArgs e) => ExitVideoFullscreen();
@@ -741,13 +747,16 @@ public sealed partial class MainWindow : Window
         WindowState = _preFullscreenWindowState;
         ViewModel?.SetVideoFullscreen(false);
 
-        if (_playback is not null)
+        // Same reasoning as FullscreenButton_OnClick, in reverse - EditorVideoView
+        // collapsed to zero bounds while hidden and needs a layout pass at the
+        // restored window size before it can take the MediaPlayer back.
+        Dispatcher.UIThread.Post(() =>
         {
+            if (_playback is null) return;
             FullscreenVideoView.MediaPlayer = null;
             EditorVideoView.MediaPlayer = _playback.VideoPlayer;
-        }
-
-        AppLog.Info($"Video fullscreen exited: playback={_playback is not null}.");
+            AppLog.Info("Video fullscreen exited: MediaPlayer repointed to EditorVideoView.");
+        }, DispatcherPriority.Loaded);
     }
 
     private void CloseEditorButton_OnClick(object? sender, RoutedEventArgs e)
