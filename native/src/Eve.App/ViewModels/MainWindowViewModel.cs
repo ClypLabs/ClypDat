@@ -1956,6 +1956,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await RefreshLibraryAsync();
     }
 
+    // Renames only the card's own display label (shown in place of "Clip from
+    // {date}" for non-auto-clip cards) - unlike RenameClipAsync above, this
+    // never touches the file on disk or FileTitle/GameDisplayName, so it can't
+    // clobber the game association or a Medal import's original event title
+    // (e.g. "4K - Inferno"). An empty title clears it back to "Clip from {date}".
+    public async Task RenameClipTitleAsync(ClipCardViewModel clip, string newCustomTitle)
+    {
+        var sanitized = newCustomTitle.Trim();
+        var existingInfo = ClipInfoSidecar.Load(Settings.LibraryFolder, clip.Path);
+        var updatedInfo = (existingInfo ?? new ClipInfo(null, null)) with
+        {
+            CustomTitle = string.IsNullOrWhiteSpace(sanitized) ? null : sanitized
+        };
+        ClipInfoSidecar.Save(Settings.LibraryFolder, clip.Path, updatedInfo);
+
+        await RefreshLibraryAsync();
+    }
+
     public void CloseEditor()
     {
         _waveformCts?.Cancel();

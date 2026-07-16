@@ -621,12 +621,36 @@ public sealed partial class MainWindow : Window
     {
         if (sender is not MenuItem { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
 
-        var newTitle = await PromptRenameAsync(clip.GameNameLabel);
-        if (string.IsNullOrWhiteSpace(newTitle) || newTitle == clip.GameNameLabel) return;
+        // Auto-clips (CS2 kill clips etc.) show their "<event> - <map>" text
+        // as the main tile label, so renaming that IS the clip's title.
+        // Everything else (manual clips, VODs, Medal imports) shows "Clip
+        // from {date}" as a placeholder there instead - rename that card's
+        // own custom label, not the game name/Medal title shown above it.
+        if (clip.IsAutoClip)
+        {
+            var newTitle = await PromptRenameAsync(clip.GameNameLabel);
+            if (string.IsNullOrWhiteSpace(newTitle) || newTitle == clip.GameNameLabel) return;
+
+            try
+            {
+                await ViewModel.RenameClipAsync(clip, newTitle);
+            }
+            catch (Exception error)
+            {
+                await ShowMessageAsync("Rename failed", error.Message);
+            }
+            return;
+        }
+
+        var currentCustomTitle = clip.CustomTitle ?? string.Empty;
+        var newCustomTitle = await PromptRenameAsync(currentCustomTitle);
+        if (newCustomTitle is null) return;
+        var trimmed = newCustomTitle.Trim();
+        if (trimmed == currentCustomTitle) return;
 
         try
         {
-            await ViewModel.RenameClipAsync(clip, newTitle);
+            await ViewModel.RenameClipTitleAsync(clip, trimmed);
         }
         catch (Exception error)
         {

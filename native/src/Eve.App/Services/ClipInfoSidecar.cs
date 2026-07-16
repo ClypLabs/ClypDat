@@ -7,12 +7,18 @@ namespace Eve.App.Services;
 // time so the library can show the actual game name and a per-event icon on
 // the tile instead of parsing it back out of the clip's filename, which for a
 // manual clip is just the game name and for an auto-clip is "<event> - <map>".
+// CustomTitle is a separate, user-set display label shown in place of "Clip
+// from {date}" for non-auto-clip cards (manual clips, VODs, Medal imports) -
+// deliberately independent of FileTitle/GameDisplayName so renaming a clip
+// never touches the game association or, for a Medal import, its original
+// event title (e.g. "4K - Inferno").
 public sealed record ClipInfo(
     string? GameDisplayName,
     string? AutoClipEventType,
     string? FileTitle = null,
     DateTimeOffset? CapturedAt = null,
-    string? MedalImportKey = null);
+    string? MedalImportKey = null,
+    string? CustomTitle = null);
 
 public static class ClipInfoSidecar
 {

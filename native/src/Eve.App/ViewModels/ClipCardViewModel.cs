@@ -61,6 +61,11 @@ public sealed class ClipCardViewModel : ViewModelBase
 
     public string ClipFromLabel => $"Clip from {CreatedAt:MMM d, yyyy}";
 
+    // User-set label shown instead of ClipFromLabel on a non-auto-clip's
+    // tile - kept separate from GameNameLabel/FileTitle so renaming never
+    // overwrites the game association or a Medal import's original title.
+    public string? CustomTitle => _clipInfo?.CustomTitle;
+
     // For a CS2 auto-clip, GameNameLabel is really "<event> - <map>" (e.g.
     // "3K - Mirage") since that's what the auto-clip title became when it was
     // used to build the filename - swap the tile around for those: lead with
@@ -72,7 +77,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     public bool IsMedalImport => !string.IsNullOrWhiteSpace(_clipInfo?.MedalImportKey);
     public bool IsManualClip => !IsAutoClip && !IsVod && !IsMedalImport;
     public string TileTopLabel => IsAutoClip ? (_clipInfo!.GameDisplayName ?? GameNameLabel) : GameNameLabel;
-    public string TileMainLabel => IsAutoClip ? GameNameLabel : ClipFromLabel;
+    public string TileMainLabel => IsAutoClip ? GameNameLabel : (CustomTitle ?? ClipFromLabel);
     public string AutoClipEventTypeLabel => _clipInfo?.AutoClipEventType ?? string.Empty;
 
     // Matches Cs2GsiListener's label format: "Kill", "2K".."4K", "Ace", each
@@ -164,7 +169,9 @@ public sealed class ClipCardViewModel : ViewModelBase
     public bool HasTrimEdit => _clipEdit is not null && Duration - TrimmedDuration > TimeSpan.FromMilliseconds(50);
     public string DurationLabel => TrimmedDuration > TimeSpan.Zero ? TrimmedDuration.ToString("m\\:ss") : "0:00";
     public string GameLabel => "VIDEO";
-    public string CaptureBackendLabel => string.IsNullOrWhiteSpace(Media.CaptureBackend) ? string.Empty : $"Captured with: {Media.CaptureBackend}";
+    public string CaptureBackendLabel => IsMedalImport
+        ? "Imported from Medal"
+        : (string.IsNullOrWhiteSpace(Media.CaptureBackend) ? string.Empty : $"Captured with: {Media.CaptureBackend}");
     public bool HasCaptureBackendLabel => !string.IsNullOrWhiteSpace(CaptureBackendLabel);
 
     // The per-game filter's grouping key - reuses TileTopLabel since that
