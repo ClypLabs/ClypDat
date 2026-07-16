@@ -582,6 +582,7 @@ public sealed partial class MainWindow : Window
     private async void ClipCard_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (e.Source is CheckBox) return;
+        if (sender is not Control control || !e.GetCurrentPoint(control).Properties.IsLeftButtonPressed) return;
         if (sender is not Control { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
 
         e.Handled = true;
@@ -593,6 +594,59 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null) return;
         await ViewModel.OpenClipAsync(clip);
         QueueEditorPlayback();
+    }
+
+    private async void ClipContextExport_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
+        await OpenClipCardAsync(clip);
+        await ExportCurrentClipAsync();
+    }
+
+    private async void ClipContextOpen_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { DataContext: ClipCardViewModel clip }) return;
+        await OpenClipCardAsync(clip);
+    }
+
+    private async void ClipContextRename_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
+
+        var newTitle = await PromptRenameAsync(clip.GameNameLabel);
+        if (string.IsNullOrWhiteSpace(newTitle) || newTitle == clip.GameNameLabel) return;
+
+        try
+        {
+            await ViewModel.RenameClipAsync(clip, newTitle);
+        }
+        catch (Exception error)
+        {
+            await ShowMessageAsync("Rename failed", error.Message);
+        }
+    }
+
+    private void ClipContextOpenLocation_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { DataContext: ClipCardViewModel clip }) return;
+        OpenInExplorer(clip.Path, selectFile: true);
+    }
+
+    private async void ClipContextDelete_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
+
+        var confirmed = await ConfirmDeleteAsync(clip.Name);
+        if (!confirmed) return;
+
+        try
+        {
+            await ViewModel.DeleteClipAsync(clip);
+        }
+        catch (Exception error)
+        {
+            await ShowMessageAsync("Delete failed", error.Message);
+        }
     }
 
     private void ClipCard_OnPointerEntered(object? sender, PointerEventArgs e)
@@ -1307,6 +1361,11 @@ public sealed partial class MainWindow : Window
 
     private async void ExportButton_OnClick(object? sender, RoutedEventArgs e)
     {
+        await ExportCurrentClipAsync();
+    }
+
+    private async Task ExportCurrentClipAsync()
+    {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
         var libraryRoot = string.IsNullOrWhiteSpace(ViewModel.Settings.LibraryFolder)
             ? DefaultLibraryFolder()
@@ -1391,7 +1450,7 @@ public sealed partial class MainWindow : Window
 
     private async Task<bool> ConfirmDeleteAsync(string summary)
     {
-        var dialog = CreateDialog("Delete clips?", $"{summary}\n\nThis permanently deletes the selected files.", true);
+        var dialog = CreateDialog("Delete clips?", $"{summary}\n\nThis permanently deletes the file(s).", true);
         var result = await dialog.ShowDialog<bool>(this);
         return result;
     }
@@ -1400,6 +1459,74 @@ public sealed partial class MainWindow : Window
     {
         var dialog = CreateDialog(title, message, false);
         await dialog.ShowDialog<bool>(this);
+    }
+
+    private async Task<string?> PromptRenameAsync(string currentTitle)
+    {
+        var window = new Window
+        {
+            Title = "Rename clip",
+            Width = 420,
+            Height = 200,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = Avalonia.Media.Brush.Parse("#111920")
+        };
+
+        var textBox = new TextBox
+        {
+            Text = currentTitle,
+            Watermark = "Clip title"
+        };
+
+        var rename = new Button
+        {
+            Content = "Rename",
+            Width = 96,
+            HorizontalContentAlignment = HorizontalAlignment.Center
+        };
+        var cancel = new Button { Content = "Cancel", Width = 96 };
+
+        rename.Click += (_, _) => window.Close(textBox.Text);
+        cancel.Click += (_, _) => window.Close(null);
+        textBox.KeyDown += (_, keyArgs) =>
+        {
+            if (keyArgs.Key == Key.Enter) window.Close(textBox.Text);
+            else if (keyArgs.Key == Key.Escape) window.Close(null);
+        };
+
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 10,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Children = { cancel, rename }
+        };
+
+        window.Content = new StackPanel
+        {
+            Margin = new Avalonia.Thickness(22),
+            Spacing = 20,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = "Rename clip",
+                    Foreground = Avalonia.Media.Brush.Parse("#DDE8F5"),
+                    FontWeight = Avalonia.Media.FontWeight.Bold,
+                    FontSize = 16
+                },
+                textBox,
+                buttons
+            }
+        };
+
+        window.Opened += (_, _) =>
+        {
+            textBox.Focus();
+            textBox.SelectAll();
+        };
+
+        return await window.ShowDialog<string?>(this);
     }
 
     private async Task RunStartupDialogsAsync()

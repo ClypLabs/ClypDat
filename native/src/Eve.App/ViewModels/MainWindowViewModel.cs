@@ -1884,6 +1884,46 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return selected.Length;
     }
 
+    public async Task DeleteClipAsync(ClipCardViewModel clip)
+    {
+        File.Delete(clip.Path);
+        _mediaProbe.DeleteCacheFor(clip.Path);
+        ClipEditSidecar.Delete(Settings.LibraryFolder, clip.Path);
+        ClipInfoSidecar.Delete(Settings.LibraryFolder, clip.Path);
+        Settings.ClipEdits.Remove(ClipEditKey(clip.Path));
+
+        SaveSettings();
+        await RefreshLibraryAsync();
+    }
+
+    public async Task RenameClipAsync(ClipCardViewModel clip, string newTitle)
+    {
+        var sanitizedTitle = newTitle;
+        foreach (var invalid in Path.GetInvalidFileNameChars()) sanitizedTitle = sanitizedTitle.Replace(invalid, '-');
+        sanitizedTitle = sanitizedTitle.Trim().TrimEnd('.', ' ');
+        if (string.IsNullOrWhiteSpace(sanitizedTitle)) return;
+
+        var oldPath = clip.Path;
+        var oldStem = Path.GetFileNameWithoutExtension(oldPath);
+        var strippedOld = ClipFileNaming.StripTimestampSuffix(oldStem);
+        var suffix = oldStem[strippedOld.Length..];
+        var newStem = sanitizedTitle + suffix;
+        var directory = Path.GetDirectoryName(oldPath) ?? Settings.LibraryFolder;
+        var newPath = ClipFileNaming.BuildUniquePath(directory, newStem + Path.GetExtension(oldPath));
+
+        var existingInfo = ClipInfoSidecar.Load(Settings.LibraryFolder, oldPath);
+        var updatedInfo = existingInfo is null
+            ? new ClipInfo(null, null, sanitizedTitle)
+            : existingInfo with { FileTitle = sanitizedTitle };
+        ClipInfoSidecar.Save(Settings.LibraryFolder, oldPath, updatedInfo);
+
+        File.Move(oldPath, newPath);
+        MoveClipSidecars(oldPath, newPath);
+        _mediaProbe.DeleteCacheFor(oldPath);
+
+        await RefreshLibraryAsync();
+    }
+
     public void CloseEditor()
     {
         _waveformCts?.Cancel();

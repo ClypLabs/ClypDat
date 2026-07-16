@@ -149,6 +149,16 @@
                                 PointerPressed="ClipCard_OnPointerPressed"
                                 PointerEntered="ClipCard_OnPointerEntered"
                                 PointerExited="ClipCard_OnPointerExited">
+                          <Border.ContextMenu>
+                            <ContextMenu>
+                              <MenuItem Header="Export" Click="ClipContextExport_OnClick" />
+                              <MenuItem Header="Open" Click="ClipContextOpen_OnClick" />
+                              <MenuItem Header="Rename" Click="ClipContextRename_OnClick" />
+                              <MenuItem Header="Open file location" Click="ClipContextOpenLocation_OnClick" />
+                              <Separator />
+                              <MenuItem Header="Delete" Click="ClipContextDelete_OnClick" Foreground="#D85E61" />
+                            </ContextMenu>
+                          </Border.ContextMenu>
                           <Border CornerRadius="12" ClipToBounds="True">
                           <Grid RowDefinitions="Auto,Auto">
                             <Border Grid.RowSpan="2"
