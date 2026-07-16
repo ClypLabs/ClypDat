@@ -1916,6 +1916,16 @@ public sealed partial class MainWindow : Window
         var cts = new CancellationTokenSource();
         _playbackStartCts = cts;
 
+        // UpdateTimelineChrome only otherwise runs from a resize handler or from
+        // deep inside StartEditorPlaybackAsync (after the video's first decoded
+        // frame, plus its own 200ms settle delay) - opening a new clip already
+        // sets fresh Duration/TrimStart/TrimEnd/CurrentTime on the ViewModel
+        // synchronously (see OpenMedia), but without this the trim handles/
+        // seeker stayed at the PREVIOUS clip's pixel positions on screen until
+        // one of those later triggers finally caught up, which read as a
+        // stuck/laggy timeline. Snap it to the new clip's values immediately.
+        UpdateTimelineChrome();
+
         // Background priority deliberately deprioritized the actual video decode
         // start until after the editor panel had already finished rendering -
         // meant to keep the open transition feeling snappy, but it meant nothing
