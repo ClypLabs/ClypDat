@@ -2064,18 +2064,9 @@ public sealed partial class MainWindow : Window
     private void UpdateSpinnerRotation()
     {
         var elapsedSeconds = _spinnerClock.Elapsed.TotalSeconds;
-        // Outer ring: 1.4s per revolution, counter-clockwise. Inner ring:
-        // 0.9s per revolution, clockwise. Wrapped into 0-360 (or 0 to -360)
-        // each tick rather than letting the raw angle grow unbounded - not
-        // strictly required for a RotateTransform, but keeps the value sane
-        // for as long as the editor stays open on a slow-loading clip.
-        if (SpinnerOuterRing.RenderTransform is RotateTransform outerRotate)
+        if (SpinnerRing.RenderTransform is RotateTransform rotate)
         {
-            outerRotate.Angle = -(elapsedSeconds / 1.4 * 360.0) % 360.0;
-        }
-        if (SpinnerInnerRing.RenderTransform is RotateTransform innerRotate)
-        {
-            innerRotate.Angle = (elapsedSeconds / 0.9 * 360.0) % 360.0;
+            rotate.Angle = (elapsedSeconds / 1.2 * 360.0) % 360.0;
         }
     }
 

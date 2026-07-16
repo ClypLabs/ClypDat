@@ -1024,49 +1024,28 @@
         <Border Background="#05080B">
           <Grid>
             <vlc:VideoView x:Name="EditorVideoView" IsVisible="{Binding !IsEditorVideoLoading}" />
-            <!-- Two full ellipses, not partial-arc icon glyphs - an Ellipse's
-                 layout bounding box is always exactly centered on the shape
-                 regardless of how much of its stroke is actually drawn via
-                 StrokeDashArray, so RenderTransformOrigin="0.5,0.5" rotates
-                 each one cleanly in place around its own center. A
-                 hand-drawn arc/icon's bounding box is NOT centered on the
-                 circle it depicts (the missing wedge shifts it), which is
-                 what made an earlier icon-based version of this wobble. -->
-            <Grid Width="40"
-                  Height="40"
-                  IsVisible="{Binding IsEditorVideoLoading}"
-                  HorizontalAlignment="Center"
-                  VerticalAlignment="Center"
-                  IsHitTestVisible="False">
-              <Ellipse x:Name="SpinnerOuterRing"
-                       Width="40"
-                       Height="40"
-                       Stroke="#5C6D7E"
-                       StrokeThickness="4"
-                       StrokeDashArray="21,7"
-                       StrokeLineCap="Round"
-                       HorizontalAlignment="Center"
-                       VerticalAlignment="Center"
-                       RenderTransformOrigin="0.5,0.5">
-                <Ellipse.RenderTransform>
-                  <RotateTransform />
-                </Ellipse.RenderTransform>
-              </Ellipse>
-              <Ellipse x:Name="SpinnerInnerRing"
-                       Width="22"
-                       Height="22"
-                       Stroke="#93A6B8"
-                       StrokeThickness="3"
-                       StrokeDashArray="14,5"
-                       StrokeLineCap="Round"
-                       HorizontalAlignment="Center"
-                       VerticalAlignment="Center"
-                       RenderTransformOrigin="0.5,0.5">
-                <Ellipse.RenderTransform>
-                  <RotateTransform />
-                </Ellipse.RenderTransform>
-              </Ellipse>
-            </Grid>
+            <!-- Diagnostic baseline: ONE ring only, no second element, no
+                 alignment/stacking questions possible. If this alone still
+                 doesn't hold a fixed center while rotating, the bug is in
+                 the rotation/transform mechanism itself, not in how two
+                 elements share a Grid cell - narrows down five failed
+                 two-ring attempts to a single testable variable. -->
+            <Ellipse x:Name="SpinnerRing"
+                     Width="40"
+                     Height="40"
+                     Stroke="#93A6B8"
+                     StrokeThickness="4"
+                     StrokeDashArray="21,7"
+                     StrokeLineCap="Round"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center"
+                     RenderTransformOrigin="0.5,0.5"
+                     IsVisible="{Binding IsEditorVideoLoading}"
+                     IsHitTestVisible="False">
+              <Ellipse.RenderTransform>
+                <RotateTransform />
+              </Ellipse.RenderTransform>
+            </Ellipse>
           </Grid>
         </Border>
         <Border Grid.Column="1" Background="#101820" BorderBrush="#1F2B34" BorderThickness="1,0,0,0">
