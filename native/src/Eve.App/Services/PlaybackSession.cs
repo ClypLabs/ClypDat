@@ -588,6 +588,33 @@ public sealed class PlaybackSession : IDisposable
         return (float)Math.Clamp(percent / 100d, 0, 1.5);
     }
 
+    // Guards the once-per-run PruneAudioCache sweep.
+    private static int _audioCachePruned;
+
+    // The preview WAVs are uncompressed 48kHz stereo PCM (~11MB per minute per
+    // audio track) and were cached with no cleanup at all - every clip ever
+    // opened in the editor stayed on disk forever, measured at 9GB on one real
+    // install. They're pure re-extractable cache, so anything not used in a
+    // week is safe to drop. Recency is tracked by bumping LastWriteTime on
+    // every cache hit (NTFS LastAccessTime updates are often disabled, so
+    // that can't be trusted for this).
+    private static void PruneAudioCache(string tempDir)
+    {
+        if (Interlocked.Exchange(ref _audioCachePruned, 1) != 0) return;
+        try
+        {
+            var cutoff = DateTime.UtcNow.AddDays(-7);
+            foreach (var file in Directory.EnumerateFiles(tempDir, "*.wav"))
+            {
+                if (File.GetLastWriteTimeUtc(file) < cutoff) TryDelete(file);
+            }
+        }
+        catch
+        {
+            // Cache pruning must never block playback.
+        }
+    }
+
     private static async Task<string> ExtractAudioTrackAsync(
         string inputPath,
         int streamIndex,
@@ -598,8 +625,15 @@ public sealed class PlaybackSession : IDisposable
             "EVE",
             "preview-audio");
         Directory.CreateDirectory(tempDir);
+        PruneAudioCache(tempDir);
         var outputPath = Path.Combine(tempDir, $"{AudioCacheKey(inputPath, streamIndex)}.wav");
-        if (IsUsableAudioCache(outputPath)) return outputPath;
+        if (IsUsableAudioCache(outputPath))
+        {
+            // Mark as recently used so the 7-day prune keeps clips that are
+            // actually still being opened.
+            try { File.SetLastWriteTimeUtc(outputPath, DateTime.UtcNow); } catch { }
+            return outputPath;
+        }
         TryDelete(outputPath);
 
         var pendingPath = Path.Combine(tempDir, $"{Guid.NewGuid():N}.wav");
