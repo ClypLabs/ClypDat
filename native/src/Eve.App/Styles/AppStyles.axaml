@@ -238,15 +238,23 @@
     <Setter Property="BorderBrush" Value="#2C3B48" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
-    <Setter Property="Padding" Value="4" />
-    <Setter Property="MinWidth" Value="140" />
+    <Setter Property="Padding" Value="6" />
+    <Setter Property="MinWidth" Value="180" />
+  </Style>
+  <Style Selector="ContextMenu">
+    <Setter Property="Background" Value="#141D24" />
+    <Setter Property="BorderBrush" Value="#2C3B48" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Padding" Value="6" />
+    <Setter Property="MinWidth" Value="180" />
   </Style>
   <Style Selector="MenuItem">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="#B8C7D8" />
-    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontSize" Value="14" />
     <Setter Property="CornerRadius" Value="6" />
-    <Setter Property="Padding" Value="10,7" />
+    <Setter Property="Padding" Value="13,9" />
   </Style>
   <Style Selector="MenuItem:pointerover">
     <Setter Property="Background" Value="#263544" />
