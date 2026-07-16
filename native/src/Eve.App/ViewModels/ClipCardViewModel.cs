@@ -169,30 +169,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     // EVE-recorded and Medal-imported clips.
     public string GameFilterKey => _clipInfo?.GameDisplayName ?? TileTopLabel;
 
-    private bool _isMostRecentForGame;
-    private int _gameClipCount;
     private bool _isMatchedByGameFilter = true;
-
-    // Set by MainWindowViewModel.RecomputeGameFilterBadges() - true only for
-    // the chronologically newest clip of each distinct game, which is where
-    // the filter dropdown badge shows (one per game, not one per clip).
-    public bool IsMostRecentForGame
-    {
-        get => _isMostRecentForGame;
-        set => SetProperty(ref _isMostRecentForGame, value);
-    }
-
-    public int GameClipCount
-    {
-        get => _gameClipCount;
-        set
-        {
-            if (!SetProperty(ref _gameClipCount, value)) return;
-            OnPropertyChanged(nameof(GameFilterMenuLabel));
-        }
-    }
-
-    public string GameFilterMenuLabel => $"{GameFilterKey} ({GameClipCount})";
 
     // Drives this card's own visibility when a game filter is active -
     // toggled by MainWindowViewModel's game-filter checklist, not by
@@ -323,7 +300,6 @@ public sealed class ClipCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(AutoClipKillCount));
         OnPropertyChanged(nameof(HasAutoClipKillCount));
         OnPropertyChanged(nameof(GameFilterKey));
-        OnPropertyChanged(nameof(GameFilterMenuLabel));
     }
 
     private void SetPreviewImage(string path)

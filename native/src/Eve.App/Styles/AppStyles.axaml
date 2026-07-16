@@ -167,6 +167,11 @@
     hit the identical issue.
   -->
   <Style Selector="Button#ExportButton, Button#CheckNowButton, Button#UpdateNowButton">
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
     <Setter Property="Template">
       <ControlTemplate>
         <Border Background="{TemplateBinding Background}"
@@ -216,6 +221,11 @@
     <Setter Property="Foreground" Value="#BDD4EE" />
     <Setter Property="FontWeight" Value="Normal" />
     <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
     <Setter Property="Template">
       <ControlTemplate>
         <Border Background="{TemplateBinding Background}" CornerRadius="{TemplateBinding CornerRadius}">
@@ -239,6 +249,11 @@
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Padding" Value="8,5" />
     <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
     <Setter Property="Template">
       <ControlTemplate>
         <Border Background="{TemplateBinding Background}" CornerRadius="{TemplateBinding CornerRadius}">
@@ -260,6 +275,11 @@
     <Setter Property="CornerRadius" Value="6" />
     <Setter Property="HorizontalContentAlignment" Value="Left" />
     <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
     <Setter Property="Template">
       <ControlTemplate>
         <Border Background="{TemplateBinding Background}" CornerRadius="{TemplateBinding CornerRadius}">

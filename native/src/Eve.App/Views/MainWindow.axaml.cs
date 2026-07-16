@@ -234,13 +234,6 @@ public sealed partial class MainWindow : Window
         await ViewModel.LoadLibraryFolderAsync(path);
     }
 
-    private void GameFilterMenuItem_OnClick(object? sender, RoutedEventArgs e)
-    {
-        if (ViewModel is null) return;
-        if (sender is not MenuItem { DataContext: ClipCardViewModel card }) return;
-        ViewModel.ToggleGameFilter(card.GameFilterKey);
-    }
-
     private void ClearGameFilterButton_OnClick(object? sender, RoutedEventArgs e)
     {
         ViewModel?.ClearGameFilters();

@@ -2566,29 +2566,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private const string ClipTypeVod = "Vod";
     private const string ClipTypeMedalImport = "MedalImport";
 
-    // Marks exactly one card per distinct game (the newest, across the whole
-    // library regardless of date group) as where that game's per-card filter
-    // badge shows, gives every card an up-to-date total count for its game,
-    // and rebuilds the Game Filters / Clip Type Filters checklist option
-    // lists - works the same for EVE-recorded and Medal-imported clips since
-    // both resolve GameFilterKey (TileTopLabel) the same way. Re-run any time
-    // the library's clip set changes, not just once.
+    // Rebuilds the Game Filters / Clip Type Filters checklist option lists -
+    // works the same for EVE-recorded and Medal-imported clips since both
+    // resolve GameFilterKey (TileTopLabel) the same way. Re-run any time the
+    // library's clip set changes, not just once.
     private void RecomputeGameFilterBadges()
     {
-        var seenGames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var countsByGame = AllClips
             .GroupBy(clip => clip.GameFilterKey, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
-
-        // ClipGroups is already ordered newest-date-first and each group's
-        // own Clips newest-first, so the first time a game name is seen here
-        // is genuinely its most recent clip.
-        foreach (var clip in ClipGroups.SelectMany(group => group.Clips))
-        {
-            var hasGame = !string.IsNullOrWhiteSpace(clip.GameFilterKey);
-            clip.GameClipCount = hasGame && countsByGame.TryGetValue(clip.GameFilterKey, out var count) ? count : 0;
-            clip.IsMostRecentForGame = hasGame && seenGames.Add(clip.GameFilterKey);
-        }
 
         // A previously-active game filter's target game can disappear
         // entirely (its last clip got deleted) - drop it from the active
@@ -2626,27 +2612,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(ActiveGameFilterLabel));
             OnPropertyChanged(nameof(IsClipTypeFilterActive));
         }
-    }
-
-    // Per-card badge "isolate to just this game" shortcut - clicking a
-    // card's own game badge either narrows the active set down to exactly
-    // that one game, or (if it's already isolated to just that game) clears
-    // it, while the top-bar checklist offers true multi-select on top of the
-    // same underlying set.
-    public void ToggleGameFilter(string gameName)
-    {
-        var isolate = !(_activeGameFilters.Count == 1 && _activeGameFilters.Contains(gameName));
-        _activeGameFilters.Clear();
-        if (isolate) _activeGameFilters.Add(gameName);
-
-        foreach (var option in GameFilterOptions)
-        {
-            option.SetCheckedSilently(_activeGameFilters.Contains(option.Key));
-        }
-
-        ApplyGameFilters();
-        OnPropertyChanged(nameof(IsGameFilterActive));
-        OnPropertyChanged(nameof(ActiveGameFilterLabel));
     }
 
     public void ClearGameFilters()
