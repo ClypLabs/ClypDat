@@ -891,6 +891,11 @@ public sealed partial class MainWindow : Window
         await ViewModel.ImportSelectedMedalClipsAsync();
     }
 
+    private void ToggleMedalImportSelection_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel?.ToggleMedalImportSelection();
+    }
+
     private async void BrowseCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;

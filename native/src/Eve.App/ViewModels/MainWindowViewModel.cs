@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Security.Cryptography;
 using Avalonia.Threading;
 using Eve.App.Services;
@@ -77,6 +79,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public MainWindowViewModel()
     {
         Settings = AppSettingsStore.Load();
+        MedalImportRows.CollectionChanged += MedalImportRows_OnCollectionChanged;
+        MigrateLegacyMedalImportHistory();
         AllClips = new ObservableCollection<ClipCardViewModel>();
         TimelineTracks = new ObservableCollection<TrackLaneViewModel>();
         ChatAudioDevices = new ObservableCollection<AudioDeviceOption>();
@@ -693,6 +697,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ObservableCollection<MedalImportRowViewModel> MedalImportRows { get; } = new();
 
+    public bool? MedalImportSelectionState
+    {
+        get
+        {
+            var selectable = MedalImportRows.Where(row => row.CanImport).ToArray();
+            if (selectable.Length == 0 || selectable.All(row => !row.IsSelected)) return false;
+            return selectable.All(row => row.IsSelected) ? true : null;
+        }
+    }
+
+    public bool CanToggleMedalImportSelection => !MedalImportInProgress && MedalImportRows.Any(row => row.CanImport);
+
+    public void ToggleMedalImportSelection()
+    {
+        var selectAll = MedalImportSelectionState != true;
+        foreach (var row in MedalImportRows.Where(row => row.CanImport)) row.IsSelected = selectAll;
+        NotifyMedalImportSelectionState();
+    }
+
     private bool _medalScanned;
 
     public bool MedalScanned
@@ -718,6 +741,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (!SetProperty(ref _medalImportInProgress, value)) return;
             OnPropertyChanged(nameof(ShowMedalImportStatusText));
+            OnPropertyChanged(nameof(CanToggleMedalImportSelection));
         }
     }
 
@@ -763,32 +787,33 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         MedalImportRows.Clear();
         IReadOnlyList<MedalClipRecord> found;
         MedalImportInProgress = true;
-        MedalImportStatusText = "Scanning Medal clips...";
+        MedalImportProgressPercent = 0;
+        MedalImportStatusText = "Finding Medal clip catalogs...";
+        IProgress<MedalScanProgress> progress = new Progress<MedalScanProgress>(update =>
+        {
+            if (!MedalImportInProgress) return;
+            MedalImportProgressPercent = Math.Max(MedalImportProgressPercent, Math.Clamp(update.Percent, 0, 100));
+            MedalImportStatusText = update.Status;
+        });
         try
         {
-            found = await Task.Run(MedalImportService.ScanForClips);
+            found = await Task.Run(() => MedalImportService.ScanForClips(progress));
         }
         catch (Exception error)
         {
             MedalScanStatusText = $"Scan failed: {error.Message}";
             MedalScanned = true;
             MedalImportInProgress = false;
+            MedalImportStatusText = string.Empty;
             return;
         }
 
         try
         {
-            var repaired = await RepairMalformedMedalImportsAsync(found);
-            var importedKeys = new HashSet<string>(Settings.ImportedMedalClipKeys, StringComparer.Ordinal);
+            var importedKeys = LoadMedalImportHistory();
+            var repaired = await RepairMalformedMedalImportsAsync(found, importedKeys, progress);
             AddExistingMedalImportKeys(importedKeys);
-            var settingsChanged = false;
-            foreach (var key in importedKeys)
-            {
-                if (Settings.ImportedMedalClipKeys.Contains(key, StringComparer.Ordinal)) continue;
-                Settings.ImportedMedalClipKeys.Add(key);
-                settingsChanged = true;
-            }
-            if (settingsChanged) SaveSettings();
+            PersistMedalImportHistory(importedKeys);
 
             var candidates = found
                 .GroupBy(MedalImportService.GetImportKey, StringComparer.Ordinal)
@@ -798,14 +823,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .Where(record => !IsKnownMedalImport(record, importedKeys))
                 .OrderByDescending(record => record.CreatedAtUtc)
                 .ToArray();
-            var validations = await ValidateMedalCandidatesAsync(available);
 
-            foreach (var validation in validations)
+            foreach (var record in available)
             {
-                MedalImportRows.Add(new MedalImportRowViewModel(validation.Record, MedalImportStripEmoji, validation.Probe.Duration, validation.ValidationMessage));
+                MedalImportRows.Add(new MedalImportRowViewModel(record, MedalImportStripEmoji));
             }
 
-            var unreadable = validations.Count(validation => !string.IsNullOrWhiteSpace(validation.ValidationMessage));
             var alreadyImported = candidates.Length - available.Length;
             var status = available.Length switch
             {
@@ -814,10 +837,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 1 => alreadyImported > 0 ? $"1 new Medal clip found ({alreadyImported} already imported)." : "1 new Medal clip found.",
                 _ => alreadyImported > 0 ? $"{available.Length} new Medal clips found ({alreadyImported} already imported)." : $"{available.Length} new Medal clips found."
             };
-            if (unreadable > 0) status += $" {unreadable} unreadable file{(unreadable == 1 ? "" : "s")} shown but disabled.";
             if (repaired > 0) status += $" Repaired {repaired} malformed imported clip{(repaired == 1 ? "" : "s")}.";
             MedalScanStatusText = status;
             MedalScanned = true;
+            progress.Report(new MedalScanProgress(100, "Medal scan complete."));
+            MedalImportProgressPercent = 100;
         }
         catch (Exception error)
         {
@@ -832,37 +856,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private async Task<IReadOnlyList<MedalCandidateValidation>> ValidateMedalCandidatesAsync(IReadOnlyList<MedalClipRecord> records)
-    {
-        using var semaphore = new SemaphoreSlim(4, 4);
-        var tasks = records.Select(async record =>
-        {
-            await semaphore.WaitAsync();
-            try
-            {
-                var probe = await _mediaProbe.ProbeDurationAsync(record.VideoPath);
-                var message = probe.Duration > TimeSpan.Zero
-                    ? string.Empty
-                    : "Unreadable or incomplete video; Medal did not finish writing its metadata.";
-                if (!string.IsNullOrWhiteSpace(message)) AppLog.Error($"Medal import: unreadable source {record.VideoPath}: {probe.Error}");
-                return new MedalCandidateValidation(record, probe, message);
-            }
-            finally
-            {
-                semaphore.Release();
-            }
-        });
-        return await Task.WhenAll(tasks);
-    }
-
-    private async Task<int> RepairMalformedMedalImportsAsync(IReadOnlyList<MedalClipRecord> sources)
+    private async Task<int> RepairMalformedMedalImportsAsync(IReadOnlyList<MedalClipRecord> sources, ISet<string> importedKeys, IProgress<MedalScanProgress> progress)
     {
         if (string.IsNullOrWhiteSpace(Settings.LibraryFolder) || !Directory.Exists(Settings.LibraryFolder)) return 0;
 
         var libraryRoot = Settings.LibraryFolder;
         var repaired = 0;
-        foreach (var videoPath in Directory.EnumerateFiles(libraryRoot, "*.*", SearchOption.AllDirectories).Where(MediaProbeService.IsVideoFile))
+        var libraryVideos = Directory.EnumerateFiles(libraryRoot, "*.*", SearchOption.AllDirectories).Where(MediaProbeService.IsVideoFile).ToArray();
+        for (var i = 0; i < libraryVideos.Length; i++)
         {
+            var videoPath = libraryVideos[i];
+            progress.Report(new MedalScanProgress(55 + 35.0 * (i + 1) / Math.Max(1, libraryVideos.Length), $"Checking library clip {i + 1} of {libraryVideos.Length}..."));
             var info = ClipInfoSidecar.Load(libraryRoot, videoPath);
             if (!NeedsMedalImportRepair(info)) continue;
 
@@ -916,8 +920,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
                 var newKey = MedalImportService.GetImportKey(source);
                 ClipInfoSidecar.Save(libraryRoot, destinationPath, new ClipInfo(source.GameFolderName, info.AutoClipEventType, title, source.CreatedAtUtc, newKey));
-                Settings.ImportedMedalClipKeys.RemoveAll(key => string.Equals(key, oldKey, StringComparison.Ordinal));
-                if (!Settings.ImportedMedalClipKeys.Contains(newKey, StringComparer.Ordinal)) Settings.ImportedMedalClipKeys.Add(newKey);
+                if (!string.IsNullOrWhiteSpace(oldKey)) importedKeys.Remove(oldKey);
+                importedKeys.Add(newKey);
                 repaired++;
             }
             catch (Exception error)
@@ -928,7 +932,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         if (repaired > 0)
         {
-            SaveSettings();
             await RefreshLibraryAsync();
         }
         return repaired;
@@ -949,7 +952,42 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return leftHash.AsSpan().SequenceEqual(rightHash);
     }
 
-    private sealed record MedalCandidateValidation(MedalClipRecord Record, MediaDurationProbeResult Probe, string ValidationMessage);
+    private void MigrateLegacyMedalImportHistory()
+    {
+        if (Settings.LegacyImportedMedalClipKeys is not { Count: > 0 } ||
+            string.IsNullOrWhiteSpace(Settings.LibraryFolder) ||
+            !Directory.Exists(Settings.LibraryFolder)) return;
+
+        if (!MedalImportHistoryStore.TryLoad(Settings.LibraryFolder, out var importedKeys)) return;
+        importedKeys.UnionWith(Settings.LegacyImportedMedalClipKeys);
+        if (!MedalImportHistoryStore.TrySave(Settings.LibraryFolder, importedKeys)) return;
+
+        Settings.LegacyImportedMedalClipKeys = null;
+        SaveSettings();
+    }
+
+    private HashSet<string> LoadMedalImportHistory()
+    {
+        var importedKeys = new HashSet<string>(StringComparer.Ordinal);
+        if (!string.IsNullOrWhiteSpace(Settings.LibraryFolder) && Directory.Exists(Settings.LibraryFolder) &&
+            MedalImportHistoryStore.TryLoad(Settings.LibraryFolder, out var savedKeys))
+        {
+            importedKeys.UnionWith(savedKeys);
+        }
+
+        if (Settings.LegacyImportedMedalClipKeys is { Count: > 0 }) importedKeys.UnionWith(Settings.LegacyImportedMedalClipKeys);
+        return importedKeys;
+    }
+
+    private void PersistMedalImportHistory(ISet<string> importedKeys)
+    {
+        if (string.IsNullOrWhiteSpace(Settings.LibraryFolder) || !Directory.Exists(Settings.LibraryFolder)) return;
+        if (!MedalImportHistoryStore.TrySave(Settings.LibraryFolder, importedKeys)) return;
+
+        if (Settings.LegacyImportedMedalClipKeys is not { Count: > 0 }) return;
+        Settings.LegacyImportedMedalClipKeys = null;
+        SaveSettings();
+    }
 
     private void AddExistingMedalImportKeys(ISet<string> importedKeys)
     {
@@ -982,6 +1020,30 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private void MedalImportRows_OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs eventArgs)
+    {
+        if (eventArgs.NewItems is not null)
+        {
+            foreach (MedalImportRowViewModel row in eventArgs.NewItems) row.PropertyChanged += MedalImportRow_OnPropertyChanged;
+        }
+        if (eventArgs.OldItems is not null)
+        {
+            foreach (MedalImportRowViewModel row in eventArgs.OldItems) row.PropertyChanged -= MedalImportRow_OnPropertyChanged;
+        }
+        NotifyMedalImportSelectionState();
+    }
+
+    private void MedalImportRow_OnPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
+    {
+        if (eventArgs.PropertyName is nameof(MedalImportRowViewModel.IsSelected) or nameof(MedalImportRowViewModel.CanImport)) NotifyMedalImportSelectionState();
+    }
+
+    private void NotifyMedalImportSelectionState()
+    {
+        OnPropertyChanged(nameof(MedalImportSelectionState));
+        OnPropertyChanged(nameof(CanToggleMedalImportSelection));
+    }
+
     private static bool IsKnownMedalImport(MedalClipRecord record, ISet<string> importedKeys)
     {
         var key = MedalImportService.GetImportKey(record);
@@ -1010,6 +1072,33 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             for (var i = 0; i < selected.Count; i++)
             {
                 var row = selected[i];
+                MedalImportStatusText = $"Validating {i + 1} of {selected.Count}: {row.DisplayTitle}";
+                MediaDurationProbeResult probe;
+                try
+                {
+                    probe = await _mediaProbe.ProbeDurationAsync(row.Record.VideoPath);
+                }
+                catch (Exception error)
+                {
+                    var message = "Unreadable or incomplete video; Medal did not finish writing its metadata.";
+                    row.SetValidationError(message);
+                    AppLog.Error($"Medal import: unreadable source {row.Record.VideoPath}", error);
+                    failed++;
+                    MedalImportProgressPercent = (i + 1) * 100.0 / selected.Count;
+                    continue;
+                }
+
+                if (probe.Duration <= TimeSpan.Zero)
+                {
+                    var message = "Unreadable or incomplete video; Medal did not finish writing its metadata.";
+                    row.SetValidationError(message);
+                    AppLog.Error($"Medal import: unreadable source {row.Record.VideoPath}: {probe.Error}");
+                    failed++;
+                    MedalImportProgressPercent = (i + 1) * 100.0 / selected.Count;
+                    continue;
+                }
+
+                row.SetValidatedDuration(probe.Duration);
                 MedalImportStatusText = $"Importing {i + 1} of {selected.Count}: {row.DisplayTitle}";
                 try
                 {
@@ -1038,11 +1127,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
                     var importKey = MedalImportService.GetImportKey(row.Record);
                     ClipInfoSidecar.Save(Settings.LibraryFolder, destinationPath, new ClipInfo(row.GameFolderName, null, title, row.Record.CreatedAtUtc, importKey));
-                    if (!Settings.ImportedMedalClipKeys.Contains(importKey, StringComparer.Ordinal))
-                    {
-                        Settings.ImportedMedalClipKeys.Add(importKey);
-                        SaveSettings();
-                    }
+                    var importedKeys = LoadMedalImportHistory();
+                    importedKeys.Add(importKey);
+                    PersistMedalImportHistory(importedKeys);
 
                     await AddOrUpdateLibraryClipAsync(destinationPath);
                     imported++;
@@ -1463,6 +1550,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public async Task LoadLibraryFolderAsync(string folderPath)
     {
         Settings.LibraryFolder = folderPath;
+        MigrateLegacyMedalImportHistory();
         SaveSettings();
         OnPropertyChanged(nameof(CanRenameAllClips));
         await RefreshLibraryAsync();

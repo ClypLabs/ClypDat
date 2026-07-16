@@ -697,8 +697,13 @@
                   <StackPanel Spacing="14" IsVisible="{Binding MedalScanned}">
                     <Border Height="1" Background="#1B242D" />
 
-                    <Button Content="Import Selected" Click="ImportMedalButton_OnClick" HorizontalAlignment="Left" Classes="primaryButton"
-                            IsEnabled="{Binding !MedalImportInProgress}" />
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12" Margin="12,0,0,0">
+                      <CheckBox IsThreeState="True" IsChecked="{Binding MedalImportSelectionState, Mode=OneWay}"
+                                IsEnabled="{Binding CanToggleMedalImportSelection}" Click="ToggleMedalImportSelection_OnClick"
+                                ToolTip.Tip="Select or deselect all importable Medal clips" VerticalAlignment="Center" />
+                      <Button Grid.Column="1" Content="Import Selected" Click="ImportMedalButton_OnClick" HorizontalAlignment="Left" Classes="primaryButton"
+                              IsEnabled="{Binding !MedalImportInProgress}" />
+                    </Grid>
 
                     <ItemsControl ItemsSource="{Binding MedalImportRows}">
                       <ItemsControl.ItemTemplate>
