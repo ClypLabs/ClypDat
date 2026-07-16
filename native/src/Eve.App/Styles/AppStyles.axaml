@@ -214,7 +214,12 @@
     the equation, so a real, content-sized hover pill can be painted instead.
   -->
   <Style Selector="Button.linkButton">
-    <Setter Property="Background" Value="Transparent" />
+    <!-- Not Colors.Transparent (#00FFFFFF - white at zero alpha) - a
+         BrushTransition from that to an opaque dark color interpolates the
+         RGB channels through white along the way, which reads as a visible
+         white flash on hover-enter/exit. Same RGB as the hover color below,
+         just zero alpha, so only alpha animates. -->
+    <Setter Property="Background" Value="#001D2A36" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Padding" Value="6,3" />
     <Setter Property="CornerRadius" Value="6" />
@@ -248,7 +253,7 @@
     <Setter Property="Foreground" Value="#D2DEEC" />
   </Style>
   <Style Selector="Button.brandButton">
-    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Background" Value="#001D2A36" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Padding" Value="8,5" />
     <Setter Property="CornerRadius" Value="8" />
@@ -272,7 +277,7 @@
     <Setter Property="Background" Value="#1D2A36" />
   </Style>
   <Style Selector="Button.gameFilterBadge">
-    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Background" Value="#001D2A36" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Padding" Value="6,3" />
     <Setter Property="CornerRadius" Value="6" />
