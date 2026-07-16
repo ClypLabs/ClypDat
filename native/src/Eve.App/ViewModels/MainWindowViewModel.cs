@@ -2440,7 +2440,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public IReadOnlyList<string> BuildExportArguments(string outputPath)
+    public IReadOnlyList<string> BuildExportArguments(string outputPath, bool useHardwareEncoder = true)
     {
         var startSeconds = Math.Max(0, TrimStart.TotalSeconds);
         var end = TrimEnd > TrimStart ? TrimEnd : Duration;
@@ -2496,7 +2496,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             args.Add("[aout]");
         }
 
-        args.AddRange(BuildExportCodecArguments());
+        args.AddRange(BuildExportCodecArguments(useHardwareEncoder));
         if (audioTracks.Length > 0)
         {
             args.AddRange(new[] { "-c:a", "aac" });
@@ -2510,8 +2510,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private static double VolumeMultiplier(double percent) => Math.Clamp(percent / 100d, 0, 1.5);
 
-    private IReadOnlyList<string> BuildExportCodecArguments()
+    // NVENC first: the CPU encoders here (libx265, and especially libaom-av1)
+    // took minutes for clips NVENC finishes in seconds, and this app already
+    // targets NVENC hardware for capture. Callers retry with
+    // useHardwareEncoder: false when ffmpeg fails - which is exactly what
+    // happens on a machine with no NVIDIA GPU - so the CPU path is the
+    // fallback, not a separate user-facing choice.
+    private IReadOnlyList<string> BuildExportCodecArguments(bool useHardwareEncoder)
     {
+        if (useHardwareEncoder)
+        {
+            return SelectedExportCodec?.Label switch
+            {
+                "H.265" => new[] { "-c:v", "hevc_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "24", "-b:v", "0" },
+                "AV1" => new[] { "-c:v", "av1_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "32", "-b:v", "0" },
+                _ => new[] { "-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "20", "-b:v", "0" }
+            };
+        }
+
         return SelectedExportCodec?.Label switch
         {
             "H.265" => new[] { "-c:v", "libx265", "-preset", "veryfast", "-crf", "24" },

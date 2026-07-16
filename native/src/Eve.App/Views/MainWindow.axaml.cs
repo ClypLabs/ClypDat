@@ -1476,8 +1476,13 @@ public sealed partial class MainWindow : Window
         ViewModel.IsExporting = true;
         try
         {
-            var args = ViewModel.BuildExportArguments(tempPath);
-            var result = await RunProcessAsync("ffmpeg", args);
+            var result = await RunProcessAsync("ffmpeg", ViewModel.BuildExportArguments(tempPath));
+            if (result.ExitCode != 0)
+            {
+                // Same NVENC-then-CPU fallback as Export.
+                AppLog.Info($"Save Trim: NVENC encode failed, retrying with CPU encoder. ffmpeg said: {result.Error}");
+                result = await RunProcessAsync("ffmpeg", ViewModel.BuildExportArguments(tempPath, useHardwareEncoder: false));
+            }
             if (result.ExitCode != 0)
             {
                 await ShowMessageAsync("Save Trim failed", string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg failed." : result.Error);
@@ -1580,7 +1585,6 @@ public sealed partial class MainWindow : Window
         {
             _playback?.Pause();
             ViewModel.IsPlaying = false;
-            var args = ViewModel.BuildExportArguments(outputPath);
             var exportDuration = ViewModel.ExportDuration;
             var progress = new Progress<double>(fraction =>
             {
@@ -1588,7 +1592,16 @@ public sealed partial class MainWindow : Window
                 progressBar.Value = Math.Clamp(fraction * 100, 0, 100);
                 statusText.Text = $"Exporting clip... {progressBar.Value:0}%";
             });
-            var result = await RunProcessWithProgressAsync("ffmpeg", args, exportDuration, progress, progressCts.Token);
+            var result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildExportArguments(outputPath), exportDuration, progress, progressCts.Token);
+            if (result.ExitCode != 0 && !progressCts.IsCancellationRequested)
+            {
+                // NVENC encode failed (no NVIDIA GPU, driver too old) - redo
+                // the whole encode on the CPU instead of surfacing an error.
+                AppLog.Info($"Export: NVENC encode failed, retrying with CPU encoder. ffmpeg said: {result.Error}");
+                progressBar.IsIndeterminate = true;
+                statusText.Text = "Exporting clip (CPU encoder)...";
+                result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildExportArguments(outputPath, useHardwareEncoder: false), exportDuration, progress, progressCts.Token);
+            }
             progressWindow.Close();
             if (progressCts.IsCancellationRequested)
             {
