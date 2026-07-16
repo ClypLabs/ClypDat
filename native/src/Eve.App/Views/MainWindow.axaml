@@ -118,6 +118,49 @@
 
           </Grid>
 
+          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
+            <Button Classes="gameFilterBadge" ToolTip.Tip="Game Filters">
+              <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <PathIcon Data="M21.58,16.09l-1.09-7.66C20.21,6.46,18.52,5,16.53,5H7.47C5.48,5,3.79,6.46,3.51,8.43l-1.09,7.66C2.2,17.63,3.39,19,4.94,19h0c0.68,0,1.32-0.27,1.8-0.75L9,16h6l2.25,2.25c0.48,0.48,1.13,0.75,1.8,0.75h0C20.61,19,21.8,17.63,21.58,16.09z M11,11H9v2H8v-2H6v-1h2V8h1v2h2V11z M15.5,10c-0.55,0-1-0.45-1-1s0.45-1,1-1s1,0.45,1,1S16.05,10,15.5,10z M17.5,13c-0.55,0-1-0.45-1-1s0.45-1,1-1s1,0.45,1,1S18.05,13,17.5,13z"
+                          Width="14" Height="14" Foreground="#8C98A7" />
+                <TextBlock Text="Game Filters" Foreground="#B8C7D8" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
+                <PathIcon Data="M7,10L12,15L17,10Z" Width="10" Height="10" Foreground="#8C98A7" />
+              </StackPanel>
+              <Button.Flyout>
+                <Flyout Placement="BottomEdgeAlignedLeft">
+                  <ScrollViewer MaxHeight="320">
+                    <ItemsControl ItemsSource="{Binding GameFilterOptions}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <CheckBox Content="{Binding Label}" IsChecked="{Binding IsChecked, Mode=TwoWay}" Margin="4,4" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </ScrollViewer>
+                </Flyout>
+              </Button.Flyout>
+            </Button>
+            <Button Classes="gameFilterBadge" ToolTip.Tip="Clip Type Filters">
+              <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <PathIcon Data="M21,19V5c0-1.1-0.9-2-2-2H5C3.9,3,3,3.9,3,5v14c0,1.1,0.9,2,2,2h14C20.1,21,21,20.1,21,19z M8.5,13.5l2.5,3.01L14.5,12l4.5,6H5L8.5,13.5z"
+                          Width="14" Height="14" Foreground="#8C98A7" />
+                <TextBlock Text="Clip Type Filters" Foreground="#B8C7D8" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
+                <PathIcon Data="M7,10L12,15L17,10Z" Width="10" Height="10" Foreground="#8C98A7" />
+              </StackPanel>
+              <Button.Flyout>
+                <Flyout Placement="BottomEdgeAlignedLeft">
+                  <ItemsControl ItemsSource="{Binding ClipTypeFilterOptions}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <CheckBox Content="{Binding Label}" IsChecked="{Binding IsChecked, Mode=TwoWay}" Margin="4,4" />
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </Flyout>
+              </Button.Flyout>
+            </Button>
+          </StackPanel>
+
           <ScrollViewer Margin="-4,14,-4,0">
             <ItemsControl ItemsSource="{Binding ClipGroups}">
             <ItemsControl.ItemTemplate>
@@ -145,7 +188,7 @@
                                 Background="#24303A"
                                 CornerRadius="12"
                                 BoxShadow="0 6 18 -6 #66000000"
-                                IsVisible="{Binding IsMatchedByGameFilter}"
+                                IsVisible="{Binding IsVisibleInLibrary}"
                                 PointerPressed="ClipCard_OnPointerPressed"
                                 PointerEntered="ClipCard_OnPointerEntered"
                                 PointerExited="ClipCard_OnPointerExited">

@@ -243,7 +243,7 @@ public sealed partial class MainWindow : Window
 
     private void ClearGameFilterButton_OnClick(object? sender, RoutedEventArgs e)
     {
-        ViewModel?.SetGameFilter(null);
+        ViewModel?.ClearGameFilters();
     }
 
     private async void FolderButton_OnClick(object? sender, RoutedEventArgs e)

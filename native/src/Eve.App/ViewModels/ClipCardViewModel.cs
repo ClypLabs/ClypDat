@@ -15,6 +15,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     private Bitmap? _previewImage;
     private ClipInfo? _clipInfo;
     private ClipEditSettings? _clipEdit;
+    private bool _isVod;
 
     public ClipCardViewModel(MediaFileInfo media, string libraryRoot)
     {
@@ -23,7 +24,21 @@ public sealed class ClipCardViewModel : ViewModelBase
         _previewImagePath = media.ThumbnailPath;
         _clipInfo = ClipInfoSidecar.Load(_libraryRoot, media.Path);
         _clipEdit = ClipEditSidecar.Load(_libraryRoot, media.Path);
+        _isVod = ComputeIsVod(media, libraryRoot);
         SetPreviewImage(_previewImagePath);
+    }
+
+    // Authoritative via path - a clip was already sorted into Clips/ or
+    // VODs/ at save time by LibraryLayout.VideoDirectory, so this doesn't
+    // need to wait on ffprobe duration hydration to be correct. Duration is
+    // just a secondary fallback for the rare case a long file ended up
+    // outside VODs/ some other way.
+    private static bool ComputeIsVod(MediaFileInfo media, string libraryRoot)
+    {
+        if (media.Duration.TotalSeconds > LibraryLayout.ClipMaximumDurationSeconds) return true;
+        if (string.IsNullOrWhiteSpace(libraryRoot)) return false;
+        var relative = System.IO.Path.GetRelativePath(LibraryLayout.VodsRoot(libraryRoot), media.Path);
+        return !relative.StartsWith("..", StringComparison.Ordinal) && !System.IO.Path.IsPathRooted(relative);
     }
 
     public MediaFileInfo Media => _media;
@@ -49,6 +64,9 @@ public sealed class ClipCardViewModel : ViewModelBase
     // (from the sidecar, not parseable out of the filename) as the small label
     // above it instead of "Clip from <date>".
     public bool IsAutoClip => !string.IsNullOrWhiteSpace(_clipInfo?.AutoClipEventType);
+    public bool IsVod => _isVod;
+    public bool IsMedalImport => !string.IsNullOrWhiteSpace(_clipInfo?.MedalImportKey);
+    public bool IsManualClip => !IsAutoClip && !IsVod && !IsMedalImport;
     public string TileTopLabel => IsAutoClip ? (_clipInfo!.GameDisplayName ?? GameNameLabel) : GameNameLabel;
     public string TileMainLabel => IsAutoClip ? GameNameLabel : ClipFromLabel;
     public string AutoClipEventTypeLabel => _clipInfo?.AutoClipEventType ?? string.Empty;
@@ -177,12 +195,38 @@ public sealed class ClipCardViewModel : ViewModelBase
     public string GameFilterMenuLabel => $"{GameFilterKey} ({GameClipCount})";
 
     // Drives this card's own visibility when a game filter is active -
-    // toggled by MainWindowViewModel.SetGameFilter(), not by anything local.
+    // toggled by MainWindowViewModel's game-filter checklist, not by
+    // anything local.
     public bool IsMatchedByGameFilter
     {
         get => _isMatchedByGameFilter;
-        set => SetProperty(ref _isMatchedByGameFilter, value);
+        set
+        {
+            if (!SetProperty(ref _isMatchedByGameFilter, value)) return;
+            OnPropertyChanged(nameof(IsVisibleInLibrary));
+        }
     }
+
+    private bool _isMatchedByClipTypeFilter = true;
+
+    // Same shape as IsMatchedByGameFilter but for the clip-type checklist -
+    // toggled by MainWindowViewModel, kept as a separate flag so the two
+    // filter groups can be combined with AND (IsVisibleInLibrary) while each
+    // stays independently OR'd within its own group.
+    public bool IsMatchedByClipTypeFilter
+    {
+        get => _isMatchedByClipTypeFilter;
+        set
+        {
+            if (!SetProperty(ref _isMatchedByClipTypeFilter, value)) return;
+            OnPropertyChanged(nameof(IsVisibleInLibrary));
+        }
+    }
+
+    // What the card's own Border.IsVisible and ClipGroupViewModel.HasVisibleClips
+    // actually bind to - both the game and clip-type filter groups have to
+    // match (AND across groups; each group's own set membership is an OR).
+    public bool IsVisibleInLibrary => IsMatchedByGameFilter && IsMatchedByClipTypeFilter;
 
     public string PreviewImagePath
     {
@@ -250,8 +294,12 @@ public sealed class ClipCardViewModel : ViewModelBase
         _media = media;
         _clipInfo = ClipInfoSidecar.Load(_libraryRoot, media.Path);
         _clipEdit = ClipEditSidecar.Load(_libraryRoot, media.Path);
+        _isVod = ComputeIsVod(media, _libraryRoot);
         PreviewImagePath = media.ThumbnailPath;
         OnPropertyChanged(nameof(Media));
+        OnPropertyChanged(nameof(IsVod));
+        OnPropertyChanged(nameof(IsMedalImport));
+        OnPropertyChanged(nameof(IsManualClip));
         OnPropertyChanged(nameof(Name));
         OnPropertyChanged(nameof(CreatedAt));
         OnPropertyChanged(nameof(Duration));

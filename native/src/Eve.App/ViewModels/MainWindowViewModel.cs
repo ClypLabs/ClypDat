@@ -2551,16 +2551,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RecomputeGameFilterBadges();
     }
 
-    private string? _activeGameFilter;
+    private readonly HashSet<string> _activeGameFilters = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _activeClipTypeFilters = new(StringComparer.OrdinalIgnoreCase);
 
-    public string? ActiveGameFilter => _activeGameFilter;
-    public bool IsGameFilterActive => !string.IsNullOrEmpty(_activeGameFilter);
-    public string ActiveGameFilterLabel => _activeGameFilter ?? string.Empty;
+    public ObservableCollection<FilterOptionViewModel> GameFilterOptions { get; } = new();
+    public ObservableCollection<FilterOptionViewModel> ClipTypeFilterOptions { get; } = new();
+
+    public bool IsGameFilterActive => _activeGameFilters.Count > 0;
+    public string ActiveGameFilterLabel => string.Join(", ", _activeGameFilters);
+    public bool IsClipTypeFilterActive => _activeClipTypeFilters.Count > 0;
+
+    private const string ClipTypeManual = "Manual";
+    private const string ClipTypeAutoClip = "AutoClip";
+    private const string ClipTypeVod = "Vod";
+    private const string ClipTypeMedalImport = "MedalImport";
 
     // Marks exactly one card per distinct game (the newest, across the whole
-    // library regardless of date group) as where that game's filter dropdown
-    // badge shows, and gives every card an up-to-date total count for its
-    // game - works the same for EVE-recorded and Medal-imported clips since
+    // library regardless of date group) as where that game's per-card filter
+    // badge shows, gives every card an up-to-date total count for its game,
+    // and rebuilds the Game Filters / Clip Type Filters checklist option
+    // lists - works the same for EVE-recorded and Medal-imported clips since
     // both resolve GameFilterKey (TileTopLabel) the same way. Re-run any time
     // the library's clip set changes, not just once.
     private void RecomputeGameFilterBadges()
@@ -2580,38 +2590,124 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             clip.IsMostRecentForGame = hasGame && seenGames.Add(clip.GameFilterKey);
         }
 
-        // A previously-active filter's target game can disappear entirely
-        // (its last clip got deleted) - clear rather than leave the library
-        // showing zero clips with no visible way to tell why.
-        if (_activeGameFilter is not null && !countsByGame.ContainsKey(_activeGameFilter))
+        // A previously-active game filter's target game can disappear
+        // entirely (its last clip got deleted) - drop it from the active
+        // set rather than leave the library showing zero clips with no
+        // visible way to tell why.
+        var removedAnyGameFilter = _activeGameFilters.RemoveWhere(name => !countsByGame.ContainsKey(name)) > 0;
+
+        GameFilterOptions.Clear();
+        foreach (var game in countsByGame.OrderByDescending(pair => pair.Value).ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
         {
-            SetGameFilter(null);
+            GameFilterOptions.Add(new FilterOptionViewModel(
+                game.Key,
+                $"{game.Key} ({game.Value})",
+                _activeGameFilters.Contains(game.Key),
+                OnGameFilterOptionChanged));
+        }
+
+        var hasMedalImports = AllClips.Any(clip => clip.IsMedalImport);
+        var removedAnyClipTypeFilter = !hasMedalImports && _activeClipTypeFilters.Remove(ClipTypeMedalImport);
+
+        ClipTypeFilterOptions.Clear();
+        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeManual, "Manual clips", _activeClipTypeFilters.Contains(ClipTypeManual), OnClipTypeFilterOptionChanged));
+        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeAutoClip, "Auto-Clips", _activeClipTypeFilters.Contains(ClipTypeAutoClip), OnClipTypeFilterOptionChanged));
+        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeVod, "Full Session / VODs", _activeClipTypeFilters.Contains(ClipTypeVod), OnClipTypeFilterOptionChanged));
+        if (hasMedalImports)
+        {
+            ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeMedalImport, "Medal imports", _activeClipTypeFilters.Contains(ClipTypeMedalImport), OnClipTypeFilterOptionChanged));
+        }
+
+        if (removedAnyGameFilter) ApplyGameFilters();
+        if (removedAnyClipTypeFilter) ApplyClipTypeFilters();
+        if (removedAnyGameFilter || removedAnyClipTypeFilter)
+        {
+            OnPropertyChanged(nameof(IsGameFilterActive));
+            OnPropertyChanged(nameof(ActiveGameFilterLabel));
+            OnPropertyChanged(nameof(IsClipTypeFilterActive));
         }
     }
 
+    // Per-card badge "isolate to just this game" shortcut - clicking a
+    // card's own game badge either narrows the active set down to exactly
+    // that one game, or (if it's already isolated to just that game) clears
+    // it, while the top-bar checklist offers true multi-select on top of the
+    // same underlying set.
     public void ToggleGameFilter(string gameName)
     {
-        SetGameFilter(string.Equals(_activeGameFilter, gameName, StringComparison.OrdinalIgnoreCase) ? null : gameName);
+        var isolate = !(_activeGameFilters.Count == 1 && _activeGameFilters.Contains(gameName));
+        _activeGameFilters.Clear();
+        if (isolate) _activeGameFilters.Add(gameName);
+
+        foreach (var option in GameFilterOptions)
+        {
+            option.SetCheckedSilently(_activeGameFilters.Contains(option.Key));
+        }
+
+        ApplyGameFilters();
+        OnPropertyChanged(nameof(IsGameFilterActive));
+        OnPropertyChanged(nameof(ActiveGameFilterLabel));
     }
 
-    public void SetGameFilter(string? gameName)
+    public void ClearGameFilters()
     {
-        if (string.Equals(_activeGameFilter, gameName, StringComparison.OrdinalIgnoreCase)) return;
-        _activeGameFilter = gameName;
+        if (_activeGameFilters.Count == 0) return;
+        _activeGameFilters.Clear();
+        foreach (var option in GameFilterOptions) option.SetCheckedSilently(false);
+        ApplyGameFilters();
+        OnPropertyChanged(nameof(IsGameFilterActive));
+        OnPropertyChanged(nameof(ActiveGameFilterLabel));
+    }
 
+    private void OnGameFilterOptionChanged(string gameName, bool isChecked)
+    {
+        if (isChecked) _activeGameFilters.Add(gameName);
+        else _activeGameFilters.Remove(gameName);
+        ApplyGameFilters();
+        OnPropertyChanged(nameof(IsGameFilterActive));
+        OnPropertyChanged(nameof(ActiveGameFilterLabel));
+    }
+
+    private void OnClipTypeFilterOptionChanged(string key, bool isChecked)
+    {
+        if (isChecked) _activeClipTypeFilters.Add(key);
+        else _activeClipTypeFilters.Remove(key);
+        ApplyClipTypeFilters();
+        OnPropertyChanged(nameof(IsClipTypeFilterActive));
+    }
+
+    private void ApplyGameFilters()
+    {
         foreach (var group in ClipGroups)
         {
             foreach (var clip in group.Clips)
             {
-                clip.IsMatchedByGameFilter = gameName is null || string.Equals(clip.GameFilterKey, gameName, StringComparison.OrdinalIgnoreCase);
+                clip.IsMatchedByGameFilter = _activeGameFilters.Count == 0 || _activeGameFilters.Contains(clip.GameFilterKey);
             }
 
-            group.NotifyGameFilterChanged();
+            group.NotifyFilterChanged();
         }
+    }
 
-        OnPropertyChanged(nameof(ActiveGameFilter));
-        OnPropertyChanged(nameof(IsGameFilterActive));
-        OnPropertyChanged(nameof(ActiveGameFilterLabel));
+    private void ApplyClipTypeFilters()
+    {
+        foreach (var group in ClipGroups)
+        {
+            foreach (var clip in group.Clips)
+            {
+                clip.IsMatchedByClipTypeFilter = _activeClipTypeFilters.Count == 0 || MatchesClipTypeFilter(clip);
+            }
+
+            group.NotifyFilterChanged();
+        }
+    }
+
+    private bool MatchesClipTypeFilter(ClipCardViewModel clip)
+    {
+        return (clip.IsManualClip && _activeClipTypeFilters.Contains(ClipTypeManual))
+            || (clip.IsAutoClip && _activeClipTypeFilters.Contains(ClipTypeAutoClip))
+            || (clip.IsVod && _activeClipTypeFilters.Contains(ClipTypeVod))
+            || (clip.IsMedalImport && _activeClipTypeFilters.Contains(ClipTypeMedalImport));
     }
 
     private void NotifySelectionChrome()

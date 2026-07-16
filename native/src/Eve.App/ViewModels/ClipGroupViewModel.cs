@@ -30,12 +30,13 @@ public sealed class ClipGroupViewModel : ViewModelBase
         set => SetProperty(ref _isPartiallySelected, value);
     }
 
-    // Whole date group hides itself when a game filter is active and none of
-    // its clips match - each card's own IsMatchedByGameFilter flag drives
-    // this rather than removing/re-adding items, avoiding container
-    // recreation churn (same reasoning as the existing GameSearchText filter
-    // for Settings > Game Capture Overrides).
-    public bool HasVisibleClips => Clips.Any(c => c.IsMatchedByGameFilter);
+    // Whole date group hides itself when a game or clip-type filter is
+    // active and none of its clips match - each card's own
+    // IsVisibleInLibrary flag (game AND clip-type match) drives this rather
+    // than removing/re-adding items, avoiding container recreation churn
+    // (same reasoning as the existing GameSearchText filter for Settings >
+    // Game Capture Overrides).
+    public bool HasVisibleClips => Clips.Any(c => c.IsVisibleInLibrary);
 
-    public void NotifyGameFilterChanged() => OnPropertyChanged(nameof(HasVisibleClips));
+    public void NotifyFilterChanged() => OnPropertyChanged(nameof(HasVisibleClips));
 }
