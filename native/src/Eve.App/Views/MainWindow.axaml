@@ -1520,7 +1520,7 @@
               </Button>
               <Border Width="1" Height="20" Background="#26FFFFFF" Margin="4,0" />
               <Button Classes="transportButton" Click="ExitVideoFullscreenButton_OnClick" ToolTip.Tip="Exit fullscreen">
-                <PathIcon Width="17" Height="17" Foreground="#C8D6E6" Data="M5,16h3v3h2v-5H5V16z M8,5H5v2h3v3h2V5H8z M14,20v-3h3v-2h-5v5H14z M14,5v3h3v2h-5V5H14z" />
+                <PathIcon Width="14" Height="14" Foreground="#C8D6E6" Data="M19,6.41 L17.59,5 L12,10.59 L6.41,5 L5,6.41 L10.59,12 L5,17.59 L6.41,19 L12,13.41 L17.59,19 L19,17.59 L13.41,12 Z" />
               </Button>
             </StackPanel>
           </Border>
