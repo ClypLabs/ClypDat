@@ -97,7 +97,7 @@ public sealed class AudioCapturePipeline : IDisposable
         // Shared across every track/segment of this one save - see
         // GetOrCreateSourceSnapshot for why this must be per-save, not
         // per-chunk.
-        var sourceSnapshotCache = new Dictionary<ReplayAudioCapture, string>();
+        var sourceSnapshotCache = new Dictionary<ReplayAudioCapture, SourceSnapshot?>();
 
         var gamePath = await BuildAlignedTrackAsync(AudioCaptureKind.Game, captures, null, segmentWindows, allowMix: true, snapshots, sourceSnapshotCache, cancellationToken);
         tracks.Add(("Game Audio", gamePath));
@@ -503,6 +503,21 @@ public sealed class AudioCapturePipeline : IDisposable
         return ids;
     }
 
+    // A snapshot of a capture's WAV plus WavStartUtc: the wall-clock moment
+    // WAV position 0 actually corresponds to, anchored from the END of the
+    // data (last sample = the snapshot/capture-end moment) rather than from
+    // FirstSampleUtc. Start-anchoring let capture-clock drift accumulate for
+    // the capture's whole lifetime: real device clocks aren't exactly their
+    // nominal rate, so N seconds of wall-clock never yields exactly N seconds
+    // of samples, and after an hour-plus of one continuous capture the
+    // window's WAV offset could be seconds off - clips saved late in a long
+    // session came out audibly desynced while early ones were fine. The
+    // Legacy backend never showed this only because it restarted captures
+    // every ~20s segment. End-anchoring makes the error zero at the newest
+    // sample and only ~a window's worth of drift (micro-seconds over 60s)
+    // within a clip.
+    private sealed record SourceSnapshot(string Path, DateTime WavStartUtc);
+
     // One full copy of a capture's WAV per save operation, shared by every
     // segment window - this used to happen inside SnapshotAudioFile, once per
     // 60s chunk, which for a multi-hour Full Session finalize meant copying
@@ -511,7 +526,7 @@ public sealed class AudioCapturePipeline : IDisposable
     // muxing. The single snapshot is taken up front, so every chunk window
     // (all of which end at-or-before the moment the save started) is fully
     // covered by it.
-    private string GetOrCreateSourceSnapshot(ReplayAudioCapture capture, ICollection<string> snapshots, Dictionary<ReplayAudioCapture, string> sourceSnapshotCache)
+    private SourceSnapshot? GetOrCreateSourceSnapshot(ReplayAudioCapture capture, ICollection<string> snapshots, Dictionary<ReplayAudioCapture, SourceSnapshot?> sourceSnapshotCache)
     {
         if (sourceSnapshotCache.TryGetValue(capture, out var existing)) return existing;
 
@@ -519,33 +534,58 @@ public sealed class AudioCapturePipeline : IDisposable
         var copied = capture.EndedAtUtc is null
             ? capture.Session.SnapshotTo(sourceSnapshotPath)
             : CopyAudioFile(capture.Path, sourceSnapshotPath);
+        // For a live capture the newest sample in the snapshot was written
+        // essentially "now" (SnapshotTo flushes first); for an ended one it
+        // was written at EndedAtUtc.
+        var lastSampleUtc = capture.EndedAtUtc ?? DateTime.UtcNow;
         if (!copied || !IsUsableAudioFile(sourceSnapshotPath))
         {
             TryDelete(sourceSnapshotPath);
-            sourceSnapshotCache[capture] = string.Empty;
-            return string.Empty;
+            sourceSnapshotCache[capture] = null;
+            return null;
         }
 
         snapshots.Add(sourceSnapshotPath);
-        sourceSnapshotCache[capture] = sourceSnapshotPath;
-        return sourceSnapshotPath;
+
+        var wavStartUtc = capture.EffectiveStartedAtUtc;
+        try
+        {
+            using var reader = new WaveFileReader(sourceSnapshotPath);
+            wavStartUtc = lastSampleUtc - reader.TotalTime;
+            var driftMs = (wavStartUtc - capture.EffectiveStartedAtUtc).TotalMilliseconds;
+            AppLog.Info($"Audio snapshot anchored: kind={capture.Kind}, sourceKey={capture.SourceKey}, wavSeconds={reader.TotalTime.TotalSeconds:0.0}, startDriftMs={driftMs:0}.");
+        }
+        catch (Exception error)
+        {
+            // Fall back to the old start-anchored mapping rather than failing
+            // the save outright.
+            AppLog.Error($"Audio snapshot duration read failed for {sourceSnapshotPath}; falling back to start-anchored alignment.", error);
+        }
+
+        var snapshot = new SourceSnapshot(sourceSnapshotPath, wavStartUtc);
+        sourceSnapshotCache[capture] = snapshot;
+        return snapshot;
     }
 
-    private string SnapshotAudioFile(ReplayAudioCapture? capture, DateTime windowStartUtc, double durationSeconds, ICollection<string> snapshots, Dictionary<ReplayAudioCapture, string> sourceSnapshotCache, ReplayBufferConfig? config = null)
+    private string SnapshotAudioFile(ReplayAudioCapture? capture, DateTime windowStartUtc, double durationSeconds, ICollection<string> snapshots, Dictionary<ReplayAudioCapture, SourceSnapshot?> sourceSnapshotCache, ReplayBufferConfig? config = null)
     {
         if (capture is null || !IsUsableAudioFile(capture.Path)) return string.Empty;
-        var captureEndUtc = capture.EndedAtUtc ?? DateTime.UtcNow;
-        var windowEndUtc = windowStartUtc + TimeSpan.FromSeconds(durationSeconds);
-        var effectiveStartUtc = capture.EffectiveStartedAtUtc;
-        var overlapStartUtc = effectiveStartUtc > windowStartUtc ? effectiveStartUtc : windowStartUtc;
-        var overlapEndUtc = captureEndUtc < windowEndUtc ? captureEndUtc : windowEndUtc;
-        if (overlapEndUtc <= overlapStartUtc) return string.Empty;
 
         var snapshotPath = Path.Combine(_bufferFolder, $"audio_{Guid.NewGuid():N}.wav");
         try
         {
-            var sourceSnapshotPath = GetOrCreateSourceSnapshot(capture, snapshots, sourceSnapshotCache);
-            if (string.IsNullOrEmpty(sourceSnapshotPath)) return string.Empty;
+            var sourceSnapshot = GetOrCreateSourceSnapshot(capture, snapshots, sourceSnapshotCache);
+            if (sourceSnapshot is null) return string.Empty;
+            var sourceSnapshotPath = sourceSnapshot.Path;
+
+            var captureEndUtc = capture.EndedAtUtc ?? DateTime.UtcNow;
+            var windowEndUtc = windowStartUtc + TimeSpan.FromSeconds(durationSeconds);
+            // End-anchored (see SourceSnapshot) - the wall-clock moment WAV
+            // position 0 maps to, NOT FirstSampleUtc.
+            var effectiveStartUtc = sourceSnapshot.WavStartUtc;
+            var overlapStartUtc = effectiveStartUtc > windowStartUtc ? effectiveStartUtc : windowStartUtc;
+            var overlapEndUtc = captureEndUtc < windowEndUtc ? captureEndUtc : windowEndUtc;
+            if (overlapEndUtc <= overlapStartUtc) return string.Empty;
 
             var trimStart = Math.Max(0, (overlapStartUtc - effectiveStartUtc).TotalSeconds);
             var overlapDuration = Math.Max(0, (overlapEndUtc - overlapStartUtc).TotalSeconds);
@@ -601,7 +641,7 @@ public sealed class AudioCapturePipeline : IDisposable
         List<(DateTime StartUtc, double DurationSeconds)> segmentWindows,
         bool allowMix,
         List<string> snapshots,
-        Dictionary<ReplayAudioCapture, string> sourceSnapshotCache,
+        Dictionary<ReplayAudioCapture, SourceSnapshot?> sourceSnapshotCache,
         CancellationToken cancellationToken,
         ReplayBufferConfig? config = null)
     {
