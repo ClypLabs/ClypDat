@@ -1024,51 +1024,14 @@
         <Border Background="#05080B">
           <Grid>
             <vlc:VideoView x:Name="EditorVideoView" IsVisible="{Binding !IsEditorVideoLoading}" />
-            <!-- A single ring, alignment-centered directly in this Grid,
-                 was confirmed correct. Two rings alignment-centered as
-                 siblings the same way still weren't sharing a center for
-                 reasons that didn't add up on paper - so this drops
-                 alignment/Grid-centering out of the picture entirely for
-                 the two-ring case. Canvas with hardcoded pixel offsets is
-                 unambiguous: the canvas itself is the one thing centered
-                 via alignment (exactly the proven single-element case),
-                 and everything inside it is placed by plain arithmetic,
-                 not alignment semantics. -->
-            <Canvas Width="40"
-                    Height="40"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    IsVisible="{Binding IsEditorVideoLoading}"
-                    IsHitTestVisible="False">
-              <Ellipse x:Name="SpinnerOuterRing"
-                       Width="40"
-                       Height="40"
-                       Canvas.Left="0"
-                       Canvas.Top="0"
-                       Stroke="#5C6D7E"
-                       StrokeThickness="4"
-                       StrokeDashArray="21,7"
-                       StrokeLineCap="Round"
-                       RenderTransformOrigin="0.5,0.5">
-                <Ellipse.RenderTransform>
-                  <RotateTransform />
-                </Ellipse.RenderTransform>
-              </Ellipse>
-              <Ellipse x:Name="SpinnerInnerRing"
-                       Width="22"
-                       Height="22"
-                       Canvas.Left="9"
-                       Canvas.Top="9"
-                       Stroke="#93A6B8"
-                       StrokeThickness="3"
-                       StrokeDashArray="14,5"
-                       StrokeLineCap="Round"
-                       RenderTransformOrigin="0.5,0.5">
-                <Ellipse.RenderTransform>
-                  <RotateTransform />
-                </Ellipse.RenderTransform>
-              </Ellipse>
-            </Canvas>
+            <TextBlock Text="Loading"
+                       Foreground="#93A6B8"
+                       FontSize="16"
+                       FontWeight="Bold"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       IsVisible="{Binding IsEditorVideoLoading}"
+                       IsHitTestVisible="False" />
           </Grid>
         </Border>
         <Border Grid.Column="1" Background="#101820" BorderBrush="#1F2B34" BorderThickness="1,0,0,0">
