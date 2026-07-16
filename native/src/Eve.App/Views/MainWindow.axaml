@@ -1038,7 +1038,8 @@
                   HorizontalAlignment="Center"
                   VerticalAlignment="Center"
                   IsHitTestVisible="False">
-              <Ellipse Width="40"
+              <Ellipse x:Name="SpinnerOuterRing"
+                       Width="40"
                        Height="40"
                        Stroke="#5C6D7E"
                        StrokeThickness="4"
@@ -1050,22 +1051,9 @@
                 <Ellipse.RenderTransform>
                   <RotateTransform />
                 </Ellipse.RenderTransform>
-                <Ellipse.Styles>
-                  <Style Selector="Ellipse">
-                    <Style.Animations>
-                      <Animation Duration="0:0:1.4" IterationCount="INFINITE" Easing="LinearEasing">
-                        <KeyFrame Cue="0%">
-                          <Setter Property="RotateTransform.Angle" Value="0" />
-                        </KeyFrame>
-                        <KeyFrame Cue="100%">
-                          <Setter Property="RotateTransform.Angle" Value="-360" />
-                        </KeyFrame>
-                      </Animation>
-                    </Style.Animations>
-                  </Style>
-                </Ellipse.Styles>
               </Ellipse>
-              <Ellipse Width="22"
+              <Ellipse x:Name="SpinnerInnerRing"
+                       Width="22"
                        Height="22"
                        Stroke="#93A6B8"
                        StrokeThickness="3"
@@ -1077,20 +1065,6 @@
                 <Ellipse.RenderTransform>
                   <RotateTransform />
                 </Ellipse.RenderTransform>
-                <Ellipse.Styles>
-                  <Style Selector="Ellipse">
-                    <Style.Animations>
-                      <Animation Duration="0:0:0.9" IterationCount="INFINITE" Easing="LinearEasing">
-                        <KeyFrame Cue="0%">
-                          <Setter Property="RotateTransform.Angle" Value="0" />
-                        </KeyFrame>
-                        <KeyFrame Cue="100%">
-                          <Setter Property="RotateTransform.Angle" Value="360" />
-                        </KeyFrame>
-                      </Animation>
-                    </Style.Animations>
-                  </Style>
-                </Ellipse.Styles>
               </Ellipse>
             </Grid>
           </Grid>

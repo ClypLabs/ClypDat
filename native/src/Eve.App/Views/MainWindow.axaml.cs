@@ -18,6 +18,8 @@ namespace Eve.App.Views;
 public sealed partial class MainWindow : Window
 {
     private readonly DispatcherTimer _playbackTimer;
+    private readonly DispatcherTimer _spinnerTimer;
+    private readonly Stopwatch _spinnerClock = new();
     private readonly DispatcherTimer _gameDetectionTimer;
     private readonly ForegroundGameDetector _gameDetector = new();
     private Cs2GsiListener? _cs2GsiListener;
@@ -59,6 +61,14 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         _playbackTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _playbackTimer.Tick += (_, _) => SyncPlaybackPosition();
+        // Drives the editor loading spinner's two RotateTransforms directly
+        // from a Stopwatch-based elapsed time, same pattern as _playheadClock,
+        // instead of Avalonia's declarative Animation/KeyFrame system - the
+        // XAML version of this visibly wobbled (the rings didn't hold a fixed
+        // center while rotating), and driving the exact same angle math from
+        // code sidesteps whatever that animation path was doing wrong.
+        _spinnerTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        _spinnerTimer.Tick += (_, _) => UpdateSpinnerRotation();
         _gameDetectionTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _gameDetectionTimer.Tick += (_, _) => UpdateDetectedGame();
         Opened += (_, _) =>
@@ -76,8 +86,10 @@ public sealed partial class MainWindow : Window
                 ViewModel.PropertyChanged += (_, e) =>
                 {
                     if (e.PropertyName == nameof(MainWindowViewModel.Cs2AutoClipEnabled)) UpdateCs2AutoClipState();
+                    if (e.PropertyName == nameof(MainWindowViewModel.IsEditorVideoLoading)) UpdateSpinnerTimerState();
                 };
                 UpdateCs2AutoClipState();
+                UpdateSpinnerTimerState();
             }
         };
         // Tunnel, not bubble - a focused Button (Export, a transport button,
@@ -108,6 +120,7 @@ public sealed partial class MainWindow : Window
             _globalHotkey?.Dispose();
             _cs2GsiListener?.Dispose();
             _gameDetectionTimer.Stop();
+            _spinnerTimer.Stop();
             if (_replayBuffer is not null) _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
             _replayBuffer?.Dispose();
             _playback?.Dispose();
@@ -2032,6 +2045,38 @@ public sealed partial class MainWindow : Window
         overlay.Width = Math.Max(1, (bottomRight.X - topLeft.X) / overlay.RenderScaling);
         overlay.Height = Math.Max(1, (bottomRight.Y - topLeft.Y) / overlay.RenderScaling);
         if (!overlay.IsVisible) overlay.Show(this);
+    }
+
+    private void UpdateSpinnerTimerState()
+    {
+        if (ViewModel?.IsEditorVideoLoading == true)
+        {
+            _spinnerClock.Restart();
+            _spinnerTimer.Start();
+        }
+        else
+        {
+            _spinnerTimer.Stop();
+            _spinnerClock.Reset();
+        }
+    }
+
+    private void UpdateSpinnerRotation()
+    {
+        var elapsedSeconds = _spinnerClock.Elapsed.TotalSeconds;
+        // Outer ring: 1.4s per revolution, counter-clockwise. Inner ring:
+        // 0.9s per revolution, clockwise. Wrapped into 0-360 (or 0 to -360)
+        // each tick rather than letting the raw angle grow unbounded - not
+        // strictly required for a RotateTransform, but keeps the value sane
+        // for as long as the editor stays open on a slow-loading clip.
+        if (SpinnerOuterRing.RenderTransform is RotateTransform outerRotate)
+        {
+            outerRotate.Angle = -(elapsedSeconds / 1.4 * 360.0) % 360.0;
+        }
+        if (SpinnerInnerRing.RenderTransform is RotateTransform innerRotate)
+        {
+            innerRotate.Angle = (elapsedSeconds / 0.9 * 360.0) % 360.0;
+        }
     }
 
     private void SyncPlaybackPosition()
