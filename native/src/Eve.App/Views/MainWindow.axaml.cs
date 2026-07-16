@@ -1445,6 +1445,83 @@ public sealed partial class MainWindow : Window
         await ExportCurrentClipAsync();
     }
 
+    private async void SaveTrimButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        await SaveTrimToOriginalAsync();
+    }
+
+    private async Task SaveTrimToOriginalAsync()
+    {
+        if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
+        var sourcePath = ViewModel.SelectedVideoPath;
+
+        var trimEnd = ViewModel.TrimEnd > ViewModel.TrimStart ? ViewModel.TrimEnd : ViewModel.Duration;
+        var hasTrim = ViewModel.TrimStart > TimeSpan.FromMilliseconds(50) || trimEnd < ViewModel.Duration - TimeSpan.FromMilliseconds(50);
+        if (!hasTrim)
+        {
+            await ShowMessageAsync("Nothing to trim", "Drag the trim handles on the timeline first, then Save Trim.");
+            return;
+        }
+
+        var dialog = CreateDialog(
+            "Save trim?",
+            "This replaces the original clip with just the trimmed range. This can't be undone.",
+            showCancel: true,
+            confirmLabel: "Save Trim",
+            destructive: false);
+        if (!await dialog.ShowDialog<bool>(this)) return;
+
+        var tempPath = Path.Combine(Path.GetTempPath(), $"eve-save-trim-{Guid.NewGuid():N}{Path.GetExtension(sourcePath)}");
+
+        ViewModel.IsExporting = true;
+        try
+        {
+            var args = ViewModel.BuildExportArguments(tempPath);
+            var result = await RunProcessAsync("ffmpeg", args);
+            if (result.ExitCode != 0)
+            {
+                await ShowMessageAsync("Save Trim failed", string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg failed." : result.Error);
+                return;
+            }
+
+            // Release EditorVideoView's hold on the source file before replacing
+            // it - libvlc keeps an open handle on the currently loaded clip,
+            // which would otherwise make the File.Move calls below fail with a
+            // sharing violation. Synchronous variant: the moves right after need
+            // the handle actually gone, not just releasing eventually.
+            StopEditorPlayback();
+
+            var createdUtc = File.GetCreationTimeUtc(sourcePath);
+            var backupPath = sourcePath + ".eve-trim-backup";
+            AudioCapturePipeline.TryDelete(backupPath);
+            File.Move(sourcePath, backupPath);
+            try
+            {
+                File.Move(tempPath, sourcePath);
+            }
+            catch
+            {
+                // Restore the original instead of leaving the clip missing.
+                File.Move(backupPath, sourcePath);
+                throw;
+            }
+            File.SetCreationTimeUtc(sourcePath, createdUtc);
+            AudioCapturePipeline.TryDelete(backupPath);
+
+            await ViewModel.FinalizeSavedTrimAsync(sourcePath);
+            QueueEditorPlayback();
+        }
+        catch (Exception error)
+        {
+            await ShowMessageAsync("Save Trim failed", error.Message);
+        }
+        finally
+        {
+            AudioCapturePipeline.TryDelete(tempPath);
+            ViewModel.IsExporting = false;
+        }
+    }
+
     private async Task ExportCurrentClipAsync()
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
@@ -2362,7 +2439,7 @@ public sealed partial class MainWindow : Window
         return new ProcessResult(process.ExitCode, await outputTask, await errorTask);
     }
 
-    private static Window CreateDialog(string title, string message, bool showCancel)
+    private static Window CreateDialog(string title, string message, bool showCancel, string confirmLabel = "Delete", bool destructive = true)
     {
         var window = new Window
         {
@@ -2375,11 +2452,11 @@ public sealed partial class MainWindow : Window
 
         var ok = new Button
         {
-            Content = showCancel ? "Delete" : "OK",
+            Content = showCancel ? confirmLabel : "OK",
             Width = 96,
             HorizontalContentAlignment = HorizontalAlignment.Center
         };
-        if (showCancel)
+        if (showCancel && destructive)
         {
             ok.Background = Avalonia.Media.Brush.Parse("#D95B62");
             ok.Foreground = Avalonia.Media.Brush.Parse("#FFFFFF");

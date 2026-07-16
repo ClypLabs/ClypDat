@@ -1959,6 +1959,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await RefreshLibraryAsync();
     }
 
+    // Called by the View once it's finished re-encoding the trimmed range over
+    // the original file (see MainWindow.axaml.cs's SaveTrimToOriginalAsync) -
+    // the trim sidecar is deleted rather than reset to 0/Duration because the
+    // file on disk now IS exactly the trimmed range, so there's nothing left
+    // to trim away; leaving stale TrimStart/TrimEndSeconds from the old, longer
+    // duration around would just re-trim the already-trimmed file next open.
+    public async Task FinalizeSavedTrimAsync(string path)
+    {
+        _mediaProbe.DeleteCacheFor(path);
+        ClipEditSidecar.Delete(Settings.LibraryFolder, path);
+        await AddOrUpdateLibraryClipAsync(path);
+    }
+
     // Renames only the card's own display label (shown in place of "Clip from
     // {date}" for non-auto-clip cards) - unlike RenameClipAsync above, this
     // never touches the file on disk or FileTitle/GameDisplayName, so it can't

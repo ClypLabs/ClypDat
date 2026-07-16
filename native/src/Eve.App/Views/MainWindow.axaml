@@ -1158,17 +1158,28 @@
                 <PathIcon Width="14" Height="14" Foreground="#C8D6E6" Data="M7,14H5v5h5v-2H7V14z M5,10h2V7h3V5H5V10z M17,17h-3v2h5v-5h-2V17z M14,5v2h3v3h2V5H14z" />
               </Button>
             </StackPanel>
-            <Button Name="ExportButton"
-                    Grid.Column="2"
-                    Content="{Binding ExportButtonText}"
-                    Classes="primaryButton"
-                    Width="150"
-                    Height="34"
-                    Padding="0"
-                    HorizontalContentAlignment="Center"
-                    VerticalContentAlignment="Center"
-                    IsEnabled="{Binding !IsExporting}"
-                    Click="ExportButton_OnClick" />
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+              <Button Name="SaveTrimButton"
+                      Content="Save Trim"
+                      Width="110"
+                      Height="34"
+                      Padding="0"
+                      HorizontalContentAlignment="Center"
+                      VerticalContentAlignment="Center"
+                      IsEnabled="{Binding !IsExporting}"
+                      ToolTip.Tip="Replace the original clip with just the trimmed range"
+                      Click="SaveTrimButton_OnClick" />
+              <Button Name="ExportButton"
+                      Content="{Binding ExportButtonText}"
+                      Classes="primaryButton"
+                      Width="150"
+                      Height="34"
+                      Padding="0"
+                      HorizontalContentAlignment="Center"
+                      VerticalContentAlignment="Center"
+                      IsEnabled="{Binding !IsExporting}"
+                      Click="ExportButton_OnClick" />
+            </StackPanel>
           </Grid>
 
           <Grid Grid.Row="1" ColumnDefinitions="160,*" ColumnSpacing="12">
