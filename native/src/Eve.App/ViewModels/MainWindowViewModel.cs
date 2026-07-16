@@ -2757,16 +2757,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 OnGameFilterOptionChanged));
         }
 
-        var hasMedalImports = AllClips.Any(clip => clip.IsMedalImport);
+        // Same "(count)" suffix the game filter rows above already get.
+        var manualCount = AllClips.Count(clip => clip.IsManualClip);
+        var autoClipCount = AllClips.Count(clip => clip.IsAutoClip);
+        var vodCount = AllClips.Count(clip => clip.IsVod);
+        var medalImportCount = AllClips.Count(clip => clip.IsMedalImport);
+        var hasMedalImports = medalImportCount > 0;
         var removedAnyClipTypeFilter = !hasMedalImports && _activeClipTypeFilters.Remove(ClipTypeMedalImport);
 
         ClipTypeFilterOptions.Clear();
-        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeManual, "Manual clips", _activeClipTypeFilters.Contains(ClipTypeManual), OnClipTypeFilterOptionChanged));
-        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeAutoClip, "Auto-Clips", _activeClipTypeFilters.Contains(ClipTypeAutoClip), OnClipTypeFilterOptionChanged));
-        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeVod, "Full Session / VODs", _activeClipTypeFilters.Contains(ClipTypeVod), OnClipTypeFilterOptionChanged));
+        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeManual, $"Manual clips ({manualCount})", _activeClipTypeFilters.Contains(ClipTypeManual), OnClipTypeFilterOptionChanged));
+        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeAutoClip, $"Auto-Clips ({autoClipCount})", _activeClipTypeFilters.Contains(ClipTypeAutoClip), OnClipTypeFilterOptionChanged));
+        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeVod, $"Full Session / VODs ({vodCount})", _activeClipTypeFilters.Contains(ClipTypeVod), OnClipTypeFilterOptionChanged));
         if (hasMedalImports)
         {
-            ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeMedalImport, "Medal imports", _activeClipTypeFilters.Contains(ClipTypeMedalImport), OnClipTypeFilterOptionChanged));
+            ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeMedalImport, $"Medal imports ({medalImportCount})", _activeClipTypeFilters.Contains(ClipTypeMedalImport), OnClipTypeFilterOptionChanged));
         }
 
         if (removedAnyGameFilter) ApplyGameFilters();
