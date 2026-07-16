@@ -2440,6 +2440,43 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // Save Trim's variant of BuildExportArguments: keeps every audio stream
+    // discrete (Game Audio / Chat Audio / Microphone, titles included) instead
+    // of mixing them down to one track. Export mixes deliberately - most
+    // players/upload targets only play a multi-track file's first audio
+    // stream - but Save Trim replaces the clip itself, which must stay fully
+    // editable afterward: mixing here would permanently destroy the per-track
+    // mute/volume control the editor is built around. Volumes aren't baked in
+    // either, for the same reason.
+    public IReadOnlyList<string> BuildTrimArguments(string outputPath, bool useHardwareEncoder = true)
+    {
+        var startSeconds = Math.Max(0, TrimStart.TotalSeconds);
+        var end = TrimEnd > TrimStart ? TrimEnd : Duration;
+        var durationSeconds = Math.Max(0.1, (end - TrimStart).TotalSeconds);
+        var args = new List<string>
+        {
+            "-y",
+            "-progress", "pipe:1",
+            "-stats_period", "0.1",
+            "-nostats",
+            "-ss", startSeconds.ToString("0.###"),
+            "-t", durationSeconds.ToString("0.###"),
+            "-i", SelectedVideoPath,
+            "-map", "0:v:0?",
+            "-map", "0:a?",
+            "-sn",
+            // Stream titles ("Game Audio" etc.) ride along with the mapped
+            // streams by default; this keeps container-level metadata too.
+            "-map_metadata", "0"
+        };
+        args.AddRange(BuildExportCodecArguments(useHardwareEncoder));
+        args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k" });
+        args.Add("-movflags");
+        args.Add("+faststart");
+        args.Add(outputPath);
+        return args;
+    }
+
     public IReadOnlyList<string> BuildExportArguments(string outputPath, bool useHardwareEncoder = true)
     {
         var startSeconds = Math.Max(0, TrimStart.TotalSeconds);

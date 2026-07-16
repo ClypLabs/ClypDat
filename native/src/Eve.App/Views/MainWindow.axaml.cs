@@ -1493,7 +1493,7 @@ public sealed partial class MainWindow : Window
                     etaText.IsVisible = true;
                 }
             });
-            var result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildExportArguments(tempPath), exportDuration, progress, progressCts.Token);
+            var result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildTrimArguments(tempPath), exportDuration, progress, progressCts.Token);
             if (result.ExitCode != 0 && !progressCts.IsCancellationRequested)
             {
                 // Same NVENC-then-CPU fallback as Export.
@@ -1503,7 +1503,7 @@ public sealed partial class MainWindow : Window
                 percentText.Text = string.Empty;
                 etaText.IsVisible = false;
                 encodeClock.Restart();
-                result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildExportArguments(tempPath, useHardwareEncoder: false), exportDuration, progress, progressCts.Token);
+                result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildTrimArguments(tempPath, useHardwareEncoder: false), exportDuration, progress, progressCts.Token);
             }
             progressWindow.Close();
             if (progressCts.IsCancellationRequested) return;
