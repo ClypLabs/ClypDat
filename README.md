@@ -61,6 +61,9 @@ Settings > Import from Medal scans Medal's local database for clips and
 copies (or moves) them into your EVE library, keeping Medal's own titles.
 If Medal's database is missing or corrupted, it also falls back to
 scanning Medal's default clips folder directly so nothing gets lost.
+Medal's auto-generated "{date} - {time} - {game}" names are parsed back
+into the real game name and recording date instead of being used verbatim,
+and imported cards show "Imported from Medal".
 
 ## First-time setup
 
@@ -76,8 +79,18 @@ playback runs on LibVLC; audio runs on a separate NAudio/WASAPI pipeline.
 They are not synchronized to a shared clock, so long clips can drift out
 of sync during playback.
 
-The Library groups clips by day and supports filtering to a single game
-by clicking the dropdown on that game's most recent clip tile.
+Export mixes all audio tracks down to one (with each track's volume
+applied) so the file plays everywhere; Save Trim instead re-encodes the
+trimmed range over the original clip in place, keeping Game/Chat/Mic as
+separate tracks so it stays fully editable. Both encode on the GPU via
+NVENC (H.264/H.265/AV1) with an automatic CPU fallback, and show a
+progress popup with a live percentage, time estimate, and Cancel.
+
+The Library shows per-card date headers and has Game Filters and Clip
+Type Filters dropdowns in the header (each option shows its clip count),
+plus a right-click context menu on clip cards (rename, export, delete,
+open location). Renaming edits the card's display label only - the game
+name and original file stay untouched.
 
 ## Auto-update
 
@@ -85,6 +98,13 @@ On launch, EVE checks the GitHub Releases API for a newer non-draft,
 non-prerelease tag. If found, it shows a dialog with the version and release
 notes; accepting downloads `EVE-win-x64.zip`, extracts it, and replaces the
 running install via a PowerShell helper that waits for the process to exit.
+
+## Storage
+
+EVE cleans up after itself: replay-buffer scratch audio is deleted as soon
+as it ages out of the buffer window, stale backend scratch folders are
+swept at startup, preview-audio and thumbnail caches expire after
+7/30 days unused, and logs are kept for 7 days.
 
 ## Requirements
 
