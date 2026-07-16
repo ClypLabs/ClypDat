@@ -203,6 +203,7 @@
                     <Border Classes="clipDateRow"
                             Background="Transparent"
                             Padding="0,0,4,8"
+                            HorizontalAlignment="Left"
                             Opacity="{Binding DateHeaderOpacity}"
                             IsHitTestVisible="{Binding IsFirstOfDate}">
                       <StackPanel Orientation="Horizontal" Spacing="8">

@@ -1830,9 +1830,11 @@ public sealed partial class MainWindow : Window
             // on the reused PlaybackSession) so a superseded/cancelled open's
             // late-firing event can't wrongly clear a NEWER open's loading
             // flag - the cancellation check below guards that.
+            var videoReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             void OnTimeChanged(object? _, MediaPlayerTimeChangedEventArgs __)
             {
                 playback.VideoPlayer.TimeChanged -= OnTimeChanged;
+                videoReady.TrySetResult();
                 Dispatcher.UIThread.Post(() =>
                 {
                     if (cancellationToken.IsCancellationRequested) return;
@@ -1846,7 +1848,7 @@ public sealed partial class MainWindow : Window
             _endedAtTrimBoundary = false;
             ViewModel.IsPlaying = true;
             _playbackTimer.Start();
-            _ = LoadEditorAudioAsync(playback, ViewModel.SelectedVideoPath, audioTracks, cancellationToken);
+            _ = LoadEditorAudioAsync(playback, ViewModel.SelectedVideoPath, audioTracks, videoReady.Task, cancellationToken);
             await Task.Delay(200, cancellationToken);
             if (playback.Duration > TimeSpan.Zero && IsPlausibleDuration(playback.Duration, ViewModel.Duration))
             {
@@ -1866,11 +1868,22 @@ public sealed partial class MainWindow : Window
         PlaybackSession playback,
         string videoPath,
         IReadOnlyList<AudioPreviewTrack> audioTracks,
+        Task videoReady,
         CancellationToken cancellationToken)
     {
         try
         {
             await playback.LoadAudioAsync(videoPath, audioTracks, cancellationToken);
+            if (cancellationToken.IsCancellationRequested || _playback != playback) return;
+            // Don't let audio start before the video's first real frame is
+            // actually visible (the same TimeChanged confirmation that
+            // clears IsEditorVideoLoading) - otherwise a clip that's slow to
+            // open plays audio-only while the "Loading" placeholder is still
+            // showing, which sounds like it's running ahead of a black
+            // screen. Already-completed by the time this runs (the common
+            // case, since video usually confirms before audio extraction
+            // finishes) resolves immediately, no extra delay.
+            await videoReady.WaitAsync(cancellationToken).ConfigureAwait(false);
             if (cancellationToken.IsCancellationRequested || _playback != playback) return;
             playback.SyncAndPlayMixedAudio();
         }
