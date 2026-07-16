@@ -259,12 +259,24 @@ public sealed class MediaProbeService
             "-ss", seek.ToString("0.###"),
             "-i", filePath,
             "-frames:v", "1",
-            "-vf", "scale=960:-1",
+            // -2, not -1: -1 preserves aspect exactly, which can produce an
+            // ODD height (e.g. ultrawide 3440x1440 -> 960x403), and the JPEG
+            // encoder's 4:2:0 output needs even dimensions - ffmpeg then fails
+            // and the clip silently never got a thumbnail. -2 preserves aspect
+            // rounded to the nearest even value. 1080p sources never hit this
+            // (960x540), which is why it looked resolution-dependent.
+            "-vf", "scale=960:-2",
             "-q:v", "4",
             output
         });
 
-        return result.ExitCode == 0 && File.Exists(output) ? output : string.Empty;
+        if (result.ExitCode != 0 || !File.Exists(output))
+        {
+            AppLog.Error($"Thumbnail generation failed for {filePath}: {(string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg failed" : result.Error.Trim())}");
+            return string.Empty;
+        }
+
+        return output;
     }
 
     private string GetThumbnailPath(string filePath)
