@@ -207,7 +207,7 @@
                            the date text is pushed right by ordinary
                            StackPanel flow as the checkbox's own Width
                            transitions open, no RenderTransform needed. -->
-                      <Border Classes="clipDateRow" Padding="4,0,4,8">
+                      <Border Classes="clipDateRow" Background="Transparent" Padding="4,0,4,8">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                           <CheckBox Classes="dayCheck"
                                     Width="0"
