@@ -24,18 +24,6 @@ public sealed partial class MainWindow : Window
     private PlaybackSession? _playback;
     private CancellationTokenSource? _playbackStartCts;
     private CancellationTokenSource? _editorSeekCts;
-    // Hover-preload: separate cts from _playbackStartCts (real opens) so a
-    // card's PointerExited firing right after a click can never accidentally
-    // cancel that click's own real open - see QueueClipPreload/
-    // PreloadHoveredClipAsync/ClipCard_OnPointerExited.
-    private CancellationTokenSource? _hoverPreloadCts;
-    // Path of the clip currently sitting loaded-and-paused-at-frame-0 in
-    // _playback because hovering its card primed it ahead of a click -
-    // StartEditorPlaybackAsync checks this to skip a redundant cold
-    // Stop()+LoadVideo() when the clicked clip is exactly what's already
-    // warmed up. Cleared (consumed) the moment any real open runs, whether
-    // or not it matched - a preload is only ever good for one open.
-    private string? _preloadedClipPath;
     private TimelineDragMode _timelineDragMode = TimelineDragMode.None;
     private bool _endedAtTrimBoundary;
     private bool _timelineWasPlayingBeforeDrag;
@@ -665,93 +653,12 @@ public sealed partial class MainWindow : Window
     {
         if (sender is not Control { DataContext: ClipCardViewModel clip }) return;
         clip.IsHovered = true;
-        QueueClipPreload(clip);
     }
 
     private void ClipCard_OnPointerExited(object? sender, PointerEventArgs e)
     {
         if (sender is not Control { DataContext: ClipCardViewModel clip }) return;
         clip.IsHovered = false;
-
-        _hoverPreloadCts?.Cancel();
-        _hoverPreloadCts?.Dispose();
-        _hoverPreloadCts = null;
-
-        // Stop actually decoding/playing whatever was being primed for this
-        // card the moment nothing's hovered anymore - otherwise a preload the
-        // user never clicked into just keeps running silently in the
-        // background. Harmless no-op if it was already paused or nothing had
-        // started yet; guarded so this can never touch an actually-open editor.
-        if (ViewModel?.IsEditorVisible != true) _playback?.Pause();
-    }
-
-    private void QueueClipPreload(ClipCardViewModel clip)
-    {
-        if (ViewModel is null || ViewModel.IsEditorVisible) return;
-        if (string.Equals(_preloadedClipPath, clip.Path, StringComparison.OrdinalIgnoreCase)) return;
-
-        _hoverPreloadCts?.Cancel();
-        _hoverPreloadCts?.Dispose();
-        var cts = new CancellationTokenSource();
-        _hoverPreloadCts = cts;
-        _ = PreloadHoveredClipAsync(clip.Path, cts.Token);
-    }
-
-    // Starts decoding a clip in the shared PlaybackSession as soon as it's
-    // hovered in the Library, well before the user actually clicks it - by
-    // the time PointerPressed fires, StartEditorPlaybackAsync can often just
-    // resume an already-primed frame instead of paying LibVLC's real
-    // open/demux/decode cost at the exact moment the user is waiting on it.
-    // Debounced so a quick pass across several cards doesn't kick off a real
-    // decode for each one. cancellationToken is checked after every await so
-    // a newer hover, a hover-exit, or a real open can never let this stale
-    // task mutate _playback out from under it.
-    private async Task PreloadHoveredClipAsync(string path, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await Task.Delay(150, cancellationToken);
-            if (cancellationToken.IsCancellationRequested) return;
-            if (ViewModel is null || ViewModel.IsEditorVisible) return;
-
-            var playback = _playback ?? new PlaybackSession();
-            _playback = playback;
-            playback.LoadVideo(path);
-            if (cancellationToken.IsCancellationRequested) return;
-            EditorVideoView.MediaPlayer = playback.VideoPlayer;
-
-            var primed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            void OnTimeChanged(object? _, MediaPlayerTimeChangedEventArgs __) => primed.TrySetResult();
-            playback.VideoPlayer.TimeChanged += OnTimeChanged;
-            try
-            {
-                playback.PlayFrom(TimeSpan.Zero);
-                await primed.Task.WaitAsync(TimeSpan.FromSeconds(3), cancellationToken);
-            }
-            finally
-            {
-                playback.VideoPlayer.TimeChanged -= OnTimeChanged;
-            }
-
-            // A real open (or a newer hover) may have taken over the shared
-            // session while the above was in flight - if so this preload no
-            // longer owns _playback and must not touch it, in particular must
-            // not pause whatever is now actually playing.
-            if (cancellationToken.IsCancellationRequested) return;
-
-            playback.Pause();
-            _preloadedClipPath = path;
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (TimeoutException)
-        {
-        }
-        catch (Exception error)
-        {
-            AppLog.Error($"Clip hover preload failed: {path}", error);
-        }
     }
 
     private void ClipCheckBox_OnClick(object? sender, RoutedEventArgs e)
@@ -1853,14 +1760,6 @@ public sealed partial class MainWindow : Window
 
     private void QueueEditorPlayback()
     {
-        // A real open always wins over an in-flight hover preload - cancel it
-        // up front so its cancellation check (after the TimeChanged await)
-        // fires before it can call Pause() on what's about to become this
-        // real, actively-playing session.
-        _hoverPreloadCts?.Cancel();
-        _hoverPreloadCts?.Dispose();
-        _hoverPreloadCts = null;
-
         _playbackStartCts?.Cancel();
         _playbackStartCts?.Dispose();
         var cts = new CancellationTokenSource();
@@ -1887,17 +1786,7 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
         if (cancellationToken.IsCancellationRequested) return;
 
-        var targetPath = ViewModel.SelectedVideoPath;
-        // Hover already primed this exact clip in the shared session (loaded,
-        // decoded to its first real frame, and paused there) - tearing that
-        // down via the normal Stop()+LoadVideo() cold-start path would throw
-        // away exactly the head start preloading exists to buy. A preload is
-        // only ever good for one open either way, so consume it regardless.
-        var reusePreload = _playback is not null
-            && string.Equals(_preloadedClipPath, targetPath, StringComparison.OrdinalIgnoreCase);
-        _preloadedClipPath = null;
-
-        StopEditorPlayback(cancelQueuedStart: false, preservePlayback: reusePreload);
+        StopEditorPlayback(cancelQueuedStart: false);
 
         try
         {
@@ -1908,9 +1797,9 @@ public sealed partial class MainWindow : Window
             // LoadVideo() already fully tears down and replaces the previous Media
             // internally, so the same instance is safe to reuse.
             var playback = _playback ?? new PlaybackSession();
-            if (!reusePreload) playback.LoadVideo(targetPath);
+            playback.LoadVideo(ViewModel.SelectedVideoPath);
             _playback = playback;
-            _pausedRanges = LoadPausedRanges(targetPath);
+            _pausedRanges = LoadPausedRanges(ViewModel.SelectedVideoPath);
             ViewModel.IsRecordingPausedAtCurrentTime = false;
             // Redundant with StopEditorPlayback's own Hide() above, but closes
             // a real race: a timer tick already queued/dispatched right before
@@ -1920,7 +1809,7 @@ public sealed partial class MainWindow : Window
             // (EditorVideoView's bounds) may not have settled yet either,
             // which is exactly the "flickers over the library grid" symptom.
             _recordingPausedOverlay?.Hide();
-            AppLog.Info($"Editor open: {targetPath}{(reusePreload ? " (hover-preloaded)" : string.Empty)}");
+            AppLog.Info($"Editor open: {ViewModel.SelectedVideoPath}");
             EditorVideoView.MediaPlayer = playback.VideoPlayer;
             var audioTracks = ViewModel.TimelineTracks
                 .Where(track => track.IsAudio)
@@ -1996,7 +1885,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void StopEditorPlayback(bool cancelQueuedStart = true, bool stopPlaybackAsync = false, bool preservePlayback = false)
+    private void StopEditorPlayback(bool cancelQueuedStart = true, bool stopPlaybackAsync = false)
     {
         if (cancelQueuedStart)
         {
@@ -2020,15 +1909,6 @@ public sealed partial class MainWindow : Window
         // internally too either way), but doing it synchronously on editor
         // close just freezes the UI thread for however long libvlc takes to
         // unwind, well after the editor should already look closed.
-        // preservePlayback skips all of this entirely - used when the clip
-        // about to open is exactly what a hover preload already loaded and
-        // paused in this same session, where stopping/detaching would just
-        // throw away the head start preloading exists to buy.
-        if (preservePlayback)
-        {
-            return;
-        }
-
         if (stopPlaybackAsync)
         {
             var playback = _playback;
