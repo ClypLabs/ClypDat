@@ -1023,7 +1023,7 @@
       <Grid Background="#0E141A" ColumnDefinitions="*,300">
         <Border Background="#05080B">
           <Grid>
-            <vlc:VideoView x:Name="EditorVideoView" />
+            <vlc:VideoView x:Name="EditorVideoView" IsVisible="{Binding !IsEditorVideoLoading}" />
             <Image Source="{Binding SelectedThumbnail}"
                    Stretch="Uniform"
                    IsVisible="{Binding IsEditorVideoLoading}"

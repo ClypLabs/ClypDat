@@ -721,7 +721,7 @@ public sealed partial class MainWindow : Window
     private void CloseEditorButton_OnClick(object? sender, RoutedEventArgs e)
     {
         ViewModel?.SaveSelectedClipEditState();
-        StopEditorPlayback();
+        StopEditorPlayback(stopPlaybackAsync: true);
         ViewModel?.CloseEditor();
     }
 
@@ -1040,7 +1040,7 @@ public sealed partial class MainWindow : Window
             if (ViewModel.IsEditorVisible)
             {
                 ViewModel.SaveSelectedClipEditState();
-                StopEditorPlayback();
+                StopEditorPlayback(stopPlaybackAsync: true);
                 ViewModel.CloseEditor();
                 e.Handled = true;
                 return;
@@ -1875,7 +1875,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void StopEditorPlayback(bool cancelQueuedStart = true)
+    private void StopEditorPlayback(bool cancelQueuedStart = true, bool stopPlaybackAsync = false)
     {
         if (cancelQueuedStart)
         {
@@ -1892,7 +1892,22 @@ public sealed partial class MainWindow : Window
         // Stop and detach the view instead of disposing - the session (and its
         // underlying LibVLC engine) stays alive and gets reused on the next
         // editor open instead of being torn down and rebuilt from scratch.
-        _playback?.Stop();
+        // VideoPlayer.Stop() is a genuinely blocking libvlc call (real time
+        // spent tearing down decode/output threads once a clip's actually
+        // been playing) - fine to eat synchronously when a LoadVideo() is
+        // about to run right after on this same thread anyway (it stops
+        // internally too either way), but doing it synchronously on editor
+        // close just freezes the UI thread for however long libvlc takes to
+        // unwind, well after the editor should already look closed.
+        if (stopPlaybackAsync)
+        {
+            var playback = _playback;
+            if (playback is not null) _ = Task.Run(() => playback.Stop());
+        }
+        else
+        {
+            _playback?.Stop();
+        }
         EditorVideoView.MediaPlayer = null;
         _recordingPausedOverlay?.Hide();
         if (ViewModel is not null)
