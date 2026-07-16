@@ -1474,15 +1474,39 @@ public sealed partial class MainWindow : Window
         var tempPath = Path.Combine(Path.GetTempPath(), $"eve-save-trim-{Guid.NewGuid():N}{Path.GetExtension(sourcePath)}");
 
         ViewModel.IsExporting = true;
+        var progressCts = new CancellationTokenSource();
+        var (progressWindow, progressBar, statusText, percentText, etaText) = CreateProgressDialog("Saving trim", "Saving trim...", () => progressCts.Cancel());
+        var progressDialogTask = progressWindow.ShowDialog(this);
         try
         {
-            var result = await RunProcessAsync("ffmpeg", ViewModel.BuildExportArguments(tempPath));
-            if (result.ExitCode != 0)
+            var exportDuration = ViewModel.ExportDuration;
+            var encodeClock = System.Diagnostics.Stopwatch.StartNew();
+            var progress = new Progress<double>(fraction =>
+            {
+                progressBar.IsIndeterminate = false;
+                progressBar.Value = Math.Clamp(fraction * 100, 0, 100);
+                percentText.Text = $"{progressBar.Value:0}%";
+                if (fraction > 0.03)
+                {
+                    var remaining = TimeSpan.FromMilliseconds(encodeClock.ElapsedMilliseconds * (1 - fraction) / fraction);
+                    etaText.Text = $"Estimated: {FormatEta(remaining)}";
+                    etaText.IsVisible = true;
+                }
+            });
+            var result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildExportArguments(tempPath), exportDuration, progress, progressCts.Token);
+            if (result.ExitCode != 0 && !progressCts.IsCancellationRequested)
             {
                 // Same NVENC-then-CPU fallback as Export.
                 AppLog.Info($"Save Trim: NVENC encode failed, retrying with CPU encoder. ffmpeg said: {result.Error}");
-                result = await RunProcessAsync("ffmpeg", ViewModel.BuildExportArguments(tempPath, useHardwareEncoder: false));
+                progressBar.IsIndeterminate = true;
+                statusText.Text = "Saving trim (CPU encoder)...";
+                percentText.Text = string.Empty;
+                etaText.IsVisible = false;
+                encodeClock.Restart();
+                result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildExportArguments(tempPath, useHardwareEncoder: false), exportDuration, progress, progressCts.Token);
             }
+            progressWindow.Close();
+            if (progressCts.IsCancellationRequested) return;
             if (result.ExitCode != 0)
             {
                 await ShowMessageAsync("Save Trim failed", string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg failed." : result.Error);
@@ -1522,6 +1546,9 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
+            if (progressWindow.IsVisible) progressWindow.Close();
+            await progressDialogTask;
+            progressCts.Dispose();
             AudioCapturePipeline.TryDelete(tempPath);
             ViewModel.IsExporting = false;
         }
