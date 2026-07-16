@@ -1808,24 +1808,29 @@ public sealed partial class MainWindow : Window
             if (cancellationToken.IsCancellationRequested) return;
 
             ViewModel.IsEditorVideoLoading = true;
-            // LibVLC's Playing event fires once it actually starts rendering
-            // frames (as opposed to Play()/PlayFrom() returning immediately,
-            // well before the first real frame is ready) - that's the signal
-            // to swap the thumbnail placeholder out for the real video.
+            // Playing fires on the state transition alone, not on an actual
+            // decoded frame reaching the screen - fine the first time (a fresh
+            // PlaybackSession's own engine-startup latency happens to cover the
+            // gap), but on every open after that the session/vout are already
+            // warm, so Playing can fire before the NEW clip's first real frame
+            // is ready and the placeholder drops early onto a black video view.
+            // TimeChanged only fires once the position actually advances, which
+            // requires real decode progress - same signal SeekAndWaitAsync uses
+            // to confirm a seek has actually landed, not just been requested.
             // Scoped to this one load attempt (not a persistent subscription
             // on the reused PlaybackSession) so a superseded/cancelled open's
             // late-firing event can't wrongly clear a NEWER open's loading
             // flag - the cancellation check below guards that.
-            void OnPlaying(object? _, EventArgs __)
+            void OnTimeChanged(object? _, MediaPlayerTimeChangedEventArgs __)
             {
-                playback.VideoPlayer.Playing -= OnPlaying;
+                playback.VideoPlayer.TimeChanged -= OnTimeChanged;
                 Dispatcher.UIThread.Post(() =>
                 {
                     if (cancellationToken.IsCancellationRequested) return;
                     if (ViewModel is not null) ViewModel.IsEditorVideoLoading = false;
                 });
             }
-            playback.VideoPlayer.Playing += OnPlaying;
+            playback.VideoPlayer.TimeChanged += OnTimeChanged;
 
             playback.PlayFrom(ViewModel.CurrentTime);
             StartPlayheadClock(ViewModel.CurrentTime);
