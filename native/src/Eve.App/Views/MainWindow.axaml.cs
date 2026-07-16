@@ -37,7 +37,13 @@ public sealed partial class MainWindow : Window
     // throttle here just caps how often that cancel-and-restart happens rather
     // than needing any new synchronization of its own.
     private readonly Stopwatch _timelineScrubThrottle = new();
-    private static readonly TimeSpan TimelineScrubMinInterval = TimeSpan.FromMilliseconds(120);
+    // Lowered from 120ms alongside PlaybackSession's preview-mode seek wait
+    // (see SeekAndWaitAsync) - the confirmation wait used to be the actual
+    // bottleneck (up to 900ms, serialized behind _seekLock), so this throttle
+    // never got a chance to matter. Now that a preview seek gets out of the
+    // way quickly, this can drop closer to its intended job of pacing scrub
+    // updates rather than pacing around a slow seek round-trip.
+    private static readonly TimeSpan TimelineScrubMinInterval = TimeSpan.FromMilliseconds(60);
     private IReplayBuffer? _replayBuffer;
     private ReplayBackendOption _activeReplayBackend = ReplayBackendOption.Auto;
     private GlobalHotkeyService? _globalHotkey;
@@ -1268,7 +1274,7 @@ public sealed partial class MainWindow : Window
         // seek once the user lets go.
         if (_timelineScrubThrottle.Elapsed < TimelineScrubMinInterval) return;
         _timelineScrubThrottle.Restart();
-        _ = ApplyTimelineSeekAsync(ViewModel.CurrentTime, resumePlayback: false);
+        _ = ApplyTimelineSeekAsync(ViewModel.CurrentTime, resumePlayback: false, isPreview: true);
     }
 
     private async void TimelineSurface_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
@@ -2104,7 +2110,7 @@ public sealed partial class MainWindow : Window
         UpdateTimelineChrome();
     }
 
-    private async Task ApplyTimelineSeekAsync(TimeSpan time, bool resumePlayback)
+    private async Task ApplyTimelineSeekAsync(TimeSpan time, bool resumePlayback, bool isPreview = false)
     {
         if (ViewModel is null) return;
         _editorSeekCts?.Cancel();
@@ -2118,7 +2124,7 @@ public sealed partial class MainWindow : Window
         {
             try
             {
-                didResume = await _playback.SeekAsync(time, resumePlayback, seekCts.Token);
+                didResume = await _playback.SeekAsync(time, resumePlayback, seekCts.Token, isPreview);
             }
             catch (OperationCanceledException)
             {

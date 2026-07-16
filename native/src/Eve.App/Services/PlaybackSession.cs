@@ -262,7 +262,7 @@ public sealed class PlaybackSession : IDisposable
         SeekAsync(time, resumePlayback).GetAwaiter().GetResult();
     }
 
-    public async Task<bool> SeekAsync(TimeSpan time, bool resumePlayback = false, CancellationToken cancellationToken = default)
+    public async Task<bool> SeekAsync(TimeSpan time, bool resumePlayback = false, CancellationToken cancellationToken = default, bool isPreview = false)
     {
         var seekVersion = Interlocked.Increment(ref _seekVersion);
         await _seekLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -292,7 +292,7 @@ public sealed class PlaybackSession : IDisposable
             }
             AppLog.Info($"Editor seek begin: requested={requested.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}, resume={resumePlayback}, version={seekVersion}.");
             if (seekVersion != Interlocked.Read(ref _seekVersion)) return false;
-            var videoReady = await SeekAndWaitAsync(requested, cancellationToken).ConfigureAwait(false);
+            var videoReady = await SeekAndWaitAsync(requested, cancellationToken, isPreview).ConfigureAwait(false);
             if (seekVersion != Interlocked.Read(ref _seekVersion)) return false;
             var settledTime = Position;
             lock (_transportLock)
@@ -424,8 +424,25 @@ public sealed class PlaybackSession : IDisposable
         _seekLock.Dispose();
     }
 
-    private async Task<bool> SeekAndWaitAsync(TimeSpan target, CancellationToken cancellationToken)
+    private async Task<bool> SeekAndWaitAsync(TimeSpan target, CancellationToken cancellationToken, bool isPreview = false)
     {
+        // A drag-scrub preview seek doesn't need to wait for a precise
+        // confirmation - it's purely visual (resumePlayback is always false
+        // for these) and the caller doesn't act differently on true/false
+        // either way. Waiting up to the full 900ms here was the actual
+        // bottleneck during a fast drag: this call is serialized behind
+        // _seekLock, so every scrub tick queued behind whichever one
+        // currently held the lock, and the video visibly lagged the mouse
+        // by however long confirmation took rather than by the UI's own
+        // throttle. A short wait lets each accepted scrub seek get out of
+        // the way quickly so the next (latest) mouse position can start
+        // almost immediately. The 650ms match-tolerance below is untouched -
+        // it only decides how close counts as "landed", not how long to
+        // wait - and the real (non-preview) seek from release/restart/step
+        // keeps the full 900ms, since that's the one that decides whether
+        // playback correctly resumes and shortening it was what caused a
+        // real desync bug previously.
+        var waitTimeout = isPreview ? TimeSpan.FromMilliseconds(180) : TimeSpan.FromMilliseconds(900);
         var targetMs = target.TotalMilliseconds;
         var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         void OnTimeChanged(object? sender, MediaPlayerTimeChangedEventArgs args)
@@ -450,7 +467,7 @@ public sealed class PlaybackSession : IDisposable
 
             try
             {
-                await ready.Task.WaitAsync(TimeSpan.FromMilliseconds(900), cancellationToken).ConfigureAwait(false);
+                await ready.Task.WaitAsync(waitTimeout, cancellationToken).ConfigureAwait(false);
             }
             catch (TimeoutException)
             {
