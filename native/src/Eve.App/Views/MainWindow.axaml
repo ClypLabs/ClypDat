@@ -70,10 +70,13 @@
         </Grid>
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" IsVisible="{Binding ShowLibraryActions}">
-          <Border Background="#1A2530" CornerRadius="16" Padding="10,6" IsVisible="{Binding IsGameFilterActive}">
-            <StackPanel Orientation="Horizontal" Spacing="6">
+          <Border Background="#1A2530" CornerRadius="14" Padding="10,0" Height="28" IsVisible="{Binding IsGameFilterActive}">
+            <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
               <TextBlock Text="{Binding ActiveGameFilterLabel}" Foreground="#D2DEEC" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
-              <Button Classes="linkButton" Content="X" Click="ClearGameFilterButton_OnClick" Foreground="#8C98A7" FontSize="11" VerticalAlignment="Center" />
+              <Button Classes="linkButton" Click="ClearGameFilterButton_OnClick" Padding="4" VerticalAlignment="Center" ToolTip.Tip="Clear game filters">
+                <PathIcon Data="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"
+                          Width="10" Height="10" Foreground="#8C98A7" />
+              </Button>
             </StackPanel>
           </Border>
           <Button Click="OpenSettingsButton_OnClick" ToolTip.Tip="Settings">
@@ -174,9 +177,18 @@
                   </StackPanel>
 
                   <ItemsControl ItemsSource="{Binding Clips}">
-                    <ItemsControl.ItemsPanel>
+                    <!-- WrapPanel, not UniformGrid - UniformGrid pre-computes
+                         its row/column count from the total child count
+                         (including IsVisible="False" filtered-out cards) and
+                         still reserves each one's grid cell, leaving gaps
+                         above whatever's left visible when most of a date
+                         group is filtered out. WrapPanel properly skips
+                         invisible children during layout so visible cards
+                         compact together - each card's own CardWidth still
+                         lands 3-per-row the same as before. -->
+                      <ItemsControl.ItemsPanel>
                       <ItemsPanelTemplate>
-                        <UniformGrid Columns="3" />
+                        <WrapPanel Orientation="Horizontal" />
                       </ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>

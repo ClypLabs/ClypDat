@@ -244,6 +244,9 @@
     <Setter Property="Background" Value="#1D2A36" />
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
+  <Style Selector="Button.linkButton:pointerover PathIcon">
+    <Setter Property="Foreground" Value="#D2DEEC" />
+  </Style>
   <Style Selector="Button.brandButton">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
