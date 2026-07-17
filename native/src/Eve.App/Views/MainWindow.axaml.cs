@@ -1958,6 +1958,20 @@ public sealed partial class MainWindow : Window
             {
                 await AppUpdateService.DownloadAndRestartAsync(update, progress);
                 window.Close();
+                // The update helper Wait-Process-es for THIS process to exit
+                // before swapping files and relaunching - and since close-to-
+                // tray shipped, closing windows no longer exits the process,
+                // so the helper waited forever and the app never restarted.
+                // Exit for real, exactly like the tray's own Quit item.
+                AllowRealClose = true;
+                if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+                {
+                    desktop.Shutdown();
+                }
+                else
+                {
+                    Environment.Exit(0);
+                }
             }
             catch (Exception error)
             {
