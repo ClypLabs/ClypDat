@@ -42,7 +42,10 @@ public sealed class AudioCapturePipeline : IDisposable
         StartAudioCaptures(config);
     }
 
-    public void Stop()
+    // deleteCaptureFiles: false when a background full-session finalize still
+    // needs the raw WAVs - the finalize job takes ownership (via the
+    // CaptureSetSnapshot it was handed) and deletes them itself when done.
+    public void Stop(bool deleteCaptureFiles = true)
     {
         _activeConfig = null;
         _audioRouteTimer?.Dispose();
@@ -58,10 +61,24 @@ public sealed class AudioCapturePipeline : IDisposable
             foreach (var capture in _audioCaptures.ToArray())
             {
                 StopAudioCapture(capture);
-                TryDelete(capture.Path);
+                if (deleteCaptureFiles) TryDelete(capture.Path);
             }
             _audioCaptures.Clear();
         }
+    }
+
+    // Opaque handle over the current capture set, for a background finalize
+    // that must keep building tracks after Stop() has cleared the live list.
+    public sealed class CaptureSetSnapshot
+    {
+        internal CaptureSetSnapshot(ReplayAudioCapture[] captures) => Captures = captures;
+        internal ReplayAudioCapture[] Captures { get; }
+        public IReadOnlyList<string> FilePaths => Captures.Select(capture => capture.Path).ToArray();
+    }
+
+    public CaptureSetSnapshot SnapshotCaptures()
+    {
+        lock (_lock) return new CaptureSetSnapshot(_audioCaptures.ToArray());
     }
 
     public void PruneOlderThan(DateTime cutoffUtc)
@@ -88,10 +105,18 @@ public sealed class AudioCapturePipeline : IDisposable
         List<(DateTime StartUtc, double DurationSeconds)> segmentWindows,
         ReplayBufferConfig config,
         List<string> snapshots,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CaptureSetSnapshot? capturesOverride = null)
     {
         ReplayAudioCapture[] captures;
-        lock (_lock) captures = _audioCaptures.ToArray();
+        if (capturesOverride is not null)
+        {
+            captures = capturesOverride.Captures;
+        }
+        else
+        {
+            lock (_lock) captures = _audioCaptures.ToArray();
+        }
 
         var tracks = new List<(string Label, string Path)>();
         // Shared across every track/segment of this one save - see
@@ -1036,7 +1061,7 @@ public sealed class AudioCapturePipeline : IDisposable
         Microphone
     }
 
-    private sealed class ReplayAudioCapture
+    internal sealed class ReplayAudioCapture
     {
         public ReplayAudioCapture(AudioCaptureSession session, string path, string title, AudioCaptureKind kind, int? processId, DateTime startedAtUtc, string sourceKey, string? deviceId = null)
         {

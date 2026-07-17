@@ -1375,6 +1375,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string FullSessionRecordingFolderDisplay =>
         string.IsNullOrWhiteSpace(FullSessionRecordingFolder) ? "Choose a library folder" : FullSessionRecordingFolder;
 
+    public bool FullSessionBackgroundFinalize
+    {
+        get => Settings.FullSessionBackgroundFinalize;
+        set
+        {
+            Settings.FullSessionBackgroundFinalize = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
     public IReadOnlyList<string> FullSessionCodecs { get; } = new[] { "H.264 (fastest)", "H.265 (smaller)", "AV1 (smallest)" };
 
     public string SelectedFullSessionCodec
@@ -2607,6 +2618,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             FullSessionRecordingFolder: LibraryLayout.VodDirectory(Settings.LibraryFolder, ActiveGameDetection.DisplayName),
             FullSessionVideoCodec: Settings.FullSessionVideoCodec,
             FullSessionQuotaGb: Settings.FullSessionQuotaGb,
+            FullSessionBackgroundFinalize: Settings.FullSessionBackgroundFinalize,
             AudioSyncOffsetMs: Settings.AudioSyncOffsetMs,
             ClipFileNameScheme: Settings.ClipFileNameScheme,
             CustomClipFileNameTemplate: Settings.CustomClipFileNameTemplate,

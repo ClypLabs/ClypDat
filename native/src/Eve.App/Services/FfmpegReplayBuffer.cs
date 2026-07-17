@@ -776,6 +776,7 @@ public sealed record ReplayBufferConfig(
     string FullSessionRecordingFolder = "",
     string FullSessionVideoCodec = "H.264",
     int FullSessionQuotaGb = 0,
+    bool FullSessionBackgroundFinalize = true,
     int AudioSyncOffsetMs = 0,
     string ClipFileNameScheme = "Standard",
     string CustomClipFileNameTemplate = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}",

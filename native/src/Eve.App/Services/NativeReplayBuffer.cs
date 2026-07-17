@@ -72,6 +72,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer
 
     private CancellationTokenSource? _captureCts;
     private Task? _captureTask;
+    private Task? _backgroundFinalize;
+    // Guards StartAsync's orphan-WAV sweep across the app: a background
+    // finalize still owns capture WAVs after its session stopped, and a new
+    // session starting meanwhile must not sweep them out from under it.
+    private static int _activeBackgroundFinalizes;
     private volatile bool _sessionActive;
     private AVRational _timeBase = new() { num = 1, den = 1_000_000 };
     private byte[]? _extraData;
@@ -97,7 +102,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         if (_sessionActive) return Task.CompletedTask;
 
         Directory.CreateDirectory(_bufferFolder);
-        CleanupOldFiles();
+        if (Volatile.Read(ref _activeBackgroundFinalizes) == 0)
+        {
+            CleanupOldFiles();
+        }
+        else
+        {
+            AppLog.Info("Native replay start: skipping orphan-WAV sweep, a background session finalize still owns capture files.");
+        }
 
         var config = _configProvider();
         Duration = TimeSpan.FromSeconds(Math.Clamp(config.DurationSeconds, 30, 1200));
@@ -155,7 +167,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             catch (OperationCanceledException) { }
         }
 
-        _audio.Stop();
+        // When a background finalize is running it took a snapshot of the
+        // capture set and deletes the WAVs itself once the session file is
+        // complete - deleting them here would yank them out from under it.
+        _audio.Stop(deleteCaptureFiles: _backgroundFinalize is null || _backgroundFinalize.IsCompleted);
         lock (_bufferLock)
         {
             _packets.Clear();
@@ -871,7 +886,58 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             FinalizeFullSessionWriter(fullSessionFormatContext);
             if (!string.IsNullOrEmpty(fullSessionTempVideoPath))
             {
-                FinalizeFullSessionRecording(_configProvider(), fullSessionStartUtc, fullSessionTempVideoPath, fullSessionFinalOutputPath, fullSessionGameDisplayName);
+                var finalizeConfig = _configProvider();
+                if (finalizeConfig.FullSessionBackgroundFinalize)
+                {
+                    // Snapshot the capture set NOW - StopAsync clears the live
+                    // list (without deleting files, see its comment) the
+                    // moment this loop returns.
+                    var captureSnapshot = _audio.SnapshotCaptures();
+                    var startUtc = fullSessionStartUtc;
+                    var tempPath = fullSessionTempVideoPath;
+                    var finalPath = fullSessionFinalOutputPath;
+                    var gameName = fullSessionGameDisplayName;
+
+                    // Make the session visible IMMEDIATELY as a video-only
+                    // file; the background job then muxes audio into it via a
+                    // swap. If the move fails (cross-volume oddity), the job
+                    // just works from the temp file like the synchronous path.
+                    var videoPath = tempPath;
+                    try
+                    {
+                        File.Move(tempPath, finalPath);
+                        videoPath = finalPath;
+                        var immediateGameName = !string.IsNullOrWhiteSpace(gameName) && !string.Equals(gameName, "No game detected", StringComparison.OrdinalIgnoreCase)
+                            ? gameName
+                            : finalizeConfig.GameDisplayName;
+                        ClipInfoSidecar.Save(finalizeConfig.LibraryFolder, finalPath, new ClipInfo(immediateGameName, null, $"{immediateGameName} Full Session", startUtc));
+                        AppLog.Info($"Full session video available immediately (audio attaching in background): {finalPath}.");
+                    }
+                    catch (Exception error)
+                    {
+                        AppLog.Error("Full session immediate video move failed; background finalize will produce the file instead.", error);
+                    }
+
+                    Interlocked.Increment(ref _activeBackgroundFinalizes);
+                    var capturedVideoPath = videoPath;
+                    _backgroundFinalize = Task.Run(() =>
+                    {
+                        try
+                        {
+                            FinalizeFullSessionRecording(finalizeConfig, startUtc, capturedVideoPath, finalPath, gameName, captureSnapshot);
+                        }
+                        finally
+                        {
+                            foreach (var path in captureSnapshot.FilePaths) AudioCapturePipeline.TryDelete(path);
+                            Interlocked.Decrement(ref _activeBackgroundFinalizes);
+                            AppLog.Info($"Full session background finalize complete: final={finalPath}.");
+                        }
+                    });
+                }
+                else
+                {
+                    FinalizeFullSessionRecording(finalizeConfig, fullSessionStartUtc, fullSessionTempVideoPath, fullSessionFinalOutputPath, fullSessionGameDisplayName);
+                }
             }
             if (codecContext is not null) { var c = codecContext; ffmpeg.avcodec_free_context(&c); }
             duplication?.Dispose();
@@ -1317,7 +1383,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
     // used for clip saves, already running the whole time regardless) and muxes them
     // against the temp video into the user's chosen folder. -c:v copy keeps this fast
     // even for a multi-hour session.
-    private void FinalizeFullSessionRecording(ReplayBufferConfig config, DateTime sessionStartUtc, string tempVideoPath, string finalOutputPath, string sessionGameDisplayName = "")
+    private void FinalizeFullSessionRecording(ReplayBufferConfig config, DateTime sessionStartUtc, string tempVideoPath, string finalOutputPath, string sessionGameDisplayName = "", AudioCapturePipeline.CaptureSetSnapshot? capturesOverride = null)
     {
         if (string.IsNullOrEmpty(tempVideoPath) || string.IsNullOrEmpty(finalOutputPath)) return;
 
@@ -1360,8 +1426,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             }
 
             var tracks = _audio
-                .BuildAlignedTracksAsync(segmentWindows, config, snapshots, CancellationToken.None)
+                .BuildAlignedTracksAsync(segmentWindows, config, snapshots, CancellationToken.None, capturesOverride)
                 .GetAwaiter().GetResult();
+
+            // Background finalize already moved the video-only file onto the
+            // final path so the session is visible immediately - ffmpeg can't
+            // write its own input, so mux to a sibling temp and swap after.
+            var muxInPlace = string.Equals(tempVideoPath, finalOutputPath, StringComparison.OrdinalIgnoreCase);
+            var muxOutputPath = muxInPlace ? finalOutputPath + ".muxing.mp4" : finalOutputPath;
 
             List<string> BuildMuxArgs(string[] videoCodecArgs)
             {
@@ -1380,7 +1452,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 // network drive that made long sessions stutter/fail in the
                 // editor while plain VLC (single reader, patient) coped.
                 muxArgs.AddRange(new[] { "-movflags", "+faststart" });
-                muxArgs.AddRange(new[] { "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("EVE Native Full Session")}", finalOutputPath });
+                muxArgs.AddRange(new[] { "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("EVE Native Full Session")}", muxOutputPath });
                 return muxArgs;
             }
 
@@ -1404,10 +1476,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             }
             if (result.ExitCode != 0)
             {
-                AppLog.Error($"Full session recording final mux failed: {result.Error}");
+                AppLog.Error($"Full session recording final mux failed: {result.Error}{(muxInPlace ? " (video-only session file kept)" : string.Empty)}");
+                if (muxInPlace) AudioCapturePipeline.TryDelete(muxOutputPath);
             }
             else
             {
+                if (muxInPlace)
+                {
+                    File.Move(muxOutputPath, finalOutputPath, overwrite: true);
+                }
                 ClipInfoSidecar.Save(config.LibraryFolder, finalOutputPath, new ClipInfo(gameDisplayName, null, $"{gameDisplayName} Full Session", sessionStartUtc));
                 AppLog.Info($"Native full session recording saved: path={finalOutputPath}, codec={config.FullSessionVideoCodec}.");
                 EnforceFullSessionQuota(config);
@@ -1419,7 +1496,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         }
         finally
         {
-            AudioCapturePipeline.TryDelete(tempVideoPath);
+            // In-place mode the "temp" IS the final file - never delete it.
+            if (!string.Equals(tempVideoPath, finalOutputPath, StringComparison.OrdinalIgnoreCase))
+            {
+                AudioCapturePipeline.TryDelete(tempVideoPath);
+            }
             foreach (var snapshot in snapshots) AudioCapturePipeline.TryDelete(snapshot);
         }
     }

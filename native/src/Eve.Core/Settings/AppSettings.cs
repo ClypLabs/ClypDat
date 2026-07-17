@@ -94,6 +94,10 @@ public sealed class AppSettings
     // 0 = unlimited. When set, the oldest EVE session recordings are deleted
     // after each save until the session folder fits the quota again.
     public int FullSessionQuotaGb { get; set; }
+    // On: session video lands on disk the moment recording stops; audio
+    // tracks are attached by a background job afterward (file is briefly
+    // video-only). Off: the whole mux runs before the session file appears.
+    public bool FullSessionBackgroundFinalize { get; set; } = true;
 }
 
 public sealed class ClipEditSettings

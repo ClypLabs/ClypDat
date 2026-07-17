@@ -455,6 +455,14 @@
                     <Border Height="1" Background="#1B242D" Margin="0,6" />
                     <Grid ColumnDefinitions="*,Auto">
                       <StackPanel Spacing="2" VerticalAlignment="Center">
+                        <TextBlock Text="Finalize in background" Foreground="#B8C7D8" FontWeight="Bold" FontSize="13" />
+                        <TextBlock Text="On: the session video appears the moment recording stops, and audio tracks attach quietly afterward (file is briefly video-only). Off: everything is processed before the file appears." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                      </StackPanel>
+                      <ToggleSwitch Grid.Column="1" IsChecked="{Binding FullSessionBackgroundFinalize}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                    </Grid>
+                    <Border Height="1" Background="#1B242D" Margin="0,6" />
+                    <Grid ColumnDefinitions="*,Auto">
+                      <StackPanel Spacing="2" VerticalAlignment="Center">
                         <TextBlock Text="Storage limit" Foreground="#B8C7D8" FontWeight="Bold" FontSize="13" />
                         <TextBlock Text="When session recordings exceed this, the oldest ones are deleted automatically after each save." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
                       </StackPanel>
