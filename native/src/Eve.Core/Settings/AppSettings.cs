@@ -88,6 +88,12 @@ public sealed class AppSettings
     // for now; Legacy/OBS would need their own, larger wiring.
     public bool FullSessionRecordingEnabled { get; set; }
     public string FullSessionRecordingFolder { get; set; } = string.Empty;
+    // H.264 = mux the already-encoded stream as-is (fast, bigger file);
+    // H.265/AV1 re-encode at finalize time via NVENC for smaller session files.
+    public string FullSessionVideoCodec { get; set; } = "H.264";
+    // 0 = unlimited. When set, the oldest EVE session recordings are deleted
+    // after each save until the session folder fits the quota again.
+    public int FullSessionQuotaGb { get; set; }
 }
 
 public sealed class ClipEditSettings

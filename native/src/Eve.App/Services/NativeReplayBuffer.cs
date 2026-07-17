@@ -1351,14 +1351,37 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 .BuildAlignedTracksAsync(segmentWindows, config, snapshots, CancellationToken.None)
                 .GetAwaiter().GetResult();
 
-            var muxArgs = new List<string> { "-y", "-i", tempVideoPath };
-            foreach (var track in tracks) muxArgs.AddRange(new[] { "-i", track.Path });
-            muxArgs.AddRange(new[] { "-map", "0:v" });
-            for (var i = 0; i < tracks.Count; i++) muxArgs.AddRange(new[] { "-map", $"{i + 1}:a" });
-            muxArgs.AddRange(new[] { "-c:v", "copy", "-c:a", "aac", "-b:a", "192k" });
-            for (var i = 0; i < tracks.Count; i++) muxArgs.AddRange(new[] { $"-metadata:s:a:{i}", $"title={tracks[i].Label}" });
-            muxArgs.AddRange(new[] { "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("EVE Native Full Session")}", finalOutputPath });
-            var result = AudioCapturePipeline.RunProcessAsync("ffmpeg", muxArgs, CancellationToken.None).GetAwaiter().GetResult();
+            List<string> BuildMuxArgs(string[] videoCodecArgs)
+            {
+                var muxArgs = new List<string> { "-y", "-i", tempVideoPath };
+                foreach (var track in tracks) muxArgs.AddRange(new[] { "-i", track.Path });
+                muxArgs.AddRange(new[] { "-map", "0:v" });
+                for (var i = 0; i < tracks.Count; i++) muxArgs.AddRange(new[] { "-map", $"{i + 1}:a" });
+                muxArgs.AddRange(videoCodecArgs);
+                muxArgs.AddRange(new[] { "-c:a", "aac", "-b:a", "192k" });
+                for (var i = 0; i < tracks.Count; i++) muxArgs.AddRange(new[] { $"-metadata:s:a:{i}", $"title={tracks[i].Label}" });
+                muxArgs.AddRange(new[] { "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("EVE Native Full Session")}", finalOutputPath });
+                return muxArgs;
+            }
+
+            // The ring encoder already produced H.264, so H.264 here is a
+            // plain stream copy (fast). H.265/AV1 re-encode the whole session
+            // through NVENC at finalize time for a much smaller file, falling
+            // back to a stream copy (not a CPU encode - a multi-hour software
+            // re-encode at finalize would be far worse than a bigger file) if
+            // NVENC isn't available.
+            var codecArgs = config.FullSessionVideoCodec switch
+            {
+                "H.265" => new[] { "-c:v", "hevc_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "24", "-b:v", "0" },
+                "AV1" => new[] { "-c:v", "av1_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "32", "-b:v", "0" },
+                _ => new[] { "-c:v", "copy" }
+            };
+            var result = AudioCapturePipeline.RunProcessAsync("ffmpeg", BuildMuxArgs(codecArgs), CancellationToken.None).GetAwaiter().GetResult();
+            if (result.ExitCode != 0 && codecArgs[1] != "copy")
+            {
+                AppLog.Error($"Full session {config.FullSessionVideoCodec} re-encode failed, retrying as stream copy: {result.Error}");
+                result = AudioCapturePipeline.RunProcessAsync("ffmpeg", BuildMuxArgs(new[] { "-c:v", "copy" }), CancellationToken.None).GetAwaiter().GetResult();
+            }
             if (result.ExitCode != 0)
             {
                 AppLog.Error($"Full session recording final mux failed: {result.Error}");
@@ -1366,7 +1389,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             else
             {
                 ClipInfoSidecar.Save(config.LibraryFolder, finalOutputPath, new ClipInfo(config.GameDisplayName, null, $"{config.GameDisplayName} Full Session", sessionStartUtc));
-                AppLog.Info($"Native full session recording saved: path={finalOutputPath}.");
+                AppLog.Info($"Native full session recording saved: path={finalOutputPath}, codec={config.FullSessionVideoCodec}.");
+                EnforceFullSessionQuota(config);
             }
         }
         catch (Exception error)
@@ -1377,6 +1401,53 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         {
             AudioCapturePipeline.TryDelete(tempVideoPath);
             foreach (var snapshot in snapshots) AudioCapturePipeline.TryDelete(snapshot);
+        }
+    }
+
+    // Deletes the oldest EVE-recorded session files (identified by their own
+    // sidecar's "... Full Session" FileTitle - never touches clips or files
+    // EVE didn't write) until the library's VODs tree fits the configured
+    // quota again. Runs after each successful session save; the just-saved
+    // file is always kept even if it alone exceeds the quota.
+    private static void EnforceFullSessionQuota(ReplayBufferConfig config)
+    {
+        if (config.FullSessionQuotaGb <= 0 || string.IsNullOrWhiteSpace(config.LibraryFolder)) return;
+        try
+        {
+            var vodsRoot = LibraryLayout.VodsRoot(config.LibraryFolder);
+            if (!Directory.Exists(vodsRoot)) return;
+
+            var sessions = Directory.EnumerateFiles(vodsRoot, "*.*", SearchOption.AllDirectories)
+                .Where(MediaProbeService.IsVideoFile)
+                .Where(path => ClipInfoSidecar.Load(config.LibraryFolder, path)?.FileTitle?.EndsWith("Full Session", StringComparison.OrdinalIgnoreCase) == true)
+                .Select(path => new FileInfo(path))
+                .OrderBy(info => info.CreationTimeUtc)
+                .ToList();
+
+            var quotaBytes = (long)config.FullSessionQuotaGb * 1024 * 1024 * 1024;
+            var totalBytes = sessions.Sum(info => info.Length);
+            // Index-bounded to Count-1 so the newest session always survives.
+            for (var i = 0; totalBytes > quotaBytes && i < sessions.Count - 1; i++)
+            {
+                var victim = sessions[i];
+                try
+                {
+                    File.Delete(victim.FullName);
+                    ClipInfoSidecar.Delete(config.LibraryFolder, victim.FullName);
+                    ClipEditSidecar.Delete(config.LibraryFolder, victim.FullName);
+                    AudioCapturePipeline.TryDelete(LibraryLayout.SidecarPath(config.LibraryFolder, victim.FullName, ".paused.json"));
+                    totalBytes -= victim.Length;
+                    AppLog.Info($"Full session quota: deleted oldest session {victim.Name} ({victim.Length / (1024.0 * 1024 * 1024):0.0}GB) to fit {config.FullSessionQuotaGb}GB.");
+                }
+                catch (Exception error)
+                {
+                    AppLog.Error($"Full session quota: failed deleting {victim.FullName}", error);
+                }
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Full session quota enforcement failed", error);
         }
     }
 

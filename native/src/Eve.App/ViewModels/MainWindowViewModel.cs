@@ -1375,6 +1375,41 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string FullSessionRecordingFolderDisplay =>
         string.IsNullOrWhiteSpace(FullSessionRecordingFolder) ? "Choose a library folder" : FullSessionRecordingFolder;
 
+    public IReadOnlyList<string> FullSessionCodecs { get; } = new[] { "H.264 (fastest)", "H.265 (smaller)", "AV1 (smallest)" };
+
+    public string SelectedFullSessionCodec
+    {
+        get => FullSessionCodecs.FirstOrDefault(option => option.StartsWith(Settings.FullSessionVideoCodec, StringComparison.OrdinalIgnoreCase)) ?? FullSessionCodecs[0];
+        set
+        {
+            Settings.FullSessionVideoCodec = value.Split(' ')[0];
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    public sealed record FullSessionQuotaOption(string Label, int Gb);
+
+    public IReadOnlyList<FullSessionQuotaOption> FullSessionQuotaOptions { get; } = new FullSessionQuotaOption[]
+    {
+        new("Unlimited", 0),
+        new("25 GB", 25),
+        new("50 GB", 50),
+        new("100 GB", 100),
+        new("250 GB", 250)
+    };
+
+    public FullSessionQuotaOption SelectedFullSessionQuota
+    {
+        get => FullSessionQuotaOptions.FirstOrDefault(option => option.Gb == Settings.FullSessionQuotaGb) ?? FullSessionQuotaOptions[0];
+        set
+        {
+            Settings.FullSessionQuotaGb = value.Gb;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
     public string SelectedVideoName
     {
         get => _selectedVideoName;
@@ -2529,6 +2564,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             MicrophoneNoiseSuppressionStrength: Settings.MicrophoneNoiseSuppressionStrength,
             FullSessionRecordingEnabled: Settings.FullSessionRecordingEnabled,
             FullSessionRecordingFolder: LibraryLayout.VodDirectory(Settings.LibraryFolder, ActiveGameDetection.DisplayName),
+            FullSessionVideoCodec: Settings.FullSessionVideoCodec,
+            FullSessionQuotaGb: Settings.FullSessionQuotaGb,
             AudioSyncOffsetMs: Settings.AudioSyncOffsetMs,
             ClipFileNameScheme: Settings.ClipFileNameScheme,
             CustomClipFileNameTemplate: Settings.CustomClipFileNameTemplate,
