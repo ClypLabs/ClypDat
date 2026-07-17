@@ -77,10 +77,18 @@ public sealed class PlaybackSession : IDisposable
         // higher/spikier read latency blows through it and playback stutters.
         // A bigger demux cache absorbs those latency spikes at the cost of a
         // few MB of RAM; local files keep a modest bump over the default.
-        _videoMedia.AddOption($":file-caching={(IsNetworkPath(path) ? 5000 : 1000)}");
+        var isNetwork = IsNetworkPath(path);
+        _videoMedia.AddOption($":file-caching={(isNetwork ? 5000 : 1000)}");
         VideoPlayer.Media = _videoMedia;
         VideoPlayer.Mute = true;
         VideoPlayer.Volume = 0;
+
+        // Network-drive diagnostics: size + storage type up front, so slow
+        // opens in the log can immediately be attributed (or not) to the file
+        // living on a share.
+        long sizeMb = 0;
+        try { sizeMb = new FileInfo(path).Length / (1024 * 1024); } catch { }
+        AppLog.Info($"Editor video load: network={isNetwork}, sizeMB={sizeMb}, path={path}");
     }
 
     public static bool IsNetworkPath(string path)

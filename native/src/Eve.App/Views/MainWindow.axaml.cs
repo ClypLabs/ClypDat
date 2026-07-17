@@ -2130,10 +2130,16 @@ public sealed partial class MainWindow : Window
             // late-firing event can't wrongly clear a NEWER open's loading
             // flag - the cancellation check below guards that.
             var videoReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var firstFrameClock = System.Diagnostics.Stopwatch.StartNew();
             void OnTimeChanged(object? _, MediaPlayerTimeChangedEventArgs __)
             {
                 playback.VideoPlayer.TimeChanged -= OnTimeChanged;
                 videoReady.TrySetResult();
+                // Time from play request to first decoded frame - the primary
+                // "how slow is this clip's storage" number for network-drive
+                // diagnosis (pairs with the "Editor video load: network=..."
+                // line logged at LoadVideo).
+                AppLog.Info($"Editor first frame after {firstFrameClock.ElapsedMilliseconds}ms.");
                 Dispatcher.UIThread.Post(() =>
                 {
                     if (cancellationToken.IsCancellationRequested) return;

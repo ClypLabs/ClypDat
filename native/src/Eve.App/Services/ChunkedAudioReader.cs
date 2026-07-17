@@ -48,6 +48,7 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
     private ISampleProvider? _openChunkSamples;
     private int _openChunkIndex = -1;
     private long _positionFrames;
+    private long _starvedFrames;
     private bool _disposed;
 
     public ChunkedAudioReader(string inputPath, int streamIndex, TimeSpan duration, string cacheDir, string cacheKey)
@@ -131,8 +132,18 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
                     Array.Clear(buffer, offset + written, silentSamples);
                     written += silentSamples;
                     _positionFrames += framesWanted;
+                    _starvedFrames += framesWanted;
                     continue;
                 }
+
+                // Starvation diagnostic: how much silence the listener just sat
+                // through waiting on this chunk - the key number for judging
+                // network-drive audio behavior from the log.
+                if (_starvedFrames > SampleRate / 5)
+                {
+                    AppLog.Info($"Editor audio starved: stream={_streamIndex}, chunk={chunkIndex}, silentMs={_starvedFrames * 1000 / SampleRate}, network={PlaybackSession.IsNetworkPath(_inputPath)}.");
+                }
+                _starvedFrames = 0;
 
                 var read = _openChunkSamples!.Read(buffer, offset + written, (int)(framesWanted * Channels));
                 if (read <= 0)
@@ -280,6 +291,7 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
 
         try
         {
+            var clock = Stopwatch.StartNew();
             using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start ffmpeg.");
             var errorTask = process.StandardError.ReadToEndAsync();
             _ = process.StandardOutput.ReadToEndAsync();
@@ -292,6 +304,11 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
             }
 
             File.Move(pendingPath, outputPath, overwrite: true);
+            // Per-chunk extraction time is the primary network-drive health
+            // metric: local NVMe lands well under 200ms; a share that takes
+            // multiple seconds per chunk is what audio starvation reports
+            // trace back to.
+            AppLog.Info($"Editor audio chunk extracted: stream={_streamIndex}, chunk={chunkIndex}, ms={clock.ElapsedMilliseconds}, network={PlaybackSession.IsNetworkPath(_inputPath)}.");
         }
         catch (Exception error)
         {
