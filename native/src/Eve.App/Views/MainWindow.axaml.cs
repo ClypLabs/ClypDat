@@ -467,8 +467,14 @@ public sealed partial class MainWindow : Window
                 // Windows Capture segments need a few seconds to concat/mux before
                 // the clip lands in the library, so give instant feedback on the
                 // hotkey press instead of waiting for that to finish.
-                var notifiedEarly = _replayBuffer is WindowsReplayBuffer;
-                if (notifiedEarly) ShowClipSavedNotification();
+                // Overlay/sound fire the moment the hotkey lands, not after the
+                // save pipeline finishes - the Native backend's save (remux +
+                // audio track building + mux) takes several seconds, and the
+                // delayed badge read as the hotkey not registering. The buffered
+                // audio/video is snapshotted at the save CALL, so the badge is
+                // truthful about what got captured; an actual failure still
+                // logs and (for manual clips) shows the error dialog.
+                ShowClipSavedNotification();
 
                 var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder, titleOverride: autoClipLabel));
                 AppLog.Info($"Replay clip saved: {outputPath}");
@@ -481,7 +487,6 @@ public sealed partial class MainWindow : Window
                     autoClipLabel ?? ViewModel.ActiveGameDetection.DisplayName,
                     File.GetCreationTimeUtc(outputPath)));
                 await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
-                if (!notifiedEarly) ShowClipSavedNotification();
             }
             catch (Exception error)
             {
