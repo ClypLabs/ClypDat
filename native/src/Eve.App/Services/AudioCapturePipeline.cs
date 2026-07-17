@@ -237,7 +237,7 @@ public sealed class AudioCapturePipeline : IDisposable
         TryDelete(path);
         var capture = new WasapiLoopbackCapture(device);
         lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, kind, null, DateTime.UtcNow, sourceKey));
-        AppLog.Info($"Audio capture started: {title}, device={device.FriendlyName}.");
+        AppLog.Debug($"Audio capture started: {title}, device={device.FriendlyName}.");
     }
 
     private void StartProcessLoopbackCapture(AudioCaptureKind kind, int processId, ProcessLoopbackCaptureMode mode, string title, string sourceKey)
@@ -246,7 +246,7 @@ public sealed class AudioCapturePipeline : IDisposable
         TryDelete(path);
         var capture = new ProcessLoopbackWaveIn(processId, mode);
         lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, kind, processId, DateTime.UtcNow, sourceKey));
-        AppLog.Info($"Audio capture started: {title}, pid={processId}, mode={mode}.");
+        AppLog.Debug($"Audio capture started: {title}, pid={processId}, mode={mode}.");
     }
 
     private void StartMicrophoneCapture(MMDevice device, string title, string sourceKey)
@@ -255,7 +255,7 @@ public sealed class AudioCapturePipeline : IDisposable
         TryDelete(path);
         var capture = new WasapiCapture(device);
         lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, AudioCaptureKind.Microphone, null, DateTime.UtcNow, sourceKey, device.ID));
-        AppLog.Info($"Audio capture started: {title}, device={device.FriendlyName}.");
+        AppLog.Debug($"Audio capture started: {title}, device={device.FriendlyName}.");
     }
 
     private static string AudioKindPrefix(AudioCaptureKind kind) => kind switch
@@ -325,7 +325,7 @@ public sealed class AudioCapturePipeline : IDisposable
             // Stop best effort.
         }
 
-        AppLog.Info($"Audio capture stopped: {capture.Title}, pid={capture.ProcessId?.ToString() ?? "none"}, start={capture.StartedAtUtc:o}, end={capture.EndedAtUtc:o}, bytes={AudioFileLength(capture.Path)}.");
+        AppLog.Debug($"Audio capture stopped: {capture.Title}, pid={capture.ProcessId?.ToString() ?? "none"}, start={capture.StartedAtUtc:o}, end={capture.EndedAtUtc:o}, bytes={AudioFileLength(capture.Path)}.");
     }
 
     private void RefreshAudioRoutes()
@@ -722,7 +722,7 @@ public sealed class AudioCapturePipeline : IDisposable
             using var reader = new WaveFileReader(sourceSnapshotPath);
             wavStartUtc = lastSampleUtc - reader.TotalTime;
             var driftMs = (wavStartUtc - capture.EffectiveStartedAtUtc).TotalMilliseconds;
-            AppLog.Info($"Audio snapshot anchored: kind={capture.Kind}, sourceKey={capture.SourceKey}, wavSeconds={reader.TotalTime.TotalSeconds:0.0}, startDriftMs={driftMs:0}.");
+            AppLog.Debug($"Audio snapshot anchored: kind={capture.Kind}, sourceKey={capture.SourceKey}, wavSeconds={reader.TotalTime.TotalSeconds:0.0}, startDriftMs={driftMs:0}.");
         }
         catch (Exception error)
         {
@@ -772,7 +772,7 @@ public sealed class AudioCapturePipeline : IDisposable
             // atrim filter approach that decoded the file from the top every
             // chunk.
             var filters = $"[0:a]asetpts=PTS-STARTPTS,aresample=48000,{noiseSuppressionFilter}adelay={delayMs}|{delayMs},apad=whole_dur={FormatSeconds(durationSeconds)},atrim=0:{FormatSeconds(durationSeconds)}[out]";
-            AppLog.Info($"Replay audio overlap: kind={capture.Kind}, pid={capture.ProcessId?.ToString() ?? "none"}, trim={trimStart:0.###}s, overlap={overlapDuration:0.###}s, delay={delayMs}ms, bytes={AudioFileLength(capture.Path)}.");
+            AppLog.Debug($"Replay audio overlap: kind={capture.Kind}, pid={capture.ProcessId?.ToString() ?? "none"}, trim={trimStart:0.###}s, overlap={overlapDuration:0.###}s, delay={delayMs}ms, bytes={AudioFileLength(capture.Path)}.");
 
             var result = RunProcessAsync("ffmpeg", new[]
             {

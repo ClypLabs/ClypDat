@@ -148,7 +148,7 @@ public sealed class ForegroundGameDetector
         if (!detection.IsDetected && !string.IsNullOrEmpty(reason) && !string.Equals(exeName, _lastLoggedRejectedExe, StringComparison.OrdinalIgnoreCase))
         {
             _lastLoggedRejectedExe = exeName;
-            AppLog.Info($"Game detection: not detecting foreground window, exe={exeName}, reason={reason}.");
+            AppLog.Debug($"Game detection: not detecting foreground window, exe={exeName}, reason={reason}.");
         }
         else if (detection.IsDetected)
         {

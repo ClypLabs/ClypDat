@@ -88,7 +88,7 @@ public sealed class PlaybackSession : IDisposable
         // living on a share.
         long sizeMb = 0;
         try { sizeMb = new FileInfo(path).Length / (1024 * 1024); } catch { }
-        AppLog.Info($"Editor video load: network={isNetwork}, sizeMB={sizeMb}, path={path}");
+        AppLog.Debug($"Editor video load: network={isNetwork}, sizeMB={sizeMb}, path={path}");
     }
 
     public static bool IsNetworkPath(string path)
@@ -135,7 +135,7 @@ public sealed class PlaybackSession : IDisposable
             _audioVolumes.TryAdd(track.StreamIndex, track.VolumePercent);
         }
 
-        AppLog.Info($"Editor audio loaded (chunked): streams={string.Join(",", _audioStreamIndexes.OrderBy(key => key))}, volumes={string.Join(",", _audioVolumes.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:{pair.Value:0}%"))}.");
+        AppLog.Debug($"Editor audio loaded (chunked): streams={string.Join(",", _audioStreamIndexes.OrderBy(key => key))}, volumes={string.Join(",", _audioVolumes.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:{pair.Value:0}%"))}.");
         RebuildAudioOutput();
         return Task.CompletedTask;
     }
@@ -178,7 +178,7 @@ public sealed class PlaybackSession : IDisposable
         var limited = new SoftLimiterSampleProvider(normalized);
         _audioOutput = new WasapiOut(AudioClientShareMode.Shared, false, 120);
         _audioOutput.Init(limited);
-        AppLog.Info($"Editor audio output ready: streams={string.Join(",", _audioSources.Keys.OrderBy(key => key))}.");
+        AppLog.Debug($"Editor audio output ready: streams={string.Join(",", _audioSources.Keys.OrderBy(key => key))}.");
     }
 
     public void Play()
@@ -191,7 +191,7 @@ public sealed class PlaybackSession : IDisposable
         var playVersion = Interlocked.Increment(ref _playVersion);
         var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
         var wasStoppedOrEnded = IsEnded || VideoPlayer.State == VLCState.Stopped;
-        AppLog.Info($"Editor play from requested={time.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}, ended={IsEnded}.");
+        AppLog.Debug($"Editor play from requested={time.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}, ended={IsEnded}.");
         if (wasStoppedOrEnded)
         {
             VideoPlayer.Stop();
@@ -237,7 +237,7 @@ public sealed class PlaybackSession : IDisposable
             _ = StartAudioOnceVideoCatchesUpAsync(playVersion, milliseconds);
         }
 
-        AppLog.Info($"Editor play from requested={time.TotalSeconds:0.###}s (seek={needsSeek}), vlc after={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}.");
+        AppLog.Debug($"Editor play from requested={time.TotalSeconds:0.###}s (seek={needsSeek}), vlc after={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}.");
     }
 
     // Holds audio back until the video has actually reached the seek target
@@ -283,7 +283,7 @@ public sealed class PlaybackSession : IDisposable
             _audioOutput?.Stop();
             VideoPlayer.SetPause(true);
         }
-        AppLog.Info($"Editor pause at {Position.TotalSeconds:0.###}s.");
+        AppLog.Debug($"Editor pause at {Position.TotalSeconds:0.###}s.");
     }
 
     public void Stop()
@@ -338,7 +338,7 @@ public sealed class PlaybackSession : IDisposable
                 if (!VideoPlayer.IsPlaying) VideoPlayer.Play();
                 VideoPlayer.SetPause(false);
             }
-            AppLog.Info($"Editor seek begin: requested={requested.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}, resume={resumePlayback}, version={seekVersion}.");
+            AppLog.Debug($"Editor seek begin: requested={requested.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}, resume={resumePlayback}, version={seekVersion}.");
             if (seekVersion != Interlocked.Read(ref _seekVersion)) return false;
             var videoReady = await SeekAndWaitAsync(requested, cancellationToken, isPreview).ConfigureAwait(false);
             if (seekVersion != Interlocked.Read(ref _seekVersion)) return false;
@@ -367,7 +367,7 @@ public sealed class PlaybackSession : IDisposable
                 }
             }
 
-            AppLog.Info($"Editor seek end: requested={requested.TotalSeconds:0.###}s, settled={settledTime.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}, resume={resumePlayback}, resumed={resumed}, version={seekVersion}.");
+            AppLog.Debug($"Editor seek end: requested={requested.TotalSeconds:0.###}s, settled={settledTime.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}, resume={resumePlayback}, resumed={resumed}, version={seekVersion}.");
             return !resumePlayback || resumed;
         }
         finally
@@ -396,11 +396,11 @@ public sealed class PlaybackSession : IDisposable
         if (_audioSources.TryGetValue(streamIndex, out var source))
         {
             source.Volume.Volume = VolumeCurve(percent);
-            AppLog.Info($"Editor volume changed: stream={streamIndex}, percent={percent:0}%, found=True.");
+            AppLog.Debug($"Editor volume changed: stream={streamIndex}, percent={percent:0}%, found=True.");
         }
         else
         {
-            AppLog.Info($"Editor volume changed: stream={streamIndex}, percent={percent:0}%, found=False, loaded={string.Join(",", _audioSources.Keys.OrderBy(key => key))}.");
+            AppLog.Debug($"Editor volume changed: stream={streamIndex}, percent={percent:0}%, found=False, loaded={string.Join(",", _audioSources.Keys.OrderBy(key => key))}.");
         }
     }
 
@@ -456,7 +456,7 @@ public sealed class PlaybackSession : IDisposable
 
             var readerState = string.Join(",", _audioSources.Select(pair =>
                 $"{pair.Key}:cur={pair.Value.Reader.CurrentTime.TotalSeconds:0.###}s/total={pair.Value.Reader.TotalTime.TotalSeconds:0.###}s"));
-            AppLog.Info($"Editor audio sync: position={position.TotalSeconds:0.###}s, shouldPlay={_shouldPlay}, videoPlaying={VideoPlayer.IsPlaying}, willPlay={willPlay}, outputState={_audioOutput.PlaybackState}, readers=[{readerState}].");
+            AppLog.Debug($"Editor audio sync: position={position.TotalSeconds:0.###}s, shouldPlay={_shouldPlay}, videoPlaying={VideoPlayer.IsPlaying}, willPlay={willPlay}, outputState={_audioOutput.PlaybackState}, readers=[{readerState}].");
         }
     }
 
@@ -526,10 +526,10 @@ public sealed class PlaybackSession : IDisposable
                 // "pause" even when the seek genuinely succeeded.
                 if (Math.Abs(VideoPlayer.Time - targetMs) >= 650)
                 {
-                    AppLog.Info($"Editor video seek settle timeout: target={target.TotalSeconds:0.###}s, actual={Position.TotalSeconds:0.###}s, playing={VideoPlayer.IsPlaying}.");
+                    AppLog.Debug($"Editor video seek settle timeout: target={target.TotalSeconds:0.###}s, actual={Position.TotalSeconds:0.###}s, playing={VideoPlayer.IsPlaying}.");
                     return false;
                 }
-                AppLog.Info($"Editor video seek settle timeout but position already matches: target={target.TotalSeconds:0.###}s, actual={Position.TotalSeconds:0.###}s.");
+                AppLog.Debug($"Editor video seek settle timeout but position already matches: target={target.TotalSeconds:0.###}s, actual={Position.TotalSeconds:0.###}s.");
             }
 
             _lastRequestedPosition = TimeSpan.FromMilliseconds(Math.Max(0, VideoPlayer.Time));

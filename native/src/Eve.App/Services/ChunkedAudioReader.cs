@@ -308,7 +308,7 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
             // metric: local NVMe lands well under 200ms; a share that takes
             // multiple seconds per chunk is what audio starvation reports
             // trace back to.
-            AppLog.Info($"Editor audio chunk extracted: stream={_streamIndex}, chunk={chunkIndex}, ms={clock.ElapsedMilliseconds}, network={PlaybackSession.IsNetworkPath(_inputPath)}.");
+            AppLog.Debug($"Editor audio chunk extracted: stream={_streamIndex}, chunk={chunkIndex}, ms={clock.ElapsedMilliseconds}, network={PlaybackSession.IsNetworkPath(_inputPath)}.");
         }
         catch (Exception error)
         {

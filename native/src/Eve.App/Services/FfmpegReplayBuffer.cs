@@ -950,7 +950,7 @@ internal sealed class AudioCaptureSession : IDisposable
         if (FirstSampleUtc is not { } first) return;
         var wallMs = (referenceUtc - first).TotalMilliseconds;
         var writtenMs = BytesToMilliseconds(_bytesWritten);
-        AppLog.Info($"Audio placement diag: {Title}, written={writtenMs / 1000:0.0}s, wall={wallMs / 1000:0.0}s, deficitMs={wallMs - writtenMs:0}.");
+        AppLog.Debug($"Audio placement diag: {Title}, written={writtenMs / 1000:0.0}s, wall={wallMs / 1000:0.0}s, deficitMs={wallMs - writtenMs:0}.");
     }
 
     private void WriteZerosLocked(long gapBytes)

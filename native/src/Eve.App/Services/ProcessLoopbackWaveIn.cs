@@ -150,7 +150,7 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
                         if (!_loggedFirstPacket)
                         {
                             _loggedFirstPacket = true;
-                            AppLog.Info($"Process loopback first packet: pid={_processId}, mode={_mode}, frames={frames}, bytes={bytes}, silent={flags.HasFlag(AudioClientBufferFlags.Silent)}.");
+                            AppLog.Debug($"Process loopback first packet: pid={_processId}, mode={_mode}, frames={frames}, bytes={bytes}, silent={flags.HasFlag(AudioClientBufferFlags.Silent)}.");
                         }
 
                         if (!loggedDiscontinuity && flags.HasFlag(AudioClientBufferFlags.DataDiscontinuity))

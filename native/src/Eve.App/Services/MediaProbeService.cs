@@ -282,7 +282,7 @@ public sealed class MediaProbeService
         // Network-drive diagnostic: first-segment latency is what the user
         // perceives (when the waveform starts appearing); total/segment count
         // shows whether the share's throughput is the bottleneck.
-        AppLog.Info($"Waveform decoded: segments={segmentCount}x{audioTracks.Length}tracks, firstSegmentMs={firstSegmentMs}, totalMs={decodeClock.ElapsedMilliseconds}, path={media.Path}");
+        AppLog.Debug($"Waveform decoded: segments={segmentCount}x{audioTracks.Length}tracks, firstSegmentMs={firstSegmentMs}, totalMs={decodeClock.ElapsedMilliseconds}, path={media.Path}");
 
         var waveforms = peaksByTrack.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<double>)pair.Value);
         await TryWriteWaveformCacheAsync(cachePath, waveforms, cancellationToken);

@@ -224,7 +224,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             // actually has, which wouldn't just be a start offset - it'd get
             // worse toward the end of the clip.
             var videoDurationSeconds = (window[^1].PtsMs - window[0].PtsMs) / 1_000_000.0;
-            AppLog.Info($"Native replay audio/video duration check: videoDurationSeconds={videoDurationSeconds:0.000}, audioWindowDurationSeconds={windowDurationSeconds:0.000}, deltaMs={(windowDurationSeconds - videoDurationSeconds) * 1000:0.0}, packetCount={window.Length}.");
+            AppLog.Debug($"Native replay audio/video duration check: videoDurationSeconds={videoDurationSeconds:0.000}, audioWindowDurationSeconds={windowDurationSeconds:0.000}, deltaMs={(windowDurationSeconds - videoDurationSeconds) * 1000:0.0}, packetCount={window.Length}.");
 
             // A capture stall (the loop goes an extended stretch without
             // acquiring/encoding a frame - seen under heavy GPU load, driver
@@ -502,7 +502,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     var m = Math.Max(1, iterationsSinceLog);
                     var realFrameCount = Math.Max(1, iterationsSinceLog - zeroPresentSkips);
                     var presentGapDenom = Math.Max(1, presentGapCount);
-                    AppLog.Info($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgEncodeMs={encodeMs / n:0.00}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, iterations={iterationsSinceLog}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}.");
+                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgEncodeMs={encodeMs / n:0.00}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, iterations={iterationsSinceLog}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}.");
                     copyMapMs = 0;
                     scaleMs = 0;
                     encodeMs = 0;

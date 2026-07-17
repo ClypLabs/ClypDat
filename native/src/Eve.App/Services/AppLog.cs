@@ -18,6 +18,16 @@ public static class AppLog
         Write("INFO", message);
     }
 
+    // High-frequency diagnostics (capture stats, per-seek traces, per-chunk
+    // timings) - written to a separate eve-debug-{date}.log so the main
+    // eve-{date}.log stays a readable story of what the app actually did
+    // (startup, buffer on/off, clips saved, errors) instead of a wall of
+    // engine telemetry. Same folder, same 7-day prune.
+    public static void Debug(string message)
+    {
+        Write("DEBUG", message, debugFile: true);
+    }
+
     public static void Error(string message, Exception? error = null)
     {
         Write("ERROR", error is null ? message : $"{message}: {error}");
@@ -63,12 +73,17 @@ public static class AppLog
         }
     }
 
-    private static void Write(string level, string message)
+    private static void Write(string level, string message, bool debugFile = false)
     {
         try
         {
             Directory.CreateDirectory(LogFolder);
-            var path = Path.Combine(LogFolder, $"eve-{DateTime.Now:yyyy-MM-dd}.log");
+            var path = Path.Combine(LogFolder, $"eve-{(debugFile ? "debug-" : string.Empty)}{DateTime.Now:yyyy-MM-dd}.log");
+            // One entry = one line, always. Embedded multi-line payloads
+            // (ffmpeg stderr, exception stack traces) otherwise splatter
+            // timestamp-less fragments through the file and make it unreadable.
+            message = message.ReplaceLineEndings(" ¦ ");
+            if (message.Length > 2000) message = message[..2000] + "…";
             var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] {message}{Environment.NewLine}";
             lock (Lock)
             {

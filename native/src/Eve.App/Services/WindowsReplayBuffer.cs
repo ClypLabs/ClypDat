@@ -412,7 +412,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                 var adjustedStartUtc = segment.EndedAtUtc - duration;
                 var correctionMs = (adjustedStartUtc - segment.StartedAtUtc).TotalMilliseconds;
                 var fpsHealth = wallDuration.TotalSeconds > 0 ? duration.TotalSeconds / wallDuration.TotalSeconds : 1d;
-                AppLog.Info($"Replay segment hydrated: path={segment.Path}, wall={wallDuration.TotalSeconds:0.###}s, video={duration.TotalSeconds:0.###}s, startCorrection={correctionMs:0}ms, health={fpsHealth:P0}.");
+                AppLog.Debug($"Replay segment hydrated: path={segment.Path}, wall={wallDuration.TotalSeconds:0.###}s, video={duration.TotalSeconds:0.###}s, startCorrection={correctionMs:0}ms, health={fpsHealth:P0}.");
                 if (fpsHealth < MinimumSegmentHealth || wallDuration > MaxVideoSegmentDuration + TimeSpan.FromSeconds(8))
                 {
                     AppLog.Info($"Replay segment skipped: unhealthy capture, path={segment.Path}, health={fpsHealth:P0}.");

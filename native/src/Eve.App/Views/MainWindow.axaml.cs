@@ -2139,7 +2139,7 @@ public sealed partial class MainWindow : Window
                 // "how slow is this clip's storage" number for network-drive
                 // diagnosis (pairs with the "Editor video load: network=..."
                 // line logged at LoadVideo).
-                AppLog.Info($"Editor first frame after {firstFrameClock.ElapsedMilliseconds}ms.");
+                AppLog.Debug($"Editor first frame after {firstFrameClock.ElapsedMilliseconds}ms.");
                 Dispatcher.UIThread.Post(() =>
                 {
                     if (cancellationToken.IsCancellationRequested) return;

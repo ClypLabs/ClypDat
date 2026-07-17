@@ -1771,6 +1771,32 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (Settings.ClipEdits.Remove(ClipEditKey(SelectedVideoPath))) SaveSettings();
     }
 
+    // One-time cleanup: session recordings used to title as "{game} Full
+    // Session"; the convention is now "Session - {game}" (matching their
+    // filenames). Rewrites old sidecars so existing tiles read the same as
+    // new ones. Cheap - VODs only, skips anything already migrated.
+    private void MigrateLegacySessionTitles()
+    {
+        try
+        {
+            var vodsRoot = LibraryLayout.VodsRoot(Settings.LibraryFolder);
+            if (!Directory.Exists(vodsRoot)) return;
+            foreach (var path in Directory.EnumerateFiles(vodsRoot, "*.*", SearchOption.AllDirectories).Where(MediaProbeService.IsVideoFile))
+            {
+                var info = ClipInfoSidecar.Load(Settings.LibraryFolder, path);
+                if (info?.FileTitle is not { } title || !title.EndsWith(" Full Session", StringComparison.OrdinalIgnoreCase)) continue;
+                var game = title[..^" Full Session".Length].Trim();
+                if (string.IsNullOrWhiteSpace(game)) game = info.GameDisplayName ?? "Session";
+                ClipInfoSidecar.Save(Settings.LibraryFolder, path, info with { FileTitle = $"Session - {game}" });
+                AppLog.Info($"Session title migrated: {path} -> \"Session - {game}\".");
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Legacy session title migration failed", error);
+        }
+    }
+
     public async Task RefreshLibraryAsync()
     {
         var scanClock = System.Diagnostics.Stopwatch.StartNew();
@@ -1789,6 +1815,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             await MigrateLibraryLayoutAsync();
         }
+
+        MigrateLegacySessionTitles();
         StartLibraryWatcher();
 
         var clips = _mediaProbe.EnumerateVideos(Settings.LibraryFolder)
@@ -1979,7 +2007,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         NotifyLibraryChrome();
-        AppLog.Info($"Library quick add: {filePath} in {clock.ElapsedMilliseconds}ms.");
+        AppLog.Debug($"Library quick add: {filePath} in {clock.ElapsedMilliseconds}ms.");
         await HydrateOpenClipAsync(existing ?? AllClips.First(clip => string.Equals(clip.Path, filePath, StringComparison.OrdinalIgnoreCase)));
     }
 
