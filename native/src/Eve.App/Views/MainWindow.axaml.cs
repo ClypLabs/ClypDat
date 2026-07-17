@@ -2333,7 +2333,7 @@ public sealed partial class MainWindow : Window
                 Background = new SolidColorBrush(Color.FromArgb(0xB3, 0, 0, 0)),
                 Child = new TextBlock
                 {
-                    Text = "Recording Paused",
+                    Text = "Playback Paused",
                     Foreground = Brushes.White,
                     FontSize = 28,
                     FontWeight = FontWeight.Bold,
