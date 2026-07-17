@@ -2168,7 +2168,7 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            await playback.LoadAudioAsync(videoPath, audioTracks, cancellationToken);
+            await playback.LoadAudioAsync(videoPath, audioTracks, ViewModel?.Duration ?? TimeSpan.Zero, cancellationToken);
             if (cancellationToken.IsCancellationRequested || _playback != playback) return;
             // Don't let audio start before the video's first real frame is
             // actually visible (the same TimeChanged confirmation that

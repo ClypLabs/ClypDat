@@ -12,7 +12,9 @@ public sealed class PlaybackSession : IDisposable
 {
     private readonly LibVLC _libVlc;
     private readonly Dictionary<int, AudioTrackSource> _audioSources = new();
-    private readonly Dictionary<int, string> _audioPaths = new();
+    private readonly List<int> _audioStreamIndexes = new();
+    private string _audioInputPath = string.Empty;
+    private TimeSpan _audioDuration = TimeSpan.Zero;
     private readonly Dictionary<int, double> _audioVolumes = new();
     private WasapiOut? _audioOutput;
     private MixingSampleProvider? _audioMixer;
@@ -74,40 +76,45 @@ public sealed class PlaybackSession : IDisposable
         VideoPlayer.Volume = 0;
     }
 
-    public async Task LoadAudioAsync(string path, IReadOnlyList<AudioPreviewTrack> audioTracks, CancellationToken cancellationToken)
+    // No upfront extraction anymore - audio streams in 30s chunks on demand
+    // (see ChunkedAudioReader), so this only records what to build readers
+    // from and constructs the output; audio is ready near-instantly even for
+    // an hour-long clip instead of waiting on a full-track WAV extract.
+    public Task LoadAudioAsync(string path, IReadOnlyList<AudioPreviewTrack> audioTracks, TimeSpan duration, CancellationToken cancellationToken)
     {
         DisposeAudioOutput();
-        _audioPaths.Clear();
-        if (audioTracks.Count == 0) return;
+        _audioStreamIndexes.Clear();
+        _audioInputPath = path;
+        _audioDuration = duration;
+        if (audioTracks.Count == 0) return Task.CompletedTask;
 
         foreach (var track in audioTracks)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var audioPath = await ExtractAudioTrackAsync(path, track.StreamIndex, cancellationToken);
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!IsUsableAudioCache(audioPath))
-            {
-                AppLog.Info($"Editor audio cache invalid after extract: stream={track.StreamIndex}, path={audioPath}.");
-                TryDelete(audioPath);
-                audioPath = await ExtractAudioTrackAsync(path, track.StreamIndex, cancellationToken);
-            }
-            _audioPaths[track.StreamIndex] = audioPath;
+            _audioStreamIndexes.Add(track.StreamIndex);
             _audioVolumes.TryAdd(track.StreamIndex, track.VolumePercent);
         }
 
-        AppLog.Info($"Editor audio loaded: streams={string.Join(",", _audioPaths.Keys.OrderBy(key => key))}, volumes={string.Join(",", _audioVolumes.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:{pair.Value:0}%"))}.");
+        AppLog.Info($"Editor audio loaded (chunked): streams={string.Join(",", _audioStreamIndexes.OrderBy(key => key))}, volumes={string.Join(",", _audioVolumes.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:{pair.Value:0}%"))}.");
         RebuildAudioOutput();
+        return Task.CompletedTask;
     }
 
     private void RebuildAudioOutput()
     {
         DisposeAudioOutput();
-        if (_audioPaths.Count == 0) return;
+        if (_audioStreamIndexes.Count == 0 || string.IsNullOrEmpty(_audioInputPath)) return;
+
+        var tempDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "EVE",
+            "preview-audio");
+        Directory.CreateDirectory(tempDir);
+        PruneAudioCache(tempDir);
 
         var providers = new List<ISampleProvider>();
-        foreach (var (streamIndex, audioPath) in _audioPaths)
+        foreach (var streamIndex in _audioStreamIndexes)
         {
-            var reader = new AudioFileReader(audioPath);
+            var reader = new ChunkedAudioReader(_audioInputPath, streamIndex, _audioDuration, tempDir, AudioCacheKey(_audioInputPath, streamIndex));
             var volume = new VolumeSampleProvider(reader)
             {
                 Volume = VolumeCurve(_audioVolumes.GetValueOrDefault(streamIndex, 100))
@@ -510,7 +517,7 @@ public sealed class PlaybackSession : IDisposable
 
     private void EnsureAudioOutputCanSeek(TimeSpan target)
     {
-        if (_audioPaths.Count == 0) return;
+        if (_audioStreamIndexes.Count == 0) return;
         if (_audioOutput is null)
         {
             RebuildAudioOutput();
@@ -520,7 +527,7 @@ public sealed class PlaybackSession : IDisposable
         var targetBeforeEnd = _audioSources.Values.Any(source => target < source.Reader.TotalTime - TimeSpan.FromMilliseconds(100));
         if (!targetBeforeEnd) return;
 
-        var anyReaderAtEnd = _audioSources.Values.Any(source => source.Reader.Position >= source.Reader.Length);
+        var anyReaderAtEnd = _audioSources.Values.Any(source => source.Reader.AtEnd);
         if (!anyReaderAtEnd) return;
 
         AppLog.Info("Editor audio output reached EOF; rebuilding before replay.");
@@ -536,7 +543,9 @@ public sealed class PlaybackSession : IDisposable
     private void DisposeAudio()
     {
         DisposeAudioOutput();
-        _audioPaths.Clear();
+        _audioStreamIndexes.Clear();
+        _audioInputPath = string.Empty;
+        _audioDuration = TimeSpan.Zero;
         _audioVolumes.Clear();
     }
 
@@ -615,101 +624,6 @@ public sealed class PlaybackSession : IDisposable
         }
     }
 
-    private static async Task<string> ExtractAudioTrackAsync(
-        string inputPath,
-        int streamIndex,
-        CancellationToken cancellationToken)
-    {
-        var tempDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "EVE",
-            "preview-audio");
-        Directory.CreateDirectory(tempDir);
-        PruneAudioCache(tempDir);
-        var outputPath = Path.Combine(tempDir, $"{AudioCacheKey(inputPath, streamIndex)}.wav");
-        if (IsUsableAudioCache(outputPath))
-        {
-            // Mark as recently used so the 7-day prune keeps clips that are
-            // actually still being opened.
-            try { File.SetLastWriteTimeUtc(outputPath, DateTime.UtcNow); } catch { }
-            return outputPath;
-        }
-        TryDelete(outputPath);
-
-        var pendingPath = Path.Combine(tempDir, $"{Guid.NewGuid():N}.wav");
-        var startInfo = new ProcessStartInfo("ffmpeg")
-        {
-            RedirectStandardError = true,
-            RedirectStandardOutput = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        foreach (var argument in new[]
-        {
-            "-y",
-            "-v", "error",
-            "-i", inputPath,
-            "-map", $"0:{streamIndex}",
-            "-vn",
-            "-sn",
-            "-ac", "2",
-            "-ar", "48000",
-            "-c:a", "pcm_s16le",
-            pendingPath
-        })
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start ffmpeg.");
-        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        try
-        {
-            await process.WaitForExitAsync(cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            TryKill(process);
-            TryDelete(pendingPath);
-            throw;
-        }
-
-        if (process.ExitCode != 0)
-        {
-            var error = await errorTask;
-            TryDelete(pendingPath);
-            throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? "ffmpeg failed to extract preview audio." : error);
-        }
-
-        await outputTask;
-        if (!File.Exists(outputPath))
-        {
-            File.Move(pendingPath, outputPath);
-        }
-        else
-        {
-            TryDelete(pendingPath);
-        }
-
-        return outputPath;
-    }
-
-    private static bool IsUsableAudioCache(string path)
-    {
-        try
-        {
-            if (!File.Exists(path) || new FileInfo(path).Length < 4096) return false;
-            using var reader = new WaveFileReader(path);
-            return reader.TotalTime > TimeSpan.FromMilliseconds(250);
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     private static string AudioCacheKey(string inputPath, int streamIndex)
     {
         var info = new FileInfo(inputPath);
@@ -720,18 +634,6 @@ public sealed class PlaybackSession : IDisposable
             info.Exists ? info.Length : 0,
             info.Exists ? info.LastWriteTimeUtc.Ticks : 0);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(input)))[..24].ToLowerInvariant();
-    }
-
-    private static void TryKill(Process process)
-    {
-        try
-        {
-            if (!process.HasExited) process.Kill(true);
-        }
-        catch
-        {
-            // Best-effort cancellation.
-        }
     }
 
     private static void TryDelete(string path)
@@ -746,7 +648,7 @@ public sealed class PlaybackSession : IDisposable
         }
     }
 
-    private sealed record AudioTrackSource(AudioFileReader Reader, VolumeSampleProvider Volume);
+    private sealed record AudioTrackSource(ChunkedAudioReader Reader, VolumeSampleProvider Volume);
 
     private sealed class SoftLimiterSampleProvider : ISampleProvider
     {
