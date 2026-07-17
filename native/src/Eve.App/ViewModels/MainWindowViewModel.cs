@@ -1388,6 +1388,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // Gb = -1 is the "Custom" sentinel: the actual number comes from the
+    // CustomFullSessionQuotaGb text field shown while it's selected.
     public sealed record FullSessionQuotaOption(string Label, int Gb);
 
     public IReadOnlyList<FullSessionQuotaOption> FullSessionQuotaOptions { get; } = new FullSessionQuotaOption[]
@@ -1396,15 +1398,54 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         new("25 GB", 25),
         new("50 GB", 50),
         new("100 GB", 100),
-        new("250 GB", 250)
+        new("250 GB", 250),
+        new("500 GB", 500),
+        new("Custom", -1)
     };
+
+    private bool _customFullSessionQuotaSelected;
 
     public FullSessionQuotaOption SelectedFullSessionQuota
     {
-        get => FullSessionQuotaOptions.FirstOrDefault(option => option.Gb == Settings.FullSessionQuotaGb) ?? FullSessionQuotaOptions[0];
+        get
+        {
+            if (IsCustomFullSessionQuota) return FullSessionQuotaOptions[^1];
+            return FullSessionQuotaOptions.FirstOrDefault(option => option.Gb == Settings.FullSessionQuotaGb) ?? FullSessionQuotaOptions[0];
+        }
         set
         {
-            Settings.FullSessionQuotaGb = value.Gb;
+            if (value.Gb < 0)
+            {
+                _customFullSessionQuotaSelected = true;
+                if (Settings.FullSessionQuotaGb <= 0) Settings.FullSessionQuotaGb = 500;
+            }
+            else
+            {
+                _customFullSessionQuotaSelected = false;
+                Settings.FullSessionQuotaGb = value.Gb;
+            }
+
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsCustomFullSessionQuota));
+            OnPropertyChanged(nameof(CustomFullSessionQuotaGb));
+            SaveSettings();
+        }
+    }
+
+    // Custom is active when explicitly picked, or when the saved value isn't
+    // one of the presets (a previously-entered custom number surviving a
+    // restart).
+    public bool IsCustomFullSessionQuota =>
+        _customFullSessionQuotaSelected ||
+        (Settings.FullSessionQuotaGb > 0 && FullSessionQuotaOptions.All(option => option.Gb != Settings.FullSessionQuotaGb));
+
+    public string CustomFullSessionQuotaGb
+    {
+        get => Settings.FullSessionQuotaGb > 0 ? Settings.FullSessionQuotaGb.ToString() : string.Empty;
+        set
+        {
+            if (!int.TryParse(value, out var gb)) return;
+            Settings.FullSessionQuotaGb = Math.Clamp(gb, 1, 100_000);
             OnPropertyChanged();
             SaveSettings();
         }

@@ -466,6 +466,11 @@
                         </ComboBox.ItemTemplate>
                       </ComboBox>
                     </Grid>
+                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" IsVisible="{Binding IsCustomFullSessionQuota}">
+                      <TextBlock Text="Custom limit" Foreground="#B8C7D8" FontSize="12" VerticalAlignment="Center" />
+                      <TextBox Grid.Column="1" Classes="settingsInput" Width="110" Text="{Binding CustomFullSessionQuotaGb}" Watermark="500" VerticalAlignment="Center" />
+                      <TextBlock Grid.Column="2" Text="GB" Foreground="#6B7C8C" FontSize="12" VerticalAlignment="Center" />
+                    </Grid>
                     <TextBlock Text="⚠ Finalizing a long session (muxing the whole thing) can take real time and heavy CPU/disk use, more so at higher quality/fps or longer sessions - other apps (Discord, Spotify, etc.) may stutter or freeze until it finishes."
                                Foreground="#E5A00D" FontSize="11" FontWeight="Bold" TextWrapping="Wrap" Margin="0,4,0,0" />
                   </StackPanel>
