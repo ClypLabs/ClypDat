@@ -910,7 +910,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                         var immediateGameName = !string.IsNullOrWhiteSpace(gameName) && !string.Equals(gameName, "No game detected", StringComparison.OrdinalIgnoreCase)
                             ? gameName
                             : finalizeConfig.GameDisplayName;
-                        ClipInfoSidecar.Save(finalizeConfig.LibraryFolder, finalPath, new ClipInfo(immediateGameName, null, $"{immediateGameName} Full Session", startUtc));
+                        ClipInfoSidecar.Save(finalizeConfig.LibraryFolder, finalPath, new ClipInfo(immediateGameName, null, $"Session - {immediateGameName}", startUtc));
                         AppLog.Info($"Full session video available immediately (audio attaching in background): {finalPath}.");
                     }
                     catch (Exception error)
@@ -1485,7 +1485,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 {
                     File.Move(muxOutputPath, finalOutputPath, overwrite: true);
                 }
-                ClipInfoSidecar.Save(config.LibraryFolder, finalOutputPath, new ClipInfo(gameDisplayName, null, $"{gameDisplayName} Full Session", sessionStartUtc));
+                ClipInfoSidecar.Save(config.LibraryFolder, finalOutputPath, new ClipInfo(gameDisplayName, null, $"Session - {gameDisplayName}", sessionStartUtc));
                 AppLog.Info($"Native full session recording saved: path={finalOutputPath}, codec={config.FullSessionVideoCodec}.");
                 EnforceFullSessionQuota(config);
             }
@@ -1520,7 +1520,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer
 
             var sessions = Directory.EnumerateFiles(vodsRoot, "*.*", SearchOption.AllDirectories)
                 .Where(MediaProbeService.IsVideoFile)
-                .Where(path => ClipInfoSidecar.Load(config.LibraryFolder, path)?.FileTitle?.EndsWith("Full Session", StringComparison.OrdinalIgnoreCase) == true)
+                .Where(path =>
+                {
+                    // New sessions title as "Session - {game}"; pre-existing
+                    // ones as "{game} Full Session" - quota must keep seeing both.
+                    var title = ClipInfoSidecar.Load(config.LibraryFolder, path)?.FileTitle;
+                    return title is not null &&
+                           (title.StartsWith("Session - ", StringComparison.OrdinalIgnoreCase) ||
+                            title.EndsWith("Full Session", StringComparison.OrdinalIgnoreCase));
+                })
                 .Select(path => new FileInfo(path))
                 .OrderBy(info => info.CreationTimeUtc)
                 .ToList();
