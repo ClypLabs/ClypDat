@@ -102,6 +102,7 @@ public sealed partial class MainWindow : Window
         // handler runs AFTER the focused Button's own KeyUp already fired
         // Click, too late to swallow it.
         AddHandler(KeyDownEvent, MainWindow_OnKeyDown, RoutingStrategies.Tunnel);
+        TrackPausedOverlayToWindow();
         AddHandler(KeyUpEvent, MainWindow_OnKeyUp, RoutingStrategies.Tunnel);
         Closing += (_, e) =>
         {
@@ -2359,12 +2360,33 @@ public sealed partial class MainWindow : Window
         }
 
         var overlay = EnsureRecordingPausedOverlay();
+        RepositionPausedOverlay(overlay);
+        if (!overlay.IsVisible) overlay.Show(this);
+    }
+
+    private void RepositionPausedOverlay(Window overlay)
+    {
         var topLeft = EditorVideoView.PointToScreen(new Point(0, 0));
         var bottomRight = EditorVideoView.PointToScreen(new Point(EditorVideoView.Bounds.Width, EditorVideoView.Bounds.Height));
         overlay.Position = topLeft;
         overlay.Width = Math.Max(1, (bottomRight.X - topLeft.X) / overlay.RenderScaling);
         overlay.Height = Math.Max(1, (bottomRight.Y - topLeft.Y) / overlay.RenderScaling);
-        if (!overlay.IsVisible) overlay.Show(this);
+    }
+
+    // Keeps the badge glued to the video area during window drags/resizes -
+    // without this its position only updated on playback-timer ticks (and
+    // not at all while paused), so it visibly lagged/snapped behind the
+    // window instead of moving with it.
+    private void TrackPausedOverlayToWindow()
+    {
+        PositionChanged += (_, _) =>
+        {
+            if (_recordingPausedOverlay is { IsVisible: true } overlay) RepositionPausedOverlay(overlay);
+        };
+        EditorVideoView.LayoutUpdated += (_, _) =>
+        {
+            if (_recordingPausedOverlay is { IsVisible: true } overlay) RepositionPausedOverlay(overlay);
+        };
     }
 
     // Recomputes the "Playback Paused" badge for the CURRENT position. Must
