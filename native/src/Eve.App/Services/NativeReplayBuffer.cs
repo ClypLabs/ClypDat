@@ -336,6 +336,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         var fullSessionTempVideoPath = string.Empty;
         var fullSessionFinalOutputPath = string.Empty;
         var fullSessionStartUtc = DateTime.UtcNow;
+        var fullSessionGameDisplayName = string.Empty;
         var timerResolutionRaised = TimeBeginPeriod(1) == 0;
 
         try
@@ -386,6 +387,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             if (InitFullSessionWriter(config, codecContext, out fullSessionFormatContext, out fullSessionStream, out fullSessionTempVideoPath, out fullSessionFinalOutputPath))
             {
                 fullSessionStartUtc = DateTime.UtcNow;
+                fullSessionGameDisplayName = config.GameDisplayName;
             }
 
             swsContext = CreateScaler(captureWidth, captureHeight, outputWidth, outputHeight);
@@ -869,7 +871,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             FinalizeFullSessionWriter(fullSessionFormatContext);
             if (!string.IsNullOrEmpty(fullSessionTempVideoPath))
             {
-                FinalizeFullSessionRecording(_configProvider(), fullSessionStartUtc, fullSessionTempVideoPath, fullSessionFinalOutputPath);
+                FinalizeFullSessionRecording(_configProvider(), fullSessionStartUtc, fullSessionTempVideoPath, fullSessionFinalOutputPath, fullSessionGameDisplayName);
             }
             if (codecContext is not null) { var c = codecContext; ffmpeg.avcodec_free_context(&c); }
             duplication?.Dispose();
@@ -1315,9 +1317,19 @@ public sealed class NativeReplayBuffer : IReplayBuffer
     // used for clip saves, already running the whole time regardless) and muxes them
     // against the temp video into the user's chosen folder. -c:v copy keeps this fast
     // even for a multi-hour session.
-    private void FinalizeFullSessionRecording(ReplayBufferConfig config, DateTime sessionStartUtc, string tempVideoPath, string finalOutputPath)
+    private void FinalizeFullSessionRecording(ReplayBufferConfig config, DateTime sessionStartUtc, string tempVideoPath, string finalOutputPath, string sessionGameDisplayName = "")
     {
         if (string.IsNullOrEmpty(tempVideoPath) || string.IsNullOrEmpty(finalOutputPath)) return;
+
+        // The game the session was RECORDED from, not whatever detection says
+        // at finalize time - the session usually ends precisely because the
+        // game closed, so the fresh config here reads "No game detected" and
+        // that's what the library tile showed. Start-time identity wins;
+        // finalize-time only fills in if the session began before any game
+        // was detected.
+        var gameDisplayName = !string.IsNullOrWhiteSpace(sessionGameDisplayName) && !string.Equals(sessionGameDisplayName, "No game detected", StringComparison.OrdinalIgnoreCase)
+            ? sessionGameDisplayName
+            : config.GameDisplayName;
 
         var snapshots = new List<string>();
         try
@@ -1396,7 +1408,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             }
             else
             {
-                ClipInfoSidecar.Save(config.LibraryFolder, finalOutputPath, new ClipInfo(config.GameDisplayName, null, $"{config.GameDisplayName} Full Session", sessionStartUtc));
+                ClipInfoSidecar.Save(config.LibraryFolder, finalOutputPath, new ClipInfo(gameDisplayName, null, $"{gameDisplayName} Full Session", sessionStartUtc));
                 AppLog.Info($"Native full session recording saved: path={finalOutputPath}, codec={config.FullSessionVideoCodec}.");
                 EnforceFullSessionQuota(config);
             }
