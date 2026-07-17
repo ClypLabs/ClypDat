@@ -99,13 +99,6 @@ non-prerelease tag. If found, it shows a dialog with the version and release
 notes; accepting downloads `EVE-win-x64.zip`, extracts it, and replaces the
 running install via a PowerShell helper that waits for the process to exit.
 
-## Storage
-
-EVE cleans up after itself: replay-buffer scratch audio is deleted as soon
-as it ages out of the buffer window, stale backend scratch folders are
-swept at startup, preview-audio and thumbnail caches expire after
-7/30 days unused, and logs are kept for 7 days.
-
 ## Requirements
 
 - Windows 10 or 11, x64
@@ -113,6 +106,12 @@ swept at startup, preview-audio and thumbnail caches expire after
 - The EVE (Native) backend works on NVIDIA, AMD, and (as a last-resort
   software fallback) any GPU-less machine. The OBS backend's encoder is
   still NVENC-only, with no AMD/software fallback.
+
+## Known limitations
+
+- Windows only.
+- NVENC-only encoding in the OBS backend specifically.
+- Clips on Network Drives tend to take far longer than clips on a regular drive. Working on a resolution.
 
 ## Building
 
@@ -138,20 +137,12 @@ Pushing a tag matching `v*` triggers `.github/workflows/release.yml`, which
 builds the same output and packages it four ways: a zip, a self-extracting
 portable exe, an NSIS installer, and an MSI.
 
-
 ## Future Updates
 
 - AMD/software fallback for the OBS backend too (Native already has it)
 - Seamless replay buffer rotation for the Legacy Windows Capture backend
   (no stop/restart gap between segments - EVE's own backend already has this)
 - I'll update this when I get more ideas lol
-
-
-## Known limitations
-
-- Windows only.
-- NVENC-only encoding in the OBS backend specifically.
-- Clips on Network Drives tend to take far longer than clips on a regular drive. Working on a resolution.
 
 ## Third-party licenses
 
