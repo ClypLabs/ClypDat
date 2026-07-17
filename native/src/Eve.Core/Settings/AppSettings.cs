@@ -114,7 +114,9 @@ public sealed class GameCaptureOverride
 
 public sealed class Cs2AutoClipSettings
 {
-    public bool Enabled { get; set; }
+    // On by default for fresh installs; an existing settings.json keeps
+    // whatever the user last had (the stored value wins over this default).
+    public bool Enabled { get; set; } = true;
     public bool Kill { get; set; }
     public bool TwoKill { get; set; }
     public bool ThreeKill { get; set; } = true;
