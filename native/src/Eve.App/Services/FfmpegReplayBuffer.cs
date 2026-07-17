@@ -774,6 +774,8 @@ public sealed record ReplayBufferConfig(
     double MicrophoneNoiseSuppressionStrength = 12.0,
     bool FullSessionRecordingEnabled = false,
     string FullSessionRecordingFolder = "",
+    string FullSessionVideoCodec = "H.264",
+    int FullSessionQuotaGb = 0,
     int AudioSyncOffsetMs = 0,
     string ClipFileNameScheme = "Standard",
     string CustomClipFileNameTemplate = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}",
@@ -843,6 +845,11 @@ internal sealed class AudioCaptureSession : IDisposable
         {
             try
             {
+                // Pad any in-progress delivery gap up to "now" first, so the
+                // snapshot's last byte genuinely corresponds to the snapshot
+                // moment - the end-anchored alignment in AudioCapturePipeline
+                // depends on that.
+                WriteSilenceForDeliveryGapLocked(DateTime.UtcNow);
                 _writer.Flush();
                 _stream.Flush(true);
                 using var source = new FileStream(((FileStream)_stream).Name, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
@@ -859,16 +866,62 @@ internal sealed class AudioCaptureSession : IDisposable
 
     private void Capture_OnDataAvailable(object? sender, WaveInEventArgs e)
     {
+        var now = DateTime.UtcNow;
         if (!_firstSampleSeen)
         {
             _firstSampleSeen = true;
-            FirstSampleUtc = DateTime.UtcNow;
+            FirstSampleUtc = now;
         }
 
         lock (_lock)
         {
+            WriteSilenceForDeliveryGapLocked(now - TimeSpan.FromMilliseconds(BytesToMilliseconds(e.BytesRecorded)));
             _writer.Write(e.Buffer, 0, e.BytesRecorded);
+            _bytesWritten += e.BytesRecorded;
             _writer.Flush();
         }
+    }
+
+    private long _bytesWritten;
+
+    private double BytesToMilliseconds(long bytes) =>
+        bytes * 1000.0 / Math.Max(1, _capture.WaveFormat.AverageBytesPerSecond);
+
+    // Endpoint (speaker) loopback and mic captures deliver a continuous
+    // stream - silence included - so their WAV's timeline always matches
+    // wall-clock. PROCESS loopback (the Chat tracks) only delivers buffers
+    // while the target app is actually rendering audio: every stretch where
+    // Discord etc. goes quiet is simply MISSING from the file, making the WAV
+    // shorter than the wall-clock span it covers. Both the start- and
+    // end-anchored WAV-position math in AudioCapturePipeline assume a
+    // continuous timeline, so those holes shifted every chat sound after the
+    // first gap to the wrong spot in saved clips (or into apparent silence).
+    // Backfill each gap with actual zero samples as it's detected, keeping
+    // WAV time == wall time for every capture kind.
+    private void WriteSilenceForDeliveryGapLocked(DateTime expectedDataStartUtc)
+    {
+        if (FirstSampleUtc is not { } firstSampleUtc) return;
+        var expectedMs = (expectedDataStartUtc - firstSampleUtc).TotalMilliseconds;
+        var writtenMs = BytesToMilliseconds(_bytesWritten);
+        var gapMs = expectedMs - writtenMs;
+        // Small jitter between deliveries is normal; only real gaps count.
+        if (gapMs < 300) return;
+
+        var format = _capture.WaveFormat;
+        var gapBytes = (long)(gapMs / 1000.0 * format.AverageBytesPerSecond);
+        gapBytes -= gapBytes % Math.Max(1, format.BlockAlign);
+        if (gapBytes <= 0) return;
+
+        var zeros = new byte[Math.Min(gapBytes, 64 * 1024)];
+        var remaining = gapBytes;
+        while (remaining > 0)
+        {
+            var chunk = (int)Math.Min(zeros.Length, remaining);
+            _writer.Write(zeros, 0, chunk);
+            remaining -= chunk;
+        }
+
+        _bytesWritten += gapBytes;
+        AppLog.Info($"Audio capture gap backfilled with silence: {Title}, gap={gapMs / 1000.0:0.0}s.");
     }
 }
