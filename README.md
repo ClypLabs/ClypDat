@@ -151,7 +151,7 @@ portable exe, an NSIS installer, and an MSI.
 
 - Windows only.
 - NVENC-only encoding in the OBS backend specifically.
-
+- Clips on Network Drives tend to take far longer than clips on a regular drive. Working on a resolution.
 
 ## Third-party licenses
 
