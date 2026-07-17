@@ -82,13 +82,15 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
         }
     }
 
-    // Kicks off extraction of the chunk containing `time` plus the next one,
-    // without blocking.
+    // Kicks off extraction of the chunk containing `time`, the next one, and
+    // the previous one (small backward seeks - stepping back, re-listening to
+    // a moment - are as common as forward playback), without blocking.
     public void Prefetch(TimeSpan time)
     {
         var chunkIndex = (int)(Math.Max(0, time.TotalSeconds) / ChunkSeconds);
         ScheduleExtraction(chunkIndex);
         ScheduleExtraction(chunkIndex + 1);
+        ScheduleExtraction(chunkIndex - 1);
     }
 
     public int Read(float[] buffer, int offset, int count)

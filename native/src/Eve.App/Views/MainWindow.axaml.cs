@@ -1408,6 +1408,13 @@ public sealed partial class MainWindow : Window
         {
             await ApplyTimelineSeekAsync(ViewModel.CurrentTime, wasPlaying);
             ViewModel.SaveSelectedClipEditState();
+            // Warm the audio chunk cache at both trim markers - the very next
+            // actions after placing a handle are usually jumping to it
+            // (Restart plays from TrimStart, End jumps near TrimEnd), and on
+            // a network drive the extraction round-trip is what a user would
+            // otherwise hear as a silent beat after that jump.
+            _playback?.PrefetchAudioAt(ViewModel.TrimStart);
+            if (ViewModel.TrimEnd > TimeSpan.Zero) _playback?.PrefetchAudioAt(ViewModel.TrimEnd);
         }
     }
 
@@ -2170,6 +2177,14 @@ public sealed partial class MainWindow : Window
         {
             await playback.LoadAudioAsync(videoPath, audioTracks, ViewModel?.Duration ?? TimeSpan.Zero, cancellationToken);
             if (cancellationToken.IsCancellationRequested || _playback != playback) return;
+            // Warm the chunk cache at the clip's saved trim markers too -
+            // jumping straight to a previously-set trim point is a common
+            // first action after opening a clip.
+            if (ViewModel is { } viewModel)
+            {
+                if (viewModel.TrimStart > TimeSpan.Zero) playback.PrefetchAudioAt(viewModel.TrimStart);
+                if (viewModel.TrimEnd > TimeSpan.Zero && viewModel.TrimEnd < viewModel.Duration) playback.PrefetchAudioAt(viewModel.TrimEnd);
+            }
             // Don't let audio start before the video's first real frame is
             // actually visible (the same TimeChanged confirmation that
             // clears IsEditorVideoLoading) - otherwise a clip that's slow to

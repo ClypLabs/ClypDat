@@ -71,9 +71,42 @@ public sealed class PlaybackSession : IDisposable
         _videoMedia = new Media(_libVlc, new Uri(path));
         _videoMedia.AddOption(":no-audio");
         _videoMedia.AddOption(":avcodec-hw=d3d11va");
+        // LibVLC already streams windowed around the playhead (it never reads
+        // the whole file), but its default read-ahead cache is sized for
+        // local disks - on a network drive (UNC path or mapped SMB share) the
+        // higher/spikier read latency blows through it and playback stutters.
+        // A bigger demux cache absorbs those latency spikes at the cost of a
+        // few MB of RAM; local files keep a modest bump over the default.
+        _videoMedia.AddOption($":file-caching={(IsNetworkPath(path) ? 5000 : 1000)}");
         VideoPlayer.Media = _videoMedia;
         VideoPlayer.Mute = true;
         VideoPlayer.Volume = 0;
+    }
+
+    private static bool IsNetworkPath(string path)
+    {
+        try
+        {
+            if (path.StartsWith(@"\\", StringComparison.Ordinal)) return true;
+            var root = Path.GetPathRoot(path);
+            return !string.IsNullOrEmpty(root) && new DriveInfo(root).DriveType == DriveType.Network;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    // Warms the on-demand audio chunk cache around an arbitrary timeline
+    // point (trim handles, markers) so seeking there plays real audio
+    // immediately instead of a silent beat while its chunk extracts - called
+    // by the editor whenever the user positions something worth jumping to.
+    public void PrefetchAudioAt(TimeSpan time)
+    {
+        foreach (var source in _audioSources.Values)
+        {
+            source.Reader.Prefetch(time);
+        }
     }
 
     // No upfront extraction anymore - audio streams in 30s chunks on demand
