@@ -2367,6 +2367,22 @@ public sealed partial class MainWindow : Window
         if (!overlay.IsVisible) overlay.Show(this);
     }
 
+    // Recomputes the "Playback Paused" badge for the CURRENT position. Must
+    // run on every path that moves/settles the playhead - it used to live
+    // only inside the playback-timer tick, so with playback paused (timer
+    // stopped) a seek that landed inside a frozen range never showed the
+    // badge until the user pressed play.
+    private void RefreshPausedBadge()
+    {
+        if (ViewModel is null) return;
+        if (_pausedRanges.Count > 0)
+        {
+            var currentSeconds = ViewModel.CurrentTime.TotalSeconds;
+            ViewModel.IsRecordingPausedAtCurrentTime = _pausedRanges.Any(r => currentSeconds >= r.StartSeconds && currentSeconds < r.EndSeconds);
+        }
+        UpdateRecordingPausedOverlay(ViewModel.ShowRecordingPausedBadge);
+    }
+
     private void SyncPlaybackPosition()
     {
         if (ViewModel is null || _playback is null) return;
@@ -2386,12 +2402,7 @@ public sealed partial class MainWindow : Window
             _playback.EnsurePausedIfNeeded();
         }
         UpdateTimelineChrome();
-        if (_pausedRanges.Count > 0)
-        {
-            var currentSeconds = ViewModel.CurrentTime.TotalSeconds;
-            ViewModel.IsRecordingPausedAtCurrentTime = _pausedRanges.Any(r => currentSeconds >= r.StartSeconds && currentSeconds < r.EndSeconds);
-        }
-        UpdateRecordingPausedOverlay(ViewModel.ShowRecordingPausedBadge);
+        RefreshPausedBadge();
         if (ViewModel.TrimEnd > TimeSpan.Zero && ViewModel.CurrentTime >= ViewModel.TrimEnd)
         {
             _playback.Pause();
@@ -2472,6 +2483,9 @@ public sealed partial class MainWindow : Window
             _playbackTimer.Stop();
         }
         UpdateTimelineChrome();
+        // Timer may be stopped here (seek while paused) - refresh the frozen-
+        // range badge for the landing position explicitly.
+        RefreshPausedBadge();
     }
 
     private void UpdateTimelineChrome()
