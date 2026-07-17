@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using NAudio.CoreAudioApi;
@@ -5,6 +6,21 @@ using NAudio.CoreAudioApi.Interfaces;
 using NAudio.Wave;
 
 namespace Eve.App.Services;
+
+// WaveInEventArgs plus the exact wall-clock capture moment of the packet's
+// first frame (from WASAPI's per-packet QPC timestamp). AudioCaptureSession
+// type-checks for this to place bytes at their true timeline offset instead
+// of relying on byte-count accounting.
+internal sealed class TimestampedWaveInEventArgs : WaveInEventArgs
+{
+    public TimestampedWaveInEventArgs(byte[] buffer, int bytes, DateTime packetStartUtc)
+        : base(buffer, bytes)
+    {
+        PacketStartUtc = packetStartUtc;
+    }
+
+    public DateTime PacketStartUtc { get; }
+}
 
 [SupportedOSPlatform("windows")]
 internal sealed class ProcessLoopbackWaveIn : IWaveIn
@@ -99,6 +115,13 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
     private void CaptureLoop(CancellationToken token)
     {
         Exception? stoppedError = null;
+        var loggedDiscontinuity = false;
+        // Base pair for converting each packet's QPC capture timestamp (100ns
+        // units of the performance counter) into wall-clock UTC.
+        // Stopwatch.GetTimestamp reads the same QPC, so the offset between
+        // the two clocks is fixed for the process lifetime.
+        var utcBase = DateTime.UtcNow;
+        var qpcBase100ns = Stopwatch.GetTimestamp() * (10_000_000.0 / Stopwatch.Frequency);
         try
         {
             Marshal.ThrowExceptionForHR(_audioClient.Start());
@@ -112,7 +135,7 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
                         out var frames,
                         out var flags,
                         out _,
-                        out _));
+                        out var qpcPosition));
 
                     var bytes = frames * WaveFormat.BlockAlign;
                     var buffer = new byte[bytes];
@@ -130,7 +153,19 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
                             AppLog.Info($"Process loopback first packet: pid={_processId}, mode={_mode}, frames={frames}, bytes={bytes}, silent={flags.HasFlag(AudioClientBufferFlags.Silent)}.");
                         }
 
-                        DataAvailable?.Invoke(this, new WaveInEventArgs(buffer, bytes));
+                        if (!loggedDiscontinuity && flags.HasFlag(AudioClientBufferFlags.DataDiscontinuity))
+                        {
+                            loggedDiscontinuity = true;
+                            AppLog.Info($"Process loopback data discontinuity flagged: pid={_processId} - per-packet timestamps keep placement correct through it.");
+                        }
+
+                        // Exact capture moment of this packet's first frame -
+                        // the ground truth AudioCaptureSession places bytes
+                        // by, instead of guessing from byte counts and
+                        // callback times (which drifted hundreds of ms over
+                        // long sessions and desynced saved clips).
+                        var packetStartUtc = utcBase + TimeSpan.FromTicks((long)(qpcPosition - qpcBase100ns));
+                        DataAvailable?.Invoke(this, new TimestampedWaveInEventArgs(buffer, bytes, packetStartUtc));
                     }
                     Marshal.ThrowExceptionForHR(_captureClient.GetNextPacketSize(out packetFrames));
                 }

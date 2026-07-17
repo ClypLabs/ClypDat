@@ -866,6 +866,54 @@ internal sealed class AudioCaptureSession : IDisposable
 
     private void Capture_OnDataAvailable(object? sender, WaveInEventArgs e)
     {
+        // Timestamped path (ProcessLoopbackWaveIn, i.e. Game/Chat process
+        // captures): every packet carries the exact wall-clock moment its
+        // first frame was captured, so bytes are PLACED at their true
+        // timeline offset - silence gaps land exactly where the source was
+        // silent. This replaces the byte-count deficit heuristic, which
+        // drifted hundreds of ms over long sessions (bursty/pre-rolled
+        // delivery makes cumulative byte math lie in both directions) and
+        // audibly desynced saved clips.
+        if (e is TimestampedWaveInEventArgs timestamped)
+        {
+            if (!_firstSampleSeen)
+            {
+                _firstSampleSeen = true;
+                FirstSampleUtc = timestamped.PacketStartUtc;
+            }
+
+            lock (_lock)
+            {
+                var format = _capture.WaveFormat;
+                var expectedBytes = (long)((timestamped.PacketStartUtc - FirstSampleUtc!.Value).TotalSeconds * format.AverageBytesPerSecond);
+                expectedBytes -= expectedBytes % Math.Max(1, format.BlockAlign);
+                var aheadBytes = expectedBytes - _bytesWritten;
+                // ~30ms tolerance: QPC timestamps are exact but packet sizes
+                // quantize placement; below this it's jitter, not a gap.
+                var toleranceBytes = format.AverageBytesPerSecond * 30 / 1000;
+                if (aheadBytes > toleranceBytes)
+                {
+                    WriteZerosLocked(aheadBytes);
+                    if (aheadBytes > format.AverageBytesPerSecond / 4)
+                    {
+                        AppLog.Info($"Audio capture gap placed from packet timestamps: {Title}, gap={aheadBytes * 1000L / Math.Max(1, format.AverageBytesPerSecond)}ms.");
+                    }
+                }
+                else if (aheadBytes < -toleranceBytes && !_loggedOverlap)
+                {
+                    _loggedOverlap = true;
+                    AppLog.Info($"Audio capture packet overlap (timestamp behind written data): {Title}, behindMs={-aheadBytes * 1000L / Math.Max(1, format.AverageBytesPerSecond)}.");
+                }
+
+                _writer.Write(e.Buffer, 0, e.BytesRecorded);
+                _bytesWritten += e.BytesRecorded;
+                _writer.Flush();
+                LogPlacementDiagnosticLocked(timestamped.PacketStartUtc);
+            }
+
+            return;
+        }
+
         var now = DateTime.UtcNow;
         if (!_firstSampleSeen)
         {
@@ -878,18 +926,44 @@ internal sealed class AudioCaptureSession : IDisposable
             _writer.Write(e.Buffer, 0, e.BytesRecorded);
             _bytesWritten += e.BytesRecorded;
             // Deficit check AFTER appending the current buffer, against plain
-            // "now" - the original pre-write check subtracted the current
-            // buffer's duration from the expected span, which with process
-            // loopback's large delivery buffers permanently hid a steady
-            // shortage under that allowance (measured 0.7-0.9s of uncorrected
-            // deficit after 16 minutes, only caught at snapshot time). Right
-            // after a write the expected-vs-written comparison carries no
-            // buffer-size slack, so the 300ms threshold fires as intended,
-            // and the inserted silence lands between this buffer and the
-            // next - exactly where the missing time is.
+            // "now" - a pre-write check that subtracts the current buffer's
+            // duration hides a steady shortage under the delivery buffer
+            // size. Only used for NAudio endpoint/mic captures now; process
+            // loopback uses the exact timestamped path above.
             WriteSilenceForDeliveryGapLocked(now);
             _writer.Flush();
+            LogPlacementDiagnosticLocked(now);
         }
+    }
+
+    private bool _loggedOverlap;
+    private DateTime _nextPlacementDiagUtc = DateTime.MinValue;
+
+    // Once-a-minute per capture: how far the WAV's written length sits from
+    // the wall-clock span it should cover. Near zero = saved clips will be in
+    // sync; a growing value points straight at the capture kind responsible.
+    private void LogPlacementDiagnosticLocked(DateTime referenceUtc)
+    {
+        if (referenceUtc < _nextPlacementDiagUtc) return;
+        _nextPlacementDiagUtc = referenceUtc + TimeSpan.FromSeconds(60);
+        if (FirstSampleUtc is not { } first) return;
+        var wallMs = (referenceUtc - first).TotalMilliseconds;
+        var writtenMs = BytesToMilliseconds(_bytesWritten);
+        AppLog.Info($"Audio placement diag: {Title}, written={writtenMs / 1000:0.0}s, wall={wallMs / 1000:0.0}s, deficitMs={wallMs - writtenMs:0}.");
+    }
+
+    private void WriteZerosLocked(long gapBytes)
+    {
+        var zeros = new byte[Math.Min(gapBytes, 64 * 1024)];
+        var remaining = gapBytes;
+        while (remaining > 0)
+        {
+            var chunk = (int)Math.Min(zeros.Length, remaining);
+            _writer.Write(zeros, 0, chunk);
+            remaining -= chunk;
+        }
+
+        _bytesWritten += gapBytes;
     }
 
     private long _bytesWritten;
@@ -922,16 +996,7 @@ internal sealed class AudioCaptureSession : IDisposable
         gapBytes -= gapBytes % Math.Max(1, format.BlockAlign);
         if (gapBytes <= 0) return;
 
-        var zeros = new byte[Math.Min(gapBytes, 64 * 1024)];
-        var remaining = gapBytes;
-        while (remaining > 0)
-        {
-            var chunk = (int)Math.Min(zeros.Length, remaining);
-            _writer.Write(zeros, 0, chunk);
-            remaining -= chunk;
-        }
-
-        _bytesWritten += gapBytes;
+        WriteZerosLocked(gapBytes);
         AppLog.Info($"Audio capture gap backfilled with silence: {Title}, gap={gapMs / 1000.0:0.0}s.");
     }
 }
