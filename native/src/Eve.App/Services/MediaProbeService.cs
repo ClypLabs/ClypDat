@@ -202,9 +202,16 @@ public sealed class MediaProbeService
             captureBackend);
     }
 
+    // onPartial (optional) fires on a background thread after each decoded
+    // segment with the peaks-so-far for one stream - undecoded stretches sit
+    // at the silence floor and fill in left-to-right, so long clips show a
+    // progressively-growing waveform instead of nothing until the whole file
+    // has been decoded. Segments are interleaved across tracks so every lane
+    // grows together rather than one completing before the next starts.
     public async Task<IReadOnlyDictionary<int, IReadOnlyList<double>>> LoadWaveformsAsync(
         MediaFileInfo media,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<int, IReadOnlyList<double>>? onPartial = null)
     {
         var audioTracks = media.Tracks.Where(track => track.Type == "audio").ToArray();
         if (audioTracks.Length == 0) return new Dictionary<int, IReadOnlyList<double>>();
@@ -213,13 +220,62 @@ public sealed class MediaProbeService
         var cached = await TryReadWaveformCacheAsync(cachePath, cancellationToken);
         if (cached.Count > 0) return cached;
 
-        var waveforms = new Dictionary<int, IReadOnlyList<double>>();
-        foreach (var track in audioTracks)
+        const int BucketCount = 700;
+        const double SegmentSeconds = 60;
+        var totalSeconds = media.Duration.TotalSeconds;
+
+        // Unknown duration - can't map segments to bucket ranges, decode whole
+        // tracks in one pass like before.
+        if (totalSeconds <= 1)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            waveforms[track.Index] = await ReadWaveformAsync(media.Path, track.Index, cancellationToken);
+            var wholeWaveforms = new Dictionary<int, IReadOnlyList<double>>();
+            foreach (var track in audioTracks)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                wholeWaveforms[track.Index] = await ReadWaveformAsync(media.Path, track.Index, null, null, cancellationToken);
+                onPartial?.Invoke(track.Index, wholeWaveforms[track.Index]);
+            }
+
+            await TryWriteWaveformCacheAsync(cachePath, wholeWaveforms, cancellationToken);
+            return wholeWaveforms;
         }
 
+        var peaksByTrack = audioTracks.ToDictionary(
+            track => track.Index,
+            _ =>
+            {
+                var peaks = new double[BucketCount];
+                Array.Fill(peaks, 0.02);
+                return peaks;
+            });
+
+        var segmentCount = (int)Math.Ceiling(totalSeconds / SegmentSeconds);
+        for (var segment = 0; segment < segmentCount; segment++)
+        {
+            var segmentStart = segment * SegmentSeconds;
+            var segmentLength = Math.Min(SegmentSeconds, totalSeconds - segmentStart);
+            var startBucket = (int)(segmentStart / totalSeconds * BucketCount);
+            var endBucket = segment == segmentCount - 1 ? BucketCount : (int)((segmentStart + segmentLength) / totalSeconds * BucketCount);
+            if (endBucket <= startBucket) continue;
+
+            foreach (var track in audioTracks)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var segmentPeaks = await ReadWaveformAsync(media.Path, track.Index, segmentStart, segmentLength, cancellationToken);
+                var target = peaksByTrack[track.Index];
+                for (var bucket = startBucket; bucket < endBucket; bucket++)
+                {
+                    // Resample the segment's own peak list onto this segment's
+                    // slice of the full-clip bucket range.
+                    var source = (int)((bucket - startBucket) / (double)(endBucket - startBucket) * segmentPeaks.Count);
+                    target[bucket] = segmentPeaks[Math.Min(segmentPeaks.Count - 1, source)];
+                }
+
+                onPartial?.Invoke(track.Index, target.ToArray());
+            }
+        }
+
+        var waveforms = peaksByTrack.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<double>)pair.Value);
         await TryWriteWaveformCacheAsync(cachePath, waveforms, cancellationToken);
         return waveforms;
     }
@@ -324,18 +380,27 @@ public sealed class MediaProbeService
         }
     }
 
+    // startSeconds/lengthSeconds null = decode the whole track (unknown-duration
+    // fallback); otherwise decode just that window (-ss/-t input options, so
+    // ffmpeg byte-seeks instead of decoding from the top) for the segmented
+    // progressive load.
     private static async Task<IReadOnlyList<double>> ReadWaveformAsync(
         string filePath,
         int streamIndex,
+        double? startSeconds,
+        double? lengthSeconds,
         CancellationToken cancellationToken)
     {
         var tempPath = Path.Combine(Path.GetTempPath(), $"eve-waveform-{Guid.NewGuid():N}.f32");
         try
         {
-            var result = await RunProcessAsync("ffmpeg", new[]
+            var args = new List<string> { "-y", "-v", "error" };
+            if (startSeconds is not null && lengthSeconds is not null)
             {
-                "-y",
-                "-v", "error",
+                args.AddRange(new[] { "-ss", startSeconds.Value.ToString("0.###"), "-t", lengthSeconds.Value.ToString("0.###") });
+            }
+            args.AddRange(new[]
+            {
                 "-i", filePath,
                 "-map", $"0:{streamIndex}",
                 "-vn",
@@ -344,7 +409,8 @@ public sealed class MediaProbeService
                 "-ar", "4000",
                 "-f", "f32le",
                 tempPath
-            }, cancellationToken);
+            });
+            var result = await RunProcessAsync("ffmpeg", args.ToArray(), cancellationToken);
 
             return result.ExitCode == 0 && File.Exists(tempPath)
                 ? BuildPeaks(await File.ReadAllBytesAsync(tempPath, cancellationToken), 700)

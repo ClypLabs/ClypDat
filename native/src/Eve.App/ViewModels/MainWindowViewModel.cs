@@ -3034,7 +3034,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         try
         {
-            var waveforms = await _mediaProbe.LoadWaveformsAsync(media, cancellationToken);
+            // Per-segment partial updates so long clips paint their waveform
+            // progressively left-to-right instead of showing nothing until the
+            // whole file has been decoded.
+            void OnPartial(int streamIndex, IReadOnlyList<double> peaks) => Dispatcher.UIThread.Post(() =>
+            {
+                if (cancellationToken.IsCancellationRequested) return;
+                if (!string.Equals(SelectedVideoPath, media.Path, StringComparison.OrdinalIgnoreCase)) return;
+                var track = TimelineTracks.FirstOrDefault(track => track.IsAudio && track.StreamIndex == streamIndex);
+                if (track is not null) track.WaveformPeaks = peaks;
+            });
+
+            var waveforms = await _mediaProbe.LoadWaveformsAsync(media, cancellationToken, OnPartial);
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (!string.Equals(SelectedVideoPath, media.Path, StringComparison.OrdinalIgnoreCase)) return;
