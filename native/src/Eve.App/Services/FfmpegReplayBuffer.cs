@@ -875,9 +875,19 @@ internal sealed class AudioCaptureSession : IDisposable
 
         lock (_lock)
         {
-            WriteSilenceForDeliveryGapLocked(now - TimeSpan.FromMilliseconds(BytesToMilliseconds(e.BytesRecorded)));
             _writer.Write(e.Buffer, 0, e.BytesRecorded);
             _bytesWritten += e.BytesRecorded;
+            // Deficit check AFTER appending the current buffer, against plain
+            // "now" - the original pre-write check subtracted the current
+            // buffer's duration from the expected span, which with process
+            // loopback's large delivery buffers permanently hid a steady
+            // shortage under that allowance (measured 0.7-0.9s of uncorrected
+            // deficit after 16 minutes, only caught at snapshot time). Right
+            // after a write the expected-vs-written comparison carries no
+            // buffer-size slack, so the 300ms threshold fires as intended,
+            // and the inserted silence lands between this buffer and the
+            // next - exactly where the missing time is.
+            WriteSilenceForDeliveryGapLocked(now);
             _writer.Flush();
         }
     }

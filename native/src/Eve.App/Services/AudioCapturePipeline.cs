@@ -419,6 +419,18 @@ public sealed class AudioCapturePipeline : IDisposable
             .ToArray();
         var selfPid = Environment.ProcessId;
         var gamePids = useProcessRouting ? ResolveGameAudioProcessIds(config.GameExecutableName, excludedPids, selfPid) : Array.Empty<int>();
+        // One capture per distinct process tree - each capture uses
+        // IncludeTargetProcessTree, so keeping a pid whose ancestor is also in
+        // the set records the same audio twice (or more: a real save showed
+        // FOUR live Game captures of overlapping Fortnite trees, mixed into
+        // one smeared/echoing Game track). Same bug class as the chat lowest-
+        // PID fix, on the game side.
+        var rawGamePids = gamePids;
+        gamePids = CollapseToTreeRoots(gamePids);
+        if (gamePids.Length != rawGamePids.Length)
+        {
+            AppLog.Info($"Game audio pids collapsed to tree roots: raw={FormatIds(rawGamePids)}, roots={FormatIds(gamePids)}.");
+        }
         var key = $"{useProcessRouting}|{string.Join(',', chatRoutes.OrderBy(route => route.AppName, StringComparer.OrdinalIgnoreCase).Select(route => $"{route.AppName}:{route.ProcessId}"))}|{string.Join(',', excludedPids)}|{string.Join(',', gamePids)}|{string.Join(',', resolvedMicDeviceIds.OrderBy(id => id, StringComparer.Ordinal))}";
         return new AudioRoutes(chatRoutes.ToArray(), excludedPids, gamePids, useProcessRouting, key, resolvedMicDeviceIds);
     }
@@ -477,6 +489,33 @@ public sealed class AudioCapturePipeline : IDisposable
         {
             AppLog.Error($"Chat route root resolution failed for {appName}; falling back to lowest PID.", error);
             return appPids.Min();
+        }
+    }
+
+    // Drops every pid that has an ancestor also present in the set - the
+    // survivors are the roots of distinct process trees.
+    private static int[] CollapseToTreeRoots(IReadOnlyCollection<int> pids)
+    {
+        if (pids.Count <= 1) return pids.ToArray();
+        try
+        {
+            var set = pids.ToHashSet();
+            var parents = SnapshotParentProcessIds();
+            return pids.Where(pid =>
+            {
+                var current = pid;
+                for (var hops = 0; hops < 32 && parents.TryGetValue(current, out var parent) && parent != 0 && parent != current; hops++)
+                {
+                    if (set.Contains(parent)) return false;
+                    current = parent;
+                }
+                return true;
+            }).OrderBy(pid => pid).ToArray();
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Collapsing audio pids to tree roots failed; keeping the full set.", error);
+            return pids.ToArray();
         }
     }
 
