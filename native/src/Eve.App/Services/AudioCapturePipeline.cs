@@ -393,14 +393,17 @@ public sealed class AudioCapturePipeline : IDisposable
         // Multi-process apps (Discord, browsers, etc.) share one executable name across
         // several OS processes. StartProcessLoopbackCapture already uses
         // IncludeTargetProcessTree, so capturing more than one PID from the same app
-        // captures its audio twice - the reported "chat audio doubled" bug. Only the
-        // lowest (typically root/parent) PID is used per app; its process tree covers
-        // the rest.
+        // captures its audio twice - the reported "chat audio doubled" bug. One PID
+        // per app; ResolveAppRootProcessId picks which (the real tree root, verified
+        // via parent PIDs - the old "lowest PID" guess broke whenever PID recycling
+        // handed a detached helper a lower number than the actual root: the capture
+        // then attached to a tree that never renders audio and recorded pure silence
+        // while voice played in the real tree).
         var chatRoutes = new List<ChatRoute>();
         foreach (var appName in chatAppNames)
         {
-            var pids = ResolveProcessIds(appName).OrderBy(pid => pid).ToArray();
-            if (pids.Length > 0) chatRoutes.Add(new ChatRoute(appName, pids[0]));
+            var rootPid = ResolveAppRootProcessId(appName);
+            if (rootPid > 0) chatRoutes.Add(new ChatRoute(appName, rootPid));
         }
 
         var useProcessRouting = chatRoutes.Count > 0 || config.GameAudioExcludedProcesses.Any(name => !string.IsNullOrWhiteSpace(name));
@@ -425,6 +428,108 @@ public sealed class AudioCapturePipeline : IDisposable
         var values = ids.ToArray();
         return values.Length == 0 ? "none" : string.Join(",", values);
     }
+
+    // Picks the PID whose process tree actually contains the app's audio -
+    // builds the real parent/child relationships from a Toolhelp snapshot
+    // instead of assuming "lowest PID = root". Roots are the app's processes
+    // whose parent isn't another process of the same app; when several exist
+    // (crash handlers, detached helpers), prefer the root whose subtree holds
+    // a currently-active audio session, then the one with the most children.
+    private static int ResolveAppRootProcessId(string appName)
+    {
+        var appPids = ResolveProcessIds(appName).ToHashSet();
+        if (appPids.Count == 0) return 0;
+        if (appPids.Count == 1) return appPids.First();
+
+        try
+        {
+            var parents = SnapshotParentProcessIds();
+            var roots = appPids.Where(pid => !parents.TryGetValue(pid, out var parent) || !appPids.Contains(parent)).ToArray();
+            if (roots.Length == 0) return appPids.Min();
+            if (roots.Length == 1) return roots[0];
+
+            int SubtreeOf(int pid)
+            {
+                var current = pid;
+                // Walk up within the app's own pids to this pid's root.
+                for (var hops = 0; hops < 32 && parents.TryGetValue(current, out var parent) && appPids.Contains(parent); hops++)
+                {
+                    current = parent;
+                }
+                return current;
+            }
+
+            var audioActive = ResolveActiveAudioProcessIds().Where(appPids.Contains).ToArray();
+            var audioRoot = audioActive.Select(SubtreeOf).FirstOrDefault(roots.Contains);
+            if (audioRoot > 0)
+            {
+                AppLog.Info($"Chat route: {appName} root {audioRoot} chosen via active audio session (roots: {string.Join(",", roots)}).");
+                return audioRoot;
+            }
+
+            var byTreeSize = roots
+                .OrderByDescending(root => appPids.Count(pid => SubtreeOf(pid) == root))
+                .First();
+            AppLog.Info($"Chat route: {appName} root {byTreeSize} chosen via largest subtree (roots: {string.Join(",", roots)}).");
+            return byTreeSize;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Chat route root resolution failed for {appName}; falling back to lowest PID.", error);
+            return appPids.Min();
+        }
+    }
+
+    private static Dictionary<int, int> SnapshotParentProcessIds()
+    {
+        var parents = new Dictionary<int, int>();
+        var snapshot = CreateToolhelp32Snapshot(2 /* TH32CS_SNAPPROCESS */, 0);
+        if (snapshot == IntPtr.Zero || snapshot == new IntPtr(-1)) return parents;
+        try
+        {
+            var entry = new PROCESSENTRY32 { dwSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<PROCESSENTRY32>() };
+            if (!Process32First(snapshot, ref entry)) return parents;
+            do
+            {
+                parents[(int)entry.th32ProcessID] = (int)entry.th32ParentProcessID;
+            }
+            while (Process32Next(snapshot, ref entry));
+        }
+        finally
+        {
+            CloseHandle(snapshot);
+        }
+
+        return parents;
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+    private struct PROCESSENTRY32
+    {
+        public uint dwSize;
+        public uint cntUsage;
+        public uint th32ProcessID;
+        public IntPtr th32DefaultHeapID;
+        public uint th32ModuleID;
+        public uint cntThreads;
+        public uint th32ParentProcessID;
+        public int pcPriClassBase;
+        public uint dwFlags;
+        [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.ByValTStr, SizeConst = 260)]
+        public string szExeFile;
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+    private static extern bool Process32First(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+    private static extern bool Process32Next(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr hObject);
 
     private static IEnumerable<int> ResolveProcessIds(string processName)
     {
