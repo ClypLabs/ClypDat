@@ -83,7 +83,7 @@ public sealed class PlaybackSession : IDisposable
         VideoPlayer.Volume = 0;
     }
 
-    private static bool IsNetworkPath(string path)
+    public static bool IsNetworkPath(string path)
     {
         try
         {

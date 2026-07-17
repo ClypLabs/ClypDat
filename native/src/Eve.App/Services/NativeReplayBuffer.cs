@@ -1360,6 +1360,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 muxArgs.AddRange(videoCodecArgs);
                 muxArgs.AddRange(new[] { "-c:a", "aac", "-b:a", "192k" });
                 for (var i = 0; i < tracks.Count; i++) muxArgs.AddRange(new[] { $"-metadata:s:a:{i}", $"title={tracks[i].Label}" });
+                // +faststart moves the moov index to the front of the file.
+                // Costs one extra file rewrite at finalize, but without it
+                // every later reader (LibVLC, ffmpeg chunk/waveform/thumbnail
+                // extraction) must first seek to the END of a multi-GB file to
+                // find the index - painless locally, a seek storm over a
+                // network drive that made long sessions stutter/fail in the
+                // editor while plain VLC (single reader, patient) coped.
+                muxArgs.AddRange(new[] { "-movflags", "+faststart" });
                 muxArgs.AddRange(new[] { "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("EVE Native Full Session")}", finalOutputPath });
                 return muxArgs;
             }

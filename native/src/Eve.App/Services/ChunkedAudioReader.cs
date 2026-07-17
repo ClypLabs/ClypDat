@@ -28,9 +28,14 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
     // Extraction dedupe/throttle shared across all readers (a clip has one
     // reader per audio track, and RebuildAudioOutput recreates readers) so
     // the same chunk is never extracted twice concurrently and at most two
-    // ffmpeg extractions run at once.
+    // ffmpeg extractions run at once. Network sources get serialized down to
+    // ONE at a time on top of that: concurrent readers seeking around the
+    // same file over SMB thrash the share badly enough to starve LibVLC's
+    // own video stream (a clip that plays fine in standalone VLC - one
+    // patient reader - broke in the editor's many-reader setup).
     private static readonly ConcurrentDictionary<string, Task> InFlightExtractions = new(StringComparer.OrdinalIgnoreCase);
     private static readonly SemaphoreSlim ExtractionGate = new(2, 2);
+    private static readonly SemaphoreSlim NetworkExtractionGate = new(1, 1);
 
     private readonly string _inputPath;
     private readonly int _streamIndex;
@@ -226,15 +231,18 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
         var path = ChunkPath(chunkIndex);
         if (File.Exists(path)) return;
 
+        var isNetwork = PlaybackSession.IsNetworkPath(_inputPath);
         InFlightExtractions.GetOrAdd(path, _ => Task.Run(async () =>
         {
             await ExtractionGate.WaitAsync();
+            if (isNetwork) await NetworkExtractionGate.WaitAsync();
             try
             {
                 if (!File.Exists(path)) await ExtractChunkAsync(chunkIndex, path);
             }
             finally
             {
+                if (isNetwork) NetworkExtractionGate.Release();
                 ExtractionGate.Release();
                 InFlightExtractions.TryRemove(path, out Task? _);
             }
