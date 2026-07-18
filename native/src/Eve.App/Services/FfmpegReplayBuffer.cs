@@ -809,6 +809,18 @@ internal sealed class AudioCaptureSession : IDisposable
     // on equal footing.
     public DateTime? FirstSampleUtc { get; private set; }
 
+    // Set when the underlying capture stopped with an error (device loss, a
+    // throw escaping the write path). The pipeline reaps Died captures on its
+    // route timer and starts fresh ones for the same source.
+    public bool Died { get; internal set; }
+
+    // Data bytes written so far (audio + backfilled silence). Exact, unlike
+    // FileInfo.Length on a file with an open write handle, whose directory
+    // entry Windows only updates lazily.
+    public long BytesWritten { get { lock (_lock) return _bytesWritten; } }
+
+    public int AverageBytesPerSecond => _capture.WaveFormat.AverageBytesPerSecond;
+
     public static AudioCaptureSession Start(IWaveIn capture, string path, string title)
     {
         var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
@@ -819,10 +831,15 @@ internal sealed class AudioCaptureSession : IDisposable
         // write path) previously vanished without a trace - the capture thread
         // swallowed the error and nothing was listening here. The WAV then
         // just stopped growing and saved clips lost that track with no log to
-        // explain why.
+        // explain why. Died flags it so the pipeline's route timer can reap
+        // and restart it instead of treating it as live forever.
         capture.RecordingStopped += (_, stopped) =>
         {
-            if (stopped.Exception is not null) AppLog.Error($"Audio capture stopped unexpectedly: {title}", stopped.Exception);
+            if (stopped.Exception is not null)
+            {
+                session.Died = true;
+                AppLog.Error($"Audio capture stopped unexpectedly: {title}", stopped.Exception);
+            }
         };
         capture.StartRecording();
         return session;
@@ -982,6 +999,17 @@ internal sealed class AudioCaptureSession : IDisposable
 
     private void WriteZerosLocked(long gapBytes)
     {
+        // Never let a silence backfill push the WAV over the 4GiB RIFF cap -
+        // WaveFileWriter throws "WAV file too large" there and the throw
+        // kills the capture (or fails the snapshot pad, losing the whole
+        // track from a save). A quiet process capture can accumulate a huge
+        // pad-to-now gap; clamp to remaining capacity and let the pipeline's
+        // rollover replace the capture.
+        var capacityBytes = uint.MaxValue - 4096L - _bytesWritten;
+        gapBytes = Math.Min(gapBytes, Math.Max(0, capacityBytes));
+        gapBytes -= gapBytes % Math.Max(1, _capture.WaveFormat.BlockAlign);
+        if (gapBytes <= 0) return;
+
         var zeros = new byte[Math.Min(gapBytes, 64 * 1024)];
         var remaining = gapBytes;
         while (remaining > 0)

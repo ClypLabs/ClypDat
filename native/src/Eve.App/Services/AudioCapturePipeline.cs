@@ -375,7 +375,29 @@ public sealed class AudioCapturePipeline : IDisposable
         lock (_lock) live = _audioCaptures.Where(capture => capture.EndedAtUtc is null).ToArray();
         foreach (var capture in live)
         {
-            var bytes = AudioFileLength(capture.Path);
+            // A capture whose thread died (device loss, an escaped throw) keeps
+            // EndedAtUtc null, so HasLiveCapture kept reporting it alive and no
+            // replacement ever started - reap it so one does.
+            if (capture.Session.Died)
+            {
+                AppLog.Info($"Audio capture found dead; restarting: {capture.Title}.");
+                StopAudioCapture(capture);
+                rolled = true;
+                continue;
+            }
+
+            // Written bytes alone miss the quiet-process case: a process
+            // capture delivers nothing while its app is silent, so the file
+            // stops growing, but the save-time pad-to-now still has to cover
+            // that whole gap in silence - size the check on what the file
+            // BECOMES after that pad, not what it is now.
+            var bytes = capture.Session.BytesWritten;
+            if (capture.EffectiveStartedAtUtc is var started && started < MonotonicClock.UtcNow)
+            {
+                var projectedBytes = (long)((MonotonicClock.UtcNow - started).TotalSeconds * capture.Session.AverageBytesPerSecond);
+                if (projectedBytes > bytes) bytes = projectedBytes;
+            }
+
             if (bytes < MaxCaptureFileBytes) continue;
             AppLog.Info($"Audio capture rolled to a new file before the 4GiB WAV cap: {capture.Title}, bytes={bytes}.");
             StopAudioCapture(capture);
