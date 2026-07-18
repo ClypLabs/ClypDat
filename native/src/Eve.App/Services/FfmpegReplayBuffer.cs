@@ -815,6 +815,15 @@ internal sealed class AudioCaptureSession : IDisposable
         var writer = new WaveFileWriter(stream, capture.WaveFormat);
         var session = new AudioCaptureSession(capture, stream, writer, title);
         capture.DataAvailable += session.Capture_OnDataAvailable;
+        // A capture that dies mid-session (device error, a throw escaping the
+        // write path) previously vanished without a trace - the capture thread
+        // swallowed the error and nothing was listening here. The WAV then
+        // just stopped growing and saved clips lost that track with no log to
+        // explain why.
+        capture.RecordingStopped += (_, stopped) =>
+        {
+            if (stopped.Exception is not null) AppLog.Error($"Audio capture stopped unexpectedly: {title}", stopped.Exception);
+        };
         capture.StartRecording();
         return session;
     }

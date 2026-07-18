@@ -335,10 +335,11 @@ public sealed class AudioCapturePipeline : IDisposable
         {
             var config = _activeConfig;
             if (config is null) return;
+            var rolledOver = RollOversizedCaptures();
             using var enumerator = new MMDeviceEnumerator();
             var resolvedMicDeviceIds = ResolveMicrophoneDeviceIds(enumerator, config.MicrophoneDeviceIds);
             var routes = ResolveAudioRoutes(config, resolvedMicDeviceIds);
-            if (string.Equals(routes.RouteKey, _audioRouteKey, StringComparison.Ordinal)) return;
+            if (!rolledOver && string.Equals(routes.RouteKey, _audioRouteKey, StringComparison.Ordinal)) return;
             try
             {
                 AppLog.Info("Audio route changed; restarting replay audio captures.");
@@ -353,6 +354,35 @@ public sealed class AudioCapturePipeline : IDisposable
         {
             _routeRefreshGate.Release();
         }
+    }
+
+    // NAudio's WaveFileWriter hard-fails ("WAV file too large") the moment a
+    // capture's WAV reaches the 4GiB RIFF cap - at the 96kHz float stereo mix
+    // format that's only ~93 minutes - and the throw escaped inside the
+    // capture callback, killing the capture thread with no log line. Long
+    // sessions then saved clips whose Game/Chat tracks were silent because
+    // the captures had quietly been dead for a while. Roll well before the
+    // cap: end the capture and let StartAudioCaptures open a fresh file for
+    // the same source - the aligned-track builder already stitches multiple
+    // captures per source across a save window (same path chat-app restarts
+    // use).
+    private const long MaxCaptureFileBytes = 3_900_000_000;
+
+    private bool RollOversizedCaptures()
+    {
+        var rolled = false;
+        ReplayAudioCapture[] live;
+        lock (_lock) live = _audioCaptures.Where(capture => capture.EndedAtUtc is null).ToArray();
+        foreach (var capture in live)
+        {
+            var bytes = AudioFileLength(capture.Path);
+            if (bytes < MaxCaptureFileBytes) continue;
+            AppLog.Info($"Audio capture rolled to a new file before the 4GiB WAV cap: {capture.Title}, bytes={bytes}.");
+            StopAudioCapture(capture);
+            rolled = true;
+        }
+
+        return rolled;
     }
 
     private void StartAudioRouteTimer()

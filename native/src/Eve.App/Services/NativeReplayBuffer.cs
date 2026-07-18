@@ -864,8 +864,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     // StopStaleAudioCaptures) only get their file handle closed, not
                     // deleted; without this the raw WAV files pile up on disk for the
                     // entire lifetime of a long-running session instead of being
-                    // cleaned up as soon as they're no longer needed.
-                    _audio.PruneOlderThan(MonotonicClock.UtcNow - Duration - TimeSpan.FromSeconds(5));
+                    // cleaned up as soon as they're no longer needed. While a full
+                    // session is recording, never prune past its start - its finalize
+                    // muxes audio from session start, including captures that ended
+                    // mid-session (4GiB WAV rollovers, route changes).
+                    var audioCutoffUtc = MonotonicClock.UtcNow - Duration - TimeSpan.FromSeconds(5);
+                    if (fullSessionFormatContext is not null && fullSessionStartUtc < audioCutoffUtc) audioCutoffUtc = fullSessionStartUtc;
+                    _audio.PruneOlderThan(audioCutoffUtc);
                 }
             }
 
