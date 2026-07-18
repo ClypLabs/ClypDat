@@ -117,10 +117,12 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
         Exception? stoppedError = null;
         var loggedDiscontinuity = false;
         // Base pair for converting each packet's QPC capture timestamp (100ns
-        // units of the performance counter) into wall-clock UTC.
-        // Stopwatch.GetTimestamp reads the same QPC, so the offset between
-        // the two clocks is fixed for the process lifetime.
-        var utcBase = DateTime.UtcNow;
+        // units of the performance counter) into UTC on the MonotonicClock
+        // timeline. Stopwatch.GetTimestamp reads the same QPC, so the offset
+        // between the two clocks is fixed for the process lifetime - and
+        // MonotonicClock keeps every capture on one shared timeline that a
+        // system clock step (NTP correction) can't shift mid-session.
+        var utcBase = MonotonicClock.UtcNow;
         var qpcBase100ns = Stopwatch.GetTimestamp() * (10_000_000.0 / Stopwatch.Frequency);
         try
         {

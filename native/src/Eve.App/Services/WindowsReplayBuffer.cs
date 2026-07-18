@@ -135,7 +135,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             // the current segment is still very fresh costs at most a few seconds off the
             // tail of a queued clip - imperceptible against a replay window that's many
             // seconds to minutes long - in exchange for not thrashing the recorder.
-            var recorderIsFresh = DateTime.UtcNow - _lastRecorderRestartUtc < MinRecorderRestartInterval;
+            var recorderIsFresh = MonotonicClock.UtcNow - _lastRecorderRestartUtc < MinRecorderRestartInterval;
             var activeSegment = recorderIsFresh ? null : await TryStopCurrentRecordingAsync(cancellationToken);
             if (activeSegment is not null)
             {
@@ -198,7 +198,9 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             _recorder = Recorder.CreateRecorder(options);
             _recorder.OnRecordingComplete += Recorder_OnRecordingComplete;
             _recorder.OnRecordingFailed += Recorder_OnRecordingFailed;
-            _startedAtUtc = DateTime.UtcNow;
+            // MonotonicClock: segment start/end are compared against the audio
+            // pipeline's capture timeline, which is clock-step immune.
+            _startedAtUtc = MonotonicClock.UtcNow;
             _lastRecorderRestartUtc = _startedAtUtc;
             _recorder.Record(_activePath);
             _rotationTimer?.Dispose();
@@ -249,7 +251,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         var recorder = _recorder ?? throw new InvalidOperationException("Replay buffer is not running.");
         var completion = _completion ?? throw new InvalidOperationException("Replay buffer is not ready.");
         var startedAt = _startedAtUtc;
-        var endedAt = DateTime.UtcNow;
+        var endedAt = MonotonicClock.UtcNow;
         recorder.Stop();
         string path;
         try
@@ -374,7 +376,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
     private ReplayVideoSegment[] GetReplaySegments()
     {
-        var cutoff = DateTime.UtcNow - Duration - TimeSpan.FromSeconds(2);
+        var cutoff = MonotonicClock.UtcNow - Duration - TimeSpan.FromSeconds(2);
         return _segments
             .Where(segment => segment.EndedAtUtc >= cutoff && File.Exists(segment.Path))
             .OrderBy(segment => segment.StartedAtUtc)
@@ -388,7 +390,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
     private void PruneSegments()
     {
-        var cutoff = DateTime.UtcNow - Duration - TimeSpan.FromSeconds(15);
+        var cutoff = MonotonicClock.UtcNow - Duration - TimeSpan.FromSeconds(15);
         foreach (var segment in _segments.Where(segment => segment.EndedAtUtc < cutoff).ToArray())
         {
             _segments.Remove(segment);

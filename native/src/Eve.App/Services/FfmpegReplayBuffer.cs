@@ -849,8 +849,11 @@ internal sealed class AudioCaptureSession : IDisposable
                 // Pad any in-progress delivery gap up to "now" first, so the
                 // snapshot's last byte genuinely corresponds to the snapshot
                 // moment - the end-anchored alignment in AudioCapturePipeline
-                // depends on that.
-                WriteSilenceForDeliveryGapLocked(DateTime.UtcNow);
+                // depends on that. MonotonicClock, not DateTime: a system
+                // clock step mid-session made this pad silently stop firing
+                // (the stepped-back "now" implied fewer bytes than written),
+                // desyncing every track by its own flush-phase amount.
+                WriteSilenceForDeliveryGapLocked(MonotonicClock.UtcNow);
                 _writer.Flush();
                 _stream.Flush(true);
                 using var source = new FileStream(((FileStream)_stream).Name, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
@@ -915,7 +918,7 @@ internal sealed class AudioCaptureSession : IDisposable
             return;
         }
 
-        var now = DateTime.UtcNow;
+        var now = MonotonicClock.UtcNow;
         if (!_firstSampleSeen)
         {
             _firstSampleSeen = true;
@@ -951,7 +954,16 @@ internal sealed class AudioCaptureSession : IDisposable
         var wallMs = (referenceUtc - first).TotalMilliseconds;
         var writtenMs = BytesToMilliseconds(_bytesWritten);
         AppLog.Debug($"Audio placement diag: {Title}, written={writtenMs / 1000:0.0}s, wall={wallMs / 1000:0.0}s, deficitMs={wallMs - writtenMs:0}.");
+
+        var clockOffset = MonotonicClock.SystemClockOffset;
+        if (!_loggedClockStep && Math.Abs(clockOffset.TotalSeconds) > 2)
+        {
+            _loggedClockStep = true;
+            AppLog.Info($"System clock step detected: wall clock is {clockOffset.TotalMilliseconds:0}ms away from the capture timeline. Capture alignment is unaffected (monotonic timebase).");
+        }
     }
+
+    private static bool _loggedClockStep;
 
     private void WriteZerosLocked(long gapBytes)
     {

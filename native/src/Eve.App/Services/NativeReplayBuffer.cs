@@ -187,7 +187,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         {
             if (_packets.Count == 0) throw new InvalidOperationException("Replay just started. Try again in a second.");
 
-            var cutoffUtc = DateTime.UtcNow - Duration;
+            var cutoffUtc = MonotonicClock.UtcNow - Duration;
             var startIndex = _packets.FindLastIndex(p => p.WallClockUtc <= cutoffUtc && p.IsKeyframe);
             if (startIndex < 0) startIndex = _packets.FindIndex(p => p.IsKeyframe);
             if (startIndex < 0) throw new InvalidOperationException("Replay just started. Try again in a second.");
@@ -350,7 +350,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         AVStream* fullSessionStream = null;
         var fullSessionTempVideoPath = string.Empty;
         var fullSessionFinalOutputPath = string.Empty;
-        var fullSessionStartUtc = DateTime.UtcNow;
+        var fullSessionStartUtc = MonotonicClock.UtcNow;
+        // Real wall-clock twin of fullSessionStartUtc, only for the sidecar's
+        // user-facing CreatedAt - all alignment math stays on MonotonicClock.
+        var fullSessionStartWallUtc = DateTime.UtcNow;
         var fullSessionGameDisplayName = string.Empty;
         var timerResolutionRaised = TimeBeginPeriod(1) == 0;
 
@@ -401,7 +404,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer
 
             if (InitFullSessionWriter(config, codecContext, out fullSessionFormatContext, out fullSessionStream, out fullSessionTempVideoPath, out fullSessionFinalOutputPath))
             {
-                fullSessionStartUtc = DateTime.UtcNow;
+                fullSessionStartUtc = MonotonicClock.UtcNow;
+                fullSessionStartWallUtc = DateTime.UtcNow;
                 fullSessionGameDisplayName = config.GameDisplayName;
             }
 
@@ -438,7 +442,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             // (index * exact interval) rather than real elapsed time - see
             // the pacing gate below for why. RingPacket.WallClockUtc (used
             // only for audio alignment) is tracked completely separately via
-            // a real DateTime.UtcNow captured at each actual encode, passed
+            // a MonotonicClock.UtcNow captured at each actual encode, passed
             // straight into DrainToRingBuffer, so idealizing video's own
             // timeline can't drag audio sync off with it.
             var encodedFrameIndex = 0L;
@@ -543,7 +547,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                         if (isPaused)
                         {
                             isPaused = false;
-                            lock (_bufferLock) _pauseEvents.Add(new PauseEvent(DateTime.UtcNow, false));
+                            lock (_bufferLock) _pauseEvents.Add(new PauseEvent(MonotonicClock.UtcNow, false));
                         }
                     }
                 }
@@ -759,7 +763,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 if (occluded != isPaused)
                 {
                     isPaused = occluded;
-                    lock (_bufferLock) _pauseEvents.Add(new PauseEvent(DateTime.UtcNow, isPaused));
+                    lock (_bufferLock) _pauseEvents.Add(new PauseEvent(MonotonicClock.UtcNow, isPaused));
                     AppLog.Info($"Native capture: recording {(isPaused ? "paused (window not foreground)" : "resumed")}.");
                 }
 
@@ -841,7 +845,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     // this FIFO guarantees each packet gets the real timestamp
                     // of the specific frame it actually came from, regardless of
                     // how deep the encoder's internal buffering is.
-                    pendingFrameWallClocks.Enqueue(DateTime.UtcNow);
+                    pendingFrameWallClocks.Enqueue(MonotonicClock.UtcNow);
 
                     stageStopwatch.Restart();
                     if (ffmpeg.avcodec_send_frame(codecContext, frame) == 0)
@@ -861,7 +865,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     // deleted; without this the raw WAV files pile up on disk for the
                     // entire lifetime of a long-running session instead of being
                     // cleaned up as soon as they're no longer needed.
-                    _audio.PruneOlderThan(DateTime.UtcNow - Duration - TimeSpan.FromSeconds(5));
+                    _audio.PruneOlderThan(MonotonicClock.UtcNow - Duration - TimeSpan.FromSeconds(5));
                 }
             }
 
@@ -894,6 +898,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     // moment this loop returns.
                     var captureSnapshot = _audio.SnapshotCaptures();
                     var startUtc = fullSessionStartUtc;
+                    var startWallUtc = fullSessionStartWallUtc;
                     var tempPath = fullSessionTempVideoPath;
                     var finalPath = fullSessionFinalOutputPath;
                     var gameName = fullSessionGameDisplayName;
@@ -910,7 +915,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                         var immediateGameName = !string.IsNullOrWhiteSpace(gameName) && !string.Equals(gameName, "No game detected", StringComparison.OrdinalIgnoreCase)
                             ? gameName
                             : finalizeConfig.GameDisplayName;
-                        ClipInfoSidecar.Save(finalizeConfig.LibraryFolder, finalPath, new ClipInfo(immediateGameName, null, $"Session - {immediateGameName}", startUtc));
+                        ClipInfoSidecar.Save(finalizeConfig.LibraryFolder, finalPath, new ClipInfo(immediateGameName, null, $"Session - {immediateGameName}", startWallUtc));
                         AppLog.Info($"Full session video available immediately (audio attaching in background): {finalPath}.");
                     }
                     catch (Exception error)
@@ -924,7 +929,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     {
                         try
                         {
-                            FinalizeFullSessionRecording(finalizeConfig, startUtc, capturedVideoPath, finalPath, gameName, captureSnapshot);
+                            FinalizeFullSessionRecording(finalizeConfig, startUtc, startWallUtc, capturedVideoPath, finalPath, gameName, captureSnapshot);
                         }
                         finally
                         {
@@ -936,7 +941,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 }
                 else
                 {
-                    FinalizeFullSessionRecording(finalizeConfig, fullSessionStartUtc, fullSessionTempVideoPath, fullSessionFinalOutputPath, fullSessionGameDisplayName);
+                    FinalizeFullSessionRecording(finalizeConfig, fullSessionStartUtc, fullSessionStartWallUtc, fullSessionTempVideoPath, fullSessionFinalOutputPath, fullSessionGameDisplayName);
                 }
             }
             if (codecContext is not null) { var c = codecContext; ffmpeg.avcodec_free_context(&c); }
@@ -1273,7 +1278,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             // before releasing output, and packet->pts is now an IDEAL,
             // constant-rate timestamp (see the pacing gate in CaptureLoop) so
             // it can't be used to derive this the way it used to be.
-            var realWallClockUtc = pendingFrameWallClocks.Count > 0 ? pendingFrameWallClocks.Dequeue() : DateTime.UtcNow;
+            var realWallClockUtc = pendingFrameWallClocks.Count > 0 ? pendingFrameWallClocks.Dequeue() : MonotonicClock.UtcNow;
 
             lock (_bufferLock)
             {
@@ -1383,7 +1388,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer
     // used for clip saves, already running the whole time regardless) and muxes them
     // against the temp video into the user's chosen folder. -c:v copy keeps this fast
     // even for a multi-hour session.
-    private void FinalizeFullSessionRecording(ReplayBufferConfig config, DateTime sessionStartUtc, string tempVideoPath, string finalOutputPath, string sessionGameDisplayName = "", AudioCapturePipeline.CaptureSetSnapshot? capturesOverride = null)
+    // sessionStartUtc is on the MonotonicClock timeline (audio/pause alignment);
+    // sessionStartWallUtc is the real wall-clock start, used only for the
+    // sidecar's user-facing CreatedAt.
+    private void FinalizeFullSessionRecording(ReplayBufferConfig config, DateTime sessionStartUtc, DateTime sessionStartWallUtc, string tempVideoPath, string finalOutputPath, string sessionGameDisplayName = "", AudioCapturePipeline.CaptureSetSnapshot? capturesOverride = null)
     {
         if (string.IsNullOrEmpty(tempVideoPath) || string.IsNullOrEmpty(finalOutputPath)) return;
 
@@ -1400,7 +1408,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         var snapshots = new List<string>();
         try
         {
-            var sessionEndUtc = DateTime.UtcNow;
+            var sessionEndUtc = MonotonicClock.UtcNow;
             var durationSeconds = Math.Max(1, (sessionEndUtc - sessionStartUtc).TotalSeconds);
             WritePausedRangesSidecar(config.LibraryFolder, finalOutputPath, ComputePausedRangesSeconds(GetOrderedPauseEvents(), sessionStartUtc, sessionEndUtc));
             // One giant segment spanning the whole session let audio/video clock
@@ -1485,7 +1493,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 {
                     File.Move(muxOutputPath, finalOutputPath, overwrite: true);
                 }
-                ClipInfoSidecar.Save(config.LibraryFolder, finalOutputPath, new ClipInfo(gameDisplayName, null, $"Session - {gameDisplayName}", sessionStartUtc));
+                ClipInfoSidecar.Save(config.LibraryFolder, finalOutputPath, new ClipInfo(gameDisplayName, null, $"Session - {gameDisplayName}", sessionStartWallUtc));
                 AppLog.Info($"Native full session recording saved: path={finalOutputPath}, codec={config.FullSessionVideoCodec}.");
                 EnforceFullSessionQuota(config);
             }
@@ -1562,7 +1570,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
 
     private void TrimRingBuffer(DateTime? fullSessionStartUtc)
     {
-        var cutoff = DateTime.UtcNow - Duration - TimeSpan.FromSeconds(5);
+        var cutoff = MonotonicClock.UtcNow - Duration - TimeSpan.FromSeconds(5);
         lock (_bufferLock)
         {
             var removeCount = 0;

@@ -236,7 +236,7 @@ public sealed class AudioCapturePipeline : IDisposable
         var path = Path.Combine(_bufferFolder, $"{AudioKindPrefix(kind)}_{Guid.NewGuid():N}.wav");
         TryDelete(path);
         var capture = new WasapiLoopbackCapture(device);
-        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, kind, null, DateTime.UtcNow, sourceKey));
+        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, kind, null, MonotonicClock.UtcNow, sourceKey));
         AppLog.Debug($"Audio capture started: {title}, device={device.FriendlyName}.");
     }
 
@@ -245,7 +245,7 @@ public sealed class AudioCapturePipeline : IDisposable
         var path = Path.Combine(_bufferFolder, $"{AudioKindPrefix(kind)}_{processId}_{Guid.NewGuid():N}.wav");
         TryDelete(path);
         var capture = new ProcessLoopbackWaveIn(processId, mode);
-        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, kind, processId, DateTime.UtcNow, sourceKey));
+        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, kind, processId, MonotonicClock.UtcNow, sourceKey));
         AppLog.Debug($"Audio capture started: {title}, pid={processId}, mode={mode}.");
     }
 
@@ -254,7 +254,7 @@ public sealed class AudioCapturePipeline : IDisposable
         var path = Path.Combine(_bufferFolder, $"{AudioKindPrefix(AudioCaptureKind.Microphone)}_{Guid.NewGuid():N}.wav");
         TryDelete(path);
         var capture = new WasapiCapture(device);
-        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, AudioCaptureKind.Microphone, null, DateTime.UtcNow, sourceKey, device.ID));
+        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, AudioCaptureKind.Microphone, null, MonotonicClock.UtcNow, sourceKey, device.ID));
         AppLog.Debug($"Audio capture started: {title}, device={device.FriendlyName}.");
     }
 
@@ -315,7 +315,7 @@ public sealed class AudioCapturePipeline : IDisposable
     private static void StopAudioCapture(ReplayAudioCapture capture)
     {
         if (capture.EndedAtUtc is not null) return;
-        capture.EndedAtUtc = DateTime.UtcNow;
+        capture.EndedAtUtc = MonotonicClock.UtcNow;
         try
         {
             capture.Session.Dispose();
@@ -705,8 +705,10 @@ public sealed class AudioCapturePipeline : IDisposable
             : CopyAudioFile(capture.Path, sourceSnapshotPath);
         // For a live capture the newest sample in the snapshot was written
         // essentially "now" (SnapshotTo flushes first); for an ended one it
-        // was written at EndedAtUtc.
-        var lastSampleUtc = capture.EndedAtUtc ?? DateTime.UtcNow;
+        // was written at EndedAtUtc. Monotonic - a system clock step between
+        // capture start and save would otherwise shift the anchor by the
+        // step amount.
+        var lastSampleUtc = capture.EndedAtUtc ?? MonotonicClock.UtcNow;
         if (!copied || !IsUsableAudioFile(sourceSnapshotPath))
         {
             TryDelete(sourceSnapshotPath);
@@ -747,7 +749,7 @@ public sealed class AudioCapturePipeline : IDisposable
             if (sourceSnapshot is null) return string.Empty;
             var sourceSnapshotPath = sourceSnapshot.Path;
 
-            var captureEndUtc = capture.EndedAtUtc ?? DateTime.UtcNow;
+            var captureEndUtc = capture.EndedAtUtc ?? MonotonicClock.UtcNow;
             var windowEndUtc = windowStartUtc + TimeSpan.FromSeconds(durationSeconds);
             // End-anchored (see SourceSnapshot) - the wall-clock moment WAV
             // position 0 maps to, NOT FirstSampleUtc.
@@ -1046,7 +1048,7 @@ public sealed class AudioCapturePipeline : IDisposable
 
     private static bool AudioCaptureOverlaps(ReplayAudioCapture capture, DateTime windowStartUtc, DateTime windowEndUtc)
     {
-        var captureEndUtc = capture.EndedAtUtc ?? DateTime.UtcNow;
+        var captureEndUtc = capture.EndedAtUtc ?? MonotonicClock.UtcNow;
         return capture.EffectiveStartedAtUtc < windowEndUtc && captureEndUtc > windowStartUtc;
     }
 
