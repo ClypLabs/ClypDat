@@ -840,10 +840,16 @@ internal sealed class AudioCaptureSession : IDisposable
         _capture.Dispose();
     }
 
-    public bool SnapshotTo(string path)
+    // lastSampleUtc reports the timeline moment the snapshot's final byte
+    // corresponds to. It MUST be stamped here, before the copy: copying a
+    // multi-GB session WAV takes 1-2s, and end-anchoring against a "now"
+    // taken after the copy shifted every track's anchor late by its own copy
+    // duration - game audio lagged ~2s in clips saved late in long sessions.
+    public bool SnapshotTo(string path, out DateTime lastSampleUtc)
     {
         lock (_lock)
         {
+            lastSampleUtc = MonotonicClock.UtcNow;
             try
             {
                 // Pad any in-progress delivery gap up to "now" first, so the
@@ -853,7 +859,7 @@ internal sealed class AudioCaptureSession : IDisposable
                 // clock step mid-session made this pad silently stop firing
                 // (the stepped-back "now" implied fewer bytes than written),
                 // desyncing every track by its own flush-phase amount.
-                WriteSilenceForDeliveryGapLocked(MonotonicClock.UtcNow);
+                WriteSilenceForDeliveryGapLocked(lastSampleUtc, minGapMs: 30);
                 _writer.Flush();
                 _stream.Flush(true);
                 using var source = new FileStream(((FileStream)_stream).Name, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
@@ -995,14 +1001,16 @@ internal sealed class AudioCaptureSession : IDisposable
     // first gap to the wrong spot in saved clips (or into apparent silence).
     // Backfill each gap with actual zero samples as it's detected, keeping
     // WAV time == wall time for every capture kind.
-    private void WriteSilenceForDeliveryGapLocked(DateTime expectedDataStartUtc)
+    private void WriteSilenceForDeliveryGapLocked(DateTime expectedDataStartUtc, double minGapMs = 300)
     {
         if (FirstSampleUtc is not { } firstSampleUtc) return;
         var expectedMs = (expectedDataStartUtc - firstSampleUtc).TotalMilliseconds;
         var writtenMs = BytesToMilliseconds(_bytesWritten);
         var gapMs = expectedMs - writtenMs;
         // Small jitter between deliveries is normal; only real gaps count.
-        if (gapMs < 300) return;
+        // (Snapshots pass a much tighter threshold - there the pad IS the
+        // end-anchor, so any unfilled remainder becomes anchor error.)
+        if (gapMs < minGapMs) return;
 
         var format = _capture.WaveFormat;
         var gapBytes = (long)(gapMs / 1000.0 * format.AverageBytesPerSecond);
@@ -1010,6 +1018,6 @@ internal sealed class AudioCaptureSession : IDisposable
         if (gapBytes <= 0) return;
 
         WriteZerosLocked(gapBytes);
-        AppLog.Info($"Audio capture gap backfilled with silence: {Title}, gap={gapMs / 1000.0:0.0}s.");
+        if (gapMs >= 300) AppLog.Info($"Audio capture gap backfilled with silence: {Title}, gap={gapMs / 1000.0:0.0}s.");
     }
 }

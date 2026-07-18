@@ -700,15 +700,16 @@ public sealed class AudioCapturePipeline : IDisposable
         if (sourceSnapshotCache.TryGetValue(capture, out var existing)) return existing;
 
         var sourceSnapshotPath = Path.Combine(_bufferFolder, $"audio_source_{Guid.NewGuid():N}.wav");
-        var copied = capture.EndedAtUtc is null
-            ? capture.Session.SnapshotTo(sourceSnapshotPath)
-            : CopyAudioFile(capture.Path, sourceSnapshotPath);
-        // For a live capture the newest sample in the snapshot was written
-        // essentially "now" (SnapshotTo flushes first); for an ended one it
-        // was written at EndedAtUtc. Monotonic - a system clock step between
+        // For a live capture the newest sample in the snapshot corresponds to
+        // the pad-to-now moment SnapshotTo stamps (NOT "now" after the copy -
+        // the multi-GB copy itself takes seconds); for an ended one it was
+        // written at EndedAtUtc. Monotonic - a system clock step between
         // capture start and save would otherwise shift the anchor by the
         // step amount.
-        var lastSampleUtc = capture.EndedAtUtc ?? MonotonicClock.UtcNow;
+        var lastSampleUtc = capture.EndedAtUtc ?? default;
+        var copied = capture.EndedAtUtc is null
+            ? capture.Session.SnapshotTo(sourceSnapshotPath, out lastSampleUtc)
+            : CopyAudioFile(capture.Path, sourceSnapshotPath);
         if (!copied || !IsUsableAudioFile(sourceSnapshotPath))
         {
             TryDelete(sourceSnapshotPath);
