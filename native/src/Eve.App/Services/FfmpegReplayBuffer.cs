@@ -944,6 +944,7 @@ internal sealed class AudioCaptureSession : IDisposable
                 _writer.Write(e.Buffer, 0, e.BytesRecorded);
                 _bytesWritten += e.BytesRecorded;
                 _writer.Flush();
+                AccumulatePeakLocked(e.Buffer, e.BytesRecorded);
                 LogPlacementDiagnosticLocked(timestamped.PacketStartUtc);
             }
 
@@ -968,12 +969,31 @@ internal sealed class AudioCaptureSession : IDisposable
             // loopback uses the exact timestamped path above.
             WriteSilenceForDeliveryGapLocked(now);
             _writer.Flush();
+            AccumulatePeakLocked(e.Buffer, e.BytesRecorded);
             LogPlacementDiagnosticLocked(now);
         }
     }
 
     private bool _loggedOverlap;
     private DateTime _nextPlacementDiagUtc = DateTime.MinValue;
+
+    // Loudest absolute sample since the last placement diag - answers "is
+    // this capture receiving actual signal or an active-but-silent stream?"
+    // (a chat capture once delivered packets for a full hour whose content
+    // was pure silence while voice audibly played; nothing in the logs could
+    // distinguish that from a genuinely quiet call). 32-bit here is the
+    // float mix format every one of these captures uses.
+    private float _diagPeak;
+
+    private void AccumulatePeakLocked(byte[] buffer, int bytes)
+    {
+        if (_capture.WaveFormat.BitsPerSample != 32) return;
+        for (var offset = 0; offset + 4 <= bytes; offset += 4)
+        {
+            var sample = Math.Abs(BitConverter.ToSingle(buffer, offset));
+            if (sample > _diagPeak) _diagPeak = sample;
+        }
+    }
 
     // Once-a-minute per capture: how far the WAV's written length sits from
     // the wall-clock span it should cover. Near zero = saved clips will be in
@@ -985,7 +1005,9 @@ internal sealed class AudioCaptureSession : IDisposable
         if (FirstSampleUtc is not { } first) return;
         var wallMs = (referenceUtc - first).TotalMilliseconds;
         var writtenMs = BytesToMilliseconds(_bytesWritten);
-        AppLog.Debug($"Audio placement diag: {Title}, written={writtenMs / 1000:0.0}s, wall={wallMs / 1000:0.0}s, deficitMs={wallMs - writtenMs:0}.");
+        var peakDb = _diagPeak > 0 ? 20 * Math.Log10(_diagPeak) : -120;
+        _diagPeak = 0;
+        AppLog.Debug($"Audio placement diag: {Title}, written={writtenMs / 1000:0.0}s, wall={wallMs / 1000:0.0}s, deficitMs={wallMs - writtenMs:0}, peakDb={peakDb:0}.");
 
         var clockOffset = MonotonicClock.SystemClockOffset;
         if (!_loggedClockStep && Math.Abs(clockOffset.TotalSeconds) > 2)
