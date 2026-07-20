@@ -188,6 +188,26 @@ public sealed class ForegroundGameDetector
         {
             using var process = Process.GetProcessById((int)processId);
             exeName = GetExecutableName(process);
+
+            // Store/UWP games (Forza Horizon 6) put ApplicationFrameHost.exe's
+            // frame window in the foreground; the game itself owns the
+            // Windows.UI.Core.CoreWindow child. Re-target the process at the
+            // hosted app so catalog matching sees the real exe, but keep the
+            // frame host's top-level handle - that's the window capture wants.
+            Process? hostedProcess = null;
+            if (string.Equals(exeName, "ApplicationFrameHost.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                var hostedWindow = FindWindowEx(handle, IntPtr.Zero, "Windows.UI.Core.CoreWindow", null);
+                GetWindowThreadProcessId(hostedWindow, out var hostedPid);
+                if (hostedWindow != IntPtr.Zero && hostedPid != 0 && hostedPid != processId)
+                {
+                    processId = hostedPid;
+                    hostedProcess = Process.GetProcessById((int)processId);
+                    exeName = GetExecutableName(hostedProcess);
+                }
+            }
+            using var hostedProcessLifetime = hostedProcess;
+
             if (string.IsNullOrWhiteSpace(exeName)) return GameDetection.None;
             if (IgnoredExecutables.Contains(exeName))
             {
@@ -212,13 +232,17 @@ public sealed class ForegroundGameDetector
                 rejectReason = "window smaller than 320x240";
                 return GameDetection.None;
             }
-            if (!isCatalogGame && !HasGraphicsModule(process))
+            if (!isCatalogGame && !HasGraphicsModule(hostedProcess ?? process))
             {
                 rejectReason = "no D3D/DXGI/OpenGL/Vulkan module found (module enumeration may be blocked by anti-cheat) and not in the game catalog";
                 return GameDetection.None;
             }
+            // Catalog games are exempt from the overlay heuristics - a UWP
+            // game's own window classes (ApplicationFrameWindow,
+            // Windows.UI.Core.CoreWindow) are the same ones the heuristics
+            // treat as overlay chrome.
             var className = GetWindowClass(handle);
-            if (IsOverlayWindow(title, className))
+            if (!isCatalogGame && IsOverlayWindow(title, className))
             {
                 rejectReason = "looks like an overlay window (title/class matched an overlay pattern)";
                 return GameDetection.None;
@@ -408,6 +432,9 @@ public sealed class ForegroundGameDetector
 
     [DllImport("user32.dll")]
     private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string className, string? windowTitle);
 
     [StructLayout(LayoutKind.Sequential)]
     private readonly struct Rect
