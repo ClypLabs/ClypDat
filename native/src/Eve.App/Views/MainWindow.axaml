@@ -40,7 +40,7 @@
           <TextBlock Grid.Column="2" Text="{Binding HotkeyDisplay}" Foreground="#93A6B8" FontWeight="Bold" VerticalAlignment="Center" Margin="10,0,0,0" />
           <Border Grid.Column="3" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding ShowLibraryStatus}" Margin="10,0,0,0" />
           <Button Grid.Column="4" Classes="linkButton" Click="ActiveGameButton_OnClick" IsVisible="{Binding ShowLibraryStatus}" Margin="10,0,0,0" ToolTip.Tip="Click for detection options">
-            <TextBlock Text="{Binding ActiveGame}" Foreground="#BDD4EE" VerticalAlignment="Center" />
+            <TextBlock Text="{Binding ActiveGame}" Foreground="#BDD4EE" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="220" />
           </Button>
           <Border Grid.Column="5" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding HasSelection}" Margin="10,0,0,0" />
           <TextBlock Grid.Column="6"
