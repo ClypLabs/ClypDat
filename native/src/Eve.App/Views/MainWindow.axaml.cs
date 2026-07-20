@@ -184,7 +184,15 @@ public sealed partial class MainWindow : Window
         if (detection is not { IsDetected: true } || string.IsNullOrWhiteSpace(detection.ExeName)) return;
 
         var flyout = new MenuFlyout();
-        var exclude = new MenuItem { Header = $"Don't detect \"{detection.DisplayName}\" ({detection.ExeName}) as a game" };
+        var exclude = new MenuItem
+        {
+            Header = new TextBlock
+            {
+                Text = $"Don't detect \"{detection.DisplayName}\" ({detection.ExeName}) as a game",
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 320
+            }
+        };
         exclude.Click += (_, _) =>
         {
             ViewModel.AddIgnoredGameExecutable(detection.ExeName);
