@@ -413,6 +413,11 @@ public sealed partial class MainWindow : Window
         {
             AppLog.Error("Replay start failed", error);
             ViewModel.IsReplayRecording = false;
+            // IsReplayRecording's setter is a no-op when the value doesn't change
+            // (e.g. a second consecutive failed start while already false), which
+            // would otherwise leave the status text frozen on stale "Replay Armed" -
+            // set it directly so a failure always reflects in the UI.
+            ViewModel.RecorderStatus = _replayArmed ? "Replay Armed" : "Replay Off";
             if (showErrors)
             {
                 await ShowMessageAsync("Replay unavailable", error.Message);

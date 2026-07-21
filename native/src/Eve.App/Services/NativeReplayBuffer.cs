@@ -534,7 +534,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     {
                         targetHandle = freshHandle;
                         isMonitorMode = targetHandle == 0;
-                        duplication.Dispose();
+                        duplication!.Dispose();
+                        // Null out before the recreate attempt - if it throws, `duplication`
+                        // must not be left pointing at the just-disposed object, or the next
+                        // AcquireNextFrame call below crashes the whole loop with an NRE
+                        // instead of just retrying (see the null-guard above the acquire call).
+                        duplication = null;
                         try
                         {
                             duplication = CreateDuplicationFor(device, targetHandle, out desktopBounds);
@@ -569,6 +574,27 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 // this loop returning often enough for the pacing gate below
                 // (now unconditional, not gated on a successful acquire) to
                 // actually catch up and duplicate-encode on schedule.
+                // duplication can be null here if a prior recreate attempt (target
+                // switch or access-loss recovery below) failed - retry it every
+                // iteration with a short backoff instead of dereferencing null,
+                // which previously crashed the whole capture session on any
+                // transient DuplicateOutput failure (e.g. a fullscreen-exclusive
+                // transition briefly denying access).
+                if (duplication is null)
+                {
+                    Thread.Sleep(50);
+                    try
+                    {
+                        duplication = CreateDuplicationFor(device, targetHandle, out desktopBounds);
+                        AppLog.Info("Native capture: DXGI duplication recreated after prior failure.");
+                    }
+                    catch (Exception error)
+                    {
+                        AppLog.Error("Native capture: duplication recreate retry failed.", error);
+                    }
+                    continue;
+                }
+
                 var acquireResult = duplication.AcquireNextFrame(AcquireTimeoutMs, out var frameInfo, out var desktopResource);
                 waitMs += stageStopwatch.Elapsed.TotalMilliseconds;
 
@@ -738,6 +764,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     {
                         AppLog.Info("Native capture: DXGI duplication access lost, recreating.");
                         duplication.Dispose();
+                        duplication = null;
                         try
                         {
                             duplication = CreateDuplicationFor(device, targetHandle, out desktopBounds);
