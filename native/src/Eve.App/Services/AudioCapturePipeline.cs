@@ -253,7 +253,7 @@ public sealed class AudioCapturePipeline : IDisposable
     {
         var path = Path.Combine(_bufferFolder, $"{AudioKindPrefix(AudioCaptureKind.Microphone)}_{Guid.NewGuid():N}.wav");
         TryDelete(path);
-        var capture = new WasapiCapture(device);
+        var capture = new MicrophoneWaveIn(device);
         lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, AudioCaptureKind.Microphone, null, MonotonicClock.UtcNow, sourceKey, device.ID));
         AppLog.Debug($"Audio capture started: {title}, device={device.FriendlyName}.");
     }
