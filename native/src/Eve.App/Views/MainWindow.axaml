@@ -681,7 +681,7 @@
                               </DataTemplate>
                             </ComboBox.ItemTemplate>
                           </ComboBox>
-                          <Button Grid.Column="2" Content="Remove" Width="80" VerticalAlignment="Center" Click="RemoveGameButton_OnClick"
+                          <Button Grid.Column="2" Classes="deleteButton" Content="Remove" Padding="14,7" VerticalAlignment="Center" Click="RemoveGameButton_OnClick"
                                   ToolTip.Tip="Removes it from this list and stops EVE detecting it as a game again" />
                         </Grid>
                         <TextBlock Text="⚠ Since this game has an anti-cheat, OBS may black out or freeze the capture (or get the game closed) - Auto, EVE or Windows Capture are safer."
