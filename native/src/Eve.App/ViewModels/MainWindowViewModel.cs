@@ -273,7 +273,36 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public GameDetection ActiveGameDetection
     {
         get => _activeGameDetection;
-        set => SetProperty(ref _activeGameDetection, value);
+        set
+        {
+            if (!SetProperty(ref _activeGameDetection, value)) return;
+            if (value.IsDetected) EnsureGameCaptureRow(value);
+        }
+    }
+
+    // A detected game with no catalog entry and no prior override just gets
+    // played fine (detection doesn't require a catalog match), but it never
+    // showed up in Game Detection settings unless the user found it and
+    // manually added it via "add a running game". Auto-adding it here as a
+    // custom override row (same shape AddCustomGame produces) means any game
+    // you actually play surfaces there on its own, with a sane default
+    // display name, so the per-game backend override is discoverable.
+    private void EnsureGameCaptureRow(GameDetection detection)
+    {
+        if (string.IsNullOrWhiteSpace(detection.ExeName)) return;
+        if (GameCatalog.BuiltIn.ContainsKey(detection.ExeName)) return;
+        if (Settings.GameCaptureOverrides.Any(g => string.Equals(g.ExecutableName, detection.ExeName, StringComparison.OrdinalIgnoreCase))) return;
+
+        Settings.GameCaptureOverrides.Add(new GameCaptureOverride
+        {
+            ExecutableName = detection.ExeName,
+            DisplayName = detection.DisplayName,
+            CaptureBackend = "Auto"
+        });
+        SaveSettings();
+        RebuildGameCaptureRows();
+        GameCatalogChanged?.Invoke(this, EventArgs.Empty);
+        AppLog.Info($"Game detection: auto-added {detection.DisplayName} ({detection.ExeName}) to Game Detection settings.");
     }
 
     public bool IsEditorVisible
