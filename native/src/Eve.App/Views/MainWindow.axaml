@@ -649,7 +649,7 @@
                 <StackPanel Spacing="10">
                   <StackPanel Spacing="2">
                     <TextBlock Text="Excluded from detection" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
-                    <TextBlock Text="Apps you told EVE not to treat as games (click the detected game in the header to add one)." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    <TextBlock Text="Apps you told EVE not to treat as games (click the detected game in the header, or Remove a row below, to add one)." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
                   </StackPanel>
                   <ItemsControl ItemsSource="{Binding IgnoredGameExecutableRows}">
                     <ItemsControl.ItemTemplate>
@@ -681,7 +681,8 @@
                               </DataTemplate>
                             </ComboBox.ItemTemplate>
                           </ComboBox>
-                          <Button Grid.Column="2" Content="Remove" Width="80" IsVisible="{Binding IsCustom}" VerticalAlignment="Center" Click="RemoveCustomGameButton_OnClick" />
+                          <Button Grid.Column="2" Content="Remove" Width="80" IsVisible="{Binding IsCustom}" VerticalAlignment="Center" Click="RemoveCustomGameButton_OnClick"
+                                  ToolTip.Tip="Removes it from this list and stops EVE detecting it as a game again" />
                         </Grid>
                         <TextBlock Text="⚠ Since this game has an anti-cheat, OBS may black out or freeze the capture (or get the game closed) - Auto, EVE or Windows Capture are safer."
                                    Foreground="#E5A00D" FontSize="11" FontWeight="Bold" TextWrapping="Wrap"
