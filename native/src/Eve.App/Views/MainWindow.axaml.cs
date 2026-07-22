@@ -622,7 +622,21 @@ public sealed partial class MainWindow : Window
     private async Task EnsureLibraryFolderAsync()
     {
         if (ViewModel is null) return;
-        if (!string.IsNullOrWhiteSpace(ViewModel.Settings.LibraryFolder) && Directory.Exists(ViewModel.Settings.LibraryFolder)) return;
+        var configured = ViewModel.Settings.LibraryFolder;
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            if (await Task.Run(() => Directory.Exists(configured))) return;
+            // A configured folder (often a network share) that's just not reachable
+            // THIS MOMENT (not yet mounted, VPN not up, drive letter not remapped)
+            // must NOT fall through to creating a new local folder and overwriting
+            // the setting below - that would silently redirect every future
+            // recording to local disk while the user's whole existing library on
+            // the share becomes invisible, with no way back short of manually
+            // re-entering the path. Leave the setting alone; RefreshLibraryAsync
+            // will just show an empty library until the share comes back.
+            AppLog.Error($"Library folder unreachable at startup: {configured} - leaving the setting as-is instead of switching to a local default.");
+            return;
+        }
 
         var path = DefaultLibraryFolder();
         Directory.CreateDirectory(path);

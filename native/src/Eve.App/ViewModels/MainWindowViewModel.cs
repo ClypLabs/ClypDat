@@ -1832,7 +1832,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         AllClips.Clear();
         ClearSelection();
 
-        if (string.IsNullOrWhiteSpace(Settings.LibraryFolder) || !Directory.Exists(Settings.LibraryFolder))
+        // A network share that's slow or briefly unreachable makes even
+        // Directory.Exists block for the OS's SMB timeout (can be several
+        // seconds) - offloading it (and the scan below) keeps that off the
+        // UI thread instead of freezing the whole window on every refresh.
+        if (string.IsNullOrWhiteSpace(Settings.LibraryFolder) || !await Task.Run(() => Directory.Exists(Settings.LibraryFolder)))
         {
             StartLibraryWatcher();
             NotifyLibraryChrome();
@@ -1848,10 +1852,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         MigrateLegacySessionTitles();
         StartLibraryWatcher();
 
-        var clips = _mediaProbe.EnumerateVideos(Settings.LibraryFolder)
+        var clips = await Task.Run(() => _mediaProbe.EnumerateVideos(Settings.LibraryFolder)
             .Select(file => new ClipCardViewModel(_mediaProbe.CreateLibraryStub(file), Settings.LibraryFolder))
             .OrderByDescending(clip => clip.CreatedAt)
-            .ToArray();
+            .ToArray());
 
         foreach (var clip in clips) AllClips.Add(clip);
 
@@ -2146,7 +2150,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var selected = AllClips.Where(clip => clip.IsSelected).ToArray();
         foreach (var clip in selected)
         {
-            File.Delete(clip.Path);
+            await FileRetry.RunAsync(() => File.Delete(clip.Path), $"Delete clip {clip.Path}");
             _mediaProbe.DeleteCacheFor(clip.Path);
             ClipEditSidecar.Delete(Settings.LibraryFolder, clip.Path);
             ClipInfoSidecar.Delete(Settings.LibraryFolder, clip.Path);
@@ -2160,7 +2164,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public async Task DeleteClipAsync(ClipCardViewModel clip)
     {
-        File.Delete(clip.Path);
+        await FileRetry.RunAsync(() => File.Delete(clip.Path), $"Delete clip {clip.Path}");
         _mediaProbe.DeleteCacheFor(clip.Path);
         ClipEditSidecar.Delete(Settings.LibraryFolder, clip.Path);
         ClipInfoSidecar.Delete(Settings.LibraryFolder, clip.Path);
@@ -2191,7 +2195,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             : existingInfo with { FileTitle = sanitizedTitle };
         ClipInfoSidecar.Save(Settings.LibraryFolder, oldPath, updatedInfo);
 
-        File.Move(oldPath, newPath);
+        await FileRetry.RunAsync(() => File.Move(oldPath, newPath), $"Rename clip {oldPath} -> {newPath}");
         MoveClipSidecars(oldPath, newPath);
         _mediaProbe.DeleteCacheFor(oldPath);
 
@@ -3158,7 +3162,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         watcher.Created += LibraryWatcher_OnChanged;
         watcher.Deleted += LibraryWatcher_OnChanged;
         watcher.Renamed += LibraryWatcher_OnRenamed;
+        watcher.Error += LibraryWatcher_OnError;
         _libraryWatcher = watcher;
+    }
+
+    // A buffer overflow (bursty writes) or the watched share going
+    // unreachable both fire this and leave the watcher permanently dead -
+    // no further Created/Deleted/Renamed events ever again - which is easy
+    // to hit on a flaky/slow network share. Without this, the library just
+    // silently stops noticing external changes until the user happens to
+    // hit Refresh. Recreate it after a short delay instead.
+    private void LibraryWatcher_OnError(object sender, ErrorEventArgs e)
+    {
+        AppLog.Error("Library folder watcher failed - restarting in 5s.", e.GetException());
+        Dispatcher.UIThread.Post(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5));
+            StartLibraryWatcher();
+        });
     }
 
     private void LibraryWatcher_OnChanged(object sender, FileSystemEventArgs e)
