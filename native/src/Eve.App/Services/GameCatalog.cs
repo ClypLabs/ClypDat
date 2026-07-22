@@ -23,6 +23,7 @@ public static class GameCatalog
         ["Cyberpunk2077.exe"] = "Cyberpunk 2077",
         ["DeadByDaylight.exe"] = "Dead by Daylight",
         ["DeadByDaylight-Win64-Shipping.exe"] = "Dead by Daylight",
+        ["Elgato.Studio.exe"] = "Elgato Studio",
         ["TheFirstDescendant.exe"] = "The First Descendant",
         ["forhonor.exe"] = "For Honor",
         ["forzahorizon6.exe"] = "Forza Horizon 6",

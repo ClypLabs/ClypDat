@@ -2480,23 +2480,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         foreach (var row in GameCaptureRows) row.PropertyChanged -= GameCaptureRow_OnPropertyChanged;
         GameCaptureRows.Clear();
 
-        foreach (var pair in GameCatalog.BuiltIn
-                     .Where(kv => !Settings.IgnoredGameExecutables.Contains(kv.Key, StringComparer.OrdinalIgnoreCase))
-                     .OrderBy(kv => kv.Value, StringComparer.OrdinalIgnoreCase))
+        var builtIn = GameCatalog.BuiltIn
+            .Where(kv => !Settings.IgnoredGameExecutables.Contains(kv.Key, StringComparer.OrdinalIgnoreCase))
+            .Select(kv => (ExecutableName: kv.Key, DisplayName: kv.Value, IsCustom: false));
+        var custom = Settings.GameCaptureOverrides
+            .Where(g => !GameCatalog.BuiltIn.ContainsKey(g.ExecutableName))
+            .Select(g => (ExecutableName: g.ExecutableName, DisplayName: g.DisplayName, IsCustom: true));
+
+        // One alphabetical list instead of "sorted built-ins, then whatever
+        // order custom/auto-added games happened to land in Settings" - a
+        // newly detected game should slot in by name, not always show up at
+        // the bottom.
+        foreach (var entry in builtIn.Concat(custom).OrderBy(e => e.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
-            var overrideEntry = Settings.GameCaptureOverrides.FirstOrDefault(g => string.Equals(g.ExecutableName, pair.Key, StringComparison.OrdinalIgnoreCase));
+            var overrideEntry = Settings.GameCaptureOverrides.FirstOrDefault(g => string.Equals(g.ExecutableName, entry.ExecutableName, StringComparison.OrdinalIgnoreCase));
             var backend = ReplayBackends.FirstOrDefault(preset => string.Equals(preset.Value, overrideEntry?.CaptureBackend, StringComparison.OrdinalIgnoreCase))
                           ?? ReplayBackends.First(preset => preset.Value == "Auto");
-            var row = new GameBackendRowViewModel(pair.Key, pair.Value, isCustom: false, GameCatalog.AntiCheatSensitive.Contains(pair.Key), backend);
-            row.PropertyChanged += GameCaptureRow_OnPropertyChanged;
-            GameCaptureRows.Add(row);
-        }
-
-        foreach (var overrideEntry in Settings.GameCaptureOverrides.Where(g => !GameCatalog.BuiltIn.ContainsKey(g.ExecutableName)))
-        {
-            var backend = ReplayBackends.FirstOrDefault(preset => string.Equals(preset.Value, overrideEntry.CaptureBackend, StringComparison.OrdinalIgnoreCase))
-                          ?? ReplayBackends.First(preset => preset.Value == "Auto");
-            var row = new GameBackendRowViewModel(overrideEntry.ExecutableName, overrideEntry.DisplayName, isCustom: true, GameCatalog.AntiCheatSensitive.Contains(overrideEntry.ExecutableName), backend);
+            var row = new GameBackendRowViewModel(entry.ExecutableName, entry.DisplayName, entry.IsCustom, GameCatalog.AntiCheatSensitive.Contains(entry.ExecutableName), backend);
             row.PropertyChanged += GameCaptureRow_OnPropertyChanged;
             GameCaptureRows.Add(row);
         }
