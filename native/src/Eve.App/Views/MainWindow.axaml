@@ -22,7 +22,7 @@
           <Button Classes="brandButton" Padding="4,5,8,5" Click="LibraryHomeButton_OnClick" ToolTip.Tip="Library">
             <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
               <Image Source="/Assets/eve-icon-24.png" Width="28" Height="28" />
-              <TextBlock Text="EVE" FontSize="18" FontWeight="Bold" Foreground="#EDF4FB" Margin="0,4,0,0" />
+              <TextBlock Text="EVE" FontSize="18" FontWeight="Bold" Foreground="#EDF4FB" Margin="0,3,0,0" />
             </StackPanel>
           </Button>
           <Button Click="OpenSettingsButton_OnClick" ToolTip.Tip="Settings" IsVisible="{Binding ShowLibraryActions}">
