@@ -515,7 +515,9 @@ public sealed class MediaProbeService
                 if (value > max) max = value;
             }
 
-            peaks[bucket] = Math.Clamp(max, 0.02, 1);
+            // No artificial floor - true silence (max == 0) should render as a
+            // gap in the waveform, not a flat baseline line the whole way through.
+            peaks[bucket] = Math.Clamp(max, 0, 1);
         }
 
         return peaks;
