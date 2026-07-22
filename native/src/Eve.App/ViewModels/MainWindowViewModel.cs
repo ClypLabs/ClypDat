@@ -2410,6 +2410,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings.IgnoredGameExecutables.Add(executableName);
         SaveSettings();
         SyncIgnoredGameExecutableRows();
+        RebuildGameCaptureRows();
         GameCatalogChanged?.Invoke(this, EventArgs.Empty);
         AppLog.Info($"Game detection: user excluded {executableName}.");
     }
@@ -2419,6 +2420,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (Settings.IgnoredGameExecutables.RemoveAll(name => string.Equals(name, executableName, StringComparison.OrdinalIgnoreCase)) == 0) return;
         SaveSettings();
         SyncIgnoredGameExecutableRows();
+        RebuildGameCaptureRows();
         GameCatalogChanged?.Invoke(this, EventArgs.Empty);
         AppLog.Info($"Game detection: user un-excluded {executableName}.");
     }
@@ -2457,14 +2459,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedGameProcess = null;
     }
 
-    public void RemoveCustomGame(GameBackendRowViewModel row)
+    // Handles both a user-added custom row (delete its override entry) and a
+    // built-in catalog row (nothing to delete there - GameCatalog.BuiltIn is a
+    // static dict, not per-user data). Either way, excluding the exe is what
+    // actually makes removal stick: RebuildGameCaptureRows filters ignored
+    // exes out of the built-in list too, and detection itself skips anything
+    // on the ignore list, so it won't just reappear next time it's opened.
+    public void RemoveGame(GameBackendRowViewModel row)
     {
-        if (!row.IsCustom) return;
-        Settings.GameCaptureOverrides.RemoveAll(g => string.Equals(g.ExecutableName, row.ExecutableName, StringComparison.OrdinalIgnoreCase));
-        row.PropertyChanged -= GameCaptureRow_OnPropertyChanged;
-        GameCaptureRows.Remove(row);
-        SaveSettings();
-        GameCatalogChanged?.Invoke(this, EventArgs.Empty);
+        if (row.IsCustom)
+        {
+            Settings.GameCaptureOverrides.RemoveAll(g => string.Equals(g.ExecutableName, row.ExecutableName, StringComparison.OrdinalIgnoreCase));
+            SaveSettings();
+        }
+        AddIgnoredGameExecutable(row.ExecutableName);
     }
 
     private void RebuildGameCaptureRows()
@@ -2472,7 +2480,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         foreach (var row in GameCaptureRows) row.PropertyChanged -= GameCaptureRow_OnPropertyChanged;
         GameCaptureRows.Clear();
 
-        foreach (var pair in GameCatalog.BuiltIn.OrderBy(kv => kv.Value, StringComparer.OrdinalIgnoreCase))
+        foreach (var pair in GameCatalog.BuiltIn
+                     .Where(kv => !Settings.IgnoredGameExecutables.Contains(kv.Key, StringComparer.OrdinalIgnoreCase))
+                     .OrderBy(kv => kv.Value, StringComparer.OrdinalIgnoreCase))
         {
             var overrideEntry = Settings.GameCaptureOverrides.FirstOrDefault(g => string.Equals(g.ExecutableName, pair.Key, StringComparison.OrdinalIgnoreCase));
             var backend = ReplayBackends.FirstOrDefault(preset => string.Equals(preset.Value, overrideEntry?.CaptureBackend, StringComparison.OrdinalIgnoreCase))

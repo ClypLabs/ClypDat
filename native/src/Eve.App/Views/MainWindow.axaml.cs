@@ -942,19 +942,12 @@ public sealed partial class MainWindow : Window
         ViewModel?.AddGameFromProcess();
     }
 
-    private void RemoveCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
+    private void RemoveGameButton_OnClick(object? sender, RoutedEventArgs e)
     {
-        if (sender is not Button { DataContext: GameBackendRowViewModel row } || ViewModel is null) return;
-        var exeName = row.ExecutableName;
-        ViewModel.RemoveCustomGame(row);
-        // Removing the row alone doesn't stop detection from picking the exe back
-        // up next time it's foreground (detection doesn't require a catalog/override
-        // entry) - and since a detected-but-uncataloged game now auto-adds itself
-        // back (see EnsureGameCaptureRow), a plain remove would silently reappear.
-        // Excluding it here is what actually makes "Remove" a fail-safe for a
-        // misdetected app instead of a no-op.
-        ViewModel.AddIgnoredGameExecutable(exeName);
-        _gameDetector.ApplyUserIgnoredExecutables(ViewModel.Settings.IgnoredGameExecutables);
+        if (sender is Button { DataContext: GameBackendRowViewModel row } && ViewModel is not null)
+        {
+            ViewModel.RemoveGame(row);
+        }
     }
 
     private void UpdateCs2AutoClipState()
