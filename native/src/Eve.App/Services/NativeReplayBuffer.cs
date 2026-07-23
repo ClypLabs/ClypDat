@@ -496,6 +496,19 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             // FinalizeFullSessionRecording read _pauseEvents to tell the editor
             // which parts of a saved clip were frozen like this.
             var isPaused = false;
+            // Whether a real (non-occluded) frame has ever been captured yet.
+            // The buffer arms the instant a game is detected, which is often
+            // before the game window has focus (user alt-tabbed away, or just
+            // hasn't clicked in yet) - frame->data is still FillFrameBlack's
+            // placeholder at that point. Encoding used to start immediately
+            // regardless, so the ring buffer/full session opened on however
+            // many seconds of solid black preceded the user actually looking
+            // at the game. Gating the encode/ring-write step on this instead
+            // means that stretch is simply never recorded - once the window
+            // has been seen in the foreground once, later occlusions (a
+            // mid-session alt-tab) go back to the existing freeze-and-keep-
+            // recording behavior above, unaffected.
+            var hasCapturedRealFrame = false;
 
             while (!token.IsCancellationRequested)
             {
@@ -794,6 +807,28 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     AppLog.Info($"Native capture: recording {(isPaused ? "paused (window not foreground)" : "resumed")}.");
                 }
 
+                if (!occluded && !hasCapturedRealFrame)
+                {
+                    hasCapturedRealFrame = true;
+                    // lastEncodedAt is still its initial/stale value from however
+                    // long the buffer sat waiting for focus - reset it to now so
+                    // the catch-up gate below doesn't treat that entire wait as a
+                    // pacing gap to fill with duplicate frames.
+                    lastEncodedAt = stopwatch.Elapsed;
+                    if (fullSessionFormatContext is not null)
+                    {
+                        // Full Session's muxed audio window is requested starting
+                        // at fullSessionStartUtc (see FinalizeFullSessionRecording)
+                        // - it was set at buffer-arm time above, before the window
+                        // ever had focus. Re-anchor it to this, the actual first
+                        // recorded video frame, so audio isn't muxed several
+                        // seconds ahead of where the video track now starts.
+                        fullSessionStartUtc = MonotonicClock.UtcNow;
+                        fullSessionStartWallUtc = DateTime.UtcNow;
+                    }
+                    AppLog.Info("Native capture: first foreground frame captured, recording started.");
+                }
+
                 // Pacing/encode gate - now evaluated every iteration regardless of
                 // whether this exact cycle produced fresh content, instead of only
                 // running inside the successful-real-frame branch. Previously the
@@ -824,6 +859,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 // static clip). Past a couple of seconds' worth of padding, snap
                 // the ideal timeline forward to now instead of mechanically
                 // filling every missed slot.
+                // Skipped entirely until the target window has been in the
+                // foreground at least once - see hasCapturedRealFrame's
+                // declaration above for why (avoids ever writing the
+                // FillFrameBlack placeholder into the ring buffer/full
+                // session as real recorded content).
+                if (hasCapturedRealFrame)
+                {
                 var catchUpFramesRemaining = Math.Clamp(config.FrameRate, 15, 240) * 2;
                 while (stopwatch.Elapsed - lastEncodedAt >= targetFrameInterval)
                 {
@@ -880,6 +922,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                         DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrameWallClocks);
                     }
                     encodeMs += stageStopwatch.Elapsed.TotalMilliseconds;
+                }
                 }
 
                 if (stopwatch.Elapsed - lastRingTrim >= TimeSpan.FromSeconds(1))

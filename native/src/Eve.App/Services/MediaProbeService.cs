@@ -317,7 +317,6 @@ public sealed class MediaProbeService
         var seek = duration > TimeSpan.FromSeconds(2)
             ? Math.Min(3, duration.TotalSeconds / 3)
             : 0;
-        seek = await ResolveNonBlackSeekAsync(filePath, duration, seek);
 
         var result = await RunProcessAsync("ffmpeg", new[]
         {
@@ -343,64 +342,6 @@ public sealed class MediaProbeService
         }
 
         return output;
-    }
-
-    // Recordings often START black: the buffer arms when the game is
-    // detected, but capture shows the last-real-frame freeze (or nothing yet)
-    // until the game window actually has focus - Full Sessions especially,
-    // where the user may not click into the game for a while. The old
-    // fixed-3s grab then produced a pure black tile. Scan the opening stretch
-    // with ffmpeg's blackdetect and grab the first bright frame instead,
-    // falling back to the middle of the clip if the whole scanned window is
-    // black.
-    private static async Task<double> ResolveNonBlackSeekAsync(string filePath, TimeSpan duration, double defaultSeek)
-    {
-        try
-        {
-            var scanSeconds = Math.Min(90, Math.Max(2, duration.TotalSeconds));
-            var result = await RunProcessAsync("ffmpeg", new[]
-            {
-                "-v", "info",
-                "-t", scanSeconds.ToString("0.###"),
-                "-i", filePath,
-                "-an", "-sn",
-                "-vf", "blackdetect=d=0.3:pix_th=0.10",
-                "-f", "null",
-                OperatingSystem.IsWindows() ? "NUL" : "/dev/null"
-            });
-
-            // blackdetect logs regions to stderr: "black_start:0 black_end:47.2 ...".
-            var matches = System.Text.RegularExpressions.Regex.Matches(
-                result.Error,
-                @"black_start:(?<start>[0-9.]+).*?black_end:(?<end>[0-9.]+)");
-            if (matches.Count == 0) return defaultSeek;
-
-            var firstStart = double.Parse(matches[0].Groups["start"].Value, System.Globalization.CultureInfo.InvariantCulture);
-            var firstEnd = double.Parse(matches[0].Groups["end"].Value, System.Globalization.CultureInfo.InvariantCulture);
-
-            // Black doesn't start at the beginning - the default grab point is
-            // already showing real content.
-            if (firstStart > defaultSeek + 0.5) return defaultSeek;
-
-            // Opening black region ends within the scan - first bright frame
-            // sits just past it.
-            if (firstEnd < scanSeconds - 0.5 && firstEnd + 0.5 < duration.TotalSeconds)
-            {
-                AppLog.Info($"Thumbnail seek moved past opening black: path={filePath}, firstBrightAt={firstEnd:0.0}s.");
-                return firstEnd + 0.5;
-            }
-
-            // The whole scanned window is black - middle of the clip is the
-            // best available guess.
-            var middle = Math.Max(defaultSeek, duration.TotalSeconds / 2);
-            AppLog.Info($"Thumbnail seek fell back to clip middle (opening {scanSeconds:0}s all black): path={filePath}, seek={middle:0.0}s.");
-            return middle;
-        }
-        catch (Exception error)
-        {
-            AppLog.Error($"Thumbnail black-scan failed for {filePath}; using default seek.", error);
-            return defaultSeek;
-        }
     }
 
     private string GetThumbnailPath(string filePath)
