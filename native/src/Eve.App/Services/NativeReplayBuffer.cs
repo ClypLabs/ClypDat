@@ -1,5 +1,6 @@
 using Eve.Capture.Abstractions;
 using FFmpeg.AutoGen;
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text.Json;
@@ -82,6 +83,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer
     private byte[]? _extraData;
     private int _outputWidth;
     private int _outputHeight;
+    // Encode-thread diagnostics (see EncodeLoop) - written with Interlocked from
+    // that thread, read/reset from CaptureLoop's own periodic diag line. Plain
+    // instance fields are safe here since only one capture session (and so only
+    // one encode thread) is ever active at a time.
+    private long _encodeMicrosAccum;
+    private long _encodeCountAccum;
+    private long _encodeDroppedCount;
 
     public NativeReplayBuffer(Func<ReplayBufferConfig> configProvider)
     {
@@ -381,6 +389,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         AVPacket* packet = null;
         AVFormatContext* fullSessionFormatContext = null;
         AVStream* fullSessionStream = null;
+        // Encode (avcodec_send_frame/receive_packet, both of which can block on
+        // NVENC for a while under real GPU contention - see EncodeLoop) runs on
+        // its own thread so a slow encode call never blocks AcquireNextFrame on
+        // the thread below it. Declared out here (not inside the try) so the
+        // finally block can always drain/join it before codecContext gets freed,
+        // on every exit path including an exception mid-loop.
+        BlockingCollection<EncodeJob>? encodeQueue = null;
+        Thread? encodeThread = null;
         var fullSessionTempVideoPath = string.Empty;
         var fullSessionFinalOutputPath = string.Empty;
         var fullSessionStartUtc = MonotonicClock.UtcNow;
@@ -460,6 +476,28 @@ public sealed class NativeReplayBuffer : IReplayBuffer
 
             packet = ffmpeg.av_packet_alloc();
 
+            // Bounded generously past a worst-case single-iteration catch-up burst
+            // (see the pacing gate below, capped at FrameRate*2 duplicate-encoded
+            // frames) so a legitimate burst never spuriously drops frames - only a
+            // genuinely sustained backlog (the encoder truly can't keep pace, not
+            // just a transient stall) hits the cap and starts dropping in
+            // EncodeLoop's TryAdd below.
+            encodeQueue = new BlockingCollection<EncodeJob>(boundedCapacity: Math.Max(64, Math.Clamp(config.FrameRate, 15, 240) * 2));
+            // Pointer locals can't be captured by a lambda closure directly - cross
+            // the thread boundary as nint instead, cast back inside EncodeLoop.
+            var encodeCodecContextPtr = (nint)codecContext;
+            var encodePacketPtr = (nint)packet;
+            var encodeFullSessionFormatContextPtr = (nint)fullSessionFormatContext;
+            var encodeFullSessionStreamPtr = (nint)fullSessionStream;
+            encodeThread = new Thread(() => EncodeLoop(encodeQueue, encodeCodecContextPtr, encodePacketPtr, encodeFullSessionFormatContextPtr, encodeFullSessionStreamPtr))
+            {
+                IsBackground = true,
+                Name = "EVE-NativeEncode"
+            };
+            try { encodeThread.Priority = ThreadPriority.AboveNormal; }
+            catch (Exception error) { AppLog.Error("Native capture: failed to raise encode thread priority (non-fatal)", error); }
+            encodeThread.Start();
+
             AppLog.Info($"Native capture started (DXGI Desktop Duplication): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, encoder={encoderName}, configFrameRate={config.FrameRate}.");
             ready.TrySetResult();
 
@@ -480,12 +518,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             // timeline can't drag audio sync off with it.
             var encodedFrameIndex = 0L;
             var idealFrameIntervalMicroseconds = 1_000_000.0 / Math.Clamp(config.FrameRate, 15, 240);
-            // FIFO of real capture-moment timestamps, one enqueued per
-            // avcodec_send_frame call, dequeued one-for-one as packets
-            // actually come out - see the enqueue call site for why this
-            // (not just "now" at drain time) is what actually fixes audio
-            // sync regardless of encoder internal buffering depth.
-            var pendingFrameWallClocks = new Queue<DateTime>();
+            // The real capture-moment timestamp FIFO (one per avcodec_send_frame
+            // call, dequeued one-for-one as packets actually come out - see
+            // DrainToRingBuffer for why this, not just "now" at drain time, is
+            // what fixes audio sync) now lives inside EncodeLoop, since send_frame
+            // itself moved there - see the encode-queue enqueue below.
             // Short enough to stay well under even a 240fps target interval
             // (4.17ms) so the pacing gate below is never blocked waiting on
             // this call - see its call site for why that matters now. Lower
@@ -591,7 +628,17 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     long ringBufferBytes;
                     lock (_bufferLock) ringBufferBytes = _packets.Sum(p => (long)p.Data.Length);
                     var ringBufferMb = ringBufferBytes / (1024 * 1024);
-                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, ringBufferMb={ringBufferMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgEncodeMs={encodeMs / n:0.00}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, iterations={iterationsSinceLog}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
+                    // avgEncodeMs now comes from EncodeLoop's own thread (Interlocked
+                    // handoff, reset via Exchange so nothing's lost mid-read) - the
+                    // capture-thread-local encodeMs is relabeled avgQueueMs, since
+                    // it's now just av_frame_clone+TryAdd cost, not the real encode
+                    // call. queueDepth/droppedFrames confirm whether decoupling is
+                    // actually keeping up: a growing depth or nonzero drops under
+                    // load means the encoder itself is too slow, not just blocked.
+                    var encodeCountSinceLog = Math.Max(1, Interlocked.Exchange(ref _encodeCountAccum, 0));
+                    var encodeMicrosSinceLog = Interlocked.Exchange(ref _encodeMicrosAccum, 0);
+                    var droppedSinceLog = Interlocked.Exchange(ref _encodeDroppedCount, 0);
+                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, ringBufferMb={ringBufferMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, droppedFrames={droppedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, iterations={iterationsSinceLog}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
                     copyMapMs = 0;
                     scaleMs = 0;
                     encodeMs = 0;
@@ -1006,22 +1053,34 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                         frame->pict_type = AVPictureType.AV_PICTURE_TYPE_NONE;
                     }
 
-                    // Enqueued BEFORE send_frame, dequeued inside DrainToRingBuffer
-                    // once PER PACKET actually received - NVENC (or any encoder)
-                    // can hold frames internally for a call or two before
-                    // releasing output, so whichever packet THIS drain call
-                    // happens to receive doesn't necessarily correspond to the
-                    // frame just sent. A plain "now" here (tried first) still
-                    // has that same skew the ORIGINAL audio-sync fix targeted -
-                    // this FIFO guarantees each packet gets the real timestamp
-                    // of the specific frame it actually came from, regardless of
-                    // how deep the encoder's internal buffering is.
-                    pendingFrameWallClocks.Enqueue(MonotonicClock.UtcNow);
-
+                    // avcodec_send_frame/receive_packet themselves now run on
+                    // EncodeLoop's own thread (see its declaration above) - a slow
+                    // NVENC call under real GPU contention used to block THIS
+                    // thread, stalling AcquireNextFrame right along with it (the
+                    // capture freeze this whole diagnostic trail was chasing:
+                    // avgEncodeMs spiking 20x+ with frames backing up hundreds
+                    // deep). av_frame_clone is a cheap ref-counted handle, not a
+                    // pixel copy - av_frame_make_writable up above already treats
+                    // "something else still references this buffer" as
+                    // copy-on-write, so the encode thread holding this clone a
+                    // while longer just means the NEXT capture-thread frame gets
+                    // a fresh buffer instead of racing this one, exactly the
+                    // mechanism that comment already relies on.
                     stageStopwatch.Restart();
-                    if (ffmpeg.avcodec_send_frame(codecContext, frame) == 0)
+                    var clonedFrame = ffmpeg.av_frame_clone(frame);
+                    if (clonedFrame is null)
                     {
-                        DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrameWallClocks);
+                        AppLog.Error("Native capture: av_frame_clone failed, dropping a frame.");
+                        Interlocked.Increment(ref _encodeDroppedCount);
+                    }
+                    else if (!encodeQueue.TryAdd(new EncodeJob((nint)clonedFrame, MonotonicClock.UtcNow)))
+                    {
+                        // Queue's genuinely full - the encoder can't keep pace even
+                        // decoupled, not just a transient stall. Drop rather than
+                        // block (defeats the whole point) or grow unbounded.
+                        var droppedFrame = clonedFrame;
+                        ffmpeg.av_frame_free(&droppedFrame);
+                        Interlocked.Increment(ref _encodeDroppedCount);
                     }
                     encodeMs += stageStopwatch.Elapsed.TotalMilliseconds;
                 }
@@ -1046,11 +1105,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 }
             }
 
-            // flush - any packets still buffered inside the encoder drain here;
-            // their real timestamps are already sitting in the queue from when
-            // they were originally sent, nothing new to enqueue for a null frame.
-            ffmpeg.avcodec_send_frame(codecContext, null);
-            DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrameWallClocks);
+            // Stop accepting new jobs and wait for EncodeLoop to drain everything
+            // already queued (including its own final flush of whatever's still
+            // buffered inside the encoder) - the finally block below also does
+            // this on any exception path, so this is a no-op there, not a
+            // duplicate drain.
+            encodeQueue.CompleteAdding();
+            encodeThread.Join();
         }
         catch (Exception error)
         {
@@ -1061,6 +1122,22 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         }
         finally
         {
+            // Guarantee the encode thread is fully stopped (and has released its
+            // last cloned frame) before codecContext/packet get freed below, on
+            // EVERY exit path - the happy path above already did this, so this is
+            // a no-op there; an exception thrown mid-loop is the path that
+            // actually needs it here.
+            try
+            {
+                encodeQueue?.CompleteAdding();
+                encodeThread?.Join();
+            }
+            catch (Exception error)
+            {
+                AppLog.Error("Native capture: encode thread shutdown failed.", error);
+            }
+            encodeQueue?.Dispose();
+
             if (frame is not null) { var f = frame; ffmpeg.av_frame_free(&f); }
             if (packet is not null) { var p = packet; ffmpeg.av_packet_free(&p); }
             if (swsContext is not null) ffmpeg.sws_freeContext(swsContext);
@@ -1428,6 +1505,67 @@ public sealed class NativeReplayBuffer : IReplayBuffer
     {
         const uint MONITOR_DEFAULTTOPRIMARY = 1;
         return MonitorFromPoint(default, MONITOR_DEFAULTTOPRIMARY);
+    }
+
+    // FramePtr is an AVFrame* smuggled across the thread boundary as nint -
+    // pointer types can't be used as generic type arguments (BlockingCollection<T>
+    // here) or captured by a lambda closure, both of which this needs. Owned by
+    // whichever side currently holds it: the capture thread until TryAdd
+    // succeeds, EncodeLoop from then on (which is responsible for freeing it).
+    private readonly record struct EncodeJob(nint FramePtr, DateTime WallClockUtc);
+
+    // Runs avcodec_send_frame/receive_packet (and so DrainToRingBuffer, and the
+    // full-session mux write inside it) on its own thread, decoupled from
+    // CaptureLoop's AcquireNextFrame loop. Existed as a single synchronous call
+    // inline in CaptureLoop originally - fine when NVENC keeps up, but a real
+    // GPU-contention stall there (confirmed via avgEncodeMs spiking 20x+ baseline
+    // with frames backing up hundreds deep in Native capture diag) blocked
+    // AcquireNextFrame right along with it, since it was the same thread. This
+    // loop owns codecContext/packet/pendingFrameWallClocks exclusively from here
+    // on - CaptureLoop never touches them again after starting this thread.
+    private unsafe void EncodeLoop(BlockingCollection<EncodeJob> queue, nint codecContextPtr, nint packetPtr, nint fullSessionFormatContextPtr, nint fullSessionStreamPtr)
+    {
+        var codecContext = (AVCodecContext*)codecContextPtr;
+        var packet = (AVPacket*)packetPtr;
+        var fullSessionFormatContext = (AVFormatContext*)fullSessionFormatContextPtr;
+        var fullSessionStream = (AVStream*)fullSessionStreamPtr;
+        // Same FIFO purpose as the original inline version - see DrainToRingBuffer's
+        // dequeue site - just living here now since send_frame moved here with it.
+        var pendingFrameWallClocks = new Queue<DateTime>();
+        try
+        {
+            foreach (var job in queue.GetConsumingEnumerable())
+            {
+                var jobFrame = (AVFrame*)job.FramePtr;
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                try
+                {
+                    pendingFrameWallClocks.Enqueue(job.WallClockUtc);
+                    if (ffmpeg.avcodec_send_frame(codecContext, jobFrame) == 0)
+                    {
+                        DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrameWallClocks);
+                    }
+                }
+                finally
+                {
+                    ffmpeg.av_frame_free(&jobFrame);
+                }
+                Interlocked.Add(ref _encodeMicrosAccum, (long)(sw.Elapsed.TotalMilliseconds * 1000));
+                Interlocked.Increment(ref _encodeCountAccum);
+            }
+
+            // Queue drained and CompleteAdding was called (CaptureLoop's while
+            // loop exited) - flush whatever's still buffered inside the encoder
+            // itself, same as the original inline flush used to.
+            ffmpeg.avcodec_send_frame(codecContext, null);
+            DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrameWallClocks);
+        }
+        catch (Exception error)
+        {
+            // Must not throw unhandled off this thread - an unobserved exception
+            // on a plain Thread (unlike Task) crashes the whole process.
+            AppLog.Error("Native capture: encode thread failed.", error);
+        }
     }
 
     private unsafe void DrainToRingBuffer(AVCodecContext* codecContext, AVPacket* packet, AVFormatContext* fullSessionFormatContext, AVStream* fullSessionStream, Queue<DateTime> pendingFrameWallClocks)
@@ -1926,19 +2064,27 @@ public sealed class NativeReplayBuffer : IReplayBuffer
     // still works even with no usable hardware encoder at all.
     private static readonly string[] EncoderCandidates = { "h264_nvenc", "h264_amf", "libx264" };
 
-    // Real-time screen capture needs the encoder's fastest/lowest-latency
-    // preset, not whatever balanced default ships with it - h264_nvenc's
-    // default preset does real per-frame rate-distortion search, which
-    // measured a sustained ~59-60ms/frame (vs. ~0.5ms on the fast preset)
-    // during actual Dead by Daylight matches specifically, where the same GPU
-    // is also under its heaviest rendering load of the whole session. That
-    // 100x-per-frame cost is what turns "GPU is busy, a few frames get
-    // dropped" into sustained near-1fps capture for minutes at a time. Applied
-    // to priv_data before avcodec_open2 - these are encoder-specific options,
-    // not real AVCodecContext fields, so they have to land before open, not
-    // after. Best-effort: an unsupported option name just logs and moves on
-    // instead of failing the whole encoder open, since exact option support
-    // varies by ffmpeg build/driver version.
+    // h264_nvenc's default preset does real per-frame rate-distortion search,
+    // which measured a sustained ~59-60ms/frame (vs. ~0.5ms on p1) during
+    // actual Dead by Daylight matches specifically, where the same GPU is also
+    // under its heaviest rendering load of the whole session - that 100x
+    // per-frame cost, back when encode still ran inline on CaptureLoop's own
+    // thread, turned "GPU is busy" into sustained near-1fps capture for
+    // minutes at a time. p1 was the fix at the time, at the cost of visible
+    // motion-compression artifacts under fast camera movement (looks like
+    // dropped frames even though every frame is present and correctly timed -
+    // confirmed via ffprobe on an actual saved clip: exact expected frame
+    // count, zero duplicates, dead-even PTS spacing). Now that encode runs on
+    // its own thread (see EncodeLoop) decoupled from AcquireNextFrame, a
+    // slower preset can no longer reproduce that stall - worst case is
+    // EncodeLoop's queue backing up (watch queueDepth/droppedFrames in Native
+    // capture diag), not a frozen capture thread. p4 trades some of that
+    // encode headroom back for quality. Applied to priv_data before
+    // avcodec_open2 - these are encoder-specific options, not real
+    // AVCodecContext fields, so they have to land before open, not after.
+    // Best-effort: an unsupported option name just logs and moves on instead
+    // of failing the whole encoder open, since exact option support varies by
+    // ffmpeg build/driver version.
     private static unsafe void ApplyLowLatencyEncoderOptions(AVCodecContext* codecContext, string candidateName)
     {
         void TrySet(string name, string value)
@@ -1953,7 +2099,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         switch (candidateName)
         {
             case "h264_nvenc":
-                TrySet("preset", "p1");
+                TrySet("preset", "p4");
                 TrySet("tune", "ll");
                 break;
             case "h264_amf":
