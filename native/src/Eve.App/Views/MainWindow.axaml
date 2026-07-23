@@ -1296,6 +1296,7 @@
               </Border>
               <Slider Classes="volumeSlider"
                       Minimum="0" Maximum="150"
+                      TickFrequency="1" IsSnapToTickEnabled="True"
                       Width="90"
                       VerticalAlignment="Center"
                       Value="{Binding MasterVolumePercent, Mode=TwoWay}"
@@ -1425,6 +1426,8 @@
                                 Classes="volumeSlider"
                                 Minimum="0"
                                 Maximum="150"
+                                TickFrequency="1"
+                                IsSnapToTickEnabled="True"
                                 Height="36"
                                 MinHeight="36"
                                 Padding="0"
@@ -1753,7 +1756,7 @@
                           Foreground="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToMuteBrushConverter.Instance}}"
                           Data="{Binding EffectiveMasterVolumePercent, Converter={x:Static opconv:VolumeLevelToIconConverter.Instance}}" />
               </Border>
-              <Slider Classes="volumeSlider" Minimum="0" Maximum="150" Width="90" VerticalAlignment="Center"
+              <Slider Classes="volumeSlider" Minimum="0" Maximum="150" TickFrequency="1" IsSnapToTickEnabled="True" Width="90" VerticalAlignment="Center"
                       Value="{Binding MasterVolumePercent, Mode=TwoWay}"
                       Opacity="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToOpacityConverter.Instance}}" />
               <TextBlock Text="{Binding MasterVolumePercent, StringFormat={}{0:0}%}"
@@ -1762,19 +1765,19 @@
                          Width="30"
                          Margin="0,2,0,0"
                          VerticalAlignment="Center" />
-              <!-- Opacity, not IsVisible - this sits inside a
+              <!-- IsEnabled, not IsVisible - this sits inside a
                    HorizontalAlignment="Center" StackPanel, so collapsing its
                    layout space on hide would re-center the whole row and
-                   shift every button in it (Restart through Exit). Opacity
-                   keeps its slot reserved either way, so only its own
-                   visibility changes, not anyone else's position. -->
+                   shift every button in it (Restart through Exit). Always
+                   laid out at the same size; IsEnabled=False just greys it
+                   out (the global Button:disabled style) and blocks the
+                   click, at 100% where there's nothing to reset. -->
               <Button Classes="linkButton"
                       Content="Reset"
                       FontSize="10"
                       Padding="6,1"
                       VerticalAlignment="Center"
-                      Opacity="{Binding IsMasterVolumeNonDefault, Converter={x:Static opconv:BoolToVisibleOpacityConverter.Instance}}"
-                      IsHitTestVisible="{Binding IsMasterVolumeNonDefault}"
+                      IsEnabled="{Binding IsMasterVolumeNonDefault}"
                       Click="MasterVolumeReset_OnClick"
                       ToolTip.Tip="Reset to 100%" />
               <Border Width="1" Height="20" Background="#26FFFFFF" Margin="4,0" />
