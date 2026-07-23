@@ -1553,24 +1553,9 @@
                 </ItemsControl>
 
                 <Canvas x:Name="TimelineOverlay" IsHitTestVisible="False">
-                  <!-- Sized/positioned to sit exactly over the video lane
-                       (the first/top lane) - matches its LaneHeight
-                       (TrackLaneViewModel). Background is Transparent, not a
-                       solid fill: this used to be #151F24, invisible against
-                       the video lane's old blank-box rendering, but that same
-                       opaque fill sat ON TOP of (painted after) the lane's
-                       own content in the visual tree - once the lane started
-                       drawing real filmstrip thumbnails, this box visibly
-                       darkened/hid them. The teal border alone still marks
-                       the trim range; per-lane dimming for the
-                       excluded-from-trim portion is TimelineLaneControl's
-                       own DrawTrimShade, not this box. -->
-                  <Border x:Name="TrimSelection"
-                          Height="42"
-                          BorderBrush="#13C8B5"
-                          BorderThickness="1"
-                          CornerRadius="4"
-                          Background="Transparent" />
+                  <!-- Per-lane dimming for the excluded-from-trim portion is
+                       TimelineLaneControl's own DrawTrimShade - that alone
+                       marks the trim range now, no separate box on top of it. -->
                   <Border x:Name="TimelinePlayhead"
                           Width="3"
                           Background="#F2F6FB" />
@@ -1579,25 +1564,33 @@
                            Fill="#F2F6FB" />
                 </Canvas>
 
+                <!-- Trim start/end handles - thin full-height lines with a
+                     small flag-style triangle cap at the top, matching the
+                     playhead's own look (and GG's), instead of a thick
+                     rounded block confined to just the video lane. -->
                 <Canvas x:Name="TimelineHandleLayer">
                   <Border x:Name="TrimStartHandle"
-                          Width="14"
-                          Height="42"
+                          Width="4"
                           Background="#13C8B5"
-                          CornerRadius="2"
                           Cursor="SizeWestEast"
                           PointerPressed="TrimStartHandle_OnPointerPressed"
                           PointerMoved="TimelineSurface_OnPointerMoved"
                           PointerReleased="TimelineSurface_OnPointerReleased" />
+                  <Polygon x:Name="TrimStartCap"
+                           Points="0,0 10,0 5,7"
+                           Fill="#13C8B5"
+                           IsHitTestVisible="False" />
                   <Border x:Name="TrimEndHandle"
-                          Width="14"
-                          Height="42"
+                          Width="4"
                           Background="#13C8B5"
-                          CornerRadius="2"
                           Cursor="SizeWestEast"
                           PointerPressed="TrimEndHandle_OnPointerPressed"
                           PointerMoved="TimelineSurface_OnPointerMoved"
                           PointerReleased="TimelineSurface_OnPointerReleased" />
+                  <Polygon x:Name="TrimEndCap"
+                           Points="0,0 10,0 5,7"
+                           Fill="#13C8B5"
+                           IsHitTestVisible="False" />
                 </Canvas>
               </Grid>
             </Grid>

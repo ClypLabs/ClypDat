@@ -2765,22 +2765,33 @@ public sealed partial class MainWindow : Window
         var end = ViewModel.TrimEnd.TotalMilliseconds / ViewModel.Duration.TotalMilliseconds * width;
         var playhead = ViewModel.CurrentTime.TotalMilliseconds / ViewModel.Duration.TotalMilliseconds * width;
 
-        Canvas.SetLeft(TrimSelection, start);
-        TrimSelection.Width = Math.Max(0, end - start);
-
-        // Handles are centered on the trim boundary (Left = boundary -
-        // Width/2), so at TrimStart=0 or TrimEnd=Duration that centering
-        // pushes half the handle's own width past the track's left/right
-        // edge instead of stopping flush with it. Clamping the handle's
+        // Thin full-height lines (GG-style) instead of a thick block
+        // confined to the video lane - handles are centered on the trim
+        // boundary (Left = boundary - Width/2), so at TrimStart=0 or
+        // TrimEnd=Duration that centering pushes half the handle's own
+        // width past the track's left/right edge; clamping the handle's
         // available Left range to [0, width - handleWidth] squishes it
-        // against the near edge instead of letting it overhang past the
-        // track.
+        // against the near edge instead of letting it overhang.
+        // Matches TrimStartCap/TrimEndCap's Points width (see XAML) - read as
+        // a constant rather than Bounds.Width since the Polygon may not have
+        // been measured yet on the very first call.
+        const double capWidth = 10;
+
         var startMaxLeft = Math.Max(0, width - TrimStartHandle.Width);
-        Canvas.SetLeft(TrimStartHandle, Math.Clamp(start - TrimStartHandle.Width / 2, 0, startMaxLeft));
+        var startLeft = Math.Clamp(start - TrimStartHandle.Width / 2, 0, startMaxLeft);
+        Canvas.SetLeft(TrimStartHandle, startLeft);
         Canvas.SetTop(TrimStartHandle, 0);
+        TrimStartHandle.Height = height;
+        Canvas.SetLeft(TrimStartCap, startLeft - (capWidth - TrimStartHandle.Width) / 2);
+        Canvas.SetTop(TrimStartCap, -7);
+
         var endMaxLeft = Math.Max(0, width - TrimEndHandle.Width);
-        Canvas.SetLeft(TrimEndHandle, Math.Clamp(end - TrimEndHandle.Width / 2, 0, endMaxLeft));
+        var endLeft = Math.Clamp(end - TrimEndHandle.Width / 2, 0, endMaxLeft);
+        Canvas.SetLeft(TrimEndHandle, endLeft);
         Canvas.SetTop(TrimEndHandle, 0);
+        TrimEndHandle.Height = height;
+        Canvas.SetLeft(TrimEndCap, endLeft - (capWidth - TrimEndHandle.Width) / 2);
+        Canvas.SetTop(TrimEndCap, -7);
 
         Canvas.SetLeft(TimelinePlayhead, playhead - TimelinePlayhead.Width / 2);
         TimelinePlayhead.Height = height;
