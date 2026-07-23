@@ -268,20 +268,20 @@ public sealed class AudioCapturePipeline : IDisposable
     // `path` is still passed through even for the in-memory case - nothing
     // is ever written there, but ReplayAudioCapture.Path is also used as a
     // plain nominal identifier elsewhere (logging, TryDelete no-ops).
+    // Reverted to always-disk. RAM-backed capture (StartInMemory below) was
+    // the suspected cause of a severe, rapidly-repeating managed-heap churn -
+    // managedMb swinging from ~200MB to 2-3GB within seconds, driving
+    // frequent multi-second blocking GC pauses that showed up as capture
+    // stutter/freezing - after the video ring buffer was conclusively ruled
+    // out as the source (its own byte total stayed flat at ~80-95MB across
+    // the exact same window the managed heap was swinging wildly). Left the
+    // RAM infrastructure (StartInMemory/TrimMemoryCaptures/IsMemoryBacked)
+    // in place rather than ripping it out - IsMemoryBacked is always false
+    // now so it's all inert, but easy to flip back if disk turns out not to
+    // be the fix after all.
     private AudioCaptureSession StartSession(IWaveIn capture, string path, string title)
     {
-        if (_activeConfig?.FullSessionRecordingEnabled == true)
-        {
-            return AudioCaptureSession.Start(capture, path, title);
-        }
-
-        // Pre-sized to exactly the steady-state retention target
-        // (RamCaptureRetentionSeconds) - since TrimMemoryCaptures keeps the
-        // buffer hovering right around this size continuously (not growing
-        // toward a much larger ceiling first), this one allocation should
-        // cover the capture's whole lifetime without ever needing to grow.
-        var capacityHint = (int)Math.Min(int.MaxValue, RamCaptureRetentionSeconds() * (long)capture.WaveFormat.AverageBytesPerSecond);
-        return AudioCaptureSession.StartInMemory(capture, title, capacityHint);
+        return AudioCaptureSession.Start(capture, path, title);
     }
 
     // How much audio a RAM-backed capture keeps at any given moment -
