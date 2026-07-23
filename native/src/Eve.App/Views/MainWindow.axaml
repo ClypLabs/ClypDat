@@ -340,12 +340,25 @@
                                            FontWeight="Bold"
                                            TextTrimming="CharacterEllipsis"
                                            ToolTip.Tip="{Binding TileTopLabel}" />
-                                <Grid ColumnDefinitions="*,Auto">
+                                <!-- Auto,Auto,* (not */Auto) so the pencil hugs
+                                     the title text itself rather than floating
+                                     at the card's far right edge whenever the
+                                     title's shorter than the card is wide -
+                                     MaxWidth on the title is what still lets
+                                     CharacterEllipsis trim it (an Auto column
+                                     measures its child at its full desired
+                                     size, ignoring TextTrimming, unless
+                                     something caps it), sized to the smallest
+                                     card (CardWidth floor is 220) so a trimmed
+                                     title plus the pencil never overflows even
+                                     the narrowest card. -->
+                                <Grid ColumnDefinitions="Auto,Auto,*">
                                   <TextBlock Grid.Column="0"
                                              Text="{Binding TileMainLabel}"
                                              Foreground="#EDF4FB"
                                              FontSize="15"
                                              FontWeight="Bold"
+                                             MaxWidth="150"
                                              TextTrimming="CharacterEllipsis" />
                                   <Button Grid.Column="1"
                                           Classes="linkButton"
