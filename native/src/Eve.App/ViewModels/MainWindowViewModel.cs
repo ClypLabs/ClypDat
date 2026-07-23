@@ -2404,8 +2404,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         else
         {
-            // Unchanged from before this setting existed - keep it exact so
-            // ScaleClipsWithWindow being off by default is a true no-op.
+            // Original fixed-3-column formula, from before this setting
+            // existed - kept exact for anyone who turns scaling back off.
             CardColumns = 3;
             CardWidth = Math.Max(220, Math.Floor((contentWidth - 64) / 3));
         }

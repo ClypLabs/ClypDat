@@ -22,12 +22,11 @@ public sealed class AppSettings
     public bool StartMinimizedToTray { get; set; }
     public bool IsStatusAreaVisible { get; set; } = true;
     public bool ShowRecordingPausedIndicator { get; set; } = true;
-    // Off by default - the existing fixed-3-columns behavior (cards just
-    // grow/shrink with the window, same column count always) is what most
-    // people are already used to. On, MainWindowViewModel.UpdateCardLayout
-    // targets a fixed card width instead and lets the column count itself
-    // grow on wider windows (e.g. ~6 across on a 1440p-wide window).
-    public bool ScaleClipsWithWindow { get; set; }
+    // On by default - MainWindowViewModel.UpdateCardLayout targets a fixed
+    // card width and lets the column count itself grow on wider windows
+    // (e.g. ~6 across on a 1440p-wide window) instead of always exactly 3
+    // columns that just stretch wider.
+    public bool ScaleClipsWithWindow { get; set; } = true;
     // Positive shifts audio EARLIER relative to video (fixes audio sounding
     // delayed/late); negative shifts audio LATER (fixes audio sounding
     // ahead). Exact WASAPI/hardware-encoder latency varies too much by
