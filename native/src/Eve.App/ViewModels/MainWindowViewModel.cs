@@ -16,6 +16,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private CancellationTokenSource? _waveformCts;
     private FileSystemWatcher? _libraryWatcher;
     private readonly DispatcherTimer _libraryRefreshDebounce;
+    private readonly DispatcherTimer _clipNotReadyMessageTimer;
     private readonly SemaphoreSlim _libraryLayoutMigrationLock = new(1, 1);
     private readonly AudioDeviceService _audioDevices = new();
     private bool _isReplayRecording;
@@ -60,6 +61,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isHydratingLibrary;
     private int _hydrationTotal;
     private int _hydrationCompleted;
+    private string _clipNotReadyMessage = string.Empty;
     private string _selectedMetadata = string.Empty;
     private string _selectedCreated = "Created: No clip loaded";
     private string _selectedQuality = "Video Quality: Unknown";
@@ -158,6 +160,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _libraryRefreshDebounce.Stop();
             await RefreshLibraryAsync();
         };
+        _clipNotReadyMessageTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.5) };
+        _clipNotReadyMessageTimer.Tick += (_, _) =>
+        {
+            _clipNotReadyMessageTimer.Stop();
+            ClipNotReadyMessage = string.Empty;
+        };
         _ = RefreshLibraryAsync();
     }
 
@@ -255,6 +263,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string HydrationProgressText => $"Building your library... {HydrationCompleted}/{HydrationTotal}";
     public double HydrationProgressFraction => HydrationTotal > 0 ? (double)HydrationCompleted / HydrationTotal : 0;
+
+    // Transient message shown when a card is clicked before
+    // HydrateLibraryClipsAsync has reached it - see OpenClipAsync. Clears
+    // itself after a few seconds via _clipNotReadyMessageTimer.
+    public string ClipNotReadyMessage
+    {
+        get => _clipNotReadyMessage;
+        private set
+        {
+            if (!SetProperty(ref _clipNotReadyMessage, value)) return;
+            OnPropertyChanged(nameof(HasClipNotReadyMessage));
+        }
+    }
+
+    public bool HasClipNotReadyMessage => !string.IsNullOrEmpty(ClipNotReadyMessage);
 
     public string SelectionSummary
     {
@@ -2105,17 +2128,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return Task.CompletedTask;
     }
 
-    public Task OpenClipAsync(ClipCardViewModel clip)
+    // Returns whether the clip actually opened - OpenClipCardAsync (the click
+    // handler) skips queuing playback when it didn't. A card can be clicked
+    // before HydrateLibraryClipsAsync has reached it (still 0:00, no tracks
+    // probed yet); opening it anyway used to show a half-broken editor that
+    // silently fixed itself once the background probe caught up. Telling the
+    // user to wait instead is clearer than that.
+    public Task<bool> OpenClipAsync(ClipCardViewModel clip)
     {
-        // See OpenVideoFileAsync - hydration keeps running in the background.
-        OpenMedia(clip.Media);
-
-        if (clip.Duration == TimeSpan.Zero || clip.Media.Tracks.Count == 0)
+        if (!clip.IsHydrated)
         {
-            _ = HydrateOpenClipAsync(clip);
+            ClipNotReadyMessage = "Still loading this clip's info - try again in a moment.";
+            _clipNotReadyMessageTimer.Stop();
+            _clipNotReadyMessageTimer.Start();
+            return Task.FromResult(false);
         }
 
-        return Task.CompletedTask;
+        // See OpenVideoFileAsync - hydration keeps running in the background.
+        OpenMedia(clip.Media);
+        return Task.FromResult(true);
     }
 
     public void UpdateCardLayout(double availableWidth)

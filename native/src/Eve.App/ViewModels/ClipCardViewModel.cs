@@ -47,6 +47,13 @@ public sealed class ClipCardViewModel : ViewModelBase
     public DateTimeOffset CreatedAt => Media.CreatedAt;
     public TimeSpan Duration => Media.Duration;
     public long SizeBytes => Media.SizeBytes;
+
+    // False while HydrateLibraryClipsAsync hasn't reached this card yet (or
+    // its probe genuinely failed) - same stub-detection check OpenClipAsync
+    // already used to decide whether to re-probe on open. Lets the click
+    // handler tell the user to wait instead of opening an editor with no
+    // duration/tracks to work with.
+    public bool IsHydrated => Duration > TimeSpan.Zero && Media.Tracks.Count > 0;
     public string DateLabel => CreatedAt.ToString("MMM d, yyyy h:mm tt");
 
     // Per-card date header shown above the thumbnail (replaces the old
@@ -330,6 +337,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(Name));
         OnPropertyChanged(nameof(CreatedAt));
         OnPropertyChanged(nameof(Duration));
+        OnPropertyChanged(nameof(IsHydrated));
         OnPropertyChanged(nameof(SizeBytes));
         OnPropertyChanged(nameof(DateLabel));
         OnPropertyChanged(nameof(RelativeDateLabel));

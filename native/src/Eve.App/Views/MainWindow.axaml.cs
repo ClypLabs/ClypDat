@@ -665,17 +665,18 @@ public sealed partial class MainWindow : Window
         await OpenClipCardAsync(clip);
     }
 
-    private async Task OpenClipCardAsync(ClipCardViewModel clip)
+    private async Task<bool> OpenClipCardAsync(ClipCardViewModel clip)
     {
-        if (ViewModel is null) return;
-        await ViewModel.OpenClipAsync(clip);
+        if (ViewModel is null) return false;
+        if (!await ViewModel.OpenClipAsync(clip)) return false;
         QueueEditorPlayback();
+        return true;
     }
 
     private async void ClipContextExport_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
-        await OpenClipCardAsync(clip);
+        if (!await OpenClipCardAsync(clip)) return;
         await ExportCurrentClipAsync();
     }
 
