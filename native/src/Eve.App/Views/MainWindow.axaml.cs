@@ -764,6 +764,18 @@ public sealed partial class MainWindow : Window
         clip.IsHovered = false;
     }
 
+    // Fires as each card's own row scrolls in/out of the library
+    // ScrollViewer's clipped viewport (also on initial layout, so anything
+    // below the fold starts out reporting an empty viewport) - lets
+    // ClipCardViewModel decode/dispose its thumbnail Bitmap lazily instead
+    // of every card in the library holding a decoded bitmap at once.
+    private void ClipCard_OnEffectiveViewportChanged(object? sender, EffectiveViewportChangedEventArgs e)
+    {
+        if (sender is not Control { DataContext: ClipCardViewModel clip }) return;
+        var viewport = e.EffectiveViewport;
+        clip.SetPreviewVisible(viewport.Width > 0 && viewport.Height > 0);
+    }
+
     private void ClipCheckBox_OnClick(object? sender, RoutedEventArgs e)
     {
         e.Handled = true;

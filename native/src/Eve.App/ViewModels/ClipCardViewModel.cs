@@ -16,6 +16,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     private ClipInfo? _clipInfo;
     private ClipEditSettings? _clipEdit;
     private bool _isVod;
+    private bool _isPreviewVisible;
 
     public ClipCardViewModel(MediaFileInfo media, string libraryRoot)
     {
@@ -25,7 +26,11 @@ public sealed class ClipCardViewModel : ViewModelBase
         _clipInfo = ClipInfoSidecar.Load(_libraryRoot, media.Path);
         _clipEdit = ClipEditSidecar.Load(_libraryRoot, media.Path);
         _isVod = ComputeIsVod(media, libraryRoot);
-        SetPreviewImage(_previewImagePath);
+        // Thumbnail Bitmap is NOT decoded here - a library can have hundreds
+        // of cards and only a screenful are ever actually on screen at once.
+        // MainWindow.axaml wires each card's EffectiveViewportChanged to
+        // SetPreviewVisible, which does the real decode/dispose lazily as
+        // cards scroll in and out of the ScrollViewer's viewport.
     }
 
     // Authoritative via path - a clip was already sorted into Clips/ or
@@ -229,7 +234,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         private set
         {
             if (!SetProperty(ref _previewImagePath, value)) return;
-            SetPreviewImage(value);
+            if (_isPreviewVisible) SetPreviewImage(value);
         }
     }
 
@@ -237,6 +242,27 @@ public sealed class ClipCardViewModel : ViewModelBase
     {
         get => _previewImage;
         private set => SetProperty(ref _previewImage, value);
+    }
+
+    // Called by MainWindow's per-card EffectiveViewportChanged handler as
+    // cards cross the ScrollViewer's viewport - decodes the thumbnail on
+    // entry and disposes/releases it on exit, so a large library never has
+    // more than a screenful of decoded bitmaps live at once.
+    public void SetPreviewVisible(bool visible)
+    {
+        if (_isPreviewVisible == visible) return;
+        _isPreviewVisible = visible;
+
+        if (visible)
+        {
+            SetPreviewImage(_previewImagePath);
+        }
+        else
+        {
+            var old = _previewImage;
+            PreviewImage = null;
+            old?.Dispose();
+        }
     }
 
     private int _selectionOrder;
@@ -362,6 +388,7 @@ public sealed class ClipCardViewModel : ViewModelBase
 
     private void SetPreviewImage(string path)
     {
+        var old = _previewImage;
         try
         {
             PreviewImage = !string.IsNullOrWhiteSpace(path) && File.Exists(path)
@@ -371,6 +398,10 @@ public sealed class ClipCardViewModel : ViewModelBase
         catch
         {
             PreviewImage = null;
+        }
+        finally
+        {
+            if (old is not null && old != _previewImage) old.Dispose();
         }
     }
 }

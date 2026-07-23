@@ -229,7 +229,8 @@
                 <DataTemplate>
                   <StackPanel Width="{Binding $parent[Window].DataContext.CardWidth}"
                               Margin="4,4,20,24"
-                              IsVisible="{Binding IsVisibleInLibrary}">
+                              IsVisible="{Binding IsVisibleInLibrary}"
+                              EffectiveViewportChanged="ClipCard_OnEffectiveViewportChanged">
                     <!-- Per-card date header, replacing the old shared
                          per-day group header - only rendered on the first
                          (topmost) clip of each date, not repeated on every
