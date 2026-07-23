@@ -326,6 +326,28 @@ public sealed class NativeReplayBuffer : IReplayBuffer
 
     private unsafe void CaptureLoop(CancellationToken token, TaskCompletionSource ready)
     {
+        // Every save (auto or manual) runs RemuxWindowToMp4 - a synchronous,
+        // single-threaded loop of thousands of native FFmpeg calls writing
+        // straight to disk - on a plain Task.Run threadpool thread at Normal
+        // priority, same as this loop. On a system without much CPU headroom,
+        // that's enough to starve this thread of scheduling for a second or
+        // more at a time: per-frame GPU/encode costs stay normal during a
+        // stall (see Native capture diag's avgScaleMs/avgEncodeMs), but the
+        // loop's own iteration rate collapses, which is what "video freezes/
+        // stutters right when a clip saves - even via the manual hotkey"
+        // turned out to be. AboveNormal (not Highest, which risks starving
+        // the OS's own threads if held for this thread's entire multi-hour
+        // capture-session lifetime) gives the scheduler a reason to favor
+        // this over that remux work specifically during the contention.
+        try
+        {
+            Thread.CurrentThread.Priority = ThreadPriority.AboveNormal;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Native capture: failed to raise capture thread priority (non-fatal)", error);
+        }
+
         ID3D11Device? device = null;
         ID3D11Texture2D? staging = null;
         IDXGIOutputDuplication? duplication = null;
