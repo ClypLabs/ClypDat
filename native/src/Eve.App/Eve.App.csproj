@@ -17,6 +17,12 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <Version>0.1.7</Version>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Precompiles IL to native code for this RID at publish time so the
+         published EVE.exe skips JIT-on-first-run for its own assemblies
+         (Avalonia's XAML-heavy startup path is the main beneficiary) - only
+         affects `dotnet publish` output, not the plain `dotnet build` used
+         to verify compilation. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
   </PropertyGroup>
 
   <ItemGroup>

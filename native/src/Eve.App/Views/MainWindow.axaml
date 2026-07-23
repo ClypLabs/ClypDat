@@ -1279,75 +1279,8 @@
                       SelectedItem="{Binding SelectedExportCodec}"
                       Width="180"
                       HorizontalAlignment="Left" />
-          </StackPanel>
-        </Border>
-      </Grid>
-
-      <Border Grid.Row="1" Background="#141D24" BorderBrush="#22303A" BorderThickness="0,1,0,0">
-        <Grid RowDefinitions="44,*" Margin="8,0,8,8">
-          <Grid ColumnDefinitions="222,*,Auto" Height="44">
-            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8" Margin="4,0,0,0">
-              <Border Classes="muteToggle"
-                      Width="26"
-                      Height="26"
-                      HorizontalAlignment="Center"
-                      VerticalAlignment="Center"
-                      PointerPressed="MasterVolumeMuteToggle_OnPointerPressed"
-                      Cursor="Hand"
-                      ToolTip.Tip="Mute/unmute">
-                <PathIcon Width="15"
-                          Height="15"
-                          HorizontalAlignment="Center"
-                          VerticalAlignment="Center"
-                          Foreground="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToMuteBrushConverter.Instance}}"
-                          Data="{Binding EffectiveMasterVolumePercent, Converter={x:Static opconv:VolumeLevelToIconConverter.Instance}}" />
-              </Border>
-              <Slider Classes="volumeSlider"
-                      Minimum="0" Maximum="150"
-                      TickFrequency="1" IsSnapToTickEnabled="True"
-                      Width="90"
-                      VerticalAlignment="Center"
-                      Value="{Binding MasterVolumePercent, Mode=TwoWay}"
-                      Opacity="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToOpacityConverter.Instance}}" />
-              <TextBlock Text="{Binding MasterVolumePercent, StringFormat={}{0:0}%}"
-                         Foreground="#93A6B8"
-                         FontSize="11"
-                         Width="30"
-                         Margin="0,2,0,0"
-                         VerticalAlignment="Center" />
-              <Button Classes="linkButton"
-                      Content="Reset"
-                      FontSize="10"
-                      Padding="6,1"
-                      VerticalAlignment="Center"
-                      IsVisible="{Binding IsMasterVolumeNonDefault}"
-                      Click="MasterVolumeReset_OnClick"
-                      ToolTip.Tip="Reset to 100%" />
-            </StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="7">
-              <Button Classes="transportButton" Click="RestartButton_OnClick">
-                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 5,3 L 7,3 L 7,17 L 5,17 Z M 17,4 L 17,16 L 8,10 Z" />
-              </Button>
-              <Button Classes="transportButton" Click="StepBackButton_OnClick">
-                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 15,4 L 15,16 L 6,10 Z" />
-              </Button>
-              <Button Classes="playButton" Click="PlayPauseButton_OnClick">
-                <Grid>
-                  <PathIcon Width="16" Height="16" Foreground="#DDE8F6" Data="M 7,4 L 17,10 L 7,16 Z" IsVisible="{Binding !IsPlaying}" />
-                  <PathIcon Width="16" Height="16" Foreground="#DDE8F6" Data="M 6,4 L 9,4 L 9,16 L 6,16 Z M 12,4 L 15,4 L 15,16 L 12,16 Z" IsVisible="{Binding IsPlaying}" />
-                </Grid>
-              </Button>
-              <Button Classes="transportButton" Click="StepForwardButton_OnClick">
-                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 5,4 L 14,10 L 5,16 Z" />
-              </Button>
-              <Button Classes="transportButton" Click="EndButton_OnClick">
-                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 15,3 L 17,3 L 17,17 L 15,17 Z M 4,4 L 13,10 L 4,16 Z" />
-              </Button>
-              <Button Classes="transportButton" Click="FullscreenButton_OnClick" ToolTip.Tip="Fullscreen">
-                <PathIcon Width="14" Height="14" Foreground="#C8D6E6" Data="M7,14H5v5h5v-2H7V14z M5,10h2V7h3V5H5V10z M17,17h-3v2h5v-5h-2V17z M14,5v2h3v3h2V5H14z" />
-              </Button>
-            </StackPanel>
-            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+            <Border Height="1" Background="#22303A" Margin="0,10,0,0" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
               <Button Name="SaveTrimButton"
                       Content="Save Trim"
                       Width="110"
@@ -1369,6 +1302,76 @@
                       IsEnabled="{Binding !IsExporting}"
                       Click="ExportButton_OnClick" />
             </StackPanel>
+          </StackPanel>
+        </Border>
+      </Grid>
+
+      <Border Grid.Row="1" Background="#141D24" BorderBrush="#22303A" BorderThickness="0,1,0,0">
+        <Grid RowDefinitions="44,*" Margin="8,0,8,8">
+          <Grid ColumnDefinitions="*,300" Height="44">
+            <Grid Grid.Column="0">
+              <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center" Spacing="8" Margin="4,0,0,0">
+                <Border Classes="muteToggle"
+                        Width="26"
+                        Height="26"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        PointerPressed="MasterVolumeMuteToggle_OnPointerPressed"
+                        Cursor="Hand"
+                        ToolTip.Tip="Mute/unmute">
+                  <PathIcon Width="15"
+                            Height="15"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Foreground="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToMuteBrushConverter.Instance}}"
+                            Data="{Binding EffectiveMasterVolumePercent, Converter={x:Static opconv:VolumeLevelToIconConverter.Instance}}" />
+                </Border>
+                <Slider Classes="volumeSlider"
+                        Minimum="0" Maximum="150"
+                        TickFrequency="1" IsSnapToTickEnabled="True"
+                        Width="90"
+                        VerticalAlignment="Center"
+                        Value="{Binding MasterVolumePercent, Mode=TwoWay}"
+                        Opacity="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToOpacityConverter.Instance}}" />
+                <TextBlock Text="{Binding MasterVolumePercent, StringFormat={}{0:0}%}"
+                           Foreground="#93A6B8"
+                           FontSize="11"
+                           Width="30"
+                           Margin="0,2,0,0"
+                           VerticalAlignment="Center" />
+                <Button Classes="linkButton"
+                        Content="Reset"
+                        FontSize="10"
+                        Padding="6,1"
+                        VerticalAlignment="Center"
+                        IsVisible="{Binding IsMasterVolumeNonDefault}"
+                        Click="MasterVolumeReset_OnClick"
+                        ToolTip.Tip="Reset to 100%" />
+              </StackPanel>
+              <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="7">
+                <Button Classes="transportButton" Click="RestartButton_OnClick">
+                  <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 5,3 L 7,3 L 7,17 L 5,17 Z M 17,4 L 17,16 L 8,10 Z" />
+                </Button>
+                <Button Classes="transportButton" Click="StepBackButton_OnClick">
+                  <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 15,4 L 15,16 L 6,10 Z" />
+                </Button>
+                <Button Classes="playButton" Click="PlayPauseButton_OnClick">
+                  <Grid>
+                    <PathIcon Width="16" Height="16" Foreground="#DDE8F6" Data="M 7,4 L 17,10 L 7,16 Z" IsVisible="{Binding !IsPlaying}" />
+                    <PathIcon Width="16" Height="16" Foreground="#DDE8F6" Data="M 6,4 L 9,4 L 9,16 L 6,16 Z M 12,4 L 15,4 L 15,16 L 12,16 Z" IsVisible="{Binding IsPlaying}" />
+                  </Grid>
+                </Button>
+                <Button Classes="transportButton" Click="StepForwardButton_OnClick">
+                  <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 5,4 L 14,10 L 5,16 Z" />
+                </Button>
+                <Button Classes="transportButton" Click="EndButton_OnClick">
+                  <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 15,3 L 17,3 L 17,17 L 15,17 Z M 4,4 L 13,10 L 4,16 Z" />
+                </Button>
+                <Button Classes="transportButton" Click="FullscreenButton_OnClick" ToolTip.Tip="Fullscreen">
+                  <PathIcon Width="14" Height="14" Foreground="#C8D6E6" Data="M7,14H5v5h5v-2H7V14z M5,10h2V7h3V5H5V10z M17,17h-3v2h5v-5h-2V17z M14,5v2h3v3h2V5H14z" />
+                </Button>
+              </StackPanel>
+            </Grid>
           </Grid>
 
           <Grid Grid.Row="1" ColumnDefinitions="160,*" ColumnSpacing="12">
@@ -1470,13 +1473,21 @@
             </Grid>
 
             <Grid Grid.Column="1" RowDefinitions="24,*">
+              <!-- Cursor="Hand" on both - the ruler already forwards to the
+                   exact same click/drag handlers as the surface below it
+                   (UpdateTimelineFromPointer maps via GetPosition(TimelineSurface),
+                   so it works correctly regardless of which one the pointer
+                   event actually came from), it just had no visual hint that
+                   the timestamp row was clickable/draggable too. -->
               <controls:TimelineRulerControl x:Name="TimelineRuler"
                                              Duration="{Binding Duration}"
+                                             Cursor="Hand"
                                              PointerPressed="TimelineSurface_OnPointerPressed"
                                              PointerMoved="TimelineSurface_OnPointerMoved"
                                              PointerReleased="TimelineSurface_OnPointerReleased" />
               <Grid x:Name="TimelineSurface"
                     Grid.Row="1"
+                    Cursor="Hand"
                     SizeChanged="TimelineSurface_OnSizeChanged"
                     PointerPressed="TimelineSurface_OnPointerPressed"
                     PointerMoved="TimelineSurface_OnPointerMoved"
