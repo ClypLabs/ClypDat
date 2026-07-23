@@ -457,7 +457,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async Task SaveReplayClipAsync(string? autoClipLabel = null)
+    private async Task SaveReplayClipAsync(string? autoClipLabel = null, ReplayClipWindow? clipWindow = null)
     {
         var isAutoClip = autoClipLabel is not null;
         // A replay save (segment hydrate/mux) can take 20-30+ seconds. Manual clip
@@ -506,20 +506,19 @@ public sealed partial class MainWindow : Window
 
                 AppLog.Info(isAutoClip ? $"Auto-clip triggered: {autoClipLabel}." : "Replay clip save requested.");
 
-                // Windows Capture segments need a few seconds to concat/mux before
-                // the clip lands in the library, so give instant feedback on the
-                // hotkey press instead of waiting for that to finish.
-                // Overlay/sound fire the moment the hotkey lands, not after the
-                // save pipeline finishes - the Native backend's save (remux +
-                // audio track building + mux) takes several seconds, and the
-                // delayed badge read as the hotkey not registering. The buffered
-                // audio/video is snapshotted at the save CALL, so the badge is
-                // truthful about what got captured; an actual failure still
-                // logs and (for manual clips) shows the error dialog.
-                ShowClipSavedNotification();
+                // The final four seconds belong to the event, not whatever is
+                // happening when a round finishes. Wait for that tail before the
+                // replay buffer snapshots its requested UTC window.
+                if (clipWindow is not null)
+                {
+                    var wait = clipWindow.EndUtc - MonotonicClock.UtcNow;
+                    if (wait > TimeSpan.Zero) await Task.Delay(wait);
+                    ShowClipNotification($"Saving {autoClipLabel} clip…", playSound: false);
+                }
 
-                var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder, titleOverride: autoClipLabel));
+                var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder, titleOverride: autoClipLabel, clipWindow: clipWindow));
                 AppLog.Info($"Replay clip saved: {outputPath}");
+                ShowClipSavedNotification();
                 // "3K - Mirage" -> event type "3K", map dropped - the game name
                 // (not the map) is what belongs next to it as the game label.
                 var autoClipEventType = autoClipLabel?.Split(" - ", 2)[0];
@@ -533,6 +532,7 @@ public sealed partial class MainWindow : Window
             catch (Exception error)
             {
                 AppLog.Error("Replay clip save failed", error);
+                if (isAutoClip) ShowClipNotification("Auto clip failed", playSound: false);
                 if (!isAutoClip) await ShowMessageAsync("Clip failed", error.Message);
             }
         }
@@ -544,8 +544,13 @@ public sealed partial class MainWindow : Window
 
     private void ShowClipSavedNotification()
     {
+        ShowClipNotification("Clip saved", playSound: true);
+    }
+
+    private void ShowClipNotification(string text, bool playSound)
+    {
         if (ViewModel is null) return;
-        if (ViewModel.Settings.EnableClipOverlaySound)
+        if (playSound && ViewModel.Settings.EnableClipOverlaySound)
         {
             try
             {
@@ -561,7 +566,7 @@ public sealed partial class MainWindow : Window
         {
             try
             {
-                ShowClipSavedOverlay(ViewModel.Settings.ClipOverlayPosition);
+                ShowClipSavedOverlay(ViewModel.Settings.ClipOverlayPosition, text);
             }
             catch (Exception error)
             {
@@ -570,7 +575,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void ShowClipSavedOverlay(string position)
+    private void ShowClipSavedOverlay(string position, string text)
     {
         var badge = new Border
         {
@@ -587,7 +592,7 @@ public sealed partial class MainWindow : Window
                 {
                     new TextBlock
                     {
-                        Text = "Clip saved",
+                        Text = text,
                         Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
                         FontWeight = Avalonia.Media.FontWeight.Bold,
                         FontSize = 13,
@@ -1197,7 +1202,8 @@ public sealed partial class MainWindow : Window
         {
             if (_cs2GsiListener is not null)
             {
-                _cs2GsiListener.AutoClipTriggered -= Cs2GsiListener_OnAutoClipTriggered;
+                _cs2GsiListener.AutoClipPending -= Cs2GsiListener_OnAutoClipPending;
+                _cs2GsiListener.AutoClipReady -= Cs2GsiListener_OnAutoClipReady;
                 _cs2GsiListener.Stop();
             }
 
@@ -1215,14 +1221,22 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        _cs2GsiListener.AutoClipTriggered += Cs2GsiListener_OnAutoClipTriggered;
+        _cs2GsiListener.AutoClipPending += Cs2GsiListener_OnAutoClipPending;
+        _cs2GsiListener.AutoClipReady += Cs2GsiListener_OnAutoClipReady;
         Cs2GsiDeployer.TryDeploy(port, out var statusMessage);
         ViewModel.Cs2GsiStatusText = statusMessage;
     }
 
-    private void Cs2GsiListener_OnAutoClipTriggered(object? sender, string label)
+    private void Cs2GsiListener_OnAutoClipPending(object? sender, string message)
     {
-        Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(label));
+        Dispatcher.UIThread.Post(() => ShowClipNotification(message, playSound: false));
+    }
+
+    private void Cs2GsiListener_OnAutoClipReady(object? sender, Cs2AutoClipRequest request)
+    {
+        Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(
+            request.Title,
+            new ReplayClipWindow(request.StartUtc, request.EndUtc)));
     }
 
     private async void CheckUpdatesButton_OnClick(object? sender, RoutedEventArgs e)

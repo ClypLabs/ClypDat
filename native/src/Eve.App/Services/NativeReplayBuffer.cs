@@ -178,7 +178,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         }
     }
 
-    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null)
+    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null)
     {
         if (!_sessionActive) throw new InvalidOperationException("Replay buffer is not recording.");
 
@@ -187,12 +187,23 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         {
             if (_packets.Count == 0) throw new InvalidOperationException("Replay just started. Try again in a second.");
 
-            var cutoffUtc = MonotonicClock.UtcNow - Duration;
+            var requestedStartUtc = clipWindow?.StartUtc ?? MonotonicClock.UtcNow - Duration;
+            var requestedEndUtc = clipWindow?.EndUtc ?? MonotonicClock.UtcNow;
+            if (requestedEndUtc <= requestedStartUtc)
+            {
+                throw new InvalidOperationException("The requested replay window is empty.");
+            }
+
+            // Saving from a keyframe immediately before the requested event keeps
+            // the remux playable while still producing an event-sized clip.
+            var cutoffUtc = requestedStartUtc;
             var startIndex = _packets.FindLastIndex(p => p.WallClockUtc <= cutoffUtc && p.IsKeyframe);
             if (startIndex < 0) startIndex = _packets.FindIndex(p => p.IsKeyframe);
             if (startIndex < 0) throw new InvalidOperationException("Replay just started. Try again in a second.");
+            var endIndex = _packets.FindLastIndex(p => p.WallClockUtc <= requestedEndUtc);
+            if (endIndex < startIndex) throw new InvalidOperationException("The requested replay window is no longer available.");
 
-            window = _packets.Skip(startIndex).ToArray();
+            window = _packets.Skip(startIndex).Take(endIndex - startIndex + 1).ToArray();
         }
 
         if (window.Length == 0) throw new InvalidOperationException("Replay just started. Try again in a second.");

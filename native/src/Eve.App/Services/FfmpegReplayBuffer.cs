@@ -124,13 +124,17 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         }
     }
 
-    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null)
+    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null)
     {
         if (!Directory.Exists(outputFolder)) Directory.CreateDirectory(outputFolder);
 
+        var requestedDuration = clipWindow is null
+            ? _duration.TotalSeconds
+            : Math.Max(1, (clipWindow.EndUtc - clipWindow.StartUtc).TotalSeconds);
+
         PruneOldSegments();
         var files = GetFinishedVideoSegments()
-            .TakeLast(Math.Max(2, (int)Math.Ceiling(_duration.TotalSeconds / 2) + 4))
+            .TakeLast(Math.Max(2, (int)Math.Ceiling(requestedDuration / 2) + 4))
             .ToArray();
 
         if (files.Length == 0) throw new InvalidOperationException("Replay buffer has no finished segments yet.");
@@ -162,7 +166,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
             }, cancellationToken);
 
             if (result.ExitCode != 0) throw new InvalidOperationException(result.Error);
-            await MuxAudioTracksAsync(tempVideoPath, outputPath, cancellationToken);
+            await MuxAudioTracksAsync(tempVideoPath, outputPath, cancellationToken, requestedDuration);
             return await ClipMetadataTagger.TagCaptureBackendAsync(outputPath, "FFmpeg", cancellationToken);
         }
         finally
@@ -441,7 +445,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         }
     }
 
-    private async Task MuxAudioTracksAsync(string videoPath, string outputPath, CancellationToken cancellationToken)
+    private async Task MuxAudioTracksAsync(string videoPath, string outputPath, CancellationToken cancellationToken, double clipDurationSeconds)
     {
         var audioFiles = new[] { "game.wav", "chat.wav", "microphone.wav" }
             .Select(path => Path.Combine(_bufferFolder, path))
@@ -456,7 +460,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         var args = new List<string> { "-y", "-i", videoPath };
         foreach (var audioFile in audioFiles)
         {
-            args.AddRange(new[] { "-sseof", $"-{Math.Max(1, _duration.TotalSeconds):0.###}", "-i", audioFile });
+            args.AddRange(new[] { "-sseof", $"-{Math.Max(1, clipDurationSeconds):0.###}", "-i", audioFile });
         }
 
         args.AddRange(new[] { "-map", "0:v:0", "-c:v", "copy" });

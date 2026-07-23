@@ -4,15 +4,15 @@ using Eve.Core.Settings;
 
 namespace Eve.App.Services;
 
-// CS2 posts its own game state (kills, deaths, assists, round info) as JSON to a
-// local HTTP endpoint once a "Game State Integration" config file is dropped into
-// its cfg folder (see Cs2GsiDeployer). This just listens on that endpoint and
-// diffs consecutive payloads to detect discrete events - CS2 doesn't send "a kill
-// happened", it sends "here is the current state", so a kill is inferred from
-// player.state.round_kills going up.
+public sealed record Cs2AutoClipRequest(string Title, DateTime StartUtc, DateTime EndUtc);
+
+// CS2 GSI supplies snapshots rather than discrete events. Keep the round's
+// timeline so a 3K can become a 4K/Ace before one precise clip is exported.
 public sealed class Cs2GsiListener : IDisposable
 {
+    private static readonly TimeSpan EventPadding = TimeSpan.FromSeconds(4);
     private readonly Func<Cs2AutoClipSettings> _settingsProvider;
+    private readonly object _stateLock = new();
     private HttpListener? _listener;
     private CancellationTokenSource? _cts;
     private bool _seeded;
@@ -21,38 +21,17 @@ public sealed class Cs2GsiListener : IDisposable
     private int _lastMatchDeaths;
     private int _lastMatchAssists;
     private int _lastRoundNumber = -1;
-    // Set on a round-number change - the payload carrying that change (and
-    // sometimes the next one or two) can still report the *previous* round's
-    // final round_kills value due to GSI update lag, arriving after we've
-    // already reset the round-kill trackers to 0. Without this, that stale
-    // value reads as "N brand new kills" and schedules a duplicate clip for a
-    // streak that was already flushed (e.g. a real 5-kill Ace correctly
-    // clipped once, then a second phantom "Ace" clip from round 1's first
-    // payload still echoing round 0's round_kills=5).
-    private bool _suppressNextKillDelta;
     private string _lastMapName = string.Empty;
-    private readonly object _killClipLock = new();
-    private Timer? _killClipDebounceTimer;
-    private string? _pendingKillLabel;
-    // Round-over and death (below) are the actual "this streak is done" signals
-    // and both flush immediately - this idle timer is only a fallback for when
-    // neither of those fires in a reasonable time (GSI stops updating, a very
-    // slow-paced round). 8s still split real streaks: a 17s gap between a 3rd
-    // and a later 4th kill (repositioning to a second engagement, still
-    // clearly the same round's streak) let the 3K timer fire and flush before
-    // the 4th kill landed, producing a separate "3K" + "4K" pair instead of
-    // one 4K clip. Long enough that round-over/death almost always win the
-    // race in practice.
-    private static readonly TimeSpan KillClipDebounce = TimeSpan.FromSeconds(25);
+    private readonly List<DateTime> _roundKillTimes = new();
+    private DateTime? _lastRelevantEventUtc;
+    private string? _pendingLabel;
 
-    public event EventHandler<string>? AutoClipTriggered;
+    public event EventHandler<string>? AutoClipPending;
+    public event EventHandler<Cs2AutoClipRequest>? AutoClipReady;
 
     public bool IsListening => _listener?.IsListening == true;
 
-    public Cs2GsiListener(Func<Cs2AutoClipSettings> settingsProvider)
-    {
-        _settingsProvider = settingsProvider;
-    }
+    public Cs2GsiListener(Func<Cs2AutoClipSettings> settingsProvider) => _settingsProvider = settingsProvider;
 
     public bool Start(int port)
     {
@@ -80,29 +59,16 @@ public sealed class Cs2GsiListener : IDisposable
     {
         _cts?.Cancel();
         _cts = null;
-        try
-        {
-            _listener?.Stop();
-        }
-        catch
-        {
-            // Best effort.
-        }
-
+        try { _listener?.Stop(); } catch { }
         _listener?.Close();
         _listener = null;
-        _seeded = false;
-        _lastRoundKills = 0;
-        _lastRoundKillHs = 0;
-        _lastMatchDeaths = 0;
-        _lastMatchAssists = 0;
-        _lastRoundNumber = -1;
-
-        lock (_killClipLock)
+        lock (_stateLock)
         {
-            _killClipDebounceTimer?.Dispose();
-            _killClipDebounceTimer = null;
-            _pendingKillLabel = null;
+            _seeded = false;
+            _lastRoundKills = _lastRoundKillHs = _lastMatchDeaths = _lastMatchAssists = 0;
+            _lastRoundNumber = -1;
+            _lastMapName = string.Empty;
+            ClearRoundLocked();
         }
     }
 
@@ -111,15 +77,8 @@ public sealed class Cs2GsiListener : IDisposable
         while (!token.IsCancellationRequested && listener.IsListening)
         {
             HttpListenerContext context;
-            try
-            {
-                context = await listener.GetContextAsync();
-            }
-            catch
-            {
-                // Thrown when Stop() closes the listener out from under a pending accept.
-                break;
-            }
+            try { context = await listener.GetContextAsync(); }
+            catch { break; }
 
             try
             {
@@ -132,15 +91,7 @@ public sealed class Cs2GsiListener : IDisposable
             catch (Exception error)
             {
                 AppLog.Error("CS2 GSI payload processing failed", error);
-                try
-                {
-                    context.Response.StatusCode = 500;
-                    context.Response.Close();
-                }
-                catch
-                {
-                    // Best effort.
-                }
+                try { context.Response.StatusCode = 500; context.Response.Close(); } catch { }
             }
         }
     }
@@ -151,56 +102,6 @@ public sealed class Cs2GsiListener : IDisposable
         var root = doc.RootElement;
         if (!root.TryGetProperty("player", out var player)) return;
 
-        // A kill-streak in progress can take longer than the debounce window to
-        // reach its final kill (repositioning, waiting out a peek) - if the round
-        // ends first, there are no more kills coming for it regardless, so flush
-        // immediately instead of making the clip wait out the rest of the timer.
-        if (root.TryGetProperty("round", out var roundElement) &&
-            roundElement.TryGetProperty("phase", out var roundPhaseElement) &&
-            string.Equals(roundPhaseElement.GetString(), "over", StringComparison.OrdinalIgnoreCase))
-        {
-            FirePendingKillClip();
-        }
-
-        if (root.TryGetProperty("map", out var map) &&
-            map.TryGetProperty("round", out var roundNumElement) &&
-            roundNumElement.TryGetInt32(out var roundNum) &&
-            roundNum != _lastRoundNumber)
-        {
-            AppLog.Info($"CS2 GSI: round changed {_lastRoundNumber} -> {roundNum}, resetting round kill counters.");
-            _lastRoundNumber = roundNum;
-            _lastRoundKills = 0;
-            _lastRoundKillHs = 0;
-            _suppressNextKillDelta = true;
-            // Used to flush any pending debounced clip here on the theory that
-            // "no more kills are coming for the round that just ended" - but CS2
-            // reports the round-ending kill itself under the *next* round's
-            // already-reset counter, in the same payload as the round-number
-            // change. Flushing immediately fired the streak's PREVIOUS pending
-            // label before the round-ending kill (arriving a few lines below in
-            // this same payload) got a chance to replace it - an Ace's last kill
-            // landing right as the round flipped produced a separate "4K" clip
-            // plus an "Ace" clip instead of just the Ace. The kill-ladder
-            // detection further down still schedules/replaces the pending clip
-            // for whatever kill is in *this* payload, so just letting the
-            // debounce timer run its course (no round-boundary shortcut) is
-            // both simpler and correct - it costs a few extra seconds of
-            // latency on the final clip of a round, not a split streak.
-        }
-
-        if (root.TryGetProperty("map", out var mapElement) &&
-            mapElement.TryGetProperty("name", out var mapNameElement) &&
-            mapNameElement.GetString() is { Length: > 0 } mapName)
-        {
-            _lastMapName = mapName;
-        }
-
-        // "player" is whoever CS2 currently has in view - the local user while
-        // alive, but a spectated teammate or a killcam's target otherwise. Without
-        // this check, a teammate's kill (or the killcam of the person who just
-        // killed you) got tracked as if it were the local user's, auto-clipping
-        // for kills that weren't theirs. "provider.steamid" is always the actual
-        // account running the client, so only process events when they match.
         if (root.TryGetProperty("provider", out var provider) &&
             provider.TryGetProperty("steamid", out var providerSteamIdElement) &&
             player.TryGetProperty("steamid", out var playerSteamIdElement) &&
@@ -213,172 +114,174 @@ public sealed class Cs2GsiListener : IDisposable
 
         var state = player.TryGetProperty("state", out var stateElement) ? stateElement : default;
         var matchStats = player.TryGetProperty("match_stats", out var statsElement) ? statsElement : default;
-
-        // The first payload after (re)connecting reflects whatever already
-        // happened this session/round - seed the trackers from it instead of
-        // treating "already had 2 kills this round" as a brand new event.
-        if (!_seeded)
-        {
-            _seeded = true;
-            _lastRoundKills = GetInt(state, "round_kills") ?? 0;
-            _lastRoundKillHs = GetInt(state, "round_killhs") ?? 0;
-            _lastMatchDeaths = GetInt(matchStats, "deaths") ?? 0;
-            _lastMatchAssists = GetInt(matchStats, "assists") ?? 0;
-            return;
-        }
-
-        var settings = _settingsProvider();
-        if (!settings.Enabled) return;
+        var mapName = root.TryGetProperty("map", out var mapElement) && mapElement.TryGetProperty("name", out var mapNameElement)
+            ? mapNameElement.GetString() ?? string.Empty
+            : string.Empty;
+        var roundNumber = root.TryGetProperty("map", out var map) && map.TryGetProperty("round", out var roundElement) && roundElement.TryGetInt32(out var parsedRound)
+            ? parsedRound
+            : (int?)null;
+        var roundOver = root.TryGetProperty("round", out var round) && round.TryGetProperty("phase", out var phase) &&
+                        string.Equals(phase.GetString(), "over", StringComparison.OrdinalIgnoreCase);
 
         var roundKills = GetInt(state, "round_kills");
         var roundKillHs = GetInt(state, "round_killhs");
-        var matchKills = GetInt(matchStats, "kills");
-        if (roundKills.HasValue)
-        {
-            AppLog.Info($"CS2 GSI: round={_lastRoundNumber}, round_kills={roundKills.Value} (was {_lastRoundKills}), round_killhs={roundKillHs}, match_kills={matchKills}.");
-        }
+        var deaths = GetInt(matchStats, "deaths");
+        var assists = GetInt(matchStats, "assists");
+        var now = MonotonicClock.UtcNow;
 
-        if (_suppressNextKillDelta)
+        lock (_stateLock)
         {
-            // First payload after a round change - round_kills here may still
-            // be the previous round's stale final value (see field doc
-            // comment on _suppressNextKillDelta). Sync trackers without
-            // treating it as new kills, then resume normal detection.
-            _suppressNextKillDelta = false;
-            if (roundKills.HasValue) _lastRoundKills = roundKills.Value;
-            if (roundKillHs.HasValue) _lastRoundKillHs = roundKillHs.Value;
-        }
-        else if (roundKills.HasValue && roundKills.Value > _lastRoundKills)
-        {
-            var isHeadshotKill = roundKillHs.HasValue && roundKillHs.Value > _lastRoundKillHs;
-            var baseLabel = roundKills.Value switch
+            if (!string.IsNullOrWhiteSpace(mapName) && !string.Equals(mapName, _lastMapName, StringComparison.OrdinalIgnoreCase))
             {
-                1 when settings.Kill => "Kill",
-                2 when settings.TwoKill => "2K",
-                3 when settings.ThreeKill => "3K",
-                4 when settings.FourKill => "4K",
-                5 when settings.Ace => "Ace",
-                _ => null
-            };
+                FinalizePendingLocked();
+                _lastMapName = mapName;
+                _lastRoundNumber = -1;
+                _lastRoundKills = _lastRoundKillHs = 0;
+                ClearRoundLocked();
+            }
 
-            var killLabel = isHeadshotKill && settings.Headshot
-                ? (baseLabel is null ? "Headshot" : $"Headshot {baseLabel}")
-                : baseLabel;
+            if (!_seeded)
+            {
+                _seeded = true;
+                _lastRoundKills = roundKills ?? 0;
+                _lastRoundKillHs = roundKillHs ?? 0;
+                _lastMatchDeaths = deaths ?? 0;
+                _lastMatchAssists = assists ?? 0;
+                _lastRoundNumber = roundNumber ?? _lastRoundNumber;
+                return;
+            }
 
-            // Each kill in a streak (3K -> 4K -> Ace) used to fire its own
-            // immediate clip, so a fast multi-kill round produced several
-            // duplicate/overlapping saves of essentially the same moment - and
-            // queuing them (so none get dropped) meant several full save
-            // pipelines running back to back, which is also what was spiking
-            // memory. Debounce instead: wait a few seconds after each kill
-            // before actually clipping, and if another kill lands before that
-            // timer elapses, restart it for the new (higher) label. Only the
-            // streak's final milestone actually gets clipped.
-            if (killLabel is not null) ScheduleKillClip(killLabel);
+            // A clean new round means the previous candidate cannot improve.
+            // GSI normally reports phase=over first, but this also covers servers
+            // that skip that payload.
+            if (roundNumber.HasValue && _lastRoundNumber >= 0 && roundNumber.Value != _lastRoundNumber && (roundKills ?? 0) == 0)
+            {
+                FinalizePendingLocked();
+                ClearRoundLocked();
+                _lastRoundKills = _lastRoundKillHs = 0;
+            }
+            if (roundNumber.HasValue) _lastRoundNumber = roundNumber.Value;
+
+            var settings = _settingsProvider();
+            if (!settings.Enabled)
+            {
+                SyncCounters(roundKills, roundKillHs, deaths, assists);
+                return;
+            }
+
+            if (roundKills is { } currentKills && currentKills > _lastRoundKills)
+            {
+                for (var killNumber = _lastRoundKills + 1; killNumber <= currentKills; killNumber++)
+                {
+                    _roundKillTimes.Add(now);
+                    _lastRelevantEventUtc = now;
+                    var label = LabelForKill(killNumber, settings);
+                    if (label is not null)
+                    {
+                        var changed = !string.Equals(_pendingLabel, label, StringComparison.Ordinal);
+                        _pendingLabel = label;
+                        if (changed)
+                        {
+                            AutoClipPending?.Invoke(this, $"Auto clip started — {label} detected, waiting for the round result.");
+                        }
+                    }
+                }
+            }
+
+            if (roundKillHs is { } currentHeadshots && currentHeadshots > _lastRoundKillHs && settings.Headshot)
+            {
+                _lastRelevantEventUtc = now;
+                if (_pendingLabel is null)
+                {
+                    FireStandaloneLocked("Headshot", now);
+                }
+            }
+
+            if (deaths is { } currentDeaths && currentDeaths > _lastMatchDeaths)
+            {
+                _lastRelevantEventUtc = now;
+                if (_pendingLabel is not null) FinalizePendingLocked(now);
+                else if (settings.Death) FireStandaloneLocked("Death", now);
+            }
+
+            if (assists is { } currentAssists && currentAssists > _lastMatchAssists && settings.Assist)
+            {
+                _lastRelevantEventUtc = now;
+                if (_pendingLabel is null) FireStandaloneLocked("Assist", now);
+            }
+
+            SyncCounters(roundKills, roundKillHs, deaths, assists);
+            if (roundOver) FinalizePendingLocked();
         }
+    }
 
+    private void SyncCounters(int? roundKills, int? roundKillHs, int? deaths, int? assists)
+    {
         if (roundKills.HasValue) _lastRoundKills = roundKills.Value;
         if (roundKillHs.HasValue) _lastRoundKillHs = roundKillHs.Value;
-
-        string? label = null;
-
-        var deaths = GetInt(matchStats, "deaths");
-        // Dying always ends whatever kill streak was in progress, regardless of
-        // whether the "Death" auto-clip type itself is enabled - same reasoning
-        // as the round-end flush above.
-        if (deaths.HasValue && deaths.Value > _lastMatchDeaths)
-        {
-            FirePendingKillClip();
-        }
-
-        if (settings.Death && deaths.HasValue && deaths.Value > _lastMatchDeaths)
-        {
-            label = "Death";
-        }
-
         if (deaths.HasValue) _lastMatchDeaths = deaths.Value;
-
-        var assists = GetInt(matchStats, "assists");
-        if (label is null && settings.Assist && assists.HasValue && assists.Value > _lastMatchAssists)
-        {
-            label = "Assist";
-        }
-
         if (assists.HasValue) _lastMatchAssists = assists.Value;
-
-        if (label is not null) Fire(label);
     }
 
-    private void ScheduleKillClip(string label)
+    private void FinalizePendingLocked(DateTime? endOverrideUtc = null)
     {
-        lock (_killClipLock)
-        {
-            _pendingKillLabel = label;
-            _killClipDebounceTimer?.Dispose();
-            _killClipDebounceTimer = new Timer(_ => FirePendingKillClip(), null, KillClipDebounce, Timeout.InfiniteTimeSpan);
-        }
+        if (_pendingLabel is null || _roundKillTimes.Count == 0) return;
+        var endUtc = (endOverrideUtc ?? _lastRelevantEventUtc ?? _roundKillTimes[^1]) + EventPadding;
+        var startUtc = _roundKillTimes[0] - EventPadding;
+        var title = BuildTitle(_pendingLabel);
+        AppLog.Info($"CS2 auto-clip finalized: {title}, window={startUtc:O}..{endUtc:O}.");
+        AutoClipReady?.Invoke(this, new Cs2AutoClipRequest(title, startUtc, endUtc));
+        ClearRoundLocked();
     }
 
-    private void FirePendingKillClip()
+    private void FireStandaloneLocked(string label, DateTime timestampUtc)
     {
-        string? label;
-        lock (_killClipLock)
-        {
-            label = _pendingKillLabel;
-            _pendingKillLabel = null;
-            _killClipDebounceTimer?.Dispose();
-            _killClipDebounceTimer = null;
-        }
-
-        if (label is not null) Fire(label);
+        AutoClipPending?.Invoke(this, $"Auto clip started — {label} detected, finishing the clip.");
+        AutoClipReady?.Invoke(this, new Cs2AutoClipRequest(BuildTitle(label), timestampUtc - EventPadding, timestampUtc + EventPadding));
     }
 
-    private void Fire(string label)
+    private void ClearRoundLocked()
+    {
+        _roundKillTimes.Clear();
+        _lastRelevantEventUtc = null;
+        _pendingLabel = null;
+    }
+
+    private static string? LabelForKill(int killNumber, Cs2AutoClipSettings settings) => killNumber switch
+    {
+        1 when settings.Kill => "Kill",
+        2 when settings.TwoKill => "2K",
+        3 when settings.ThreeKill => "3K",
+        4 when settings.FourKill => "4K",
+        >= 5 when settings.Ace => "Ace",
+        _ => null
+    };
+
+    private string BuildTitle(string label)
     {
         var mapDisplayName = FormatMapName(_lastMapName);
-        var title = string.IsNullOrEmpty(mapDisplayName) ? label : $"{label} - {mapDisplayName}";
-        AutoClipTriggered?.Invoke(this, title);
+        return string.IsNullOrEmpty(mapDisplayName) ? label : $"{label} - {mapDisplayName}";
     }
 
     private static int? GetInt(JsonElement parent, string name) =>
-        parent.ValueKind == JsonValueKind.Object && parent.TryGetProperty(name, out var element) && element.TryGetInt32(out var value)
-            ? value
-            : null;
+        parent.ValueKind == JsonValueKind.Object && parent.TryGetProperty(name, out var element) && element.TryGetInt32(out var value) ? value : null;
 
-    // CS2's GSI map name is the internal codename ("de_inferno"), not the name
-    // players actually call it ("Inferno") - matches how Medal titles its own
-    // CS2 auto-clips (e.g. "4K - Inferno").
     private static readonly Dictionary<string, string> KnownMapNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["de_dust2"] = "Dust II",
-        ["de_inferno"] = "Inferno",
-        ["de_mirage"] = "Mirage",
-        ["de_nuke"] = "Nuke",
-        ["de_overpass"] = "Overpass",
-        ["de_vertigo"] = "Vertigo",
-        ["de_ancient"] = "Ancient",
-        ["de_anubis"] = "Anubis",
-        ["de_train"] = "Train",
-        ["de_cache"] = "Cache",
-        ["cs_office"] = "Office",
-        ["cs_italy"] = "Italy"
+        ["de_dust2"] = "Dust II", ["de_inferno"] = "Inferno", ["de_mirage"] = "Mirage", ["de_nuke"] = "Nuke",
+        ["de_overpass"] = "Overpass", ["de_vertigo"] = "Vertigo", ["de_ancient"] = "Ancient", ["de_anubis"] = "Anubis",
+        ["de_train"] = "Train", ["de_cache"] = "Cache", ["cs_office"] = "Office", ["cs_italy"] = "Italy"
     };
 
     private static string FormatMapName(string rawMapName)
     {
         if (string.IsNullOrWhiteSpace(rawMapName)) return string.Empty;
         if (KnownMapNames.TryGetValue(rawMapName, out var known)) return known;
-
         var cleaned = rawMapName;
         foreach (var prefix in new[] { "de_", "cs_", "ar_", "gd_" })
         {
-            if (cleaned.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                cleaned = cleaned[prefix.Length..];
-                break;
-            }
+            if (cleaned.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) { cleaned = cleaned[prefix.Length..]; break; }
         }
-
         return cleaned.Length == 0 ? string.Empty : char.ToUpperInvariant(cleaned[0]) + cleaned[1..];
     }
 

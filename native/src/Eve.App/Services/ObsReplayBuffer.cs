@@ -103,7 +103,7 @@ public sealed class ObsReplayBuffer : IReplayBuffer
         return Task.CompletedTask;
     }
 
-    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null)
+    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null)
     {
         if (!IsRecording) throw new InvalidOperationException("OBS replay buffer is not running.");
         var warmupRemaining = HookWarmup - (DateTime.UtcNow - _startedAtUtc);
@@ -116,6 +116,25 @@ public sealed class ObsReplayBuffer : IReplayBuffer
         var output = _bridge.SaveReplay(outputFolder);
         if (string.IsNullOrWhiteSpace(output)) throw new InvalidOperationException("OBS replay backend returned no output path.");
         AppLog.Info($"OBS replay saved: {output}.");
+
+        if (clipWindow is not null)
+        {
+            var duration = Math.Max(1, (clipWindow.EndUtc - clipWindow.StartUtc).TotalSeconds);
+            var trimmed = Path.Combine(Path.GetDirectoryName(output) ?? outputFolder, $"eve-obs-trim-{Guid.NewGuid():N}{Path.GetExtension(output)}");
+            var result = await AudioCapturePipeline.RunProcessAsync("ffmpeg", new[]
+            {
+                "-y", "-sseof", $"-{duration:0.###}", "-i", output,
+                "-map", "0", "-c", "copy", trimmed
+            }, cancellationToken);
+            if (result.ExitCode != 0)
+            {
+                AudioCapturePipeline.TryDelete(trimmed);
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(result.Error) ? "OBS event-window trim failed." : result.Error);
+            }
+
+            File.Move(trimmed, output, overwrite: true);
+        }
+
         output = await ClipMetadataTagger.TagCaptureBackendAsync(output, "OBS", cancellationToken);
 
         // OBS itself picks the exact save path/filename, so the per-game
