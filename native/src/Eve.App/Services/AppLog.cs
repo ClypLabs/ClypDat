@@ -82,7 +82,15 @@ public static class AppLog
             // (ffmpeg stderr, exception stack traces) otherwise splatter
             // timestamp-less fragments through the file and make it unreadable.
             message = message.ReplaceLineEndings(" ¦ ");
-            if (message.Length > 2000) message = message[..2000] + "…";
+            // Keep head AND tail, not just head - ffmpeg errors put version/config
+            // banner (often 1000+ chars alone) up front and the actual failure
+            // reason (Conversion failed!, Error while filtering, etc.) at the very
+            // end, so a head-only truncation was silently hiding the one part that
+            // explains WHY every ffmpeg failure happened.
+            if (message.Length > 2000)
+            {
+                message = message[..1200] + " …[truncated]… " + message[^700..];
+            }
             var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] {message}{Environment.NewLine}";
             lock (Lock)
             {
