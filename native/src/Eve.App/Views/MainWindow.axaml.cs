@@ -712,6 +712,18 @@ public sealed partial class MainWindow : Window
         var isFileTitle = clip.IsAutoClip || clip.IsMedalImport;
         var originalText = isFileTitle ? clip.GameNameLabel : (clip.CustomTitle ?? string.Empty);
 
+        // A plain MaxWidth here isn't enough to keep the card from growing -
+        // the title Grid's own column is Auto-sized (needed so the pencil
+        // hugs the text instead of floating at the card's edge), and Auto
+        // columns measure their child with unbounded available width, so
+        // whatever the TextBox's OWN desired size comes out to still grows
+        // the column/card. An explicit Width pins the TextBox's DesiredSize
+        // outright regardless of content, matching the same CardWidth-minus-
+        // reserve budget SubtractDoubleConverter gives the static title
+        // TextBlock (see MainWindow.axaml), so the card can't inflate while
+        // editing.
+        var titleWidth = Math.Max(80, (ViewModel?.CardWidth ?? 220) - 64);
+
         var editBox = new TextBox
         {
             Text = originalText,
@@ -728,8 +740,7 @@ public sealed partial class MainWindow : Window
             Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
             CornerRadius = new CornerRadius(6),
             Padding = new Thickness(8, 4),
-            MinWidth = 80,
-            MaxWidth = titleBlock.MaxWidth
+            Width = titleWidth
         };
         Grid.SetColumn(editBox, 0);
 
