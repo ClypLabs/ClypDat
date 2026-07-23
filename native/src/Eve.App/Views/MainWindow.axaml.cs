@@ -2765,23 +2765,22 @@ public sealed partial class MainWindow : Window
         var end = ViewModel.TrimEnd.TotalMilliseconds / ViewModel.Duration.TotalMilliseconds * width;
         var playhead = ViewModel.CurrentTime.TotalMilliseconds / ViewModel.Duration.TotalMilliseconds * width;
 
-        // Was a static 42 (the video lane's own LaneHeight) regardless of how
-        // many audio tracks are stacked below it (each 56, see
-        // TrackLaneViewModel.LaneHeight) - matching TimelinePlayhead's own
-        // height below, so the selection box and drag handles reach exactly
-        // as far down as the full track stack instead of stopping short at
-        // the video lane and leaving every audio track's bottom edge outside
-        // them.
         Canvas.SetLeft(TrimSelection, start);
         TrimSelection.Width = Math.Max(0, end - start);
-        TrimSelection.Height = height;
 
-        Canvas.SetLeft(TrimStartHandle, start - TrimStartHandle.Width / 2);
+        // Handles are centered on the trim boundary (Left = boundary -
+        // Width/2), so at TrimStart=0 or TrimEnd=Duration that centering
+        // pushes half the handle's own width past the track's left/right
+        // edge instead of stopping flush with it. Clamping the handle's
+        // available Left range to [0, width - handleWidth] squishes it
+        // against the near edge instead of letting it overhang past the
+        // track.
+        var startMaxLeft = Math.Max(0, width - TrimStartHandle.Width);
+        Canvas.SetLeft(TrimStartHandle, Math.Clamp(start - TrimStartHandle.Width / 2, 0, startMaxLeft));
         Canvas.SetTop(TrimStartHandle, 0);
-        TrimStartHandle.Height = height;
-        Canvas.SetLeft(TrimEndHandle, end - TrimEndHandle.Width / 2);
+        var endMaxLeft = Math.Max(0, width - TrimEndHandle.Width);
+        Canvas.SetLeft(TrimEndHandle, Math.Clamp(end - TrimEndHandle.Width / 2, 0, endMaxLeft));
         Canvas.SetTop(TrimEndHandle, 0);
-        TrimEndHandle.Height = height;
 
         Canvas.SetLeft(TimelinePlayhead, playhead - TimelinePlayhead.Width / 2);
         TimelinePlayhead.Height = height;
