@@ -1397,7 +1397,7 @@
               <!-- Nudged right of true-center (Margin left offset) - centering
                    on the video column's own width alone still reads as
                    slightly left of the actual visible video content. -->
-              <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="7" Margin="24,0,0,0">
+              <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="7" Margin="36,0,0,0">
                 <Button Classes="transportButton" Click="RestartButton_OnClick">
                   <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 5,3 L 7,3 L 7,17 L 5,17 Z M 17,4 L 17,16 L 8,10 Z" />
                 </Button>
