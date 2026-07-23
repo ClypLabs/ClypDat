@@ -95,7 +95,11 @@ public sealed class MediaProbeService
             cached?.Width ?? 0,
             cached?.Height ?? 0,
             cached?.Fps ?? 0,
-            cached?.CaptureBackend ?? string.Empty);
+            cached?.CaptureBackend ?? string.Empty,
+            // Read-only check (no ffmpeg) - filmstrip generation itself only
+            // happens in ProbeAsync (during hydration), same split as
+            // ThumbnailPath above.
+            ListFilmstripFrames(filePath));
     }
 
     public async Task<TimeSpan> GetDurationAsync(string filePath, CancellationToken cancellationToken = default)
@@ -132,6 +136,7 @@ public sealed class MediaProbeService
         if (cached is not null)
         {
             var cachedThumbnailPath = await EnsureThumbnailAsync(filePath, cached.Duration);
+            var cachedFilmstrip = await EnsureFilmstripAsync(filePath, cached.Duration);
             return new MediaFileInfo(
                 Path.GetFileNameWithoutExtension(filePath),
                 filePath,
@@ -143,7 +148,8 @@ public sealed class MediaProbeService
                 cached.Width,
                 cached.Height,
                 cached.Fps,
-                cached.CaptureBackend);
+                cached.CaptureBackend,
+                cachedFilmstrip);
         }
 
         var result = await RunProcessAsync("ffprobe", new[]
@@ -224,6 +230,7 @@ public sealed class MediaProbeService
         }
 
         var thumbnailPath = await EnsureThumbnailAsync(filePath, duration);
+        var filmstrip = await EnsureFilmstripAsync(filePath, duration);
 
         var media = new MediaFileInfo(
             Path.GetFileNameWithoutExtension(filePath),
@@ -236,7 +243,8 @@ public sealed class MediaProbeService
             width,
             height,
             fps,
-            captureBackend);
+            captureBackend,
+            filmstrip);
 
         if (duration > TimeSpan.Zero)
         {
@@ -408,6 +416,12 @@ public sealed class MediaProbeService
             Directory.Delete(frameFolder, true);
         }
 
+        var filmstripFolder = GetFilmstripFolder(filePath);
+        if (Directory.Exists(filmstripFolder))
+        {
+            Directory.Delete(filmstripFolder, true);
+        }
+
         TryDelete(GetWaveformPath(filePath));
     }
 
@@ -482,6 +496,88 @@ public sealed class MediaProbeService
 
         AppLog.Info($"Thumbnail seek: every candidate frame looked black, keeping the last one: path={filePath}.");
         return output;
+    }
+
+    // Editor timeline's video-lane filmstrip (TimelineLaneControl) - a row of
+    // small frames sampled evenly across the clip, generated once here during
+    // hydration (HydrateLibraryClipsAsync/ProbeAsync) rather than lazily when
+    // the editor opens, so it's already sitting in cache by the time the user
+    // picks a clip. One frame per FrameIntervalSeconds of clip length, capped
+    // at MaxFrames so a multi-hour Full Session can't generate hundreds of
+    // tiny JPEGs - TimelineLaneControl stretches however many frames exist
+    // across the lane's actual pixel width at render time (same
+    // decoupled-from-pixel-width approach the waveform's fixed BucketCount
+    // already uses), so a lower frame count on a long clip just means each
+    // frame covers a wider slice, not a visibly incomplete strip.
+    private const double FilmstripFrameIntervalSeconds = 2.0;
+    private const int FilmstripMinFrames = 6;
+    private const int FilmstripMaxFrames = 90;
+    private const int FilmstripFrameHeight = 54;
+
+    private async Task<IReadOnlyList<string>> EnsureFilmstripAsync(string filePath, TimeSpan duration)
+    {
+        var existing = ListFilmstripFrames(filePath);
+        if (existing.Count > 0) return existing;
+        if (duration <= TimeSpan.Zero) return Array.Empty<string>();
+
+        var frameCount = (int)Math.Clamp(
+            Math.Round(duration.TotalSeconds / FilmstripFrameIntervalSeconds),
+            FilmstripMinFrames,
+            FilmstripMaxFrames);
+
+        var folder = GetFilmstripFolder(filePath);
+        try
+        {
+            Directory.CreateDirectory(folder);
+
+            var fps = frameCount / Math.Max(0.1, duration.TotalSeconds);
+            var result = await RunProcessAsync("ffmpeg", new[]
+            {
+                "-y",
+                "-i", filePath,
+                // -2: even width for the JPEG encoder's 4:2:0 output - same
+                // reasoning as EnsureThumbnailAsync's scale filter.
+                "-vf", $"fps={fps.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)},scale=-2:{FilmstripFrameHeight}",
+                "-q:v", "6",
+                Path.Combine(folder, "f%04d.jpg")
+            });
+
+            var frames = ListFilmstripFrames(filePath);
+            if (result.ExitCode != 0 || frames.Count == 0)
+            {
+                AppLog.Error($"Filmstrip generation failed for {filePath}: {(string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg failed" : result.Error.Trim())}");
+                try { Directory.Delete(folder, true); } catch { }
+                return Array.Empty<string>();
+            }
+
+            return frames;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Filmstrip generation failed for {filePath}", error);
+            return Array.Empty<string>();
+        }
+    }
+
+    private IReadOnlyList<string> ListFilmstripFrames(string filePath)
+    {
+        try
+        {
+            var folder = GetFilmstripFolder(filePath);
+            if (!Directory.Exists(folder)) return Array.Empty<string>();
+            var frames = Directory.GetFiles(folder, "f*.jpg");
+            Array.Sort(frames, StringComparer.Ordinal);
+            return frames;
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+    }
+
+    private string GetFilmstripFolder(string filePath)
+    {
+        return Path.Combine(_cacheFolder, $"{CacheKey(filePath)}-filmstrip");
     }
 
     private string GetThumbnailPath(string filePath)
@@ -800,7 +896,11 @@ public sealed record MediaFileInfo(
     int Width,
     int Height,
     double Fps,
-    string CaptureBackend = "");
+    string CaptureBackend = "",
+    IReadOnlyList<string>? FilmstripFramePaths = null)
+{
+    public IReadOnlyList<string> FilmstripFramePaths { get; init; } = FilmstripFramePaths ?? Array.Empty<string>();
+}
 
 public sealed record MediaTrackInfo(int Index, string Type, string Codec, string Label, double VolumePercent = 100);
 

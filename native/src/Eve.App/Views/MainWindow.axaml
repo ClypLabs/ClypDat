@@ -1481,6 +1481,7 @@
                                                     LaneBrush="{Binding Color}"
                                                     IsVideo="{Binding IsVideo}"
                                                     Peaks="{Binding WaveformPeaks}"
+                                                    FilmstripFrames="{Binding FilmstripFrames}"
                                                     TrimStartPercent="{Binding $parent[Window].DataContext.TrimStartPercentValue}"
                                                     TrimEndPercent="{Binding $parent[Window].DataContext.TrimEndPercentValue}" />
                     </DataTemplate>

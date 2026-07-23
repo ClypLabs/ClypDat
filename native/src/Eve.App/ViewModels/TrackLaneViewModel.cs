@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Media.Imaging;
 
 namespace Eve.App.ViewModels;
 
@@ -9,6 +10,7 @@ public sealed class TrackLaneViewModel : ViewModelBase
     private bool _showVolumePercent;
     private bool _isMuted;
     private IReadOnlyList<double> _waveformPeaks = Array.Empty<double>();
+    private IReadOnlyList<Bitmap> _filmstripFrames = Array.Empty<Bitmap>();
 
     public TrackLaneViewModel(int streamIndex, string label, string type, string color, bool canAdjustVolume, double volumePercent = 100)
     {
@@ -87,5 +89,14 @@ public sealed class TrackLaneViewModel : ViewModelBase
     {
         get => _waveformPeaks;
         set => SetProperty(ref _waveformPeaks, value);
+    }
+
+    // Only meaningful for the video lane - the row of small preview frames
+    // TimelineLaneControl draws across the timeline (see EnsureFilmstripAsync
+    // in MediaProbeService for how these get generated/cached).
+    public IReadOnlyList<Bitmap> FilmstripFrames
+    {
+        get => _filmstripFrames;
+        set => SetProperty(ref _filmstripFrames, value);
     }
 }

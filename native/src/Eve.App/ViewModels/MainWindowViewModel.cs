@@ -2311,8 +2311,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public async Task<int> DeleteSelectedAsync()
     {
         var selected = AllClips.Where(clip => clip.IsSelected).ToArray();
+        HashSet<string>? importedKeys = null;
         foreach (var clip in selected)
         {
+            // Read the sidecar's MedalImportKey BEFORE deleting it below - once
+            // gone, there's no way to know this clip was ever a Medal import,
+            // and its key would stay stuck in the "already imported" history
+            // forever, permanently blocking a re-import of the same clip.
+            var medalImportKey = ClipInfoSidecar.Load(Settings.LibraryFolder, clip.Path)?.MedalImportKey;
+            if (!string.IsNullOrWhiteSpace(medalImportKey))
+            {
+                importedKeys ??= LoadMedalImportHistory();
+                importedKeys.Remove(medalImportKey);
+            }
+
             await FileRetry.RunAsync(() => File.Delete(clip.Path), $"Delete clip {clip.Path}");
             _mediaProbe.DeleteCacheFor(clip.Path);
             ClipEditSidecar.Delete(Settings.LibraryFolder, clip.Path);
@@ -2320,6 +2332,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Settings.ClipEdits.Remove(ClipEditKey(clip.Path));
             AllClips.Remove(clip);
         }
+
+        if (importedKeys is not null) PersistMedalImportHistory(importedKeys);
 
         // Every currently-selected clip just got deleted above, so a plain
         // ClearSelection is correct here (not per-clip SetClipSelected) and
@@ -2332,6 +2346,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public async Task DeleteClipAsync(ClipCardViewModel clip)
     {
+        // See DeleteSelectedAsync - must read this before the sidecar is deleted.
+        var medalImportKey = ClipInfoSidecar.Load(Settings.LibraryFolder, clip.Path)?.MedalImportKey;
+        if (!string.IsNullOrWhiteSpace(medalImportKey))
+        {
+            var importedKeys = LoadMedalImportHistory();
+            importedKeys.Remove(medalImportKey);
+            PersistMedalImportHistory(importedKeys);
+        }
+
         await FileRetry.RunAsync(() => File.Delete(clip.Path), $"Delete clip {clip.Path}");
         _mediaProbe.DeleteCacheFor(clip.Path);
         ClipEditSidecar.Delete(Settings.LibraryFolder, clip.Path);
@@ -3091,26 +3114,48 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         var hasVideo = false;
         var audioIndex = 0;
+        // Medal always exports two audio streams: a full pre-mix ("All
+        // Audio" - game+mic+everything combined) first, then a second,
+        // narrower one ("All PC Audio") after it. The pre-mix just
+        // duplicates content the other track(s) already carry, so for a
+        // Medal import it's dropped before it's ever added to
+        // TimelineTracks - not shown, not muted, not selectable, just never
+        // exists as far as the editor or playback (which builds its audio
+        // list FROM TimelineTracks, see MainWindow.axaml.cs's
+        // StartEditorPlaybackAsync) are concerned.
+        var skippedMedalPreMixTrack = false;
+        var filmstripFrames = LoadFilmstripFrames(media.FilmstripFramePaths);
         foreach (var track in media.Tracks)
         {
             if (track.Type == "subtitle") continue;
+            if (isMedalImport && track.Type == "audio" && !skippedMedalPreMixTrack)
+            {
+                skippedMedalPreMixTrack = true;
+                continue;
+            }
+
             var color = track.Type switch
             {
                 "video" => "#05C7B7",
                 "audio" => AudioColor(audioIndex),
                 _ => "#607080"
             };
-            if (track.Type == "video") hasVideo = true;
             var label = track.Type == "audio"
                 ? AudioLaneLabel(track.Label, audioIndex)
                 : "Video";
-            TimelineTracks.Add(new TrackLaneViewModel(track.Index, label, track.Type, color, track.Type == "audio", track.VolumePercent));
+            var lane = new TrackLaneViewModel(track.Index, label, track.Type, color, track.Type == "audio", track.VolumePercent);
+            if (track.Type == "video")
+            {
+                hasVideo = true;
+                lane.FilmstripFrames = filmstripFrames;
+            }
+            TimelineTracks.Add(lane);
             if (track.Type == "audio") audioIndex++;
         }
 
         if (!hasVideo)
         {
-            TimelineTracks.Insert(0, new TrackLaneViewModel(0, "Video", "video", "#05C7B7", false));
+            TimelineTracks.Insert(0, new TrackLaneViewModel(0, "Video", "video", "#05C7B7", false) { FilmstripFrames = filmstripFrames });
         }
 
         ApplyClipEditState(media.Path);
@@ -3590,6 +3635,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             return null;
         }
+    }
+
+    // Loads every filmstrip frame for the video lane (TimelineLaneControl) -
+    // up to FilmstripMaxFrames (90) small ~96x54 JPEGs, cheap enough to
+    // decode synchronously here the same way SelectedThumbnail's single
+    // image already is. A frame that fails to load (corrupt/partial write)
+    // is just skipped rather than failing the whole strip.
+    private static IReadOnlyList<Avalonia.Media.Imaging.Bitmap> LoadFilmstripFrames(IReadOnlyList<string> paths)
+    {
+        if (paths.Count == 0) return Array.Empty<Avalonia.Media.Imaging.Bitmap>();
+
+        var frames = new List<Avalonia.Media.Imaging.Bitmap>(paths.Count);
+        foreach (var path in paths)
+        {
+            var bitmap = LoadBitmap(path);
+            if (bitmap is not null) frames.Add(bitmap);
+        }
+
+        return frames;
     }
 
     private static string FormatBytes(long bytes)

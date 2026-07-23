@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 
 namespace Eve.App.Controls;
 
@@ -14,6 +15,9 @@ public sealed class TimelineLaneControl : Control
 
     public static readonly StyledProperty<IReadOnlyList<double>?> PeaksProperty =
         AvaloniaProperty.Register<TimelineLaneControl, IReadOnlyList<double>?>(nameof(Peaks));
+
+    public static readonly StyledProperty<IReadOnlyList<Bitmap>?> FilmstripFramesProperty =
+        AvaloniaProperty.Register<TimelineLaneControl, IReadOnlyList<Bitmap>?>(nameof(FilmstripFrames));
 
     public static readonly StyledProperty<double> TrimStartPercentProperty =
         AvaloniaProperty.Register<TimelineLaneControl, double>(nameof(TrimStartPercent));
@@ -39,6 +43,12 @@ public sealed class TimelineLaneControl : Control
         set => SetValue(PeaksProperty, value);
     }
 
+    public IReadOnlyList<Bitmap>? FilmstripFrames
+    {
+        get => GetValue(FilmstripFramesProperty);
+        set => SetValue(FilmstripFramesProperty, value);
+    }
+
     public double TrimStartPercent
     {
         get => GetValue(TrimStartPercentProperty);
@@ -57,6 +67,7 @@ public sealed class TimelineLaneControl : Control
             LaneBrushProperty,
             IsVideoProperty,
             PeaksProperty,
+            FilmstripFramesProperty,
             TrimStartPercentProperty,
             TrimEndPercentProperty);
     }
@@ -75,6 +86,7 @@ public sealed class TimelineLaneControl : Control
 
         if (IsVideo)
         {
+            DrawFilmstrip(context, rect);
             context.DrawRectangle(null, new Pen(Color.Parse("#13C8B5").ToUInt32()), rect.Deflate(1), 3, 3);
         }
         else
@@ -83,6 +95,30 @@ public sealed class TimelineLaneControl : Control
         }
 
         DrawTrimShade(context, rect);
+    }
+
+    // Frame count is decoupled from the lane's actual pixel width (see
+    // MediaProbeService.EnsureFilmstripAsync's comment) - just like
+    // DrawWaveform's peaks array, whatever frames exist get stretched evenly
+    // across whatever width the lane currently has, edge to edge.
+    private void DrawFilmstrip(DrawingContext context, Rect rect)
+    {
+        var frames = FilmstripFrames;
+        if (frames is null || frames.Count == 0) return;
+
+        using (context.PushClip(rect.Deflate(1)))
+        {
+            var frameWidth = rect.Width / frames.Count;
+            for (var i = 0; i < frames.Count; i++)
+            {
+                var bitmap = frames[i];
+                // +0.5 overlap so float rounding between adjacent frame
+                // rects can't leave a hairline gap of bare lane background
+                // showing through between two frames.
+                var dest = new Rect(rect.X + i * frameWidth, rect.Y, frameWidth + 0.5, rect.Height);
+                context.DrawImage(bitmap, new Rect(bitmap.Size), dest);
+            }
+        }
     }
 
     private void DrawWaveform(DrawingContext context, Rect rect)
