@@ -275,14 +275,37 @@ public sealed class AudioCapturePipeline : IDisposable
             return AudioCaptureSession.Start(capture, path, title);
         }
 
-        var capacityHint = (int)Math.Min(int.MaxValue, RamCaptureMaxSeconds() * (long)capture.WaveFormat.AverageBytesPerSecond);
+        // Pre-size to the TYPICAL expected size (the replay window itself),
+        // not the rare-case roll ceiling below - eagerly reserving, say, the
+        // full 20-minute ceiling on every capture even for a 30s replay
+        // buffer would waste real memory for the overwhelmingly common case.
+        // MemoryStream still grows past this via its normal doubling
+        // strategy on the rare capture that actually approaches the roll
+        // ceiling - that's an acceptable one-off cost, not a steady-state one.
+        var capacitySeconds = Math.Clamp(_activeConfig?.DurationSeconds ?? 60, 30, 1200) + RamCaptureSlackSeconds;
+        var capacityHint = (int)Math.Min(int.MaxValue, capacitySeconds * (long)capture.WaveFormat.AverageBytesPerSecond);
         return AudioCaptureSession.StartInMemory(capture, title, capacityHint);
     }
 
-    // Shared by StartSession's pre-size hint and RollOversizedCaptures' roll
-    // threshold, so the two can never disagree about how big a RAM-backed
-    // capture is allowed to get.
-    private int RamCaptureMaxSeconds() => Math.Clamp(_activeConfig?.DurationSeconds ?? 60, 30, 1200) + RamCaptureSlackSeconds;
+    // How long a RAM-backed capture is allowed to grow before
+    // RollOversizedCaptures rotates it to a fresh one. Deliberately NOT just
+    // "replay Duration + slack" - that rolled every ~65s for a default 60s
+    // buffer, and every roll boundary a save's segment window happens to
+    // cross means GetOrCreateSourceSnapshot/SnapshotAudioFile has to stitch
+    // TWO captures together instead of reading one straight through -
+    // measured as a real, noticeable save-time slowdown (extra ffmpeg
+    // process spawns per extra capture) versus the disk-backed path, which
+    // only ever rolled at the 4GiB cap (~93 minutes - effectively never in
+    // normal use). Flooring this at 20 minutes makes rolls rare again for
+    // any realistic replay Duration setting (max configurable is also 20
+    // min), matching disk's "rolling is the rare case" characteristic,
+    // while still bounding memory to a sane per-track ceiling (~450MB at
+    // the default 48kHz/stereo/float mix format).
+    private const int RamCaptureMinRollSeconds = 1200;
+
+    private int RamCaptureMaxSeconds() => Math.Max(
+        Math.Clamp(_activeConfig?.DurationSeconds ?? 60, 30, 1200) + RamCaptureSlackSeconds,
+        RamCaptureMinRollSeconds);
 
     private static string AudioKindPrefix(AudioCaptureKind kind) => kind switch
     {
