@@ -466,6 +466,12 @@
   <Style Selector="TextBox.inlineTitleEdit:focus /template/ TextBlock#PART_Watermark, TextBox.inlineTitleEdit:pointerover /template/ TextBlock#PART_Watermark">
     <Setter Property="Foreground" Value="#5C6D7E" />
   </Style>
+  <!-- Replaces the old pencil-icon affordance - hovering the clip title
+       itself now signals it's clickable to rename. -->
+  <Style Selector="TextBlock.editableTitle:pointerover">
+    <Setter Property="TextDecorations" Value="Underline" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+  </Style>
   <Style Selector="Border.settingsCard">
     <Setter Property="Background" Value="#141D24" />
     <Setter Property="BorderBrush" Value="#232F3A" />

@@ -139,6 +139,12 @@ public sealed partial class MainWindow : Window
         };
         AddHandler(PointerPressedEvent, VolumeSlider_OnPointerPressedAny, RoutingStrategies.Tunnel, true);
         AddHandler(PointerReleasedEvent, VolumeSlider_OnPointerReleasedAny, RoutingStrategies.Tunnel, true);
+        // Inline title editing (BeginInlineTitleEdit) needs to close/commit
+        // the instant a click lands anywhere else - LostFocus alone only
+        // fires when the newly clicked target is itself focusable, so a
+        // click on a non-focusable area (e.g. a thumbnail, plain text) would
+        // otherwise leave the box open with focus untouched.
+        AddHandler(PointerPressedEvent, ClipTitleEdit_OnAnyPointerPressed, RoutingStrategies.Tunnel);
     }
 
     private MainWindowViewModel? ViewModel => DataContext as MainWindowViewModel;
@@ -694,35 +700,52 @@ public sealed partial class MainWindow : Window
         await RenameClipCardAsync(clip);
     }
 
-    // The pencil edits the title right on the card instead of opening the
-    // dialog - swaps the title TextBlock for a bordered TextBox in place,
-    // matching the reference screenshot's inline-edit look, rather than a
-    // separate "type a new name" popup.
-    private void ClipRenamePencil_OnClick(object? sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        if (sender is not Control { DataContext: ClipCardViewModel clip } pencil) return;
-        if (pencil.Parent is not Grid grid || grid.Children.Count == 0 || grid.Children[0] is not TextBlock titleBlock) return;
+    // At most one inline title edit is open at a time - BeginInlineTitleEdit
+    // resolves whichever of these is set before starting a new one, and the
+    // window-level tunnel handler (registered in the constructor) uses them
+    // to close/commit the box the instant a click lands anywhere else.
+    private TextBox? _activeInlineTitleEdit;
+    private Action<bool>? _resolveActiveInlineTitleEdit;
 
-        BeginInlineTitleEdit(grid, titleBlock, pencil, clip);
+    // Hovering the title (TextBlock.editableTitle's underline in
+    // AppStyles.axaml) is the only affordance now - clicking it swaps it for
+    // a bordered TextBox in place instead of opening a separate "type a new
+    // name" dialog.
+    private void ClipTitle_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is not TextBlock { DataContext: ClipCardViewModel clip } titleBlock) return;
+        if (!e.GetCurrentPoint(titleBlock).Properties.IsLeftButtonPressed) return;
+        if (titleBlock.Parent is not Panel container) return;
+
+        e.Handled = true;
+        BeginInlineTitleEdit(container, titleBlock, clip);
     }
 
-    private void BeginInlineTitleEdit(Grid grid, TextBlock titleBlock, Control pencil, ClipCardViewModel clip)
+    private void ClipTitleEdit_OnAnyPointerPressed(object? sender, PointerPressedEventArgs e)
     {
+        if (_activeInlineTitleEdit is not { } editBox) return;
+        if (e.Source is Visual visual && (visual == editBox || editBox.IsVisualAncestorOf(visual))) return;
+        _resolveActiveInlineTitleEdit?.Invoke(true);
+    }
+
+    private void BeginInlineTitleEdit(Panel container, TextBlock titleBlock, ClipCardViewModel clip)
+    {
+        // Only one at a time - starting a new one commits/closes whatever
+        // was already open elsewhere in the library.
+        _resolveActiveInlineTitleEdit?.Invoke(true);
+
         var isFileTitle = clip.IsAutoClip || clip.IsMedalImport;
         var originalText = isFileTitle ? clip.GameNameLabel : (clip.CustomTitle ?? string.Empty);
 
         // A plain MaxWidth here isn't enough to keep the card from growing -
-        // the title Grid's own column is Auto-sized (needed so the pencil
-        // hugs the text instead of floating at the card's edge), and Auto
-        // columns measure their child with unbounded available width, so
+        // the Panel's child is measured with unbounded available width, so
         // whatever the TextBox's OWN desired size comes out to still grows
-        // the column/card. An explicit Width pins the TextBox's DesiredSize
+        // the card. An explicit Width pins the TextBox's DesiredSize
         // outright regardless of content, matching the same CardWidth-minus-
         // reserve budget SubtractDoubleConverter gives the static title
         // TextBlock (see MainWindow.axaml), so the card can't inflate while
         // editing.
-        var titleWidth = Math.Max(80, (ViewModel?.CardWidth ?? 220) - 64);
+        var titleWidth = Math.Max(80, (ViewModel?.CardWidth ?? 220) - 32);
 
         var editBox = new TextBox
         {
@@ -740,13 +763,13 @@ public sealed partial class MainWindow : Window
             Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
             CornerRadius = new CornerRadius(6),
             Padding = new Thickness(8, 4),
+            HorizontalAlignment = HorizontalAlignment.Left,
             Width = titleWidth
         };
-        Grid.SetColumn(editBox, 0);
 
         titleBlock.IsVisible = false;
-        pencil.IsVisible = false;
-        grid.Children.Add(editBox);
+        container.Children.Add(editBox);
+        _activeInlineTitleEdit = editBox;
 
         Dispatcher.UIThread.Post(() =>
         {
@@ -754,9 +777,9 @@ public sealed partial class MainWindow : Window
             editBox.SelectAll();
         });
 
-        // Enter/blur both commit, Escape cancels - guarded by resolved so a
-        // programmatic blur from removing the box on Escape/Enter can't
-        // re-fire LostFocus and commit a second time.
+        // Enter/blur/click-elsewhere all commit, Escape cancels - guarded by
+        // resolved so removing the box (which can itself trigger a blur)
+        // can't re-fire and commit a second time.
         var resolved = false;
 
         async void Resolve(bool save)
@@ -764,9 +787,10 @@ public sealed partial class MainWindow : Window
             if (resolved) return;
             resolved = true;
 
-            grid.Children.Remove(editBox);
+            container.Children.Remove(editBox);
             titleBlock.IsVisible = true;
-            pencil.IsVisible = true;
+            _activeInlineTitleEdit = null;
+            _resolveActiveInlineTitleEdit = null;
 
             if (!save) return;
             var newTitle = (editBox.Text ?? string.Empty).Trim();
@@ -775,6 +799,8 @@ public sealed partial class MainWindow : Window
 
             await ApplyClipTitleRenameAsync(clip, newTitle);
         }
+
+        _resolveActiveInlineTitleEdit = Resolve;
 
         editBox.KeyDown += (_, keyArgs) =>
         {
