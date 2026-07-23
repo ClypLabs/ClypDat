@@ -311,6 +311,20 @@ public sealed class MediaProbeService
         var cached = await TryReadWaveformCacheAsync(cachePath, cancellationToken);
         if (cached.Count > 0) return cached;
 
+        // On a network drive, waveform decoding competes with LibVLC's video
+        // stream and the audio chunk extractor for the same remote file the
+        // moment a clip opens - SMB seek thrash from three concurrent readers
+        // is what made long network clips stutter in the editor while
+        // standalone VLC played them fine. Give playback a head start; the
+        // waveform is the least urgent of the three. Only applies here, past
+        // the cache check above - an already-cached waveform is just a local
+        // JSON read and has nothing to contend with, so it used to eat this
+        // same 4s delay for no reason even on a clip opened many times before.
+        if (PlaybackSession.IsNetworkPath(media.Path))
+        {
+            await Task.Delay(TimeSpan.FromSeconds(4), cancellationToken);
+        }
+
         const int BucketCount = 700;
         const double SegmentSeconds = 60;
         var totalSeconds = media.Duration.TotalSeconds;

@@ -3251,16 +3251,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         try
         {
-            // On a network drive, waveform decoding competes with LibVLC's
-            // video stream and the audio chunk extractor for the same remote
-            // file the moment a clip opens - SMB seek thrash from three
-            // concurrent readers is what made long network clips stutter in
-            // the editor while standalone VLC played them fine. Give playback
-            // a head start; the waveform is the least urgent of the three.
-            if (PlaybackSession.IsNetworkPath(media.Path))
-            {
-                await Task.Delay(TimeSpan.FromSeconds(4), cancellationToken);
-            }
+            // The network-drive head-start delay (so waveform decode doesn't
+            // contend with playback for the same remote file) now lives in
+            // MediaProbeService.LoadWaveformsAsync, past its own cache check -
+            // an already-cached waveform has nothing to contend with and
+            // shouldn't eat that delay just to return a local JSON read.
 
             // Per-segment partial updates so long clips paint their waveform
             // progressively left-to-right instead of showing nothing until the
