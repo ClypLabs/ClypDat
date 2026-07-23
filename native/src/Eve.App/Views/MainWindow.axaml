@@ -1489,12 +1489,24 @@
                 </ItemsControl>
 
                 <Canvas x:Name="TimelineOverlay" IsHitTestVisible="False">
+                  <!-- Sized/positioned to sit exactly over the video lane
+                       (the first/top lane) - matches its LaneHeight
+                       (TrackLaneViewModel). Background is Transparent, not a
+                       solid fill: this used to be #151F24, invisible against
+                       the video lane's old blank-box rendering, but that same
+                       opaque fill sat ON TOP of (painted after) the lane's
+                       own content in the visual tree - once the lane started
+                       drawing real filmstrip thumbnails, this box visibly
+                       darkened/hid them. The teal border alone still marks
+                       the trim range; per-lane dimming for the
+                       excluded-from-trim portion is TimelineLaneControl's
+                       own DrawTrimShade, not this box. -->
                   <Border x:Name="TrimSelection"
-                          Height="32"
+                          Height="64"
                           BorderBrush="#13C8B5"
                           BorderThickness="2"
                           CornerRadius="4"
-                          Background="#151F24" />
+                          Background="Transparent" />
                   <Border x:Name="TimelinePlayhead"
                           Width="3"
                           Background="#F2F6FB" />
@@ -1506,7 +1518,7 @@
                 <Canvas x:Name="TimelineHandleLayer">
                   <Border x:Name="TrimStartHandle"
                           Width="14"
-                          Height="32"
+                          Height="64"
                           Background="#13C8B5"
                           CornerRadius="2"
                           Cursor="SizeWestEast"
@@ -1515,7 +1527,7 @@
                           PointerReleased="TimelineSurface_OnPointerReleased" />
                   <Border x:Name="TrimEndHandle"
                           Width="14"
-                          Height="32"
+                          Height="64"
                           Background="#13C8B5"
                           CornerRadius="2"
                           Cursor="SizeWestEast"

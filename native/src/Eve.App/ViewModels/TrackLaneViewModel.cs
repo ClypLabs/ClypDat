@@ -29,7 +29,12 @@ public sealed class TrackLaneViewModel : ViewModelBase
     public bool CanAdjustVolume { get; }
     public bool IsAudio => Type == "audio";
     public bool IsVideo => Type == "video";
-    public double LaneHeight => IsVideo ? 32 : 56;
+    // Video bumped from its old 32 (a plain outlined box, no real content)
+    // to 64 now that it renders filmstrip thumbnails (TimelineLaneControl) -
+    // taller than the audio lanes so the frames are actually readable rather
+    // than a thin, squished strip. MainWindow.axaml's TrimSelection overlay
+    // Height is hardcoded to match this - keep them in sync if this changes.
+    public double LaneHeight => IsVideo ? 64 : 56;
     public string VolumeLabel => $"{VolumePercent:0}%";
     public Thickness VolumeBadgeMargin => new(VolumeBadgeX, -8, 0, 0);
     public string HeaderClass => IsAudio ? "audioHeader" : "videoHeader";
