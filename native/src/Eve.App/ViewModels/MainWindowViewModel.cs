@@ -62,6 +62,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _hydrationTotal;
     private int _hydrationCompleted;
     private string _clipNotReadyMessage = string.Empty;
+    private double _masterVolumePercent;
+    private double _videoZoom = 1.0;
+    private double _videoPanY;
     private string _selectedMetadata = string.Empty;
     private string _selectedCreated = "Created: No clip loaded";
     private string _selectedQuality = "Video Quality: Unknown";
@@ -134,6 +137,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedClipOverlayVolume = ClipOverlayVolumes.FirstOrDefault(volume => string.Equals(volume, Settings.ClipOverlayVolume, StringComparison.OrdinalIgnoreCase)) ?? "Medium";
         _selectedClipFileNameScheme = ClipFileNameSchemes.FirstOrDefault(item => string.Equals(item.Value, Settings.ClipFileNameScheme, StringComparison.OrdinalIgnoreCase))?.Value ?? ClipFileNaming.StandardScheme;
         _customClipFileNameTemplate = Settings.CustomClipFileNameTemplate;
+        _masterVolumePercent = Settings.EditorMasterVolume;
         UpdateClipFileNamePreview();
         ExcludedProcesses = new ObservableCollection<string>(Settings.GameAudioExcludedProcesses);
         ChatAudioApps = new ObservableCollection<string>(Settings.ChatAudioProcessNames);
@@ -414,6 +418,65 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public void SetVideoFullscreen(bool value) => IsVideoFullscreen = value;
 
     public bool IsEditorVideoAreaVisible => !IsEditorVideoLoading;
+
+    // Editor's master output volume - MainWindow.axaml.cs forwards changes to
+    // PlaybackSession.SetMasterVolume via the ViewModel.PropertyChanged
+    // subscription already used for a couple of other view-affecting
+    // properties, same pattern as Cs2AutoClipEnabled.
+    public double MasterVolumePercent
+    {
+        get => _masterVolumePercent;
+        set
+        {
+            var clamped = Math.Clamp(value, 0, 150);
+            if (!SetProperty(ref _masterVolumePercent, clamped)) return;
+            Settings.EditorMasterVolume = clamped;
+            SaveSettings();
+        }
+    }
+
+    // Scroll-to-zoom on the video (both the normal editor and fullscreen -
+    // it's the SAME EditorVideoView control reparented between the two, see
+    // MainWindow.axaml.cs's FullscreenButton_OnClick). 1.0 = no zoom;
+    // clamped so it can never zoom OUT past the frame (no black margin) or
+    // in so far the picture is unusable.
+    public double VideoZoom
+    {
+        get => _videoZoom;
+        set
+        {
+            var clamped = Math.Clamp(value, 1.0, 4.0);
+            if (!SetProperty(ref _videoZoom, clamped)) return;
+            OnPropertyChanged(nameof(IsVideoZoomed));
+            // Re-clamping here (not just relying on VideoPanY's own setter)
+            // matters when zooming OUT shrinks the valid pan range - without
+            // this, a pan set at 3x zoom would stay at its old value at 1.5x,
+            // even though the transform math would then be panning past the
+            // frame edge.
+            VideoPanY = _videoPanY;
+        }
+    }
+
+    public bool IsVideoZoomed => VideoZoom > 1.0;
+
+    // Normalized -1..1 - MainWindow.axaml.cs's UpdateVideoTransform turns this
+    // into an actual pixel offset against the video's current rendered
+    // height and zoom level, since that's layout-dependent and not something
+    // a plain binding can compute.
+    public double VideoPanY
+    {
+        get => _videoPanY;
+        set => SetProperty(ref _videoPanY, Math.Clamp(value, -1, 1));
+    }
+
+    // Called on every clip open (OpenMedia) - a fresh clip should always
+    // start at the normal, unzoomed view rather than carrying over whatever
+    // zoom/pan the previous clip was left at.
+    private void ResetVideoZoom()
+    {
+        VideoZoom = 1.0;
+        VideoPanY = 0;
+    }
 
     // AppUpdateService.CurrentVersion is a System.Version, always 4 components -
     // our own <Version> in the csproj is 3-part (e.g. "0.1.1"), so the SDK-
@@ -2964,6 +3027,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void OpenMedia(MediaFileInfo media, bool preserveEditorText = false)
     {
+        ResetVideoZoom();
         SelectedVideoName = media.Name;
         SelectedVideoPath = media.Path;
         SelectedThumbnailPath = media.ThumbnailPath;

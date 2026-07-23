@@ -50,6 +50,11 @@ public sealed class AppSettings
     public bool EnableEditorKeyboardShortcuts { get; set; } = true;
     public string ClipOverlayPosition { get; set; } = "Top Right";
     public string ClipOverlayVolume { get; set; } = "Medium";
+    // Editor's master output volume (fullscreen playbar slider) - separate
+    // from TrackVolumes (per-clip, per-track mix levels stored in
+    // ClipEditSettings), this is a single global preference like any media
+    // player remembering your last volume across everything you play.
+    public double EditorMasterVolume { get; set; } = 100;
     public double WindowX { get; set; } = double.NaN;
     public double WindowY { get; set; } = double.NaN;
     public double WindowWidth { get; set; } = 1180;

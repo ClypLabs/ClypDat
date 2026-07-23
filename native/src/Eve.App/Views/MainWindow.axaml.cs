@@ -87,6 +87,8 @@ public sealed partial class MainWindow : Window
                 ViewModel.PropertyChanged += (_, e) =>
                 {
                     if (e.PropertyName == nameof(MainWindowViewModel.Cs2AutoClipEnabled)) UpdateCs2AutoClipState();
+                    if (e.PropertyName == nameof(MainWindowViewModel.MasterVolumePercent)) _playback?.SetMasterVolume(ViewModel.MasterVolumePercent);
+                    if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
                 };
                 UpdateCs2AutoClipState();
             }
@@ -829,6 +831,44 @@ public sealed partial class MainWindow : Window
     }
 
     private void ExitVideoFullscreenButton_OnClick(object? sender, RoutedEventArgs e) => ExitVideoFullscreen();
+
+    // Scroll up = zoom in, scroll down = zoom out - wired to both
+    // EditorVideoHost and FullscreenVideoHost (same handler, same
+    // ViewModel.VideoZoom either way, since it's the same EditorVideoView
+    // reparented between them).
+    private void VideoHost_OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
+    {
+        if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
+        if (e.Delta.Y == 0) return;
+        const double zoomStep = 0.25;
+        ViewModel.VideoZoom += e.Delta.Y > 0 ? zoomStep : -zoomStep;
+        e.Handled = true;
+    }
+
+    // Turns VideoZoom/VideoPanY (both normalized ViewModel values with no
+    // notion of pixels) into the actual RenderTransform on EditorVideoView -
+    // needs its current rendered size, which only code-behind has, so this
+    // can't just be a plain XAML binding. Called on every VideoZoom/VideoPanY
+    // change and on EditorVideoView's own LayoutUpdated (covers window
+    // resize and the fullscreen reparent, both of which change the height
+    // the pan range is computed from).
+    private void UpdateVideoTransform()
+    {
+        if (ViewModel is null) return;
+        // x:Name on a Transform nested inside a TransformGroup property
+        // element doesn't generate a code-behind field the way a named
+        // Control does - looked up by index instead (matches XAML order:
+        // ScaleTransform then TranslateTransform).
+        if (EditorVideoView.RenderTransform is not TransformGroup group) return;
+        if (group.Children is not [ScaleTransform scale, TranslateTransform translate]) return;
+
+        scale.ScaleX = ViewModel.VideoZoom;
+        scale.ScaleY = ViewModel.VideoZoom;
+
+        var height = EditorVideoView.Bounds.Height;
+        var maxPanPixels = height * (ViewModel.VideoZoom - 1) / 2;
+        translate.Y = ViewModel.VideoPanY * maxPanPixels;
+    }
 
     private void ExitVideoFullscreen()
     {
@@ -2139,6 +2179,7 @@ public sealed partial class MainWindow : Window
             // internally, so the same instance is safe to reuse.
             var playback = _playback ?? new PlaybackSession();
             playback.LoadVideo(ViewModel.SelectedVideoPath);
+            playback.SetMasterVolume(ViewModel.MasterVolumePercent);
             _playback = playback;
             _pausedRanges = LoadPausedRanges(ViewModel.SelectedVideoPath);
             ViewModel.IsRecordingPausedAtCurrentTime = false;
@@ -2428,6 +2469,10 @@ public sealed partial class MainWindow : Window
         EditorVideoView.LayoutUpdated += (_, _) =>
         {
             if (_recordingPausedOverlay is { IsVisible: true } overlay) RepositionPausedOverlay(overlay);
+            // Covers window resize AND the fullscreen reparent (both change
+            // EditorVideoView's rendered height, which the pan-range math
+            // depends on) without needing separate handlers for each.
+            UpdateVideoTransform();
         };
     }
 

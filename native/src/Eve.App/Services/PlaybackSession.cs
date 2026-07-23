@@ -18,6 +18,13 @@ public sealed class PlaybackSession : IDisposable
     private readonly Dictionary<int, double> _audioVolumes = new();
     private WasapiOut? _audioOutput;
     private MixingSampleProvider? _audioMixer;
+    private VolumeSampleProvider? _masterVolume;
+    // Survives RebuildAudioOutput (called on every clip load, which tears
+    // down and recreates _masterVolume itself) so a volume set once via
+    // SetMasterVolume - e.g. restored from AppSettings.EditorMasterVolume at
+    // startup - stays applied across every clip opened afterward in this
+    // session, not just the one that was loaded when it was set.
+    private double _masterVolumePercent = 100;
     private Media? _videoMedia;
     private bool _disposed;
     private bool _ended;
@@ -168,7 +175,11 @@ public sealed class PlaybackSession : IDisposable
         }
 
         var normalized = new GainSampleProvider(_audioMixer, 1f / Math.Max(1, providers.Count));
-        var limited = new SoftLimiterSampleProvider(normalized);
+        // Master volume sits BEFORE the limiter (not after) so boosting past
+        // 100% still gets caught by SoftLimiterSampleProvider instead of
+        // clipping the final output unprotected.
+        _masterVolume = new VolumeSampleProvider(normalized) { Volume = VolumeCurve(_masterVolumePercent) };
+        var limited = new SoftLimiterSampleProvider(_masterVolume);
         _audioOutput = new WasapiOut(AudioClientShareMode.Shared, false, 120);
         _audioOutput.Init(limited);
         AppLog.Debug($"Editor audio output ready: streams={string.Join(",", _audioSources.Keys.OrderBy(key => key))}.");
@@ -383,6 +394,14 @@ public sealed class PlaybackSession : IDisposable
         }
     }
 
+    // Global output level (fullscreen playbar slider) - distinct from
+    // SetTrackVolume, which mixes individual tracks against each other.
+    public void SetMasterVolume(double percent)
+    {
+        _masterVolumePercent = percent;
+        if (_masterVolume is not null) _masterVolume.Volume = VolumeCurve(percent);
+    }
+
     public void SetTrackVolume(int streamIndex, double percent)
     {
         _audioVolumes[streamIndex] = percent;
@@ -591,6 +610,7 @@ public sealed class PlaybackSession : IDisposable
             previous = _audioOutput;
             _audioOutput = null;
             _audioMixer = null;
+            _masterVolume = null;
 
             foreach (var source in _audioSources.Values)
             {
