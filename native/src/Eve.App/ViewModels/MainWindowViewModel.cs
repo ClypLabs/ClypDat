@@ -57,6 +57,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _selectedThumbnailPath = string.Empty;
     private Avalonia.Media.Imaging.Bitmap? _selectedThumbnail;
     private bool _isEditorVideoLoading;
+    private bool _isHydratingLibrary;
+    private int _hydrationTotal;
+    private int _hydrationCompleted;
     private string _selectedMetadata = string.Empty;
     private string _selectedCreated = "Created: No clip loaded";
     private string _selectedQuality = "Video Quality: Unknown";
@@ -216,6 +219,42 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool ShowLibraryActions => HasNoSelection && IsLibraryVisible;
     public bool ShowLibraryStatus => IsLibraryVisible;
     public bool ShowSettingsClose => IsSettingsVisible;
+
+    // Drives the "Building your library..." banner - HydrateLibraryClipsAsync
+    // (one clip's ffprobe/thumbnail at a time, see its ParallelOptions) can
+    // take a while on a large or network-drive library, and without this the
+    // window otherwise looks idle/frozen while every card's duration is
+    // still 0:00 and thumbnails are still filling in.
+    public bool IsHydratingLibrary
+    {
+        get => _isHydratingLibrary;
+        private set => SetProperty(ref _isHydratingLibrary, value);
+    }
+
+    public int HydrationTotal
+    {
+        get => _hydrationTotal;
+        private set
+        {
+            if (!SetProperty(ref _hydrationTotal, value)) return;
+            OnPropertyChanged(nameof(HydrationProgressText));
+            OnPropertyChanged(nameof(HydrationProgressFraction));
+        }
+    }
+
+    public int HydrationCompleted
+    {
+        get => _hydrationCompleted;
+        private set
+        {
+            if (!SetProperty(ref _hydrationCompleted, value)) return;
+            OnPropertyChanged(nameof(HydrationProgressText));
+            OnPropertyChanged(nameof(HydrationProgressFraction));
+        }
+    }
+
+    public string HydrationProgressText => $"Building your library... {HydrationCompleted}/{HydrationTotal}";
+    public double HydrationProgressFraction => HydrationTotal > 0 ? (double)HydrationCompleted / HydrationTotal : 0;
 
     public string SelectionSummary
     {
@@ -3303,6 +3342,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task HydrateLibraryClipsAsync(IReadOnlyList<ClipCardViewModel> clips, CancellationToken cancellationToken)
     {
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            HydrationCompleted = 0;
+            HydrationTotal = clips.Count;
+            IsHydratingLibrary = clips.Count > 0;
+        });
+
         try
         {
             await Parallel.ForEachAsync(
@@ -3315,7 +3361,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                         token.ThrowIfCancellationRequested();
                         var media = await _mediaProbe.ProbeAsync(clip.Path);
                         if (token.IsCancellationRequested) return;
-                        await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(media));
+                        await Dispatcher.UIThread.InvokeAsync(() =>
+                        {
+                            clip.UpdateMedia(media);
+                            HydrationCompleted++;
+                        });
                     }
                     catch (OperationCanceledException)
                     {
@@ -3324,6 +3374,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     catch
                     {
                         // Bad files should not stop the rest of the library from filling in.
+                        await Dispatcher.UIThread.InvokeAsync(() => HydrationCompleted++);
                     }
                 });
         }
@@ -3333,10 +3384,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         finally
         {
+            // Guarded the same way as the dispose below - a superseded scan's
+            // finally still runs (just later, asynchronously), and without
+            // this check it could clear IsHydratingLibrary out from under a
+            // newer scan that's already replaced it and is still running.
             if (_libraryHydrationCts?.Token == cancellationToken)
             {
                 _libraryHydrationCts.Dispose();
                 _libraryHydrationCts = null;
+                await Dispatcher.UIThread.InvokeAsync(() => IsHydratingLibrary = false);
             }
         }
     }

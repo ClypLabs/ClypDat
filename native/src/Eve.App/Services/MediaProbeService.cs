@@ -71,17 +71,26 @@ public sealed class MediaProbeService
             // Recency marker for PruneStaleCache - see its comment.
             try { File.SetLastWriteTimeUtc(thumbnailPath, DateTime.UtcNow); } catch { }
         }
+
+        // A cached probe (see ProbeAsync/WriteProbeCache) means an unchanged
+        // file's duration/tracks/etc can paint on the very first frame - no
+        // waiting on HydrateLibraryClipsAsync to reach this clip's turn.
+        // Without this, EVERY library load showed 0:00 on every card until
+        // hydration (one ffprobe at a time) worked its way down the list,
+        // even for a library the user had already opened before.
+        var cached = TryReadProbeCache(filePath, info);
         return new MediaFileInfo(
             Path.GetFileNameWithoutExtension(filePath),
             filePath,
             info.CreationTimeUtc,
-            TimeSpan.Zero,
+            cached?.Duration ?? TimeSpan.Zero,
             info.Length,
             File.Exists(thumbnailPath) ? thumbnailPath : string.Empty,
-            Array.Empty<MediaTrackInfo>(),
-            0,
-            0,
-            0);
+            cached?.Tracks ?? Array.Empty<MediaTrackInfo>(),
+            cached?.Width ?? 0,
+            cached?.Height ?? 0,
+            cached?.Fps ?? 0,
+            cached?.CaptureBackend ?? string.Empty);
     }
 
     public async Task<TimeSpan> GetDurationAsync(string filePath, CancellationToken cancellationToken = default)
@@ -109,6 +118,29 @@ public sealed class MediaProbeService
     public async Task<MediaFileInfo> ProbeAsync(string filePath)
     {
         var info = new FileInfo(filePath);
+
+        // Cache hit: the file's size+mtime match what was last probed, so
+        // its duration/tracks/resolution can't have changed - skip ffprobe
+        // entirely instead of re-reading the whole file's stream info on
+        // every single library load (the main cost on a network drive).
+        var cached = TryReadProbeCache(filePath, info);
+        if (cached is not null)
+        {
+            var cachedThumbnailPath = await EnsureThumbnailAsync(filePath, cached.Duration);
+            return new MediaFileInfo(
+                Path.GetFileNameWithoutExtension(filePath),
+                filePath,
+                info.CreationTimeUtc,
+                cached.Duration,
+                info.Length,
+                cachedThumbnailPath,
+                cached.Tracks,
+                cached.Width,
+                cached.Height,
+                cached.Fps,
+                cached.CaptureBackend);
+        }
+
         var result = await RunProcessAsync("ffprobe", new[]
         {
             "-v", "quiet",
@@ -188,7 +220,7 @@ public sealed class MediaProbeService
 
         var thumbnailPath = await EnsureThumbnailAsync(filePath, duration);
 
-        return new MediaFileInfo(
+        var media = new MediaFileInfo(
             Path.GetFileNameWithoutExtension(filePath),
             filePath,
             info.CreationTimeUtc,
@@ -200,6 +232,60 @@ public sealed class MediaProbeService
             height,
             fps,
             captureBackend);
+
+        if (duration > TimeSpan.Zero)
+        {
+            WriteProbeCache(filePath, info, media);
+        }
+
+        return media;
+    }
+
+    private ProbeCacheEntry? TryReadProbeCache(string filePath, FileInfo info)
+    {
+        try
+        {
+            var path = GetProbeCachePath(filePath);
+            if (!File.Exists(path)) return null;
+            var entry = JsonSerializer.Deserialize<ProbeCacheEntry>(File.ReadAllText(path));
+            if (entry is null) return null;
+            // Size+mtime instead of a content hash - cheap enough to check on
+            // every library load (a stat the OS/SMB client already did to
+            // build the FileInfo), while still catching the file having
+            // changed since it was last probed.
+            if (entry.SizeBytes != info.Length || entry.LastWriteTimeUtcTicks != info.LastWriteTimeUtc.Ticks) return null;
+            return entry;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void WriteProbeCache(string filePath, FileInfo info, MediaFileInfo media)
+    {
+        try
+        {
+            var entry = new ProbeCacheEntry(
+                media.Duration,
+                info.Length,
+                info.LastWriteTimeUtc.Ticks,
+                media.Width,
+                media.Height,
+                media.Fps,
+                media.CaptureBackend,
+                media.Tracks);
+            File.WriteAllText(GetProbeCachePath(filePath), JsonSerializer.Serialize(entry));
+        }
+        catch
+        {
+            // Probe cache is a pure speedup - losing an entry just means the next load re-probes.
+        }
+    }
+
+    private string GetProbeCachePath(string filePath)
+    {
+        return Path.Combine(_cacheFolder, $"{CacheKey(filePath)}-probe.json");
     }
 
     // onPartial (optional) fires on a background thread after each decoded
@@ -661,6 +747,16 @@ public sealed record MediaFileInfo(
     string CaptureBackend = "");
 
 public sealed record MediaTrackInfo(int Index, string Type, string Codec, string Label, double VolumePercent = 100);
+
+internal sealed record ProbeCacheEntry(
+    TimeSpan Duration,
+    long SizeBytes,
+    long LastWriteTimeUtcTicks,
+    int Width,
+    int Height,
+    double Fps,
+    string CaptureBackend,
+    IReadOnlyList<MediaTrackInfo> Tracks);
 
 public sealed record MediaDurationProbeResult(TimeSpan Duration, string Error);
 
