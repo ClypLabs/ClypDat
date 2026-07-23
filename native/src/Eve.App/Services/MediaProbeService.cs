@@ -15,10 +15,15 @@ public sealed class MediaProbeService
 
     public MediaProbeService()
     {
+        // Named "thumbnails" originally, back when that's all it held - now
+        // also holds waveform peaks and probed metadata (duration/tracks/
+        // resolution), so "media-cache" is the honest name going forward.
+        // Old "thumbnails" folders from prior versions are just left behind;
+        // it's disposable cache data, not worth a migration.
         _cacheFolder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "EVE",
-            "thumbnails");
+            "media-cache");
         Directory.CreateDirectory(_cacheFolder);
         Task.Run(PruneStaleCache);
     }
