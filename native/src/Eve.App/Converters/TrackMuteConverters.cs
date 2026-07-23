@@ -54,3 +54,20 @@ public sealed class BoolToOpacityConverter : IValueConverter
 
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotSupportedException();
 }
+
+// Used instead of IsVisible for controls inside a HorizontalAlignment="Center"
+// StackPanel (the fullscreen playbar) - IsVisible=False COLLAPSES the
+// element's layout space, which changes the StackPanel's total measured
+// width and re-centers the whole row, shifting every other control in it
+// (transport buttons, Exit button) whenever the reset button's visibility
+// flips. Opacity keeps the layout slot reserved either way, so nothing else
+// in the row ever moves.
+public sealed class BoolToVisibleOpacityConverter : IValueConverter
+{
+    public static readonly BoolToVisibleOpacityConverter Instance = new();
+
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is true ? 1.0 : 0.0;
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotSupportedException();
+}

@@ -1762,12 +1762,19 @@
                          Width="30"
                          Margin="0,2,0,0"
                          VerticalAlignment="Center" />
+              <!-- Opacity, not IsVisible - this sits inside a
+                   HorizontalAlignment="Center" StackPanel, so collapsing its
+                   layout space on hide would re-center the whole row and
+                   shift every button in it (Restart through Exit). Opacity
+                   keeps its slot reserved either way, so only its own
+                   visibility changes, not anyone else's position. -->
               <Button Classes="linkButton"
                       Content="Reset"
                       FontSize="10"
                       Padding="6,1"
                       VerticalAlignment="Center"
-                      IsVisible="{Binding IsMasterVolumeNonDefault}"
+                      Opacity="{Binding IsMasterVolumeNonDefault, Converter={x:Static opconv:BoolToVisibleOpacityConverter.Instance}}"
+                      IsHitTestVisible="{Binding IsMasterVolumeNonDefault}"
                       Click="MasterVolumeReset_OnClick"
                       ToolTip.Tip="Reset to 100%" />
               <Border Width="1" Height="20" Background="#26FFFFFF" Margin="4,0" />
