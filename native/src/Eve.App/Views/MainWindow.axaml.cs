@@ -3002,32 +3002,49 @@ public sealed partial class MainWindow : Window
         return window;
     }
 
+    // Opens a file's containing folder with it pre-selected, or opens a
+    // folder directly. Explorer's own launch (ShellExecuteEx under the hood,
+    // via UseShellExecute) can block for real time - shell extensions, icon
+    // overlay providers, AV scanning the target, a cold Explorer process
+    // with no window yet open - so this always runs off the UI thread;
+    // there's no follow-up state to update once Explorer's asked to open.
     private static void OpenInExplorer(string path, bool selectFile)
     {
-        // Process.Start with UseShellExecute=true goes through ShellExecuteEx,
-        // which can genuinely block for real time (shell extension/icon
-        // overlay enumeration, AV scanning the target, a cold Explorer
-        // launch with no window already open) - called synchronously on the
-        // UI thread this froze the whole app for however long that took.
-        // Fire-and-forget on a background thread instead; there's no
-        // follow-up state to update once Explorer's asked to open.
-        Task.Run(() =>
-        {
-            try
-            {
-                var info = new ProcessStartInfo("explorer.exe")
-                {
-                    UseShellExecute = true,
-                    Arguments = selectFile ? $"/select,\"{path}\"" : $"\"{path}\""
-                };
+        if (string.IsNullOrWhiteSpace(path)) return;
 
-                Process.Start(info);
-            }
-            catch
+        Task.Run(() => LaunchExplorer(path, selectFile));
+    }
+
+    private static void LaunchExplorer(string path, bool selectFile)
+    {
+        try
+        {
+            var target = selectFile
+                ? Directory.GetParent(path)?.FullName ?? path
+                : path;
+
+            if (selectFile && File.Exists(path))
             {
-                // Explorer links are convenience-only.
+                Process.Start(new ProcessStartInfo("explorer.exe")
+                {
+                    ArgumentList = { "/select,", path },
+                    UseShellExecute = true
+                });
+                return;
             }
-        });
+
+            if (!Directory.Exists(target)) return;
+
+            Process.Start(new ProcessStartInfo("explorer.exe")
+            {
+                ArgumentList = { target },
+                UseShellExecute = true
+            });
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Failed to open Explorer for '{path}'", error);
+        }
     }
 
     private static bool IsTypingInTextInput(object? source)
