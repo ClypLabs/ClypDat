@@ -409,38 +409,75 @@ public sealed class MediaProbeService
             ? Math.Min(3, duration.TotalSeconds / 3)
             : 0;
 
-        var result = await RunProcessAsync("ffmpeg", new[]
+        // Recordings made before the "skip recording black frames" capture
+        // fix (NativeReplayBuffer.CaptureLoop) can still have a real black
+        // stretch baked into the file's opening - sometimes MINUTES, if the
+        // user alt-tabbed away right after the game was detected and didn't
+        // switch back for a while (one real Full Session measured black for
+        // the first ~260s of an ~524s recording). New recordings never hit
+        // this. Fractions of the clip's own duration (not fixed offsets, which
+        // could never reach far enough into a long clip's black stretch) keep
+        // this scaling to any length, and each is still just one cheap
+        // single-frame grab - not the full blackdetect scan that used to live
+        // here and was the main network-drive slowdown.
+        var candidateSeeks = new List<double> { seek };
+        foreach (var fraction in new[] { 0.10, 0.25, 0.50, 0.75 })
         {
-            "-y",
-            "-ss", seek.ToString("0.###"),
-            "-i", filePath,
-            "-frames:v", "1",
-            // -2, not -1: -1 preserves aspect exactly, which can produce an
-            // ODD height (e.g. ultrawide 3440x1440 -> 960x403), and the JPEG
-            // encoder's 4:2:0 output needs even dimensions - ffmpeg then fails
-            // and the clip silently never got a thumbnail. -2 preserves aspect
-            // rounded to the nearest even value. 1080p sources never hit this
-            // (960x540), which is why it looked resolution-dependent.
-            "-vf", "scale=960:-2",
-            "-q:v", "4",
-            output
-        });
+            var candidate = duration.TotalSeconds * fraction;
+            if (candidate > seek + 0.5 && candidate < duration.TotalSeconds - 0.5) candidateSeeks.Add(candidate);
+        }
 
-        if (result.ExitCode != 0 || !File.Exists(output))
+        var result = new ProcessResult(-1, string.Empty, string.Empty);
+        for (var attempt = 0; attempt < candidateSeeks.Count; attempt++)
+        {
+            result = await RunProcessAsync("ffmpeg", new[]
+            {
+                "-y",
+                "-ss", candidateSeeks[attempt].ToString("0.###"),
+                "-i", filePath,
+                "-frames:v", "1",
+                // blackframe passes the frame through unchanged, only logs to
+                // stderr when it's >=98% black - lets one ffmpeg call both
+                // grab AND check the frame instead of a separate scan pass.
+                // -2, not -1: -1 preserves aspect exactly, which can produce
+                // an ODD height (e.g. ultrawide 3440x1440 -> 960x403), and
+                // the JPEG encoder's 4:2:0 output needs even dimensions -
+                // ffmpeg then fails and the clip silently never got a
+                // thumbnail. -2 preserves aspect rounded to the nearest even
+                // value. 1080p sources never hit this (960x540), which is
+                // why it looked resolution-dependent.
+                "-vf", "blackframe=98:32,scale=960:-2",
+                "-q:v", "4",
+                output
+            });
+
+            if (result.ExitCode != 0 || !File.Exists(output)) continue;
+
+            var isBlack = System.Text.RegularExpressions.Regex.IsMatch(result.Error, @"blackframe.*pblack:");
+            if (!isBlack) return output;
+        }
+
+        // Every candidate came back black (or ffmpeg failed outright) -
+        // either a genuinely all-black clip or a real failure. The last
+        // attempt's output (if any) is still the best available guess.
+        if (!File.Exists(output))
         {
             AppLog.Error($"Thumbnail generation failed for {filePath}: {(string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg failed" : result.Error.Trim())}");
             return string.Empty;
         }
 
+        AppLog.Info($"Thumbnail seek: every candidate frame looked black, keeping the last one: path={filePath}.");
         return output;
     }
 
     private string GetThumbnailPath(string filePath)
     {
-        // -v2: cache-key suffix bump so thumbnails generated before the
-        // black-frame-avoidance logic regenerate; the old entries age out via
-        // the 30-day prune.
-        return Path.Combine(_cacheFolder, $"{CacheKey(filePath)}-v2.jpg");
+        // -v3: cache-key suffix bump so thumbnails generated before the
+        // blackframe-retry fallback (EnsureThumbnailAsync) regenerate - a
+        // clip whose fixed 3s seek landed on real black got that baked into
+        // its cached jpg permanently otherwise. Old entries age out via the
+        // 30-day prune.
+        return Path.Combine(_cacheFolder, $"{CacheKey(filePath)}-v3.jpg");
     }
 
     private string GetWaveformPath(string filePath)
