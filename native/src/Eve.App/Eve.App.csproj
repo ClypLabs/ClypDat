@@ -23,6 +23,13 @@
          affects `dotnet publish` output, not the plain `dotnet build` used
          to verify compilation. -->
     <PublishReadyToRun>true</PublishReadyToRun>
+    <!-- Lets SetSourceRevisionId below (which sets $(SourceRevisionId), not
+         SourceLink) fold a "+<short-hash>" onto AssemblyInformationalVersion
+         without touching <Version>/AssemblyVersion - the About screen reads
+         the informational version to show which exact commit a locally
+         published build came from; AppUpdateService's update check still
+         reads the plain numeric AssemblyVersion, unaffected either way. -->
+    <IncludeSourceRevisionInInformationalVersion>true</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -51,6 +58,20 @@
     <AvaloniaResource Include="..\..\..\assets\eve-icon.ico" Link="Assets\eve-icon.ico" />
     <AvaloniaResource Include="..\..\..\assets\cs2-cover.jpg" Link="Assets\cs2-cover.jpg" />
   </ItemGroup>
+
+  <!-- git rev-parse failing (no git on PATH, source distributed without
+       .git) just leaves SourceRevisionId unset - InformationalVersion falls
+       back to the plain "0.1.7" with no "+hash" suffix, so this degrades
+       gracefully rather than breaking the build. -->
+  <Target Name="SetSourceRevisionId" BeforeTargets="GetAssemblyVersion;GenerateAssemblyInfo">
+    <Exec Command="git rev-parse --short HEAD" ConsoleToMSBuild="true" IgnoreExitCode="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="GitCommitHash" />
+      <Output TaskParameter="ExitCode" PropertyName="GitRevParseExitCode" />
+    </Exec>
+    <PropertyGroup Condition="'$(GitRevParseExitCode)' == '0' And '$(GitCommitHash)' != ''">
+      <SourceRevisionId>$(GitCommitHash)</SourceRevisionId>
+    </PropertyGroup>
+  </Target>
 
   <Target Name="CopyLibVlcRuntimeToPublish" AfterTargets="Publish">
     <ItemGroup>

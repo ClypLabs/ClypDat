@@ -1089,7 +1089,19 @@
                   <StackPanel Spacing="3" VerticalAlignment="Center">
                     <TextBlock Text="EVE" Foreground="#EDF4FB" FontWeight="Bold" FontSize="20" />
                     <TextBlock Text="A clip recorder and editor, made to be fast and to stay out of your way." Foreground="#8EA1B6" FontSize="12" TextWrapping="Wrap" />
-                    <TextBlock Text="{Binding AppVersionDisplay}" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" Margin="0,4,0,0" />
+                    <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,4,0,0">
+                      <TextBlock Text="{Binding AppVersionDisplay}" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
+                      <TextBlock Text="{Binding AppCommitDisplay}"
+                                 ToolTip.Tip="View this build's commit on GitHub"
+                                 Foreground="#75B8F0"
+                                 FontSize="12"
+                                 FontWeight="Bold"
+                                 TextDecorations="Underline"
+                                 Cursor="Hand"
+                                 IsVisible="{Binding HasAppCommit}"
+                                 Tag="{Binding AppCommitUrl}"
+                                 PointerPressed="LicenseLinkText_OnPointerPressed" />
+                    </StackPanel>
                   </StackPanel>
                 </StackPanel>
               </Border>

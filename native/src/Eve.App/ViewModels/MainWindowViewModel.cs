@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Reflection;
 using System.Security.Cryptography;
 using Avalonia.Threading;
 using Eve.App.Services;
@@ -566,6 +567,31 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return $"v{version.Major}.{version.Minor}.{version.Build}";
         }
     }
+
+    // Eve.App.csproj's SetSourceRevisionId target folds "+<short-hash>" onto
+    // AssemblyInformationalVersion at build time (e.g. "0.1.7+a1b2c3d") - a
+    // completely separate attribute from AssemblyVersion, which is what
+    // AppVersionDisplay/AppUpdateService's update check both read instead,
+    // so showing this here doesn't affect update-check behavior at all.
+    // Empty whenever git wasn't available at build time (source distributed
+    // without .git, git missing from PATH) - the target just leaves the
+    // informational version at its plain, hash-less default then.
+    private static readonly string CommitHash = ResolveCommitHash();
+
+    private static string ResolveCommitHash()
+    {
+        var informational = Assembly.GetEntryAssembly()?
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion;
+        if (string.IsNullOrWhiteSpace(informational)) return string.Empty;
+
+        var plusIndex = informational.IndexOf('+');
+        return plusIndex >= 0 && plusIndex + 1 < informational.Length ? informational[(plusIndex + 1)..] : string.Empty;
+    }
+
+    public bool HasAppCommit => CommitHash.Length > 0;
+    public string AppCommitDisplay => $"({CommitHash})";
+    public string AppCommitUrl => $"https://github.com/Stormanzanii/EVE/commit/{CommitHash}";
 
     public string SelectedSettingsSection
     {
