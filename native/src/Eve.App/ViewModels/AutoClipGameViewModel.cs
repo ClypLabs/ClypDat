@@ -54,7 +54,16 @@ public sealed class AutoClipGroupViewModel : ViewModelBase
         get { var count = _definitions.Count(item => _settings.Events.TryGetValue(item.Id, out var enabled) && enabled); return count == 0 ? false : count == _definitions.Count ? true : null; }
         set { var enabled = value == true; foreach (var item in _definitions) _settings.Events[item.Id] = enabled; Refresh(); _changed(); }
     }
-    public void Refresh() { OnPropertyChanged(nameof(IsChecked)); foreach (var item in Events) item.Refresh(); }
+    public bool IsAllEnabled => IsChecked == true;
+    public bool IsIndeterminate => IsChecked is null;
+    public void Toggle() => IsChecked = IsChecked != true;
+    public void Refresh()
+    {
+        OnPropertyChanged(nameof(IsChecked));
+        OnPropertyChanged(nameof(IsAllEnabled));
+        OnPropertyChanged(nameof(IsIndeterminate));
+        foreach (var item in Events) item.Refresh();
+    }
 }
 
 public sealed class AutoClipEventViewModel : ViewModelBase

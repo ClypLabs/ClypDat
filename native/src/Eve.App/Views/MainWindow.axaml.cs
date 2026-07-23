@@ -1342,6 +1342,11 @@ public sealed partial class MainWindow : Window
         if (ViewModel.FindAutoClipGame("dota2") is { } game) game.StatusText = status;
     }
 
+    private void AutoClipGroupToggleButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: AutoClipGroupViewModel group }) group.Toggle();
+    }
+
     private async void CheckUpdatesButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || _updateDialogOpen) return;
