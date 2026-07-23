@@ -14,6 +14,8 @@ public static class GameCatalog
         ["FortniteClient-Win64-Shipping_EAC.exe"] = "Fortnite",
         ["FortniteClient-Win64-Shipping_EAC_EOS.exe"] = "Fortnite",
         ["cs2.exe"] = "Counter-Strike 2",
+        ["dota2.exe"] = "Dota 2",
+        ["League of Legends.exe"] = "League of Legends",
         ["Marvel-Win64-Shipping.exe"] = "Marvel Rivals",
         ["Among Us.exe"] = "Among Us",
         ["Back4Blood.exe"] = "Back 4 Blood",

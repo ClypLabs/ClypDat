@@ -11,7 +11,7 @@ public sealed record Cs2AutoClipRequest(string Title, DateTime StartUtc, DateTim
 public sealed class Cs2GsiListener : IDisposable
 {
     private static readonly TimeSpan EventPadding = TimeSpan.FromSeconds(4);
-    private readonly Func<Cs2AutoClipSettings> _settingsProvider;
+    private readonly Func<AutoClipGameSettings> _settingsProvider;
     private readonly object _stateLock = new();
     private HttpListener? _listener;
     private CancellationTokenSource? _cts;
@@ -31,7 +31,7 @@ public sealed class Cs2GsiListener : IDisposable
 
     public bool IsListening => _listener?.IsListening == true;
 
-    public Cs2GsiListener(Func<Cs2AutoClipSettings> settingsProvider) => _settingsProvider = settingsProvider;
+    public Cs2GsiListener(Func<AutoClipGameSettings> settingsProvider) => _settingsProvider = settingsProvider;
 
     public bool Start(int port)
     {
@@ -188,7 +188,7 @@ public sealed class Cs2GsiListener : IDisposable
                 }
             }
 
-            if (roundKillHs is { } currentHeadshots && currentHeadshots > _lastRoundKillHs && settings.Headshot)
+            if (roundKillHs is { } currentHeadshots && currentHeadshots > _lastRoundKillHs && IsEnabled(settings, "headshot"))
             {
                 _lastRelevantEventUtc = now;
                 if (_pendingLabel is null)
@@ -201,10 +201,10 @@ public sealed class Cs2GsiListener : IDisposable
             {
                 _lastRelevantEventUtc = now;
                 if (_pendingLabel is not null) FinalizePendingLocked(now);
-                else if (settings.Death) FireStandaloneLocked("Death", now);
+                else if (IsEnabled(settings, "death")) FireStandaloneLocked("Death", now);
             }
 
-            if (assists is { } currentAssists && currentAssists > _lastMatchAssists && settings.Assist)
+            if (assists is { } currentAssists && currentAssists > _lastMatchAssists && IsEnabled(settings, "assist"))
             {
                 _lastRelevantEventUtc = now;
                 if (_pendingLabel is null) FireStandaloneLocked("Assist", now);
@@ -247,15 +247,17 @@ public sealed class Cs2GsiListener : IDisposable
         _pendingLabel = null;
     }
 
-    private static string? LabelForKill(int killNumber, Cs2AutoClipSettings settings) => killNumber switch
+    private static string? LabelForKill(int killNumber, AutoClipGameSettings settings) => killNumber switch
     {
-        1 when settings.Kill => "Kill",
-        2 when settings.TwoKill => "2K",
-        3 when settings.ThreeKill => "3K",
-        4 when settings.FourKill => "4K",
-        >= 5 when settings.Ace => "Ace",
+        1 when IsEnabled(settings, "kill") => "Kill",
+        2 when IsEnabled(settings, "2k") => "2K",
+        3 when IsEnabled(settings, "3k") => "3K",
+        4 when IsEnabled(settings, "4k") => "4K",
+        >= 5 when IsEnabled(settings, "ace") => "Ace",
         _ => null
     };
+
+    private static bool IsEnabled(AutoClipGameSettings settings, string id) => settings.Events.TryGetValue(id, out var enabled) && enabled;
 
     private string BuildTitle(string label)
     {

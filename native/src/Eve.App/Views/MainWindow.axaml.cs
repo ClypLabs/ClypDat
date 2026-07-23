@@ -21,6 +21,8 @@ public sealed partial class MainWindow : Window
     private readonly DispatcherTimer _gameDetectionTimer;
     private readonly ForegroundGameDetector _gameDetector = new();
     private Cs2GsiListener? _cs2GsiListener;
+    private DotaGsiListener? _dotaGsiListener;
+    private LeagueAutoClipListener? _leagueAutoClipListener;
     private PlaybackSession? _playback;
     private CancellationTokenSource? _playbackStartCts;
     private CancellationTokenSource? _editorSeekCts;
@@ -86,11 +88,18 @@ public sealed partial class MainWindow : Window
                 };
                 ViewModel.PropertyChanged += (_, e) =>
                 {
-                    if (e.PropertyName == nameof(MainWindowViewModel.Cs2AutoClipEnabled)) UpdateCs2AutoClipState();
+                    if (e.PropertyName == nameof(MainWindowViewModel.AutoClippingEnabled)) UpdateAutoClipStates();
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
                 };
-                UpdateCs2AutoClipState();
+                foreach (var autoClipGame in ViewModel.AutoClipGames)
+                {
+                    autoClipGame.PropertyChanged += (_, e) =>
+                    {
+                        if (e.PropertyName == nameof(AutoClipGameViewModel.IsEnabled)) UpdateAutoClipStates();
+                    };
+                }
+                UpdateAutoClipStates();
             }
         };
         // Tunnel, not bubble - a focused Button (Export, a transport button,
@@ -130,6 +139,8 @@ public sealed partial class MainWindow : Window
         {
             _globalHotkey?.Dispose();
             _cs2GsiListener?.Dispose();
+            _dotaGsiListener?.Dispose();
+            _leagueAutoClipListener?.Dispose();
             _gameDetectionTimer.Stop();
             if (_replayBuffer is not null) _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
             _replayBuffer?.Dispose();
@@ -457,7 +468,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async Task SaveReplayClipAsync(string? autoClipLabel = null, ReplayClipWindow? clipWindow = null)
+    private async Task SaveReplayClipAsync(string? autoClipLabel = null, ReplayClipWindow? clipWindow = null, string? autoClipGameName = null)
     {
         var isAutoClip = autoClipLabel is not null;
         // A replay save (segment hydrate/mux) can take 20-30+ seconds. Manual clip
@@ -523,7 +534,7 @@ public sealed partial class MainWindow : Window
                 // (not the map) is what belongs next to it as the game label.
                 var autoClipEventType = autoClipLabel?.Split(" - ", 2)[0];
                 ClipInfoSidecar.Save(ViewModel.Settings.LibraryFolder, outputPath, new ClipInfo(
-                    ViewModel.ActiveGameDetection.DisplayName,
+                    autoClipGameName ?? ViewModel.ActiveGameDetection.DisplayName,
                     autoClipEventType,
                     autoClipLabel ?? ViewModel.ActiveGameDetection.DisplayName,
                     File.GetCreationTimeUtc(outputPath)));
@@ -1194,11 +1205,21 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void UpdateAutoClipStates()
+    {
+        if (ViewModel is null) return;
+        UpdateCs2AutoClipState();
+        UpdateDotaAutoClipState();
+        UpdateLeagueAutoClipState();
+    }
+
     private void UpdateCs2AutoClipState()
     {
         if (ViewModel is null) return;
+        var game = ViewModel.FindAutoClipGame("cs2");
+        if (game is null) return;
 
-        if (!ViewModel.Settings.Cs2AutoClip.Enabled)
+        if (!ViewModel.AutoClippingEnabled || !game.IsEnabled)
         {
             if (_cs2GsiListener is not null)
             {
@@ -1207,24 +1228,57 @@ public sealed partial class MainWindow : Window
                 _cs2GsiListener.Stop();
             }
 
-            ViewModel.Cs2GsiStatusText = string.Empty;
+            game.StatusText = "Disabled";
             return;
         }
 
-        _cs2GsiListener ??= new Cs2GsiListener(() => ViewModel.Settings.Cs2AutoClip);
+        _cs2GsiListener ??= new Cs2GsiListener(() => ViewModel.Settings.AutoClipping.Games["cs2"]);
         if (_cs2GsiListener.IsListening) return;
 
-        var port = ViewModel.Settings.Cs2AutoClip.GsiPort;
+        var port = ViewModel.Settings.AutoClipping.Games["cs2"].ListenerPort;
         if (!_cs2GsiListener.Start(port))
         {
-            ViewModel.Cs2GsiStatusText = $"Auto-clip listener couldn't start on port {port} - it may already be in use. Check the log.";
+            game.StatusText = $"Listener couldn't start on port {port} - it may already be in use.";
             return;
         }
 
         _cs2GsiListener.AutoClipPending += Cs2GsiListener_OnAutoClipPending;
         _cs2GsiListener.AutoClipReady += Cs2GsiListener_OnAutoClipReady;
         Cs2GsiDeployer.TryDeploy(port, out var statusMessage);
-        ViewModel.Cs2GsiStatusText = statusMessage;
+        game.StatusText = statusMessage;
+    }
+
+    private void UpdateDotaAutoClipState()
+    {
+        if (ViewModel is null) return;
+        var game = ViewModel.FindAutoClipGame("dota2"); if (game is null) return;
+        if (!ViewModel.AutoClippingEnabled || !game.IsEnabled)
+        {
+            if (_dotaGsiListener is not null) { _dotaGsiListener.AutoClipPending -= AutoClip_OnPending; _dotaGsiListener.AutoClipReady -= AutoClip_OnReady; _dotaGsiListener.Stop(); }
+            game.StatusText = "Disabled"; return;
+        }
+        _dotaGsiListener ??= new DotaGsiListener(() => ViewModel.Settings.AutoClipping.Games["dota2"]);
+        if (!_dotaGsiListener.IsListening)
+        {
+            var port = ViewModel.Settings.AutoClipping.Games["dota2"].ListenerPort;
+            if (!_dotaGsiListener.Start(port)) { game.StatusText = $"Listener couldn't start on port {port}."; return; }
+            _dotaGsiListener.AutoClipPending += AutoClip_OnPending; _dotaGsiListener.AutoClipReady += AutoClip_OnReady;
+        }
+        DotaGsiDeployer.TryDeploy(ViewModel.Settings.AutoClipping.Games["dota2"].ListenerPort, out var status); game.StatusText = status;
+    }
+
+    private void UpdateLeagueAutoClipState()
+    {
+        if (ViewModel is null) return;
+        var game = ViewModel.FindAutoClipGame("league"); if (game is null) return;
+        if (!ViewModel.AutoClippingEnabled || !game.IsEnabled)
+        {
+            _leagueAutoClipListener?.Stop(); game.StatusText = "Disabled"; return;
+        }
+        _leagueAutoClipListener ??= new LeagueAutoClipListener(() => ViewModel.Settings.AutoClipping.Games["league"]);
+        _leagueAutoClipListener.AutoClipPending -= AutoClip_OnPending; _leagueAutoClipListener.AutoClipReady -= AutoClip_OnReady;
+        _leagueAutoClipListener.AutoClipPending += AutoClip_OnPending; _leagueAutoClipListener.AutoClipReady += AutoClip_OnReady;
+        _leagueAutoClipListener.Start(); game.StatusText = "Waiting for a live League match";
     }
 
     private void Cs2GsiListener_OnAutoClipPending(object? sender, string message)
@@ -1234,9 +1288,27 @@ public sealed partial class MainWindow : Window
 
     private void Cs2GsiListener_OnAutoClipReady(object? sender, Cs2AutoClipRequest request)
     {
-        Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(
-            request.Title,
-            new ReplayClipWindow(request.StartUtc, request.EndUtc)));
+        AutoClip_OnReady(sender, new AutoClipRequest("cs2", "Counter-Strike 2", request.Title, request.Title, request.StartUtc, request.EndUtc));
+    }
+
+    private void AutoClip_OnPending(object? sender, string message) => Dispatcher.UIThread.Post(() => ShowClipNotification(message, playSound: false));
+
+    private void AutoClip_OnReady(object? sender, AutoClipRequest request)
+    {
+        Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(request.Title, new ReplayClipWindow(request.StartUtc, request.EndUtc), request.GameName));
+    }
+
+    private void ToggleAutoClipCardButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: AutoClipGameViewModel game }) { game.IsExpanded = !game.IsExpanded; UpdateAutoClipStates(); }
+    }
+
+    private void SetupDotaAutoClipButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        var port = ViewModel.Settings.AutoClipping.Games["dota2"].ListenerPort;
+        DotaGsiDeployer.TryDeploy(port, out var status);
+        if (ViewModel.FindAutoClipGame("dota2") is { } game) game.StatusText = status;
     }
 
     private async void CheckUpdatesButton_OnClick(object? sender, RoutedEventArgs e)
