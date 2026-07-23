@@ -348,17 +348,19 @@
                                      CharacterEllipsis trim it (an Auto column
                                      measures its child at its full desired
                                      size, ignoring TextTrimming, unless
-                                     something caps it), sized to the smallest
-                                     card (CardWidth floor is 220) so a trimmed
-                                     title plus the pencil never overflows even
-                                     the narrowest card. -->
+                                     something caps it). Bound to CardWidth
+                                     minus the card's own side padding and the
+                                     pencil's own footprint, so it scales with
+                                     the actual card instead of a flat guess
+                                     that either trims too eagerly on wide
+                                     cards or overflows on narrow ones. -->
                                 <Grid ColumnDefinitions="Auto,Auto,*">
                                   <TextBlock Grid.Column="0"
                                              Text="{Binding TileMainLabel}"
                                              Foreground="#EDF4FB"
                                              FontSize="15"
                                              FontWeight="Bold"
-                                             MaxWidth="150"
+                                             MaxWidth="{Binding $parent[Window].DataContext.CardWidth, Converter={x:Static opconv:SubtractDoubleConverter.Instance}, ConverterParameter=64}"
                                              TextTrimming="CharacterEllipsis" />
                                   <Button Grid.Column="1"
                                           Classes="linkButton"
