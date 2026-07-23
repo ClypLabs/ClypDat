@@ -1,5 +1,6 @@
 <Styles xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:sys="using:System">
   <Styles.Resources>
     <!--
       Style Selector="ScrollBar" with a Template setter kept losing to
@@ -78,23 +79,23 @@
   <!-- Volume mute toggle (per-track lanes AND the master volume controls) -
        a plain Border (not Button) so it never inherits Fluent's press-scale
        animation, which made it visibly shrink/jump on click. Always shows a
-       visible background/border box (not just on hover) so it reads as a
-       clickable button on sight - a plain icon with no box, only reacting on
-       hover, gave no visual hint it was interactive at all. -->
+       visible background box (not just on hover) so it reads as a clickable
+       button on sight - a plain icon with no box, only reacting on hover,
+       gave no visual hint it was interactive at all. Square (CornerRadius 6),
+       same background/shape language as Button.transportButton/.playButton
+       right next to it in both playbars, not a circle - reads as part of the
+       same button row instead of a mismatched shape. -->
   <Style Selector="Border.muteToggle">
-    <Setter Property="Background" Value="#1B242D" />
-    <Setter Property="BorderBrush" Value="#2C3B48" />
-    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Background" Value="#24313C" />
+    <Setter Property="CornerRadius" Value="6" />
     <Setter Property="Transitions">
       <Transitions>
         <BrushTransition Property="Background" Duration="0:0:0.1" />
-        <BrushTransition Property="BorderBrush" Duration="0:0:0.1" />
       </Transitions>
     </Setter>
   </Style>
   <Style Selector="Border.muteToggle:pointerover">
-    <Setter Property="Background" Value="#26323E" />
-    <Setter Property="BorderBrush" Value="#3E5064" />
+    <Setter Property="Background" Value="#2E3F4E" />
   </Style>
 
   <Style Selector="Button.deleteButton">
@@ -556,8 +557,27 @@
   </Style>
   <!-- Shared by every volume slider - per-track lanes AND both master
        volume controls (regular editor + fullscreen) - so all three look and
-       feel identical. Perfectly round (Width=Height, CornerRadius=half),
-       not the taller pill shape this used before. -->
+       feel identical.
+
+       Foreground/Background here aren't cosmetic no-ops - Fluent's Slider
+       template binds PART_DecreaseButton (the filled/value portion of the
+       rail) to the Slider's own Foreground, and PART_IncreaseButton (the
+       unfilled remainder) to Background. Setting them is the supported way
+       to recolor the rail without reimplementing Fluent's template.
+
+       SliderTrackThemeHeight is the DynamicResource Fluent's rail Border
+       reads its Height from - scoped to just this class via Style.Resources
+       (not overridden app-wide) so the plain Sliders elsewhere (noise
+       suppression, audio sync offset) keep Fluent's default thin rail. Bumped
+       from Fluent's default (~4px) to make the whole slider a visibly larger,
+       easier target to click, not just a thicker line. -->
+  <Style Selector="Slider.volumeSlider">
+    <Style.Resources>
+      <sys:Double x:Key="SliderTrackThemeHeight">6</sys:Double>
+    </Style.Resources>
+    <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+    <Setter Property="Background" Value="#26313C" />
+  </Style>
   <Style Selector="Slider.volumeSlider /template/ Thumb">
     <Setter Property="Width" Value="16" />
     <Setter Property="Height" Value="16" />

@@ -42,8 +42,14 @@ public sealed class TrackLaneViewModel : ViewModelBase
             OnPropertyChanged(nameof(VolumeLabel));
             OnPropertyChanged(nameof(VolumeBadgeMargin));
             OnPropertyChanged(nameof(EffectiveVolumePercent));
+            OnPropertyChanged(nameof(IsVolumeNonDefault));
         }
     }
+
+    // Drives the per-track reset button (MainWindow.axaml) - only shown once
+    // a track has actually been moved off its 100% default, so the row
+    // doesn't show a reset affordance for every track all the time.
+    public bool IsVolumeNonDefault => Math.Abs(VolumePercent - 100) > 0.01;
 
     public bool ShowVolumePercent
     {

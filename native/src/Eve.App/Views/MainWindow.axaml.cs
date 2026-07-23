@@ -1564,6 +1564,14 @@ public sealed partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private void TrackVolumeReset_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Control { DataContext: TrackLaneViewModel track }) return;
+        track.VolumePercent = 100;
+        _playback?.SetTrackVolume(track.StreamIndex, track.EffectiveVolumePercent);
+        ViewModel?.SaveSelectedClipEditState();
+    }
+
     private static void UpdateVolumeBadgePosition(Slider slider, TrackLaneViewModel track, double? pointerX = null)
     {
         var width = Math.Max(1, slider.Bounds.Width);

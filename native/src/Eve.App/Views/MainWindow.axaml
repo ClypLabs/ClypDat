@@ -1282,7 +1282,6 @@
               <Border Classes="muteToggle"
                       Width="26"
                       Height="26"
-                      CornerRadius="13"
                       HorizontalAlignment="Center"
                       VerticalAlignment="Center"
                       PointerPressed="MasterVolumeMuteToggle_OnPointerPressed"
@@ -1300,8 +1299,12 @@
                       Width="90"
                       VerticalAlignment="Center"
                       Value="{Binding MasterVolumePercent, Mode=TwoWay}"
-                      Opacity="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToOpacityConverter.Instance}}"
-                      ToolTip.Tip="{Binding MasterVolumePercent}" />
+                      Opacity="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToOpacityConverter.Instance}}" />
+              <TextBlock Text="{Binding MasterVolumePercent, StringFormat={}{0:0}%}"
+                         Foreground="#93A6B8"
+                         FontSize="11"
+                         Width="30"
+                         VerticalAlignment="Center" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="7">
               <Button Classes="transportButton" Click="RestartButton_OnClick">
@@ -1367,18 +1370,33 @@
                             BorderThickness="1"
                             CornerRadius="8"
                             ClipToBounds="False">
-                      <Grid Margin="8,5" RowDefinitions="Auto,36" ColumnDefinitions="18,*">
-                        <TextBlock Grid.ColumnSpan="2"
-                                   Text="{Binding Label}"
-                                   Foreground="#D4E0EA"
-                                   FontSize="11"
-                                   Margin="0,3,0,0"
-                                   TextTrimming="CharacterEllipsis" />
+                      <Grid Margin="8,5" RowDefinitions="Auto,36" ColumnDefinitions="18,10,*">
+                        <Grid Grid.ColumnSpan="3" ColumnDefinitions="*,Auto">
+                          <TextBlock Text="{Binding Label}"
+                                     Foreground="#D4E0EA"
+                                     FontSize="11"
+                                     Margin="0,3,0,0"
+                                     VerticalAlignment="Center"
+                                     TextTrimming="CharacterEllipsis" />
+                          <!-- Only shown once a track has actually been moved off
+                               its 100% default (IsVolumeNonDefault) - a reset
+                               affordance next to every track's label all the
+                               time would just be noise for the common case
+                               (untouched, still at 100%). -->
+                          <Button Grid.Column="1"
+                                  Classes="linkButton"
+                                  Content="Reset"
+                                  FontSize="10"
+                                  Padding="6,1"
+                                  VerticalAlignment="Center"
+                                  IsVisible="{Binding IsVolumeNonDefault}"
+                                  Click="TrackVolumeReset_OnClick"
+                                  ToolTip.Tip="Reset to 100%" />
+                        </Grid>
                         <Border Grid.Row="1"
                                 Classes="muteToggle"
                                 Width="22"
                                 Height="22"
-                                CornerRadius="11"
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
                                 IsVisible="{Binding IsAudio}"
@@ -1393,7 +1411,7 @@
                                     Data="{Binding EffectiveVolumePercent, Converter={x:Static opconv:VolumeLevelToIconConverter.Instance}}" />
                         </Border>
                         <Slider Grid.Row="1"
-                                Grid.Column="1"
+                                Grid.Column="2"
                                 Classes="volumeSlider"
                                 Minimum="0"
                                 Maximum="150"
@@ -1411,7 +1429,7 @@
                                 PointerReleased="TrackVolume_OnPointerReleased"
                                 PropertyChanged="TrackVolume_OnPropertyChanged" />
                         <Border Grid.Row="1"
-                                Grid.Column="1"
+                                Grid.Column="2"
                                 Background="#E8EEF8"
                                 CornerRadius="4"
                                 Padding="5,2"
@@ -1713,7 +1731,6 @@
               <Border Classes="muteToggle"
                       Width="26"
                       Height="26"
-                      CornerRadius="13"
                       HorizontalAlignment="Center"
                       VerticalAlignment="Center"
                       PointerPressed="MasterVolumeMuteToggle_OnPointerPressed"
@@ -1728,8 +1745,12 @@
               </Border>
               <Slider Classes="volumeSlider" Minimum="0" Maximum="150" Width="90" VerticalAlignment="Center"
                       Value="{Binding MasterVolumePercent, Mode=TwoWay}"
-                      Opacity="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToOpacityConverter.Instance}}"
-                      ToolTip.Tip="{Binding MasterVolumePercent}" />
+                      Opacity="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToOpacityConverter.Instance}}" />
+              <TextBlock Text="{Binding MasterVolumePercent, StringFormat={}{0:0}%}"
+                         Foreground="#C8D6E6"
+                         FontSize="11"
+                         Width="30"
+                         VerticalAlignment="Center" />
               <Border Width="1" Height="20" Background="#26FFFFFF" Margin="4,0" />
               <Button Classes="transportButton" Click="ExitVideoFullscreenButton_OnClick" ToolTip.Tip="Exit fullscreen">
                 <PathIcon Width="14" Height="14" Foreground="#C8D6E6" Data="M19,6.41 L17.59,5 L12,10.59 L6.41,5 L5,6.41 L10.59,12 L5,17.59 L6.41,19 L12,13.41 L17.59,19 L19,17.59 L13.41,12 Z" />
