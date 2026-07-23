@@ -580,7 +580,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     // (GPU copy/scale/encode, AcquireNextFrame itself) still
                     // reading normal.
                     var managedMb = GC.GetTotalMemory(false) / (1024 * 1024);
-                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgEncodeMs={encodeMs / n:0.00}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, iterations={iterationsSinceLog}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
+                    // Distinguishes "the video ring buffer itself is what's
+                    // ballooning" from "something else is" (the audio
+                    // capture side - AudioCapturePipeline - runs on its own
+                    // 2s trim timer, completely independent of this loop, and
+                    // is the other obvious candidate for runaway MemoryStream
+                    // growth). If ringBufferMb tracks managedMb closely, the
+                    // problem is in this ring buffer/packet handling; if
+                    // managedMb spikes far above ringBufferMb, it's elsewhere.
+                    long ringBufferBytes;
+                    lock (_bufferLock) ringBufferBytes = _packets.Sum(p => (long)p.Data.Length);
+                    var ringBufferMb = ringBufferBytes / (1024 * 1024);
+                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, ringBufferMb={ringBufferMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgEncodeMs={encodeMs / n:0.00}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, iterations={iterationsSinceLog}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
                     copyMapMs = 0;
                     scaleMs = 0;
                     encodeMs = 0;
