@@ -607,10 +607,20 @@
        (not overridden app-wide) so the plain Sliders elsewhere (noise
        suppression, audio sync offset) keep Fluent's default thin rail. Bumped
        from Fluent's default (~4px) to make the whole slider a visibly larger,
-       easier target to click, not just a thicker line. -->
+       easier target to click, not just a thicker line.
+
+       ControlCornerRadius is ALSO read by that same rail Border (Fluent's
+       PART_DecreaseButton/PART_IncreaseButton each independently round
+       their own segment by this amount, not one continuous track) - left at
+       its app-wide default (~4px) it's nearly the ENTIRE height of our
+       4.5px rail, so each segment rendered as a near-full pill and the two
+       bulged into a warped/pinched shape right where they meet at the
+       thumb instead of a clean straight bar. Scoped down proportionally to
+       the rail height, same as the height override above. -->
   <Style Selector="Slider.volumeSlider">
     <Style.Resources>
       <sys:Double x:Key="SliderTrackThemeHeight">4.5</sys:Double>
+      <CornerRadius x:Key="ControlCornerRadius">2.25</CornerRadius>
     </Style.Resources>
     <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
     <Setter Property="Background" Value="#26313C" />

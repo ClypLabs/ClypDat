@@ -650,6 +650,13 @@
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding ShowRecordingPausedIndicator}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
+                  <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="Scale clips with window size" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
+                      <TextBlock Text="Library cards target a fixed size and more columns fit on a wider window (e.g. ~6 across at 1440p), instead of always 3 columns that just grow or shrink with the window." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding ScaleClipsWithWindow}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                  </Grid>
                 </StackPanel>
               </Border>
 

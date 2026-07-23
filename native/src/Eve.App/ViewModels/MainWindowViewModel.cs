@@ -1426,6 +1426,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public bool ScaleClipsWithWindow
+    {
+        get => Settings.ScaleClipsWithWindow;
+        set
+        {
+            if (Settings.ScaleClipsWithWindow == value) return;
+            Settings.ScaleClipsWithWindow = value;
+            OnPropertyChanged();
+            SaveSettings();
+            // Re-lay the grid immediately against whatever width the window
+            // is already at, rather than waiting for the next resize to
+            // notice the toggle changed.
+            if (_lastCardLayoutWidth > 0) UpdateCardLayout(_lastCardLayoutWidth);
+        }
+    }
+
     private bool _isRecordingPausedAtCurrentTime;
 
     // Driven from MainWindow.axaml.cs's SyncPlaybackPosition against the
@@ -2364,11 +2380,36 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return Task.FromResult(true);
     }
 
+    private double _lastCardLayoutWidth;
+
+    // Target card width for ScaleClipsWithWindow - picked so a maximized
+    // ~2560px-wide (1440p) window lands around 6 columns, per the reference
+    // point this setting was calibrated against.
+    private const double ScaledCardTargetWidth = 400;
+
     public void UpdateCardLayout(double availableWidth)
     {
+        _lastCardLayoutWidth = availableWidth;
         var contentWidth = Math.Max(320, availableWidth - 48);
-        CardColumns = 3;
-        CardWidth = Math.Max(220, Math.Floor((contentWidth - 64) / 3));
+
+        if (Settings.ScaleClipsWithWindow)
+        {
+            // More columns on a wider window instead of the same fixed
+            // count just stretching wider - floor so a partial column never
+            // overflows, clamped to a sane [2, 10] range. 24 matches each
+            // card's own trailing Margin (MainWindow.axaml's WrapPanel item,
+            // Margin="4,4,20,24" - 4 left + 20 right) reserved per column.
+            CardColumns = Math.Clamp((int)Math.Floor(contentWidth / ScaledCardTargetWidth), 2, 10);
+            CardWidth = Math.Max(220, Math.Floor(contentWidth / CardColumns) - 24);
+        }
+        else
+        {
+            // Unchanged from before this setting existed - keep it exact so
+            // ScaleClipsWithWindow being off by default is a true no-op.
+            CardColumns = 3;
+            CardWidth = Math.Max(220, Math.Floor((contentWidth - 64) / 3));
+        }
+
         CardImageHeight = Math.Floor(CardWidth * 9 / 16);
     }
 
@@ -2449,6 +2490,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 importedKeys.Remove(medalImportKey);
             }
 
+            // Suppresses the watcher's own Deleted echo for this path -
+            // reusing the same dictionary/window AddOrUpdateLibraryClipAsync
+            // marks self-adds with, just for the delete side of the same
+            // "don't redundantly react to our own change" pattern.
+            _recentlySelfAddedPaths[clip.Path] = DateTime.UtcNow;
             await FileRetry.RunAsync(() => File.Delete(clip.Path), $"Delete clip {clip.Path}");
             _mediaProbe.DeleteCacheFor(clip.Path);
             ClipEditSidecar.Delete(Settings.LibraryFolder, clip.Path);
@@ -2479,6 +2525,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             PersistMedalImportHistory(importedKeys);
         }
 
+        _recentlySelfAddedPaths[clip.Path] = DateTime.UtcNow;
         await FileRetry.RunAsync(() => File.Delete(clip.Path), $"Delete clip {clip.Path}");
         _mediaProbe.DeleteCacheFor(clip.Path);
         ClipEditSidecar.Delete(Settings.LibraryFolder, clip.Path);
@@ -3570,7 +3617,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
 
         watcher.Created += LibraryWatcher_OnChanged;
-        watcher.Deleted += LibraryWatcher_OnChanged;
+        watcher.Deleted += LibraryWatcher_OnDeleted;
         watcher.Renamed += LibraryWatcher_OnRenamed;
         watcher.Error += LibraryWatcher_OnError;
         _libraryWatcher = watcher;
@@ -3600,6 +3647,49 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (WasRecentlySelfAdded(e.FullPath)) return;
             ScheduleLibraryRefresh();
         });
+    }
+
+    // A file deleted outside EVE (File Explorer, another process) fires the
+    // exact same watcher event a delete triggered from inside EVE does -
+    // WasRecentlySelfAdded below is what tells the two apart (DeleteClipAsync/
+    // DeleteSelectedAsync mark the path first) so an in-app delete's own
+    // already-precise cleanup+card removal isn't duplicated here.
+    private void LibraryWatcher_OnDeleted(object sender, FileSystemEventArgs e)
+    {
+        if (!MediaProbeService.IsVideoFile(e.FullPath)) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (WasRecentlySelfAdded(e.FullPath)) return;
+
+            CleanUpDeletedClipArtifacts(e.FullPath);
+
+            var clip = AllClips.FirstOrDefault(c => string.Equals(c.Path, e.FullPath, StringComparison.OrdinalIgnoreCase));
+            if (clip is not null) RemoveClipFromLibrary(clip);
+            else ScheduleLibraryRefresh();
+        });
+    }
+
+    // Mirrors DeleteClipAsync/DeleteSelectedAsync's own cleanup - a clip
+    // deleted outside EVE still needs its leftover media-cache (thumbnail/
+    // filmstrip/waveform), sidecars, and Medal-import-history entry cleaned
+    // up the same way an in-app delete already does, otherwise these pile up
+    // forever and (for a Medal import) permanently block re-importing the
+    // same clip since its key never leaves the "already imported" history.
+    private void CleanUpDeletedClipArtifacts(string path)
+    {
+        var medalImportKey = ClipInfoSidecar.Load(Settings.LibraryFolder, path)?.MedalImportKey;
+        if (!string.IsNullOrWhiteSpace(medalImportKey))
+        {
+            var importedKeys = LoadMedalImportHistory();
+            importedKeys.Remove(medalImportKey);
+            PersistMedalImportHistory(importedKeys);
+        }
+
+        _mediaProbe.DeleteCacheFor(path);
+        ClipEditSidecar.Delete(Settings.LibraryFolder, path);
+        ClipInfoSidecar.Delete(Settings.LibraryFolder, path);
+        Settings.ClipEdits.Remove(ClipEditKey(path));
+        SaveSettings();
     }
 
     private void LibraryWatcher_OnRenamed(object sender, RenamedEventArgs e)

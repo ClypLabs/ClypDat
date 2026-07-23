@@ -4,6 +4,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
 using Avalonia.Platform;
+using Avalonia.Threading;
 using System.Diagnostics;
 using Eve.App.Services;
 using Eve.App.ViewModels;
@@ -25,6 +26,7 @@ public sealed partial class App : Application
     public override void OnFrameworkInitializationCompleted()
     {
         AppLog.Startup();
+        InstallGlobalExceptionHandlers();
         _ = Task.Run(PlaybackSession.WarmUp);
         _ = Task.Run(StorageJanitor.CleanupAtStartup);
 
@@ -58,6 +60,35 @@ public sealed partial class App : Application
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    // Without this, ANY unhandled exception on the UI thread - a timer tick,
+    // a posted continuation, routed input dispatch - takes the whole process
+    // down immediately with no chance to log what happened. This is the root
+    // cause of "EVE crashes when deleting a clip in File Explorer while it's
+    // running": the playback timer/audio pipeline can hit a file-not-found/
+    // I/O error mid-read when the open clip's file vanishes out from under
+    // it, and nothing was catching that. Logging + marking Handled turns a
+    // hard crash into a recoverable error instead. AppDomain/TaskScheduler
+    // hooks below can't prevent a crash the same way (those fire after the
+    // process has already decided to die), but still get the failure logged
+    // for a background-thread exception that never reached the UI thread.
+    private void InstallGlobalExceptionHandlers()
+    {
+        Dispatcher.UIThread.UnhandledException += (_, e) =>
+        {
+            AppLog.Error("Unhandled UI-thread exception - recovered.", e.Exception);
+            e.Handled = true;
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            AppLog.Error("Unhandled exception (fatal).", e.ExceptionObject as Exception);
+        };
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            AppLog.Error("Unobserved task exception.", e.Exception);
+            e.SetObserved();
+        };
     }
 
     private void InitializeAccentColor()
