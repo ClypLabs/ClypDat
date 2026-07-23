@@ -70,11 +70,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _hydrationCompleted;
     private string _hydrationPhaseLabel = "Loading clip info";
     private string _hydrationEtaText = string.Empty;
-    // Tracks progress across ALL three hydration passes, separately from
-    // HydrationCompleted/HydrationTotal (which reset per-phase for the
-    // displayed fraction) - the ETA is for the whole job finishing, not just
-    // the current phase, so it needs its own running total unaffected by
-    // those per-phase resets.
+    // _hydrationClock restarts at the beginning of EACH phase (see
+    // RunHydrationPassAsync) so the ETA's rate always reflects whichever
+    // pass is actually running right now, same idea as the export/save-trim
+    // dialogs' own ETA. _hydrationOverallCompleted/Total track progress
+    // across ALL three passes separately from HydrationCompleted/
+    // HydrationTotal (which reset per-phase for the displayed fraction) -
+    // the ETA projects the current phase's rate across however many items
+    // are left in the WHOLE job, not just the current phase.
     private readonly System.Diagnostics.Stopwatch _hydrationClock = new();
     private int _hydrationOverallCompleted;
     private int _hydrationOverallTotal;
@@ -299,10 +302,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public double HydrationProgressFraction => HydrationTotal > 0 ? (double)HydrationCompleted / HydrationTotal : 0;
 
     // Estimated time left for the WHOLE hydration job (all three passes),
-    // not just the current one - UpdateHydrationEta computes this from
-    // overall throughput so far (_hydrationOverallCompleted/_hydrationClock),
-    // not the per-phase counts above, since those reset every phase and
-    // would make the rate look like it restarts from zero each time too.
+    // not just the current one - UpdateHydrationEta computes the RATE from
+    // the current phase alone (HydrationCompleted/_hydrationClock, both
+    // reset every phase) and projects it across every item still left in
+    // the whole job, so the estimate reacts immediately once a slower/
+    // faster phase starts instead of staying dragged toward an earlier
+    // phase's very different pace.
     public string HydrationEtaText
     {
         get => _hydrationEtaText;
@@ -2609,12 +2614,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         var newPath = await RenameClipFileAsync(clip, sanitizedTitle);
         SyncOpenEditorPathIfNeeded(oldPath, newPath);
-
-        // The probe/thumbnail/waveform cache is keyed off the path itself, so
-        // the moved file needs a fresh probe under its new path regardless -
-        // but only for this one card, not a full library rescan.
-        RemoveClipFromLibrary(clip);
-        await AddOrUpdateLibraryClipAsync(newPath);
+        await RefreshClipInPlaceAsync(clip, newPath);
     }
 
     private static string SanitizeFileTitle(string title)
@@ -2708,9 +2708,29 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ClipInfoSidecar.Save(Settings.LibraryFolder, oldPath, updatedInfo);
         var newPath = await RenameClipFileAsync(clip, sanitizedForFile);
         SyncOpenEditorPathIfNeeded(oldPath, newPath);
+        await RefreshClipInPlaceAsync(clip, newPath);
+    }
 
-        RemoveClipFromLibrary(clip);
-        await AddOrUpdateLibraryClipAsync(newPath);
+    // Renaming used to RemoveClipFromLibrary + AddOrUpdateLibraryClipAsync -
+    // correct (the probe/thumbnail/waveform cache is keyed off the path, so
+    // the moved file needs a fresh probe under its new path regardless), but
+    // visibly janky: the card's whole WrapPanel container got torn down and
+    // rebuilt from scratch, so it flickered out of the grid and back in a
+    // moment later instead of just updating in place. Re-probing straight
+    // onto the SAME ClipCardViewModel (still sitting at its same spot in
+    // AllClips) gets the fresh data without ever removing it from the grid.
+    private async Task RefreshClipInPlaceAsync(ClipCardViewModel clip, string newPath)
+    {
+        // Same self-change suppression AddOrUpdateLibraryClipAsync marks for
+        // its own path - otherwise the watcher's own Renamed echo for this
+        // exact move triggers a redundant full ScheduleLibraryRefresh right
+        // behind it.
+        _recentlySelfAddedPaths[newPath] = DateTime.UtcNow;
+
+        clip.UpdateMedia(_mediaProbe.CreateLibraryStub(newPath));
+        var probedMedia = await _mediaProbe.ProbeMetadataAsync(newPath);
+        clip.UpdateMedia(probedMedia);
+        _ = HydrateClipImagesAsync(clip, newPath);
     }
 
     public void CloseEditor()
@@ -3920,14 +3940,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             // Bar resets per phase (0/clips.Count each time, not a combined
             // 0/clips.Count*3) - RunHydrationPassAsync resets
-            // HydrationCompleted/HydrationTotal at the start of every pass,
-            // so a 300-clip library reads "0/300" for each of the three
-            // phases in turn, not "0/900" for the whole thing. The ETA
-            // tracks the OVERALL job separately (see its own fields) so it
-            // doesn't reset alongside the displayed per-phase fraction.
+            // HydrationCompleted/HydrationTotal (and _hydrationClock) at the
+            // start of every pass, so a 300-clip library reads "0/300" for
+            // each of the three phases in turn, not "0/900" for the whole
+            // thing. _hydrationOverallCompleted/Total track the WHOLE job's
+            // remaining-item count separately, unaffected by those per-phase
+            // resets - the ETA is for the whole job finishing, not just
+            // whichever phase happens to be running.
             _hydrationOverallCompleted = 0;
             _hydrationOverallTotal = clips.Count * 3;
-            _hydrationClock.Restart();
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 IsHydratingLibrary = clips.Count > 0;
@@ -3996,6 +4017,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             HydrationPhaseLabel = phaseLabel;
             HydrationCompleted = 0;
             HydrationTotal = clips.Count;
+            // Restarted per-phase, not once for the whole job - ffprobe vs
+            // thumbnail vs filmstrip generation cost wildly different
+            // amounts, so a rate averaged since the job started stays
+            // dragged toward whatever phase ran first for a long time after
+            // a slower phase begins (the export/update dialogs' own ETAs
+            // avoid exactly this by timing only the operation actually in
+            // progress - see ExportButton_OnClick's encodeClock). Using the
+            // CURRENT phase's own live rate, projected across however many
+            // items are left in the WHOLE job, keeps the number both
+            // accurate to what's actually running right now and still an
+            // estimate for the whole job finishing.
+            _hydrationClock.Restart();
         });
 
         await Parallel.ForEachAsync(
@@ -4032,17 +4065,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         UpdateHydrationEta();
     }
 
-    // Straight-line estimate from overall throughput so far (items/sec since
-    // _hydrationClock started) - no per-phase weighting, since ffprobe vs
-    // thumbnail vs filmstrip generation cost enough differently that a
-    // flat per-item average across all three, measured live, tracks the
-    // ACTUAL mix of what's already run better than guessing fixed weights
-    // up front would. Needs a few completed items before the estimate means
-    // anything - too few and one slow/fast outlier swings it wildly.
+    // Straight-line estimate from the CURRENT phase's own live rate
+    // (items/sec since _hydrationClock last restarted, at the start of
+    // whichever pass is running now - same idea as the export/save-trim
+    // dialogs' encodeClock, timing only the operation actually in
+    // progress), projected across every item still left in the WHOLE job
+    // (_hydrationOverallTotal/_hydrationOverallCompleted, unaffected by the
+    // per-phase resets above). A couple of completed items is enough to
+    // trust - HydrationCompleted itself already resets to 0 at the start of
+    // each phase, so it doubles as "how many samples the current rate is
+    // based on" without a separate counter.
     private void UpdateHydrationEta()
     {
-        const int minSamplesForEstimate = 5;
-        if (_hydrationOverallCompleted < minSamplesForEstimate || _hydrationOverallTotal <= 0)
+        const int minSamplesForEstimate = 2;
+        if (HydrationCompleted < minSamplesForEstimate || _hydrationOverallTotal <= 0)
         {
             HydrationEtaText = string.Empty;
             return;
@@ -4055,18 +4091,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var secondsPerItem = _hydrationClock.Elapsed.TotalSeconds / _hydrationOverallCompleted;
+        var secondsPerItem = _hydrationClock.Elapsed.TotalSeconds / HydrationCompleted;
         var etaSeconds = secondsPerItem * remaining;
         HydrationEtaText = FormatHydrationEta(etaSeconds);
     }
 
+    // Same granular "Xs" / "Xm YYs" style as MainWindow.axaml.cs's FormatEta
+    // (export/save-trim's own ETA), instead of the old "~Xs left" rounded up
+    // to the nearest 5 seconds / whole minute - a live class here, not a
+    // ViewModel dependency on View code-behind.
     private static string FormatHydrationEta(double etaSeconds)
     {
-        if (etaSeconds < 5) return "almost done";
-        if (etaSeconds < 60) return $"~{Math.Ceiling(etaSeconds / 5) * 5:0}s left";
-        var minutes = etaSeconds / 60;
-        if (minutes < 60) return $"~{Math.Ceiling(minutes):0}m left";
-        return $"~{minutes / 60:0.#}h left";
+        if (etaSeconds < 1) return "less than a second left";
+        if (etaSeconds < 60) return $"{etaSeconds:0}s left";
+        var remaining = TimeSpan.FromSeconds(etaSeconds);
+        return $"{(int)remaining.TotalMinutes}m {remaining.Seconds:00}s left";
     }
 
     private TimeSpan ClampTime(TimeSpan time)

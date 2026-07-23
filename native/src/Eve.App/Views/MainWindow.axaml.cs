@@ -781,8 +781,16 @@ public sealed partial class MainWindow : Window
             FontSize = 15,
             FontWeight = Avalonia.Media.FontWeight.Bold,
             Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
-            CornerRadius = new CornerRadius(6),
-            Padding = new Thickness(8, 4),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(6, 2),
+            // Fluent's TextBox defaults to a much taller MinHeight (~32px)
+            // than a plain 15px Bold TextBlock's own line height - without
+            // pinning this down explicitly, swapping the two made the whole
+            // card visibly jump/reflow (title row growing ~12px taller, the
+            // date/duration row below shoved down) the instant editing
+            // started, then snapping back when it ended.
+            MinHeight = 24,
+            VerticalContentAlignment = VerticalAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Left,
             Width = titleWidth
         };
