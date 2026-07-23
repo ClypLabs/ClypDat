@@ -435,6 +435,37 @@
     <Setter Property="FontSize" Value="14" />
     <Setter Property="MinHeight" Value="42" />
   </Style>
+  <!--
+    Fluent's own TextBox theme repaints Border#PART_BorderElement's
+    Background/BorderBrush/BorderThickness on :pointerover and :focus from
+    its own DynamicResources (an opaque near-black fill and a bright accent-
+    blue ring) - those nested style setters target the template part
+    directly, so they beat a plain instance-level Background/BorderBrush
+    value the same way the Button styles above have to work around Fluent's
+    template. Targeting the template part explicitly for every state here
+    is what actually keeps the inline clip-title editor's own dark, muted
+    look instead of flashing to Fluent's default look on hover/focus.
+  -->
+  <Style Selector="TextBox.inlineTitleEdit /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="#0D151C" />
+    <Setter Property="BorderBrush" Value="#22303A" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="TextBox.inlineTitleEdit:pointerover /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="#0D151C" />
+    <Setter Property="BorderBrush" Value="#324454" />
+  </Style>
+  <Style Selector="TextBox.inlineTitleEdit:focus /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="#0D151C" />
+    <Setter Property="BorderBrush" Value="#4C6478" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="TextBox.inlineTitleEdit /template/ TextBlock#PART_Watermark">
+    <Setter Property="Foreground" Value="#5C6D7E" />
+  </Style>
+  <Style Selector="TextBox.inlineTitleEdit:focus /template/ TextBlock#PART_Watermark, TextBox.inlineTitleEdit:pointerover /template/ TextBlock#PART_Watermark">
+    <Setter Property="Foreground" Value="#5C6D7E" />
+  </Style>
   <Style Selector="Border.settingsCard">
     <Setter Property="Background" Value="#141D24" />
     <Setter Property="BorderBrush" Value="#232F3A" />

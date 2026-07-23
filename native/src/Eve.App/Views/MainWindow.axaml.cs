@@ -715,14 +715,19 @@ public sealed partial class MainWindow : Window
         var editBox = new TextBox
         {
             Text = originalText,
+            // Manual clips with no CustomTitle start empty (so committing an
+            // unchanged blank field stays a no-op / typing straight away
+            // replaces the placeholder) - the watermark shows what's
+            // actually on the card right now (clip.TileMainLabel, e.g.
+            // "Clip from July 23, 2026") so the empty box doesn't look blank
+            // for no reason.
+            Watermark = clip.TileMainLabel,
+            Classes = { "inlineTitleEdit" },
             FontSize = 15,
             FontWeight = Avalonia.Media.FontWeight.Bold,
             Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
-            Background = Avalonia.Media.Brush.Parse("#0D151C"),
-            BorderBrush = Avalonia.Media.Brush.Parse("#3A4B5C"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(4),
-            Padding = new Thickness(6, 2),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(8, 4),
             MinWidth = 80,
             MaxWidth = titleBlock.MaxWidth
         };
