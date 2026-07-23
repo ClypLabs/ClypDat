@@ -3558,7 +3558,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         try
         {
-            await Dispatcher.UIThread.InvokeAsync(() => IsHydratingLibrary = clips.Count > 0);
+            // One continuous bar across all three passes (0 to clips.Count*3),
+            // set up front and never reset between passes - it used to reset
+            // to 0% at the start of each pass, which read as the whole scan
+            // restarting three times over instead of one steady climb to
+            // done. RunHydrationPassAsync only updates HydrationPhaseLabel
+            // (the "Loading clip info"/"Loading thumbnails"/"Loading
+            // timelines" text) per phase now, not the total/completed counts.
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                IsHydratingLibrary = clips.Count > 0;
+                HydrationCompleted = 0;
+                HydrationTotal = clips.Count * 3;
+            });
 
             await RunHydrationPassAsync(clips, "Loading clip info", cancellationToken,
                 async clip =>
@@ -3604,20 +3616,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     // One pass of HydrateLibraryClipsAsync - runs `action` for every clip
     // (one at a time, matching the existing network-drive-friendly
-    // MaxDegreeOfParallelism), resetting/driving the progress banner for
-    // just this phase.
+    // MaxDegreeOfParallelism). Only updates the phase LABEL - the overall
+    // HydrationTotal/HydrationCompleted counters are set once up front by
+    // the caller and keep climbing across all three passes, not reset here.
     private async Task RunHydrationPassAsync(
         IReadOnlyList<ClipCardViewModel> clips,
         string phaseLabel,
         CancellationToken cancellationToken,
         Func<ClipCardViewModel, Task> action)
     {
-        await Dispatcher.UIThread.InvokeAsync(() =>
-        {
-            HydrationPhaseLabel = phaseLabel;
-            HydrationCompleted = 0;
-            HydrationTotal = clips.Count;
-        });
+        await Dispatcher.UIThread.InvokeAsync(() => HydrationPhaseLabel = phaseLabel);
 
         await Parallel.ForEachAsync(
             clips,
