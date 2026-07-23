@@ -2096,7 +2096,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public Task OpenVideoFileAsync(string filePath)
     {
-        CancelLibraryHydration();
+        // Library hydration deliberately keeps running in the background here
+        // - opening a clip shouldn't stop the rest of the library from
+        // filling in behind it. Only closing EVE (Dispose) should stop it.
         var media = _mediaProbe.CreateLibraryStub(filePath);
         OpenMedia(media);
         _ = HydrateSelectedMediaAsync(filePath);
@@ -2105,7 +2107,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public Task OpenClipAsync(ClipCardViewModel clip)
     {
-        CancelLibraryHydration();
+        // See OpenVideoFileAsync - hydration keeps running in the background.
         OpenMedia(clip.Media);
 
         if (clip.Duration == TimeSpan.Zero || clip.Media.Tracks.Count == 0)
