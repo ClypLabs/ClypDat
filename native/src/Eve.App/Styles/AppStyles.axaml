@@ -573,7 +573,7 @@
        easier target to click, not just a thicker line. -->
   <Style Selector="Slider.volumeSlider">
     <Style.Resources>
-      <sys:Double x:Key="SliderTrackThemeHeight">6</sys:Double>
+      <sys:Double x:Key="SliderTrackThemeHeight">4.5</sys:Double>
     </Style.Resources>
     <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
     <Setter Property="Background" Value="#26313C" />

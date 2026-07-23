@@ -434,8 +434,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Settings.EditorMasterVolume = clamped;
             SaveSettings();
             OnPropertyChanged(nameof(EffectiveMasterVolumePercent));
+            OnPropertyChanged(nameof(IsMasterVolumeNonDefault));
         }
     }
+
+    // Drives the master volume reset button (MainWindow.axaml) - same
+    // "only show once it's actually off-default" behavior as
+    // TrackLaneViewModel.IsVolumeNonDefault.
+    public bool IsMasterVolumeNonDefault => Math.Abs(MasterVolumePercent - 100) > 0.01;
 
     // Independent of MasterVolumePercent so un-muting restores whatever level
     // was set before - same pattern as TrackLaneViewModel.IsMuted. Not

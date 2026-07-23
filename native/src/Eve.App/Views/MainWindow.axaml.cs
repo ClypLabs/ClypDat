@@ -1572,6 +1572,12 @@ public sealed partial class MainWindow : Window
         ViewModel?.SaveSelectedClipEditState();
     }
 
+    private void MasterVolumeReset_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        ViewModel.MasterVolumePercent = 100;
+    }
+
     private static void UpdateVolumeBadgePosition(Slider slider, TrackLaneViewModel track, double? pointerX = null)
     {
         var width = Math.Max(1, slider.Bounds.Width);

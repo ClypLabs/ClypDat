@@ -1277,7 +1277,7 @@
 
       <Border Grid.Row="1" Background="#141D24" BorderBrush="#22303A" BorderThickness="0,1,0,0">
         <Grid RowDefinitions="44,*" Margin="8,0,8,8">
-          <Grid ColumnDefinitions="160,*,Auto" Height="44">
+          <Grid ColumnDefinitions="222,*,Auto" Height="44">
             <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8" Margin="4,0,0,0">
               <Border Classes="muteToggle"
                       Width="26"
@@ -1304,7 +1304,16 @@
                          Foreground="#93A6B8"
                          FontSize="11"
                          Width="30"
+                         Margin="0,2,0,0"
                          VerticalAlignment="Center" />
+              <Button Classes="linkButton"
+                      Content="Reset"
+                      FontSize="10"
+                      Padding="6,1"
+                      VerticalAlignment="Center"
+                      IsVisible="{Binding IsMasterVolumeNonDefault}"
+                      Click="MasterVolumeReset_OnClick"
+                      ToolTip.Tip="Reset to 100%" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="7">
               <Button Classes="transportButton" Click="RestartButton_OnClick">
@@ -1399,6 +1408,7 @@
                                 Height="22"
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
+                                Margin="0,-2,0,0"
                                 IsVisible="{Binding IsAudio}"
                                 PointerPressed="TrackMuteToggle_OnPointerPressed"
                                 Cursor="Hand"
@@ -1419,7 +1429,7 @@
                                 MinHeight="36"
                                 Padding="0"
                                 VerticalAlignment="Center"
-                                Margin="0,-10,0,0"
+                                Margin="0,-12,0,0"
                                 Value="{Binding VolumePercent, Mode=TwoWay}"
                                 IsEnabled="{Binding CanAdjustVolume}"
                                 IsVisible="{Binding IsAudio}"
@@ -1750,7 +1760,16 @@
                          Foreground="#C8D6E6"
                          FontSize="11"
                          Width="30"
+                         Margin="0,2,0,0"
                          VerticalAlignment="Center" />
+              <Button Classes="linkButton"
+                      Content="Reset"
+                      FontSize="10"
+                      Padding="6,1"
+                      VerticalAlignment="Center"
+                      IsVisible="{Binding IsMasterVolumeNonDefault}"
+                      Click="MasterVolumeReset_OnClick"
+                      ToolTip.Tip="Reset to 100%" />
               <Border Width="1" Height="20" Background="#26FFFFFF" Margin="4,0" />
               <Button Classes="transportButton" Click="ExitVideoFullscreenButton_OnClick" ToolTip.Tip="Exit fullscreen">
                 <PathIcon Width="14" Height="14" Foreground="#C8D6E6" Data="M19,6.41 L17.59,5 L12,10.59 L6.41,5 L5,6.41 L10.59,12 L5,17.59 L6.41,19 L12,13.41 L17.59,19 L19,17.59 L13.41,12 Z" />
