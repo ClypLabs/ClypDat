@@ -116,9 +116,43 @@ public sealed class TimelineLaneControl : Control
                 // rects can't leave a hairline gap of bare lane background
                 // showing through between two frames.
                 var dest = new Rect(rect.X + i * frameWidth, rect.Y, frameWidth + 0.5, rect.Height);
-                context.DrawImage(bitmap, new Rect(bitmap.Size), dest);
+                // Cropped ("cover"), not stretched to fill both dimensions
+                // independently - each cell's own width/height ratio rarely
+                // matches the source frame's 16:9, and drawing the WHOLE
+                // source into a mismatched dest rect distorts every frame
+                // (squished/stretched). Crop the source to the cell's own
+                // aspect ratio first, then draw that crop filling the cell
+                // exactly - same idea as CSS's object-fit: cover.
+                context.DrawImage(bitmap, CoverSourceRect(bitmap.Size, dest.Size), dest);
             }
         }
+    }
+
+    // Largest centered crop of sourceSize that matches destSize's aspect
+    // ratio - crops the wider dimension (left/right or top/bottom evenly)
+    // rather than distorting either axis independently.
+    private static Rect CoverSourceRect(Size sourceSize, Size destSize)
+    {
+        if (sourceSize.Width <= 0 || sourceSize.Height <= 0 || destSize.Width <= 0 || destSize.Height <= 0)
+        {
+            return new Rect(sourceSize);
+        }
+
+        var sourceAspect = sourceSize.Width / sourceSize.Height;
+        var destAspect = destSize.Width / destSize.Height;
+
+        if (sourceAspect > destAspect)
+        {
+            // Source is relatively wider than the cell - crop its sides,
+            // keep full height.
+            var cropWidth = sourceSize.Height * destAspect;
+            return new Rect((sourceSize.Width - cropWidth) / 2, 0, cropWidth, sourceSize.Height);
+        }
+
+        // Source is relatively taller/narrower than the cell - crop top/
+        // bottom, keep full width.
+        var cropHeight = sourceSize.Width / destAspect;
+        return new Rect(0, (sourceSize.Height - cropHeight) / 2, sourceSize.Width, cropHeight);
     }
 
     private void DrawWaveform(DrawingContext context, Rect rect)

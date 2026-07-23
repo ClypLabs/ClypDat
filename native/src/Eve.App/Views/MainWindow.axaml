@@ -1502,7 +1502,7 @@
                        excluded-from-trim portion is TimelineLaneControl's
                        own DrawTrimShade, not this box. -->
                   <Border x:Name="TrimSelection"
-                          Height="64"
+                          Height="42"
                           BorderBrush="#13C8B5"
                           BorderThickness="2"
                           CornerRadius="4"
@@ -1518,7 +1518,7 @@
                 <Canvas x:Name="TimelineHandleLayer">
                   <Border x:Name="TrimStartHandle"
                           Width="14"
-                          Height="64"
+                          Height="42"
                           Background="#13C8B5"
                           CornerRadius="2"
                           Cursor="SizeWestEast"
@@ -1527,7 +1527,7 @@
                           PointerReleased="TimelineSurface_OnPointerReleased" />
                   <Border x:Name="TrimEndHandle"
                           Width="14"
-                          Height="64"
+                          Height="42"
                           Background="#13C8B5"
                           CornerRadius="2"
                           Cursor="SizeWestEast"

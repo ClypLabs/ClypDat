@@ -502,16 +502,13 @@ public sealed class MediaProbeService
     // small frames sampled evenly across the clip, generated once here during
     // hydration (HydrateLibraryClipsAsync/ProbeAsync) rather than lazily when
     // the editor opens, so it's already sitting in cache by the time the user
-    // picks a clip. One frame per FrameIntervalSeconds of clip length, capped
-    // at MaxFrames so a multi-hour Full Session can't generate hundreds of
-    // tiny JPEGs - TimelineLaneControl stretches however many frames exist
-    // across the lane's actual pixel width at render time (same
-    // decoupled-from-pixel-width approach the waveform's fixed BucketCount
-    // already uses), so a lower frame count on a long clip just means each
-    // frame covers a wider slice, not a visibly incomplete strip.
-    private const double FilmstripFrameIntervalSeconds = 2.0;
-    private const int FilmstripMinFrames = 6;
-    private const int FilmstripMaxFrames = 90;
+    // picks a clip. Fixed frame count regardless of duration -
+    // TimelineLaneControl stretches however many frames exist across the
+    // lane's actual pixel width at render time (same decoupled-from-pixel-
+    // width approach the waveform's fixed BucketCount already uses), so this
+    // doesn't need to scale with clip length the way that generation cost
+    // consideration originally assumed.
+    private const int FilmstripFrameCount = 10;
     private const int FilmstripFrameHeight = 54;
 
     private async Task<IReadOnlyList<string>> EnsureFilmstripAsync(string filePath, TimeSpan duration)
@@ -520,10 +517,7 @@ public sealed class MediaProbeService
         if (existing.Count > 0) return existing;
         if (duration <= TimeSpan.Zero) return Array.Empty<string>();
 
-        var frameCount = (int)Math.Clamp(
-            Math.Round(duration.TotalSeconds / FilmstripFrameIntervalSeconds),
-            FilmstripMinFrames,
-            FilmstripMaxFrames);
+        var frameCount = FilmstripFrameCount;
 
         var folder = GetFilmstripFolder(filePath);
         try
@@ -577,7 +571,12 @@ public sealed class MediaProbeService
 
     private string GetFilmstripFolder(string filePath)
     {
-        return Path.Combine(_cacheFolder, $"{CacheKey(filePath)}-filmstrip");
+        // -v2: cache-key suffix bump so filmstrips generated under the old
+        // duration-scaled frame count (up to 90 frames) regenerate at the
+        // new fixed FilmstripFrameCount instead of a stale, much denser
+        // folder sitting there forever (old entries age out via the 30-day
+        // prune, same as everything else in this cache).
+        return Path.Combine(_cacheFolder, $"{CacheKey(filePath)}-filmstrip-v2");
     }
 
     private string GetThumbnailPath(string filePath)
