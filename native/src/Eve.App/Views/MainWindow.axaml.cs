@@ -659,7 +659,7 @@ public sealed partial class MainWindow : Window
 
     private async void ClipCard_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (e.Source is CheckBox or Button or PathIcon) return;
+        if (e.Source is CheckBox or Button or PathIcon or TextBox) return;
         if (sender is not Control control || !e.GetCurrentPoint(control).Properties.IsLeftButtonPressed) return;
         if (sender is not Control { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
 
@@ -694,11 +694,78 @@ public sealed partial class MainWindow : Window
         await RenameClipCardAsync(clip);
     }
 
-    private async void ClipRenamePencil_OnClick(object? sender, RoutedEventArgs e)
+    // The pencil edits the title right on the card instead of opening the
+    // dialog - swaps the title TextBlock for a bordered TextBox in place,
+    // matching the reference screenshot's inline-edit look, rather than a
+    // separate "type a new name" popup.
+    private void ClipRenamePencil_OnClick(object? sender, RoutedEventArgs e)
     {
         e.Handled = true;
-        if (sender is not Control { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
-        await RenameClipCardAsync(clip);
+        if (sender is not Control { DataContext: ClipCardViewModel clip } pencil) return;
+        if (pencil.Parent is not Grid grid || grid.Children.Count == 0 || grid.Children[0] is not TextBlock titleBlock) return;
+
+        BeginInlineTitleEdit(grid, titleBlock, pencil, clip);
+    }
+
+    private void BeginInlineTitleEdit(Grid grid, TextBlock titleBlock, Control pencil, ClipCardViewModel clip)
+    {
+        var isFileTitle = clip.IsAutoClip || clip.IsMedalImport;
+        var originalText = isFileTitle ? clip.GameNameLabel : (clip.CustomTitle ?? string.Empty);
+
+        var editBox = new TextBox
+        {
+            Text = originalText,
+            FontSize = 15,
+            FontWeight = Avalonia.Media.FontWeight.Bold,
+            Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
+            Background = Avalonia.Media.Brush.Parse("#0D151C"),
+            BorderBrush = Avalonia.Media.Brush.Parse("#3A4B5C"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(6, 2),
+            MinWidth = 80,
+            MaxWidth = titleBlock.MaxWidth
+        };
+        Grid.SetColumn(editBox, 0);
+
+        titleBlock.IsVisible = false;
+        pencil.IsVisible = false;
+        grid.Children.Add(editBox);
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            editBox.Focus();
+            editBox.SelectAll();
+        });
+
+        // Enter/blur both commit, Escape cancels - guarded by resolved so a
+        // programmatic blur from removing the box on Escape/Enter can't
+        // re-fire LostFocus and commit a second time.
+        var resolved = false;
+
+        async void Resolve(bool save)
+        {
+            if (resolved) return;
+            resolved = true;
+
+            grid.Children.Remove(editBox);
+            titleBlock.IsVisible = true;
+            pencil.IsVisible = true;
+
+            if (!save) return;
+            var newTitle = (editBox.Text ?? string.Empty).Trim();
+            if (isFileTitle && string.IsNullOrWhiteSpace(newTitle)) return;
+            if (newTitle == originalText) return;
+
+            await ApplyClipTitleRenameAsync(clip, newTitle);
+        }
+
+        editBox.KeyDown += (_, keyArgs) =>
+        {
+            if (keyArgs.Key == Key.Enter) { keyArgs.Handled = true; Resolve(true); }
+            else if (keyArgs.Key == Key.Escape) { keyArgs.Handled = true; Resolve(false); }
+        };
+        editBox.LostFocus += (_, _) => Resolve(true);
     }
 
     private async Task RenameClipCardAsync(ClipCardViewModel clip)
@@ -713,31 +780,28 @@ public sealed partial class MainWindow : Window
         // date/time suffix untouched). Everything else (manual clips, VODs)
         // shows "Clip from {date}" as a placeholder there instead - rename
         // that card's own custom label, not a title baked into the filename.
-        if (clip.IsAutoClip || clip.IsMedalImport)
-        {
-            var newTitle = await PromptRenameAsync(clip.GameNameLabel);
-            if (string.IsNullOrWhiteSpace(newTitle) || newTitle == clip.GameNameLabel) return;
+        var isFileTitle = clip.IsAutoClip || clip.IsMedalImport;
+        var currentTitle = isFileTitle ? clip.GameNameLabel : (clip.CustomTitle ?? string.Empty);
 
-            try
-            {
-                await ViewModel.RenameClipAsync(clip, newTitle);
-            }
-            catch (Exception error)
-            {
-                await ShowMessageAsync("Rename failed", error.Message);
-            }
-            return;
-        }
+        var newTitle = await PromptRenameAsync(currentTitle);
+        if (newTitle is null) return;
+        var trimmed = newTitle.Trim();
+        if (trimmed == currentTitle) return;
 
-        var currentCustomTitle = clip.CustomTitle ?? string.Empty;
-        var newCustomTitle = await PromptRenameAsync(currentCustomTitle);
-        if (newCustomTitle is null) return;
-        var trimmed = newCustomTitle.Trim();
-        if (trimmed == currentCustomTitle) return;
+        await ApplyClipTitleRenameAsync(clip, trimmed);
+    }
+
+    private async Task ApplyClipTitleRenameAsync(ClipCardViewModel clip, string newTitle)
+    {
+        if (ViewModel is null) return;
+
+        var isFileTitle = clip.IsAutoClip || clip.IsMedalImport;
+        if (isFileTitle && string.IsNullOrWhiteSpace(newTitle)) return;
 
         try
         {
-            await ViewModel.RenameClipTitleAsync(clip, trimmed);
+            if (isFileTitle) await ViewModel.RenameClipAsync(clip, newTitle);
+            else await ViewModel.RenameClipTitleAsync(clip, newTitle);
         }
         catch (Exception error)
         {
