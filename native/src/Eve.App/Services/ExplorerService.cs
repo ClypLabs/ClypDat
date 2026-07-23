@@ -12,16 +12,14 @@ public static class ExplorerService
         {
             try
             {
-                var startInfo = new ProcessStartInfo("explorer.exe")
+                var arguments = selectFile
+                    ? $"/n,/select,\"{path}\""
+                    : $"/n,\"{path}\"";
+
+                Process.Start(new ProcessStartInfo("explorer.exe", arguments)
                 {
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-
-                if (selectFile) startInfo.ArgumentList.Add("/select,");
-                startInfo.ArgumentList.Add(path);
-
-                using var process = Process.Start(startInfo);
+                    UseShellExecute = true
+                });
             }
             catch (Exception error)
             {

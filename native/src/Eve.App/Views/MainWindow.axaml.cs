@@ -904,7 +904,7 @@ public sealed partial class MainWindow : Window
     private void ClipContextOpenLocation_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { DataContext: ClipCardViewModel clip }) return;
-        OpenInExplorer(clip.Path, selectFile: true);
+        ExplorerService.Open(clip.Path, selectFile: true);
     }
 
     private async void ClipContextDelete_OnClick(object? sender, RoutedEventArgs e)
@@ -1301,13 +1301,13 @@ public sealed partial class MainWindow : Window
     private void LibraryPathButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.Settings.LibraryFolder)) return;
-        OpenInExplorer(ViewModel.Settings.LibraryFolder, selectFile: false);
+        ExplorerService.Open(ViewModel.Settings.LibraryFolder, selectFile: false);
     }
 
     private void EditorPathButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
-        OpenInExplorer(ViewModel.SelectedVideoPath, selectFile: true);
+        ExplorerService.Open(ViewModel.SelectedVideoPath, selectFile: true);
     }
 
     private void HotkeyCaptureButton_OnClick(object? sender, RoutedEventArgs e)
@@ -1984,7 +1984,7 @@ public sealed partial class MainWindow : Window
             {
                 ClipInfoSidecar.Save(libraryRoot, outputPath, new ClipInfo(game, null, exportTitle, exportTimestamp));
                 if (IsPathWithinLibrary(outputPath, libraryRoot)) await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
-                OpenInExplorer(outputPath, selectFile: true);
+                ExplorerService.Open(outputPath, selectFile: true);
             }
         }
         finally
@@ -3197,11 +3197,6 @@ public sealed partial class MainWindow : Window
         body.Children.Add(buttons);
 
         return window;
-    }
-
-    private static void OpenInExplorer(string path, bool selectFile)
-    {
-        ExplorerService.Open(path, selectFile);
     }
 
     private static bool IsTypingInTextInput(object? source)
