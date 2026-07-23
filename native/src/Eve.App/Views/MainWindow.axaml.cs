@@ -2765,35 +2765,40 @@ public sealed partial class MainWindow : Window
         var end = ViewModel.TrimEnd.TotalMilliseconds / ViewModel.Duration.TotalMilliseconds * width;
         var playhead = ViewModel.CurrentTime.TotalMilliseconds / ViewModel.Duration.TotalMilliseconds * width;
 
-        // Thin full-height lines (GG-style) instead of a thick block
-        // confined to the video lane - handles are centered on the trim
-        // boundary (Left = boundary - Width/2), so at TrimStart=0 or
-        // TrimEnd=Duration that centering pushes half the handle's own
-        // width past the track's left/right edge; clamping the handle's
-        // available Left range to [0, width - handleWidth] squishes it
-        // against the near edge instead of letting it overhang.
+        // Thin lines confined to just the video lane (TrackLaneViewModel's
+        // video LaneHeight), not the full track stack - matches
+        // TrimSelection's old scope, just restyled.
+        const double videoLaneHeight = 42;
         // Matches TrimStartCap/TrimEndCap's Points width (see XAML) - read as
         // a constant rather than Bounds.Width since the Polygon may not have
         // been measured yet on the very first call.
         const double capWidth = 10;
 
+        // Sits entirely on the excluded side of the boundary (flush against
+        // it, not centered on it) - "thicker" toward the left for the start
+        // handle and toward the right for the end handle, like a bracket
+        // hugging the selected range from outside instead of overlapping it.
         var startMaxLeft = Math.Max(0, width - TrimStartHandle.Width);
-        var startLeft = Math.Clamp(start - TrimStartHandle.Width / 2, 0, startMaxLeft);
+        var startLeft = Math.Clamp(start - TrimStartHandle.Width, 0, startMaxLeft);
         Canvas.SetLeft(TrimStartHandle, startLeft);
         Canvas.SetTop(TrimStartHandle, 0);
-        TrimStartHandle.Height = height;
+        TrimStartHandle.Height = videoLaneHeight;
         Canvas.SetLeft(TrimStartCap, startLeft - (capWidth - TrimStartHandle.Width) / 2);
         Canvas.SetTop(TrimStartCap, -7);
 
         var endMaxLeft = Math.Max(0, width - TrimEndHandle.Width);
-        var endLeft = Math.Clamp(end - TrimEndHandle.Width / 2, 0, endMaxLeft);
+        var endLeft = Math.Clamp(end, 0, endMaxLeft);
         Canvas.SetLeft(TrimEndHandle, endLeft);
         Canvas.SetTop(TrimEndHandle, 0);
-        TrimEndHandle.Height = height;
+        TrimEndHandle.Height = videoLaneHeight;
         Canvas.SetLeft(TrimEndCap, endLeft - (capWidth - TrimEndHandle.Width) / 2);
         Canvas.SetTop(TrimEndCap, -7);
 
-        Canvas.SetLeft(TimelinePlayhead, playhead - TimelinePlayhead.Width / 2);
+        // Clamped the same way the handles are - uncentered, it could
+        // otherwise poke a sliver out past the timeline's left edge at
+        // CurrentTime=0, visible peeking out from behind TrimStartHandle.
+        var playheadMaxLeft = Math.Max(0, width - TimelinePlayhead.Width);
+        Canvas.SetLeft(TimelinePlayhead, Math.Clamp(playhead - TimelinePlayhead.Width / 2, 0, playheadMaxLeft));
         TimelinePlayhead.Height = height;
         Canvas.SetTop(TimelinePlayhead, -8);
         Canvas.SetLeft(PlayheadCap, playhead - 8);

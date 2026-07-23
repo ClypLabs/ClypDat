@@ -2504,11 +2504,41 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public async Task RenameClipAsync(ClipCardViewModel clip, string newTitle)
     {
-        var sanitizedTitle = newTitle;
-        foreach (var invalid in Path.GetInvalidFileNameChars()) sanitizedTitle = sanitizedTitle.Replace(invalid, '-');
-        sanitizedTitle = sanitizedTitle.Trim().TrimEnd('.', ' ');
+        var sanitizedTitle = SanitizeFileTitle(newTitle);
         if (string.IsNullOrWhiteSpace(sanitizedTitle)) return;
 
+        var oldPath = clip.Path;
+        var existingInfo = ClipInfoSidecar.Load(Settings.LibraryFolder, oldPath);
+        var updatedInfo = existingInfo is null
+            ? new ClipInfo(null, null, sanitizedTitle)
+            : existingInfo with { FileTitle = sanitizedTitle };
+        ClipInfoSidecar.Save(Settings.LibraryFolder, oldPath, updatedInfo);
+
+        var newPath = await RenameClipFileAsync(clip, sanitizedTitle);
+        SyncOpenEditorPathIfNeeded(oldPath, newPath);
+
+        // The probe/thumbnail/waveform cache is keyed off the path itself, so
+        // the moved file needs a fresh probe under its new path regardless -
+        // but only for this one card, not a full library rescan.
+        RemoveClipFromLibrary(clip);
+        await AddOrUpdateLibraryClipAsync(newPath);
+    }
+
+    private static string SanitizeFileTitle(string title)
+    {
+        var sanitized = title;
+        foreach (var invalid in Path.GetInvalidFileNameChars()) sanitized = sanitized.Replace(invalid, '-');
+        return sanitized.Trim().TrimEnd('.', ' ');
+    }
+
+    // Renames the video file on disk, swapping just the title portion (game
+    // name / custom label) while preserving whatever trailing date/time
+    // suffix ClipFileNaming appended to the original filename - shared by
+    // both RenameClipAsync (auto-clips/Medal imports, edits FileTitle) and
+    // RenameClipTitleAsync (manual clips, edits CustomTitle), so naming a
+    // clip in the Library keeps File Explorer's filename in sync either way.
+    private async Task<string> RenameClipFileAsync(ClipCardViewModel clip, string sanitizedTitle)
+    {
         var oldPath = clip.Path;
         var oldStem = Path.GetFileNameWithoutExtension(oldPath);
         var strippedOld = ClipFileNaming.StripTimestampSuffix(oldStem);
@@ -2517,21 +2547,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var directory = Path.GetDirectoryName(oldPath) ?? Settings.LibraryFolder;
         var newPath = ClipFileNaming.BuildUniquePath(directory, newStem + Path.GetExtension(oldPath));
 
-        var existingInfo = ClipInfoSidecar.Load(Settings.LibraryFolder, oldPath);
-        var updatedInfo = existingInfo is null
-            ? new ClipInfo(null, null, sanitizedTitle)
-            : existingInfo with { FileTitle = sanitizedTitle };
-        ClipInfoSidecar.Save(Settings.LibraryFolder, oldPath, updatedInfo);
-
         await FileRetry.RunAsync(() => File.Move(oldPath, newPath), $"Rename clip {oldPath} -> {newPath}");
         MoveClipSidecars(oldPath, newPath);
         _mediaProbe.DeleteCacheFor(oldPath);
+        return newPath;
+    }
 
-        // The probe/thumbnail/waveform cache is keyed off the path itself, so
-        // the moved file needs a fresh probe under its new path regardless -
-        // but only for this one card, not a full library rescan.
-        RemoveClipFromLibrary(clip);
-        await AddOrUpdateLibraryClipAsync(newPath);
+    // A rename can target the clip that's currently open in the editor -
+    // without this its SelectedVideoPath would keep pointing at the
+    // now-moved/renamed file. Only the identity fields are touched (path/
+    // name/title), not a full OpenMedia reset, so trim/zoom/playback
+    // position aren't disturbed for what's just a rename, not new media.
+    private void SyncOpenEditorPathIfNeeded(string oldPath, string newPath)
+    {
+        if (!IsEditorVisible || !string.Equals(SelectedVideoPath, oldPath, StringComparison.OrdinalIgnoreCase)) return;
+
+        var newName = Path.GetFileNameWithoutExtension(newPath);
+        SelectedVideoPath = newPath;
+        SelectedVideoName = newName;
+        EditorTitle = newName;
     }
 
     // Called by the View once it's finished re-encoding the trimmed range over
@@ -2547,12 +2581,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await AddOrUpdateLibraryClipAsync(path);
     }
 
-    // Renames only the card's own display label (shown in place of "Clip from
-    // {date}" for non-auto-clip cards) - unlike RenameClipAsync above, this
-    // never touches the file on disk or FileTitle/GameDisplayName, so it can't
-    // clobber the game association or a Medal import's original event title
-    // (e.g. "4K - Inferno"). An empty title clears it back to "Clip from {date}".
-    public Task RenameClipTitleAsync(ClipCardViewModel clip, string newCustomTitle)
+    // Renames the card's own display label (shown in place of "Clip from
+    // {date}" for non-auto-clip cards) - unlike RenameClipAsync above this
+    // never touches FileTitle/GameDisplayName, so it can't clobber a Medal
+    // import's original event title. It DOES still rename the file on disk
+    // (same suffix-preserving swap as RenameClipAsync) so File Explorer's
+    // filename and an already-open editor's title stay in sync with the new
+    // custom label too. An empty title clears it back to "Clip from {date}"
+    // and leaves the file's name alone - there's no sensible "revert" name
+    // to rename it back to.
+    public async Task RenameClipTitleAsync(ClipCardViewModel clip, string newCustomTitle)
     {
         var sanitized = newCustomTitle.Trim();
         var existingInfo = ClipInfoSidecar.Load(Settings.LibraryFolder, clip.Path);
@@ -2560,14 +2598,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             CustomTitle = string.IsNullOrWhiteSpace(sanitized) ? null : sanitized
         };
-        ClipInfoSidecar.Save(Settings.LibraryFolder, clip.Path, updatedInfo);
 
-        // The video file itself is untouched - re-running UpdateMedia with the
-        // SAME MediaFileInfo just makes the card reload the sidecar it owns
-        // and re-fire its display-label bindings, no re-probe/full refresh
-        // needed.
-        clip.UpdateMedia(clip.Media);
-        return Task.CompletedTask;
+        var sanitizedForFile = string.IsNullOrWhiteSpace(sanitized) ? string.Empty : SanitizeFileTitle(sanitized);
+        if (string.IsNullOrWhiteSpace(sanitizedForFile))
+        {
+            ClipInfoSidecar.Save(Settings.LibraryFolder, clip.Path, updatedInfo);
+            // The video file itself is untouched - re-running UpdateMedia with
+            // the SAME MediaFileInfo just makes the card reload the sidecar it
+            // owns and re-fire its display-label bindings, no re-probe/full
+            // refresh needed.
+            clip.UpdateMedia(clip.Media);
+            return;
+        }
+
+        var oldPath = clip.Path;
+        ClipInfoSidecar.Save(Settings.LibraryFolder, oldPath, updatedInfo);
+        var newPath = await RenameClipFileAsync(clip, sanitizedForFile);
+        SyncOpenEditorPathIfNeeded(oldPath, newPath);
+
+        RemoveClipFromLibrary(clip);
+        await AddOrUpdateLibraryClipAsync(newPath);
     }
 
     public void CloseEditor()
