@@ -63,6 +63,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _hydrationCompleted;
     private string _clipNotReadyMessage = string.Empty;
     private double _masterVolumePercent;
+    private bool _isMasterMuted;
     private double _videoZoom = 1.0;
     private double _videoPanY;
     private string _selectedMetadata = string.Empty;
@@ -432,8 +433,29 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (!SetProperty(ref _masterVolumePercent, clamped)) return;
             Settings.EditorMasterVolume = clamped;
             SaveSettings();
+            OnPropertyChanged(nameof(EffectiveMasterVolumePercent));
         }
     }
+
+    // Independent of MasterVolumePercent so un-muting restores whatever level
+    // was set before - same pattern as TrackLaneViewModel.IsMuted. Not
+    // persisted (matches per-track mute, which also resets each session);
+    // only the volume LEVEL is a saved preference.
+    public bool IsMasterMuted
+    {
+        get => _isMasterMuted;
+        set
+        {
+            if (!SetProperty(ref _isMasterMuted, value)) return;
+            OnPropertyChanged(nameof(EffectiveMasterVolumePercent));
+        }
+    }
+
+    // What PlaybackSession's output should actually use - 0 while muted, the
+    // real percent otherwise. Also what the volume icon's tier (mute/low/
+    // high) is driven from, so toggling mute updates the icon exactly like
+    // dragging the slider to 0 would.
+    public double EffectiveMasterVolumePercent => IsMasterMuted ? 0 : MasterVolumePercent;
 
     // Scroll-to-zoom on the video (both the normal editor and fullscreen -
     // it's the SAME EditorVideoView control reparented between the two, see

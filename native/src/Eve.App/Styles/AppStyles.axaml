@@ -75,19 +75,26 @@
     <Setter Property="Background" Value="#324255" />
   </Style>
 
-  <!-- Editor track lane mute toggle - a plain Border (not Button) so it never
-       inherits Fluent's press-scale animation, which made it visibly shrink/
-       jump on click. Hover/press feedback added here instead for polish. -->
-  <Style Selector="Border.trackMuteToggle">
-    <Setter Property="Background" Value="Transparent" />
+  <!-- Volume mute toggle (per-track lanes AND the master volume controls) -
+       a plain Border (not Button) so it never inherits Fluent's press-scale
+       animation, which made it visibly shrink/jump on click. Always shows a
+       visible background/border box (not just on hover) so it reads as a
+       clickable button on sight - a plain icon with no box, only reacting on
+       hover, gave no visual hint it was interactive at all. -->
+  <Style Selector="Border.muteToggle">
+    <Setter Property="Background" Value="#1B242D" />
+    <Setter Property="BorderBrush" Value="#2C3B48" />
+    <Setter Property="BorderThickness" Value="1" />
     <Setter Property="Transitions">
       <Transitions>
         <BrushTransition Property="Background" Duration="0:0:0.1" />
+        <BrushTransition Property="BorderBrush" Duration="0:0:0.1" />
       </Transitions>
     </Setter>
   </Style>
-  <Style Selector="Border.trackMuteToggle:pointerover">
+  <Style Selector="Border.muteToggle:pointerover">
     <Setter Property="Background" Value="#26323E" />
+    <Setter Property="BorderBrush" Value="#3E5064" />
   </Style>
 
   <Style Selector="Button.deleteButton">
@@ -547,20 +554,31 @@
   <Style Selector="Button.settingsNavButton.active:pointerover">
     <Setter Property="Background" Value="#1B2A3D" />
   </Style>
+  <!-- Shared by every volume slider - per-track lanes AND both master
+       volume controls (regular editor + fullscreen) - so all three look and
+       feel identical. Perfectly round (Width=Height, CornerRadius=half),
+       not the taller pill shape this used before. -->
   <Style Selector="Slider.volumeSlider /template/ Thumb">
-    <Setter Property="Width" Value="14" />
-    <Setter Property="Height" Value="18" />
-    <Setter Property="CornerRadius" Value="3" />
+    <Setter Property="Width" Value="16" />
+    <Setter Property="Height" Value="16" />
+    <Setter Property="CornerRadius" Value="8" />
     <Setter Property="Background" Value="#EEF4FF" />
-    <Setter Property="BorderBrush" Value="#776CFF" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
     <Setter Property="BorderThickness" Value="2" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.1" />
+      </Transitions>
+    </Setter>
   </Style>
   <Style Selector="Slider.volumeSlider /template/ Thumb:pointerover">
     <Setter Property="Background" Value="#FFFFFF" />
-    <Setter Property="BorderBrush" Value="#8B82FF" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrushHover}" />
+    <Setter Property="RenderTransform" Value="scale(1.15)" />
   </Style>
   <Style Selector="Slider.volumeSlider /template/ Thumb:pressed">
     <Setter Property="Background" Value="#EAF0FF" />
-    <Setter Property="BorderBrush" Value="#6D63FF" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="RenderTransform" Value="scale(1.05)" />
   </Style>
 </Styles>

@@ -87,7 +87,7 @@ public sealed partial class MainWindow : Window
                 ViewModel.PropertyChanged += (_, e) =>
                 {
                     if (e.PropertyName == nameof(MainWindowViewModel.Cs2AutoClipEnabled)) UpdateCs2AutoClipState();
-                    if (e.PropertyName == nameof(MainWindowViewModel.MasterVolumePercent)) _playback?.SetMasterVolume(ViewModel.MasterVolumePercent);
+                    if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
                 };
                 UpdateCs2AutoClipState();
@@ -1553,6 +1553,17 @@ public sealed partial class MainWindow : Window
         e.Handled = true;
     }
 
+    // Same toggle-and-remember pattern as TrackMuteToggle_OnPointerPressed,
+    // for the master volume icon (present in both the regular editor and
+    // fullscreen playbars - same handler, same ViewModel property, either
+    // one it's clicked from).
+    private void MasterVolumeMuteToggle_OnPointerPressed(object? sender, Avalonia.Input.PointerPressedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        ViewModel.IsMasterMuted = !ViewModel.IsMasterMuted;
+        e.Handled = true;
+    }
+
     private static void UpdateVolumeBadgePosition(Slider slider, TrackLaneViewModel track, double? pointerX = null)
     {
         var width = Math.Max(1, slider.Bounds.Width);
@@ -2179,7 +2190,7 @@ public sealed partial class MainWindow : Window
             // internally, so the same instance is safe to reuse.
             var playback = _playback ?? new PlaybackSession();
             playback.LoadVideo(ViewModel.SelectedVideoPath);
-            playback.SetMasterVolume(ViewModel.MasterVolumePercent);
+            playback.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
             _playback = playback;
             _pausedRanges = LoadPausedRanges(ViewModel.SelectedVideoPath);
             ViewModel.IsRecordingPausedAtCurrentTime = false;

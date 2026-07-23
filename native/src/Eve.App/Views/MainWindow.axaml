@@ -1278,6 +1278,31 @@
       <Border Grid.Row="1" Background="#141D24" BorderBrush="#22303A" BorderThickness="0,1,0,0">
         <Grid RowDefinitions="44,*" Margin="8,0,8,8">
           <Grid ColumnDefinitions="160,*,Auto" Height="44">
+            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8" Margin="4,0,0,0">
+              <Border Classes="muteToggle"
+                      Width="26"
+                      Height="26"
+                      CornerRadius="13"
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Center"
+                      PointerPressed="MasterVolumeMuteToggle_OnPointerPressed"
+                      Cursor="Hand"
+                      ToolTip.Tip="Mute/unmute">
+                <PathIcon Width="15"
+                          Height="15"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center"
+                          Foreground="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToMuteBrushConverter.Instance}}"
+                          Data="{Binding EffectiveMasterVolumePercent, Converter={x:Static opconv:VolumeLevelToIconConverter.Instance}}" />
+              </Border>
+              <Slider Classes="volumeSlider"
+                      Minimum="0" Maximum="150"
+                      Width="90"
+                      VerticalAlignment="Center"
+                      Value="{Binding MasterVolumePercent, Mode=TwoWay}"
+                      Opacity="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToOpacityConverter.Instance}}"
+                      ToolTip.Tip="{Binding MasterVolumePercent}" />
+            </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="7">
               <Button Classes="transportButton" Click="RestartButton_OnClick">
                 <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 5,3 L 7,3 L 7,17 L 5,17 Z M 17,4 L 17,16 L 8,10 Z" />
@@ -1342,15 +1367,15 @@
                             BorderThickness="1"
                             CornerRadius="8"
                             ClipToBounds="False">
-                      <Grid Margin="8,5" RowDefinitions="Auto,36" ColumnDefinitions="18,*,18">
-                        <TextBlock Grid.ColumnSpan="3"
+                      <Grid Margin="8,5" RowDefinitions="Auto,36" ColumnDefinitions="18,*">
+                        <TextBlock Grid.ColumnSpan="2"
                                    Text="{Binding Label}"
                                    Foreground="#D4E0EA"
                                    FontSize="11"
                                    Margin="0,3,0,0"
                                    TextTrimming="CharacterEllipsis" />
                         <Border Grid.Row="1"
-                                Classes="trackMuteToggle"
+                                Classes="muteToggle"
                                 Width="22"
                                 Height="22"
                                 CornerRadius="11"
@@ -1365,7 +1390,7 @@
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center"
                                     Foreground="{Binding IsMuted, Converter={x:Static opconv:BoolToMuteBrushConverter.Instance}}"
-                                    Data="{Binding IsMuted, Converter={x:Static opconv:BoolToMuteIconConverter.Instance}}" />
+                                    Data="{Binding EffectiveVolumePercent, Converter={x:Static opconv:VolumeLevelToIconConverter.Instance}}" />
                         </Border>
                         <Slider Grid.Row="1"
                                 Grid.Column="1"
@@ -1385,15 +1410,6 @@
                                 PointerMoved="TrackVolume_OnPointerMoved"
                                 PointerReleased="TrackVolume_OnPointerReleased"
                                 PropertyChanged="TrackVolume_OnPropertyChanged" />
-                        <PathIcon Grid.Row="1"
-                                  Grid.Column="2"
-                                  Width="14"
-                                  Height="14"
-                                  Foreground="#9FB2C5"
-                                  HorizontalAlignment="Center"
-                                  VerticalAlignment="Center"
-                                  Data="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"
-                                  IsVisible="{Binding IsAudio}" />
                         <Border Grid.Row="1"
                                 Grid.Column="1"
                                 Background="#E8EEF8"
@@ -1694,10 +1710,25 @@
                 <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 15,3 L 17,3 L 17,17 L 15,17 Z M 4,4 L 13,10 L 4,16 Z" />
               </Button>
               <Border Width="1" Height="20" Background="#26FFFFFF" Margin="4,0" />
-              <PathIcon Width="14" Height="14" Foreground="#C8D6E6"
-                        Data="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
-              <Slider Minimum="0" Maximum="150" Width="90" VerticalAlignment="Center"
+              <Border Classes="muteToggle"
+                      Width="26"
+                      Height="26"
+                      CornerRadius="13"
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Center"
+                      PointerPressed="MasterVolumeMuteToggle_OnPointerPressed"
+                      Cursor="Hand"
+                      ToolTip.Tip="Mute/unmute">
+                <PathIcon Width="15"
+                          Height="15"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center"
+                          Foreground="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToMuteBrushConverter.Instance}}"
+                          Data="{Binding EffectiveMasterVolumePercent, Converter={x:Static opconv:VolumeLevelToIconConverter.Instance}}" />
+              </Border>
+              <Slider Classes="volumeSlider" Minimum="0" Maximum="150" Width="90" VerticalAlignment="Center"
                       Value="{Binding MasterVolumePercent, Mode=TwoWay}"
+                      Opacity="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToOpacityConverter.Instance}}"
                       ToolTip.Tip="{Binding MasterVolumePercent}" />
               <Border Width="1" Height="20" Background="#26FFFFFF" Margin="4,0" />
               <Button Classes="transportButton" Click="ExitVideoFullscreenButton_OnClick" ToolTip.Tip="Exit fullscreen">
