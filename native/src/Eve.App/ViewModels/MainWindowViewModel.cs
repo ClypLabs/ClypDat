@@ -2227,10 +2227,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ClipEditSidecar.Delete(Settings.LibraryFolder, clip.Path);
             ClipInfoSidecar.Delete(Settings.LibraryFolder, clip.Path);
             Settings.ClipEdits.Remove(ClipEditKey(clip.Path));
+            AllClips.Remove(clip);
         }
 
+        // Every currently-selected clip just got deleted above, so a plain
+        // ClearSelection is correct here (not per-clip SetClipSelected) and
+        // cheaper.
+        ClearSelection();
         SaveSettings();
-        await RefreshLibraryAsync();
+        NotifyLibraryChrome();
         return selected.Length;
     }
 
@@ -2243,7 +2248,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings.ClipEdits.Remove(ClipEditKey(clip.Path));
 
         SaveSettings();
-        await RefreshLibraryAsync();
+        RemoveClipFromLibrary(clip);
+    }
+
+    // Deleting/renaming/re-titling one clip used to call RefreshLibraryAsync,
+    // which clears and re-enumerates the WHOLE library and restarts
+    // hydration for every card - a full grid rebuild (lost scroll position,
+    // hover state, and a re-probe of every other clip) for what's really a
+    // one-card change. This just pulls the single affected card out in
+    // place instead.
+    private void RemoveClipFromLibrary(ClipCardViewModel clip)
+    {
+        if (clip.IsSelected) SetClipSelected(clip, false);
+        AllClips.Remove(clip);
+        NotifyLibraryChrome();
     }
 
     public async Task RenameClipAsync(ClipCardViewModel clip, string newTitle)
@@ -2271,7 +2289,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         MoveClipSidecars(oldPath, newPath);
         _mediaProbe.DeleteCacheFor(oldPath);
 
-        await RefreshLibraryAsync();
+        // The probe/thumbnail/waveform cache is keyed off the path itself, so
+        // the moved file needs a fresh probe under its new path regardless -
+        // but only for this one card, not a full library rescan.
+        RemoveClipFromLibrary(clip);
+        await AddOrUpdateLibraryClipAsync(newPath);
     }
 
     // Called by the View once it's finished re-encoding the trimmed range over
@@ -2292,7 +2314,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // never touches the file on disk or FileTitle/GameDisplayName, so it can't
     // clobber the game association or a Medal import's original event title
     // (e.g. "4K - Inferno"). An empty title clears it back to "Clip from {date}".
-    public async Task RenameClipTitleAsync(ClipCardViewModel clip, string newCustomTitle)
+    public Task RenameClipTitleAsync(ClipCardViewModel clip, string newCustomTitle)
     {
         var sanitized = newCustomTitle.Trim();
         var existingInfo = ClipInfoSidecar.Load(Settings.LibraryFolder, clip.Path);
@@ -2302,7 +2324,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
         ClipInfoSidecar.Save(Settings.LibraryFolder, clip.Path, updatedInfo);
 
-        await RefreshLibraryAsync();
+        // The video file itself is untouched - re-running UpdateMedia with the
+        // SAME MediaFileInfo just makes the card reload the sidecar it owns
+        // and re-fire its display-label bindings, no re-probe/full refresh
+        // needed.
+        clip.UpdateMedia(clip.Media);
+        return Task.CompletedTask;
     }
 
     public void CloseEditor()
