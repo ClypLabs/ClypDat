@@ -28,6 +28,7 @@ public sealed class ForegroundGameDetector
         "discord.exe",
         "discordcanary.exe",
         "dwm.exe",
+        "epicgameslauncher.exe",
         "eve.exe",
         "explorer.exe",
         "firefox.exe",
