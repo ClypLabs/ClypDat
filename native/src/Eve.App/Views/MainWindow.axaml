@@ -228,7 +228,7 @@
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
                   <StackPanel Width="{Binding $parent[Window].DataContext.CardWidth}"
-                              Margin="4,4,20,14"
+                              Margin="4,4,20,8"
                               IsVisible="{Binding IsVisibleInLibrary}"
                               EffectiveViewportChanged="ClipCard_OnEffectiveViewportChanged">
                     <!-- Per-card date header, replacing the old shared
@@ -251,7 +251,7 @@
                          transitions open, no RenderTransform needed. -->
                     <Border Classes="clipDateRow"
                             Background="Transparent"
-                            Padding="0,0,4,4"
+                            Padding="0,0,4,2"
                             HorizontalAlignment="Left"
                             Opacity="{Binding DateHeaderOpacity}"
                             IsHitTestVisible="{Binding IsFirstOfDate}">
