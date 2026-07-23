@@ -659,7 +659,7 @@ public sealed partial class MainWindow : Window
 
     private async void ClipCard_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (e.Source is CheckBox) return;
+        if (e.Source is CheckBox or Button or PathIcon) return;
         if (sender is not Control control || !e.GetCurrentPoint(control).Properties.IsLeftButtonPressed) return;
         if (sender is not Control { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
 
@@ -691,13 +691,29 @@ public sealed partial class MainWindow : Window
     private async void ClipContextRename_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
+        await RenameClipCardAsync(clip);
+    }
 
-        // Auto-clips (CS2 kill clips etc.) show their "<event> - <map>" text
-        // as the main tile label, so renaming that IS the clip's title.
-        // Everything else (manual clips, VODs, Medal imports) shows "Clip
-        // from {date}" as a placeholder there instead - rename that card's
-        // own custom label, not the game name/Medal title shown above it.
-        if (clip.IsAutoClip)
+    private async void ClipRenamePencil_OnClick(object? sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is not Control { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
+        await RenameClipCardAsync(clip);
+    }
+
+    private async Task RenameClipCardAsync(ClipCardViewModel clip)
+    {
+        if (ViewModel is null) return;
+
+        // Auto-clips (CS2 kill clips etc.) and Medal imports both show their
+        // filename-derived title ("<event> - <map>" / the imported clip's own
+        // title) as the main tile label, so renaming that IS the clip's
+        // title - it has to go through RenameClipAsync to actually change
+        // the game-name portion of the file on disk (leaving the trailing
+        // date/time suffix untouched). Everything else (manual clips, VODs)
+        // shows "Clip from {date}" as a placeholder there instead - rename
+        // that card's own custom label, not a title baked into the filename.
+        if (clip.IsAutoClip || clip.IsMedalImport)
         {
             var newTitle = await PromptRenameAsync(clip.GameNameLabel);
             if (string.IsNullOrWhiteSpace(newTitle) || newTitle == clip.GameNameLabel) return;
