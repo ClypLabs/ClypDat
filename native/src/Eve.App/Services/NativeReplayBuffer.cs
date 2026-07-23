@@ -537,6 +537,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             var preAcquireMs = 0.0;
             var preAcquireMaxMs = 0.0;
             preAcquireStopwatch.Start();
+            var gen2CountAtLastIteration = GC.CollectionCount(2);
+            var gen1CountAtLastIteration = GC.CollectionCount(1);
             // Whether the target window is currently NOT foreground/visible - the
             // capture keeps encoding through this (re-submitting the last good
             // frame, see below) instead of stopping, so the ring buffer/full
@@ -567,7 +569,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     var m = Math.Max(1, iterationsSinceLog);
                     var realFrameCount = Math.Max(1, iterationsSinceLog - zeroPresentSkips);
                     var presentGapDenom = Math.Max(1, presentGapCount);
-                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgEncodeMs={encodeMs / n:0.00}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, iterations={iterationsSinceLog}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}.");
+                    // gen2Count/managedMb: if a stall coincides with gen2Count
+                    // actually incrementing between two diag lines (or between
+                    // the before/after read on a single spike below), that's
+                    // a blocking GC pause, not a GPU/DXGI/scheduling stall -
+                    // a multi-GB managed heap (see managedMb) can produce
+                    // multi-second Gen2/full collections that freeze every
+                    // managed thread at once, including this one, which would
+                    // explain gaps this large with every named stage timer
+                    // (GPU copy/scale/encode, AcquireNextFrame itself) still
+                    // reading normal.
+                    var managedMb = GC.GetTotalMemory(false) / (1024 * 1024);
+                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgEncodeMs={encodeMs / n:0.00}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, iterations={iterationsSinceLog}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
                     copyMapMs = 0;
                     scaleMs = 0;
                     encodeMs = 0;
@@ -632,10 +645,21 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                 preAcquireStopwatch.Restart();
                 preAcquireMs += preAcquireElapsedMs;
                 if (preAcquireElapsedMs > preAcquireMaxMs) preAcquireMaxMs = preAcquireElapsedMs;
+                var gen2CountNow = GC.CollectionCount(2);
+                var gen1CountNow = GC.CollectionCount(1);
                 if (preAcquireElapsedMs > 200)
                 {
-                    AppLog.Info($"Native capture: {preAcquireElapsedMs:0}ms iteration-to-iteration gap (includes AcquireNextFrame + all frame processing, not just idle time) - see avgWaitMs/avgCopyMapMs/avgScaleMs/avgEncodeMs/avgGetFrameMs in the next diag line to see how much of that was accounted for.");
+                    // If gen1Delta/gen2Delta are both 0, this gap has nothing
+                    // to do with GC - back to looking at DXGI/scheduling. If
+                    // either incremented, a blocking collection ran somewhere
+                    // in this window and froze every managed thread,
+                    // including this one - managedMb shows how big a heap
+                    // that collection had to walk.
+                    AppLog.Info($"Native capture: {preAcquireElapsedMs:0}ms iteration-to-iteration gap - gen1Delta={gen1CountNow - gen1CountAtLastIteration}, gen2Delta={gen2CountNow - gen2CountAtLastIteration}, managedMb={GC.GetTotalMemory(false) / (1024 * 1024)}.");
                 }
+
+                gen1CountAtLastIteration = gen1CountNow;
+                gen2CountAtLastIteration = gen2CountNow;
 
                 iterationsSinceLog++;
                 stageStopwatch.Restart();
