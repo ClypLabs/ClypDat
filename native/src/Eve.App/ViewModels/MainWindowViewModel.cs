@@ -305,7 +305,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string HydrationEtaText
     {
         get => _hydrationEtaText;
-        private set => SetProperty(ref _hydrationEtaText, value);
+        private set
+        {
+            if (!SetProperty(ref _hydrationEtaText, value)) return;
+            // HasHydrationEta is computed off this field - without this its
+            // own IsVisible binding never re-evaluates past its initial
+            // false, so the ETA text stays permanently hidden even once
+            // HydrationEtaText itself starts updating.
+            OnPropertyChanged(nameof(HasHydrationEta));
+        }
     }
 
     public bool HasHydrationEta => !string.IsNullOrEmpty(HydrationEtaText);
