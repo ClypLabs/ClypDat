@@ -145,17 +145,10 @@ public sealed class PlaybackSession : IDisposable
         DisposeAudioOutput();
         if (_audioStreamIndexes.Count == 0 || string.IsNullOrEmpty(_audioInputPath)) return;
 
-        var tempDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "EVE",
-            "preview-audio");
-        Directory.CreateDirectory(tempDir);
-        PruneAudioCache(tempDir);
-
         var providers = new List<ISampleProvider>();
         foreach (var streamIndex in _audioStreamIndexes)
         {
-            var reader = new ChunkedAudioReader(_audioInputPath, streamIndex, _audioDuration, tempDir, AudioCacheKey(_audioInputPath, streamIndex));
+            var reader = new ChunkedAudioReader(_audioInputPath, streamIndex, _audioDuration, AudioCacheKey(_audioInputPath, streamIndex));
             var volume = new VolumeSampleProvider(reader)
             {
                 Volume = VolumeCurve(_audioVolumes.GetValueOrDefault(streamIndex, 100))
@@ -638,33 +631,6 @@ public sealed class PlaybackSession : IDisposable
         return (float)Math.Clamp(percent / 100d, 0, 1.5);
     }
 
-    // Guards the once-per-run PruneAudioCache sweep.
-    private static int _audioCachePruned;
-
-    // The preview WAVs are uncompressed 48kHz stereo PCM (~11MB per minute per
-    // audio track) and were cached with no cleanup at all - every clip ever
-    // opened in the editor stayed on disk forever, measured at 9GB on one real
-    // install. They're pure re-extractable cache, so anything not used in a
-    // week is safe to drop. Recency is tracked by bumping LastWriteTime on
-    // every cache hit (NTFS LastAccessTime updates are often disabled, so
-    // that can't be trusted for this).
-    private static void PruneAudioCache(string tempDir)
-    {
-        if (Interlocked.Exchange(ref _audioCachePruned, 1) != 0) return;
-        try
-        {
-            var cutoff = DateTime.UtcNow.AddDays(-7);
-            foreach (var file in Directory.EnumerateFiles(tempDir, "*.wav"))
-            {
-                if (File.GetLastWriteTimeUtc(file) < cutoff) TryDelete(file);
-            }
-        }
-        catch
-        {
-            // Cache pruning must never block playback.
-        }
-    }
-
     private static string AudioCacheKey(string inputPath, int streamIndex)
     {
         var info = new FileInfo(inputPath);
@@ -675,18 +641,6 @@ public sealed class PlaybackSession : IDisposable
             info.Exists ? info.Length : 0,
             info.Exists ? info.LastWriteTimeUtc.Ticks : 0);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(input)))[..24].ToLowerInvariant();
-    }
-
-    private static void TryDelete(string path)
-    {
-        try
-        {
-            File.Delete(path);
-        }
-        catch
-        {
-            // Best-effort cache cleanup.
-        }
     }
 
     private sealed record AudioTrackSource(ChunkedAudioReader Reader, VolumeSampleProvider Volume);

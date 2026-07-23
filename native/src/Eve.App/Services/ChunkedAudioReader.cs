@@ -13,17 +13,19 @@ namespace Eve.App.Services;
 // rest fills in as playback approaches it (each chunk prefetches the next).
 //
 // Read() is called on the WASAPI render thread, so it never blocks on
-// extraction: a chunk that isn't on disk yet plays as silence (position
-// keeps advancing, preserving A/V sync) and the real audio takes over the
-// moment its file lands. Chunk files live in the same preview-audio cache
-// folder (and 7-day prune) as the old full-file WAVs did, keyed by the same
-// content-derived cache key, so they're reused across editor opens.
+// extraction: a chunk that isn't ready yet plays as silence (position keeps
+// advancing, preserving A/V sync) and the real audio takes over the moment
+// it lands. Chunks live in AudioChunkCache - an in-memory, budget-capped
+// cache shared process-wide - rather than as WAV files on disk; see its
+// comment for why (measured 9GB on one real install with the old disk
+// cache).
 public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
 {
     private const int ChunkSeconds = 30;
     private const int SampleRate = 48000;
     private const int Channels = 2;
     private const long ChunkFrames = (long)ChunkSeconds * SampleRate;
+    private static readonly WaveFormat ChunkWaveFormat = new(SampleRate, 16, Channels);
 
     // Extraction dedupe/throttle shared across all readers (a clip has one
     // reader per audio track, and RebuildAudioOutput recreates readers) so
@@ -39,23 +41,21 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
 
     private readonly string _inputPath;
     private readonly int _streamIndex;
-    private readonly string _cacheDir;
     private readonly string _cacheKey;
     private readonly long _totalFrames;
 
     private readonly object _readerLock = new();
-    private WaveFileReader? _openChunkReader;
+    private RawSourceWaveStream? _openChunkReader;
     private ISampleProvider? _openChunkSamples;
     private int _openChunkIndex = -1;
     private long _positionFrames;
     private long _starvedFrames;
     private bool _disposed;
 
-    public ChunkedAudioReader(string inputPath, int streamIndex, TimeSpan duration, string cacheDir, string cacheKey)
+    public ChunkedAudioReader(string inputPath, int streamIndex, TimeSpan duration, string cacheKey)
     {
         _inputPath = inputPath;
         _streamIndex = streamIndex;
-        _cacheDir = cacheDir;
         _cacheKey = cacheKey;
         // Duration can transiently be unknown while a clip is still being
         // probed - better to keep producing (silent) audio and let the video
@@ -148,10 +148,10 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
                 var read = _openChunkSamples!.Read(buffer, offset + written, (int)(framesWanted * Channels));
                 if (read <= 0)
                 {
-                    // The chunk file ran short of its nominal 30s (always true
-                    // for the final chunk, possible for others by a few frames
-                    // of rounding) - pad the remainder of the nominal window
-                    // with silence so position stays chunk-aligned.
+                    // The chunk ran short of its nominal 30s (always true for
+                    // the final chunk, possible for others by a few frames of
+                    // rounding) - pad the remainder of the nominal window with
+                    // silence so position stays chunk-aligned.
                     var padSamples = (int)(framesWanted * Channels);
                     Array.Clear(buffer, offset + written, padSamples);
                     written += padSamples;
@@ -183,8 +183,6 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
         }
     }
 
-    private string ChunkPath(int chunkIndex) => Path.Combine(_cacheDir, $"{_cacheKey}-c{chunkIndex:0000}.wav");
-
     private bool TryOpenChunk(int chunkIndex, long frameWithinChunk)
     {
         if (_openChunkIndex == chunkIndex && _openChunkSamples is not null)
@@ -196,33 +194,27 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
             return true;
         }
 
-        var path = ChunkPath(chunkIndex);
-        if (!File.Exists(path)) return false;
+        if (!AudioChunkCache.TryGet(_cacheKey, chunkIndex, out var pcm)) return false;
 
         try
         {
             CloseOpenChunk();
-            var reader = new WaveFileReader(path);
-            var byteOffset = frameWithinChunk * reader.WaveFormat.BlockAlign;
-            if (byteOffset < reader.Length)
-            {
-                reader.Position = byteOffset;
-            }
-            else
-            {
-                reader.Position = reader.Length;
-            }
+            // MemoryStream(byte[]) wraps the array directly (no copy) - the
+            // cache entry stays the single copy of this chunk's data for as
+            // long as it's resident.
+            var stream = new RawSourceWaveStream(new MemoryStream(pcm, writable: false), ChunkWaveFormat);
+            var byteOffset = frameWithinChunk * ChunkWaveFormat.BlockAlign;
+            stream.Position = Math.Min(byteOffset, stream.Length);
 
-            _openChunkReader = reader;
-            _openChunkSamples = reader.ToSampleProvider();
+            _openChunkReader = stream;
+            _openChunkSamples = stream.ToSampleProvider();
             _openChunkIndex = chunkIndex;
             return true;
         }
         catch (Exception error)
         {
-            // Partially-written/corrupt chunk - drop it and re-extract.
-            AppLog.Error($"Editor audio chunk open failed: {path}", error);
-            try { File.Delete(path); } catch { }
+            AppLog.Error($"Editor audio chunk open failed: cacheKey={_cacheKey}, chunk={chunkIndex}", error);
+            AudioChunkCache.Remove(_cacheKey, chunkIndex);
             CloseOpenChunk();
             return false;
         }
@@ -239,30 +231,29 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
     private void ScheduleExtraction(int chunkIndex)
     {
         if (chunkIndex < 0 || (long)chunkIndex * ChunkFrames >= _totalFrames) return;
-        var path = ChunkPath(chunkIndex);
-        if (File.Exists(path)) return;
+        if (AudioChunkCache.Contains(_cacheKey, chunkIndex)) return;
 
         var isNetwork = PlaybackSession.IsNetworkPath(_inputPath);
-        InFlightExtractions.GetOrAdd(path, _ => Task.Run(async () =>
+        var flightKey = $"{_cacheKey}-c{chunkIndex:0000}";
+        InFlightExtractions.GetOrAdd(flightKey, _ => Task.Run(async () =>
         {
             await ExtractionGate.WaitAsync();
             if (isNetwork) await NetworkExtractionGate.WaitAsync();
             try
             {
-                if (!File.Exists(path)) await ExtractChunkAsync(chunkIndex, path);
+                if (!AudioChunkCache.Contains(_cacheKey, chunkIndex)) await ExtractChunkAsync(chunkIndex);
             }
             finally
             {
                 if (isNetwork) NetworkExtractionGate.Release();
                 ExtractionGate.Release();
-                InFlightExtractions.TryRemove(path, out Task? _);
+                InFlightExtractions.TryRemove(flightKey, out Task? _);
             }
         }));
     }
 
-    private async Task ExtractChunkAsync(int chunkIndex, string outputPath)
+    private async Task ExtractChunkAsync(int chunkIndex)
     {
-        var pendingPath = Path.Combine(_cacheDir, $"{Guid.NewGuid():N}.tmp.wav");
         var startInfo = new ProcessStartInfo("ffmpeg")
         {
             RedirectStandardError = true,
@@ -282,8 +273,9 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
             "-sn",
             "-ac", Channels.ToString(),
             "-ar", SampleRate.ToString(),
+            "-f", "s16le",
             "-c:a", "pcm_s16le",
-            pendingPath
+            "-"
         })
         {
             startInfo.ArgumentList.Add(argument);
@@ -293,27 +285,127 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
         {
             var clock = Stopwatch.StartNew();
             using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start ffmpeg.");
+            // Both pipes drained concurrently while the process runs - reading
+            // stdout to EOF (CopyToAsync) waits on ffmpeg to finish writing and
+            // close it, which happens at/just before exit, so this is safe to
+            // await before WaitForExitAsync rather than deadlocking on a full
+            // pipe buffer.
             var errorTask = process.StandardError.ReadToEndAsync();
-            _ = process.StandardOutput.ReadToEndAsync();
+            using var pcm = new MemoryStream();
+            await process.StandardOutput.BaseStream.CopyToAsync(pcm);
             await process.WaitForExitAsync();
-            if (process.ExitCode != 0)
+            var error = await errorTask;
+
+            if (process.ExitCode != 0 || pcm.Length == 0)
             {
-                AppLog.Error($"Editor audio chunk extract failed: input={_inputPath}, stream={_streamIndex}, chunk={chunkIndex}: {(await errorTask).Trim()}");
-                try { File.Delete(pendingPath); } catch { }
+                AppLog.Error($"Editor audio chunk extract failed: input={_inputPath}, stream={_streamIndex}, chunk={chunkIndex}: {error.Trim()}");
                 return;
             }
 
-            File.Move(pendingPath, outputPath, overwrite: true);
+            AudioChunkCache.Store(_cacheKey, chunkIndex, pcm.ToArray());
             // Per-chunk extraction time is the primary network-drive health
             // metric: local NVMe lands well under 200ms; a share that takes
             // multiple seconds per chunk is what audio starvation reports
             // trace back to.
-            AppLog.Debug($"Editor audio chunk extracted: stream={_streamIndex}, chunk={chunkIndex}, ms={clock.ElapsedMilliseconds}, network={PlaybackSession.IsNetworkPath(_inputPath)}.");
+            AppLog.Debug($"Editor audio chunk extracted: stream={_streamIndex}, chunk={chunkIndex}, ms={clock.ElapsedMilliseconds}, bytes={pcm.Length}, network={PlaybackSession.IsNetworkPath(_inputPath)}.");
         }
         catch (Exception error)
         {
             AppLog.Error($"Editor audio chunk extract failed: input={_inputPath}, stream={_streamIndex}, chunk={chunkIndex}", error);
-            try { File.Delete(pendingPath); } catch { }
+        }
+    }
+}
+
+// Global, process-lifetime, memory-bounded cache of extracted PCM chunks -
+// replaces the old on-disk WAV chunk cache (measured 9GB on one real install
+// with no cleanup, later capped to a 7-day prune) with an in-memory LRU
+// instead: no permanent disk footprint, and no time-based staleness to
+// reason about - a chunk that stops being touched just falls out under
+// eviction pressure from newer ones, whenever that happens to occur.
+//
+// Bounded by design, not just in practice: Store() always runs an eviction
+// pass immediately after adding, so resident bytes can only ever exceed
+// BudgetBytes by whatever a handful of concurrent extractions (capped by
+// ChunkedAudioReader's ExtractionGate, at most 2 at once) add between one
+// eviction pass and the next - never allowed to grow unbounded the way the
+// old disk cache's per-file WAVs did. Entries hold only raw PCM byte[] data,
+// nothing that chains back to a ViewModel/session/UI object, so they can
+// never keep heavier objects alive past their own use.
+internal static class AudioChunkCache
+{
+    // ~5.76MB per 30s chunk at 48kHz/16-bit/stereo. Budget covers a few
+    // minutes of lookback/lookahead across several tracks at once (a Full
+    // Session can have 3-4) without letting a long scrub session's resident
+    // set grow without limit.
+    private const long BudgetBytes = 256L * 1024 * 1024;
+
+    private sealed class Entry(byte[] data, long lastUsedTicks)
+    {
+        public readonly byte[] Data = data;
+        public long LastUsedTicks = lastUsedTicks;
+    }
+
+    private static readonly ConcurrentDictionary<(string CacheKey, int ChunkIndex), Entry> Entries = new();
+    private static long _totalBytes;
+    private static readonly object EvictionLock = new();
+
+    public static bool TryGet(string cacheKey, int chunkIndex, out byte[] data)
+    {
+        if (Entries.TryGetValue((cacheKey, chunkIndex), out var entry))
+        {
+            Volatile.Write(ref entry.LastUsedTicks, Stopwatch.GetTimestamp());
+            data = entry.Data;
+            return true;
+        }
+
+        data = Array.Empty<byte>();
+        return false;
+    }
+
+    public static bool Contains(string cacheKey, int chunkIndex) => Entries.ContainsKey((cacheKey, chunkIndex));
+
+    public static void Store(string cacheKey, int chunkIndex, byte[] data)
+    {
+        var entry = new Entry(data, Stopwatch.GetTimestamp());
+        if (!Entries.TryAdd((cacheKey, chunkIndex), entry)) return;
+
+        Interlocked.Add(ref _totalBytes, data.LongLength);
+        EvictIfNeeded();
+    }
+
+    public static void Remove(string cacheKey, int chunkIndex)
+    {
+        if (Entries.TryRemove((cacheKey, chunkIndex), out var entry))
+        {
+            Interlocked.Add(ref _totalBytes, -entry.Data.LongLength);
+        }
+    }
+
+    // Linear scan for the least-recently-used entry - the byte budget keeps
+    // the resident set small enough in practice (well under 100 chunks) that
+    // this is cheaper to reason about than maintaining a proper LRU list, and
+    // it only runs when a new chunk actually pushes the total over budget.
+    private static void EvictIfNeeded()
+    {
+        lock (EvictionLock)
+        {
+            while (Interlocked.Read(ref _totalBytes) > BudgetBytes)
+            {
+                (string CacheKey, int ChunkIndex)? oldestKey = null;
+                var oldestTicks = long.MaxValue;
+                foreach (var pair in Entries)
+                {
+                    var ticks = Volatile.Read(ref pair.Value.LastUsedTicks);
+                    if (ticks < oldestTicks)
+                    {
+                        oldestTicks = ticks;
+                        oldestKey = pair.Key;
+                    }
+                }
+
+                if (oldestKey is null) return;
+                Remove(oldestKey.Value.CacheKey, oldestKey.Value.ChunkIndex);
+            }
         }
     }
 }
