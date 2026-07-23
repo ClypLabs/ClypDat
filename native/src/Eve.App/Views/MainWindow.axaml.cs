@@ -3199,49 +3199,9 @@ public sealed partial class MainWindow : Window
         return window;
     }
 
-    // Opens a file's containing folder with it pre-selected, or opens a
-    // folder directly. Explorer's own launch (ShellExecuteEx under the hood,
-    // via UseShellExecute) can block for real time - shell extensions, icon
-    // overlay providers, AV scanning the target, a cold Explorer process
-    // with no window yet open - so this always runs off the UI thread;
-    // there's no follow-up state to update once Explorer's asked to open.
     private static void OpenInExplorer(string path, bool selectFile)
     {
-        if (string.IsNullOrWhiteSpace(path)) return;
-
-        Task.Run(() => LaunchExplorer(path, selectFile));
-    }
-
-    private static void LaunchExplorer(string path, bool selectFile)
-    {
-        try
-        {
-            var target = selectFile
-                ? Directory.GetParent(path)?.FullName ?? path
-                : path;
-
-            if (selectFile && File.Exists(path))
-            {
-                Process.Start(new ProcessStartInfo("explorer.exe")
-                {
-                    ArgumentList = { "/select,", path },
-                    UseShellExecute = true
-                });
-                return;
-            }
-
-            if (!Directory.Exists(target)) return;
-
-            Process.Start(new ProcessStartInfo("explorer.exe")
-            {
-                ArgumentList = { target },
-                UseShellExecute = true
-            });
-        }
-        catch (Exception error)
-        {
-            AppLog.Error($"Failed to open Explorer for '{path}'", error);
-        }
+        ExplorerService.Open(path, selectFile);
     }
 
     private static bool IsTypingInTextInput(object? source)

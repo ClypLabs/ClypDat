@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text;
 using System.Reflection;
 
@@ -36,7 +35,7 @@ public static class AppLog
     public static void OpenFolder()
     {
         Directory.CreateDirectory(LogFolder);
-        Process.Start(new ProcessStartInfo(LogFolder) { UseShellExecute = true });
+        ExplorerService.Open(LogFolder, selectFile: false);
     }
 
     public static void Startup()
