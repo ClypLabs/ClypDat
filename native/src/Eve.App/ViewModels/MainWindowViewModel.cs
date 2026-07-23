@@ -61,6 +61,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isHydratingLibrary;
     private int _hydrationTotal;
     private int _hydrationCompleted;
+    private string _hydrationPhaseLabel = "Loading clip info";
     private string _clipNotReadyMessage = string.Empty;
     private double _masterVolumePercent;
     private bool _isMasterMuted;
@@ -266,7 +267,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public string HydrationProgressText => $"Building your library... {HydrationCompleted}/{HydrationTotal}";
+    // Which of the three hydration passes is currently running (RunHydrationPassAsync) -
+    // "Loading clip info" / "Loading thumbnails" / "Loading timelines".
+    public string HydrationPhaseLabel
+    {
+        get => _hydrationPhaseLabel;
+        private set
+        {
+            if (!SetProperty(ref _hydrationPhaseLabel, value)) return;
+            OnPropertyChanged(nameof(HydrationProgressText));
+        }
+    }
+
+    public string HydrationProgressText => $"{HydrationPhaseLabel}... {HydrationCompleted}/{HydrationTotal}";
     public double HydrationProgressFraction => HydrationTotal > 0 ? (double)HydrationCompleted / HydrationTotal : 0;
 
     // Transient message shown when a card is clicked before
@@ -3532,42 +3545,42 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // Staged in three passes across the WHOLE library, instead of doing
+    // metadata+thumbnail+filmstrip for one clip before moving to the next -
+    // every clip's duration/tracks (cheap - a probe-cache hit is just a JSON
+    // read, and even a real ffprobe is far lighter than image generation)
+    // lands FIRST, so every card stops showing 0:00 as fast as possible,
+    // THEN thumbnails fill in across the whole library, THEN the much more
+    // expensive filmstrips (up to 11 ffmpeg processes per clip) last. A
+    // single clip's full pipeline no longer blocks every other clip behind
+    // it in the list from getting at least its basic info quickly.
     private async Task HydrateLibraryClipsAsync(IReadOnlyList<ClipCardViewModel> clips, CancellationToken cancellationToken)
     {
-        await Dispatcher.UIThread.InvokeAsync(() =>
-        {
-            HydrationCompleted = 0;
-            HydrationTotal = clips.Count;
-            IsHydratingLibrary = clips.Count > 0;
-        });
-
         try
         {
-            await Parallel.ForEachAsync(
-                clips,
-                new ParallelOptions { MaxDegreeOfParallelism = 1, CancellationToken = cancellationToken },
-                async (clip, token) =>
+            await Dispatcher.UIThread.InvokeAsync(() => IsHydratingLibrary = clips.Count > 0);
+
+            await RunHydrationPassAsync(clips, "Loading clip info", cancellationToken,
+                async clip =>
                 {
-                    try
-                    {
-                        token.ThrowIfCancellationRequested();
-                        var media = await _mediaProbe.ProbeAsync(clip.Path);
-                        if (token.IsCancellationRequested) return;
-                        await Dispatcher.UIThread.InvokeAsync(() =>
-                        {
-                            clip.UpdateMedia(media);
-                            HydrationCompleted++;
-                        });
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch
-                    {
-                        // Bad files should not stop the rest of the library from filling in.
-                        await Dispatcher.UIThread.InvokeAsync(() => HydrationCompleted++);
-                    }
+                    var media = await _mediaProbe.ProbeMetadataAsync(clip.Path);
+                    await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(media));
+                });
+
+            await RunHydrationPassAsync(clips, "Loading thumbnails", cancellationToken,
+                async clip =>
+                {
+                    var path = await _mediaProbe.EnsureThumbnailAsync(clip.Path, clip.Duration);
+                    if (string.IsNullOrEmpty(path)) return;
+                    await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(clip.Media with { ThumbnailPath = path }));
+                });
+
+            await RunHydrationPassAsync(clips, "Loading timelines", cancellationToken,
+                async clip =>
+                {
+                    var path = await _mediaProbe.EnsureFilmstripAsync(clip.Path, clip.Duration);
+                    if (string.IsNullOrEmpty(path)) return;
+                    await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(clip.Media with { FilmstripPath = path }));
                 });
         }
         catch (OperationCanceledException)
@@ -3587,6 +3600,47 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 await Dispatcher.UIThread.InvokeAsync(() => IsHydratingLibrary = false);
             }
         }
+    }
+
+    // One pass of HydrateLibraryClipsAsync - runs `action` for every clip
+    // (one at a time, matching the existing network-drive-friendly
+    // MaxDegreeOfParallelism), resetting/driving the progress banner for
+    // just this phase.
+    private async Task RunHydrationPassAsync(
+        IReadOnlyList<ClipCardViewModel> clips,
+        string phaseLabel,
+        CancellationToken cancellationToken,
+        Func<ClipCardViewModel, Task> action)
+    {
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            HydrationPhaseLabel = phaseLabel;
+            HydrationCompleted = 0;
+            HydrationTotal = clips.Count;
+        });
+
+        await Parallel.ForEachAsync(
+            clips,
+            new ParallelOptions { MaxDegreeOfParallelism = 1, CancellationToken = cancellationToken },
+            async (clip, token) =>
+            {
+                try
+                {
+                    token.ThrowIfCancellationRequested();
+                    await action(clip);
+                    if (token.IsCancellationRequested) return;
+                    await Dispatcher.UIThread.InvokeAsync(() => HydrationCompleted++);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    // A bad clip in one pass shouldn't stop the rest of the library.
+                    await Dispatcher.UIThread.InvokeAsync(() => HydrationCompleted++);
+                }
+            });
     }
 
     private TimeSpan ClampTime(TimeSpan time)

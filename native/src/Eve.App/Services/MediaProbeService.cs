@@ -126,9 +126,34 @@ public sealed class MediaProbeService
         return new MediaDurationProbeResult(TimeSpan.Zero, string.IsNullOrWhiteSpace(result.Error) ? "ffprobe could not read a duration." : result.Error.Trim());
     }
 
+    // Full probe: metadata (from cache if possible) AND generates the
+    // thumbnail/filmstrip if either is missing. Used where a single specific
+    // clip's complete info is needed right away (opening a clip, adding one
+    // new clip to the library) - for hydrating the WHOLE library, see
+    // ProbeMetadataAsync/EnsureThumbnailAsync/EnsureFilmstripAsync instead,
+    // called as three separate passes (MainWindowViewModel.
+    // HydrateLibraryClipsAsync) so a single clip's full pipeline can't block
+    // every other clip behind it in the list from getting at least its basic
+    // info quickly.
     public async Task<MediaFileInfo> ProbeAsync(string filePath)
     {
+        var media = await ProbeMetadataAsync(filePath);
+        var thumbnailPath = await EnsureThumbnailAsync(filePath, media.Duration);
+        var filmstripPath = await EnsureFilmstripAsync(filePath, media.Duration);
+        return media with { ThumbnailPath = thumbnailPath, FilmstripPath = filmstripPath };
+    }
+
+    // Metadata only (duration/tracks/resolution/etc) - no ffmpeg thumbnail/
+    // filmstrip generation, just whichever of those already happen to exist
+    // in cache (a cheap File.Exists check, same as CreateLibraryStub). This
+    // is the cheap, fast part of a full probe: a cache hit is just a JSON
+    // read, and even a real ffprobe call is far lighter than image
+    // generation - see HydrateLibraryClipsAsync for why that split matters.
+    public async Task<MediaFileInfo> ProbeMetadataAsync(string filePath)
+    {
         var info = new FileInfo(filePath);
+        var thumbnailPath = GetThumbnailPath(filePath);
+        var filmstripPath = GetFilmstripPath(filePath);
 
         // Cache hit: the file's size+mtime match what was last probed, so
         // its duration/tracks/resolution can't have changed - skip ffprobe
@@ -137,21 +162,19 @@ public sealed class MediaProbeService
         var cached = TryReadProbeCache(filePath, info);
         if (cached is not null)
         {
-            var cachedThumbnailPath = await EnsureThumbnailAsync(filePath, cached.Duration);
-            var cachedFilmstrip = await EnsureFilmstripAsync(filePath, cached.Duration);
             return new MediaFileInfo(
                 Path.GetFileNameWithoutExtension(filePath),
                 filePath,
                 info.CreationTimeUtc,
                 cached.Duration,
                 info.Length,
-                cachedThumbnailPath,
+                File.Exists(thumbnailPath) ? thumbnailPath : string.Empty,
                 cached.Tracks,
                 cached.Width,
                 cached.Height,
                 cached.Fps,
                 cached.CaptureBackend,
-                cachedFilmstrip);
+                File.Exists(filmstripPath) ? filmstripPath : string.Empty);
         }
 
         var result = await RunProcessAsync("ffprobe", new[]
@@ -231,22 +254,19 @@ public sealed class MediaProbeService
             }
         }
 
-        var thumbnailPath = await EnsureThumbnailAsync(filePath, duration);
-        var filmstrip = await EnsureFilmstripAsync(filePath, duration);
-
         var media = new MediaFileInfo(
             Path.GetFileNameWithoutExtension(filePath),
             filePath,
             info.CreationTimeUtc,
             duration,
             info.Length,
-            thumbnailPath,
+            File.Exists(thumbnailPath) ? thumbnailPath : string.Empty,
             tracks,
             width,
             height,
             fps,
             captureBackend,
-            filmstrip);
+            File.Exists(filmstripPath) ? filmstripPath : string.Empty);
 
         if (duration > TimeSpan.Zero)
         {
@@ -424,7 +444,7 @@ public sealed class MediaProbeService
         TryDelete(GetWaveformPath(filePath));
     }
 
-    private async Task<string> EnsureThumbnailAsync(string filePath, TimeSpan duration)
+    public async Task<string> EnsureThumbnailAsync(string filePath, TimeSpan duration)
     {
         var output = GetThumbnailPath(filePath);
         if (File.Exists(output))
@@ -518,7 +538,7 @@ public sealed class MediaProbeService
     // actually wanted. Same reasoning as EnsureThumbnailAsync's -ss usage.
     // The combine-into-one-strip pass afterward reads only these small
     // already-extracted JPEGs, not the source video, so it's effectively free.
-    private async Task<string> EnsureFilmstripAsync(string filePath, TimeSpan duration)
+    public async Task<string> EnsureFilmstripAsync(string filePath, TimeSpan duration)
     {
         var output = GetFilmstripPath(filePath);
         if (File.Exists(output)) return output;
