@@ -21,6 +21,9 @@ public sealed partial class MainWindow : Window
     private readonly DispatcherTimer _gameDetectionTimer;
     private readonly ForegroundGameDetector _gameDetector = new();
     private Cs2GsiListener? _cs2GsiListener;
+    private DotaGsiListener? _dotaGsiListener;
+    private LeagueAutoClipListener? _leagueAutoClipListener;
+    private FortniteAutoClipListener? _fortniteAutoClipListener;
     private PlaybackSession? _playback;
     private CancellationTokenSource? _playbackStartCts;
     private CancellationTokenSource? _editorSeekCts;
@@ -86,11 +89,18 @@ public sealed partial class MainWindow : Window
                 };
                 ViewModel.PropertyChanged += (_, e) =>
                 {
-                    if (e.PropertyName == nameof(MainWindowViewModel.Cs2AutoClipEnabled)) UpdateCs2AutoClipState();
+                    if (e.PropertyName == nameof(MainWindowViewModel.AutoClippingEnabled)) UpdateAutoClipStates();
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
                 };
-                UpdateCs2AutoClipState();
+                foreach (var autoClipGame in ViewModel.AutoClipGames)
+                {
+                    autoClipGame.PropertyChanged += (_, e) =>
+                    {
+                        if (e.PropertyName == nameof(AutoClipGameViewModel.IsEnabled)) UpdateAutoClipStates();
+                    };
+                }
+                UpdateAutoClipStates();
             }
         };
         // Tunnel, not bubble - a focused Button (Export, a transport button,
@@ -130,6 +140,9 @@ public sealed partial class MainWindow : Window
         {
             _globalHotkey?.Dispose();
             _cs2GsiListener?.Dispose();
+            _dotaGsiListener?.Dispose();
+            _leagueAutoClipListener?.Dispose();
+            _fortniteAutoClipListener?.Dispose();
             _gameDetectionTimer.Stop();
             if (_replayBuffer is not null) _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
             _replayBuffer?.Dispose();
@@ -457,7 +470,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async Task SaveReplayClipAsync(string? autoClipLabel = null)
+    private async Task SaveReplayClipAsync(string? autoClipLabel = null, ReplayClipWindow? clipWindow = null, string? autoClipGameName = null)
     {
         var isAutoClip = autoClipLabel is not null;
         // A replay save (segment hydrate/mux) can take 20-30+ seconds. Manual clip
@@ -506,25 +519,24 @@ public sealed partial class MainWindow : Window
 
                 AppLog.Info(isAutoClip ? $"Auto-clip triggered: {autoClipLabel}." : "Replay clip save requested.");
 
-                // Windows Capture segments need a few seconds to concat/mux before
-                // the clip lands in the library, so give instant feedback on the
-                // hotkey press instead of waiting for that to finish.
-                // Overlay/sound fire the moment the hotkey lands, not after the
-                // save pipeline finishes - the Native backend's save (remux +
-                // audio track building + mux) takes several seconds, and the
-                // delayed badge read as the hotkey not registering. The buffered
-                // audio/video is snapshotted at the save CALL, so the badge is
-                // truthful about what got captured; an actual failure still
-                // logs and (for manual clips) shows the error dialog.
-                ShowClipSavedNotification();
+                // The final four seconds belong to the event, not whatever is
+                // happening when a round finishes. Wait for that tail before the
+                // replay buffer snapshots its requested UTC window.
+                if (clipWindow is not null)
+                {
+                    var wait = clipWindow.EndUtc - MonotonicClock.UtcNow;
+                    if (wait > TimeSpan.Zero) await Task.Delay(wait);
+                    ShowClipNotification($"Saving {autoClipLabel} clip…", playSound: false);
+                }
 
-                var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder, titleOverride: autoClipLabel));
+                var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder, titleOverride: autoClipLabel, clipWindow: clipWindow));
                 AppLog.Info($"Replay clip saved: {outputPath}");
+                ShowClipSavedNotification();
                 // "3K - Mirage" -> event type "3K", map dropped - the game name
                 // (not the map) is what belongs next to it as the game label.
                 var autoClipEventType = autoClipLabel?.Split(" - ", 2)[0];
                 ClipInfoSidecar.Save(ViewModel.Settings.LibraryFolder, outputPath, new ClipInfo(
-                    ViewModel.ActiveGameDetection.DisplayName,
+                    autoClipGameName ?? ViewModel.ActiveGameDetection.DisplayName,
                     autoClipEventType,
                     autoClipLabel ?? ViewModel.ActiveGameDetection.DisplayName,
                     File.GetCreationTimeUtc(outputPath)));
@@ -533,6 +545,7 @@ public sealed partial class MainWindow : Window
             catch (Exception error)
             {
                 AppLog.Error("Replay clip save failed", error);
+                if (isAutoClip) ShowClipNotification("Auto clip failed", playSound: false);
                 if (!isAutoClip) await ShowMessageAsync("Clip failed", error.Message);
             }
         }
@@ -544,8 +557,13 @@ public sealed partial class MainWindow : Window
 
     private void ShowClipSavedNotification()
     {
+        ShowClipNotification("Clip saved", playSound: true);
+    }
+
+    private void ShowClipNotification(string text, bool playSound)
+    {
         if (ViewModel is null) return;
-        if (ViewModel.Settings.EnableClipOverlaySound)
+        if (playSound && ViewModel.Settings.EnableClipOverlaySound)
         {
             try
             {
@@ -561,7 +579,7 @@ public sealed partial class MainWindow : Window
         {
             try
             {
-                ShowClipSavedOverlay(ViewModel.Settings.ClipOverlayPosition);
+                ShowClipSavedOverlay(ViewModel.Settings.ClipOverlayPosition, text);
             }
             catch (Exception error)
             {
@@ -570,7 +588,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void ShowClipSavedOverlay(string position)
+    private void ShowClipSavedOverlay(string position, string text)
     {
         var badge = new Border
         {
@@ -587,7 +605,7 @@ public sealed partial class MainWindow : Window
                 {
                     new TextBlock
                     {
-                        Text = "Clip saved",
+                        Text = text,
                         Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
                         FontWeight = Avalonia.Media.FontWeight.Bold,
                         FontSize = 13,
@@ -904,7 +922,7 @@ public sealed partial class MainWindow : Window
     private void ClipContextOpenLocation_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { DataContext: ClipCardViewModel clip }) return;
-        OpenInExplorer(clip.Path, selectFile: true);
+        ExplorerService.Open(clip.Path, selectFile: true);
     }
 
     private async void ClipContextDelete_OnClick(object? sender, RoutedEventArgs e)
@@ -1189,40 +1207,144 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void UpdateAutoClipStates()
+    {
+        if (ViewModel is null) return;
+        UpdateCs2AutoClipState();
+        UpdateDotaAutoClipState();
+        UpdateLeagueAutoClipState();
+        UpdateFortniteAutoClipState();
+    }
+
     private void UpdateCs2AutoClipState()
     {
         if (ViewModel is null) return;
+        var game = ViewModel.FindAutoClipGame("cs2");
+        if (game is null) return;
 
-        if (!ViewModel.Settings.Cs2AutoClip.Enabled)
+        if (!ViewModel.AutoClippingEnabled || !game.IsEnabled)
         {
             if (_cs2GsiListener is not null)
             {
-                _cs2GsiListener.AutoClipTriggered -= Cs2GsiListener_OnAutoClipTriggered;
+                _cs2GsiListener.AutoClipPending -= Cs2GsiListener_OnAutoClipPending;
+                _cs2GsiListener.AutoClipReady -= Cs2GsiListener_OnAutoClipReady;
                 _cs2GsiListener.Stop();
             }
 
-            ViewModel.Cs2GsiStatusText = string.Empty;
+            game.StatusText = "Disabled";
             return;
         }
 
-        _cs2GsiListener ??= new Cs2GsiListener(() => ViewModel.Settings.Cs2AutoClip);
+        _cs2GsiListener ??= new Cs2GsiListener(() => ViewModel.Settings.AutoClipping.Games["cs2"]);
         if (_cs2GsiListener.IsListening) return;
 
-        var port = ViewModel.Settings.Cs2AutoClip.GsiPort;
+        var port = ViewModel.Settings.AutoClipping.Games["cs2"].ListenerPort;
         if (!_cs2GsiListener.Start(port))
         {
-            ViewModel.Cs2GsiStatusText = $"Auto-clip listener couldn't start on port {port} - it may already be in use. Check the log.";
+            game.StatusText = $"Listener couldn't start on port {port} - it may already be in use.";
             return;
         }
 
-        _cs2GsiListener.AutoClipTriggered += Cs2GsiListener_OnAutoClipTriggered;
+        _cs2GsiListener.AutoClipPending += Cs2GsiListener_OnAutoClipPending;
+        _cs2GsiListener.AutoClipReady += Cs2GsiListener_OnAutoClipReady;
         Cs2GsiDeployer.TryDeploy(port, out var statusMessage);
-        ViewModel.Cs2GsiStatusText = statusMessage;
+        game.StatusText = statusMessage;
     }
 
-    private void Cs2GsiListener_OnAutoClipTriggered(object? sender, string label)
+    private void UpdateDotaAutoClipState()
     {
-        Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(label));
+        if (ViewModel is null) return;
+        var game = ViewModel.FindAutoClipGame("dota2"); if (game is null) return;
+        if (!ViewModel.AutoClippingEnabled || !game.IsEnabled)
+        {
+            if (_dotaGsiListener is not null) { _dotaGsiListener.AutoClipPending -= AutoClip_OnPending; _dotaGsiListener.AutoClipReady -= AutoClip_OnReady; _dotaGsiListener.Stop(); }
+            game.StatusText = "Disabled"; return;
+        }
+        _dotaGsiListener ??= new DotaGsiListener(() => ViewModel.Settings.AutoClipping.Games["dota2"]);
+        if (!_dotaGsiListener.IsListening)
+        {
+            var port = ViewModel.Settings.AutoClipping.Games["dota2"].ListenerPort;
+            if (!_dotaGsiListener.Start(port)) { game.StatusText = $"Listener couldn't start on port {port}."; return; }
+            _dotaGsiListener.AutoClipPending += AutoClip_OnPending; _dotaGsiListener.AutoClipReady += AutoClip_OnReady;
+        }
+        DotaGsiDeployer.TryDeploy(ViewModel.Settings.AutoClipping.Games["dota2"].ListenerPort, out var status); game.StatusText = status;
+    }
+
+    private void UpdateLeagueAutoClipState()
+    {
+        if (ViewModel is null) return;
+        var game = ViewModel.FindAutoClipGame("league"); if (game is null) return;
+        if (!ViewModel.AutoClippingEnabled || !game.IsEnabled)
+        {
+            _leagueAutoClipListener?.Stop(); game.StatusText = "Disabled"; return;
+        }
+        _leagueAutoClipListener ??= new LeagueAutoClipListener(() => ViewModel.Settings.AutoClipping.Games["league"]);
+        _leagueAutoClipListener.AutoClipPending -= AutoClip_OnPending; _leagueAutoClipListener.AutoClipReady -= AutoClip_OnReady;
+        _leagueAutoClipListener.AutoClipPending += AutoClip_OnPending; _leagueAutoClipListener.AutoClipReady += AutoClip_OnReady;
+        _leagueAutoClipListener.Start(); game.StatusText = "Waiting for a live League match";
+    }
+
+    private void UpdateFortniteAutoClipState()
+    {
+        if (ViewModel is null) return;
+        var game = ViewModel.FindAutoClipGame("fortnite"); if (game is null) return;
+        if (!ViewModel.AutoClippingEnabled || !game.IsEnabled)
+        {
+            if (_fortniteAutoClipListener is not null)
+            {
+                _fortniteAutoClipListener.AutoClipPending -= AutoClip_OnPending;
+                _fortniteAutoClipListener.AutoClipReady -= AutoClip_OnReady;
+                _fortniteAutoClipListener.StatusChanged -= FortniteAutoClipListener_OnStatusChanged;
+                _fortniteAutoClipListener.Stop();
+            }
+            game.StatusText = "Disabled";
+            return;
+        }
+
+        _fortniteAutoClipListener ??= new FortniteAutoClipListener(() => ViewModel.Settings.AutoClipping.Games["fortnite"]);
+        _fortniteAutoClipListener.AutoClipPending -= AutoClip_OnPending;
+        _fortniteAutoClipListener.AutoClipReady -= AutoClip_OnReady;
+        _fortniteAutoClipListener.StatusChanged -= FortniteAutoClipListener_OnStatusChanged;
+        _fortniteAutoClipListener.AutoClipPending += AutoClip_OnPending;
+        _fortniteAutoClipListener.AutoClipReady += AutoClip_OnReady;
+        _fortniteAutoClipListener.StatusChanged += FortniteAutoClipListener_OnStatusChanged;
+        _fortniteAutoClipListener.Start();
+        game.StatusText = _fortniteAutoClipListener.StatusText;
+    }
+
+    private void FortniteAutoClipListener_OnStatusChanged(object? sender, string status) => Dispatcher.UIThread.Post(() =>
+    {
+        if (ViewModel?.FindAutoClipGame("fortnite") is { } game) game.StatusText = status;
+    });
+
+    private void Cs2GsiListener_OnAutoClipPending(object? sender, string message)
+    {
+        Dispatcher.UIThread.Post(() => ShowClipNotification(message, playSound: false));
+    }
+
+    private void Cs2GsiListener_OnAutoClipReady(object? sender, Cs2AutoClipRequest request)
+    {
+        AutoClip_OnReady(sender, new AutoClipRequest("cs2", "Counter-Strike 2", request.Title, request.Title, request.StartUtc, request.EndUtc));
+    }
+
+    private void AutoClip_OnPending(object? sender, string message) => Dispatcher.UIThread.Post(() => ShowClipNotification(message, playSound: false));
+
+    private void AutoClip_OnReady(object? sender, AutoClipRequest request)
+    {
+        Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(request.Title, new ReplayClipWindow(request.StartUtc, request.EndUtc), request.GameName));
+    }
+
+    private void SetupDotaAutoClipButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        var port = ViewModel.Settings.AutoClipping.Games["dota2"].ListenerPort;
+        DotaGsiDeployer.TryDeploy(port, out var status);
+        if (ViewModel.FindAutoClipGame("dota2") is { } game) game.StatusText = status;
+    }
+
+    private void AutoClipGroupToggleButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: AutoClipGroupViewModel group }) group.Toggle();
     }
 
     private async void CheckUpdatesButton_OnClick(object? sender, RoutedEventArgs e)
@@ -1301,13 +1423,13 @@ public sealed partial class MainWindow : Window
     private void LibraryPathButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.Settings.LibraryFolder)) return;
-        OpenInExplorer(ViewModel.Settings.LibraryFolder, selectFile: false);
+        ExplorerService.Open(ViewModel.Settings.LibraryFolder, selectFile: false);
     }
 
     private void EditorPathButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
-        OpenInExplorer(ViewModel.SelectedVideoPath, selectFile: true);
+        ExplorerService.Open(ViewModel.SelectedVideoPath, selectFile: true);
     }
 
     private void HotkeyCaptureButton_OnClick(object? sender, RoutedEventArgs e)
@@ -1984,7 +2106,7 @@ public sealed partial class MainWindow : Window
             {
                 ClipInfoSidecar.Save(libraryRoot, outputPath, new ClipInfo(game, null, exportTitle, exportTimestamp));
                 if (IsPathWithinLibrary(outputPath, libraryRoot)) await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
-                OpenInExplorer(outputPath, selectFile: true);
+                ExplorerService.Open(outputPath, selectFile: true);
             }
         }
         finally
@@ -3197,51 +3319,6 @@ public sealed partial class MainWindow : Window
         body.Children.Add(buttons);
 
         return window;
-    }
-
-    // Opens a file's containing folder with it pre-selected, or opens a
-    // folder directly. Explorer's own launch (ShellExecuteEx under the hood,
-    // via UseShellExecute) can block for real time - shell extensions, icon
-    // overlay providers, AV scanning the target, a cold Explorer process
-    // with no window yet open - so this always runs off the UI thread;
-    // there's no follow-up state to update once Explorer's asked to open.
-    private static void OpenInExplorer(string path, bool selectFile)
-    {
-        if (string.IsNullOrWhiteSpace(path)) return;
-
-        Task.Run(() => LaunchExplorer(path, selectFile));
-    }
-
-    private static void LaunchExplorer(string path, bool selectFile)
-    {
-        try
-        {
-            var target = selectFile
-                ? Directory.GetParent(path)?.FullName ?? path
-                : path;
-
-            if (selectFile && File.Exists(path))
-            {
-                Process.Start(new ProcessStartInfo("explorer.exe")
-                {
-                    ArgumentList = { "/select,", path },
-                    UseShellExecute = true
-                });
-                return;
-            }
-
-            if (!Directory.Exists(target)) return;
-
-            Process.Start(new ProcessStartInfo("explorer.exe")
-            {
-                ArgumentList = { target },
-                UseShellExecute = true
-            });
-        }
-        catch (Exception error)
-        {
-            AppLog.Error($"Failed to open Explorer for '{path}'", error);
-        }
     }
 
     private static bool IsTypingInTextInput(object? source)

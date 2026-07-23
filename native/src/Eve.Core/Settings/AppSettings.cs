@@ -74,6 +74,10 @@ public sealed class AppSettings
     // the built-in ignored list, which covers common non-game apps but can
     // never cover everything.
     public List<string> IgnoredGameExecutables { get; set; } = new();
+    // Auto-clipping is data-driven so new game providers do not need their own
+    // one-off settings model. Cs2AutoClip remains below solely to migrate older
+    // settings files without losing a user's existing selections.
+    public AutoClippingSettings AutoClipping { get; set; } = new();
     public Cs2AutoClipSettings Cs2AutoClip { get; set; } = new();
     public bool MedalImportStripEmoji { get; set; } = false;
     public bool MedalImportCopyNotMove { get; set; } = true;
@@ -140,4 +144,17 @@ public sealed class Cs2AutoClipSettings
     public bool Death { get; set; }
     public bool Assist { get; set; }
     public int GsiPort { get; set; } = 3499;
+}
+
+public sealed class AutoClippingSettings
+{
+    public bool Enabled { get; set; } = true;
+    public Dictionary<string, AutoClipGameSettings> Games { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+public sealed class AutoClipGameSettings
+{
+    public bool Enabled { get; set; } = true;
+    public int ListenerPort { get; set; }
+    public Dictionary<string, bool> Events { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }

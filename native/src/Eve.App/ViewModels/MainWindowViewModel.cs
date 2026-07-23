@@ -43,6 +43,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly string _initialReplayBackend;
     private string _newCustomGameExecutable = string.Empty;
     private string _gameSearchText = string.Empty;
+    private string _autoClipSearchText = string.Empty;
     private string _newCustomGameDisplayName = string.Empty;
     private bool _replayBackendRestartRequired;
     private int _activeReplayMaxHeight;
@@ -164,6 +165,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ChatAudioApps = new ObservableCollection<string>(Settings.ChatAudioProcessNames);
         SelectedMicrophones = new ObservableCollection<AudioDeviceOption>();
         GameCaptureRows = new ObservableCollection<GameBackendRowViewModel>();
+        EnsureAutoClipSettings();
+        AutoClipGames = new ObservableCollection<AutoClipGameViewModel>(AutoClipCatalog.Active.Select(definition =>
+            new AutoClipGameViewModel(definition, Settings.AutoClipping.Games[definition.Id], SaveSettings)));
+        ComingSoonAutoClipGames = new ObservableCollection<string>(AutoClipCatalog.ComingSoon);
         RebuildGameCaptureRows();
         SyncIgnoredGameExecutableRows();
         RefreshAudioDevices();
@@ -215,6 +220,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<string> ChatAudioApps { get; }
     public ObservableCollection<AudioDeviceOption> SelectedMicrophones { get; }
     public ObservableCollection<GameBackendRowViewModel> GameCaptureRows { get; }
+    public ObservableCollection<AutoClipGameViewModel> AutoClipGames { get; }
+    public ObservableCollection<string> ComingSoonAutoClipGames { get; }
     public ObservableCollection<string> ClipOverlayPositions { get; }
     public ObservableCollection<string> ClipOverlayVolumes { get; }
     public ObservableCollection<FileNameSchemeOption> ClipFileNameSchemes { get; }
@@ -228,7 +235,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         new("Avalonia", "https://github.com/AvaloniaUI/Avalonia", "MIT License", "https://opensource.org/license/mit"),
         new("NAudio", "https://github.com/naudio/NAudio", "MIT License", "https://opensource.org/license/mit"),
         new("Vortice.Windows", "https://github.com/amerkoleci/Vortice.Windows", "MIT License", "https://opensource.org/license/mit"),
-        new("FFmpeg.AutoGen", "https://github.com/Ruslan-B/FFmpeg.AutoGen", "MIT License", "https://opensource.org/license/mit")
+        new("FFmpeg.AutoGen", "https://github.com/Ruslan-B/FFmpeg.AutoGen", "MIT License", "https://opensource.org/license/mit"),
+        new("FortniteReplayReader", "https://github.com/Shiqan/FortniteReplayDecompressor", "MIT License", "https://opensource.org/license/mit")
     };
 
     public int ReplayCaptureX { get; set; }
@@ -833,6 +841,62 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SaveSettings();
         }
     }
+
+    public bool AutoClippingEnabled
+    {
+        get => Settings.AutoClipping.Enabled;
+        set
+        {
+            if (Settings.AutoClipping.Enabled == value) return;
+            Settings.AutoClipping.Enabled = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    public string AutoClipSearchText
+    {
+        get => _autoClipSearchText;
+        set
+        {
+            if (!SetProperty(ref _autoClipSearchText, value)) return;
+            foreach (var game in AutoClipGames)
+            {
+                game.IsSearchMatch = string.IsNullOrWhiteSpace(value) || game.Name.Contains(value, StringComparison.OrdinalIgnoreCase) || game.Definition.Events.Any(item => item.Name.Contains(value, StringComparison.OrdinalIgnoreCase));
+            }
+            OnPropertyChanged(nameof(HasAutoClipSearchResults));
+        }
+    }
+
+    public bool HasAutoClipSearchResults => AutoClipGames.Any(game => game.IsSearchMatch);
+
+    public AutoClipGameViewModel? FindAutoClipGame(string id) => AutoClipGames.FirstOrDefault(game => string.Equals(game.Id, id, StringComparison.OrdinalIgnoreCase));
+
+    private void EnsureAutoClipSettings()
+    {
+        foreach (var definition in AutoClipCatalog.Active)
+        {
+            if (!Settings.AutoClipping.Games.TryGetValue(definition.Id, out var game))
+            {
+                game = new AutoClipGameSettings { ListenerPort = definition.DefaultPort };
+                Settings.AutoClipping.Games[definition.Id] = game;
+            }
+            if (game.ListenerPort == 0) game.ListenerPort = definition.DefaultPort;
+            foreach (var item in definition.Events)
+            {
+                if (!game.Events.ContainsKey(item.Id)) game.Events[item.Id] = DefaultAutoClipEvent(definition.Id, item.Id);
+            }
+        }
+    }
+
+    private static bool DefaultAutoClipEvent(string gameId, string eventId) => (gameId, eventId) switch
+    {
+        ("cs2", "3k" or "4k" or "ace") => true,
+        ("dota2", "triple" or "ultra" or "rampage" or "aegis-snatched") => true,
+        ("league", "triple" or "quadra" or "penta" or "baron-steal" or "dragon-steal") => true,
+        ("fortnite", "long-distance-shot" or "ludicrous-shot" or "double-kill" or "multi-kill" or "victory-royale") => true,
+        _ => false
+    };
 
     // Three-state: true only when all five are on, false only when none are,
     // null (indeterminate - rendered as a filled box with a dash) for any

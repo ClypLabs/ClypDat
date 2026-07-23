@@ -357,6 +357,15 @@
     <Setter Property="Opacity" Value="1" />
     <Setter Property="IsHitTestVisible" Value="True" />
   </Style>
+  <Style Selector="Button.autoClipGroupToggle">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+  </Style>
+  <Style Selector="Button.autoClipGroupToggle:pointerover Border">
+    <Setter Property="BorderBrush" Value="#A9C9E5" />
+  </Style>
   <Style Selector="MenuFlyoutPresenter">
     <Setter Property="Background" Value="#141D24" />
     <Setter Property="BorderBrush" Value="#2C3B48" />

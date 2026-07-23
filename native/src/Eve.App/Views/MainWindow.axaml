@@ -844,81 +844,48 @@
             <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Auto-Clip}">
               <StackPanel Spacing="4">
                 <TextBlock Text="AUTO-CLIPPING" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
-                <TextBlock Text="EVE reads a game's own event feed to save a clip the instant one of these happens - no voice or screen analysis involved." Foreground="#93A6B8" TextWrapping="Wrap" />
+                <TextBlock Text="Have EVE save the important moments from supported games using their local event feeds." Foreground="#93A6B8" TextWrapping="Wrap" />
                 <TextBlock Text="⚠ Experimental - still being worked on and can miss events, mislabel clips, or misbehave." Foreground="#E5A00D" FontSize="11" FontWeight="Bold" TextWrapping="Wrap" Margin="0,4,0,0" />
               </StackPanel>
 
-              <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="8">
-                <StackPanel>
-                  <Button Classes="autoClipCardHeader" Click="ToggleCs2CardButton_OnClick">
-                    <Grid ColumnDefinitions="56,*,Auto" ColumnSpacing="12">
-                      <Border Width="56" Height="56" CornerRadius="8" ClipToBounds="True">
-                        <Image Source="/Assets/cs2-cover.jpg" Stretch="UniformToFill" />
-                      </Border>
-                      <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                        <TextBlock Text="Counter-Strike 2" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
-                        <TextBlock Text="{Binding Cs2EventsSummary}" Foreground="#6B7C8C" FontSize="12" />
-                      </StackPanel>
-                      <TextBlock Grid.Column="2" Text="{Binding Cs2CardExpanded, Converter={x:Static opconv:BoolToChevronConverter.Instance}}" Foreground="#93A6B8" FontSize="16" VerticalAlignment="Center" />
-                    </Grid>
-                  </Button>
-
-                  <StackPanel IsVisible="{Binding Cs2CardExpanded}" Margin="18,0,18,18" Spacing="12">
-                    <Border Height="1" Background="#1B242D" />
-
-                    <Grid ColumnDefinitions="*,Auto">
-                      <TextBlock Text="Enable auto-clip for CS2" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" />
-                      <ToggleSwitch Grid.Column="1" IsChecked="{Binding Cs2AutoClipEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-                    </Grid>
-                    <TextBlock Text="{Binding Cs2GsiStatusText}" Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" IsVisible="{Binding Cs2AutoClipEnabled}" />
-
-                    <Border Height="1" Background="#1B242D" />
-
-                    <StackPanel>
-                      <Button Classes="autoClipCardHeader allKillsHeader" Click="ToggleCs2AllKillsButton_OnClick">
-                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
-                          <!-- Hand-drawn instead of a real CheckBox - Fluent's
-                               own indeterminate glyph is a filled square, not
-                               a dash, and this stays purely decorative
-                               (IsHitTestVisible=False further down was on the
-                               old CheckBox; this Grid has no click handling
-                               either) reflecting Cs2AllKillsChecked/
-                               Cs2AllKillsIndeterminate. -->
-                          <Grid Width="18" Height="18" VerticalAlignment="Center">
-                            <Border BorderBrush="#5C6D7E" BorderThickness="1.5" CornerRadius="4" />
-                            <Border Background="{StaticResource AccentBrush}"
-                                    CornerRadius="4"
-                                    IsVisible="{Binding Cs2AllKillsChecked}" />
-                            <Border Background="{StaticResource AccentBrush}"
-                                    CornerRadius="4"
-                                    IsVisible="{Binding Cs2AllKillsIndeterminate}" />
-                            <PathIcon Data="M9,16.17L4.83,12l-1.41,1.41L9,19L21,7l-1.41-1.41z"
-                                      Width="11" Height="11"
-                                      Foreground="White"
-                                      IsVisible="{Binding Cs2AllKillsChecked}" />
-                            <Border Background="White"
-                                    Width="10" Height="2"
-                                    CornerRadius="1"
-                                    IsVisible="{Binding Cs2AllKillsIndeterminate}" />
-                          </Grid>
-                          <TextBlock Grid.Column="1" Text="All Kills" Foreground="#D2DEEC" FontWeight="SemiBold" VerticalAlignment="Center" />
-                          <TextBlock Grid.Column="2" Text="{Binding Cs2AllKillsExpanded, Converter={x:Static opconv:BoolToChevronConverter.Instance}}" Foreground="#6B7C8C" FontSize="13" VerticalAlignment="Center" />
-                        </Grid>
-                      </Button>
-                      <StackPanel Margin="26,8,0,0" Spacing="8" IsVisible="{Binding Cs2AllKillsExpanded}">
-                        <CheckBox Content="Kill" IsChecked="{Binding Cs2Kill}" />
-                        <CheckBox Content="2K" IsChecked="{Binding Cs2TwoKill}" />
-                        <CheckBox Content="3K" IsChecked="{Binding Cs2ThreeKill}" />
-                        <CheckBox Content="4K" IsChecked="{Binding Cs2FourKill}" />
-                        <CheckBox Content="Ace" IsChecked="{Binding Cs2Ace}" />
-                      </StackPanel>
-                    </StackPanel>
-
-                    <CheckBox Content="Headshot" IsChecked="{Binding Cs2Headshot}" />
-                    <CheckBox Content="Death" IsChecked="{Binding Cs2Death}" />
-                    <CheckBox Content="Assist" IsChecked="{Binding Cs2Assist}" />
+              <Border Classes="settingsCard">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                  <StackPanel Spacing="2">
+                    <TextBlock Text="Auto Capture Events" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
+                    <TextBlock Text="Turn this off to pause every game without losing your event choices." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
                   </StackPanel>
-                </StackPanel>
+                  <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutoClippingEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                </Grid>
+              </Border>
+
+              <TextBox Classes="settingsInput" Text="{Binding AutoClipSearchText}" Watermark="Search auto-clipping games or events" />
+              <ItemsControl ItemsSource="{Binding AutoClipGames}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Grid ColumnDefinitions="84,*,Auto" ColumnSpacing="16" Margin="0,0,0,18" IsVisible="{Binding IsSearchMatch}">
+                      <Border Width="84" Height="120" CornerRadius="8" ClipToBounds="True" Background="#1F3341" VerticalAlignment="Top">
+                        <Image Source="{Binding CoverImage}" Stretch="UniformToFill" />
+                      </Border>
+                      <StackPanel Grid.Column="1" Spacing="8">
+                        <TextBlock Text="{Binding Name}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="16" />
+                        <TextBlock Text="{Binding StatusText}" Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                        <Button Content="Set up Dota 2" Click="SetupDotaAutoClipButton_OnClick" IsVisible="{Binding IsSetupRequired}" HorizontalAlignment="Left" />
+                        <ItemsControl ItemsSource="{Binding Groups}">
+                          <ItemsControl.ItemTemplate><DataTemplate><StackPanel Spacing="6"><Button Classes="autoClipGroupToggle" Click="AutoClipGroupToggleButton_OnClick"><Grid ColumnDefinitions="20,*" ColumnSpacing="7"><Grid Width="20" Height="20"><Border BorderBrush="#758494" BorderThickness="1" CornerRadius="4" Background="Transparent" /><Border IsVisible="{Binding IsAllEnabled}" BorderBrush="{DynamicResource CheckBoxCheckBackgroundFillChecked}" BorderThickness="1" CornerRadius="4" Background="{DynamicResource CheckBoxCheckBackgroundFillChecked}" /><Border IsVisible="{Binding IsIndeterminate}" BorderBrush="{DynamicResource CheckBoxCheckBackgroundFillChecked}" BorderThickness="1" CornerRadius="4" Background="{DynamicResource CheckBoxCheckBackgroundFillChecked}" /><TextBlock Text="✓" IsVisible="{Binding IsAllEnabled}" Foreground="{DynamicResource CheckBoxCheckGlyphForegroundChecked}" FontSize="14" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" /><TextBlock Text="−" IsVisible="{Binding IsIndeterminate}" Foreground="{DynamicResource CheckBoxCheckGlyphForegroundChecked}" FontSize="17" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" /></Grid><TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="#D2DEEC" FontWeight="SemiBold" VerticalAlignment="Center" /></Grid></Button><ItemsControl ItemsSource="{Binding Events}" Margin="26,0,0,0"><ItemsControl.ItemTemplate><DataTemplate><CheckBox Content="{Binding Name}" IsChecked="{Binding IsEnabled}" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></DataTemplate></ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <ItemsControl ItemsSource="{Binding UngroupedEvents}"><ItemsControl.ItemTemplate><DataTemplate><CheckBox Content="{Binding Name}" IsChecked="{Binding IsEnabled}" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+                      </StackPanel>
+                      <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                        <TextBlock Text="ON" Foreground="#9EAFBE" FontSize="11" VerticalAlignment="Center" />
+                        <ToggleSwitch IsChecked="{Binding IsEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                      </StackPanel>
+                      <Border Grid.ColumnSpan="3" Height="1" Background="#26313A" VerticalAlignment="Bottom" Margin="0,18,0,0" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <Border Background="#10171D" BorderBrush="#1E2A33" BorderThickness="1" CornerRadius="8" Padding="14">
+                <StackPanel Spacing="8"><TextBlock Text="COMING SOON" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" /><TextBlock Text="More game integrations are planned. These are not enabled until EVE can reliably detect their events." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" /><ItemsControl ItemsSource="{Binding ComingSoonAutoClipGames}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><Border Background="#18222B" CornerRadius="5" Padding="8,4" Margin="0,0,6,6"><TextBlock Text="{Binding}" Foreground="#8B9AAA" FontSize="11" /></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
               </Border>
             </StackPanel>
 

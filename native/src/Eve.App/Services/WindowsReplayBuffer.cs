@@ -111,7 +111,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         }
     }
 
-    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null)
+    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null)
     {
         ReplayVideoSegment[] sourceSegments;
         double videoOffsetSeconds;
@@ -157,7 +157,10 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                 throw new InvalidOperationException("Replay buffer has no finished segments yet.");
             }
 
-            (sourceSegments, videoOffsetSeconds, clipDurationSeconds) = SelectReplayWindow(availableSegments, Duration.TotalSeconds);
+            var requestedDuration = clipWindow is null
+                ? Duration.TotalSeconds
+                : Math.Max(0, (clipWindow.EndUtc - clipWindow.StartUtc).TotalSeconds);
+            (sourceSegments, videoOffsetSeconds, clipDurationSeconds) = SelectReplayWindow(availableSegments, requestedDuration);
             if (clipDurationSeconds < 1)
             {
                 throw new InvalidOperationException("Replay just started. Try again in a second.");

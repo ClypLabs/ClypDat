@@ -30,12 +30,43 @@ public static class AppSettingsStore
             settings.ChatAudioProcessNames ??= new List<string>();
             settings.MicrophoneDeviceIds ??= new List<string>();
             settings.IgnoredGameExecutables ??= new List<string>();
+            settings.AutoClipping ??= new AutoClippingSettings();
+            settings.AutoClipping.Games ??= new Dictionary<string, AutoClipGameSettings>(StringComparer.OrdinalIgnoreCase);
+            foreach (var game in settings.AutoClipping.Games.Values)
+            {
+                game.Events ??= new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            }
+            MigrateCs2AutoClip(settings);
             return settings;
         }
         catch
         {
             return new AppSettings();
         }
+    }
+
+    private static void MigrateCs2AutoClip(AppSettings settings)
+    {
+        const string gameId = "cs2";
+        if (settings.AutoClipping.Games.ContainsKey(gameId)) return;
+
+        var legacy = settings.Cs2AutoClip ?? new Cs2AutoClipSettings();
+        settings.AutoClipping.Games[gameId] = new AutoClipGameSettings
+        {
+            Enabled = legacy.Enabled,
+            ListenerPort = legacy.GsiPort,
+            Events = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["kill"] = legacy.Kill,
+                ["2k"] = legacy.TwoKill,
+                ["3k"] = legacy.ThreeKill,
+                ["4k"] = legacy.FourKill,
+                ["ace"] = legacy.Ace,
+                ["headshot"] = legacy.Headshot,
+                ["death"] = legacy.Death,
+                ["assist"] = legacy.Assist
+            }
+        };
     }
 
     public static void Save(AppSettings settings)
