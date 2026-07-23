@@ -596,6 +596,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             // mid-session alt-tab) go back to the existing freeze-and-keep-
             // recording behavior above, unaffected.
             var hasCapturedRealFrame = false;
+            // See the content-write sites above and the pacing gate below -
+            // measures how stale frame->data's content actually is at the
+            // moment each output frame gets encoded, to find out whether a
+            // high-source-fps/lower-target-fps mismatch (e.g. 240->60) is a
+            // real, measurable contributor to perceived judder or not, before
+            // touching the pacing algorithm itself.
+            var lastFrameContentCapturedUtc = MonotonicClock.UtcNow;
+            var frameStalenessMs = 0.0;
+            var frameStalenessMaxMs = 0.0;
+            var frameStalenessCount = 0;
 
             while (!token.IsCancellationRequested)
             {
@@ -638,10 +648,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     var encodeCountSinceLog = Math.Max(1, Interlocked.Exchange(ref _encodeCountAccum, 0));
                     var encodeMicrosSinceLog = Interlocked.Exchange(ref _encodeMicrosAccum, 0);
                     var droppedSinceLog = Interlocked.Exchange(ref _encodeDroppedCount, 0);
-                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, ringBufferMb={ringBufferMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, droppedFrames={droppedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, iterations={iterationsSinceLog}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
+                    var frameStalenessDenom = Math.Max(1, frameStalenessCount);
+                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, ringBufferMb={ringBufferMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, droppedFrames={droppedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
                     copyMapMs = 0;
                     scaleMs = 0;
                     encodeMs = 0;
+                    frameStalenessMs = 0;
+                    frameStalenessMaxMs = 0;
+                    frameStalenessCount = 0;
                     framesEncodedSinceLog = 0;
                     waitMs = 0;
                     getFrameMs = 0;
@@ -908,6 +922,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                                     }
                                     scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
                                 }
+
+                                // Real-world moment this content actually landed in frame->data -
+                                // see the pacing gate below (frameStalenessMs) for why: at a source
+                                // fps well above target (240 ->60 here), whatever's newest in
+                                // frame->data when the pacing gate fires can still be up to one
+                                // source-interval stale, varying iteration to iteration since the
+                                // two clocks (source presents, target-fps pacing) run free-running
+                                // and unsynchronized - a plausible source of visible judder despite
+                                // every output frame being unique and perfectly PTS-spaced.
+                                lastFrameContentCapturedUtc = MonotonicClock.UtcNow;
                             }
                             // else: occluded - frame->data still holds the last successfully
                             // scaled content, re-encoded unchanged below (visual freeze).
@@ -1066,6 +1090,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     // while longer just means the NEXT capture-thread frame gets
                     // a fresh buffer instead of racing this one, exactly the
                     // mechanism that comment already relies on.
+                    // Diagnostic only (see lastFrameContentCapturedUtc's declaration) -
+                    // how old frame->data's content already was at the moment this
+                    // output tick decided to encode it.
+                    var staleness = (MonotonicClock.UtcNow - lastFrameContentCapturedUtc).TotalMilliseconds;
+                    frameStalenessMs += staleness;
+                    if (staleness > frameStalenessMaxMs) frameStalenessMaxMs = staleness;
+                    frameStalenessCount++;
+
                     stageStopwatch.Restart();
                     var clonedFrame = ffmpeg.av_frame_clone(frame);
                     if (clonedFrame is null)
