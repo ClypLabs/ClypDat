@@ -522,6 +522,21 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             var presentGapSumMs = 0.0;
             var presentGapCount = 0;
             var presentGapMaxMs = 0.0;
+            // Diagnostic for the "video freezes/stutters, but avgCopyMapMs/
+            // avgScaleMs/avgEncodeMs/avgWaitMs/avgGetFrameMs all stay normal"
+            // investigation - none of those named stages cover the top of the
+            // loop (diag logging, the once-a-second ResolveTargetWindow
+            // recheck and its DXGI duplication recreate if the target
+            // changed, the null-duplication retry path). A real stall in a
+            // region no stopwatch was watching would be invisible in every
+            // other metric while iterations/sec still collapsed - which is
+            // exactly what the logs showed. This measures everything between
+            // the end of one iteration's work and the start of the next
+            // AcquireNextFrame call, whatever it turns out to be.
+            var preAcquireStopwatch = new System.Diagnostics.Stopwatch();
+            var preAcquireMs = 0.0;
+            var preAcquireMaxMs = 0.0;
+            preAcquireStopwatch.Start();
             // Whether the target window is currently NOT foreground/visible - the
             // capture keeps encoding through this (re-submitting the last good
             // frame, see below) instead of stopping, so the ring buffer/full
@@ -552,7 +567,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     var m = Math.Max(1, iterationsSinceLog);
                     var realFrameCount = Math.Max(1, iterationsSinceLog - zeroPresentSkips);
                     var presentGapDenom = Math.Max(1, presentGapCount);
-                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgEncodeMs={encodeMs / n:0.00}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, iterations={iterationsSinceLog}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}.");
+                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgEncodeMs={encodeMs / n:0.00}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, iterations={iterationsSinceLog}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}.");
                     copyMapMs = 0;
                     scaleMs = 0;
                     encodeMs = 0;
@@ -566,6 +581,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                     presentGapSumMs = 0;
                     presentGapCount = 0;
                     presentGapMaxMs = 0;
+                    preAcquireMs = 0;
+                    preAcquireMaxMs = 0;
                 }
 
                 // Re-check which window/monitor we should be capturing every second -
@@ -601,6 +618,23 @@ public sealed class NativeReplayBuffer : IReplayBuffer
                             lock (_bufferLock) _pauseEvents.Add(new PauseEvent(MonotonicClock.UtcNow, false));
                         }
                     }
+                }
+
+                // Whole-iteration wall time (previous AcquireNextFrame call
+                // through this one) - compare against
+                // waitMs+copyMapMs+scaleMs+encodeMs+getFrameMs in the diag
+                // line below: if this runs meaningfully higher than the sum
+                // of the named stages, something between them (diag
+                // logging, the once-a-second target-window recheck/DXGI
+                // recreate, GC, thread scheduling) is eating time none of
+                // them are watching.
+                var preAcquireElapsedMs = preAcquireStopwatch.Elapsed.TotalMilliseconds;
+                preAcquireStopwatch.Restart();
+                preAcquireMs += preAcquireElapsedMs;
+                if (preAcquireElapsedMs > preAcquireMaxMs) preAcquireMaxMs = preAcquireElapsedMs;
+                if (preAcquireElapsedMs > 200)
+                {
+                    AppLog.Info($"Native capture: {preAcquireElapsedMs:0}ms iteration-to-iteration gap (includes AcquireNextFrame + all frame processing, not just idle time) - see avgWaitMs/avgCopyMapMs/avgScaleMs/avgEncodeMs/avgGetFrameMs in the next diag line to see how much of that was accounted for.");
                 }
 
                 iterationsSinceLog++;
