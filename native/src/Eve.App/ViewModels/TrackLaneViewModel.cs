@@ -10,7 +10,7 @@ public sealed class TrackLaneViewModel : ViewModelBase
     private bool _showVolumePercent;
     private bool _isMuted;
     private IReadOnlyList<double> _waveformPeaks = Array.Empty<double>();
-    private IReadOnlyList<Bitmap> _filmstripFrames = Array.Empty<Bitmap>();
+    private Bitmap? _filmstrip;
 
     public TrackLaneViewModel(int streamIndex, string label, string type, string color, bool canAdjustVolume, double volumePercent = 100)
     {
@@ -97,12 +97,14 @@ public sealed class TrackLaneViewModel : ViewModelBase
         set => SetProperty(ref _waveformPeaks, value);
     }
 
-    // Only meaningful for the video lane - the row of small preview frames
-    // TimelineLaneControl draws across the timeline (see EnsureFilmstripAsync
-    // in MediaProbeService for how these get generated/cached).
-    public IReadOnlyList<Bitmap> FilmstripFrames
+    // Only meaningful for the video lane - a single spritesheet image
+    // (MediaProbeService.FilmstripFrameCount frames tiled left-to-right)
+    // TimelineLaneControl slices and draws across the timeline (see
+    // EnsureFilmstripAsync in MediaProbeService for how this gets
+    // generated/cached).
+    public Bitmap? Filmstrip
     {
-        get => _filmstripFrames;
-        set => SetProperty(ref _filmstripFrames, value);
+        get => _filmstrip;
+        set => SetProperty(ref _filmstrip, value);
     }
 }

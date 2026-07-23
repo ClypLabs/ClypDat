@@ -3124,7 +3124,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // list FROM TimelineTracks, see MainWindow.axaml.cs's
         // StartEditorPlaybackAsync) are concerned.
         var skippedMedalPreMixTrack = false;
-        var filmstripFrames = LoadFilmstripFrames(media.FilmstripFramePaths);
+        var filmstrip = LoadBitmap(media.FilmstripPath);
         foreach (var track in media.Tracks)
         {
             if (track.Type == "subtitle") continue;
@@ -3147,7 +3147,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (track.Type == "video")
             {
                 hasVideo = true;
-                lane.FilmstripFrames = filmstripFrames;
+                lane.Filmstrip = filmstrip;
             }
             TimelineTracks.Add(lane);
             if (track.Type == "audio") audioIndex++;
@@ -3155,7 +3155,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         if (!hasVideo)
         {
-            TimelineTracks.Insert(0, new TrackLaneViewModel(0, "Video", "video", "#05C7B7", false) { FilmstripFrames = filmstripFrames });
+            TimelineTracks.Insert(0, new TrackLaneViewModel(0, "Video", "video", "#05C7B7", false) { Filmstrip = filmstrip });
         }
 
         ApplyClipEditState(media.Path);
@@ -3635,25 +3635,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             return null;
         }
-    }
-
-    // Loads every filmstrip frame for the video lane (TimelineLaneControl) -
-    // up to FilmstripMaxFrames (90) small ~96x54 JPEGs, cheap enough to
-    // decode synchronously here the same way SelectedThumbnail's single
-    // image already is. A frame that fails to load (corrupt/partial write)
-    // is just skipped rather than failing the whole strip.
-    private static IReadOnlyList<Avalonia.Media.Imaging.Bitmap> LoadFilmstripFrames(IReadOnlyList<string> paths)
-    {
-        if (paths.Count == 0) return Array.Empty<Avalonia.Media.Imaging.Bitmap>();
-
-        var frames = new List<Avalonia.Media.Imaging.Bitmap>(paths.Count);
-        foreach (var path in paths)
-        {
-            var bitmap = LoadBitmap(path);
-            if (bitmap is not null) frames.Add(bitmap);
-        }
-
-        return frames;
     }
 
     private static string FormatBytes(long bytes)

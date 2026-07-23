@@ -77,6 +77,11 @@ public sealed class MediaProbeService
             try { File.SetLastWriteTimeUtc(thumbnailPath, DateTime.UtcNow); } catch { }
         }
 
+        // Read-only check (no ffmpeg) - filmstrip generation itself only
+        // happens in ProbeAsync (during hydration), same split as
+        // ThumbnailPath above.
+        var filmstripPath = GetFilmstripPath(filePath);
+
         // A cached probe (see ProbeAsync/WriteProbeCache) means an unchanged
         // file's duration/tracks/etc can paint on the very first frame - no
         // waiting on HydrateLibraryClipsAsync to reach this clip's turn.
@@ -96,10 +101,7 @@ public sealed class MediaProbeService
             cached?.Height ?? 0,
             cached?.Fps ?? 0,
             cached?.CaptureBackend ?? string.Empty,
-            // Read-only check (no ffmpeg) - filmstrip generation itself only
-            // happens in ProbeAsync (during hydration), same split as
-            // ThumbnailPath above.
-            ListFilmstripFrames(filePath));
+            File.Exists(filmstripPath) ? filmstripPath : string.Empty);
     }
 
     public async Task<TimeSpan> GetDurationAsync(string filePath, CancellationToken cancellationToken = default)
@@ -416,11 +418,8 @@ public sealed class MediaProbeService
             Directory.Delete(frameFolder, true);
         }
 
-        var filmstripFolder = GetFilmstripFolder(filePath);
-        if (Directory.Exists(filmstripFolder))
-        {
-            Directory.Delete(filmstripFolder, true);
-        }
+        // Filmstrip is a single flat file ({key}-filmstrip-v3.jpg), already
+        // caught by the {key}*.* glob above - no folder to separately clean up.
 
         TryDelete(GetWaveformPath(filePath));
     }
@@ -498,85 +497,99 @@ public sealed class MediaProbeService
         return output;
     }
 
-    // Editor timeline's video-lane filmstrip (TimelineLaneControl) - a row of
-    // small frames sampled evenly across the clip, generated once here during
-    // hydration (HydrateLibraryClipsAsync/ProbeAsync) rather than lazily when
-    // the editor opens, so it's already sitting in cache by the time the user
-    // picks a clip. Fixed frame count regardless of duration -
-    // TimelineLaneControl stretches however many frames exist across the
-    // lane's actual pixel width at render time (same decoupled-from-pixel-
-    // width approach the waveform's fixed BucketCount already uses), so this
-    // doesn't need to scale with clip length the way that generation cost
-    // consideration originally assumed.
-    private const int FilmstripFrameCount = 10;
-    private const int FilmstripFrameHeight = 54;
+    // Editor timeline's video-lane filmstrip (TimelineLaneControl) - a single
+    // cached image holding FilmstripFrameCount frames tiled left-to-right,
+    // sampled evenly across the clip, generated once here during hydration
+    // (HydrateLibraryClipsAsync/ProbeAsync) rather than lazily when the
+    // editor opens, so it's already sitting in cache by the time the user
+    // picks a clip. One flat file, not a folder of separate frame images -
+    // TimelineLaneControl reads it as a spritesheet at render time (each
+    // frame is bitmap.Width/FilmstripFrameCount wide), so it still renders
+    // each frame individually cropped to its own on-screen cell without
+    // distortion despite being cached as a single image.
+    public const int FilmstripFrameCount = 10;
+    private const int FilmstripFrameHeight = 96;
 
-    private async Task<IReadOnlyList<string>> EnsureFilmstripAsync(string filePath, TimeSpan duration)
+    // Each frame is grabbed with its OWN -ss seek (fast keyframe seek, only
+    // decodes a handful of frames around the target) - not a single `fps`
+    // filter pass across the whole file, which forces ffmpeg to decode
+    // EVERY frame from start to end just to pick out a sparse few, pegging
+    // CPU for the whole clip's duration regardless of how few frames were
+    // actually wanted. Same reasoning as EnsureThumbnailAsync's -ss usage.
+    // The combine-into-one-strip pass afterward reads only these small
+    // already-extracted JPEGs, not the source video, so it's effectively free.
+    private async Task<string> EnsureFilmstripAsync(string filePath, TimeSpan duration)
     {
-        var existing = ListFilmstripFrames(filePath);
-        if (existing.Count > 0) return existing;
-        if (duration <= TimeSpan.Zero) return Array.Empty<string>();
+        var output = GetFilmstripPath(filePath);
+        if (File.Exists(output)) return output;
+        if (duration <= TimeSpan.Zero) return string.Empty;
 
-        var frameCount = FilmstripFrameCount;
-
-        var folder = GetFilmstripFolder(filePath);
+        var tempDir = Path.Combine(Path.GetTempPath(), $"eve-filmstrip-{Guid.NewGuid():N}");
         try
         {
-            Directory.CreateDirectory(folder);
+            Directory.CreateDirectory(tempDir);
 
-            var fps = frameCount / Math.Max(0.1, duration.TotalSeconds);
-            var result = await RunProcessAsync("ffmpeg", new[]
+            for (var i = 0; i < FilmstripFrameCount; i++)
             {
-                "-y",
-                "-i", filePath,
-                // -2: even width for the JPEG encoder's 4:2:0 output - same
-                // reasoning as EnsureThumbnailAsync's scale filter.
-                "-vf", $"fps={fps.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)},scale=-2:{FilmstripFrameHeight}",
-                "-q:v", "6",
-                Path.Combine(folder, "f%04d.jpg")
-            });
+                var seek = (i + 0.5) / FilmstripFrameCount * duration.TotalSeconds;
+                var framePath = Path.Combine(tempDir, $"f{i:0000}.jpg");
+                var frameResult = await RunProcessAsync("ffmpeg", new[]
+                {
+                    "-y",
+                    "-ss", seek.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+                    "-i", filePath,
+                    "-frames:v", "1",
+                    "-vf", $"scale=-2:{FilmstripFrameHeight}",
+                    "-q:v", "3",
+                    framePath
+                });
 
-            var frames = ListFilmstripFrames(filePath);
-            if (result.ExitCode != 0 || frames.Count == 0)
-            {
-                AppLog.Error($"Filmstrip generation failed for {filePath}: {(string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg failed" : result.Error.Trim())}");
-                try { Directory.Delete(folder, true); } catch { }
-                return Array.Empty<string>();
+                if (frameResult.ExitCode != 0 || !File.Exists(framePath))
+                {
+                    AppLog.Error($"Filmstrip frame grab failed for {filePath} at {seek:0.0}s: {(string.IsNullOrWhiteSpace(frameResult.Error) ? "ffmpeg failed" : frameResult.Error.Trim())}");
+                    return string.Empty;
+                }
             }
 
-            return frames;
+            var combineResult = await RunProcessAsync("ffmpeg", new[]
+            {
+                "-y",
+                "-i", Path.Combine(tempDir, "f%04d.jpg"),
+                "-vf", $"tile={FilmstripFrameCount}x1",
+                "-frames:v", "1",
+                "-update", "1",
+                "-q:v", "3",
+                output
+            });
+
+            if (combineResult.ExitCode != 0 || !File.Exists(output))
+            {
+                AppLog.Error($"Filmstrip combine failed for {filePath}: {(string.IsNullOrWhiteSpace(combineResult.Error) ? "ffmpeg failed" : combineResult.Error.Trim())}");
+                return string.Empty;
+            }
+
+            return output;
         }
         catch (Exception error)
         {
             AppLog.Error($"Filmstrip generation failed for {filePath}", error);
-            return Array.Empty<string>();
+            return string.Empty;
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
         }
     }
 
-    private IReadOnlyList<string> ListFilmstripFrames(string filePath)
+    private string GetFilmstripPath(string filePath)
     {
-        try
-        {
-            var folder = GetFilmstripFolder(filePath);
-            if (!Directory.Exists(folder)) return Array.Empty<string>();
-            var frames = Directory.GetFiles(folder, "f*.jpg");
-            Array.Sort(frames, StringComparer.Ordinal);
-            return frames;
-        }
-        catch
-        {
-            return Array.Empty<string>();
-        }
-    }
-
-    private string GetFilmstripFolder(string filePath)
-    {
-        // -v2: cache-key suffix bump so filmstrips generated under the old
-        // duration-scaled frame count (up to 90 frames) regenerate at the
-        // new fixed FilmstripFrameCount instead of a stale, much denser
-        // folder sitting there forever (old entries age out via the 30-day
-        // prune, same as everything else in this cache).
-        return Path.Combine(_cacheFolder, $"{CacheKey(filePath)}-filmstrip-v2");
+        // -v3: cache-key suffix bump - v1 was a per-frame folder, v2 a
+        // denser per-frame folder, both replaced by this single tiled
+        // image. Old folders age out via the 30-day prune, same as
+        // everything else in this cache (DeleteCacheFor's {key}*.* glob
+        // only catches files, not the old folders, but they're harmless
+        // orphaned cache data either way).
+        return Path.Combine(_cacheFolder, $"{CacheKey(filePath)}-filmstrip-v3.jpg");
     }
 
     private string GetThumbnailPath(string filePath)
@@ -896,10 +909,7 @@ public sealed record MediaFileInfo(
     int Height,
     double Fps,
     string CaptureBackend = "",
-    IReadOnlyList<string>? FilmstripFramePaths = null)
-{
-    public IReadOnlyList<string> FilmstripFramePaths { get; init; } = FilmstripFramePaths ?? Array.Empty<string>();
-}
+    string FilmstripPath = "");
 
 public sealed record MediaTrackInfo(int Index, string Type, string Codec, string Label, double VolumePercent = 100);
 

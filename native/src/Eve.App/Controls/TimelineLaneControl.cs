@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Eve.App.Services;
 
 namespace Eve.App.Controls;
 
@@ -16,8 +17,8 @@ public sealed class TimelineLaneControl : Control
     public static readonly StyledProperty<IReadOnlyList<double>?> PeaksProperty =
         AvaloniaProperty.Register<TimelineLaneControl, IReadOnlyList<double>?>(nameof(Peaks));
 
-    public static readonly StyledProperty<IReadOnlyList<Bitmap>?> FilmstripFramesProperty =
-        AvaloniaProperty.Register<TimelineLaneControl, IReadOnlyList<Bitmap>?>(nameof(FilmstripFrames));
+    public static readonly StyledProperty<Bitmap?> FilmstripProperty =
+        AvaloniaProperty.Register<TimelineLaneControl, Bitmap?>(nameof(Filmstrip));
 
     public static readonly StyledProperty<double> TrimStartPercentProperty =
         AvaloniaProperty.Register<TimelineLaneControl, double>(nameof(TrimStartPercent));
@@ -43,10 +44,10 @@ public sealed class TimelineLaneControl : Control
         set => SetValue(PeaksProperty, value);
     }
 
-    public IReadOnlyList<Bitmap>? FilmstripFrames
+    public Bitmap? Filmstrip
     {
-        get => GetValue(FilmstripFramesProperty);
-        set => SetValue(FilmstripFramesProperty, value);
+        get => GetValue(FilmstripProperty);
+        set => SetValue(FilmstripProperty, value);
     }
 
     public double TrimStartPercent
@@ -67,7 +68,7 @@ public sealed class TimelineLaneControl : Control
             LaneBrushProperty,
             IsVideoProperty,
             PeaksProperty,
-            FilmstripFramesProperty,
+            FilmstripProperty,
             TrimStartPercentProperty,
             TrimEndPercentProperty);
     }
@@ -97,62 +98,71 @@ public sealed class TimelineLaneControl : Control
         DrawTrimShade(context, rect);
     }
 
-    // Frame count is decoupled from the lane's actual pixel width (see
-    // MediaProbeService.EnsureFilmstripAsync's comment) - just like
-    // DrawWaveform's peaks array, whatever frames exist get stretched evenly
-    // across whatever width the lane currently has, edge to edge.
+    // Filmstrip is cached as ONE spritesheet image (MediaProbeService.
+    // EnsureFilmstripAsync) holding FilmstripFrameCount frames tiled left-
+    // to-right - read here as a spritesheet, slicing out each frame's own
+    // source sub-rect (bitmap.Width/FilmstripFrameCount wide) and drawing it
+    // individually into its own on-screen cell. Frame count is decoupled
+    // from the lane's actual pixel width (like DrawWaveform's peaks array):
+    // whatever the lane's current width is, the fixed frame count gets
+    // stretched evenly across it, edge to edge.
     private void DrawFilmstrip(DrawingContext context, Rect rect)
     {
-        var frames = FilmstripFrames;
-        if (frames is null || frames.Count == 0) return;
+        var sheet = Filmstrip;
+        if (sheet is null) return;
+
+        var frameCount = MediaProbeService.FilmstripFrameCount;
+        var sourceFrameWidth = sheet.Size.Width / frameCount;
 
         using (context.PushClip(rect.Deflate(1)))
         {
-            var frameWidth = rect.Width / frames.Count;
-            for (var i = 0; i < frames.Count; i++)
+            var destFrameWidth = rect.Width / frameCount;
+            for (var i = 0; i < frameCount; i++)
             {
-                var bitmap = frames[i];
+                var source = new Rect(i * sourceFrameWidth, 0, sourceFrameWidth, sheet.Size.Height);
                 // +0.5 overlap so float rounding between adjacent frame
                 // rects can't leave a hairline gap of bare lane background
                 // showing through between two frames.
-                var dest = new Rect(rect.X + i * frameWidth, rect.Y, frameWidth + 0.5, rect.Height);
+                var dest = new Rect(rect.X + i * destFrameWidth, rect.Y, destFrameWidth + 0.5, rect.Height);
                 // Cropped ("cover"), not stretched to fill both dimensions
                 // independently - each cell's own width/height ratio rarely
-                // matches the source frame's 16:9, and drawing the WHOLE
-                // source into a mismatched dest rect distorts every frame
-                // (squished/stretched). Crop the source to the cell's own
-                // aspect ratio first, then draw that crop filling the cell
-                // exactly - same idea as CSS's object-fit: cover.
-                context.DrawImage(bitmap, CoverSourceRect(bitmap.Size, dest.Size), dest);
+                // matches a source frame's 16:9, and drawing the WHOLE
+                // source slice into a mismatched dest rect distorts it
+                // (squished/stretched). Crop the source slice to the cell's
+                // own aspect ratio first, then draw that crop filling the
+                // cell exactly - same idea as CSS's object-fit: cover.
+                context.DrawImage(sheet, CoverSourceRect(source, dest.Size), dest);
             }
         }
     }
 
-    // Largest centered crop of sourceSize that matches destSize's aspect
-    // ratio - crops the wider dimension (left/right or top/bottom evenly)
-    // rather than distorting either axis independently.
-    private static Rect CoverSourceRect(Size sourceSize, Size destSize)
+    // Largest centered crop of sourceRect (a sub-region of the spritesheet,
+    // one frame's own slice - not necessarily anchored at the bitmap's
+    // origin) that matches destSize's aspect ratio - crops the wider
+    // dimension (left/right or top/bottom evenly) rather than distorting
+    // either axis independently.
+    private static Rect CoverSourceRect(Rect sourceRect, Size destSize)
     {
-        if (sourceSize.Width <= 0 || sourceSize.Height <= 0 || destSize.Width <= 0 || destSize.Height <= 0)
+        if (sourceRect.Width <= 0 || sourceRect.Height <= 0 || destSize.Width <= 0 || destSize.Height <= 0)
         {
-            return new Rect(sourceSize);
+            return sourceRect;
         }
 
-        var sourceAspect = sourceSize.Width / sourceSize.Height;
+        var sourceAspect = sourceRect.Width / sourceRect.Height;
         var destAspect = destSize.Width / destSize.Height;
 
         if (sourceAspect > destAspect)
         {
-            // Source is relatively wider than the cell - crop its sides,
-            // keep full height.
-            var cropWidth = sourceSize.Height * destAspect;
-            return new Rect((sourceSize.Width - cropWidth) / 2, 0, cropWidth, sourceSize.Height);
+            // Source slice is relatively wider than the cell - crop its
+            // sides, keep full height.
+            var cropWidth = sourceRect.Height * destAspect;
+            return new Rect(sourceRect.X + (sourceRect.Width - cropWidth) / 2, sourceRect.Y, cropWidth, sourceRect.Height);
         }
 
-        // Source is relatively taller/narrower than the cell - crop top/
-        // bottom, keep full width.
-        var cropHeight = sourceSize.Width / destAspect;
-        return new Rect(0, (sourceSize.Height - cropHeight) / 2, sourceSize.Width, cropHeight);
+        // Source slice is relatively taller/narrower than the cell - crop
+        // top/bottom, keep full width.
+        var cropHeight = sourceRect.Width / destAspect;
+        return new Rect(sourceRect.X, sourceRect.Y + (sourceRect.Height - cropHeight) / 2, sourceRect.Width, cropHeight);
     }
 
     private void DrawWaveform(DrawingContext context, Rect rect)
