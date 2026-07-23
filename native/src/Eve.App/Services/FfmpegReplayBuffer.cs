@@ -785,12 +785,19 @@ public sealed record ReplayBufferConfig(
 internal sealed class AudioCaptureSession : IDisposable
 {
     private readonly IWaveIn _capture;
-    private readonly FileStream _stream;
+    // FileStream for a disk-backed capture (Full Session - needs to survive
+    // for the whole, potentially hours-long, recording, so it can't live in
+    // RAM), MemoryStream for a RAM-backed one (plain replay buffer - see
+    // StartInMemory). Everything below this field (gap-fill, peak
+    // diagnostics, placement logging) already only ever touches _writer, not
+    // _stream directly, so none of that needed to change either way - only
+    // SnapshotTo/Dispose, which do.
+    private readonly Stream _stream;
     private readonly WaveFileWriter _writer;
     private readonly object _lock = new();
     private bool _firstSampleSeen;
 
-    private AudioCaptureSession(IWaveIn capture, FileStream stream, WaveFileWriter writer, string title)
+    private AudioCaptureSession(IWaveIn capture, Stream stream, WaveFileWriter writer, string title)
     {
         _capture = capture;
         _stream = stream;
@@ -821,9 +828,42 @@ internal sealed class AudioCaptureSession : IDisposable
 
     public int AverageBytesPerSecond => _capture.WaveFormat.AverageBytesPerSecond;
 
+    // True for a capture started via StartInMemory - AudioCapturePipeline's
+    // roll-check uses this to apply the much smaller "replay window + slack"
+    // duration cap instead of the 4GiB RIFF cap that only a disk-backed,
+    // unbounded-duration Full Session capture needs to worry about.
+    public bool IsMemoryBacked => _stream is MemoryStream;
+
     public static AudioCaptureSession Start(IWaveIn capture, string path, string title)
     {
         var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+        return StartOn(capture, stream, title);
+    }
+
+    // RAM-backed capture - used for the plain replay-buffer window (not Full
+    // Session, which needs disk: a recording that can run for hours can't
+    // reasonably live entirely in memory). SnapshotTo below still produces a
+    // real WAV file on demand from whatever's currently buffered, so nothing
+    // downstream (AudioCapturePipeline's ffmpeg-based windowing/mixing/
+    // alignment) needs to know or care which mode a given capture is in.
+    //
+    // capacityHintBytes pre-sizes the MemoryStream to roughly the expected
+    // peak (AudioCapturePipeline passes its roll threshold - the same size
+    // it'll actually roll this capture at) - MemoryStream's default no-
+    // capacity constructor grows by doubling whenever it runs out of room,
+    // which can transiently hold up to ~2x the final data size in memory
+    // right before a growth (allocate new double-size array, copy old
+    // contents in, THEN release the old one) and repeatedly reallocates/
+    // copies along the way. Pre-sizing avoids both: one allocation, no
+    // doubling overshoot, no copy-on-grow churn during 100Hz writes.
+    public static AudioCaptureSession StartInMemory(IWaveIn capture, string title, int capacityHintBytes = 0)
+    {
+        var stream = capacityHintBytes > 0 ? new MemoryStream(capacityHintBytes) : new MemoryStream();
+        return StartOn(capture, stream, title);
+    }
+
+    private static AudioCaptureSession StartOn(IWaveIn capture, Stream stream, string title)
+    {
         var writer = new WaveFileWriter(stream, capture.WaveFormat);
         var session = new AudioCaptureSession(capture, stream, writer, title);
         capture.DataAvailable += session.Capture_OnDataAvailable;
@@ -887,10 +927,25 @@ internal sealed class AudioCaptureSession : IDisposable
                 // desyncing every track by its own flush-phase amount.
                 WriteSilenceForDeliveryGapLocked(lastSampleUtc, minGapMs: 30);
                 _writer.Flush();
-                _stream.Flush(true);
-                using var source = new FileStream(((FileStream)_stream).Name, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                using var destination = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
-                source.CopyTo(destination);
+
+                if (_stream is FileStream fileStream)
+                {
+                    fileStream.Flush(true);
+                    using var source = new FileStream(fileStream.Name, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    using var destination = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+                    source.CopyTo(destination);
+                }
+                else
+                {
+                    // MemoryStream - no file to re-open/copy, just write out
+                    // whatever's currently buffered. WriteTo copies from
+                    // position 0 regardless of the stream's current Position
+                    // (which sits at the end, mid-write).
+                    var memoryStream = (MemoryStream)_stream;
+                    using var destination = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+                    memoryStream.WriteTo(destination);
+                }
+
                 return true;
             }
             catch

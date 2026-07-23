@@ -236,7 +236,7 @@ public sealed class AudioCapturePipeline : IDisposable
         var path = Path.Combine(_bufferFolder, $"{AudioKindPrefix(kind)}_{Guid.NewGuid():N}.wav");
         TryDelete(path);
         var capture = new WasapiLoopbackCapture(device);
-        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, kind, null, MonotonicClock.UtcNow, sourceKey));
+        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(StartSession(capture, path, title), path, title, kind, null, MonotonicClock.UtcNow, sourceKey));
         AppLog.Debug($"Audio capture started: {title}, device={device.FriendlyName}.");
     }
 
@@ -245,7 +245,7 @@ public sealed class AudioCapturePipeline : IDisposable
         var path = Path.Combine(_bufferFolder, $"{AudioKindPrefix(kind)}_{processId}_{Guid.NewGuid():N}.wav");
         TryDelete(path);
         var capture = new ProcessLoopbackWaveIn(processId, mode);
-        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, kind, processId, MonotonicClock.UtcNow, sourceKey));
+        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(StartSession(capture, path, title), path, title, kind, processId, MonotonicClock.UtcNow, sourceKey));
         AppLog.Debug($"Audio capture started: {title}, pid={processId}, mode={mode}.");
     }
 
@@ -254,9 +254,35 @@ public sealed class AudioCapturePipeline : IDisposable
         var path = Path.Combine(_bufferFolder, $"{AudioKindPrefix(AudioCaptureKind.Microphone)}_{Guid.NewGuid():N}.wav");
         TryDelete(path);
         var capture = new MicrophoneWaveIn(device);
-        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(AudioCaptureSession.Start(capture, path, title), path, title, AudioCaptureKind.Microphone, null, MonotonicClock.UtcNow, sourceKey, device.ID));
+        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(StartSession(capture, path, title), path, title, AudioCaptureKind.Microphone, null, MonotonicClock.UtcNow, sourceKey, device.ID));
         AppLog.Debug($"Audio capture started: {title}, device={device.FriendlyName}.");
     }
+
+    // Full Session needs disk (a recording that can run for hours can't
+    // reasonably live entirely in RAM, and losing it to a crash would be far
+    // worse than the disk-write cost) - the plain replay-buffer window is
+    // capped at 20 minutes and only needs to survive until the next save, so
+    // it goes to RAM instead: no continuous disk writes for the common case
+    // (recording armed, nothing saved yet), which used to run the whole time
+    // the buffer was armed regardless of whether anything was ever saved.
+    // `path` is still passed through even for the in-memory case - nothing
+    // is ever written there, but ReplayAudioCapture.Path is also used as a
+    // plain nominal identifier elsewhere (logging, TryDelete no-ops).
+    private AudioCaptureSession StartSession(IWaveIn capture, string path, string title)
+    {
+        if (_activeConfig?.FullSessionRecordingEnabled == true)
+        {
+            return AudioCaptureSession.Start(capture, path, title);
+        }
+
+        var capacityHint = (int)Math.Min(int.MaxValue, RamCaptureMaxSeconds() * (long)capture.WaveFormat.AverageBytesPerSecond);
+        return AudioCaptureSession.StartInMemory(capture, title, capacityHint);
+    }
+
+    // Shared by StartSession's pre-size hint and RollOversizedCaptures' roll
+    // threshold, so the two can never disagree about how big a RAM-backed
+    // capture is allowed to get.
+    private int RamCaptureMaxSeconds() => Math.Clamp(_activeConfig?.DurationSeconds ?? 60, 30, 1200) + RamCaptureSlackSeconds;
 
     private static string AudioKindPrefix(AudioCaptureKind kind) => kind switch
     {
@@ -316,6 +342,32 @@ public sealed class AudioCapturePipeline : IDisposable
     {
         if (capture.EndedAtUtc is not null) return;
         capture.EndedAtUtc = MonotonicClock.UtcNow;
+
+        // A RAM-backed capture's audio only exists in its MemoryStream - once
+        // Dispose() below tears the session down, that data is gone for good
+        // unless it's flushed to a real file first. Ended captures are read
+        // back via a plain file copy elsewhere (GetOrCreateSourceSnapshot),
+        // the same as an already-closed disk-backed capture's WAV, so bridge
+        // it to that exact path here instead - an ended memory capture then
+        // behaves identically to a disk-backed one for every downstream
+        // consumer, no separate code path needed. The resulting file is
+        // temporary, cleaned up the same way any other ended capture's file
+        // already is (Stop()'s deleteCaptureFiles sweep, PruneOlderThan once
+        // the replay window passes it by) - this doesn't reintroduce
+        // continuous disk writes, just one final write of whatever's left
+        // once a capture actually ends (route change, roll, session stop).
+        if (capture.Session.IsMemoryBacked)
+        {
+            try
+            {
+                capture.Session.SnapshotTo(capture.Path, out _);
+            }
+            catch (Exception error)
+            {
+                AppLog.Error($"Audio capture memory->file flush on stop failed: {capture.Title}", error);
+            }
+        }
+
         try
         {
             capture.Session.Dispose();
@@ -325,7 +377,7 @@ public sealed class AudioCapturePipeline : IDisposable
             // Stop best effort.
         }
 
-        AppLog.Debug($"Audio capture stopped: {capture.Title}, pid={capture.ProcessId?.ToString() ?? "none"}, start={capture.StartedAtUtc:o}, end={capture.EndedAtUtc:o}, bytes={AudioFileLength(capture.Path)}.");
+        AppLog.Debug($"Audio capture stopped: {capture.Title}, pid={capture.ProcessId?.ToString() ?? "none"}, start={capture.StartedAtUtc:o}, end={capture.EndedAtUtc:o}, bytes={capture.Session.BytesWritten}.");
     }
 
     private void RefreshAudioRoutes()
@@ -368,6 +420,15 @@ public sealed class AudioCapturePipeline : IDisposable
     // use).
     private const long MaxCaptureFileBytes = 3_900_000_000;
 
+    // How far past the configured replay Duration a RAM-backed capture is
+    // allowed to grow before rolling - same slack the video ring buffer
+    // trims against (NativeReplayBuffer.TrimRingBuffer), so audio and video
+    // stay bounded to comparable windows. This is what keeps the in-memory
+    // buffer from just growing for as long as the replay buffer stays
+    // armed - without it, RAM would climb unboundedly the same way the old
+    // disk WAVs did before the 4GiB roll existed for them.
+    private const int RamCaptureSlackSeconds = 5;
+
     private bool RollOversizedCaptures()
     {
         var rolled = false;
@@ -396,6 +457,22 @@ public sealed class AudioCapturePipeline : IDisposable
             {
                 var projectedBytes = (long)((MonotonicClock.UtcNow - started).TotalSeconds * capture.Session.AverageBytesPerSecond);
                 if (projectedBytes > bytes) bytes = projectedBytes;
+            }
+
+            // RAM-backed (plain replay buffer, not Full Session) captures
+            // roll on a much smaller time-based cap instead of the 4GiB
+            // RIFF limit below, which a bounded ring never gets remotely
+            // close to - this is what actually bounds memory usage, not
+            // just a defensive fallback.
+            if (capture.Session.IsMemoryBacked)
+            {
+                var maxSeconds = RamCaptureMaxSeconds();
+                var maxMemoryBytes = (long)maxSeconds * capture.Session.AverageBytesPerSecond;
+                if (bytes < maxMemoryBytes) continue;
+                AppLog.Info($"Audio capture rolled to keep its RAM buffer bounded: {capture.Title}, bytes={bytes}, maxSeconds={maxSeconds}.");
+                StopAudioCapture(capture);
+                rolled = true;
+                continue;
             }
 
             if (bytes < MaxCaptureFileBytes) continue;
@@ -793,7 +870,11 @@ public sealed class AudioCapturePipeline : IDisposable
 
     private string SnapshotAudioFile(ReplayAudioCapture? capture, DateTime windowStartUtc, double durationSeconds, ICollection<string> snapshots, Dictionary<ReplayAudioCapture, SourceSnapshot?> sourceSnapshotCache, ReplayBufferConfig? config = null)
     {
-        if (capture is null || !IsUsableAudioFile(capture.Path)) return string.Empty;
+        // BytesWritten, not IsUsableAudioFile(capture.Path) - a RAM-backed
+        // capture (the plain replay-buffer window) never has a real file at
+        // capture.Path at all, so that check always failed for it. BytesWritten
+        // reports actual captured content either way, disk or memory.
+        if (capture is null || capture.Session.BytesWritten == 0) return string.Empty;
 
         var snapshotPath = Path.Combine(_bufferFolder, $"audio_{Guid.NewGuid():N}.wav");
         try
@@ -827,7 +908,7 @@ public sealed class AudioCapturePipeline : IDisposable
             // atrim filter approach that decoded the file from the top every
             // chunk.
             var filters = $"[0:a]asetpts=PTS-STARTPTS,aresample=48000,{noiseSuppressionFilter}adelay={delayMs}|{delayMs},apad=whole_dur={FormatSeconds(durationSeconds)},atrim=0:{FormatSeconds(durationSeconds)}[out]";
-            AppLog.Debug($"Replay audio overlap: kind={capture.Kind}, pid={capture.ProcessId?.ToString() ?? "none"}, trim={trimStart:0.###}s, overlap={overlapDuration:0.###}s, delay={delayMs}ms, bytes={AudioFileLength(capture.Path)}.");
+            AppLog.Debug($"Replay audio overlap: kind={capture.Kind}, pid={capture.ProcessId?.ToString() ?? "none"}, trim={trimStart:0.###}s, overlap={overlapDuration:0.###}s, delay={delayMs}ms, bytes={capture.Session.BytesWritten}.");
 
             var result = RunProcessAsync("ffmpeg", new[]
             {
