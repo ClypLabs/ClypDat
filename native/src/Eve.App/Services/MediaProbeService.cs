@@ -508,7 +508,7 @@ public sealed class MediaProbeService
     // each frame individually cropped to its own on-screen cell without
     // distortion despite being cached as a single image.
     public const int FilmstripFrameCount = 10;
-    private const int FilmstripFrameHeight = 96;
+    private const int FilmstripFrameHeight = 160;
 
     // Each frame is grabbed with its OWN -ss seek (fast keyframe seek, only
     // decodes a handful of frames around the target) - not a single `fps`
@@ -540,7 +540,7 @@ public sealed class MediaProbeService
                     "-i", filePath,
                     "-frames:v", "1",
                     "-vf", $"scale=-2:{FilmstripFrameHeight}",
-                    "-q:v", "3",
+                    "-q:v", "2",
                     framePath
                 });
 
@@ -558,7 +558,7 @@ public sealed class MediaProbeService
                 "-vf", $"tile={FilmstripFrameCount}x1",
                 "-frames:v", "1",
                 "-update", "1",
-                "-q:v", "3",
+                "-q:v", "2",
                 output
             });
 
@@ -583,13 +583,7 @@ public sealed class MediaProbeService
 
     private string GetFilmstripPath(string filePath)
     {
-        // -v3: cache-key suffix bump - v1 was a per-frame folder, v2 a
-        // denser per-frame folder, both replaced by this single tiled
-        // image. Old folders age out via the 30-day prune, same as
-        // everything else in this cache (DeleteCacheFor's {key}*.* glob
-        // only catches files, not the old folders, but they're harmless
-        // orphaned cache data either way).
-        return Path.Combine(_cacheFolder, $"{CacheKey(filePath)}-filmstrip-v3.jpg");
+        return Path.Combine(_cacheFolder, $"{CacheKey(filePath)}-filmstrip.jpg");
     }
 
     private string GetThumbnailPath(string filePath)
