@@ -176,7 +176,15 @@
                   BorderThickness="1"
                   IsVisible="{Binding IsHydratingLibrary}">
             <StackPanel Spacing="8">
-              <TextBlock Text="{Binding HydrationProgressText}" Foreground="#B8C7D8" FontSize="12" FontWeight="Bold" />
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Grid.Column="0" Text="{Binding HydrationProgressText}" Foreground="#B8C7D8" FontSize="12" FontWeight="Bold" />
+                <TextBlock Grid.Column="1"
+                           Text="{Binding HydrationEtaText}"
+                           Foreground="#7C8EA3"
+                           FontSize="11"
+                           VerticalAlignment="Center"
+                           IsVisible="{Binding HasHydrationEta}" />
+              </Grid>
               <ProgressBar Minimum="0"
                            Maximum="1"
                            Value="{Binding HydrationProgressFraction}"

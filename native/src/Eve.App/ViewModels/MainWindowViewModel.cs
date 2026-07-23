@@ -17,6 +17,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private FileSystemWatcher? _libraryWatcher;
     private readonly DispatcherTimer _libraryRefreshDebounce;
     private readonly DispatcherTimer _clipNotReadyMessageTimer;
+    // See WasRecentlySelfAdded - suppresses the redundant full-library
+    // refresh the folder watcher used to trigger for a clip
+    // AddOrUpdateLibraryClipAsync had already added directly.
+    private readonly Dictionary<string, DateTime> _recentlySelfAddedPaths = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan SelfAddedSuppressWindow = TimeSpan.FromSeconds(5);
     private readonly SemaphoreSlim _libraryLayoutMigrationLock = new(1, 1);
     private readonly AudioDeviceService _audioDevices = new();
     private bool _isReplayRecording;
@@ -62,6 +67,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _hydrationTotal;
     private int _hydrationCompleted;
     private string _hydrationPhaseLabel = "Loading clip info";
+    private string _hydrationEtaText = string.Empty;
+    // Tracks progress across ALL three hydration passes, separately from
+    // HydrationCompleted/HydrationTotal (which reset per-phase for the
+    // displayed fraction) - the ETA is for the whole job finishing, not just
+    // the current phase, so it needs its own running total unaffected by
+    // those per-phase resets.
+    private readonly System.Diagnostics.Stopwatch _hydrationClock = new();
+    private int _hydrationOverallCompleted;
+    private int _hydrationOverallTotal;
     private string _clipNotReadyMessage = string.Empty;
     private double _masterVolumePercent;
     private bool _isMasterMuted;
@@ -281,6 +295,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string HydrationProgressText => $"{HydrationPhaseLabel}... {HydrationCompleted}/{HydrationTotal}";
     public double HydrationProgressFraction => HydrationTotal > 0 ? (double)HydrationCompleted / HydrationTotal : 0;
+
+    // Estimated time left for the WHOLE hydration job (all three passes),
+    // not just the current one - UpdateHydrationEta computes this from
+    // overall throughput so far (_hydrationOverallCompleted/_hydrationClock),
+    // not the per-phase counts above, since those reset every phase and
+    // would make the rate look like it restarts from zero each time too.
+    public string HydrationEtaText
+    {
+        get => _hydrationEtaText;
+        private set => SetProperty(ref _hydrationEtaText, value);
+    }
+
+    public bool HasHydrationEta => !string.IsNullOrEmpty(HydrationEtaText);
 
     // Transient message shown when a card is clicked before
     // HydrateLibraryClipsAsync has reached it - see OpenClipAsync. Clears
@@ -2190,16 +2217,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public async Task AddOrUpdateLibraryClipAsync(string filePath)
     {
         if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath)) return;
+        // Marked BEFORE any awaits below - the folder watcher's Created event
+        // for this same file can arrive on its own thread at any point from
+        // here on, and needs to see this entry the moment it's possible for
+        // the event to fire, not after this method's own (slower) probe work
+        // finishes.
+        _recentlySelfAddedPaths[filePath] = DateTime.UtcNow;
         var clock = System.Diagnostics.Stopwatch.StartNew();
         var media = _mediaProbe.CreateLibraryStub(filePath);
         var existing = AllClips.FirstOrDefault(clip => string.Equals(clip.Path, filePath, StringComparison.OrdinalIgnoreCase));
+        ClipCardViewModel clip;
         if (existing is not null)
         {
             existing.UpdateMedia(media);
+            clip = existing;
         }
         else
         {
-            var clip = new ClipCardViewModel(media, Settings.LibraryFolder);
+            clip = new ClipCardViewModel(media, Settings.LibraryFolder);
             var insertIndex = 0;
             while (insertIndex < AllClips.Count && AllClips[insertIndex].CreatedAt > clip.CreatedAt) insertIndex++;
             AllClips.Insert(insertIndex, clip);
@@ -2207,7 +2242,83 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         NotifyLibraryChrome();
         AppLog.Debug($"Library quick add: {filePath} in {clock.ElapsedMilliseconds}ms.");
-        await HydrateOpenClipAsync(existing ?? AllClips.First(clip => string.Equals(clip.Path, filePath, StringComparison.OrdinalIgnoreCase)));
+
+        // Metadata first (fast - a probe-cache hit is a JSON read, and even a
+        // real ffprobe is far lighter than image generation) - this alone is
+        // enough for ClipCardViewModel.IsHydrated, unblocking the clip for
+        // opening. Thumbnail+filmstrip generation (up to ~16 ffmpeg processes
+        // between the two) used to run INLINE here first, before the clip
+        // was even openable - saving a clip and immediately clicking it made
+        // the editor's own playback startup (LibVLC decode, audio chunk
+        // extraction) compete directly with that generation for CPU, which
+        // is what made the clip you JUST saved specifically stutter/delay
+        // audio on open (an already-hydrated older clip has none of this
+        // cost - its images are already cached). Images now fill in after,
+        // in the background, via HydrateClipImagesAsync.
+        var probedMedia = await _mediaProbe.ProbeMetadataAsync(filePath);
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            clip.UpdateMedia(probedMedia);
+            // Guarded on IsEditorVisible too - AddOrUpdateLibraryClipAsync
+            // also runs after the editor closes (to refresh the library
+            // card), and SelectedVideoPath still points at that clip then.
+            // Without the guard, OpenMedia's unconditional IsEditorVisible =
+            // true would pop the editor back open right after the user
+            // closed it.
+            if (IsEditorVisible && string.Equals(SelectedVideoPath, filePath, StringComparison.OrdinalIgnoreCase))
+            {
+                OpenMedia(probedMedia, preserveEditorText: true);
+            }
+        });
+
+        _ = HydrateClipImagesAsync(clip, filePath);
+    }
+
+    // Second stage of AddOrUpdateLibraryClipAsync - thumbnail/filmstrip
+    // generation, run after the clip is already openable rather than
+    // blocking on it. If the editor happens to already be open on this
+    // exact clip (opened while its images were still generating), patches
+    // the thumbnail/filmstrip directly into the live editor state instead
+    // of re-running OpenMedia - OpenMedia resets zoom/trim/playhead/timeline
+    // tracks from scratch, which would visibly jump/reset the editor out
+    // from under the user for what should be an invisible background update.
+    private async Task HydrateClipImagesAsync(ClipCardViewModel clip, string filePath)
+    {
+        try
+        {
+            var thumbnailPath = await _mediaProbe.EnsureThumbnailAsync(filePath, clip.Duration);
+            var filmstripPath = await _mediaProbe.EnsureFilmstripAsync(filePath, clip.Duration);
+            if (string.IsNullOrEmpty(thumbnailPath) && string.IsNullOrEmpty(filmstripPath)) return;
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                var updated = clip.Media;
+                if (!string.IsNullOrEmpty(thumbnailPath)) updated = updated with { ThumbnailPath = thumbnailPath };
+                if (!string.IsNullOrEmpty(filmstripPath)) updated = updated with { FilmstripPath = filmstripPath };
+                clip.UpdateMedia(updated);
+
+                if (!IsEditorVisible || !string.Equals(SelectedVideoPath, filePath, StringComparison.OrdinalIgnoreCase)) return;
+
+                if (!string.IsNullOrEmpty(thumbnailPath))
+                {
+                    SelectedThumbnailPath = thumbnailPath;
+                    SelectedThumbnail = LoadBitmap(thumbnailPath);
+                }
+
+                if (!string.IsNullOrEmpty(filmstripPath))
+                {
+                    var filmstrip = LoadBitmap(filmstripPath);
+                    foreach (var track in TimelineTracks.Where(track => track.IsVideo))
+                    {
+                        track.Filmstrip = filmstrip;
+                    }
+                }
+            });
+        }
+        catch
+        {
+            // Images are pure polish - a failed thumbnail/filmstrip generation shouldn't be user-visible.
+        }
     }
 
     public void Dispose()
@@ -3434,13 +3545,57 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private void LibraryWatcher_OnChanged(object sender, FileSystemEventArgs e)
     {
         if (!MediaProbeService.IsVideoFile(e.FullPath)) return;
-        Dispatcher.UIThread.Post(ScheduleLibraryRefresh);
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (WasRecentlySelfAdded(e.FullPath)) return;
+            ScheduleLibraryRefresh();
+        });
     }
 
     private void LibraryWatcher_OnRenamed(object sender, RenamedEventArgs e)
     {
         if (!MediaProbeService.IsVideoFile(e.FullPath) && !MediaProbeService.IsVideoFile(e.OldFullPath)) return;
-        Dispatcher.UIThread.Post(ScheduleLibraryRefresh);
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (WasRecentlySelfAdded(e.FullPath)) return;
+            ScheduleLibraryRefresh();
+        });
+    }
+
+    // AddOrUpdateLibraryClipAsync already fully incorporates a newly-saved
+    // (or renamed) clip directly, one card at a time, no full rescan needed
+    // - the SAME file's Created/Renamed event still arrives here moments
+    // later from the folder watcher regardless, which used to trigger a
+    // full RefreshLibraryAsync/re-hydrate of the WHOLE library right on top
+    // of that. That redundant pass was both the real reason a save felt
+    // slow to "settle" and why the hydration progress banner briefly showed
+    // a big library-wide fraction (e.g. "43/44") for what was really just
+    // one clip. Suppress the one expected follow-up watcher event per
+    // self-added path instead of treating it as an external change - a
+    // GENUINE external change (user drops a file in manually, Medal import,
+    // another EVE instance) was never marked here and still refreshes
+    // normally.
+    private bool WasRecentlySelfAdded(string path)
+    {
+        var isSelfAdded = _recentlySelfAddedPaths.TryGetValue(path, out var addedAtUtc) &&
+                           DateTime.UtcNow - addedAtUtc < SelfAddedSuppressWindow;
+        if (isSelfAdded) _recentlySelfAddedPaths.Remove(path);
+
+        // Opportunistic cleanup of stale entries (a self-add whose watcher
+        // event never arrived, e.g. it got coalesced away) - this dictionary
+        // is tiny and short-lived, not worth a separate timer just for this.
+        if (_recentlySelfAddedPaths.Count > 0)
+        {
+            foreach (var stale in _recentlySelfAddedPaths
+                         .Where(pair => DateTime.UtcNow - pair.Value >= SelfAddedSuppressWindow)
+                         .Select(pair => pair.Key)
+                         .ToArray())
+            {
+                _recentlySelfAddedPaths.Remove(stale);
+            }
+        }
+
+        return isSelfAdded;
     }
 
     private void ScheduleLibraryRefresh()
@@ -3558,18 +3713,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         try
         {
-            // One continuous bar across all three passes (0 to clips.Count*3),
-            // set up front and never reset between passes - it used to reset
-            // to 0% at the start of each pass, which read as the whole scan
-            // restarting three times over instead of one steady climb to
-            // done. RunHydrationPassAsync only updates HydrationPhaseLabel
-            // (the "Loading clip info"/"Loading thumbnails"/"Loading
-            // timelines" text) per phase now, not the total/completed counts.
+            // Bar resets per phase (0/clips.Count each time, not a combined
+            // 0/clips.Count*3) - RunHydrationPassAsync resets
+            // HydrationCompleted/HydrationTotal at the start of every pass,
+            // so a 300-clip library reads "0/300" for each of the three
+            // phases in turn, not "0/900" for the whole thing. The ETA
+            // tracks the OVERALL job separately (see its own fields) so it
+            // doesn't reset alongside the displayed per-phase fraction.
+            _hydrationOverallCompleted = 0;
+            _hydrationOverallTotal = clips.Count * 3;
+            _hydrationClock.Restart();
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 IsHydratingLibrary = clips.Count > 0;
-                HydrationCompleted = 0;
-                HydrationTotal = clips.Count * 3;
+                HydrationEtaText = string.Empty;
             });
 
             await RunHydrationPassAsync(clips, "Loading clip info", cancellationToken,
@@ -3609,23 +3766,32 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 _libraryHydrationCts.Dispose();
                 _libraryHydrationCts = null;
-                await Dispatcher.UIThread.InvokeAsync(() => IsHydratingLibrary = false);
+                _hydrationClock.Stop();
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    IsHydratingLibrary = false;
+                    HydrationEtaText = string.Empty;
+                });
             }
         }
     }
 
     // One pass of HydrateLibraryClipsAsync - runs `action` for every clip
     // (one at a time, matching the existing network-drive-friendly
-    // MaxDegreeOfParallelism). Only updates the phase LABEL - the overall
-    // HydrationTotal/HydrationCompleted counters are set once up front by
-    // the caller and keep climbing across all three passes, not reset here.
+    // MaxDegreeOfParallelism), resetting the progress bar to 0/clips.Count
+    // for this phase specifically.
     private async Task RunHydrationPassAsync(
         IReadOnlyList<ClipCardViewModel> clips,
         string phaseLabel,
         CancellationToken cancellationToken,
         Func<ClipCardViewModel, Task> action)
     {
-        await Dispatcher.UIThread.InvokeAsync(() => HydrationPhaseLabel = phaseLabel);
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            HydrationPhaseLabel = phaseLabel;
+            HydrationCompleted = 0;
+            HydrationTotal = clips.Count;
+        });
 
         await Parallel.ForEachAsync(
             clips,
@@ -3637,7 +3803,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     token.ThrowIfCancellationRequested();
                     await action(clip);
                     if (token.IsCancellationRequested) return;
-                    await Dispatcher.UIThread.InvokeAsync(() => HydrationCompleted++);
+                    await Dispatcher.UIThread.InvokeAsync(RecordHydrationStep);
                 }
                 catch (OperationCanceledException)
                 {
@@ -3646,9 +3812,56 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 catch
                 {
                     // A bad clip in one pass shouldn't stop the rest of the library.
-                    await Dispatcher.UIThread.InvokeAsync(() => HydrationCompleted++);
+                    await Dispatcher.UIThread.InvokeAsync(RecordHydrationStep);
                 }
             });
+    }
+
+    // One clip finished in whichever pass is currently running - advances
+    // both the displayed per-phase count AND the overall-job counter the ETA
+    // is computed from.
+    private void RecordHydrationStep()
+    {
+        HydrationCompleted++;
+        _hydrationOverallCompleted++;
+        UpdateHydrationEta();
+    }
+
+    // Straight-line estimate from overall throughput so far (items/sec since
+    // _hydrationClock started) - no per-phase weighting, since ffprobe vs
+    // thumbnail vs filmstrip generation cost enough differently that a
+    // flat per-item average across all three, measured live, tracks the
+    // ACTUAL mix of what's already run better than guessing fixed weights
+    // up front would. Needs a few completed items before the estimate means
+    // anything - too few and one slow/fast outlier swings it wildly.
+    private void UpdateHydrationEta()
+    {
+        const int minSamplesForEstimate = 5;
+        if (_hydrationOverallCompleted < minSamplesForEstimate || _hydrationOverallTotal <= 0)
+        {
+            HydrationEtaText = string.Empty;
+            return;
+        }
+
+        var remaining = _hydrationOverallTotal - _hydrationOverallCompleted;
+        if (remaining <= 0)
+        {
+            HydrationEtaText = string.Empty;
+            return;
+        }
+
+        var secondsPerItem = _hydrationClock.Elapsed.TotalSeconds / _hydrationOverallCompleted;
+        var etaSeconds = secondsPerItem * remaining;
+        HydrationEtaText = FormatHydrationEta(etaSeconds);
+    }
+
+    private static string FormatHydrationEta(double etaSeconds)
+    {
+        if (etaSeconds < 5) return "almost done";
+        if (etaSeconds < 60) return $"~{Math.Ceiling(etaSeconds / 5) * 5:0}s left";
+        var minutes = etaSeconds / 60;
+        if (minutes < 60) return $"~{Math.Ceiling(minutes):0}m left";
+        return $"~{minutes / 60:0.#}h left";
     }
 
     private TimeSpan ClampTime(TimeSpan time)

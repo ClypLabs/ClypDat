@@ -275,37 +275,29 @@ public sealed class AudioCapturePipeline : IDisposable
             return AudioCaptureSession.Start(capture, path, title);
         }
 
-        // Pre-size to the TYPICAL expected size (the replay window itself),
-        // not the rare-case roll ceiling below - eagerly reserving, say, the
-        // full 20-minute ceiling on every capture even for a 30s replay
-        // buffer would waste real memory for the overwhelmingly common case.
-        // MemoryStream still grows past this via its normal doubling
-        // strategy on the rare capture that actually approaches the roll
-        // ceiling - that's an acceptable one-off cost, not a steady-state one.
-        var capacitySeconds = Math.Clamp(_activeConfig?.DurationSeconds ?? 60, 30, 1200) + RamCaptureSlackSeconds;
-        var capacityHint = (int)Math.Min(int.MaxValue, capacitySeconds * (long)capture.WaveFormat.AverageBytesPerSecond);
+        // Pre-sized to exactly the steady-state retention target
+        // (RamCaptureRetentionSeconds) - since TrimMemoryCaptures keeps the
+        // buffer hovering right around this size continuously (not growing
+        // toward a much larger ceiling first), this one allocation should
+        // cover the capture's whole lifetime without ever needing to grow.
+        var capacityHint = (int)Math.Min(int.MaxValue, RamCaptureRetentionSeconds() * (long)capture.WaveFormat.AverageBytesPerSecond);
         return AudioCaptureSession.StartInMemory(capture, title, capacityHint);
     }
 
-    // How long a RAM-backed capture is allowed to grow before
-    // RollOversizedCaptures rotates it to a fresh one. Deliberately NOT just
-    // "replay Duration + slack" - that rolled every ~65s for a default 60s
-    // buffer, and every roll boundary a save's segment window happens to
-    // cross means GetOrCreateSourceSnapshot/SnapshotAudioFile has to stitch
-    // TWO captures together instead of reading one straight through -
-    // measured as a real, noticeable save-time slowdown (extra ffmpeg
-    // process spawns per extra capture) versus the disk-backed path, which
-    // only ever rolled at the 4GiB cap (~93 minutes - effectively never in
-    // normal use). Flooring this at 20 minutes makes rolls rare again for
-    // any realistic replay Duration setting (max configurable is also 20
-    // min), matching disk's "rolling is the rare case" characteristic,
-    // while still bounding memory to a sane per-track ceiling (~450MB at
-    // the default 48kHz/stereo/float mix format).
-    private const int RamCaptureMinRollSeconds = 1200;
-
-    private int RamCaptureMaxSeconds() => Math.Max(
-        Math.Clamp(_activeConfig?.DurationSeconds ?? 60, 30, 1200) + RamCaptureSlackSeconds,
-        RamCaptureMinRollSeconds);
+    // How much audio a RAM-backed capture keeps at any given moment -
+    // TrimMemoryCaptures below continuously discards anything older than
+    // this from the FRONT of the buffer (AudioCaptureSession.TrimTo),
+    // keeping exactly one capture per source alive at a roughly constant
+    // size instead of growing toward a ceiling before ever rolling to a
+    // fresh one. An earlier version of this rolled to a fresh capture once
+    // a size ceiling was hit; that let memory climb toward the ceiling
+    // before ever shrinking back down (looked like a leak over the first
+    // several minutes of any armed session), AND meant a save whose window
+    // crossed a roll boundary had to stitch two captures together instead
+    // of reading one straight through (a measured save-time slowdown).
+    // Trimming avoids both.
+    private int RamCaptureRetentionSeconds() =>
+        Math.Clamp(_activeConfig?.DurationSeconds ?? 60, 30, 1200) + RamCaptureSlackSeconds;
 
     private static string AudioKindPrefix(AudioCaptureKind kind) => kind switch
     {
@@ -411,6 +403,7 @@ public sealed class AudioCapturePipeline : IDisposable
             var config = _activeConfig;
             if (config is null) return;
             var rolledOver = RollOversizedCaptures();
+            TrimMemoryCaptures();
             using var enumerator = new MMDeviceEnumerator();
             var resolvedMicDeviceIds = ResolveMicrophoneDeviceIds(enumerator, config.MicrophoneDeviceIds);
             var routes = ResolveAudioRoutes(config, resolvedMicDeviceIds);
@@ -470,6 +463,12 @@ public sealed class AudioCapturePipeline : IDisposable
                 continue;
             }
 
+            // RAM-backed (plain replay buffer, not Full Session) captures
+            // never hit the 4GiB RIFF cap below - TrimMemoryCaptures keeps
+            // them bounded to a much smaller size continuously instead, so
+            // there's nothing to roll here for them.
+            if (capture.Session.IsMemoryBacked) continue;
+
             // Written bytes alone miss the quiet-process case: a process
             // capture delivers nothing while its app is silent, so the file
             // stops growing, but the save-time pad-to-now still has to cover
@@ -482,22 +481,6 @@ public sealed class AudioCapturePipeline : IDisposable
                 if (projectedBytes > bytes) bytes = projectedBytes;
             }
 
-            // RAM-backed (plain replay buffer, not Full Session) captures
-            // roll on a much smaller time-based cap instead of the 4GiB
-            // RIFF limit below, which a bounded ring never gets remotely
-            // close to - this is what actually bounds memory usage, not
-            // just a defensive fallback.
-            if (capture.Session.IsMemoryBacked)
-            {
-                var maxSeconds = RamCaptureMaxSeconds();
-                var maxMemoryBytes = (long)maxSeconds * capture.Session.AverageBytesPerSecond;
-                if (bytes < maxMemoryBytes) continue;
-                AppLog.Info($"Audio capture rolled to keep its RAM buffer bounded: {capture.Title}, bytes={bytes}, maxSeconds={maxSeconds}.");
-                StopAudioCapture(capture);
-                rolled = true;
-                continue;
-            }
-
             if (bytes < MaxCaptureFileBytes) continue;
             AppLog.Info($"Audio capture rolled to a new file before the 4GiB WAV cap: {capture.Title}, bytes={bytes}.");
             StopAudioCapture(capture);
@@ -505,6 +488,23 @@ public sealed class AudioCapturePipeline : IDisposable
         }
 
         return rolled;
+    }
+
+    // Keeps every live RAM-backed capture hovering right around
+    // RamCaptureRetentionSeconds by continuously discarding older audio from
+    // the front of its buffer (AudioCaptureSession.TrimTo) - called on the
+    // same 2s cadence as RollOversizedCaptures, alongside it.
+    private void TrimMemoryCaptures()
+    {
+        ReplayAudioCapture[] live;
+        lock (_lock) live = _audioCaptures.Where(capture => capture.EndedAtUtc is null && capture.Session.IsMemoryBacked).ToArray();
+        if (live.Length == 0) return;
+
+        var retention = TimeSpan.FromSeconds(RamCaptureRetentionSeconds());
+        foreach (var capture in live)
+        {
+            capture.Session.TrimTo(retention);
+        }
     }
 
     private void StartAudioRouteTimer()

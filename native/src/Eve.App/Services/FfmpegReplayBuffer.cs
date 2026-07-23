@@ -791,9 +791,14 @@ internal sealed class AudioCaptureSession : IDisposable
     // StartInMemory). Everything below this field (gap-fill, peak
     // diagnostics, placement logging) already only ever touches _writer, not
     // _stream directly, so none of that needed to change either way - only
-    // SnapshotTo/Dispose, which do.
-    private readonly Stream _stream;
-    private readonly WaveFileWriter _writer;
+    // SnapshotTo/Dispose/TrimTo do.
+    //
+    // NOT readonly - TrimTo (RAM-backed only) periodically swaps both for a
+    // freshly-compacted MemoryStream+WaveFileWriter holding just the
+    // still-retained tail of audio, discarding everything older. Always
+    // reassigned together, always under _lock.
+    private Stream _stream;
+    private WaveFileWriter _writer;
     private readonly object _lock = new();
     private bool _firstSampleSeen;
 
@@ -951,6 +956,73 @@ internal sealed class AudioCaptureSession : IDisposable
             catch
             {
                 return false;
+            }
+        }
+    }
+
+    // Discards audio older than `retention` from a RAM-backed capture's
+    // buffer by compacting into a fresh, smaller MemoryStream+WaveFileWriter
+    // - keeps exactly this ONE session alive (WASAPI device untouched,
+    // FirstSampleUtc just advances) rather than AudioCapturePipeline's
+    // earlier approach of stopping this capture and starting a completely
+    // fresh one once it grew past a size ceiling. That approach let memory
+    // climb toward the ceiling before EVER shrinking back down (looked like
+    // a leak over the first several minutes of any armed session, even
+    // though it technically capped out eventually) AND meant a save whose
+    // window happened to cross a roll boundary had to stitch two captures
+    // together instead of reading one straight through (a measured,
+    // reported save-time slowdown). Trimming keeps memory flat near
+    // `retention` at all times and keeps exactly one capture per source,
+    // avoiding both problems at once. No-op for a disk-backed (Full
+    // Session) capture - unbounded duration is the whole point there.
+    public void TrimTo(TimeSpan retention)
+    {
+        lock (_lock)
+        {
+            if (_stream is not MemoryStream oldStream) return;
+
+            var format = _capture.WaveFormat;
+            var maxBytes = (long)(retention.TotalSeconds * format.AverageBytesPerSecond);
+            maxBytes -= maxBytes % Math.Max(1, format.BlockAlign);
+            if (_bytesWritten <= maxBytes) return;
+
+            var trimBytes = _bytesWritten - maxBytes;
+            trimBytes -= trimBytes % Math.Max(1, format.BlockAlign);
+            if (trimBytes <= 0) return;
+
+            try
+            {
+                _writer.Flush();
+
+                // WaveFileWriter writes a header (44 bytes for plain PCM,
+                // larger for float/extensible formats) then the raw sample
+                // data - rather than assume a fixed size, derive it from
+                // what's actually there: whatever's left after subtracting
+                // the PCM byte count this class already tracks separately
+                // (_bytesWritten, updated on every real write and silence
+                // backfill elsewhere in this class).
+                var headerSize = (int)(oldStream.Length - _bytesWritten);
+                var oldBuffer = oldStream.GetBuffer();
+                var keepBytes = (int)(_bytesWritten - trimBytes);
+
+                var newStream = new MemoryStream(keepBytes + headerSize + 4096);
+                var newWriter = new WaveFileWriter(newStream, format);
+                newWriter.Write(oldBuffer, headerSize + (int)trimBytes, keepBytes);
+
+                _writer.Dispose();
+                oldStream.Dispose();
+                _stream = newStream;
+                _writer = newWriter;
+                _bytesWritten = keepBytes;
+
+                if (FirstSampleUtc is { } first)
+                {
+                    FirstSampleUtc = first.AddSeconds(trimBytes / (double)format.AverageBytesPerSecond);
+                }
+            }
+            catch (Exception error)
+            {
+                AppLog.Error($"Audio RAM buffer trim failed: {Title}", error);
             }
         }
     }
