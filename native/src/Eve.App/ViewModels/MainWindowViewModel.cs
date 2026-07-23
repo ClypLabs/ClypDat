@@ -15,6 +15,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private CancellationTokenSource? _libraryHydrationCts;
     private CancellationTokenSource? _waveformCts;
     private FileSystemWatcher? _libraryWatcher;
+    private DispatcherTimer? _libraryFolderRetryTimer;
     private readonly DispatcherTimer _libraryRefreshDebounce;
     private readonly DispatcherTimer _clipNotReadyMessageTimer;
     // See WasRecentlySelfAdded - suppresses the redundant full-library
@@ -2049,8 +2050,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             StartLibraryWatcher();
             NotifyLibraryChrome();
+            // A network share not mounted yet (EVE auto-starting at boot
+            // ahead of the OS reconnecting drives is the common case) used
+            // to leave the library permanently blank - nothing here ever
+            // rechecked, so even once the share came back nothing noticed
+            // until the user hit Refresh themselves. Retry on a timer
+            // instead; it stops itself the moment a refresh actually finds
+            // the folder (see below).
+            ScheduleLibraryFolderRetry();
             return;
         }
+
+        _libraryFolderRetryTimer?.Stop();
+        _libraryFolderRetryTimer = null;
 
         LibraryLayout.EnsureRoots(Settings.LibraryFolder);
         if (Settings.LibraryLayoutVersion < LibraryLayout.CurrentVersion)
@@ -3600,6 +3612,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _libraryHydrationCts?.Cancel();
         _libraryHydrationCts?.Dispose();
         _libraryHydrationCts = null;
+    }
+
+    // See RefreshLibraryAsync's early-return - only ever scheduled while the
+    // configured library folder can't be found, and self-cancels the
+    // instant a refresh succeeds. One in-flight timer at a time (a resize/
+    // manual Refresh/etc. calling RefreshLibraryAsync again while a retry is
+    // already pending would otherwise stack up duplicate timers).
+    private void ScheduleLibraryFolderRetry()
+    {
+        if (_libraryFolderRetryTimer is not null) return;
+
+        _libraryFolderRetryTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+        _libraryFolderRetryTimer.Tick += async (_, _) =>
+        {
+            _libraryFolderRetryTimer?.Stop();
+            _libraryFolderRetryTimer = null;
+            await RefreshLibraryAsync();
+        };
+        _libraryFolderRetryTimer.Start();
     }
 
     private void StartLibraryWatcher()

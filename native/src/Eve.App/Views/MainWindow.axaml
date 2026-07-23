@@ -210,7 +210,7 @@
             <TextBlock Text="{Binding ClipNotReadyMessage}" Foreground="#B8C7D8" FontSize="12" FontWeight="Bold" />
           </Border>
 
-          <ScrollViewer Margin="-4,14,-4,0">
+          <ScrollViewer x:Name="LibraryScrollViewer" Margin="-4,14,-4,0">
             <ItemsControl ItemsSource="{Binding AllClips}">
               <!-- WrapPanel, not UniformGrid - UniformGrid pre-computes its
                    row/column count from the total child count (including
@@ -228,7 +228,7 @@
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
                   <StackPanel Width="{Binding $parent[Window].DataContext.CardWidth}"
-                              Margin="4,4,20,24"
+                              Margin="4,4,20,14"
                               IsVisible="{Binding IsVisibleInLibrary}"
                               EffectiveViewportChanged="ClipCard_OnEffectiveViewportChanged">
                     <!-- Per-card date header, replacing the old shared
@@ -251,7 +251,7 @@
                          transitions open, no RenderTransform needed. -->
                     <Border Classes="clipDateRow"
                             Background="Transparent"
-                            Padding="0,0,4,8"
+                            Padding="0,0,4,4"
                             HorizontalAlignment="Left"
                             Opacity="{Binding DateHeaderOpacity}"
                             IsHitTestVisible="{Binding IsFirstOfDate}">
@@ -1290,7 +1290,13 @@
           <StackPanel Margin="20" Spacing="14">
             <TextBlock Text="CLIP DETAILS" Foreground="#C4D9F2" FontSize="13" FontWeight="Bold" />
             <TextBlock Text="Title" Foreground="#93A6B8" FontSize="12" />
-            <TextBox Text="{Binding EditorTitle}" Foreground="#EDF4FB" FontSize="14" FontWeight="Bold" Background="#0D151C" BorderBrush="#17232D" />
+            <TextBox Text="{Binding EditorTitle}"
+                     Foreground="#EDF4FB"
+                     FontSize="14"
+                     FontWeight="Bold"
+                     Background="#0D151C"
+                     BorderBrush="#17232D"
+                     KeyDown="EditorTitle_OnKeyDown" />
             <TextBlock Text="Description" Foreground="#93A6B8" FontSize="12" />
             <TextBox Text="{Binding EditorDescription}"
                      MinHeight="86"
@@ -1376,7 +1382,10 @@
                         Click="MasterVolumeReset_OnClick"
                         ToolTip.Tip="Reset to 100%" />
               </StackPanel>
-              <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="7">
+              <!-- Nudged right of true-center (Margin left offset) - centering
+                   on the video column's own width alone still reads as
+                   slightly left of the actual visible video content. -->
+              <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="7" Margin="48,0,0,0">
                 <Button Classes="transportButton" Click="RestartButton_OnClick">
                   <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 5,3 L 7,3 L 7,17 L 5,17 Z M 17,4 L 17,16 L 8,10 Z" />
                 </Button>

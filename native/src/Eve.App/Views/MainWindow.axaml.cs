@@ -325,8 +325,28 @@ public sealed partial class MainWindow : Window
 
     private void Window_OnSizeChanged(object? sender, SizeChangedEventArgs e)
     {
+        // UpdateCardLayout changes CardWidth (and possibly CardColumns),
+        // which reflows the WrapPanel into different rows - the ScrollViewer's
+        // own Offset stays numerically the same afterward but no longer
+        // points at the same clips, since everything above it just shifted
+        // to a different height. Preserving Offset as a FRACTION of the
+        // total scrollable extent instead keeps roughly the same spot in the
+        // library in view across the reflow, rather than the resize looking
+        // like it randomly jumped somewhere else.
+        var previousExtentHeight = LibraryScrollViewer.Extent.Height;
+        var scrollFraction = previousExtentHeight > 0 ? LibraryScrollViewer.Offset.Y / previousExtentHeight : 0;
+
         ViewModel?.UpdateCardLayout(e.NewSize.Width);
         UpdateTimelineChrome();
+
+        if (scrollFraction > 0)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                var newExtentHeight = LibraryScrollViewer.Extent.Height;
+                LibraryScrollViewer.Offset = new Vector(LibraryScrollViewer.Offset.X, scrollFraction * newExtentHeight);
+            });
+        }
     }
 
     private async void ReplayButton_OnClick(object? sender, RoutedEventArgs e)
@@ -849,6 +869,28 @@ public sealed partial class MainWindow : Window
         {
             await ShowMessageAsync("Rename failed", error.Message);
         }
+    }
+
+    // Enter in the editor's own Title field renames the clip the same way
+    // Library's pencil/inline-edit does, instead of the field only ever
+    // being read later as an export filename suggestion.
+    private async void EditorTitle_OnKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || ViewModel is null) return;
+        e.Handled = true;
+
+        var clip = ViewModel.AllClips.FirstOrDefault(c => string.Equals(c.Path, ViewModel.SelectedVideoPath, StringComparison.OrdinalIgnoreCase));
+        if (clip is null) return;
+
+        // EditorTitle defaults to the clip's filename stem, which already
+        // ends in a date/time suffix (see the export flow's identical strip
+        // below) - pass that through unstripped and RenameClipAsync would
+        // treat the WHOLE thing as the title, doubling the timestamp onto
+        // the renamed file.
+        var newTitle = ClipFileNaming.StripTimestampSuffix(ViewModel.EditorTitle).Trim();
+        if (string.IsNullOrWhiteSpace(newTitle)) return;
+
+        await ApplyClipTitleRenameAsync(clip, newTitle);
     }
 
     private void ClipContextOpenLocation_OnClick(object? sender, RoutedEventArgs e)
