@@ -46,6 +46,7 @@
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
     <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
     <PackageReference Include="FFmpeg.AutoGen" Version="8.1.0" />
+    <PackageReference Include="FortniteReplayReader" Version="2.4.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -57,6 +58,9 @@
     <AvaloniaResource Include="..\..\..\assets\eve-icon*.png" Link="Assets\%(Filename)%(Extension)" />
     <AvaloniaResource Include="..\..\..\assets\eve-icon.ico" Link="Assets\eve-icon.ico" />
     <AvaloniaResource Include="..\..\..\assets\cs2-cover.jpg" Link="Assets\cs2-cover.jpg" />
+    <AvaloniaResource Include="..\..\..\assets\dota2-cover.jpg" Link="Assets\dota2-cover.jpg" />
+    <AvaloniaResource Include="..\..\..\assets\league-cover.jpg" Link="Assets\league-cover.jpg" />
+    <AvaloniaResource Include="..\..\..\assets\fortnite-cover.jpg" Link="Assets\fortnite-cover.jpg" />
   </ItemGroup>
 
   <!-- git rev-parse failing (no git on PATH, source distributed without

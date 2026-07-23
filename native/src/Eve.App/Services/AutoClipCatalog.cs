@@ -9,7 +9,8 @@ public sealed record AutoClipGameDefinition(
     IReadOnlyList<AutoClipGroupDefinition> Groups,
     bool IsAvailable = true,
     bool RequiresSetup = false,
-    int DefaultPort = 0);
+    int DefaultPort = 0,
+    string CoverAssetPath = "");
 
 public static class AutoClipCatalog
 {
@@ -21,7 +22,7 @@ public static class AutoClipCatalog
             new AutoClipEventDefinition("3k", "3K", "kills", 30), new AutoClipEventDefinition("4k", "4K", "kills", 40),
             new AutoClipEventDefinition("ace", "Ace", "kills", 50), new AutoClipEventDefinition("headshot", "Headshot", null, 15),
             new AutoClipEventDefinition("death", "Death"), new AutoClipEventDefinition("assist", "Assist")
-        }, new[] { new AutoClipGroupDefinition("kills", "All Kills") }, DefaultPort: 3499),
+        }, new[] { new AutoClipGroupDefinition("kills", "All Kills") }, DefaultPort: 3499, CoverAssetPath: "avares://EVE/Assets/cs2-cover.jpg"),
         new AutoClipGameDefinition("dota2", "Dota 2", new[]
         {
             new AutoClipEventDefinition("kill", "Kill", "kills", 10), new AutoClipEventDefinition("double", "Double Kill", "kills", 20),
@@ -29,7 +30,7 @@ public static class AutoClipCatalog
             new AutoClipEventDefinition("rampage", "Rampage", "kills", 50), new AutoClipEventDefinition("death", "Death"),
             new AutoClipEventDefinition("assist", "Assist"), new AutoClipEventDefinition("aegis-picked", "Aegis Picked Up", null, 35),
             new AutoClipEventDefinition("aegis-snatched", "Aegis Snatched", null, 45)
-        }, new[] { new AutoClipGroupDefinition("kills", "All Kills") }, RequiresSetup: true, DefaultPort: 3500),
+        }, new[] { new AutoClipGroupDefinition("kills", "All Kills") }, RequiresSetup: true, DefaultPort: 3500, CoverAssetPath: "avares://EVE/Assets/dota2-cover.jpg"),
         new AutoClipGameDefinition("league", "League of Legends", new[]
         {
             new AutoClipEventDefinition("kill", "Enemy Slain", "kills", 10), new AutoClipEventDefinition("double", "Double Kill", "kills", 20),
@@ -41,12 +42,22 @@ public static class AutoClipCatalog
             new AutoClipEventDefinition("voidgrub-steal", "Voidgrub Steal", "monsters", 45), new AutoClipEventDefinition("voidgrub-kill", "Voidgrub Kill", "monsters", 35),
             new AutoClipEventDefinition("turret", "Turret Destroyed", "objectives", 25), new AutoClipEventDefinition("inhibitor", "Inhibitor Destroyed", "objectives", 30),
             new AutoClipEventDefinition("death", "Player Slain"), new AutoClipEventDefinition("assist", "Assist")
-        }, new[] { new AutoClipGroupDefinition("kills", "All Kills"), new AutoClipGroupDefinition("monsters", "All Epic Monsters"), new AutoClipGroupDefinition("objectives", "All Objectives") })
+        }, new[] { new AutoClipGroupDefinition("kills", "All Kills"), new AutoClipGroupDefinition("monsters", "All Epic Monsters"), new AutoClipGroupDefinition("objectives", "All Objectives") }, CoverAssetPath: "avares://EVE/Assets/league-cover.jpg"),
+        new AutoClipGameDefinition("fortnite", "Fortnite", new[]
+        {
+            new AutoClipEventDefinition("eliminated-player", "Eliminated Player", "kills", 10),
+            new AutoClipEventDefinition("long-distance-shot", "Long Distance Shot", "kills", 20),
+            new AutoClipEventDefinition("ludicrous-shot", "Ludicrous Shot", "kills", 30),
+            new AutoClipEventDefinition("double-kill", "Double Kill", "kills", 40),
+            new AutoClipEventDefinition("multi-kill", "Multi Kill", "kills", 50),
+            new AutoClipEventDefinition("got-eliminated", "Got Eliminated"),
+            new AutoClipEventDefinition("victory-royale", "Victory Royale", null, 60)
+        }, new[] { new AutoClipGroupDefinition("kills", "All Kills") }, CoverAssetPath: "avares://EVE/Assets/fortnite-cover.jpg")
     };
 
     public static readonly IReadOnlyList<string> ComingSoon = new[]
     {
-        "EA Sports FC Online", "Fortnite", "GTA V", "Minecraft", "PUBG", "Rematch", "REPO", "Roblox", "Rocket League", "RuneScape: Dragonwilds", "Valorant", "War Thunder", "YAPYAP"
+        "EA Sports FC Online", "GTA V", "Minecraft", "PUBG", "Rematch", "REPO", "Roblox", "Rocket League", "RuneScape: Dragonwilds", "Valorant", "War Thunder", "YAPYAP"
     };
 
     public static AutoClipGameDefinition Get(string id) => Active.First(game => string.Equals(game.Id, id, StringComparison.OrdinalIgnoreCase));

@@ -235,7 +235,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         new("Avalonia", "https://github.com/AvaloniaUI/Avalonia", "MIT License", "https://opensource.org/license/mit"),
         new("NAudio", "https://github.com/naudio/NAudio", "MIT License", "https://opensource.org/license/mit"),
         new("Vortice.Windows", "https://github.com/amerkoleci/Vortice.Windows", "MIT License", "https://opensource.org/license/mit"),
-        new("FFmpeg.AutoGen", "https://github.com/Ruslan-B/FFmpeg.AutoGen", "MIT License", "https://opensource.org/license/mit")
+        new("FFmpeg.AutoGen", "https://github.com/Ruslan-B/FFmpeg.AutoGen", "MIT License", "https://opensource.org/license/mit"),
+        new("FortniteReplayReader", "https://github.com/Shiqan/FortniteReplayDecompressor", "MIT License", "https://opensource.org/license/mit")
     };
 
     public int ReplayCaptureX { get; set; }
@@ -893,6 +894,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ("cs2", "3k" or "4k" or "ace") => true,
         ("dota2", "triple" or "ultra" or "rampage" or "aegis-snatched") => true,
         ("league", "triple" or "quadra" or "penta" or "baron-steal" or "dragon-steal") => true,
+        ("fortnite", "long-distance-shot" or "ludicrous-shot" or "double-kill" or "multi-kill" or "victory-royale") => true,
         _ => false
     };
 

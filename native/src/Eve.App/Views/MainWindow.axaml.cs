@@ -23,6 +23,7 @@ public sealed partial class MainWindow : Window
     private Cs2GsiListener? _cs2GsiListener;
     private DotaGsiListener? _dotaGsiListener;
     private LeagueAutoClipListener? _leagueAutoClipListener;
+    private FortniteAutoClipListener? _fortniteAutoClipListener;
     private PlaybackSession? _playback;
     private CancellationTokenSource? _playbackStartCts;
     private CancellationTokenSource? _editorSeekCts;
@@ -141,6 +142,7 @@ public sealed partial class MainWindow : Window
             _cs2GsiListener?.Dispose();
             _dotaGsiListener?.Dispose();
             _leagueAutoClipListener?.Dispose();
+            _fortniteAutoClipListener?.Dispose();
             _gameDetectionTimer.Stop();
             if (_replayBuffer is not null) _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
             _replayBuffer?.Dispose();
@@ -1211,6 +1213,7 @@ public sealed partial class MainWindow : Window
         UpdateCs2AutoClipState();
         UpdateDotaAutoClipState();
         UpdateLeagueAutoClipState();
+        UpdateFortniteAutoClipState();
     }
 
     private void UpdateCs2AutoClipState()
@@ -1281,6 +1284,39 @@ public sealed partial class MainWindow : Window
         _leagueAutoClipListener.Start(); game.StatusText = "Waiting for a live League match";
     }
 
+    private void UpdateFortniteAutoClipState()
+    {
+        if (ViewModel is null) return;
+        var game = ViewModel.FindAutoClipGame("fortnite"); if (game is null) return;
+        if (!ViewModel.AutoClippingEnabled || !game.IsEnabled)
+        {
+            if (_fortniteAutoClipListener is not null)
+            {
+                _fortniteAutoClipListener.AutoClipPending -= AutoClip_OnPending;
+                _fortniteAutoClipListener.AutoClipReady -= AutoClip_OnReady;
+                _fortniteAutoClipListener.StatusChanged -= FortniteAutoClipListener_OnStatusChanged;
+                _fortniteAutoClipListener.Stop();
+            }
+            game.StatusText = "Disabled";
+            return;
+        }
+
+        _fortniteAutoClipListener ??= new FortniteAutoClipListener(() => ViewModel.Settings.AutoClipping.Games["fortnite"]);
+        _fortniteAutoClipListener.AutoClipPending -= AutoClip_OnPending;
+        _fortniteAutoClipListener.AutoClipReady -= AutoClip_OnReady;
+        _fortniteAutoClipListener.StatusChanged -= FortniteAutoClipListener_OnStatusChanged;
+        _fortniteAutoClipListener.AutoClipPending += AutoClip_OnPending;
+        _fortniteAutoClipListener.AutoClipReady += AutoClip_OnReady;
+        _fortniteAutoClipListener.StatusChanged += FortniteAutoClipListener_OnStatusChanged;
+        _fortniteAutoClipListener.Start();
+        game.StatusText = _fortniteAutoClipListener.StatusText;
+    }
+
+    private void FortniteAutoClipListener_OnStatusChanged(object? sender, string status) => Dispatcher.UIThread.Post(() =>
+    {
+        if (ViewModel?.FindAutoClipGame("fortnite") is { } game) game.StatusText = status;
+    });
+
     private void Cs2GsiListener_OnAutoClipPending(object? sender, string message)
     {
         Dispatcher.UIThread.Post(() => ShowClipNotification(message, playSound: false));
@@ -1296,11 +1332,6 @@ public sealed partial class MainWindow : Window
     private void AutoClip_OnReady(object? sender, AutoClipRequest request)
     {
         Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(request.Title, new ReplayClipWindow(request.StartUtc, request.EndUtc), request.GameName));
-    }
-
-    private void ToggleAutoClipCardButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        if (sender is Button { DataContext: AutoClipGameViewModel game }) { game.IsExpanded = !game.IsExpanded; UpdateAutoClipStates(); }
     }
 
     private void SetupDotaAutoClipButton_OnClick(object? sender, RoutedEventArgs e)

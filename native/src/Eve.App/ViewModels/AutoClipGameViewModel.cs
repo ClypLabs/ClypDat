@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 using Eve.App.Services;
 using Eve.Core.Settings;
 
@@ -8,7 +10,6 @@ public sealed class AutoClipGameViewModel : ViewModelBase
 {
     private readonly AutoClipGameSettings _settings;
     private readonly Action _save;
-    private bool _isExpanded;
     private bool _isSearchMatch = true;
     private string _statusText = "Waiting for game";
 
@@ -17,6 +18,7 @@ public sealed class AutoClipGameViewModel : ViewModelBase
         Definition = definition;
         _settings = settings;
         _save = save;
+        CoverImage = new Bitmap(AssetLoader.Open(new Uri(definition.CoverAssetPath)));
         Groups = new ObservableCollection<AutoClipGroupViewModel>(definition.Groups.Select(group => new AutoClipGroupViewModel(group, definition.Events.Where(item => item.GroupId == group.Id), _settings, SaveAndRefresh)));
         UngroupedEvents = new ObservableCollection<AutoClipEventViewModel>(definition.Events.Where(item => item.GroupId is null).Select(item => new AutoClipEventViewModel(item, _settings, SaveAndRefresh)));
     }
@@ -24,23 +26,14 @@ public sealed class AutoClipGameViewModel : ViewModelBase
     public AutoClipGameDefinition Definition { get; }
     public string Id => Definition.Id;
     public string Name => Definition.Name;
+    public Bitmap CoverImage { get; }
     public ObservableCollection<AutoClipGroupViewModel> Groups { get; }
     public ObservableCollection<AutoClipEventViewModel> UngroupedEvents { get; }
     public bool IsSetupRequired => Definition.RequiresSetup;
     public bool IsEnabled { get => _settings.Enabled; set { if (_settings.Enabled == value) return; _settings.Enabled = value; SaveAndRefresh(); } }
-    public bool IsExpanded { get => _isExpanded; set => SetProperty(ref _isExpanded, value); }
     public bool IsSearchMatch { get => _isSearchMatch; set => SetProperty(ref _isSearchMatch, value); }
     public string StatusText { get => _statusText; set => SetProperty(ref _statusText, value); }
-    public string EventsSummary
-    {
-        get
-        {
-            var selected = Definition.Events.Count(item => _settings.Events.TryGetValue(item.Id, out var enabled) && enabled);
-            return selected == 0 ? "No events selected" : selected == Definition.Events.Count ? "All events selected" : $"{selected} of {Definition.Events.Count} events selected";
-        }
-    }
-
-    public void Refresh() { OnPropertyChanged(nameof(EventsSummary)); foreach (var group in Groups) group.Refresh(); }
+    public void Refresh() { foreach (var group in Groups) group.Refresh(); }
     private void SaveAndRefresh() { Refresh(); _save(); }
 }
 

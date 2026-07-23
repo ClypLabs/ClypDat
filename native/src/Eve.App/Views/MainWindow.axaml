@@ -862,31 +862,25 @@
               <ItemsControl ItemsSource="{Binding AutoClipGames}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
-                    <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="8" Margin="0,0,0,10" IsVisible="{Binding IsSearchMatch}">
-                      <StackPanel>
-                        <Button Classes="autoClipCardHeader" Click="ToggleAutoClipCardButton_OnClick">
-                          <Grid ColumnDefinitions="42,*,Auto" ColumnSpacing="12">
-                            <Border Width="42" Height="42" CornerRadius="8" Background="#1F3341">
-                              <TextBlock Text="✦" Foreground="#7EC8FF" FontSize="20" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                            </Border>
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                              <TextBlock Text="{Binding Name}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
-                              <TextBlock Text="{Binding EventsSummary}" Foreground="#6B7C8C" FontSize="12" />
-                            </StackPanel>
-                            <ToggleSwitch Grid.Column="2" IsChecked="{Binding IsEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-                          </Grid>
-                        </Button>
-                        <StackPanel IsVisible="{Binding IsExpanded}" Margin="18,0,18,18" Spacing="10">
-                          <Border Height="1" Background="#1B242D" />
-                          <TextBlock Text="{Binding StatusText}" Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
-                          <Button Content="Set up Dota 2" Click="SetupDotaAutoClipButton_OnClick" IsVisible="{Binding IsSetupRequired}" HorizontalAlignment="Left" />
-                          <ItemsControl ItemsSource="{Binding Groups}">
-                            <ItemsControl.ItemTemplate><DataTemplate><StackPanel Spacing="6"><CheckBox Content="{Binding Name}" IsChecked="{Binding IsChecked}" FontWeight="SemiBold" /><ItemsControl ItemsSource="{Binding Events}" Margin="26,0,0,0"><ItemsControl.ItemTemplate><DataTemplate><CheckBox Content="{Binding Name}" IsChecked="{Binding IsEnabled}" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></DataTemplate></ItemsControl.ItemTemplate>
-                          </ItemsControl>
-                          <ItemsControl ItemsSource="{Binding UngroupedEvents}"><ItemsControl.ItemTemplate><DataTemplate><CheckBox Content="{Binding Name}" IsChecked="{Binding IsEnabled}" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
-                        </StackPanel>
+                    <Grid ColumnDefinitions="84,*,Auto" ColumnSpacing="16" Margin="0,0,0,18" IsVisible="{Binding IsSearchMatch}">
+                      <Border Width="84" Height="120" CornerRadius="8" ClipToBounds="True" Background="#1F3341" VerticalAlignment="Top">
+                        <Image Source="{Binding CoverImage}" Stretch="UniformToFill" />
+                      </Border>
+                      <StackPanel Grid.Column="1" Spacing="8">
+                        <TextBlock Text="{Binding Name}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="16" />
+                        <TextBlock Text="{Binding StatusText}" Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                        <Button Content="Set up Dota 2" Click="SetupDotaAutoClipButton_OnClick" IsVisible="{Binding IsSetupRequired}" HorizontalAlignment="Left" />
+                        <ItemsControl ItemsSource="{Binding Groups}">
+                          <ItemsControl.ItemTemplate><DataTemplate><StackPanel Spacing="6"><CheckBox Content="{Binding Name}" IsChecked="{Binding IsChecked}" FontWeight="SemiBold" /><ItemsControl ItemsSource="{Binding Events}" Margin="26,0,0,0"><ItemsControl.ItemTemplate><DataTemplate><CheckBox Content="{Binding Name}" IsChecked="{Binding IsEnabled}" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></DataTemplate></ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <ItemsControl ItemsSource="{Binding UngroupedEvents}"><ItemsControl.ItemTemplate><DataTemplate><CheckBox Content="{Binding Name}" IsChecked="{Binding IsEnabled}" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
                       </StackPanel>
-                    </Border>
+                      <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                        <TextBlock Text="ON" Foreground="#9EAFBE" FontSize="11" VerticalAlignment="Center" />
+                        <ToggleSwitch IsChecked="{Binding IsEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                      </StackPanel>
+                      <Border Grid.ColumnSpan="3" Height="1" Background="#26313A" VerticalAlignment="Bottom" Margin="0,18,0,0" />
+                    </Grid>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
