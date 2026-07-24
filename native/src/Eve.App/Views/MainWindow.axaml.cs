@@ -78,6 +78,7 @@ public sealed partial class MainWindow : Window
             _gameDetectionTimer.Start();
             _ = EnsureLibraryFolderAsync();
             _ = RunStartupDialogsAsync();
+            _ = RefreshRemoteGameExclusionsAsync();
             if (ViewModel is not null)
             {
                 _gameDetector.ApplyCustomGameNames(ViewModel.Settings.GameCaptureOverrides);
@@ -663,6 +664,19 @@ public sealed partial class MainWindow : Window
                 ViewModel.RecorderStatus = _replayArmed ? "Replay Armed" : "Replay Off";
             }
         });
+    }
+
+    // Best-effort, throttled internally (see RemoteGameExclusionsService) so
+    // this is safe to fire on every startup - only actually hits the network
+    // roughly once a day. _gameDetector already has whatever was cached from
+    // a previous successful fetch applied synchronously before this ever
+    // runs (see its constructor), so a slow/failed network here just means
+    // this session doesn't get today's update, not that detection has no
+    // remote list at all.
+    private async Task RefreshRemoteGameExclusionsAsync()
+    {
+        var updated = await RemoteGameExclusionsService.RefreshAsync();
+        if (updated is not null) _gameDetector.ApplyRemoteIgnoredExecutables(updated);
     }
 
     private async Task EnsureLibraryFolderAsync()

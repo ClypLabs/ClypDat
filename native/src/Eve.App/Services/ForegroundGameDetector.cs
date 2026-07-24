@@ -82,6 +82,16 @@ public sealed class ForegroundGameDetector
     // as a whole set since Detect() runs on a background thread.
     private volatile HashSet<string> _userIgnoredExecutables = new(StringComparer.OrdinalIgnoreCase);
 
+    // Community-maintained additions to IgnoredExecutables, fetched from
+    // GitHub (see RemoteGameExclusionsService) so a newly-discovered false
+    // positive can be fixed for everyone by editing one file upstream instead
+    // of shipping a new release. Starts with whatever was cached from the
+    // last successful fetch (possibly empty on a first run) and gets swapped
+    // in again if MainWindow's background refresh finds something newer -
+    // same atomic-whole-set-swap pattern as _userIgnoredExecutables, for the
+    // same reason (Detect() runs on a background thread).
+    private volatile HashSet<string> _remoteIgnoredExecutables = new(StringComparer.OrdinalIgnoreCase);
+
     private GameDetection _lastGame = GameDetection.None;
 
     public void ApplyUserIgnoredExecutables(IEnumerable<string> executableNames)
@@ -91,10 +101,18 @@ public sealed class ForegroundGameDetector
             StringComparer.OrdinalIgnoreCase);
     }
 
+    public void ApplyRemoteIgnoredExecutables(IEnumerable<string> executableNames)
+    {
+        _remoteIgnoredExecutables = new HashSet<string>(
+            executableNames.Where(name => !string.IsNullOrWhiteSpace(name)),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
     public ForegroundGameDetector()
     {
         LoadCatalog(Path.Combine(AppContext.BaseDirectory, "game-catalog.json"));
         LoadCatalog(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "EVE", "game-catalog.json"));
+        ApplyRemoteIgnoredExecutables(RemoteGameExclusionsService.LoadCached());
     }
 
     public GameDetection Detect()
@@ -109,7 +127,7 @@ public sealed class ForegroundGameDetector
         // The sticky last-game path below never re-runs BuildDetection, so a
         // just-excluded exe would otherwise stay "detected" until its window
         // closed.
-        if (_lastGame.IsDetected && _userIgnoredExecutables.Contains(_lastGame.ExeName))
+        if (_lastGame.IsDetected && (_userIgnoredExecutables.Contains(_lastGame.ExeName) || _remoteIgnoredExecutables.Contains(_lastGame.ExeName)))
         {
             _lastGame = GameDetection.None;
         }
@@ -218,6 +236,11 @@ public sealed class ForegroundGameDetector
             if (_userIgnoredExecutables.Contains(exeName))
             {
                 rejectReason = "excluded by the user";
+                return GameDetection.None;
+            }
+            if (_remoteIgnoredExecutables.Contains(exeName))
+            {
+                rejectReason = "on the remote ignored-executables list";
                 return GameDetection.None;
             }
             var isCatalogGame = _catalog.TryGetValue(exeName, out var catalogName) && !string.IsNullOrWhiteSpace(catalogName);
