@@ -127,6 +127,25 @@ public static class AppUpdateService
     private static bool TryParseVersion(string tag, out Version version) =>
         Version.TryParse(tag.Trim().TrimStart('v', 'V').Split('-')[0], out version!);
 
+    // Used by the "You're up to date" dialog to show what the currently
+    // installed version actually shipped, rather than a bare version number.
+    public static async Task<(IReadOnlyList<string> WhatsNew, IReadOnlyList<string> Fixes)> GetCurrentVersionNotesAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var client = CreateClient();
+            await using var stream = await client.GetStreamAsync(ReleasesUrl, cancellationToken);
+            var releases = await JsonSerializer.DeserializeAsync<ReleaseResponse[]>(stream, cancellationToken: cancellationToken) ?? [];
+            var match = releases.FirstOrDefault(release => TryParseVersion(release.TagName, out var version) && version == CurrentVersion);
+            return match is null ? ([], []) : ExtractCategorizedNotes(match.Body);
+        }
+        catch
+        {
+            // Release notes are supplementary and must not block showing the dialog.
+            return ([], []);
+        }
+    }
+
     private static async Task<(IReadOnlyList<string> WhatsNew, IReadOnlyList<string> Fixes)> LoadReleaseNotesAsync(HttpClient client, Version latest, CancellationToken cancellationToken)
     {
         try

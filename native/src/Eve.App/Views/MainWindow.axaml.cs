@@ -1468,8 +1468,9 @@ public sealed partial class MainWindow : Window
 
         if (update is null)
         {
-            var current = AppUpdateService.CurrentVersion;
-            await ShowMessageAsync("You're up to date", $"EVE {current.Major}.{current.Minor}.{current.Build} is the latest version.");
+            var (whatsNew, fixes) = await AppUpdateService.GetCurrentVersionNotesAsync();
+            var upToDateDialog = CreateUpToDateDialog(whatsNew, fixes);
+            await upToDateDialog.ShowDialog(this);
             return;
         }
 
@@ -2545,119 +2546,6 @@ public sealed partial class MainWindow : Window
             }
         };
 
-        // Local helper: one scrollable column ("What's New" / "Fixes"), each
-        // independently scrollable (not one shared scroll over everything -
-        // a long What's New list used to push Fixes, and the buttons, off
-        // screen together). Accent color distinguishes the two at a glance;
-        // an empty list still renders the column with a quiet placeholder
-        // instead of collapsing it, so the two-box layout stays a two-box
-        // layout even on a release that only touched one side.
-        const int ColumnAreaHeight = 320;
-        Border BuildNotesColumn(string title, IReadOnlyList<string> notes, string accentHex)
-        {
-            var header = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 8,
-                Margin = new Avalonia.Thickness(14, 12, 14, 8),
-                Children =
-                {
-                    new Border
-                    {
-                        Width = 8,
-                        Height = 8,
-                        CornerRadius = new Avalonia.CornerRadius(4),
-                        Background = Avalonia.Media.Brush.Parse(accentHex),
-                        VerticalAlignment = VerticalAlignment.Center
-                    },
-                    new TextBlock
-                    {
-                        Text = title,
-                        Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
-                        FontWeight = Avalonia.Media.FontWeight.Bold,
-                        FontSize = 14,
-                        VerticalAlignment = VerticalAlignment.Center
-                    },
-                    new TextBlock
-                    {
-                        Text = notes.Count.ToString(),
-                        Foreground = Avalonia.Media.Brush.Parse("#5C6D7E"),
-                        FontSize = 12,
-                        VerticalAlignment = VerticalAlignment.Center,
-                        IsVisible = notes.Count > 0
-                    }
-                }
-            };
-
-            var list = new StackPanel { Spacing = 9, Margin = new Avalonia.Thickness(14, 0, 12, 14) };
-            if (notes.Count == 0)
-            {
-                list.Children.Add(new TextBlock
-                {
-                    Text = "Nothing here this update.",
-                    Foreground = Avalonia.Media.Brush.Parse("#5C6D7E"),
-                    FontSize = 12,
-                    FontStyle = Avalonia.Media.FontStyle.Italic
-                });
-            }
-            foreach (var note in notes)
-            {
-                list.Children.Add(new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = 8,
-                    Children =
-                    {
-                        new Border
-                        {
-                            Width = 4,
-                            Height = 4,
-                            CornerRadius = new Avalonia.CornerRadius(2),
-                            Background = Avalonia.Media.Brush.Parse(accentHex),
-                            Margin = new Avalonia.Thickness(0, 7, 0, 0),
-                            VerticalAlignment = VerticalAlignment.Top
-                        },
-                        new TextBlock
-                        {
-                            Text = note,
-                            Foreground = Avalonia.Media.Brush.Parse("#C4D2E0"),
-                            FontSize = 13,
-                            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
-                            // A horizontal StackPanel measures children with
-                            // unbounded width, so TextWrapping does nothing
-                            // without an explicit Width to actually wrap
-                            // against. The window is fixed-size (CanResize
-                            // false) at 680, so this is safe as a constant:
-                            // 680 - hero/body's 44 side margin, split into two
-                            // equal Grid columns (minus the 14 gap column),
-                            // minus each column's own list margin (26) and
-                            // this row's own bullet dot + spacing (12), minus
-                            // a little slack for the column's ScrollViewer
-                            // reserving space for its scrollbar track.
-                            Width = 260
-                        }
-                    }
-                });
-            }
-
-            DockPanel.SetDock(header, Dock.Top);
-            return new Border
-            {
-                Background = Avalonia.Media.Brush.Parse("#0C1319"),
-                BorderBrush = Avalonia.Media.Brush.Parse("#1E2A34"),
-                BorderThickness = new Avalonia.Thickness(1),
-                CornerRadius = new Avalonia.CornerRadius(8),
-                Child = new DockPanel
-                {
-                    Children =
-                    {
-                        header,
-                        new ScrollViewer { Content = list, MaxHeight = ColumnAreaHeight }
-                    }
-                }
-            };
-        }
-
         var notesGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,14,*") };
         var whatsNewColumn = BuildNotesColumn("What's New", update.WhatsNew, "#13C8B5");
         var fixesColumn = BuildNotesColumn("Fixes", update.Fixes, "#E0A94A");
@@ -2756,6 +2644,254 @@ public sealed partial class MainWindow : Window
     }
 
     private static string FormatVersion(Version version) => $"{version.Major}.{version.Minor}.{version.Build}";
+
+    // Shared by CreateUpdateDialog and CreateUpToDateDialog: one scrollable
+    // column ("What's New" / "Fixes"), each independently scrollable (not one
+    // shared scroll over everything - a long What's New list used to push
+    // Fixes, and the buttons, off screen together). Accent color distinguishes
+    // the two at a glance; an empty list still renders the column with a quiet
+    // placeholder instead of collapsing it, so the two-box layout stays a
+    // two-box layout even on a release that only touched one side.
+    private const int NotesColumnAreaHeight = 320;
+    private static Border BuildNotesColumn(string title, IReadOnlyList<string> notes, string accentHex)
+    {
+        var header = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            Margin = new Avalonia.Thickness(14, 12, 14, 8),
+            Children =
+            {
+                new Border
+                {
+                    Width = 8,
+                    Height = 8,
+                    CornerRadius = new Avalonia.CornerRadius(4),
+                    Background = Avalonia.Media.Brush.Parse(accentHex),
+                    VerticalAlignment = VerticalAlignment.Center
+                },
+                new TextBlock
+                {
+                    Text = title,
+                    Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
+                    FontWeight = Avalonia.Media.FontWeight.Bold,
+                    FontSize = 14,
+                    VerticalAlignment = VerticalAlignment.Center
+                },
+                new TextBlock
+                {
+                    Text = notes.Count.ToString(),
+                    Foreground = Avalonia.Media.Brush.Parse("#5C6D7E"),
+                    FontSize = 12,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    IsVisible = notes.Count > 0
+                }
+            }
+        };
+
+        var list = new StackPanel { Spacing = 9, Margin = new Avalonia.Thickness(14, 0, 12, 14) };
+        if (notes.Count == 0)
+        {
+            list.Children.Add(new TextBlock
+            {
+                Text = "Nothing here this update.",
+                Foreground = Avalonia.Media.Brush.Parse("#5C6D7E"),
+                FontSize = 12,
+                FontStyle = Avalonia.Media.FontStyle.Italic
+            });
+        }
+        foreach (var note in notes)
+        {
+            list.Children.Add(new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 8,
+                Children =
+                {
+                    new Border
+                    {
+                        Width = 4,
+                        Height = 4,
+                        CornerRadius = new Avalonia.CornerRadius(2),
+                        Background = Avalonia.Media.Brush.Parse(accentHex),
+                        Margin = new Avalonia.Thickness(0, 7, 0, 0),
+                        VerticalAlignment = VerticalAlignment.Top
+                    },
+                    new TextBlock
+                    {
+                        Text = note,
+                        Foreground = Avalonia.Media.Brush.Parse("#C4D2E0"),
+                        FontSize = 13,
+                        TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                        // A horizontal StackPanel measures children with
+                        // unbounded width, so TextWrapping does nothing
+                        // without an explicit Width to actually wrap
+                        // against. The window is fixed-size (CanResize
+                        // false) at 680, so this is safe as a constant:
+                        // 680 - hero/body's 44 side margin, split into two
+                        // equal Grid columns (minus the 14 gap column),
+                        // minus each column's own list margin (26) and
+                        // this row's own bullet dot + spacing (12), minus
+                        // a little slack for the column's ScrollViewer
+                        // reserving space for its scrollbar track.
+                        Width = 260
+                    }
+                }
+            });
+        }
+
+        DockPanel.SetDock(header, Dock.Top);
+        return new Border
+        {
+            Background = Avalonia.Media.Brush.Parse("#0C1319"),
+            BorderBrush = Avalonia.Media.Brush.Parse("#1E2A34"),
+            BorderThickness = new Avalonia.Thickness(1),
+            CornerRadius = new Avalonia.CornerRadius(8),
+            Child = new DockPanel
+            {
+                Children =
+                {
+                    header,
+                    new ScrollViewer { Content = list, MaxHeight = NotesColumnAreaHeight }
+                }
+            }
+        };
+    }
+
+    // "You're up to date" dialog - shares CreateUpdateDialog's chrome/notes-
+    // column styling instead of the plain generic ShowMessageAsync box, and
+    // shows what the currently installed version actually shipped (via
+    // AppUpdateService.GetCurrentVersionNotesAsync) instead of just a bare
+    // version number.
+    private Window CreateUpToDateDialog(IReadOnlyList<string> whatsNew, IReadOnlyList<string> fixes)
+    {
+        var window = new Window
+        {
+            Width = 680,
+            SizeToContent = SizeToContent.Height,
+            MaxHeight = 720,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = Avalonia.Media.Brush.Parse("#111920"),
+            SystemDecorations = SystemDecorations.Full,
+            ExtendClientAreaToDecorationsHint = true,
+            ExtendClientAreaTitleBarHeightHint = -1,
+            ExtendClientAreaChromeHints = Avalonia.Platform.ExtendClientAreaChromeHints.NoChrome,
+            TransparencyLevelHint = new[] { Avalonia.Controls.WindowTransparencyLevel.None }
+        };
+
+        var titleBar = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
+            Height = 40,
+            Background = Avalonia.Media.Brush.Parse("#0C1319")
+        };
+        titleBar.PointerPressed += (_, e) =>
+        {
+            if (e.GetCurrentPoint(titleBar).Properties.IsLeftButtonPressed) window.BeginMoveDrag(e);
+        };
+        var titleIcon = new Image { Source = new Avalonia.Media.Imaging.Bitmap(Avalonia.Platform.AssetLoader.Open(new Uri("avares://EVE/Assets/eve-icon-24.png"))), Width = 16, Height = 16, Margin = new Avalonia.Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        var titleText = new TextBlock { Text = "You're up to date", Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"), FontSize = 12, FontWeight = Avalonia.Media.FontWeight.SemiBold, Margin = new Avalonia.Thickness(8, 2, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        var titleLeft = new StackPanel { Orientation = Orientation.Horizontal, Children = { titleIcon, titleText } };
+        Grid.SetColumn(titleLeft, 0);
+        var closeButton = new Button { Content = "✕", Width = 40, Height = 40, Padding = new Avalonia.Thickness(0), Background = Avalonia.Media.Brushes.Transparent, BorderThickness = new Avalonia.Thickness(0), CornerRadius = new Avalonia.CornerRadius(0), Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+        closeButton.Click += (_, _) => window.Close();
+        Grid.SetColumn(closeButton, 2);
+        titleBar.Children.Add(titleLeft);
+        titleBar.Children.Add(closeButton);
+
+        var notesGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,14,*") };
+        var whatsNewColumn = BuildNotesColumn("What's New", whatsNew, "#13C8B5");
+        var fixesColumn = BuildNotesColumn("Fixes", fixes, "#E0A94A");
+        Grid.SetColumn(whatsNewColumn, 0);
+        Grid.SetColumn(fixesColumn, 2);
+        notesGrid.Children.Add(whatsNewColumn);
+        notesGrid.Children.Add(fixesColumn);
+
+        var hero = new StackPanel
+        {
+            Margin = new Avalonia.Thickness(22, 20, 22, 16),
+            Spacing = 6,
+            Children =
+            {
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 10,
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = $"EVE {FormatVersion(AppUpdateService.CurrentVersion)}",
+                            Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
+                            FontWeight = Avalonia.Media.FontWeight.Bold,
+                            FontSize = 20
+                        },
+                        new Border
+                        {
+                            Background = Avalonia.Media.Brush.Parse("#1C3345"),
+                            CornerRadius = new Avalonia.CornerRadius(5),
+                            Padding = new Avalonia.Thickness(7, 2),
+                            VerticalAlignment = VerticalAlignment.Center,
+                            Child = new TextBlock
+                            {
+                                Text = "LATEST",
+                                Foreground = Avalonia.Media.Brush.Parse("#5AA9E0"),
+                                FontSize = 10,
+                                FontWeight = Avalonia.Media.FontWeight.Bold
+                            }
+                        }
+                    }
+                },
+                new TextBlock
+                {
+                    Text = "You're running the latest version. Here's what it brought:",
+                    Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"),
+                    FontSize = 13
+                }
+            }
+        };
+
+        var body = new StackPanel
+        {
+            Margin = new Avalonia.Thickness(22, 0, 22, 16),
+            Children = { notesGrid }
+        };
+
+        var footer = new StackPanel
+        {
+            Margin = new Avalonia.Thickness(22, 0, 22, 20),
+            Children =
+            {
+                new Button
+                {
+                    Content = "Got it",
+                    Width = 120,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    HorizontalContentAlignment = HorizontalAlignment.Center,
+                    VerticalContentAlignment = VerticalAlignment.Center,
+                    Classes = { "primaryButton" }
+                }
+            }
+        };
+        ((Button)footer.Children[0]).Click += (_, _) => window.Close();
+
+        window.Content = new DockPanel
+        {
+            Children =
+            {
+                titleBar,
+                footer,
+                hero,
+                body
+            }
+        };
+        DockPanel.SetDock(titleBar, Dock.Top);
+        DockPanel.SetDock(footer, Dock.Bottom);
+        DockPanel.SetDock(hero, Dock.Top);
+
+        return window;
+    }
 
     private void QueueEditorPlayback()
     {
