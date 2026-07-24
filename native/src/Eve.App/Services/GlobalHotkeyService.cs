@@ -142,13 +142,30 @@ public sealed class GlobalHotkeyService : IDisposable
             return (uint)(0x70 + (fNumber - 1));
         }
 
+        // Only Space/arrows were mapped here - any other key (Home included)
+        // silently fell through to 0, and ApplyRegistration treats vk==0 as
+        // "no hotkey" and skips RegisterHotKey entirely, no error surfaced
+        // anywhere. Filled out with the rest of the keys HotkeyCombo's own
+        // capture (MainWindow_OnKeyDown, via Avalonia's Key.ToString()) can
+        // actually produce, not just whichever ones happened to get used
+        // first.
         return key switch
         {
+            "Back" => 0x08,
+            "Tab" => 0x09,
+            "Return" or "Enter" => 0x0D,
+            "Escape" => 0x1B,
             "Space" => 0x20,
+            "PageUp" or "Prior" => 0x21,
+            "PageDown" or "Next" => 0x22,
+            "End" => 0x23,
+            "Home" => 0x24,
             "Left" => 0x25,
             "Up" => 0x26,
             "Right" => 0x27,
             "Down" => 0x28,
+            "Insert" => 0x2D,
+            "Delete" => 0x2E,
             _ => 0
         };
     }
