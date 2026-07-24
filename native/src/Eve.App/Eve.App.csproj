@@ -13,6 +13,16 @@
     <TargetFramework>net8.0-windows10.0.26100.0</TargetFramework>
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <!-- Baked in here (not just passed as a publish flag) so every publish
+         (CI's release workflow, the documented README command, or a plain
+         "dotnet publish" with no extra flags for win-x64) produces the same
+         self-contained output that bundles its own .NET runtime. Without
+         this, a publish missing the self-contained flag silently falls back
+         to framework-dependent, which then demands the user have the exact
+         matching .NET 8 Desktop Runtime installed; "I already have .NET"
+         doesn't mean that specific piece is present, and end users
+         shouldn't need any of it either way. -->
+    <SelfContained>true</SelfContained>
     <PlatformTarget>x64</PlatformTarget>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <Version>0.1.7</Version>
