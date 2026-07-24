@@ -2108,10 +2108,17 @@ public sealed class NativeReplayBuffer : IReplayBuffer
     // confirmed via ffprobe on an actual saved clip: exact expected frame
     // count, zero duplicates, dead-even PTS spacing). Now that encode runs on
     // its own thread (see EncodeLoop) decoupled from AcquireNextFrame, a
-    // slower preset can no longer reproduce that stall - worst case is
-    // EncodeLoop's queue backing up (watch queueDepth/droppedFrames in Native
-    // capture diag), not a frozen capture thread. p4 trades some of that
-    // encode headroom back for quality. Applied to priv_data before
+    // slower preset can no longer stall AcquireNextFrame itself - but it can
+    // still cost real content: p4 measured avgEncodeMs of 16-28ms/frame under
+    // real sustained gameplay load (vs. a target budget well under that),
+    // which filled EncodeLoop's queue to its cap and started genuinely
+    // dropping frames (confirmed via droppedFrames actually incrementing in
+    // Native capture diag, e.g. 110 dropped in one 2s window) - real missing
+    // content, not just a compression-quality artifact. p2 is the compromise
+    // between p1's motion-compression softness and p4's encode cost. Watch
+    // queueDepth/droppedFrames after any future preset change - that pair is
+    // the actual signal for whether a preset is sustainable under real load,
+    // not just a quick idle-desktop test. Applied to priv_data before
     // avcodec_open2 - these are encoder-specific options, not real
     // AVCodecContext fields, so they have to land before open, not after.
     // Best-effort: an unsupported option name just logs and moves on instead
@@ -2131,7 +2138,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         switch (candidateName)
         {
             case "h264_nvenc":
-                TrySet("preset", "p4");
+                TrySet("preset", "p2");
                 TrySet("tune", "ll");
                 break;
             case "h264_amf":
