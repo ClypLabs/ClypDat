@@ -104,15 +104,6 @@ calls into are covered under "ffmpeg / ffprobe (GPL)" above.
 
 - Project: https://github.com/Ruslan-B/FFmpeg.AutoGen
 
-## FortniteReplayReader (MIT)
-
-Fortnite auto-clipping reads the local replay files that Fortnite creates;
-it uses the `FortniteReplayReader` NuGet package from the
-FortniteReplayDecompressor project, licensed under the **MIT License**.
-EVE does not communicate with or inject into the Fortnite process.
-
-- Project: https://github.com/Shiqan/FortniteReplayDecompressor
-
 ---
 
 ## GPLv2 full text

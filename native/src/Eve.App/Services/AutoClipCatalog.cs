@@ -42,17 +42,7 @@ public static class AutoClipCatalog
             new AutoClipEventDefinition("voidgrub-steal", "Voidgrub Steal", "monsters", 45), new AutoClipEventDefinition("voidgrub-kill", "Voidgrub Kill", "monsters", 35),
             new AutoClipEventDefinition("turret", "Turret Destroyed", "objectives", 25), new AutoClipEventDefinition("inhibitor", "Inhibitor Destroyed", "objectives", 30),
             new AutoClipEventDefinition("death", "Player Slain"), new AutoClipEventDefinition("assist", "Assist")
-        }, new[] { new AutoClipGroupDefinition("kills", "All Kills"), new AutoClipGroupDefinition("monsters", "All Epic Monsters"), new AutoClipGroupDefinition("objectives", "All Objectives") }, CoverAssetPath: "avares://EVE/Assets/league-cover.jpg"),
-        new AutoClipGameDefinition("fortnite", "Fortnite", new[]
-        {
-            new AutoClipEventDefinition("eliminated-player", "Eliminated Player", "kills", 10),
-            new AutoClipEventDefinition("long-distance-shot", "Long Distance Shot", "kills", 20),
-            new AutoClipEventDefinition("ludicrous-shot", "Ludicrous Shot", "kills", 30),
-            new AutoClipEventDefinition("double-kill", "Double Kill", "kills", 40),
-            new AutoClipEventDefinition("multi-kill", "Multi Kill", "kills", 50),
-            new AutoClipEventDefinition("got-eliminated", "Got Eliminated"),
-            new AutoClipEventDefinition("victory-royale", "Victory Royale", null, 60)
-        }, new[] { new AutoClipGroupDefinition("kills", "All Kills") }, CoverAssetPath: "avares://EVE/Assets/fortnite-cover.jpg")
+        }, new[] { new AutoClipGroupDefinition("kills", "All Kills"), new AutoClipGroupDefinition("monsters", "All Epic Monsters"), new AutoClipGroupDefinition("objectives", "All Objectives") }, CoverAssetPath: "avares://EVE/Assets/league-cover.jpg")
     };
 
     public static readonly IReadOnlyList<string> ComingSoon = new[]
