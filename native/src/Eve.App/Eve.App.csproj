@@ -10,7 +10,7 @@
          to NativeReplayBuffer for true per-window capture, instead of DXGI Desktop
          Duplication's fixed-screen-region capture (which shows whatever's on screen
          during alt-tab, not the game specifically). -->
-    <TargetFramework>net8.0-windows10.0.26100.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <!-- Baked in here (not just passed as a publish flag) so every publish
@@ -19,7 +19,7 @@
          self-contained output that bundles its own .NET runtime. Without
          this, a publish missing the self-contained flag silently falls back
          to framework-dependent, which then demands the user have the exact
-         matching .NET 8 Desktop Runtime installed; "I already have .NET"
+         matching .NET 10 Desktop Runtime installed; "I already have .NET"
          doesn't mean that specific piece is present, and end users
          shouldn't need any of it either way. -->
     <SelfContained>true</SelfContained>

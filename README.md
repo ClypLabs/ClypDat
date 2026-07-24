@@ -4,7 +4,7 @@ EVE records a rolling buffer of gameplay on Windows and saves the last N
 seconds to a file when you press a hotkey. It also has a built-in editor for
 trimming clips and mixing audio tracks before export.
 
-The codebase is `native/` (C#/.NET 8, Avalonia UI).
+The codebase is `native/` (C#/.NET 10, Avalonia UI).
 
 ## Capture
 
