@@ -2464,8 +2464,20 @@ public sealed partial class MainWindow : Window
         var titleText = new TextBlock { Text = "Update available", Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"), FontSize = 12, FontWeight = Avalonia.Media.FontWeight.SemiBold, Margin = new Avalonia.Thickness(8, 2, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         var titleLeft = new StackPanel { Orientation = Orientation.Horizontal, Children = { titleIcon, titleText } };
         Grid.SetColumn(titleLeft, 0);
+        CancellationTokenSource? downloadCts = null;
         var closeButton = new Button { Content = "✕", Width = 40, Height = 40, Padding = new Avalonia.Thickness(0), Background = Avalonia.Media.Brushes.Transparent, BorderThickness = new Avalonia.Thickness(0), CornerRadius = new Avalonia.CornerRadius(0), Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
-        closeButton.Click += (_, _) => window.Close();
+        // downloadCts is null until Update Now starts one - X used to just
+        // close the window while DownloadAndRestartAsync kept running
+        // undisturbed in the background (nothing was ever cancelling it), so
+        // closing out of the dialog mid-download still silently installed
+        // the update anyway. Cancelling here unwinds the download loop
+        // (DownloadAndRestartAsync already threads the token through every
+        // read/write) before it ever reaches the actual file-swap script.
+        closeButton.Click += (_, _) =>
+        {
+            downloadCts?.Cancel();
+            window.Close();
+        };
         Grid.SetColumn(closeButton, 2);
         titleBar.Children.Add(titleLeft);
         titleBar.Children.Add(closeButton);
@@ -2474,6 +2486,13 @@ public sealed partial class MainWindow : Window
         {
             Text = string.Empty,
             Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"),
+            FontSize = 12,
+            IsVisible = false
+        };
+        var etaText = new TextBlock
+        {
+            Text = string.Empty,
+            Foreground = Avalonia.Media.Brush.Parse("#5C6D7E"),
             FontSize = 12,
             IsVisible = false
         };
@@ -2500,16 +2519,34 @@ public sealed partial class MainWindow : Window
             ignoreButton.IsEnabled = false;
             statusText.IsVisible = true;
             progressBar.IsVisible = true;
+            downloadCts = new CancellationTokenSource();
+            var downloadClock = Stopwatch.StartNew();
+            // Same elapsed/fraction extrapolation ExportCurrentClipAsync's own
+            // progress handler uses - below a few percent one early sample
+            // would wildly overshoot, so hold off showing anything yet.
             var progress = new Progress<UpdateDownloadProgress>(value =>
             {
                 statusText.Text = value.Status;
                 progressBar.IsIndeterminate = value.Percentage is null;
-                if (value.Percentage is not null) progressBar.Value = value.Percentage.Value * 100;
+                if (value.Percentage is not null)
+                {
+                    progressBar.Value = value.Percentage.Value * 100;
+                    if (value.Percentage.Value > 0.03)
+                    {
+                        var remaining = TimeSpan.FromMilliseconds(downloadClock.ElapsedMilliseconds * (1 - value.Percentage.Value) / value.Percentage.Value);
+                        etaText.Text = $"Estimated: {FormatEta(remaining)}";
+                        etaText.IsVisible = true;
+                    }
+                }
+                else
+                {
+                    etaText.IsVisible = false;
+                }
             });
 
             try
             {
-                await AppUpdateService.DownloadAndRestartAsync(update, progress);
+                await AppUpdateService.DownloadAndRestartAsync(update, progress, downloadCts.Token);
                 window.Close();
                 // The update helper Wait-Process-es for THIS process to exit
                 // before swapping files and relaunching - and since close-to-
@@ -2526,6 +2563,11 @@ public sealed partial class MainWindow : Window
                     Environment.Exit(0);
                 }
             }
+            catch (OperationCanceledException)
+            {
+                // User hit X mid-download (see closeButton.Click) - the window
+                // is already closing, nothing left to clean up or report.
+            }
             catch (Exception error)
             {
                 AppLog.Error("Update install failed", error);
@@ -2535,6 +2577,7 @@ public sealed partial class MainWindow : Window
                 ignoreButton.IsEnabled = true;
                 statusText.IsVisible = false;
                 progressBar.IsVisible = false;
+                etaText.IsVisible = false;
             }
         };
 
@@ -2719,6 +2762,7 @@ public sealed partial class MainWindow : Window
             Children =
             {
                 statusText,
+                etaText,
                 progressBar,
                 new StackPanel
                 {
