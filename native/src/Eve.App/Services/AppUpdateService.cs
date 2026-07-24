@@ -11,7 +11,8 @@ public sealed record AppUpdateInfo(
     Version LatestVersion,
     string TagName,
     string DownloadUrl,
-    IReadOnlyList<string> ReleaseNotes);
+    IReadOnlyList<string> WhatsNew,
+    IReadOnlyList<string> Fixes);
 
 public sealed record UpdateDownloadProgress(string Status, double? Percentage, double? BytesPerSecond = null);
 
@@ -44,8 +45,8 @@ public static class AppUpdateService
             return null;
         }
 
-        var releaseNotes = await LoadReleaseNotesAsync(client, latest, cancellationToken);
-        return new AppUpdateInfo(CurrentVersion, latest, release.TagName, asset.DownloadUrl, releaseNotes);
+        var (whatsNew, fixes) = await LoadReleaseNotesAsync(client, latest, cancellationToken);
+        return new AppUpdateInfo(CurrentVersion, latest, release.TagName, asset.DownloadUrl, whatsNew, fixes);
     }
 
     public static async Task DownloadAndRestartAsync(AppUpdateInfo update, IProgress<UpdateDownloadProgress>? progress = null, CancellationToken cancellationToken = default)
@@ -126,33 +127,75 @@ public static class AppUpdateService
     private static bool TryParseVersion(string tag, out Version version) =>
         Version.TryParse(tag.Trim().TrimStart('v', 'V').Split('-')[0], out version!);
 
-    private static async Task<IReadOnlyList<string>> LoadReleaseNotesAsync(HttpClient client, Version latest, CancellationToken cancellationToken)
+    private static async Task<(IReadOnlyList<string> WhatsNew, IReadOnlyList<string> Fixes)> LoadReleaseNotesAsync(HttpClient client, Version latest, CancellationToken cancellationToken)
     {
         try
         {
             await using var stream = await client.GetStreamAsync(ReleasesUrl, cancellationToken);
             var releases = await JsonSerializer.DeserializeAsync<ReleaseResponse[]>(stream, cancellationToken: cancellationToken) ?? [];
-            return releases
-                .Select(release => new { Release = release, Parsed = TryParseVersion(release.TagName, out var version), Version = version })
-                .Where(item => item.Parsed && !item.Release.Draft && !item.Release.Prerelease &&
-                    item.Version > CurrentVersion && item.Version <= latest)
-                .OrderBy(item => item.Version)
-                .SelectMany(item => ExtractBulletNotes(item.Release.Body)
-                    .Select(note => $"{item.Version.Major}.{item.Version.Minor}.{item.Version.Build}: {note}"))
-                .ToList();
+            var whatsNew = new List<string>();
+            var fixes = new List<string>();
+            foreach (var item in releases
+                         .Select(release => new { Release = release, Parsed = TryParseVersion(release.TagName, out var version), Version = version })
+                         .Where(item => item.Parsed && !item.Release.Draft && !item.Release.Prerelease &&
+                             item.Version > CurrentVersion && item.Version <= latest)
+                         .OrderBy(item => item.Version))
+            {
+                var versionLabel = $"{item.Version.Major}.{item.Version.Minor}.{item.Version.Build}";
+                var (releaseWhatsNew, releaseFixes) = ExtractCategorizedNotes(item.Release.Body);
+                whatsNew.AddRange(releaseWhatsNew.Select(note => $"{versionLabel}: {note}"));
+                fixes.AddRange(releaseFixes.Select(note => $"{versionLabel}: {note}"));
+            }
+
+            return (whatsNew, fixes);
         }
         catch
         {
             // Release notes are supplementary and must not block an available update.
-            return [];
+            return ([], []);
         }
     }
 
-    private static IEnumerable<string> ExtractBulletNotes(string? body) =>
-        (body ?? "").Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => line.TrimStart())
-            .Where(line => line.StartsWith("- ", StringComparison.Ordinal) && line.Length > 2)
-            .Select(line => line[2..].Trim());
+    // Release bodies are expected to use "## What's New" / "## Fixes" (or
+    // "## Fixed"/"## Bug Fixes") headings with "- " bullets under each, per
+    // AGENTS.md's Releasing section - lets the update dialog show the two
+    // apart instead of one flat mixed list. A release written before this
+    // convention (or with no headings at all) has all its bullets fall
+    // through to What's New, the more common case, rather than being dropped.
+    private static (IReadOnlyList<string> WhatsNew, IReadOnlyList<string> Fixes) ExtractCategorizedNotes(string? body)
+    {
+        var whatsNew = new List<string>();
+        var fixes = new List<string>();
+        var current = whatsNew;
+
+        foreach (var raw in (body ?? string.Empty).Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var line = raw.TrimStart();
+            if (line.StartsWith('#'))
+            {
+                var heading = line.TrimStart('#', ' ').Trim();
+                if (heading.Contains("fix", StringComparison.OrdinalIgnoreCase))
+                {
+                    current = fixes;
+                }
+                else if (heading.Contains("what", StringComparison.OrdinalIgnoreCase) ||
+                         heading.Contains("new", StringComparison.OrdinalIgnoreCase) ||
+                         heading.Contains("feature", StringComparison.OrdinalIgnoreCase))
+                {
+                    current = whatsNew;
+                }
+
+                continue;
+            }
+
+            if (line.StartsWith("- ", StringComparison.Ordinal) && line.Length > 2)
+            {
+                current.Add(line[2..].Trim());
+            }
+        }
+
+        return (whatsNew, fixes);
+    }
 
     internal static bool IsTrustedReleaseAssetUrl(string value)
     {
