@@ -529,6 +529,17 @@ public sealed partial class MainWindow : Window
                     if (wait > TimeSpan.Zero) await Task.Delay(wait);
                     ShowClipNotification($"Saving {autoClipLabel} clip…", playSound: false);
                 }
+                else
+                {
+                    // Manual hotkey press had NO feedback at all until the remux
+                    // (RemuxWindowToMp4 - thousands of native FFmpeg calls, can
+                    // take a real fraction of a second to over a second for a
+                    // long buffer) finished below - the press felt unregistered
+                    // the whole time it was working. Auto-clips already got this
+                    // via the branch above; manual presses just never had the
+                    // equivalent.
+                    ShowClipNotification("Saving clip…", playSound: false);
+                }
 
                 var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder, titleOverride: autoClipLabel, clipWindow: clipWindow));
                 AppLog.Info($"Replay clip saved: {outputPath}");
@@ -591,30 +602,54 @@ public sealed partial class MainWindow : Window
 
     private void ShowClipSavedOverlay(string position, string text)
     {
+        var isLeft = string.Equals(position, "Top Left", StringComparison.OrdinalIgnoreCase);
+
+        // A full-height accent stripe (not a small dot) plus a solid, near-
+        // opaque background - meant to actually stand out at a glance over
+        // gameplay, not blend in as a subtle little pill.
+        var accent = new Border
+        {
+            Width = 5,
+            Background = Avalonia.Media.Brush.Parse("#13C8B5"),
+            CornerRadius = isLeft ? new CornerRadius(3, 0, 0, 3) : new CornerRadius(0, 3, 3, 0),
+            VerticalAlignment = VerticalAlignment.Stretch
+        };
+        var label = new TextBlock
+        {
+            Text = text,
+            Foreground = Avalonia.Media.Brush.Parse("#F5F9FF"),
+            FontWeight = Avalonia.Media.FontWeight.Bold,
+            FontSize = 15,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var content = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 14,
+            Margin = new Thickness(16, 14, 20, 14),
+            Children = { label }
+        };
+        var translate = new TranslateTransform();
         var badge = new Border
         {
-            Background = Avalonia.Media.Brush.Parse("#DD141D24"),
-            BorderBrush = Avalonia.Media.Brush.Parse("#2C3B48"),
+            Background = Avalonia.Media.Brush.Parse("#F5141D24"),
+            BorderBrush = Avalonia.Media.Brush.Parse("#3C4C5A"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(16, 10),
-            Child = new StackPanel
+            CornerRadius = new CornerRadius(6),
+            BoxShadow = Avalonia.Media.BoxShadows.Parse("0 8 24 0 #66000000"),
+            RenderTransform = translate,
+            Opacity = 0,
+            ClipToBounds = true,
+            Child = new DockPanel
             {
-                Orientation = Orientation.Horizontal,
-                Spacing = 10,
                 Children =
                 {
-                    new TextBlock
-                    {
-                        Text = text,
-                        Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
-                        FontWeight = Avalonia.Media.FontWeight.Bold,
-                        FontSize = 13,
-                        VerticalAlignment = VerticalAlignment.Center
-                    }
+                    accent,
+                    content
                 }
             }
         };
+        DockPanel.SetDock(accent, isLeft ? Dock.Left : Dock.Right);
 
         badge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         var desiredWidth = badge.DesiredSize.Width;
@@ -624,7 +659,7 @@ public sealed partial class MainWindow : Window
         var scaling = screen?.Scaling ?? 1.0;
         var marginDevicePixels = (int)Math.Round(24 * scaling);
         var widthDevicePixels = (int)Math.Round(desiredWidth * scaling);
-        var x = string.Equals(position, "Top Left", StringComparison.OrdinalIgnoreCase)
+        var x = isLeft
             ? area.X + marginDevicePixels
             : area.X + area.Width - widthDevicePixels - marginDevicePixels;
 
@@ -643,13 +678,56 @@ public sealed partial class MainWindow : Window
             Content = badge
         };
 
+        // Slides in FROM the edge it's pinned to, toward its resting position -
+        // left-pinned slides in moving right, right-pinned slides in moving left
+        // (the "reverse"). Set before Show() (no transition yet, so this is the
+        // instant starting state, not an animated jump), then flipped to
+        // identity/opaque one frame later so the Transitions below actually have
+        // a "from" state to animate away from instead of both values landing in
+        // the same layout pass with nothing visibly in between.
+        const double SlideDistance = 28;
+        translate.X = isLeft ? -SlideDistance : SlideDistance;
+
         overlay.Show();
+
+        badge.Transitions =
+        [
+            new Avalonia.Animation.DoubleTransition
+            {
+                Property = Visual.OpacityProperty,
+                Duration = TimeSpan.FromMilliseconds(200)
+            }
+        ];
+        translate.Transitions =
+        [
+            new Avalonia.Animation.DoubleTransition
+            {
+                Property = TranslateTransform.XProperty,
+                Duration = TimeSpan.FromMilliseconds(260),
+                Easing = new Avalonia.Animation.Easings.CubicEaseOut()
+            }
+        ];
+        Dispatcher.UIThread.Post(() =>
+        {
+            badge.Opacity = 1;
+            translate.X = 0;
+        }, DispatcherPriority.Loaded);
 
         var closeTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(2200) };
         closeTimer.Tick += (_, _) =>
         {
             closeTimer.Stop();
-            overlay.Close();
+            // Slide back out the same way it came in, then close once that
+            // transition has actually had time to finish playing.
+            badge.Opacity = 0;
+            translate.X = isLeft ? -SlideDistance : SlideDistance;
+            var closeAfterExit = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(260) };
+            closeAfterExit.Tick += (_, _) =>
+            {
+                closeAfterExit.Stop();
+                overlay.Close();
+            };
+            closeAfterExit.Start();
         };
         closeTimer.Start();
     }
