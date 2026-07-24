@@ -915,6 +915,21 @@ public sealed partial class MainWindow : Window
             editBox.SelectAll();
         });
 
+        // Width above is a one-time snapshot of CardWidth at the moment
+        // editing started, same as the static TextBlock it's covering (see
+        // that field's own comment for why a fixed Width, not just MaxWidth,
+        // is needed) - but the card itself keeps resizing reactively via a
+        // live CardWidth binding while the window is dragged, so without
+        // this the edit box visibly stopped tracking the card's own width
+        // the instant editing began, going stale/mismatched on any resize.
+        void SyncWidthToCard(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+        {
+            if (args.PropertyName != nameof(MainWindowViewModel.CardWidth) || ViewModel is null) return;
+            editBox.Width = Math.Max(80, ViewModel.CardWidth - 32);
+        }
+
+        if (ViewModel is not null) ViewModel.PropertyChanged += SyncWidthToCard;
+
         // Enter/blur/click-elsewhere all commit, Escape cancels - guarded by
         // resolved so removing the box (which can itself trigger a blur)
         // can't re-fire and commit a second time.
@@ -925,6 +940,7 @@ public sealed partial class MainWindow : Window
             if (resolved) return;
             resolved = true;
 
+            if (ViewModel is not null) ViewModel.PropertyChanged -= SyncWidthToCard;
             container.Children.Remove(editBox);
             titleBlock.IsVisible = true;
             _activeInlineTitleEdit = null;
