@@ -2104,7 +2104,22 @@ public sealed partial class MainWindow : Window
             }
             else
             {
-                ClipInfoSidecar.Save(libraryRoot, outputPath, new ClipInfo(game, null, exportTitle, exportTimestamp));
+                // FileTitle stays the game (not exportTitle) so the tile's top
+                // label survives a rename - previously exportTitle went into
+                // FileTitle directly, so typing a custom title in the editor
+                // silently overwrote the game association on the exported
+                // card. CustomTitle only gets exportTitle when it's actually
+                // different from the game (the user typed something), so an
+                // untouched title falls back to ClipFromLabel's "Exported clip
+                // from" text instead of showing the game name twice.
+                var isCustomTitle = !string.Equals(exportTitle, game, StringComparison.OrdinalIgnoreCase);
+                ClipInfoSidecar.Save(libraryRoot, outputPath, new ClipInfo(
+                    GameDisplayName: game,
+                    AutoClipEventType: null,
+                    FileTitle: game,
+                    CapturedAt: exportTimestamp,
+                    CustomTitle: isCustomTitle ? exportTitle : null,
+                    IsExport: true));
                 if (IsPathWithinLibrary(outputPath, libraryRoot)) await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
                 ExplorerService.Open(outputPath, selectFile: true);
             }

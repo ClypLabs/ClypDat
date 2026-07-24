@@ -71,7 +71,9 @@ public sealed class ClipCardViewModel : ViewModelBase
     // suffix back off for display; there's no separately stored game field.
     public string GameNameLabel => _clipInfo?.FileTitle ?? ClipFileNaming.StripTimestampSuffix(Name);
 
-    public string ClipFromLabel => $"Clip from {CreatedAt:MMM d, yyyy}";
+    public string ClipFromLabel => _clipInfo?.IsExport == true
+        ? $"Exported clip from: {CreatedAt:MMM d, yyyy}"
+        : $"Clip from {CreatedAt:MMM d, yyyy}";
 
     // User-set label shown instead of ClipFromLabel on a non-auto-clip's
     // tile - kept separate from GameNameLabel/FileTitle so renaming never

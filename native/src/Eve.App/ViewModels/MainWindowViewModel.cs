@@ -3448,7 +3448,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedCreatedAtLocal = media.CreatedAt.ToLocalTime().DateTime;
         SelectedCreated = $"Created: {SelectedCreatedAtLocal:d MMM yyyy, H:mm}";
         SelectedQuality = media.Height > 0
-            ? $"Video Quality: {ResolutionLabel(media.Height)}"
+            ? $"Video Quality: {ResolutionLabel(media.Height)}{FpsSuffix(media.Fps)}"
             : "Video Quality: Unknown";
         SelectedSize = $"Size: {FormatBytes(media.SizeBytes)}";
         var isMedalImport = !string.IsNullOrWhiteSpace(ClipInfoSidecar.Load(Settings.LibraryFolder, media.Path)?.MedalImportKey);
@@ -4253,6 +4253,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (height >= 1080) return "1080p";
         if (height >= 720) return "720p";
         return $"{height}p";
+    }
+
+    private static string FpsSuffix(double fps)
+    {
+        return fps > 0 ? $"@{Math.Round(fps):0}" : string.Empty;
     }
 
     private static string AudioLabel(int audioIndex)

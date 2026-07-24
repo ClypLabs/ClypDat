@@ -18,7 +18,13 @@ public sealed record ClipInfo(
     string? FileTitle = null,
     DateTimeOffset? CapturedAt = null,
     string? MedalImportKey = null,
-    string? CustomTitle = null);
+    string? CustomTitle = null,
+    // Distinguishes a re-encoded Export from the original recording - both are
+    // ordinary "manual" cards (no AutoClipEventType/MedalImportKey) with the
+    // same CustomTitle-or-fallback tile logic, but an untitled export should
+    // read "Exported clip from" (see ClipCardViewModel.ClipFromLabel), not
+    // "Clip from", since it's a derived copy rather than the actual recording.
+    bool IsExport = false);
 
 public static class ClipInfoSidecar
 {

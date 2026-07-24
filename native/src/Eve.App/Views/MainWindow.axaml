@@ -1391,7 +1391,21 @@
           </Grid>
 
           <Grid Grid.Row="1" ColumnDefinitions="160,*" ColumnSpacing="12">
-            <Grid RowDefinitions="Auto,*">
+            <!-- Row 0 fixed at 34 (not Auto) so it matches the timeline column's
+                 own row 0 below - Auto sized this side's row 0 to the
+                 time-badge's own content height instead, so row 1 (the track
+                 label boxes) started at a different Y than row 1 on the right
+                 (the actual timeline lanes), drifting further out of sync with
+                 every extra track. 34, not 24 (the ruler's own old height) -
+                 a fixed Grid row caps its child's MEASURED height, not just
+                 sets a minimum, and the badge's real content (10,5 padding +
+                 15px font + 1px border) needs ~34px or it gets squeezed/
+                 clipped instead of rendering at full size. TimelineRulerControl
+                 (Grid.Column="1" below) draws its label anchored to the top
+                 and its ticks anchored to the bottom of whatever height it's
+                 given (see its Render override) - the extra 10px just adds a
+                 bit of breathing room there, nothing hardcoded to 24. -->
+            <Grid RowDefinitions="34,*">
               <!-- Was a single small (11px) TextBlock, easy to miss - now a
                    bordered readout matching the app's other pill-style
                    badges (e.g. the library card duration badge), current
@@ -1512,7 +1526,7 @@
               </ItemsControl>
             </Grid>
 
-            <Grid Grid.Column="1" RowDefinitions="24,*">
+            <Grid Grid.Column="1" RowDefinitions="34,*">
               <!-- Cursor="Hand" on both - the ruler already forwards to the
                    exact same click/drag handlers as the surface below it
                    (UpdateTimelineFromPointer maps via GetPosition(TimelineSurface),
@@ -1528,6 +1542,7 @@
               <Grid x:Name="TimelineSurface"
                     Grid.Row="1"
                     Cursor="Hand"
+                    Background="Transparent"
                     SizeChanged="TimelineSurface_OnSizeChanged"
                     PointerPressed="TimelineSurface_OnPointerPressed"
                     PointerMoved="TimelineSurface_OnPointerMoved"
