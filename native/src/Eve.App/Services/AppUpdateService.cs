@@ -136,7 +136,12 @@ public static class AppUpdateService
             using var client = CreateClient();
             await using var stream = await client.GetStreamAsync(ReleasesUrl, cancellationToken);
             var releases = await JsonSerializer.DeserializeAsync<ReleaseResponse[]>(stream, cancellationToken: cancellationToken) ?? [];
-            var match = releases.FirstOrDefault(release => TryParseVersion(release.TagName, out var version) && version == CurrentVersion);
+            // Version equality would fail here: a "v0.1.8" tag parses to a
+            // 3-field Version (Revision=-1), but the assembly's CurrentVersion
+            // is always 4-field (Revision=0) - compare only the 3 fields the
+            // tag actually carries.
+            var match = releases.FirstOrDefault(release => TryParseVersion(release.TagName, out var version) &&
+                version.Major == CurrentVersion.Major && version.Minor == CurrentVersion.Minor && version.Build == CurrentVersion.Build);
             return match is null ? ([], []) : ExtractCategorizedNotes(match.Body);
         }
         catch
