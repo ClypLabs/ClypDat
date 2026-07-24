@@ -24,6 +24,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // AddOrUpdateLibraryClipAsync had already added directly.
     private readonly Dictionary<string, DateTime> _recentlySelfAddedPaths = new(StringComparer.OrdinalIgnoreCase);
     private static readonly TimeSpan SelfAddedSuppressWindow = TimeSpan.FromSeconds(5);
+    // Paths that changed since the debounce last fired - see ScheduleLibraryRefresh
+    // for why the suppression check now happens against THIS set at debounce-fire
+    // time instead of at the moment each watcher event arrives.
+    private readonly HashSet<string> _pendingLibraryChangePaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _libraryLayoutMigrationLock = new(1, 1);
     private readonly AudioDeviceService _audioDevices = new();
     private bool _isReplayRecording;
@@ -188,6 +192,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _libraryRefreshDebounce.Tick += async (_, _) =>
         {
             _libraryRefreshDebounce.Stop();
+            // Re-check suppression HERE, against whatever's still pending, not
+            // back when each watcher event first arrived - a newly-saved
+            // clip's own self-add mark (AddOrUpdateLibraryClipAsync) only
+            // lands once its remux finishes, but the file (and so the
+            // watcher's Created/Changed event) exists on disk well before
+            // that, often before the mark does. Checking immediately at event
+            // time raced that mark and lost often enough to trigger a full
+            // RefreshLibraryAsync right on top of the incremental add - the
+            // library-wide hydration fraction (e.g. "1/28") that briefly
+            // flashed for what was really just one new clip. 650ms is enough
+            // slack for even a slow remux's mark to have landed by the time
+            // this actually fires; if every pending path turns out to have
+            // been self-added by now, there's nothing left to refresh for.
+            var pending = _pendingLibraryChangePaths.ToArray();
+            _pendingLibraryChangePaths.Clear();
+            if (pending.Length > 0 && pending.All(WasRecentlySelfAdded)) return;
             await RefreshLibraryAsync();
         };
         _clipNotReadyMessageTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.5) };
@@ -3793,7 +3813,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (!MediaProbeService.IsVideoFile(e.FullPath)) return;
         Dispatcher.UIThread.Post(() =>
         {
-            if (WasRecentlySelfAdded(e.FullPath)) return;
+            // Deliberately NOT checked here - see ScheduleLibraryRefresh/the
+            // debounce Tick handler for why the suppression check moved to
+            // debounce-fire time instead of event-arrival time.
+            _pendingLibraryChangePaths.Add(e.FullPath);
             ScheduleLibraryRefresh();
         });
     }
@@ -3846,7 +3869,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (!MediaProbeService.IsVideoFile(e.FullPath) && !MediaProbeService.IsVideoFile(e.OldFullPath)) return;
         Dispatcher.UIThread.Post(() =>
         {
-            if (WasRecentlySelfAdded(e.FullPath)) return;
+            // See LibraryWatcher_OnChanged - same deferred-suppression reasoning.
+            _pendingLibraryChangePaths.Add(e.FullPath);
             ScheduleLibraryRefresh();
         });
     }
