@@ -25,7 +25,7 @@
     <SelfContained>true</SelfContained>
     <PlatformTarget>x64</PlatformTarget>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-    <Version>0.1.7</Version>
+    <Version>0.1.8</Version>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Precompiles IL to native code for this RID at publish time so the
          published EVE.exe skips JIT-on-first-run for its own assemblies
