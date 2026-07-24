@@ -567,6 +567,15 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // Only one clip-notification overlay at a time - a fast save ("Saving
+    // clip..." immediately followed by "Clip saved" before the first one's
+    // 2.2s dwell even finished) used to leave two separate overlay Windows
+    // stacked on top of each other at the same position, visibly overlapping/
+    // flickering. A new notification now instantly closes whatever's already
+    // showing before presenting itself, instead of piling on top of it.
+    private Window? _activeClipOverlay;
+    private DispatcherTimer? _activeClipOverlayCloseTimer;
+
     private void ShowClipSavedNotification()
     {
         ShowClipNotification("Clip saved", playSound: true);
@@ -575,33 +584,45 @@ public sealed partial class MainWindow : Window
     private void ShowClipNotification(string text, bool playSound)
     {
         if (ViewModel is null) return;
-        if (playSound && ViewModel.Settings.EnableClipOverlaySound)
-        {
-            try
-            {
-                ClipNotificationSound.Play(ViewModel.Settings.ClipOverlayVolume);
-            }
-            catch (Exception error)
-            {
-                AppLog.Error("Clip notification sound failed", error);
-            }
-        }
-
         if (ViewModel.Settings.EnableClipOverlay)
         {
             try
             {
-                ShowClipSavedOverlay(ViewModel.Settings.ClipOverlayPosition, text);
+                ShowClipSavedOverlay(ViewModel.Settings.ClipOverlayPosition, text, playSound);
             }
             catch (Exception error)
             {
                 AppLog.Error("Clip notification overlay failed", error);
             }
         }
+        else if (playSound && ViewModel.Settings.EnableClipOverlaySound)
+        {
+            // Overlay's off but the sound is still wanted - nothing to time it
+            // against, so just play it immediately.
+            PlayClipNotificationSound();
+        }
     }
 
-    private void ShowClipSavedOverlay(string position, string text)
+    private void PlayClipNotificationSound()
     {
+        if (ViewModel is null || !ViewModel.Settings.EnableClipOverlaySound) return;
+        try
+        {
+            ClipNotificationSound.Play(ViewModel.Settings.ClipOverlayVolume);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Clip notification sound failed", error);
+        }
+    }
+
+    private void ShowClipSavedOverlay(string position, string text, bool playSound)
+    {
+        _activeClipOverlayCloseTimer?.Stop();
+        _activeClipOverlayCloseTimer = null;
+        _activeClipOverlay?.Close();
+        _activeClipOverlay = null;
+
         var isLeft = string.Equals(position, "Top Left", StringComparison.OrdinalIgnoreCase);
 
         // A full-height accent stripe (not a small dot) plus a solid, near-
@@ -609,9 +630,9 @@ public sealed partial class MainWindow : Window
         // gameplay, not blend in as a subtle little pill.
         var accent = new Border
         {
-            Width = 5,
+            Width = 7,
             Background = Avalonia.Media.Brush.Parse("#13C8B5"),
-            CornerRadius = isLeft ? new CornerRadius(3, 0, 0, 3) : new CornerRadius(0, 3, 3, 0),
+            CornerRadius = isLeft ? new CornerRadius(4, 0, 0, 4) : new CornerRadius(0, 4, 4, 0),
             VerticalAlignment = VerticalAlignment.Stretch
         };
         var label = new TextBlock
@@ -619,14 +640,14 @@ public sealed partial class MainWindow : Window
             Text = text,
             Foreground = Avalonia.Media.Brush.Parse("#F5F9FF"),
             FontWeight = Avalonia.Media.FontWeight.Bold,
-            FontSize = 15,
+            FontSize = 19,
             VerticalAlignment = VerticalAlignment.Center
         };
         var content = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 14,
-            Margin = new Thickness(16, 14, 20, 14),
+            Margin = new Thickness(22, 20, 26, 20),
             Children = { label }
         };
         var translate = new TranslateTransform();
@@ -635,8 +656,8 @@ public sealed partial class MainWindow : Window
             Background = Avalonia.Media.Brush.Parse("#F5141D24"),
             BorderBrush = Avalonia.Media.Brush.Parse("#3C4C5A"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(6),
-            BoxShadow = Avalonia.Media.BoxShadows.Parse("0 8 24 0 #66000000"),
+            CornerRadius = new CornerRadius(8),
+            BoxShadow = Avalonia.Media.BoxShadows.Parse("0 10 28 0 #70000000"),
             RenderTransform = translate,
             Opacity = 0,
             ClipToBounds = true,
@@ -688,6 +709,7 @@ public sealed partial class MainWindow : Window
         const double SlideDistance = 28;
         translate.X = isLeft ? -SlideDistance : SlideDistance;
 
+        _activeClipOverlay = overlay;
         overlay.Show();
 
         badge.Transitions =
@@ -711,12 +733,19 @@ public sealed partial class MainWindow : Window
         {
             badge.Opacity = 1;
             translate.X = 0;
+            // Sound used to fire the instant this method was called - well
+            // before the slide/fade-in transition below even started, so it
+            // landed a couple hundred ms ahead of anything visibly happening.
+            // Playing it here instead, right as the "pop in" begins, actually
+            // lines the two up.
+            if (playSound) PlayClipNotificationSound();
         }, DispatcherPriority.Loaded);
 
         var closeTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(2200) };
         closeTimer.Tick += (_, _) =>
         {
             closeTimer.Stop();
+            _activeClipOverlayCloseTimer = null;
             // Slide back out the same way it came in, then close once that
             // transition has actually had time to finish playing.
             badge.Opacity = 0;
@@ -726,9 +755,11 @@ public sealed partial class MainWindow : Window
             {
                 closeAfterExit.Stop();
                 overlay.Close();
+                if (_activeClipOverlay == overlay) _activeClipOverlay = null;
             };
             closeAfterExit.Start();
         };
+        _activeClipOverlayCloseTimer = closeTimer;
         closeTimer.Start();
     }
 
