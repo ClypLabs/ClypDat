@@ -20,7 +20,25 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        using var singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out var createdNew);
+        var singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out var createdNew);
+        // RestartAppButton_OnClick (MainWindow.axaml.cs) launches the new
+        // process BEFORE the old one exits, so this can lose the mutex race
+        // against an instance that's about to release it anyway, not just a
+        // genuinely separate one already running - without a retry, the new
+        // process saw "already running", signalled the (about to exit) old
+        // one to show itself, and quit; the old one then exited for real too,
+        // leaving nothing running, which looked like the restart button doing
+        // nothing. Retry for up to 2s (comfortably past normal shutdown time
+        // - saving settings, releasing capture devices) before concluding a
+        // second, truly separate instance is actually running.
+        for (var attempt = 0; attempt < 20 && !createdNew; attempt++)
+        {
+            Thread.Sleep(100);
+            singleInstanceMutex.Dispose();
+            singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out createdNew);
+        }
+
+        using var _ = singleInstanceMutex;
         if (!createdNew)
         {
             try

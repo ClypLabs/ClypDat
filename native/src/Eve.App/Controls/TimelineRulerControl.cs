@@ -28,6 +28,16 @@ public sealed class TimelineRulerControl : Control
         var height = Bounds.Height;
         if (width <= 0 || height <= 0) return;
 
+        // Avalonia hit-tests a custom Render() against the actual drawn
+        // geometry, not the control's Bounds rectangle - without this, only
+        // the thin tick lines and second-labels drawn below were
+        // hit-testable, leaving all the empty space between/around them
+        // (most of the control) unclickable for seeking. A transparent fill
+        // covering the full bounds first establishes that whole area as a
+        // hit target, same as TimelineLaneControl already gets for free by
+        // painting a solid background rectangle over its own full bounds.
+        context.FillRectangle(Brushes.Transparent, new Rect(0, 0, width, height));
+
         var bottom = height - 1;
         var line = new Pen(new SolidColorBrush(Color.Parse("#2C3944")), 1);
         context.DrawLine(line, new Point(0, bottom), new Point(width, bottom));
