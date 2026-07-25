@@ -681,6 +681,12 @@
       </Transitions>
     </Setter>
   </Style>
+  <!-- Game rows hold square artwork, so their hover/active backdrop is a
+       rounded square too - a circular one around a square icon reads as a
+       mismatch. Section rows keep the circle, which suits their glyphs. -->
+  <Style Selector="Button.railGameButton">
+    <Setter Property="CornerRadius" Value="12" />
+  </Style>
   <Style Selector="Button.railIconButton PathIcon">
     <Setter Property="Foreground" Value="#8C98A7" />
     <Setter Property="Transitions">
