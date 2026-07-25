@@ -509,7 +509,9 @@ public sealed partial class MainWindow : Window
                 FontSize = 9.5,
                 FontWeight = FontWeight.Bold,
                 LetterSpacing = 0.6,
-                Foreground = Avalonia.Media.Brush.Parse("#4A5C70"),
+                // Brighter than a panel-backed list would need - these sit
+                // straight over clip thumbnails now.
+                Foreground = Avalonia.Media.Brush.Parse("#93A6B8"),
                 IsHitTestVisible = false,
                 // Right-aligned into a fixed column so every label ends flush
                 // against the track rather than starting ragged from the left.
@@ -526,7 +528,7 @@ public sealed partial class MainWindow : Window
             {
                 Width = 6,
                 Height = 1,
-                Background = Avalonia.Media.Brush.Parse("#2B3947"),
+                Background = Avalonia.Media.Brush.Parse("#6B7C8C"),
                 IsHitTestVisible = false
             };
             Canvas.SetTop(tick, Math.Clamp(top, 0, Math.Max(0, trackHeight - 1)));
@@ -600,7 +602,7 @@ public sealed partial class MainWindow : Window
         {
             var isCurrent = i == currentIndex;
             var label = _scrubberLabels[i].Label;
-            label.Foreground = Avalonia.Media.Brush.Parse(isCurrent ? "#F0F5FB" : "#4A5C70");
+            label.Foreground = Avalonia.Media.Brush.Parse(isCurrent ? "#FFFFFF" : "#93A6B8");
             label.FontSize = isCurrent ? 10.5 : 9.5;
         }
 
