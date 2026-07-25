@@ -539,23 +539,36 @@
                anywhere on the track seeks the library to that point. -->
           <Border Grid.Column="1"
                   x:Name="DateScrubberHost"
-                  Width="56"
-                  Margin="4,14,6,0"
+                  Width="62"
+                  Margin="4,14,4,0"
                   Background="Transparent"
                   IsVisible="{Binding IsLibraryVisible}"
                   PointerPressed="DateScrubber_OnPointerPressed"
                   PointerMoved="DateScrubber_OnPointerMoved"
                   PointerReleased="DateScrubber_OnPointerReleased"
+                  PointerEntered="DateScrubber_OnPointerEntered"
                   PointerExited="DateScrubber_OnPointerExited">
-            <Canvas x:Name="DateScrubberCanvas" ClipToBounds="True">
-              <Border x:Name="DateScrubberThumb"
-                      Canvas.Left="46"
-                      Width="4"
-                      MinHeight="26"
-                      CornerRadius="2"
-                      Background="#4A5A6B"
+            <Panel>
+              <!-- Static rail the thumb rides in, so the track still reads
+                   as a scrollbar when the library is short enough that the
+                   thumb fills most of it. -->
+              <Border x:Name="DateScrubberTrack"
+                      Width="3"
+                      CornerRadius="1.5"
+                      Background="#18222B"
+                      HorizontalAlignment="Left"
+                      Margin="53,0,0,0"
                       IsHitTestVisible="False" />
-            </Canvas>
+              <Canvas x:Name="DateScrubberCanvas" ClipToBounds="True">
+                <Border x:Name="DateScrubberThumb"
+                        Canvas.Left="52"
+                        Width="5"
+                        MinHeight="28"
+                        CornerRadius="2.5"
+                        Background="#3E4C5A"
+                        IsHitTestVisible="False" />
+              </Canvas>
+            </Panel>
           </Border>
           </Grid>
         </DockPanel>
