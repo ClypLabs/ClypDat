@@ -589,18 +589,20 @@
                   PointerEntered="DateScrubber_OnPointerEntered"
                   PointerExited="DateScrubber_OnPointerExited">
             <Panel ClipToBounds="False">
-              <!-- Full date list, faded in only while scrubbing. No hard
-                   border - a soft shadow reads as floating above the library
-                   instead of a box pasted over it. -->
+              <!-- Full date list, faded in only while scrubbing. No panel
+                   behind it - the dates sit directly over the library and
+                   stay legible against bright thumbnails via a drop shadow
+                   on the text itself rather than a backing box. -->
               <Border x:Name="DateScrubberLabelHost"
                       Width="78"
                       Margin="-86,0,0,0"
                       HorizontalAlignment="Left"
-                      Background="#F5121A21"
-                      CornerRadius="9"
-                      BoxShadow="0 10 30 -8 #A0000000"
+                      Background="Transparent"
                       Opacity="0"
                       IsHitTestVisible="False">
+                <Border.Effect>
+                  <DropShadowEffect Color="#000000" BlurRadius="6" OffsetX="0" OffsetY="1" Opacity="0.85" />
+                </Border.Effect>
                 <Border.Transitions>
                   <Transitions>
                     <DoubleTransition Property="Opacity" Duration="0:0:0.16" />
