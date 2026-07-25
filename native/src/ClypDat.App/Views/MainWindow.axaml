@@ -1,4 +1,4 @@
-﻿<Window xmlns="https://github.com/avaloniaui"
+<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vlc="using:LibVLCSharp.Avalonia"
         xmlns:vm="using:ClypDat.App.ViewModels"
@@ -162,13 +162,13 @@
           <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Hidden">
             <StackPanel Margin="0,16,0,16" Spacing="2">
               <Button Classes="railIconButton" Classes.active="{Binding !IsClipTypeFilterActive}" Click="LibraryClipTypeSectionButton_OnClick" ToolTip.Tip="All Clips">
-                <PathIcon Data="M4,4h4v4H4V4z M10,4h4v4h-4V4z M16,4h4v4h-4V4z M4,10h4v4H4v-4z M10,10h4v4h-4v-4z M16,10h4v4h-4v-4z M4,16h4v4H4v-4z M10,16h4v4h-4v-4z M16,16h4v4h-4v-4z" Width="18" Height="18" Margin="-2,0,0,0" />
+                <PathIcon Data="M4,4h4v4H4V4z M10,4h4v4h-4V4z M16,4h4v4h-4V4z M4,10h4v4H4v-4z M10,10h4v4h-4v-4z M16,10h4v4h-4v-4z M4,16h4v4H4v-4z M10,16h4v4h-4v-4z M16,16h4v4h-4v-4z" Width="18" Height="18" />
               </Button>
               <ItemsControl ItemsSource="{Binding ClipTypeFilterOptions}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
                     <Button Classes="railIconButton" Classes.active="{Binding IsChecked}" Click="LibraryClipTypeSectionButton_OnClick" ToolTip.Tip="{Binding Label}">
-                      <PathIcon Data="{Binding Key, Converter={x:Static opconv:ClipTypeKeyToIconConverter.Instance}}" Width="18" Height="18" Margin="-2,0,0,0" />
+                      <PathIcon Data="{Binding Key, Converter={x:Static opconv:ClipTypeKeyToIconConverter.Instance}}" Width="18" Height="18" />
                     </Button>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
@@ -178,13 +178,13 @@
 
               <Button Classes="railIconButton" Classes.active="{Binding !IsGameFilterActive}" Click="LibraryGameSectionButton_OnClick" ToolTip.Tip="All Games">
                 <PathIcon Data="M21.58,16.09l-1.09-7.66C20.21,6.46,18.52,5,16.53,5H7.47C5.48,5,3.79,6.46,3.51,8.43l-1.09,7.66C2.2,17.63,3.39,19,4.94,19h0c0.68,0,1.32-0.27,1.8-0.75L9,16h6l2.25,2.25c0.48,0.48,1.13,0.75,1.8,0.75h0C20.61,19,21.8,17.63,21.58,16.09z M11,11H9v2H8v-2H6v-1h2V8h1v2h2V11z M15.5,10c-0.55,0-1-0.45-1-1s0.45-1,1-1s1,0.45,1,1S16.05,10,15.5,10z M17.5,13c-0.55,0-1-0.45-1-1s0.45-1,1-1s1,0.45,1,1S18.05,13,17.5,13z"
-                          Width="18" Height="18" Margin="-2,0,0,0" />
+                          Width="18" Height="18" />
               </Button>
               <ItemsControl ItemsSource="{Binding GameFilterOptions}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
                     <Button Classes="railIconButton" Classes.active="{Binding IsChecked}" Click="LibraryGameSectionButton_OnClick" ToolTip.Tip="{Binding Label}">
-                      <Border Classes="gameInitialBadge" Width="30" Height="30" CornerRadius="15" Margin="-2,0,0,0">
+                      <Border Classes="gameInitialBadge" Width="30" Height="30" CornerRadius="15">
                         <TextBlock Text="{Binding Key, Converter={x:Static opconv:FirstLetterConverter.Instance}}" FontWeight="Bold" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center" />
                       </Border>
                     </Button>
@@ -206,7 +206,7 @@
             </Border.Background>
           </Border>
 
-          <StackPanel Grid.Row="1" Margin="0,10,0,16" Spacing="8" HorizontalAlignment="Center">
+          <StackPanel Grid.Row="1" Margin="0,10,0,16" Spacing="8">
             <Button Classes="railIconButton" ToolTip.Tip="Storage">
               <Button.Flyout>
                 <Flyout Placement="RightEdgeAlignedBottom">
@@ -246,16 +246,16 @@
                 <Ellipse Width="30" Height="30" Stroke="#3E4C5A" StrokeThickness="2.5" />
                 <Path Data="{Binding LibraryDriveUsedFraction, Converter={x:Static opconv:FractionToArcPathConverter.Instance}}"
                       Stroke="{StaticResource AccentBrush}" StrokeThickness="2.5" StrokeLineCap="Round"
-                      IsVisible="{Binding HasDriveStats}" Margin="-2,0,0,0" />
+                      IsVisible="{Binding HasDriveStats}" />
               </Panel>
             </Button>
             <Button Classes="railIconButton" Click="FeedbackButton_OnClick" ToolTip.Tip="Send feedback">
               <PathIcon Data="M11,18h2v-2h-2V18z M12,2C6.48,2,2,6.48,2,12s4.48,10,10,10s10-4.48,10-10S17.52,2,12,2z M12,20c-4.41,0-8-3.59-8-8s3.59-8,8-8s8,3.59,8,8S16.41,20,12,20z M12,6c-2.21,0-4,1.79-4,4h2c0-1.1,0.9-2,2-2s2,0.9,2,2c0,2-3,1.75-3,5h2c0-2.25,3-2.5,3-5C16,7.79,14.21,6,12,6z"
-                        Width="18" Height="18" Margin="-2,0,0,0" />
+                        Width="18" Height="18" />
             </Button>
             <Button Classes="railIconButton" Classes.active="{Binding IsSettingsVisible}" Click="OpenSettingsButton_OnClick" ToolTip.Tip="Settings">
               <PathIcon Data="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"
-                        Width="18" Height="18" Margin="-2,0,0,0" />
+                        Width="18" Height="18" />
             </Button>
           </StackPanel>
         </Grid>
@@ -666,7 +666,7 @@
                       <TextBox Grid.Column="1" Classes="settingsInput" Width="110" Text="{Binding CustomFullSessionQuotaGb}" Watermark="500" VerticalAlignment="Center" />
                       <TextBlock Grid.Column="2" Text="GB" Foreground="#6B7C8C" FontSize="12" VerticalAlignment="Center" />
                     </Grid>
-                    <TextBlock Text="⚠ Finalizing a long session (muxing the whole thing) can take real time and heavy CPU/disk use, more so at higher quality/fps or longer sessions - other apps (Discord, Spotify, etc.) may stutter or freeze until it finishes."
+                    <TextBlock Text="? Finalizing a long session (muxing the whole thing) can take real time and heavy CPU/disk use, more so at higher quality/fps or longer sessions - other apps (Discord, Spotify, etc.) may stutter or freeze until it finishes."
                                Foreground="#E5A00D" FontSize="11" FontWeight="Bold" TextWrapping="Wrap" Margin="0,4,0,0" />
                   </StackPanel>
                 </StackPanel>
@@ -878,7 +878,7 @@
                           <Button Grid.Column="2" Classes="deleteButton" Content="Remove" Padding="14,7" VerticalAlignment="Center" Click="RemoveGameButton_OnClick"
                                   ToolTip.Tip="Removes it from this list and stops ClypDat detecting it as a game again" />
                         </Grid>
-                        <TextBlock Text="⚠ Since this game has an anti-cheat, OBS may black out or freeze the capture (or get the game closed) - Auto, ClypDat or Windows Capture are safer."
+                        <TextBlock Text="? Since this game has an anti-cheat, OBS may black out or freeze the capture (or get the game closed) - Auto, ClypDat or Windows Capture are safer."
                                    Foreground="#E5A00D" FontSize="11" FontWeight="Bold" TextWrapping="Wrap"
                                    IsVisible="{Binding ShowAntiCheatWarning}" />
                       </StackPanel>
@@ -946,7 +946,7 @@
                               <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
                                 <TextBlock Text="{Binding DisplayTitle}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" FontFamily="Segoe UI,Segoe UI Emoji" />
                                 <TextBlock Foreground="#6B7C8C" FontSize="11">
-                                  <Run Text="{Binding GameFolderName}" /><Run Text=" · " /><Run Text="{Binding CreatedAtLocal}" />
+                                  <Run Text="{Binding GameFolderName}" /><Run Text=" � " /><Run Text="{Binding CreatedAtLocal}" />
                                 </TextBlock>
                                 <TextBlock Text="{Binding ValidationMessage}" Foreground="#D85E61" FontSize="11" TextWrapping="Wrap" IsVisible="{Binding HasValidationMessage}" />
                               </StackPanel>
@@ -964,7 +964,7 @@
               <StackPanel Spacing="4">
                 <TextBlock Text="AUTO-CLIPPING" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
                 <TextBlock Text="Have ClypDat save the important moments from supported games using their local event feeds." Foreground="#93A6B8" TextWrapping="Wrap" />
-                <TextBlock Text="⚠ Experimental - still being worked on and can miss events, mislabel clips, or misbehave." Foreground="#E5A00D" FontSize="11" FontWeight="Bold" TextWrapping="Wrap" Margin="0,4,0,0" />
+                <TextBlock Text="? Experimental - still being worked on and can miss events, mislabel clips, or misbehave." Foreground="#E5A00D" FontSize="11" FontWeight="Bold" TextWrapping="Wrap" Margin="0,4,0,0" />
               </StackPanel>
 
               <Border Classes="settingsCard">
@@ -990,7 +990,7 @@
                         <TextBlock Text="{Binding StatusText}" Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
                         <Button Content="Set up Dota 2" Click="SetupDotaAutoClipButton_OnClick" IsVisible="{Binding IsSetupRequired}" HorizontalAlignment="Left" />
                         <ItemsControl ItemsSource="{Binding Groups}">
-                          <ItemsControl.ItemTemplate><DataTemplate><StackPanel Spacing="6"><Button Classes="autoClipGroupToggle" Click="AutoClipGroupToggleButton_OnClick"><Grid ColumnDefinitions="20,*" ColumnSpacing="7"><Grid Width="20" Height="20"><Border BorderBrush="#758494" BorderThickness="1" CornerRadius="4" Background="Transparent" /><Border IsVisible="{Binding IsAllEnabled}" BorderBrush="{DynamicResource CheckBoxCheckBackgroundFillChecked}" BorderThickness="1" CornerRadius="4" Background="{DynamicResource CheckBoxCheckBackgroundFillChecked}" /><Border IsVisible="{Binding IsIndeterminate}" BorderBrush="{DynamicResource CheckBoxCheckBackgroundFillChecked}" BorderThickness="1" CornerRadius="4" Background="{DynamicResource CheckBoxCheckBackgroundFillChecked}" /><TextBlock Text="✓" IsVisible="{Binding IsAllEnabled}" Foreground="{DynamicResource CheckBoxCheckGlyphForegroundChecked}" FontSize="14" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" /><TextBlock Text="−" IsVisible="{Binding IsIndeterminate}" Foreground="{DynamicResource CheckBoxCheckGlyphForegroundChecked}" FontSize="17" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" /></Grid><TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="#D2DEEC" FontWeight="SemiBold" VerticalAlignment="Center" /></Grid></Button><ItemsControl ItemsSource="{Binding Events}" Margin="26,0,0,0"><ItemsControl.ItemTemplate><DataTemplate><CheckBox Content="{Binding Name}" IsChecked="{Binding IsEnabled}" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></DataTemplate></ItemsControl.ItemTemplate>
+                          <ItemsControl.ItemTemplate><DataTemplate><StackPanel Spacing="6"><Button Classes="autoClipGroupToggle" Click="AutoClipGroupToggleButton_OnClick"><Grid ColumnDefinitions="20,*" ColumnSpacing="7"><Grid Width="20" Height="20"><Border BorderBrush="#758494" BorderThickness="1" CornerRadius="4" Background="Transparent" /><Border IsVisible="{Binding IsAllEnabled}" BorderBrush="{DynamicResource CheckBoxCheckBackgroundFillChecked}" BorderThickness="1" CornerRadius="4" Background="{DynamicResource CheckBoxCheckBackgroundFillChecked}" /><Border IsVisible="{Binding IsIndeterminate}" BorderBrush="{DynamicResource CheckBoxCheckBackgroundFillChecked}" BorderThickness="1" CornerRadius="4" Background="{DynamicResource CheckBoxCheckBackgroundFillChecked}" /><TextBlock Text="?" IsVisible="{Binding IsAllEnabled}" Foreground="{DynamicResource CheckBoxCheckGlyphForegroundChecked}" FontSize="14" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" /><TextBlock Text="-" IsVisible="{Binding IsIndeterminate}" Foreground="{DynamicResource CheckBoxCheckGlyphForegroundChecked}" FontSize="17" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" /></Grid><TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="#D2DEEC" FontWeight="SemiBold" VerticalAlignment="Center" /></Grid></Button><ItemsControl ItemsSource="{Binding Events}" Margin="26,0,0,0"><ItemsControl.ItemTemplate><DataTemplate><CheckBox Content="{Binding Name}" IsChecked="{Binding IsEnabled}" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></DataTemplate></ItemsControl.ItemTemplate>
                         </ItemsControl>
                         <ItemsControl ItemsSource="{Binding UngroupedEvents}"><ItemsControl.ItemTemplate><DataTemplate><CheckBox Content="{Binding Name}" IsChecked="{Binding IsEnabled}" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
                       </StackPanel>
@@ -1669,7 +1669,7 @@
               <Image Source="/Assets/clypdat-icon-24.png" Width="16" Height="16" />
               <TextBlock Text="Welcome to ClypDat" Foreground="#B9C6D4" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
             </StackPanel>
-            <Button Grid.Column="2" Classes="dialogClose" Content="✕" Width="40" Height="40" Click="OnboardingSkipButton_OnClick" />
+            <Button Grid.Column="2" Classes="dialogClose" Content="?" Width="40" Height="40" Click="OnboardingSkipButton_OnClick" />
           </Grid>
 
           <StackPanel DockPanel.Dock="Bottom" Margin="22,0,22,20" Spacing="14">
