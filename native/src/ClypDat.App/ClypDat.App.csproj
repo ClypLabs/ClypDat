@@ -1,0 +1,145 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>ClypDat</AssemblyName>
+    <RootNamespace>ClypDat.App</RootNamespace>
+    <ApplicationIcon>..\..\..\assets\clypdat-icon.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Windows-versioned TFM (overriding Directory.Build.props' plain net8.0, scoped
+         to just this project) so Windows.Graphics.Capture's WinRT types are available
+         to NativeReplayBuffer for true per-window capture, instead of DXGI Desktop
+         Duplication's fixed-screen-region capture (which shows whatever's on screen
+         during alt-tab, not the game specifically). -->
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <!-- Baked in here (not just passed as a publish flag) so every publish
+         (CI's release workflow, the documented README command, or a plain
+         "dotnet publish" with no extra flags for win-x64) produces the same
+         self-contained output that bundles its own .NET runtime. Without
+         this, a publish missing the self-contained flag silently falls back
+         to framework-dependent, which then demands the user have the exact
+         matching .NET 10 Desktop Runtime installed; "I already have .NET"
+         doesn't mean that specific piece is present, and end users
+         shouldn't need any of it either way. -->
+    <SelfContained>true</SelfContained>
+    <PlatformTarget>x64</PlatformTarget>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <Version>0.1.8</Version>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Precompiles IL to native code for this RID at publish time so the
+         published ClypDat.exe skips JIT-on-first-run for its own assemblies
+         (Avalonia's XAML-heavy startup path is the main beneficiary) - only
+         affects `dotnet publish` output, not the plain `dotnet build` used
+         to verify compilation. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <!-- Lets SetSourceRevisionId below (which sets $(SourceRevisionId), not
+         SourceLink) fold a "+<short-hash>" onto AssemblyInformationalVersion
+         without touching <Version>/AssemblyVersion - the About screen reads
+         the informational version to show which exact commit a locally
+         published build came from; AppUpdateService's update check still
+         reads the plain numeric AssemblyVersion, unaffected either way. -->
+    <IncludeSourceRevisionInInformationalVersion>true</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.13" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.13" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.13" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.13" />
+    <PackageReference Include="LibVLCSharp.Avalonia" Version="3.10.0" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <!-- .Core (not the full Microsoft.Data.Sqlite) so it doesn't drag in
+         SQLitePCLRaw.bundle_e_sqlite3's bundled native binary, which has an
+         unpatched high-severity NuGet advisory (GHSA-2m69-gcr7-jv3q) with no
+         fixed version available. winsqlite3 below points it at Windows'
+         own SQLite (ships with Win10+, patched via Windows Update) instead. -->
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="8.0.11" />
+    <PackageReference Include="SQLitePCLRaw.provider.winsqlite3" Version="3.0.4" />
+    <PackageReference Include="ScreenRecorderLib" Version="6.6.0" />
+    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" GeneratePathProperty="true" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
+    <PackageReference Include="FFmpeg.AutoGen" Version="8.1.0" />
+    <!-- Pinned above Avalonia's transitive 0.21.2 to pick up the CVE-2026-39959
+         backport fix (GHSA-xrw6-gwf8-vvr9); no direct usage otherwise. -->
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ClypDat.Core\ClypDat.Core.csproj" />
+    <ProjectReference Include="..\ClypDat.Capture.Abstractions\ClypDat.Capture.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="..\..\..\assets\clypdat-icon*.png" Link="Assets\%(Filename)%(Extension)" />
+    <AvaloniaResource Include="..\..\..\assets\clypdat-icon.ico" Link="Assets\clypdat-icon.ico" />
+    <AvaloniaResource Include="..\..\..\assets\cs2-cover.jpg" Link="Assets\cs2-cover.jpg" />
+    <AvaloniaResource Include="..\..\..\assets\dota2-cover.jpg" Link="Assets\dota2-cover.jpg" />
+    <AvaloniaResource Include="..\..\..\assets\league-cover.jpg" Link="Assets\league-cover.jpg" />
+  </ItemGroup>
+
+  <!-- git rev-parse failing (no git on PATH, source distributed without
+       .git) just leaves SourceRevisionId unset - InformationalVersion falls
+       back to the plain "0.1.7" with no "+hash" suffix, so this degrades
+       gracefully rather than breaking the build. -->
+  <Target Name="SetSourceRevisionId" BeforeTargets="GetAssemblyVersion;GenerateAssemblyInfo">
+    <Exec Command="git rev-parse --short HEAD" ConsoleToMSBuild="true" IgnoreExitCode="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="GitCommitHash" />
+      <Output TaskParameter="ExitCode" PropertyName="GitRevParseExitCode" />
+    </Exec>
+    <PropertyGroup Condition="'$(GitRevParseExitCode)' == '0' And '$(GitCommitHash)' != ''">
+      <SourceRevisionId>$(GitCommitHash)</SourceRevisionId>
+    </PropertyGroup>
+  </Target>
+
+  <Target Name="CopyLibVlcRuntimeToPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <LibVlcRuntimeFiles Include="$(PkgVideoLAN_LibVLC_Windows)\build\x64\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(LibVlcRuntimeFiles)"
+          DestinationFiles="@(LibVlcRuntimeFiles->'$(PublishDir)libvlc\win-x64\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyObsRuntimeToPublish" AfterTargets="Publish" Condition="Exists('..\..\vendor\obs-runtime')">
+    <ItemGroup>
+      <ObsRuntimeFiles Include="..\..\vendor\obs-runtime\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ObsRuntimeFiles)"
+          DestinationFiles="@(ObsRuntimeFiles->'$(PublishDir)obs\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="..\ClypDat.ObsBridge\bin\x64\$(Configuration)\ClypDat.ObsBridge.dll"
+          DestinationFolder="$(PublishDir)obs"
+          SkipUnchangedFiles="true"
+          Condition="Exists('..\ClypDat.ObsBridge\bin\x64\$(Configuration)\ClypDat.ObsBridge.dll')" />
+    <Copy SourceFiles="..\..\vendor\obs-runtime\bin\64bit\obs-nvenc-test.exe"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('..\..\vendor\obs-runtime\bin\64bit\obs-nvenc-test.exe')" />
+  </Target>
+
+  <Target Name="CopyFfmpegToPublish" AfterTargets="Publish" Condition="Exists('..\..\vendor\ffmpeg')">
+    <ItemGroup>
+      <FfmpegFiles Include="..\..\vendor\ffmpeg\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(FfmpegFiles)"
+          DestinationFiles="@(FfmpegFiles->'$(PublishDir)ffmpeg\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <!-- OBS (GPLv2) and LibVLC (LGPL-2.1) are bundled in every distributed
+       build; their licenses require these notices/texts to ship alongside
+       the binaries. See THIRD-PARTY-LICENSES.md at the repo root. -->
+  <Target Name="CopyThirdPartyLicensesToPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <ThirdPartyLicenseFiles Include="..\..\..\licenses\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="..\..\..\THIRD-PARTY-LICENSES.md"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ThirdPartyLicenseFiles)"
+          DestinationFiles="@(ThirdPartyLicenseFiles->'$(PublishDir)licenses\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+</Project>

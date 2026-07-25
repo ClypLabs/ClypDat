@@ -1,6 +1,6 @@
-# EVE - Easy Video Editor
+# ClypDat - Easy Video Editor
 
-EVE records a rolling buffer of gameplay on Windows and saves the last N
+ClypDat records a rolling buffer of gameplay on Windows and saves the last N
 seconds to a file when you press a hotkey. It also has a built-in editor for
 trimming clips and mixing audio tracks before export.
 
@@ -10,19 +10,19 @@ The codebase is `native/` (C#/.NET 10, Avalonia UI).
 
 Three capture backends, switchable in Settings (default is Auto):
 
-- **EVE (Native)**: EVE's own capture engine, built directly on DXGI Desktop
-  Duplication with GPU-side downscaling (`native/src/Eve.App/Services/NativeReplayBuffer.cs`).
+- **ClypDat (Native)**: ClypDat's own capture engine, built directly on DXGI Desktop
+  Duplication with GPU-side downscaling (`native/src/ClypDat.App/Services/NativeReplayBuffer.cs`).
   No process hook, so anti-cheat can't object to it, with true per-window
   capture that keeps recording through alt-tabs/overlays and no stop/start
   gap between rolling-buffer segments. Encodes with NVENC, falling back to
   AMD AMF, then software libx264, so it isn't NVIDIA-only. Selected
   automatically on Auto.
 - **OBS**: a trimmed OBS Studio runtime (32.1.2) loaded through a custom
-  C++ bridge (`native/src/Eve.ObsBridge`) via `LoadLibrary`/`GetProcAddress`,
+  C++ bridge (`native/src/ClypDat.ObsBridge`) via `LoadLibrary`/`GetProcAddress`,
   not static linking. Uses NVENC for encoding.
 - **Windows Capture (Legacy)**: `ScreenRecorderLib`, backed by Windows
   Graphics Capture / DXGI desktop duplication. Doesn't inject into the
-  target process either, kept around as a fallback alongside EVE's own engine.
+  target process either, kept around as a fallback alongside ClypDat's own engine.
 
 Foreground-window polling drives game detection: a catalog of known
 executables plus a fallback that accepts any window whose
@@ -34,9 +34,9 @@ browsing for an executable directly.
 
 ## Auto-clipping
 
-Currently EVE only has CS2 auto-clipping (Experimental), so expect issues!
+Currently ClypDat only has CS2 auto-clipping (Experimental), so expect issues!
 
-For CS2, EVE listens to the game's own Game State Integration feed (no
+For CS2, ClypDat listens to the game's own Game State Integration feed (no
 screen/voice analysis) and can automatically save a clip on kills, a
 headshot, a death, or an assist. Rapid kills within a debounce window
 are coalesced into a single clip for the final milestone (e.g. a 3K
@@ -56,7 +56,7 @@ editor shows a "Recording Paused" badge over those stretches.
 ## Importing from Medal
 
 Settings > Import from Medal scans Medal's local database for clips and
-copies (or moves) them into your EVE library, keeping Medal's own titles.
+copies (or moves) them into your ClypDat library, keeping Medal's own titles.
 If Medal's database is missing or corrupted, it also falls back to
 scanning Medal's default clips folder directly so nothing gets lost.
 Medal's auto-generated "{date} - {time} - {game}" names are parsed back
@@ -92,16 +92,16 @@ name and original file stay untouched.
 
 ## Auto-update
 
-On launch, EVE checks the GitHub Releases API for a newer non-draft,
+On launch, ClypDat checks the GitHub Releases API for a newer non-draft,
 non-prerelease tag. If found, it shows a dialog with the version and release
-notes; accepting downloads `EVE-win-x64.zip`, extracts it, and replaces the
+notes; accepting downloads `ClypDat-win-x64.zip`, extracts it, and replaces the
 running install via a PowerShell helper that waits for the process to exit.
 
 ## Requirements
 
 - Windows 10 or 11, x64
 - .NET SDK 8+ to build from source
-- The EVE (Native) backend works on NVIDIA, AMD, and (as a last-resort
+- The ClypDat (Native) backend works on NVIDIA, AMD, and (as a last-resort
   software fallback) any GPU-less machine. The OBS backend's encoder is
   still NVENC-only, with no AMD/software fallback.
 
@@ -114,23 +114,23 @@ running install via a PowerShell helper that waits for the process to exit.
 ## Building
 
 ```powershell
-dotnet restore native\EVE.Native.sln
-dotnet build native\EVE.Native.sln
+dotnet restore native\ClypDat.Native.sln
+dotnet build native\ClypDat.Native.sln
 ```
 
-`Eve.ObsBridge` is a C++ project and needs MSBuild, not `dotnet build`:
+`ClypDat.ObsBridge` is a C++ project and needs MSBuild, not `dotnet build`:
 
 ```powershell
-msbuild native\src\Eve.ObsBridge\Eve.ObsBridge.vcxproj /p:Configuration=Release /p:Platform=x64
+msbuild native\src\ClypDat.ObsBridge\ClypDat.ObsBridge.vcxproj /p:Configuration=Release /p:Platform=x64
 ```
 
 To produce a runnable, self-contained build:
 
 ```powershell
-dotnet publish native\src\Eve.App\Eve.App.csproj -c Release -r win-x64 --self-contained true -p:Platform=x64 -o native\publish\win-x64-folder
+dotnet publish native\src\ClypDat.App\ClypDat.App.csproj -c Release -r win-x64 --self-contained true -p:Platform=x64 -o native\publish\win-x64-folder
 ```
 
-`EVE.exe` and its dependencies land in `native\publish\win-x64-folder`.
+`ClypDat.exe` and its dependencies land in `native\publish\win-x64-folder`.
 Pushing a tag matching `v*` triggers `.github/workflows/release.yml`, which
 builds the same output and packages it four ways: a zip, a self-extracting
 portable exe, an NSIS installer, and an MSI.
@@ -139,12 +139,12 @@ portable exe, an NSIS installer, and an MSI.
 
 - AMD/software fallback for the OBS backend too (Native already has it)
 - Seamless replay buffer rotation for the Legacy Windows Capture backend
-  (no stop/restart gap between segments - EVE's own backend already has this)
+  (no stop/restart gap between segments - ClypDat's own backend already has this)
 - I'll update this when I get more ideas lol
 
 ## Third-party licenses
 
-EVE bundles OBS Studio (GPLv2) and LibVLC (LGPL-2.1-or-later) binaries.
+ClypDat bundles OBS Studio (GPLv2) and LibVLC (LGPL-2.1-or-later) binaries.
 `THIRD-PARTY-LICENSES.md` lists what's bundled, under which license, and
 where to get matching source. `native/vendor/obs-runtime` is not a full OBS
 Studio install; it's trimmed to the six plugins the bridge actually loads
