@@ -707,15 +707,16 @@
     <Setter Property="RenderTransform" Value="scale(0.92)" />
   </Style>
   <!-- Selection is accent-tinted rather than another shade of grey, so the
-       current section stands out against a merely-hovered one. -->
+       current section stands out against a merely-hovered one. These follow
+       the Windows accent colour (see App.axaml.cs ApplyAccentColor). -->
   <Style Selector="Button.railIconButton.active">
-    <Setter Property="Background" Value="#2A3350" />
+    <Setter Property="Background" Value="{StaticResource AccentSelectedBrush}" />
   </Style>
   <Style Selector="Button.railIconButton.active PathIcon">
-    <Setter Property="Foreground" Value="#A8B4F5" />
+    <Setter Property="Foreground" Value="{StaticResource AccentSelectedIconBrush}" />
   </Style>
   <Style Selector="Button.railIconButton.active:pointerover">
-    <Setter Property="Background" Value="#333D5E" />
+    <Setter Property="Background" Value="{StaticResource AccentSelectedHoverBrush}" />
   </Style>
   <Style Selector="Button.railIconButton Border.gameInitialBadge">
     <Setter Property="Background" Value="#26323D" />
