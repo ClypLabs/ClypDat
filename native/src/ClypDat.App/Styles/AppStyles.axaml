@@ -439,7 +439,11 @@
        MainWindow removes those), matching Fluent's ~46x32 caption button
        proportions. -->
   <Style Selector="Button.windowChromeButton">
-    <Setter Property="Background" Value="Transparent" />
+    <!-- Zero-alpha hover color rather than Transparent, so the transition
+         doesn't interpolate through white on unhover (see settingsNavButton).
+         The close button overrides this with its own red-tinted idle below,
+         since it transitions to red instead. -->
+    <Setter Property="Background" Value="#001D2A36" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="0" />
     <Setter Property="Width" Value="46" />
@@ -461,6 +465,12 @@
   </Style>
   <Style Selector="Button.windowChromeButton:pointerover PathIcon">
     <Setter Property="Foreground" Value="#F5F9FF" />
+  </Style>
+  <!-- Idle has to be the zero-alpha form of THIS button's own hover color,
+       not the shared one - fading out to a transparent blue-grey would drift
+       through grey on the way back from red. -->
+  <Style Selector="Button.windowCloseButton">
+    <Setter Property="Background" Value="#00E5484D" />
   </Style>
   <Style Selector="Button.windowCloseButton:pointerover">
     <Setter Property="Background" Value="#E5484D" />
@@ -603,7 +613,11 @@
     <Setter Property="Background" Value="#1C2733" />
   </Style>
   <Style Selector="Button.settingsNavButton">
-    <Setter Property="Background" Value="Transparent" />
+    <!-- Not Transparent (#00FFFFFF - white at zero alpha): the BrushTransition
+         below interpolates RGB as well as alpha, so unhovering flashed white
+         on the way back out. Zero-alpha version of the hover color, so only
+         alpha animates. Same fix as linkButton above. -->
+    <Setter Property="Background" Value="#00182029" />
     <Setter Property="Foreground" Value="#93A6B8" />
     <Setter Property="BorderThickness" Value="2,0,0,0" />
     <Setter Property="BorderBrush" Value="Transparent" />
@@ -647,7 +661,9 @@
        left as one unit. Nudging the icon's own Margin instead left it
        off-center inside its own hover circle. -->
   <Style Selector="Button.railIconButton">
-    <Setter Property="Background" Value="Transparent" />
+    <!-- Zero-alpha hover color rather than Transparent, so the transition
+         doesn't interpolate through white on unhover (see settingsNavButton). -->
+    <Setter Property="Background" Value="#0026323D" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="22" />
     <Setter Property="Width" Value="44" />
