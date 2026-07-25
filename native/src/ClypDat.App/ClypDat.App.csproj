@@ -128,6 +128,24 @@
           SkipUnchangedFiles="true" />
   </Target>
 
+  <!-- Same copy, but for a plain `dotnet build` run. Without this the build
+       output has FFmpeg.AutoGen.dll (the managed binding) but none of the
+       native avcodec/avformat/avutil DLLs it binds to, so
+       FfmpegPathResolver finds no bundled folder, never sets
+       ffmpeg.RootPath, and NativeReplayBuffer's very first
+       avcodec_find_encoder_by_name throws NotSupportedException - the
+       capture loop dies instantly and every clip attempt reports "Replay
+       just started". Recording has to work when running a dev build, not
+       only a published one. -->
+  <Target Name="CopyFfmpegToOutput" AfterTargets="Build" Condition="Exists('..\..\vendor\ffmpeg')">
+    <ItemGroup>
+      <FfmpegOutputFiles Include="..\..\vendor\ffmpeg\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(FfmpegOutputFiles)"
+          DestinationFiles="@(FfmpegOutputFiles->'$(OutDir)ffmpeg\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
   <!-- OBS (GPLv2) and LibVLC (LGPL-2.1) are bundled in every distributed
        build; their licenses require these notices/texts to ship alongside
        the binaries. See THIRD-PARTY-LICENSES.md at the repo root. -->
