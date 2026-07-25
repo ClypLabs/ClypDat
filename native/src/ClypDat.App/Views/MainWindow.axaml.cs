@@ -443,9 +443,10 @@ public sealed partial class MainWindow : Window
     // another LayoutUpdated - without a "nothing actually changed" guard that
     // would spin forever. Keyed on everything the marker layout depends on.
     private (double Extent, double Viewport, double Track, int VisibleClips) _scrubberSignature = (-1, -1, -1, -1);
-    // Label + the content offset it points at, so scrolling can re-highlight
-    // whichever date the viewport is currently sitting on without a rebuild.
-    private readonly List<(TextBlock Label, double ContentY)> _scrubberLabels = new();
+    // Each distinct date and the content offset it starts at. Pure data - the
+    // only thing that renders is the bubble on the thumb, which looks up
+    // whichever date the viewport currently sits in.
+    private readonly List<(string Text, double ContentY)> _scrubberDates = new();
 
     private void QueueDateScrubberRebuild()
     {
@@ -472,8 +473,7 @@ public sealed partial class MainWindow : Window
         if (signature == _scrubberSignature) return;
         _scrubberSignature = signature;
 
-        DateScrubberLabelCanvas.Children.Clear();
-        _scrubberLabels.Clear();
+        _scrubberDates.Clear();
 
         UpdateDateScrubberThumb();
 
@@ -483,7 +483,6 @@ public sealed partial class MainWindow : Window
         var itemsControl = LibraryScrollViewer.Content as ItemsControl ?? LibraryScrollViewer.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault();
         if (itemsControl is null) return;
 
-        var lastLabelTop = double.NegativeInfinity;
         foreach (var container in itemsControl.GetRealizedContainers() ?? Enumerable.Empty<Control>())
         {
             if (container.DataContext is not ClipCardViewModel clip) continue;
@@ -492,50 +491,10 @@ public sealed partial class MainWindow : Window
             var offset = container.TranslatePoint(default, itemsControl);
             if (offset is null) continue;
 
-            var contentY = offset.Value.Y;
-            var top = ContentOffsetToTrackY(contentY);
-            // Labels are ~13px tall; skip any that would collide with the
-            // one above rather than drawing them on top of each other.
-            if (top - lastLabelTop < 22) continue;
-            lastLabelTop = top;
-
-            var label = new TextBlock
-            {
-                // Not clip.DateHeaderLabel ("SAT, JUL 25") - that overflows
-                // the narrow track and renders truncated. Month+day is
-                // enough to navigate by, and the full date is still on the
-                // card's own header.
-                Text = clip.CreatedAt.ToLocalTime().ToString("MMM d").ToUpperInvariant(),
-                FontSize = 9.5,
-                FontWeight = FontWeight.Bold,
-                LetterSpacing = 0.6,
-                // Brighter than a panel-backed list would need - these sit
-                // straight over clip thumbnails now.
-                Foreground = Avalonia.Media.Brush.Parse("#93A6B8"),
-                IsHitTestVisible = false,
-                // Right-aligned into a fixed column so every label ends flush
-                // against the track rather than starting ragged from the left.
-                Width = 52,
-                TextAlignment = TextAlignment.Right
-            };
-            Canvas.SetTop(label, Math.Clamp(top - 6, 0, Math.Max(0, trackHeight - 14)));
-            Canvas.SetLeft(label, 6);
-            DateScrubberLabelCanvas.Children.Add(label);
-
-            // Tick joining the label to the rail, so a date reads as pointing
-            // at a specific position rather than floating near one.
-            var tick = new Border
-            {
-                Width = 6,
-                Height = 1,
-                Background = Avalonia.Media.Brush.Parse("#6B7C8C"),
-                IsHitTestVisible = false
-            };
-            Canvas.SetTop(tick, Math.Clamp(top, 0, Math.Max(0, trackHeight - 1)));
-            Canvas.SetLeft(tick, 64);
-            DateScrubberLabelCanvas.Children.Add(tick);
-
-            _scrubberLabels.Add((label, contentY));
+            // Every date is kept (nothing is drawn per-date any more, so
+            // there's no crowding to thin out) - the bubble should be able to
+            // name whichever one the viewport actually lands on.
+            _scrubberDates.Add((clip.DateHeaderLabel, offset.Value.Y));
         }
 
         HighlightCurrentScrubberDate();
@@ -577,12 +536,11 @@ public sealed partial class MainWindow : Window
         HighlightCurrentScrubberDate();
     }
 
-    // Brightens whichever date the top of the viewport is currently inside,
-    // so the track shows where you are, not just where things are, and feeds
-    // the same date to the bubble riding next to the thumb.
+    // Feeds the bubble on the thumb whichever date the top of the viewport is
+    // currently inside.
     private void HighlightCurrentScrubberDate()
     {
-        if (_scrubberLabels.Count == 0)
+        if (_scrubberDates.Count == 0)
         {
             if (DateScrubberBubble is not null) DateScrubberBubble.Opacity = 0;
             return;
@@ -590,23 +548,15 @@ public sealed partial class MainWindow : Window
 
         var offsetY = LibraryScrollViewer.Offset.Y;
         var currentIndex = -1;
-        for (var i = 0; i < _scrubberLabels.Count; i++)
+        for (var i = 0; i < _scrubberDates.Count; i++)
         {
-            // Labels are added in content order, so the last one at or above
-            // the viewport top is the date currently on screen.
-            if (_scrubberLabels[i].ContentY <= offsetY + 1) currentIndex = i;
+            // Added in content order, so the last one at or above the
+            // viewport top is the date currently on screen.
+            if (_scrubberDates[i].ContentY <= offsetY + 1) currentIndex = i;
         }
         if (currentIndex < 0) currentIndex = 0;
 
-        for (var i = 0; i < _scrubberLabels.Count; i++)
-        {
-            var isCurrent = i == currentIndex;
-            var label = _scrubberLabels[i].Label;
-            label.Foreground = Avalonia.Media.Brush.Parse(isCurrent ? "#FFFFFF" : "#93A6B8");
-            label.FontSize = isCurrent ? 10.5 : 9.5;
-        }
-
-        if (DateScrubberBubbleText is not null) DateScrubberBubbleText.Text = _scrubberLabels[currentIndex].Label.Text;
+        if (DateScrubberBubbleText is not null) DateScrubberBubbleText.Text = _scrubberDates[currentIndex].Text;
         PositionDateScrubberBubble();
     }
 
@@ -673,9 +623,7 @@ public sealed partial class MainWindow : Window
         // The date timeline is a drag-time affordance only - it floats over
         // the library rather than reserving space, so it stays hidden until
         // there's actually a scrub in progress to label.
-        var hasDates = _scrubberLabels.Count > 0;
-        DateScrubberLabelHost.Opacity = hasDates ? 1 : 0;
-        DateScrubberBubble.Opacity = hasDates ? 1 : 0;
+        DateScrubberBubble.Opacity = _scrubberDates.Count > 0 ? 1 : 0;
         PositionDateScrubberBubble();
         e.Handled = true;
     }
@@ -710,7 +658,6 @@ public sealed partial class MainWindow : Window
         // Still under the cursor right after releasing, so settle into hover
         // rather than all the way back to idle.
         SetScrubberThumbState(hovered: DateScrubberHost.IsPointerOver, dragging: false);
-        DateScrubberLabelHost.Opacity = 0;
         DateScrubberBubble.Opacity = 0;
     }
 
