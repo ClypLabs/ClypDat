@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -12,7 +13,10 @@ public sealed record AppUpdateInfo(
     string TagName,
     string DownloadUrl,
     IReadOnlyList<string> WhatsNew,
-    IReadOnlyList<string> Fixes);
+    IReadOnlyList<string> Fixes,
+    // Lowercase hex SHA-256 of the asset as GitHub computed it, or empty when
+    // the API didn't report one (older releases predate the field).
+    string Sha256 = "");
 
 public sealed record UpdateDownloadProgress(string Status, double? Percentage, double? BytesPerSecond = null);
 
@@ -46,7 +50,7 @@ public static class AppUpdateService
         }
 
         var (whatsNew, fixes) = await LoadReleaseNotesAsync(client, latest, cancellationToken);
-        return new AppUpdateInfo(CurrentVersion, latest, release.TagName, asset.DownloadUrl, whatsNew, fixes);
+        return new AppUpdateInfo(CurrentVersion, latest, release.TagName, asset.DownloadUrl, whatsNew, fixes, ParseSha256Digest(asset.Digest));
     }
 
     public static async Task DownloadAndRestartAsync(AppUpdateInfo update, IProgress<UpdateDownloadProgress>? progress = null, CancellationToken cancellationToken = default)
@@ -81,6 +85,15 @@ public static class AppUpdateService
                     timer.Elapsed.TotalSeconds > 0 ? downloaded / timer.Elapsed.TotalSeconds : null));
             }
         }
+
+        // Verify before anything in the archive is written to disk or run. This
+        // catches a download that was truncated, corrupted in transit, or served
+        // by something that isn't the real asset. Worth being clear about what it
+        // does NOT protect against: the digest comes from the same API response as
+        // the download URL, so whoever can publish a release can publish a matching
+        // digest. Guarding against a malicious publisher needs signed releases, not
+        // a checksum.
+        await VerifyDownloadAsync(zipPath, update.Sha256, cancellationToken);
 
         progress?.Report(new UpdateDownloadProgress("Extracting update...", null));
         ZipFile.ExtractToDirectory(zipPath, extractDir);
@@ -244,6 +257,46 @@ public static class AppUpdateService
         }
     }
 
+    // GitHub reports asset digests as "sha256:<hex>". Anything else (or a
+    // missing value) is treated as "no digest available" rather than trusted.
+    internal static string ParseSha256Digest(string? digest)
+    {
+        const string prefix = "sha256:";
+        if (string.IsNullOrWhiteSpace(digest) || !digest.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return string.Empty;
+
+        var hex = digest[prefix.Length..].Trim();
+        if (hex.Length != 64 || !hex.All(Uri.IsHexDigit)) return string.Empty;
+        return hex.ToLowerInvariant();
+    }
+
+    private static async Task VerifyDownloadAsync(string zipPath, string expectedSha256, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(expectedSha256))
+        {
+            // Releases published before GitHub exposed per-asset digests have
+            // none to check. Refusing them would break updating from those
+            // builds entirely, so proceed but leave a record.
+            AppLog.Info("Update package has no published SHA-256; skipping integrity check.");
+            return;
+        }
+
+        string actual;
+        await using (var stream = File.OpenRead(zipPath))
+        {
+            var hash = await SHA256.HashDataAsync(stream, cancellationToken);
+            actual = Convert.ToHexString(hash).ToLowerInvariant();
+        }
+
+        if (!CryptographicOperations.FixedTimeEquals(Convert.FromHexString(actual), Convert.FromHexString(expectedSha256)))
+        {
+            TryDelete(zipPath);
+            AppLog.Error($"Update package SHA-256 mismatch: expected {expectedSha256}, got {actual}. Update aborted.");
+            throw new InvalidOperationException("The downloaded update failed its integrity check and was discarded.");
+        }
+
+        AppLog.Info($"Update package SHA-256 verified ({actual}).");
+    }
+
     private static string Escape(string value) => value.Replace("'", "''");
 
     private sealed record ReleaseResponse(
@@ -255,5 +308,6 @@ public static class AppUpdateService
 
     private sealed record ReleaseAsset(
         [property: JsonPropertyName("name")] string Name,
-        [property: JsonPropertyName("browser_download_url")] string DownloadUrl);
+        [property: JsonPropertyName("browser_download_url")] string DownloadUrl,
+        [property: JsonPropertyName("digest")] string? Digest = null);
 }

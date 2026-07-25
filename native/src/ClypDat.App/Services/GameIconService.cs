@@ -52,6 +52,28 @@ public static class GameIconService
 
     private static readonly HashSet<string> NetworkAttempted = new(StringComparer.OrdinalIgnoreCase);
 
+    // Icon URLs are fetched and decoded without the user ever seeing them, and
+    // one of the sources (game-icons.json) is editable outside a release. Rather
+    // than trust whatever string comes back, only fetch HTTPS from the hosts
+    // that legitimately serve this artwork. Anything else is refused and logged.
+    private static readonly string[] AllowedIconHostSuffixes =
+    {
+        "steamstatic.com",
+        "steampowered.com",
+        "githubusercontent.com"
+    };
+
+    internal static bool IsAllowedIconUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return false;
+        if (uri.Scheme != Uri.UriSchemeHttps) return false;
+
+        var host = uri.Host;
+        return AllowedIconHostSuffixes.Any(suffix =>
+            host.Equals(suffix, StringComparison.OrdinalIgnoreCase) ||
+            host.EndsWith("." + suffix, StringComparison.OrdinalIgnoreCase));
+    }
+
     /// <summary>
     /// Resolves an icon for a game from the internet, so a game only ever
     /// clipped (never seen running by this install) still gets real artwork.
@@ -101,6 +123,11 @@ public static class GameIconService
                 : await ResolveSteamAppIconAsync(client, displayName, cancellationToken);
 
             if (string.IsNullOrWhiteSpace(url)) return false;
+            if (!IsAllowedIconUrl(url))
+            {
+                AppLog.Error($"Game icon URL rejected for '{displayName}': {url}", new InvalidOperationException("Icon URL is not an allowed HTTPS source."));
+                return false;
+            }
 
             var bytes = await client.GetByteArrayAsync(url, cancellationToken);
             using var stream = new MemoryStream(bytes);
