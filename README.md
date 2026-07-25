@@ -101,12 +101,6 @@ running install via a PowerShell helper that waits for the process to exit.
   software fallback) any GPU-less machine. The OBS backend's encoder is
   still NVENC-only, with no AMD/software fallback.
 
-## Known limitations
-
-- Windows only.
-- NVENC-only encoding in the OBS backend specifically.
-- Clips on Network Drives tend to take far longer than clips on a regular drive. Working on a resolution.
-
 ## Building
 
 ```powershell
