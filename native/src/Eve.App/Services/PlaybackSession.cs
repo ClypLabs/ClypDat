@@ -77,7 +77,12 @@ public sealed class PlaybackSession : IDisposable
         _lastRequestedPosition = TimeSpan.Zero;
         _videoMedia = new Media(_libVlc, new Uri(path));
         _videoMedia.AddOption(":no-audio");
-        _videoMedia.AddOption(":avcodec-hw=d3d11va");
+        // "any" (not a hard-forced "d3d11va") lets libvlc negotiate hardware
+        // decode per-stream and fall back to software cleanly if it misbehaves -
+        // forcing d3d11va unconditionally was showing blocky macroblock
+        // corruption on some NVENC-encoded clips that play back clean in
+        // standalone VLC (which uses this same lenient default).
+        _videoMedia.AddOption(":avcodec-hw=any");
         // LibVLC already streams windowed around the playhead (it never reads
         // the whole file), but its default read-ahead cache is sized for
         // local disks - on a network drive (UNC path or mapped SMB share) the
@@ -286,6 +291,15 @@ public sealed class PlaybackSession : IDisposable
         {
             _audioOutput?.Stop();
             VideoPlayer.SetPause(true);
+            // WasapiOut's 120ms buffer (see RebuildAudioOutput) means the audio
+            // readers already got pulled ~120ms ahead of what was actually
+            // heard by the time Stop() lands - left uncorrected, that overshoot
+            // never gets reconciled on a plain resume-from-pause (only a real
+            // seek reseeks audio) and compounds by another ~120ms on every
+            // subsequent pause, drifting audio further out of sync with the
+            // video each time. Re-anchoring to the true (video) pause position
+            // here resets it every time instead of letting it accumulate.
+            SeekAudio(Position);
         }
         AppLog.Debug($"Editor pause at {Position.TotalSeconds:0.###}s.");
     }
