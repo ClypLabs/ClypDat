@@ -538,10 +538,13 @@ public sealed partial class MainWindow : Window
 
             // Every date is kept (nothing is drawn per-date any more, so
             // there's no crowding to thin out) - the bubble should be able to
-            // name whichever one the viewport actually lands on. Includes the
-            // year, unlike the card's own header, since scrubbing a long
-            // library crosses years and "JUL 25" alone is ambiguous there.
-            _scrubberDates.Add((clip.CreatedAt.ToLocalTime().ToString("MMM d, yyyy").ToUpperInvariant(), offset.Value.Y));
+            // name whichever one the viewport actually lands on. The year is
+            // only worth showing once it stops being implied: this year's
+            // clips read as "JUL 25", older ones carry the year to
+            // disambiguate.
+            var localDate = clip.CreatedAt.ToLocalTime();
+            var format = localDate.Year == DateTime.Now.Year ? "MMM d" : "MMM d, yyyy";
+            _scrubberDates.Add((localDate.ToString(format).ToUpperInvariant(), offset.Value.Y));
         }
 
         HighlightCurrentScrubberDate();
