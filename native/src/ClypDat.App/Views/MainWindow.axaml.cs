@@ -77,6 +77,12 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         UpdateViewNavButtons();
+        LibraryScrollViewer.ScrollChanged += (_, _) => UpdateDateScrubberThumb();
+        // Card visibility flips (filtering) and hydration both change the
+        // scroll extent without a size change on this window, so the marker
+        // positions have to be recomputed off layout rather than only off
+        // Window_OnSizeChanged.
+        LibraryScrollViewer.LayoutUpdated += (_, _) => QueueDateScrubberRebuild();
         _playbackTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _playbackTimer.Tick += (_, _) => SyncPlaybackPosition();
         _gameDetectionTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -413,6 +419,164 @@ public sealed partial class MainWindow : Window
                 LibraryScrollViewer.Offset = new Vector(LibraryScrollViewer.Offset.X, scrollFraction * newExtentHeight);
             });
         }
+    }
+
+    // ---- Library date scrubber ----------------------------------------
+    // Replaces the library's scrollbar with a date-marker track: labels for
+    // each distinct clip date, positioned at that date's real offset in the
+    // scroll content, plus a viewport thumb. Positions can't be derived from
+    // the data alone (a WrapPanel flows cards continuously, so a date's first
+    // card can start mid-row), so they're measured from the realized
+    // containers after layout. The ItemsControl here is non-virtualizing, so
+    // every card has a container to measure.
+    private bool _scrubberRebuildQueued;
+    private bool _draggingScrubber;
+    // RebuildDateScrubber mutates the Canvas' children, which itself triggers
+    // another LayoutUpdated - without a "nothing actually changed" guard that
+    // would spin forever. Keyed on everything the marker layout depends on.
+    private (double Extent, double Viewport, double Track, int VisibleClips) _scrubberSignature = (-1, -1, -1, -1);
+
+    private void QueueDateScrubberRebuild()
+    {
+        if (_scrubberRebuildQueued) return;
+        _scrubberRebuildQueued = true;
+        // Loaded priority so this runs after the layout pass that prompted
+        // it - measuring before that gives every card an offset of 0.
+        Dispatcher.UIThread.Post(() =>
+        {
+            _scrubberRebuildQueued = false;
+            RebuildDateScrubber();
+        }, DispatcherPriority.Loaded);
+    }
+
+    private void RebuildDateScrubber()
+    {
+        if (DateScrubberCanvas is null || ViewModel is null || !ViewModel.IsLibraryVisible) return;
+
+        var trackHeight = DateScrubberHost.Bounds.Height;
+        var extentHeight = LibraryScrollViewer.Extent.Height;
+        var viewportHeight = LibraryScrollViewer.Viewport.Height;
+
+        var signature = (extentHeight, viewportHeight, trackHeight, ViewModel.AllClips.Count(clip => clip.IsVisibleInLibrary));
+        if (signature == _scrubberSignature) return;
+        _scrubberSignature = signature;
+
+        // Remove the previous run's labels but keep the thumb (a plain child
+        // of the same Canvas) so its position/size survive a rebuild.
+        for (var i = DateScrubberCanvas.Children.Count - 1; i >= 0; i--)
+        {
+            if (!ReferenceEquals(DateScrubberCanvas.Children[i], DateScrubberThumb))
+            {
+                DateScrubberCanvas.Children.RemoveAt(i);
+            }
+        }
+
+        UpdateDateScrubberThumb();
+
+        // Nothing to scrub through - everything already fits on screen.
+        if (trackHeight <= 0 || extentHeight <= 0 || viewportHeight >= extentHeight) return;
+
+        var itemsControl = LibraryScrollViewer.Content as ItemsControl ?? LibraryScrollViewer.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault();
+        if (itemsControl is null) return;
+
+        var lastLabelTop = double.NegativeInfinity;
+        foreach (var container in itemsControl.GetRealizedContainers() ?? Enumerable.Empty<Control>())
+        {
+            if (container.DataContext is not ClipCardViewModel clip) continue;
+            if (!clip.IsFirstOfDate || !clip.IsVisibleInLibrary) continue;
+
+            var offset = container.TranslatePoint(default, itemsControl);
+            if (offset is null) continue;
+
+            var top = offset.Value.Y / extentHeight * trackHeight;
+            // Labels are ~13px tall; skip any that would collide with the
+            // one above rather than drawing them on top of each other.
+            if (top - lastLabelTop < 20) continue;
+            lastLabelTop = top;
+
+            var label = new TextBlock
+            {
+                // Not clip.DateHeaderLabel ("SAT, JUL 25") - that overflows
+                // the narrow track and renders truncated. Month+day is
+                // enough to navigate by, and the full date is still on the
+                // card's own header.
+                Text = clip.CreatedAt.ToLocalTime().ToString("MMM d").ToUpperInvariant(),
+                FontSize = 10,
+                FontWeight = FontWeight.Bold,
+                Foreground = Avalonia.Media.Brush.Parse("#5C6D7E"),
+                IsHitTestVisible = false
+            };
+            Canvas.SetTop(label, Math.Clamp(top, 0, Math.Max(0, trackHeight - 14)));
+            Canvas.SetLeft(label, 0);
+            DateScrubberCanvas.Children.Add(label);
+        }
+    }
+
+    private void UpdateDateScrubberThumb()
+    {
+        if (DateScrubberThumb is null) return;
+
+        var trackHeight = DateScrubberHost.Bounds.Height;
+        var extentHeight = LibraryScrollViewer.Extent.Height;
+        var viewportHeight = LibraryScrollViewer.Viewport.Height;
+
+        if (trackHeight <= 0 || extentHeight <= 0 || viewportHeight >= extentHeight)
+        {
+            DateScrubberThumb.IsVisible = false;
+            return;
+        }
+
+        DateScrubberThumb.IsVisible = true;
+        DateScrubberThumb.Height = Math.Max(26, viewportHeight / extentHeight * trackHeight);
+        var top = LibraryScrollViewer.Offset.Y / extentHeight * trackHeight;
+        Canvas.SetTop(DateScrubberThumb, Math.Clamp(top, 0, Math.Max(0, trackHeight - DateScrubberThumb.Height)));
+    }
+
+    private void SeekLibraryToScrubberPoint(double y)
+    {
+        var trackHeight = DateScrubberHost.Bounds.Height;
+        var extentHeight = LibraryScrollViewer.Extent.Height;
+        var viewportHeight = LibraryScrollViewer.Viewport.Height;
+        if (trackHeight <= 0 || extentHeight <= 0) return;
+
+        // Center the viewport on the clicked point rather than putting it at
+        // the very top, so dragging feels like it tracks the cursor.
+        var target = y / trackHeight * extentHeight - viewportHeight / 2;
+        LibraryScrollViewer.Offset = new Vector(
+            LibraryScrollViewer.Offset.X,
+            Math.Clamp(target, 0, Math.Max(0, extentHeight - viewportHeight)));
+        UpdateDateScrubberThumb();
+    }
+
+    private void DateScrubber_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(DateScrubberHost).Properties.IsLeftButtonPressed) return;
+        _draggingScrubber = true;
+        DateScrubberThumb.Background = Avalonia.Media.Brush.Parse("#6C7F93");
+        SeekLibraryToScrubberPoint(e.GetPosition(DateScrubberHost).Y);
+        e.Handled = true;
+    }
+
+    private void DateScrubber_OnPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (!_draggingScrubber) return;
+        SeekLibraryToScrubberPoint(e.GetPosition(DateScrubberHost).Y);
+    }
+
+    private void DateScrubber_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (!_draggingScrubber) return;
+        _draggingScrubber = false;
+        DateScrubberThumb.Background = Avalonia.Media.Brush.Parse("#4A5A6B");
+    }
+
+    private void DateScrubber_OnPointerExited(object? sender, PointerEventArgs e)
+    {
+        // Releasing outside the track still ends the drag - without this the
+        // scrubber would keep following the cursor after the button is up.
+        if (!_draggingScrubber) return;
+        _draggingScrubber = false;
+        DateScrubberThumb.Background = Avalonia.Media.Brush.Parse("#4A5A6B");
     }
 
     private async void OpenReplaySettingsButton_OnClick(object? sender, RoutedEventArgs e)
