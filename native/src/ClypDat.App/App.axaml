@@ -6,6 +6,11 @@
          Windows accent color when available (Settings > Personalization > Colors). -->
     <SolidColorBrush x:Key="AccentBrush" Color="#5864E8" />
     <SolidColorBrush x:Key="AccentBrushHover" Color="#6D77F0" />
+    <!-- Sidebar selection tints, derived from the accent above (see
+         ApplyAccentColor) so they track the Windows colour too. -->
+    <SolidColorBrush x:Key="AccentSelectedBrush" Color="#2A3350" />
+    <SolidColorBrush x:Key="AccentSelectedHoverBrush" Color="#333D5E" />
+    <SolidColorBrush x:Key="AccentSelectedIconBrush" Color="#A8B4F5" />
   </Application.Resources>
   <Application.Styles>
     <FluentTheme />

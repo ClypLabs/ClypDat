@@ -3,6 +3,7 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Reflection;
 using System.Security.Cryptography;
+using Avalonia;
 using Avalonia.Media;
 using Avalonia.Threading;
 using ClypDat.App.Services;
@@ -392,9 +393,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // otherwise whole-drive usage.
     public double LibraryStorageRingFraction => HasLibraryStorageLimit ? LibraryStorageLimitUsedFraction : LibraryDriveUsedFraction;
 
+    // Over-limit stays a fixed red - that's a warning, and it would stop
+    // reading as one if it followed the user's accent. Under the limit uses
+    // the app's accent brush, which itself tracks the Windows accent colour.
     public IBrush LibraryStorageRingBrush => IsOverLibraryStorageLimit
         ? new SolidColorBrush(Color.Parse("#E5484D"))
-        : new SolidColorBrush(Color.Parse("#5864E8"));
+        : Application.Current?.Resources["AccentBrush"] as IBrush ?? new SolidColorBrush(Color.Parse("#5864E8"));
 
     public string LibraryStorageLimitSummary
     {

@@ -111,12 +111,32 @@ public sealed partial class App : Application
     {
         if (Resources["AccentBrush"] is SolidColorBrush accentBrush) accentBrush.Color = accent;
         if (Resources["AccentBrushHover"] is SolidColorBrush hoverBrush) hoverBrush.Color = BlendWithWhite(accent, 0.18);
+
+        // Selection tints for the sidebar rail. The accent at full strength is
+        // far too loud as a backdrop behind an icon, so these are the accent
+        // mixed down into the rail's own background - which keeps them
+        // following the system colour instead of being fixed indigo shades
+        // that only happened to match the default accent.
+        if (Resources["AccentSelectedBrush"] is SolidColorBrush selectedBrush) selectedBrush.Color = BlendWith(accent, RailBackground, 0.78);
+        if (Resources["AccentSelectedHoverBrush"] is SolidColorBrush selectedHoverBrush) selectedHoverBrush.Color = BlendWith(accent, RailBackground, 0.68);
+        if (Resources["AccentSelectedIconBrush"] is SolidColorBrush selectedIconBrush) selectedIconBrush.Color = BlendWithWhite(accent, 0.55);
     }
+
+    // #0D1116 - the sidebar rail's background, which selection tints are mixed
+    // into so they read as a subtle wash rather than a solid accent block.
+    private static readonly Color RailBackground = Color.FromRgb(0x0D, 0x11, 0x16);
 
     private static Color BlendWithWhite(Color color, double amount)
     {
         byte Blend(byte channel) => (byte)(channel + (255 - channel) * amount);
         return Color.FromArgb(color.A, Blend(color.R), Blend(color.G), Blend(color.B));
+    }
+
+    // amount is how far from color toward target: 0 keeps color, 1 gives target.
+    private static Color BlendWith(Color color, Color target, double amount)
+    {
+        byte Blend(byte from, byte to) => (byte)(from + (to - from) * amount);
+        return Color.FromArgb(color.A, Blend(color.R, target.R), Blend(color.G, target.G), Blend(color.B, target.B));
     }
 
     private void InitializeTrayIcon()
