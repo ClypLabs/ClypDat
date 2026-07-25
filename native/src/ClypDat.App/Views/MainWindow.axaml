@@ -19,7 +19,13 @@
         ExtendClientAreaTitleBarHeightHint="-1"
         ExtendClientAreaChromeHints="NoChrome"
         SizeChanged="Window_OnSizeChanged">
-  <Grid RowDefinitions="48,*">
+  <!-- Margin is kept in sync with Window.OffScreenMargin in code-behind.
+       A maximized window is deliberately oversized by Windows by the
+       invisible resize-border width, which normally sits under the system
+       chrome - with ExtendClientAreaToDecorationsHint there IS no system
+       chrome, so without this the top of the header and the left of the
+       sidebar render past the screen edge. -->
+  <Grid x:Name="RootLayout" RowDefinitions="48,*">
     <Border Grid.Row="0" Background="#171F27" BorderBrush="#1E2A33" BorderThickness="0,0,0,1" PointerPressed="HeaderBar_OnPointerPressed">
       <Grid ColumnDefinitions="Auto,*,Auto,Auto" Margin="12,1,0,0" VerticalAlignment="Center">
         <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
