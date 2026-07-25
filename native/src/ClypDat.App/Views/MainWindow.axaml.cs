@@ -73,6 +73,13 @@ public sealed partial class MainWindow : Window
     private Window? _recordingPausedOverlay;
     private Window? _editorHoverControlsWindow;
     private DispatcherTimer? _hoverControlsHideTimer;
+    // The bar used to vanish the instant the cursor left the video, so
+    // clicking anything below it - the timeline, a transport button, the
+    // volume slider - made the controls disappear mid-interaction, which read
+    // as the bar being broken. It now lingers briefly after the pointer
+    // leaves, so moving from the video to a control doesn't dismiss it.
+    private static readonly TimeSpan HoverControlsGrace = TimeSpan.FromMilliseconds(1400);
+    private DateTime _hoverControlsActiveUntilUtc = DateTime.MinValue;
     public MainWindow()
     {
         InitializeComponent();
@@ -3824,6 +3831,7 @@ public sealed partial class MainWindow : Window
 
         if (overVideo || overBar)
         {
+            _hoverControlsActiveUntilUtc = DateTime.UtcNow + HoverControlsGrace;
             var window = EnsureEditorHoverControlsWindow();
             // Reposition only on the hidden->shown transition, not every poll
             // tick - repeatedly calling native SetWindowPos on a transparent/
@@ -3837,7 +3845,7 @@ public sealed partial class MainWindow : Window
                 window.Show(this);
             }
         }
-        else
+        else if (DateTime.UtcNow >= _hoverControlsActiveUntilUtc)
         {
             _editorHoverControlsWindow?.Hide();
         }

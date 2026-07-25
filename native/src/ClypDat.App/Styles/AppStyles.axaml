@@ -203,13 +203,6 @@
   <Style Selector="Button.deleteButton:pointerover">
     <Setter Property="Background" Value="#E16B6D" />
   </Style>
-  <Style Selector="Button.closeEditor">
-    <Setter Property="Background" Value="#1D2A36" />
-    <Setter Property="Foreground" Value="#D8E4F2" />
-    <Setter Property="FontWeight" Value="Bold" />
-    <Setter Property="CornerRadius" Value="7" />
-    <Setter Property="Padding" Value="12,8" />
-  </Style>
   <!--
     linkButton/brandButton/gameFilterBadge all used Padding="0" +
     Background="Transparent" on :pointerover, meaning "no visible hover pill
