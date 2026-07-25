@@ -326,6 +326,40 @@ public sealed partial class MainWindow : Window
         ViewModel?.ClearGameFilters();
     }
 
+    // Shared by the sidebar's "All Games"/per-game buttons - the "All"
+    // button has no FilterOptionViewModel DataContext (it inherits the
+    // window's own), so the cast falls through to null and clears the
+    // filter the same way a per-game click sets it.
+    private void LibraryGameSectionButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        var key = (sender as Button)?.DataContext as FilterOptionViewModel;
+        ViewModel?.SelectGameSection(key?.Key);
+    }
+
+    private void LibraryClipTypeSectionButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        var key = (sender as Button)?.DataContext as FilterOptionViewModel;
+        ViewModel?.SelectClipTypeSection(key?.Key);
+    }
+
+    private void FeedbackButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("https://github.com/Stormanzanii/ClypDat/issues") { UseShellExecute = true });
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Open feedback link failed", error);
+        }
+    }
+
+    private void LibraryStorageButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.Settings.LibraryFolder)) return;
+        ExplorerService.Open(ViewModel.Settings.LibraryFolder, selectFile: false);
+    }
+
     private async void FolderButton_OnClick(object? sender, RoutedEventArgs e)
     {
         var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
