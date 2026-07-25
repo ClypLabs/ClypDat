@@ -636,18 +636,20 @@
     <Setter Property="Background" Value="#1B2A3D" />
   </Style>
   <!-- Library sidebar's persistent icon rail (Sections/Games/bottom
-       shortcuts) - same active-state language as settingsNavButton (left
-       accent bar + tinted background) but square and icon-only instead of
-       a full-width text row, since the rail is meant to stay narrow. -->
+       shortcuts) - hover/active read as a circular backdrop behind the
+       icon (matches common dock/rail conventions) rather than a squared-off
+       tinted row, since the rail is icon-only and narrow. Button itself is
+       square so CornerRadius at exactly half its side renders a full
+       circle; centered in the 64px-wide rail via HorizontalAlignment. -->
   <Style Selector="Button.railIconButton">
     <Setter Property="Background" Value="Transparent" />
-    <Setter Property="BorderThickness" Value="3,0,0,0" />
-    <Setter Property="BorderBrush" Value="Transparent" />
-    <Setter Property="CornerRadius" Value="0,8,8,0" />
-    <Setter Property="Width" Value="64" />
-    <Setter Property="Height" Value="46" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="22" />
+    <Setter Property="Width" Value="44" />
+    <Setter Property="Height" Value="44" />
     <Setter Property="Padding" Value="0" />
-    <Setter Property="Margin" Value="0,0,0,2" />
+    <Setter Property="Margin" Value="0,0,0,4" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
     <Setter Property="Transitions">
@@ -660,14 +662,13 @@
     <Setter Property="Foreground" Value="#8C98A7" />
   </Style>
   <Style Selector="Button.railIconButton:pointerover">
-    <Setter Property="Background" Value="#182029" />
+    <Setter Property="Background" Value="#26323D" />
   </Style>
   <Style Selector="Button.railIconButton:pointerover PathIcon">
     <Setter Property="Foreground" Value="#D8E4F2" />
   </Style>
   <Style Selector="Button.railIconButton.active">
-    <Setter Property="Background" Value="#1B2A3D" />
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="Background" Value="#33414F" />
   </Style>
   <Style Selector="Button.railIconButton.active PathIcon">
     <Setter Property="Foreground" Value="#EDF4FB" />
