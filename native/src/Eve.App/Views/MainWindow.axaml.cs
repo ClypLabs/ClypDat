@@ -28,6 +28,14 @@ public sealed partial class MainWindow : Window
     private CancellationTokenSource? _editorSeekCts;
     private TimelineDragMode _timelineDragMode = TimelineDragMode.None;
     private bool _endedAtTrimBoundary;
+    // Armed whenever a play session starts at/before TrimEnd, so playback
+    // naturally running into it still auto-stops there (trim preview);
+    // disarmed when the session instead started already past TrimEnd (user
+    // explicitly seeked past it), so it can keep playing freely from there
+    // instead of getting immediately stopped on the very next tick. Set once
+    // per play session in StartPlayheadClock, the single place a play session
+    // actually begins at a given base time.
+    private bool _trimEndGuardArmed = true;
     private bool _timelineWasPlayingBeforeDrag;
     private readonly Stopwatch _playheadClock = new();
     private TimeSpan _playheadBaseTime = TimeSpan.Zero;
@@ -3282,11 +3290,21 @@ public sealed partial class MainWindow : Window
         }
         UpdateTimelineChrome();
         RefreshPausedBadge();
-        // TrimStart/TrimEnd mark the export range only - playback is free to run
-        // past either boundary in either direction so the full clip can be
-        // previewed while editing trim points. Only the real end of the
-        // underlying media stops playback here.
-        if (_playback.IsEnded)
+        // Only auto-stops at TrimEnd for a play session that started at/before
+        // it (see _trimEndGuardArmed) - a session explicitly started past
+        // TrimEnd (user seeked there and hit play) is left alone so the
+        // footage after the trim-out point can still be previewed.
+        if (_trimEndGuardArmed && ViewModel.TrimEnd > TimeSpan.Zero && ViewModel.CurrentTime >= ViewModel.TrimEnd)
+        {
+            _playback.Pause();
+            _ = _playback.SeekAsync(ViewModel.TrimEnd);
+            ViewModel.CurrentTime = ViewModel.TrimEnd;
+            SetPlayheadBase(ViewModel.CurrentTime);
+            ViewModel.IsPlaying = false;
+            _playbackTimer.Stop();
+            _endedAtTrimBoundary = true;
+        }
+        else if (_playback.IsEnded)
         {
             ViewModel.IsPlaying = false;
             _playbackTimer.Stop();
@@ -3413,6 +3431,7 @@ public sealed partial class MainWindow : Window
     private void StartPlayheadClock(TimeSpan time)
     {
         _playheadBaseTime = time < TimeSpan.Zero ? TimeSpan.Zero : time;
+        _trimEndGuardArmed = ViewModel is null || ViewModel.TrimEnd <= TimeSpan.Zero || _playheadBaseTime < ViewModel.TrimEnd;
         _playheadClock.Restart();
     }
 
