@@ -190,31 +190,50 @@
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
                     <Button Classes="railIconButton" Classes.active="{Binding IsChecked}" Click="LibraryGameSectionButton_OnClick" ToolTip.Tip="{Binding Label}">
-                      <Border Classes="gameInitialBadge" Width="30" Height="30" CornerRadius="15">
-                        <TextBlock Text="{Binding Key, Converter={x:Static opconv:FirstLetterConverter.Instance}}" FontWeight="Bold" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                      </Border>
+                      <Panel Width="30" Height="30">
+                        <!-- Initial badge is the fallback for a game whose
+                             executable icon hasn't been captured yet (it can
+                             only be read while the game is running). -->
+                        <Border Classes="gameInitialBadge" Width="30" Height="30" CornerRadius="15" IsVisible="{Binding !HasIcon}">
+                          <TextBlock Text="{Binding Key, Converter={x:Static opconv:FirstLetterConverter.Instance}}" FontWeight="Bold" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <Border Width="30" Height="30" CornerRadius="15" ClipToBounds="True" IsVisible="{Binding HasIcon}">
+                          <Image Source="{Binding Icon}" Width="26" Height="26" Stretch="Uniform" />
+                        </Border>
+                      </Panel>
                     </Button>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
 
-              <!-- Everything past the top few games, so a big library can't
-                   grow the rail taller than the window. -->
-              <Button Classes="railIconButton" IsVisible="{Binding HasOverflowGames}" ToolTip.Tip="More games">
-                <Button.Flyout>
-                  <Flyout Placement="RightEdgeAlignedTop">
-                    <ScrollViewer MaxHeight="360">
-                      <ItemsControl ItemsSource="{Binding OverflowGameFilterOptions}">
-                        <ItemsControl.ItemTemplate>
-                          <DataTemplate>
-                            <Button Classes="settingsNavButton" Classes.active="{Binding IsChecked}" Content="{Binding Label}" Click="LibraryGameSectionButton_OnClick" MinWidth="200" />
-                          </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                      </ItemsControl>
-                    </ScrollViewer>
-                  </Flyout>
-                </Button.Flyout>
-                <PathIcon Data="M7,10L12,15L17,10Z" Width="16" Height="16" />
+              <!-- Everything past the top few games stays collapsed so a big
+                   library can't grow the rail taller than the window;
+                   expanding reveals them in place as more rail icons. -->
+              <ItemsControl ItemsSource="{Binding OverflowGameFilterOptions}" IsVisible="{Binding IsGameListExpanded}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Button Classes="railIconButton" Classes.active="{Binding IsChecked}" Click="LibraryGameSectionButton_OnClick" ToolTip.Tip="{Binding Label}">
+                      <Panel Width="30" Height="30">
+                        <Border Classes="gameInitialBadge" Width="30" Height="30" CornerRadius="15" IsVisible="{Binding !HasIcon}">
+                          <TextBlock Text="{Binding Key, Converter={x:Static opconv:FirstLetterConverter.Instance}}" FontWeight="Bold" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <Border Width="30" Height="30" CornerRadius="15" ClipToBounds="True" IsVisible="{Binding HasIcon}">
+                          <Image Source="{Binding Icon}" Width="26" Height="26" Stretch="Uniform" />
+                        </Border>
+                      </Panel>
+                    </Button>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
+              <Button Classes="railIconButton"
+                      IsVisible="{Binding HasOverflowGames}"
+                      Click="ToggleGameListButton_OnClick"
+                      ToolTip.Tip="More games">
+                <Panel>
+                  <PathIcon Data="M7,10L12,15L17,10Z" Width="16" Height="16" IsVisible="{Binding !IsGameListExpanded}" />
+                  <PathIcon Data="M7,14L12,9L17,14Z" Width="16" Height="16" IsVisible="{Binding IsGameListExpanded}" />
+                </Panel>
               </Button>
             </StackPanel>
           </ScrollViewer>

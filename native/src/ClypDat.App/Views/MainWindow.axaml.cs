@@ -211,6 +211,21 @@ public sealed partial class MainWindow : Window
         ViewModel.ActiveGameDetection = detection;
         ViewModel.ActiveGame = detection.DisplayName;
 
+        // A running game is the only time its executable path is knowable, so
+        // this is where sidebar icons get harvested. Off the UI thread (it
+        // touches the filesystem) and self-throttling, so the 1s detection
+        // tick doesn't re-extract.
+        if (detection.IsDetected)
+        {
+            var iconGame = detection.DisplayName;
+            var iconPid = detection.ProcessId;
+            _ = Task.Run(() =>
+            {
+                if (!GameIconService.EnsureCached(iconGame, iconPid)) return;
+                Dispatcher.UIThread.Post(() => ViewModel?.ApplyGameIcon(iconGame));
+            });
+        }
+
         if (detection.IsDetected && _replayBuffer is { IsRecording: false } && !_replayTransitioning)
         {
             _ = StartReplayBufferAsync(showErrors: false);
@@ -363,6 +378,11 @@ public sealed partial class MainWindow : Window
         ViewModel.SelectClipTypeSection(key?.Key);
     }
 
+    private void ToggleGameListButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel?.ToggleGameListExpanded();
+    }
+
     private void FeedbackButton_OnClick(object? sender, RoutedEventArgs e)
     {
         try
@@ -496,8 +516,10 @@ public sealed partial class MainWindow : Window
 
             // Every date is kept (nothing is drawn per-date any more, so
             // there's no crowding to thin out) - the bubble should be able to
-            // name whichever one the viewport actually lands on.
-            _scrubberDates.Add((clip.DateHeaderLabel, offset.Value.Y));
+            // name whichever one the viewport actually lands on. Includes the
+            // year, unlike the card's own header, since scrubbing a long
+            // library crosses years and "JUL 25" alone is ambiguous there.
+            _scrubberDates.Add((clip.CreatedAt.ToLocalTime().ToString("MMM d, yyyy").ToUpperInvariant(), offset.Value.Y));
         }
 
         HighlightCurrentScrubberDate();
