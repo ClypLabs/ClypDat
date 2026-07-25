@@ -69,7 +69,29 @@ public static class GameIconService
 
         try
         {
-            if (File.Exists(CachePathFor(displayName))) return false;
+            var cachePath = CachePathFor(displayName);
+            if (File.Exists(cachePath)) return false;
+
+            // An installed copy is the best source there is - it's the exact
+            // icon Windows shows for the game - and it's the only one that
+            // covers Epic, Battle.net, EA, GOG and the rest, which no amount of
+            // Steam lookups will ever find.
+            var installedExecutable = InstalledGameLocator.FindExecutable(displayName);
+            if (installedExecutable is not null)
+            {
+                var installedIcon = ExtractIconBitmap(installedExecutable);
+                if (installedIcon is not null)
+                {
+                    Directory.CreateDirectory(CacheFolder);
+                    using (installedIcon)
+                    {
+                        installedIcon.Save(cachePath);
+                    }
+
+                    AppLog.Info($"Game icon taken from installed game for '{displayName}': {installedExecutable}.");
+                    return true;
+                }
+            }
 
             using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
             client.DefaultRequestHeaders.UserAgent.ParseAdd("ClypDat-GameIcons/1.0 (+https://github.com/ClypDat/ClypDat)");
