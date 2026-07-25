@@ -39,7 +39,15 @@ public sealed class PlaybackSession : IDisposable
     public PlaybackSession()
     {
         global::LibVLCSharp.Shared.Core.Initialize();
-        _libVlc = new LibVLC("--quiet");
+        // Playback runs on software decode (see LoadVideo), which is enough for
+        // a short clip on its own but has to share the machine with an active
+        // replay buffer. When the decoder falls behind, libvlc's defaults
+        // degrade picture quality to catch up - dropping late frames and
+        // skipping the in-loop deblocking filter - and that shows up as blocky,
+        // pixelated playback that standalone VLC never exhibits, because VLC
+        // decodes the same clip on the GPU and never falls behind in the first
+        // place. Prefer a late frame over a broken-looking one.
+        _libVlc = new LibVLC("--quiet", "--no-drop-late-frames", "--no-skip-frames");
         VideoPlayer = new MediaPlayer(_libVlc);
         VideoPlayer.EnableKeyInput = false;
         VideoPlayer.EnableMouseInput = false;
@@ -86,6 +94,16 @@ public sealed class PlaybackSession : IDisposable
         // GPU decode path from the equation entirely; editor clips are short
         // enough that CPU decode cost isn't a real concern.
         _videoMedia.AddOption(":avcodec-hw=none");
+        // Belt-and-braces alongside the instance-level --no-skip-frames above:
+        // these are the decoder's own quality shortcuts, and skipping the
+        // deblocking filter in particular is exactly what makes H.264 look
+        // blocky. 0 = skip nothing.
+        _videoMedia.AddOption(":avcodec-skiploopfilter=0");
+        _videoMedia.AddOption(":avcodec-skip-frame=0");
+        _videoMedia.AddOption(":avcodec-skip-idct=0");
+        // Let the decoder use every core it can rather than libvlc's
+        // conservative default, so it is less likely to fall behind at all.
+        _videoMedia.AddOption(":avcodec-threads=0");
         // LibVLC already streams windowed around the playhead (it never reads
         // the whole file), but its default read-ahead cache is sized for
         // local disks - on a network drive (UNC path or mapped SMB share) the
