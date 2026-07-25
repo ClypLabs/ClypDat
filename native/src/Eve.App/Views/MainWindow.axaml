@@ -1366,22 +1366,22 @@
                    slightly left of the actual visible video content. -->
               <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="7" Margin="41,0,0,0">
                 <Button Classes="transportButton" Click="RestartButton_OnClick">
-                  <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 5,3 L 7,3 L 7,17 L 5,17 Z M 17,4 L 17,16 L 8,10 Z" />
+                  <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
                 </Button>
                 <Button Classes="transportButton" Click="StepBackButton_OnClick">
-                  <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 15,4 L 15,16 L 6,10 Z" />
+                  <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M16 5v14L5 12Z" />
                 </Button>
                 <Button Classes="playButton" Click="PlayPauseButton_OnClick">
                   <Grid>
-                    <PathIcon Width="16" Height="16" Foreground="#DDE8F6" Data="M 7,4 L 17,10 L 7,16 Z" IsVisible="{Binding !IsPlaying}" />
-                    <PathIcon Width="16" Height="16" Foreground="#DDE8F6" Data="M 6,4 L 9,4 L 9,16 L 6,16 Z M 12,4 L 15,4 L 15,16 L 12,16 Z" IsVisible="{Binding IsPlaying}" />
+                    <PathIcon Width="16" Height="16" Foreground="#DDE8F6" Data="M8 5v14l11-7z" IsVisible="{Binding !IsPlaying}" />
+                    <PathIcon Width="16" Height="16" Foreground="#DDE8F6" Data="M6 19h4V5H6v14zm8-14v14h4V5h-4z" IsVisible="{Binding IsPlaying}" />
                   </Grid>
                 </Button>
                 <Button Classes="transportButton" Click="StepForwardButton_OnClick">
-                  <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 5,4 L 14,10 L 5,16 Z" />
+                  <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M8 5v14l11-7z" />
                 </Button>
                 <Button Classes="transportButton" Click="EndButton_OnClick">
-                  <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 15,3 L 17,3 L 17,17 L 15,17 Z M 4,4 L 13,10 L 4,16 Z" />
+                  <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
                 </Button>
                 <Button Classes="transportButton" Click="FullscreenButton_OnClick" ToolTip.Tip="Fullscreen">
                   <PathIcon Width="14" Height="14" Foreground="#C8D6E6" Data="M7,14H5v5h5v-2H7V14z M5,10h2V7h3V5H5V10z M17,17h-3v2h5v-5h-2V17z M14,5v2h3v3h2V5H14z" />
@@ -1803,22 +1803,22 @@
           <Border Background="#0B0F14" Padding="14,10">
             <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
               <Button Classes="transportButton" Click="RestartButton_OnClick" ToolTip.Tip="Restart">
-                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 5,3 L 7,3 L 7,17 L 5,17 Z M 17,4 L 17,16 L 8,10 Z" />
+                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
               </Button>
               <Button Classes="transportButton" Click="StepBackButton_OnClick" ToolTip.Tip="Step back">
-                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 15,4 L 15,16 L 6,10 Z" />
+                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M16 5v14L5 12Z" />
               </Button>
               <Button Classes="playButton" Click="PlayPauseButton_OnClick" ToolTip.Tip="Play/Pause">
                 <Grid>
-                  <PathIcon Width="16" Height="16" Foreground="#DDE8F6" Data="M 7,4 L 17,10 L 7,16 Z" IsVisible="{Binding !IsPlaying}" />
-                  <PathIcon Width="16" Height="16" Foreground="#DDE8F6" Data="M 6,4 L 9,4 L 9,16 L 6,16 Z M 12,4 L 15,4 L 15,16 L 12,16 Z" IsVisible="{Binding IsPlaying}" />
+                  <PathIcon Width="16" Height="16" Foreground="#DDE8F6" Data="M8 5v14l11-7z" IsVisible="{Binding !IsPlaying}" />
+                  <PathIcon Width="16" Height="16" Foreground="#DDE8F6" Data="M6 19h4V5H6v14zm8-14v14h4V5h-4z" IsVisible="{Binding IsPlaying}" />
                 </Grid>
               </Button>
               <Button Classes="transportButton" Click="StepForwardButton_OnClick" ToolTip.Tip="Step forward">
-                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 5,4 L 14,10 L 5,16 Z" />
+                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M8 5v14l11-7z" />
               </Button>
               <Button Classes="transportButton" Click="EndButton_OnClick" ToolTip.Tip="End">
-                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M 15,3 L 17,3 L 17,17 L 15,17 Z M 4,4 L 13,10 L 4,16 Z" />
+                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
               </Button>
               <Border Width="1" Height="20" Background="#26FFFFFF" Margin="4,0" />
               <Border Classes="muteToggle"
