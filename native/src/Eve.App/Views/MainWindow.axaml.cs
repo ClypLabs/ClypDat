@@ -74,7 +74,6 @@ public sealed partial class MainWindow : Window
     private Window? _recordingPausedOverlay;
     private Window? _editorHoverControlsWindow;
     private DispatcherTimer? _hoverControlsHideTimer;
-    private bool _editorHoverControlsPointerInside;
     public MainWindow()
     {
         InitializeComponent();
@@ -3272,44 +3271,55 @@ public sealed partial class MainWindow : Window
     // plain in-tree Avalonia overlay would never actually show above the video.
     // An owned Window (Owner = this, no Topmost) sits above it correctly while
     // staying scoped to EVE and hidden/minimized together with its owner.
+    // PointerEntered/PointerMoved/PointerExited on EditorVideoHost never fire
+    // while the cursor is actually over the video - LibVLCSharp's VideoView is
+    // a native child hwnd occupying that whole area, and Windows routes plain
+    // mouse-move input straight to that hwnd instead of through Avalonia's
+    // input pipeline (mouse WHEEL routes differently, which is why zoom-via-
+    // scroll on this same host already worked). Polling the real cursor
+    // position against the video's on-screen rect sidesteps that entirely.
     private void SetupEditorHoverControls()
     {
-        EditorVideoHost.PointerEntered += (_, _) => ShowEditorHoverControls();
-        EditorVideoHost.PointerMoved += (_, _) => ShowEditorHoverControls();
-        EditorVideoHost.PointerExited += (_, _) => ScheduleHideEditorHoverControls();
-    }
-
-    private void ShowEditorHoverControls()
-    {
-        _editorHoverControlsPointerInside = true;
-        _hoverControlsHideTimer?.Stop();
-        if (ViewModel is null || !ViewModel.IsEditorVisible || ViewModel.IsVideoFullscreen || _playback is null) return;
-
-        var window = EnsureEditorHoverControlsWindow();
-        RepositionEditorHoverControls(window);
-        if (!window.IsVisible) window.Show(this);
-    }
-
-    // Delayed instead of hiding immediately on PointerExited - the bar is a
-    // SEPARATE owned window from EditorVideoHost, so moving the mouse from the
-    // video into the bar itself fires PointerExited on EditorVideoHost a
-    // moment before PointerEntered fires on the bar. Hiding right away would
-    // make the bar flicker away just as the cursor reaches it.
-    private void ScheduleHideEditorHoverControls()
-    {
-        _editorHoverControlsPointerInside = false;
-        _hoverControlsHideTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(220) };
-        _hoverControlsHideTimer.Tick -= OnHoverControlsHideTick;
-        _hoverControlsHideTimer.Tick += OnHoverControlsHideTick;
-        _hoverControlsHideTimer.Stop();
+        _hoverControlsHideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
+        _hoverControlsHideTimer.Tick += (_, _) => PollEditorHoverControls();
         _hoverControlsHideTimer.Start();
     }
 
-    private void OnHoverControlsHideTick(object? sender, EventArgs e)
+    private void PollEditorHoverControls()
     {
-        _hoverControlsHideTimer!.Stop();
-        if (_editorHoverControlsPointerInside) return;
-        _editorHoverControlsWindow?.Hide();
+        if (ViewModel is null || !ViewModel.IsEditorVisible || ViewModel.IsVideoFullscreen || _playback is null)
+        {
+            _editorHoverControlsWindow?.Hide();
+            return;
+        }
+
+        if (!GetCursorPos(out var cursor)) return;
+
+        var videoTopLeft = EditorVideoView.PointToScreen(new Point(0, 0));
+        var videoBottomRight = EditorVideoView.PointToScreen(new Point(EditorVideoView.Bounds.Width, EditorVideoView.Bounds.Height));
+        var overVideo = cursor.X >= videoTopLeft.X && cursor.X < videoBottomRight.X
+                        && cursor.Y >= videoTopLeft.Y && cursor.Y < videoBottomRight.Y;
+
+        var overBar = false;
+        if (_editorHoverControlsWindow is { } existingBar)
+        {
+            var barPos = existingBar.Position;
+            var barWidthPx = (int)(existingBar.Width * existingBar.RenderScaling);
+            var barHeightPx = (int)(existingBar.Height * existingBar.RenderScaling);
+            overBar = cursor.X >= barPos.X && cursor.X < barPos.X + barWidthPx
+                      && cursor.Y >= barPos.Y && cursor.Y < barPos.Y + barHeightPx;
+        }
+
+        if (overVideo || overBar)
+        {
+            var window = EnsureEditorHoverControlsWindow();
+            RepositionEditorHoverControls(window);
+            if (!window.IsVisible) window.Show(this);
+        }
+        else
+        {
+            _editorHoverControlsWindow?.Hide();
+        }
     }
 
     private void RepositionEditorHoverControls(Window bar)
@@ -3456,14 +3466,18 @@ public sealed partial class MainWindow : Window
             DataContext = DataContext,
             Content = backdrop,
         };
-        window.PointerEntered += (_, _) =>
-        {
-            _editorHoverControlsPointerInside = true;
-            _hoverControlsHideTimer?.Stop();
-        };
-        window.PointerExited += (_, _) => ScheduleHideEditorHoverControls();
         _editorHoverControlsWindow = window;
         return window;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out CursorPoint point);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private readonly struct CursorPoint
+    {
+        public readonly int X;
+        public readonly int Y;
     }
 
     // Recomputes the "Playback Paused" badge for the CURRENT position. Must
