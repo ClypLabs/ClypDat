@@ -636,17 +636,16 @@
     <Setter Property="Background" Value="#1B2A3D" />
   </Style>
   <!-- Library sidebar's persistent icon rail (Sections/Games/bottom
-       shortcuts) - hover/active read as a circular backdrop behind the
-       icon (matches common dock/rail conventions) rather than a squared-off
-       tinted row, since the rail is icon-only and narrow. Button itself is
-       square so CornerRadius at exactly half its side renders a full
-       circle; centered in the 64px-wide rail via HorizontalAlignment. -->
-  <!-- Left-aligned with an explicit 8px margin rather than centered: the
+       shortcuts). Hover/active read as a circular backdrop behind the icon
+       (common dock/rail convention) rather than a squared-off tinted row,
+       since the rail is icon-only and narrow - the button is square so
+       CornerRadius at half its side renders a true circle.
+
+       Left-aligned with an explicit 8px margin rather than centered: the
        rail is 64 wide and the button 44, so dead-center would be 10 - 8
        shifts the whole control (hover circle AND the icon inside it) 2px
        left as one unit. Nudging the icon's own Margin instead left it
-       off-center inside its own hover circle, which is what read as
-       "icons aren't aligned, including on hover". -->
+       off-center inside its own hover circle. -->
   <Style Selector="Button.railIconButton">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
@@ -658,29 +657,49 @@
     <Setter Property="HorizontalAlignment" Value="Left" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="RenderTransform" Value="scale(1)" />
     <Setter Property="Transitions">
       <Transitions>
-        <BrushTransition Property="Background" Duration="0:0:0.1" />
+        <BrushTransition Property="Background" Duration="0:0:0.13" />
+        <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.13" />
       </Transitions>
     </Setter>
   </Style>
   <Style Selector="Button.railIconButton PathIcon">
     <Setter Property="Foreground" Value="#8C98A7" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Foreground" Duration="0:0:0.13" />
+      </Transitions>
+    </Setter>
   </Style>
   <Style Selector="Button.railIconButton:pointerover">
-    <Setter Property="Background" Value="#26323D" />
+    <Setter Property="Background" Value="#232F3A" />
   </Style>
   <Style Selector="Button.railIconButton:pointerover PathIcon">
     <Setter Property="Foreground" Value="#D8E4F2" />
   </Style>
+  <!-- Presses shrink slightly so a click registers physically even though
+       nothing else about the button moves. -->
+  <Style Selector="Button.railIconButton:pressed">
+    <Setter Property="RenderTransform" Value="scale(0.92)" />
+  </Style>
+  <!-- Selection is accent-tinted rather than another shade of grey, so the
+       current section stands out against a merely-hovered one. -->
   <Style Selector="Button.railIconButton.active">
-    <Setter Property="Background" Value="#33414F" />
+    <Setter Property="Background" Value="#2A3350" />
   </Style>
   <Style Selector="Button.railIconButton.active PathIcon">
-    <Setter Property="Foreground" Value="#EDF4FB" />
+    <Setter Property="Foreground" Value="#A8B4F5" />
+  </Style>
+  <Style Selector="Button.railIconButton.active:pointerover">
+    <Setter Property="Background" Value="#333D5E" />
   </Style>
   <Style Selector="Button.railIconButton Border.gameInitialBadge">
     <Setter Property="Background" Value="#26323D" />
+  </Style>
+  <Style Selector="Button.railIconButton:pointerover Border.gameInitialBadge">
+    <Setter Property="Background" Value="#31404D" />
   </Style>
   <Style Selector="Button.railIconButton.active Border.gameInitialBadge">
     <Setter Property="Background" Value="{StaticResource AccentBrush}" />
@@ -689,7 +708,7 @@
     <Setter Property="Foreground" Value="#B8C7D8" />
   </Style>
   <Style Selector="Button.railIconButton.active Border.gameInitialBadge TextBlock">
-    <Setter Property="Foreground" Value="#0D1116" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
   <!-- Shared by every volume slider - per-track lanes AND both master
        volume controls (regular editor + fullscreen) - so all three look and
