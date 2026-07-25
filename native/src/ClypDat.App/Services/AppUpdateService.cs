@@ -22,7 +22,7 @@ public static class AppUpdateService
     // (a zip of the published win-x64-folder contents) is expected to attach an asset
     // with exactly this name.
     private const string ExpectedAssetName = "ClypDat-win-x64.zip";
-    private const string UpstreamOwner = "Stormanzanii";
+    private const string UpstreamOwner = "ClypDat";
     private const string UpstreamRepository = "ClypDat";
     private const string LatestReleaseUrl = $"https://api.github.com/repos/{UpstreamOwner}/{UpstreamRepository}/releases/latest";
     private const string ReleasesUrl = $"https://api.github.com/repos/{UpstreamOwner}/{UpstreamRepository}/releases?per_page=100";
