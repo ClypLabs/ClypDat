@@ -5,6 +5,10 @@ namespace ClypDat.Core.Settings;
 public sealed class AppSettings
 {
     public string LibraryFolder { get; set; } = string.Empty;
+    // 0 = no limit, same convention as FullSessionQuotaGb. A soft target the
+    // sidebar's storage ring fills against and warns past - nothing deletes
+    // clips to enforce it.
+    public int LibraryStorageLimitGb { get; set; }
     // Standard preserves the filename layout used before filename schemes were
     // configurable.  The custom template is deliberately kept separately so a
     // user can switch presets without losing their work-in-progress template.

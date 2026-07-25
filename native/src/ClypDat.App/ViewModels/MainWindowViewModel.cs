@@ -3,6 +3,7 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Reflection;
 using System.Security.Cryptography;
+using Avalonia.Media;
 using Avalonia.Threading;
 using ClypDat.App.Services;
 using ClypDat.Core.Settings;
@@ -305,13 +306,115 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string LibraryDriveUsedPercentDisplay => HasDriveStats
         ? $"{(int)Math.Round((DriveStats.Total - DriveStats.Free) * 100.0 / DriveStats.Total)}% used"
         : string.Empty;
-    // Ring in the sidebar always has something meaningful to show (unlike
-    // the old "set your own GB target" version, which was just an empty
-    // outline until a user configured it) - overall disk usage fraction,
-    // same number as LibraryDriveUsedPercentDisplay above.
     public double LibraryDriveUsedFraction => HasDriveStats
         ? Math.Clamp((DriveStats.Total - DriveStats.Free) / (double)DriveStats.Total, 0, 1)
         : 0;
+
+    // ---- Library storage limit ----------------------------------------
+    // Optional soft cap on the library's own size. With one set, the sidebar
+    // ring fills against it (that's the number the user actually cares about
+    // once they've chosen one); with no limit it falls back to showing whole-
+    // drive usage so the ring is never just an empty outline.
+    private const long BytesPerGb = 1_073_741_824;
+
+    public sealed record StorageLimitOption(string Label, int Gb);
+
+    public IReadOnlyList<StorageLimitOption> LibraryStorageLimitOptions { get; } = new StorageLimitOption[]
+    {
+        new("No limit", 0),
+        new("25 GB", 25),
+        new("50 GB", 50),
+        new("100 GB", 100),
+        new("250 GB", 250),
+        new("500 GB", 500),
+        new("1 TB", 1024),
+        new("Custom", -1)
+    };
+
+    private bool _customLibraryStorageLimitSelected;
+
+    public StorageLimitOption SelectedLibraryStorageLimit
+    {
+        get
+        {
+            if (IsCustomLibraryStorageLimit) return LibraryStorageLimitOptions[^1];
+            return LibraryStorageLimitOptions.FirstOrDefault(option => option.Gb == Settings.LibraryStorageLimitGb) ?? LibraryStorageLimitOptions[0];
+        }
+        set
+        {
+            if (value.Gb < 0)
+            {
+                _customLibraryStorageLimitSelected = true;
+                if (Settings.LibraryStorageLimitGb <= 0) Settings.LibraryStorageLimitGb = 100;
+            }
+            else
+            {
+                _customLibraryStorageLimitSelected = false;
+                Settings.LibraryStorageLimitGb = value.Gb;
+            }
+
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsCustomLibraryStorageLimit));
+            OnPropertyChanged(nameof(CustomLibraryStorageLimitGb));
+            NotifyStorageChrome();
+            SaveSettings();
+        }
+    }
+
+    // Custom is active when explicitly picked, or when a saved value doesn't
+    // match any preset (a previous custom number surviving a restart).
+    public bool IsCustomLibraryStorageLimit =>
+        _customLibraryStorageLimitSelected ||
+        (Settings.LibraryStorageLimitGb > 0 && LibraryStorageLimitOptions.All(option => option.Gb != Settings.LibraryStorageLimitGb));
+
+    public string CustomLibraryStorageLimitGb
+    {
+        get => Settings.LibraryStorageLimitGb > 0 ? Settings.LibraryStorageLimitGb.ToString() : string.Empty;
+        set
+        {
+            if (!int.TryParse(value, out var gb)) return;
+            Settings.LibraryStorageLimitGb = Math.Clamp(gb, 1, 1_000_000);
+            OnPropertyChanged();
+            NotifyStorageChrome();
+            SaveSettings();
+        }
+    }
+
+    public bool HasLibraryStorageLimit => Settings.LibraryStorageLimitGb > 0;
+    private long LibraryStorageLimitBytes => Settings.LibraryStorageLimitGb * BytesPerGb;
+    public bool IsOverLibraryStorageLimit => HasLibraryStorageLimit && LibraryUsedBytes > LibraryStorageLimitBytes;
+
+    public double LibraryStorageLimitUsedFraction => HasLibraryStorageLimit
+        ? Math.Clamp(LibraryUsedBytes / (double)LibraryStorageLimitBytes, 0, 1)
+        : 0;
+
+    // What the sidebar ring actually draws: the limit when there is one,
+    // otherwise whole-drive usage.
+    public double LibraryStorageRingFraction => HasLibraryStorageLimit ? LibraryStorageLimitUsedFraction : LibraryDriveUsedFraction;
+
+    public IBrush LibraryStorageRingBrush => IsOverLibraryStorageLimit
+        ? new SolidColorBrush(Color.Parse("#E5484D"))
+        : new SolidColorBrush(Color.Parse("#5864E8"));
+
+    public string LibraryStorageLimitSummary
+    {
+        get
+        {
+            if (!HasLibraryStorageLimit) return "No limit";
+            var percent = (int)Math.Round(LibraryUsedBytes * 100.0 / LibraryStorageLimitBytes);
+            return $"{FormatBytes(LibraryUsedBytes)} of {Settings.LibraryStorageLimitGb} GB ({percent}%)";
+        }
+    }
+
+    private void NotifyStorageChrome()
+    {
+        OnPropertyChanged(nameof(HasLibraryStorageLimit));
+        OnPropertyChanged(nameof(IsOverLibraryStorageLimit));
+        OnPropertyChanged(nameof(LibraryStorageLimitUsedFraction));
+        OnPropertyChanged(nameof(LibraryStorageRingFraction));
+        OnPropertyChanged(nameof(LibraryStorageRingBrush));
+        OnPropertyChanged(nameof(LibraryStorageLimitSummary));
+    }
     public double LibraryUsedFractionOfDrive => HasDriveStats ? Math.Clamp(LibraryUsedBytes / (double)DriveStats.Total, 0, 1) : 0;
     public double LibraryOtherUsedFractionOfDrive => HasDriveStats
         ? Math.Clamp((DriveStats.Total - DriveStats.Free - LibraryUsedBytes) / (double)DriveStats.Total, 0, 1)
@@ -3667,6 +3770,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(LibraryClipsUsageDisplay));
         OnPropertyChanged(nameof(LibraryOtherUsageDisplay));
         OnPropertyChanged(nameof(LibraryPossibleClipsDisplay));
+        NotifyStorageChrome();
         NotifySelectionChrome();
         RecomputeGameFilterBadges();
         UpdateFirstOfDateFlags();
