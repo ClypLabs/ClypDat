@@ -3282,17 +3282,11 @@ public sealed partial class MainWindow : Window
         }
         UpdateTimelineChrome();
         RefreshPausedBadge();
-        if (ViewModel.TrimEnd > TimeSpan.Zero && ViewModel.CurrentTime >= ViewModel.TrimEnd)
-        {
-            _playback.Pause();
-            _ = _playback.SeekAsync(ViewModel.TrimEnd);
-            ViewModel.CurrentTime = ViewModel.TrimEnd;
-            SetPlayheadBase(ViewModel.CurrentTime);
-            ViewModel.IsPlaying = false;
-            _playbackTimer.Stop();
-            _endedAtTrimBoundary = true;
-        }
-        else if (_playback.IsEnded)
+        // TrimStart/TrimEnd mark the export range only - playback is free to run
+        // past either boundary in either direction so the full clip can be
+        // previewed while editing trim points. Only the real end of the
+        // underlying media stops playback here.
+        if (_playback.IsEnded)
         {
             ViewModel.IsPlaying = false;
             _playbackTimer.Stop();
