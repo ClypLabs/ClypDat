@@ -1159,6 +1159,59 @@ public sealed partial class MainWindow : Window
         await ViewModel.RenameAllClipsAsync();
     }
 
+    // Custom title bar (native caption buttons removed via
+    // ExtendClientAreaChromeHints="NoChrome") - clicking anywhere else in
+    // the header bar drags the window, matching native title bar behavior;
+    // a second click within Avalonia's double-click window toggles
+    // maximize instead, same as double-clicking a native title bar.
+    private void HeaderBar_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
+        if (e.ClickCount == 2)
+        {
+            ToggleMaximizeRestore();
+            return;
+        }
+        BeginMoveDrag(e);
+    }
+
+    private void MinimizeButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        WindowState = WindowState.Minimized;
+    }
+
+    private void MaximizeRestoreButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ToggleMaximizeRestore();
+    }
+
+    private void ToggleMaximizeRestore()
+    {
+        WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+    }
+
+    private void CloseWindowButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        Close();
+    }
+
+    // Keeps the custom maximize/restore glyph in sync however WindowState
+    // changes - the button itself, the double-click-header shortcut above,
+    // OS-level snap/restore, and ApplySavedWindowBounds restoring a
+    // maximized state on startup all go through this same property.
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property == WindowStateProperty && MaximizeRestoreButton?.Content is PathIcon icon)
+        {
+            var isMaximized = WindowState == WindowState.Maximized;
+            icon.Data = Geometry.Parse(isMaximized
+                ? "M19,5H8C6.9,5,6,5.9,6,7v14c0,1.1,0.9,2,2,2h11c1.1,0,2-0.9,2-2V7C21,5.9,20.1,5,19,5z M19,21H8V7h11V21z M16,1H4C2.9,1,2,1.9,2,3v14h2V3h12V1z"
+                : "M18,4H6C4.9,4,4,4.9,4,6v12c0,1.1,0.9,2,2,2h12c1.1,0,2-0.9,2-2V6C20,4.9,19.1,4,18,4z M18,18H6V6h12V18z");
+            ToolTip.SetTip(MaximizeRestoreButton, isMaximized ? "Restore" : "Maximize");
+        }
+    }
+
     private WindowState _preFullscreenWindowState = WindowState.Normal;
 
     private void FullscreenButton_OnClick(object? sender, RoutedEventArgs e)
@@ -1537,12 +1590,6 @@ public sealed partial class MainWindow : Window
         {
             AppLog.Error($"Open license link failed: {url}", error);
         }
-    }
-
-    private void LibraryPathButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.Settings.LibraryFolder)) return;
-        ExplorerService.Open(ViewModel.Settings.LibraryFolder, selectFile: false);
     }
 
     private void EditorPathButton_OnClick(object? sender, RoutedEventArgs e)
