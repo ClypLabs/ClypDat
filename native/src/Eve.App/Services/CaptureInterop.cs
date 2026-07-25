@@ -81,7 +81,7 @@ internal static unsafe class CaptureInterop
         try
         {
             var accessIid = Direct3DDxgiInterfaceAccessIid;
-            Marshal.ThrowExceptionForHR(Marshal.QueryInterface(surfacePointer, ref accessIid, out var accessPointer));
+            Marshal.ThrowExceptionForHR(Marshal.QueryInterface(surfacePointer, in accessIid, out var accessPointer));
             try
             {
                 // IDirect3DDxgiInterfaceAccess vtable: 0=QueryInterface, 1=AddRef, 2=Release,

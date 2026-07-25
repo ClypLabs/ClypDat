@@ -2261,7 +2261,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         var multithreadPtr = IntPtr.Zero;
         try
         {
-            var hr = Marshal.QueryInterface(device.NativePointer, ref multithreadIid, out multithreadPtr);
+            var hr = Marshal.QueryInterface(device.NativePointer, in multithreadIid, out multithreadPtr);
             if (hr != 0 || multithreadPtr == IntPtr.Zero)
             {
                 AppLog.Info($"Native capture: D3D11 device does not support ID3D10Multithread (hr={hr}), continuing without it.");
