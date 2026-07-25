@@ -76,6 +76,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        UpdateViewNavButtons();
         _playbackTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _playbackTimer.Tick += (_, _) => SyncPlaybackPosition();
         _gameDetectionTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -103,6 +104,7 @@ public sealed partial class MainWindow : Window
                     if (e.PropertyName == nameof(MainWindowViewModel.AutoClippingEnabled)) UpdateAutoClipStates();
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
+                    if (e.PropertyName == nameof(MainWindowViewModel.IsSettingsVisible)) OnViewHistoryStateChanged();
                 };
                 foreach (var autoClipGame in ViewModel.AutoClipGames)
                 {
@@ -1228,6 +1230,63 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // Back/Forward header nav (Library <-> Settings only - Editor has its
+    // own dedicated close button and can't be generically "re-entered" via
+    // history since it needs a specific clip, not just a view flag). true =
+    // Settings was showing at that point in history, false = Library.
+    private readonly List<bool> _viewHistory = new() { false };
+    private int _viewHistoryIndex;
+    private bool _navigatingViewHistory;
+
+    private void OnViewHistoryStateChanged()
+    {
+        if (_navigatingViewHistory || ViewModel is null) return;
+        var isSettings = ViewModel.IsSettingsVisible;
+        if (_viewHistory[_viewHistoryIndex] == isSettings) return;
+
+        _viewHistory.RemoveRange(_viewHistoryIndex + 1, _viewHistory.Count - _viewHistoryIndex - 1);
+        _viewHistory.Add(isSettings);
+        _viewHistoryIndex++;
+        UpdateViewNavButtons();
+    }
+
+    private void UpdateViewNavButtons()
+    {
+        BackNavButton.IsEnabled = _viewHistoryIndex > 0;
+        ForwardNavButton.IsEnabled = _viewHistoryIndex < _viewHistory.Count - 1;
+    }
+
+    private void ApplyViewHistoryEntry()
+    {
+        if (ViewModel is null) return;
+        _navigatingViewHistory = true;
+        try
+        {
+            var wantsSettings = _viewHistory[_viewHistoryIndex];
+            if (wantsSettings && !ViewModel.IsSettingsVisible) ViewModel.OpenSettings();
+            else if (!wantsSettings && ViewModel.IsSettingsVisible) ViewModel.CloseSettings();
+        }
+        finally
+        {
+            _navigatingViewHistory = false;
+        }
+        UpdateViewNavButtons();
+    }
+
+    private void BackNavButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (_viewHistoryIndex <= 0) return;
+        _viewHistoryIndex--;
+        ApplyViewHistoryEntry();
+    }
+
+    private void ForwardNavButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (_viewHistoryIndex >= _viewHistory.Count - 1) return;
+        _viewHistoryIndex++;
+        ApplyViewHistoryEntry();
+    }
+
     private WindowState _preFullscreenWindowState = WindowState.Normal;
 
     private void FullscreenButton_OnClick(object? sender, RoutedEventArgs e)
@@ -1347,11 +1406,6 @@ public sealed partial class MainWindow : Window
         await ViewModel.RefreshOpenProcessesAsync();
     }
 
-
-    private void CloseSettingsButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        ViewModel?.CloseSettings();
-    }
 
     private void SettingsNavButton_OnClick(object? sender, RoutedEventArgs e)
     {

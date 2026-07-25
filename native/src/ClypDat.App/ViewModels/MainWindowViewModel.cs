@@ -273,40 +273,67 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string LibraryLocationText => $"Location: {LibraryFolderDisplay}";
     private long LibraryUsedBytes => AllClips.Sum(clip => clip.SizeBytes);
     public string LibrarySizeDisplay => FormatBytes(LibraryUsedBytes);
-    public bool HasLibraryStorageLimit => Settings.LibraryStorageLimitGb > 0;
-    public string LibraryStorageLimitDisplay => HasLibraryStorageLimit ? $"of {Settings.LibraryStorageLimitGb} GB" : "No Limit";
-    public double LibraryStorageUsedFraction => HasLibraryStorageLimit
-        ? Math.Clamp(LibraryUsedBytes / (Settings.LibraryStorageLimitGb * 1_073_741_824.0), 0, 1)
-        : 0;
 
-    // 0/blank = No Limit - same "empty field = unlimited" convention as
-    // CustomFullSessionQuotaGb below, just for the library's total size
-    // instead of a single Full Session recording's quota.
-    public string LibraryStorageLimitGbText
+    // Real disk stats for the library folder's drive, queried fresh each
+    // access (cheap - a single DriveInfo lookup) rather than cached, since
+    // free space drifts over time and this is only read when the storage
+    // flyout is actually open. Network drives / a not-yet-chosen folder
+    // just fall back to (0, 0) - HasDriveStats gates the flyout's content
+    // on that instead of showing a nonsense "0 B free of 0 B".
+    private (long Total, long Free) DriveStats
     {
-        get => Settings.LibraryStorageLimitGb > 0 ? Settings.LibraryStorageLimitGb.ToString() : string.Empty;
-        set
+        get
         {
-            if (string.IsNullOrWhiteSpace(value))
+            try
             {
-                Settings.LibraryStorageLimitGb = 0;
+                var folder = Settings.LibraryFolder;
+                if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) return (0, 0);
+                var drive = new DriveInfo(Path.GetPathRoot(folder) ?? folder);
+                return (drive.TotalSize, drive.AvailableFreeSpace);
             }
-            else if (int.TryParse(value, out var gb))
+            catch
             {
-                Settings.LibraryStorageLimitGb = Math.Clamp(gb, 0, 100_000);
+                return (0, 0);
             }
-            else
-            {
-                return;
-            }
-
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(HasLibraryStorageLimit));
-            OnPropertyChanged(nameof(LibraryStorageLimitDisplay));
-            OnPropertyChanged(nameof(LibraryStorageUsedFraction));
-            SaveSettings();
         }
     }
+
+    public bool HasDriveStats => DriveStats.Total > 0;
+    public string LibraryDriveFreeOfTotalDisplay => HasDriveStats
+        ? $"{FormatBytes(DriveStats.Free)} free of {FormatBytes(DriveStats.Total)}"
+        : "Unavailable";
+    public string LibraryDriveUsedPercentDisplay => HasDriveStats
+        ? $"{(int)Math.Round((DriveStats.Total - DriveStats.Free) * 100.0 / DriveStats.Total)}% used"
+        : string.Empty;
+    // Ring in the sidebar always has something meaningful to show (unlike
+    // the old "set your own GB target" version, which was just an empty
+    // outline until a user configured it) - overall disk usage fraction,
+    // same number as LibraryDriveUsedPercentDisplay above.
+    public double LibraryDriveUsedFraction => HasDriveStats
+        ? Math.Clamp((DriveStats.Total - DriveStats.Free) / (double)DriveStats.Total, 0, 1)
+        : 0;
+    public double LibraryUsedFractionOfDrive => HasDriveStats ? Math.Clamp(LibraryUsedBytes / (double)DriveStats.Total, 0, 1) : 0;
+    public double LibraryOtherUsedFractionOfDrive => HasDriveStats
+        ? Math.Clamp((DriveStats.Total - DriveStats.Free - LibraryUsedBytes) / (double)DriveStats.Total, 0, 1)
+        : 0;
+    public string LibraryClipsUsageDisplay => $"ClypDat clips: {FormatBytes(LibraryUsedBytes)} ({AllClips.Count} clips)";
+    public string LibraryOtherUsageDisplay => HasDriveStats
+        ? $"Rest of PC: {FormatBytes(Math.Max(0, DriveStats.Total - DriveStats.Free - LibraryUsedBytes))}"
+        : string.Empty;
+    // Rough "how many more clips could fit" estimate from this library's
+    // own average clip size - meaningless with zero clips to average from.
+    public string LibraryPossibleClipsDisplay
+    {
+        get
+        {
+            if (!HasDriveStats || AllClips.Count == 0) return string.Empty;
+            var averageBytes = LibraryUsedBytes / (double)AllClips.Count;
+            if (averageBytes <= 0) return string.Empty;
+            var possible = (long)(DriveStats.Free / averageBytes);
+            return $"Possible number of clips: ~{possible:N0}";
+        }
+    }
+
     public string HotkeyDisplay => IsCapturingHotkey ? "Press keys..." : Settings.SaveReplayHotkey;
 
     public int SelectedCount => _selectedPaths.Count;
@@ -314,7 +341,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool HasNoSelection => !HasSelection;
     public bool ShowLibraryActions => HasNoSelection && IsLibraryVisible;
     public bool ShowLibraryStatus => IsLibraryVisible;
-    public bool ShowSettingsClose => IsSettingsVisible;
 
     // Drives the "Building your library..." banner - HydrateLibraryClipsAsync
     // (one clip's ffprobe/thumbnail at a time, see its ParallelOptions) can
@@ -512,7 +538,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsLibraryVisible));
             OnPropertyChanged(nameof(ShowLibraryActions));
             OnPropertyChanged(nameof(ShowLibraryStatus));
-            OnPropertyChanged(nameof(ShowSettingsClose));
         }
     }
 
@@ -3627,7 +3652,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(LibraryFolderDisplay));
         OnPropertyChanged(nameof(LibraryLocationText));
         OnPropertyChanged(nameof(LibrarySizeDisplay));
-        OnPropertyChanged(nameof(LibraryStorageUsedFraction));
+        OnPropertyChanged(nameof(HasDriveStats));
+        OnPropertyChanged(nameof(LibraryDriveFreeOfTotalDisplay));
+        OnPropertyChanged(nameof(LibraryDriveUsedPercentDisplay));
+        OnPropertyChanged(nameof(LibraryDriveUsedFraction));
+        OnPropertyChanged(nameof(LibraryUsedFractionOfDrive));
+        OnPropertyChanged(nameof(LibraryOtherUsedFractionOfDrive));
+        OnPropertyChanged(nameof(LibraryClipsUsageDisplay));
+        OnPropertyChanged(nameof(LibraryOtherUsageDisplay));
+        OnPropertyChanged(nameof(LibraryPossibleClipsDisplay));
         NotifySelectionChrome();
         RecomputeGameFilterBadges();
         UpdateFirstOfDateFlags();
