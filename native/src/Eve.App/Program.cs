@@ -1,5 +1,6 @@
 using Avalonia;
 using Eve.App.Services;
+using SQLitePCL;
 
 namespace Eve.App;
 
@@ -20,6 +21,12 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        // Routes Microsoft.Data.Sqlite (MedalImportService's read-only import)
+        // through Windows' own winsqlite3.dll instead of a bundled native
+        // SQLite binary - see the SQLitePCLRaw.provider.winsqlite3 PackageReference
+        // comment in Eve.App.csproj for why.
+        raw.SetProvider(new SQLite3Provider_winsqlite3());
+
         var singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out var createdNew);
         // RestartAppButton_OnClick (MainWindow.axaml.cs) launches the new
         // process BEFORE the old one exits, so this can lose the mutex race

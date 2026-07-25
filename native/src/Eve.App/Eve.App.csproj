@@ -49,7 +49,13 @@
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.13" />
     <PackageReference Include="LibVLCSharp.Avalonia" Version="3.10.0" />
     <PackageReference Include="NAudio" Version="2.2.1" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.11" />
+    <!-- .Core (not the full Microsoft.Data.Sqlite) so it doesn't drag in
+         SQLitePCLRaw.bundle_e_sqlite3's bundled native binary, which has an
+         unpatched high-severity NuGet advisory (GHSA-2m69-gcr7-jv3q) with no
+         fixed version available. winsqlite3 below points it at Windows'
+         own SQLite (ships with Win10+, patched via Windows Update) instead. -->
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="8.0.11" />
+    <PackageReference Include="SQLitePCLRaw.provider.winsqlite3" Version="3.0.4" />
     <PackageReference Include="ScreenRecorderLib" Version="6.6.0" />
     <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" GeneratePathProperty="true" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
