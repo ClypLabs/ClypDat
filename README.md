@@ -1,4 +1,4 @@
-# ClypDat - Easy Video Editor
+# ClypDat
 
 ClypDat records a rolling buffer of gameplay on Windows and saves the last N
 seconds to a file when you press a hotkey. It also has a built-in editor for
@@ -62,12 +62,6 @@ scanning Medal's default clips folder directly so nothing gets lost.
 Medal's auto-generated "{date} - {time} - {game}" names are parsed back
 into the real game name and recording date instead of being used verbatim,
 and imported cards show "Imported from Medal".
-
-## First-time setup
-
-A one-time interactive setup wizard runs on first launch (library
-folder, hotkey, replay length, capture backend, audio) and can be
-replayed any time from Settings > About > Show Walkthrough.
 
 ## Editor
 
