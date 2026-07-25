@@ -206,6 +206,9 @@ public sealed partial class MainWindow : Window
         // click on a non-focusable area (e.g. a thumbnail, plain text) would
         // otherwise leave the box open with focus untouched.
         AddHandler(PointerPressedEvent, ClipTitleEdit_OnAnyPointerPressed, RoutingStrategies.Tunnel);
+        // Covers the Settings page's own hotkey button, which lives in this
+        // window rather than a popup.
+        AddHandler(PointerPressedEvent, HotkeyCapture_OnAnyPointerPressed, RoutingStrategies.Tunnel);
     }
 
     private MainWindowViewModel? ViewModel => DataContext as MainWindowViewModel;
@@ -2095,6 +2098,9 @@ public sealed partial class MainWindow : Window
             _hotkeyCaptureTopLevel = buttonTopLevel;
             buttonTopLevel.AddHandler(KeyDownEvent, MainWindow_OnKeyDown, RoutingStrategies.Tunnel);
             buttonTopLevel.AddHandler(KeyUpEvent, MainWindow_OnKeyUp, RoutingStrategies.Tunnel);
+            // Clicks inside the flyout don't reach this window either, so the
+            // cancel-on-click-away handler has to live on the popup too.
+            buttonTopLevel.AddHandler(PointerPressedEvent, HotkeyCapture_OnAnyPointerPressed, RoutingStrategies.Tunnel);
         }
         else
         {
@@ -2118,6 +2124,16 @@ public sealed partial class MainWindow : Window
         EndHotkeyCapture();
     }
 
+    // Clicking anywhere else abandons capture, leaving the existing hotkey
+    // untouched. Safe against the click that starts capture: Click fires after
+    // PointerPressed, so capture isn't armed yet when that press is seen.
+    private void HotkeyCapture_OnAnyPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (ViewModel?.IsCapturingHotkey != true) return;
+        AppLog.Debug("Hotkey capture cancelled - clicked away.");
+        EndHotkeyCapture();
+    }
+
     // Detaches the popup handlers and disarms capture. Safe to call when
     // capture was never started.
     private void EndHotkeyCapture()
@@ -2127,6 +2143,7 @@ public sealed partial class MainWindow : Window
         {
             _hotkeyCaptureTopLevel.RemoveHandler(KeyDownEvent, MainWindow_OnKeyDown);
             _hotkeyCaptureTopLevel.RemoveHandler(KeyUpEvent, MainWindow_OnKeyUp);
+            _hotkeyCaptureTopLevel.RemoveHandler(PointerPressedEvent, HotkeyCapture_OnAnyPointerPressed);
             _hotkeyCaptureTopLevel = null;
         }
 
