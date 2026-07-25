@@ -211,20 +211,7 @@ public sealed partial class MainWindow : Window
         ViewModel.ActiveGameDetection = detection;
         ViewModel.ActiveGame = detection.DisplayName;
 
-        // A running game is the only time its executable path is knowable, so
-        // this is where sidebar icons get harvested. Off the UI thread (it
-        // touches the filesystem) and self-throttling, so the 1s detection
-        // tick doesn't re-extract.
-        if (detection.IsDetected)
-        {
-            var iconGame = detection.DisplayName;
-            var iconPid = detection.ProcessId;
-            _ = Task.Run(() =>
-            {
-                if (!GameIconService.EnsureCached(iconGame, iconPid)) return;
-                Dispatcher.UIThread.Post(() => ViewModel?.ApplyGameIcon(iconGame));
-            });
-        }
+        HarvestGameIcons();
 
         if (detection.IsDetected && _replayBuffer is { IsRecording: false } && !_replayTransitioning)
         {
@@ -236,6 +223,41 @@ public sealed partial class MainWindow : Window
         }
 
         UpdateCapturePauseState(detection);
+    }
+
+    private DateTime _lastIconSweepUtc = DateTime.MinValue;
+
+    // A game's executable path is only knowable while it's running, so icons
+    // are harvested opportunistically from every game that currently has a
+    // window - not just the one detection settled on, which would only ever
+    // yield a single icon per session. Rate-limited because the sweep enumerates
+    // every top-level window; GameIconService itself then skips anything already
+    // cached or already tried.
+    private void HarvestGameIcons()
+    {
+        if ((DateTime.UtcNow - _lastIconSweepUtc).TotalSeconds < 30) return;
+        _lastIconSweepUtc = DateTime.UtcNow;
+
+        _ = Task.Run(() =>
+        {
+            IReadOnlyList<GameDetection> running;
+            try
+            {
+                running = _gameDetector.DetectAllRunningGames();
+            }
+            catch (Exception error)
+            {
+                AppLog.Error("Game icon sweep failed", error);
+                return;
+            }
+
+            foreach (var game in running)
+            {
+                if (!GameIconService.EnsureCached(game.DisplayName, game.ProcessId)) continue;
+                var cachedGame = game.DisplayName;
+                Dispatcher.UIThread.Post(() => ViewModel?.ApplyGameIcon(cachedGame));
+            }
+        });
     }
 
     // The header's detected-game text - clicking it offers "Don't detect X as
