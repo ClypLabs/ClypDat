@@ -537,18 +537,42 @@
                offset inside the scroll content, since a WrapPanel gives no
                way to derive that from the data alone. Clicking or dragging
                anywhere on the track seeks the library to that point. -->
+          <!-- Normally just a slim scrollbar; the date timeline only appears
+               while the thumb is being dragged. It's an overlay hanging off
+               this control's left edge (negative margin, ClipToBounds off)
+               rather than a reserved column, so hiding it costs the library
+               no width. -->
           <Border Grid.Column="1"
                   x:Name="DateScrubberHost"
-                  Width="62"
-                  Margin="4,14,4,0"
+                  Width="18"
+                  Margin="2,14,4,0"
                   Background="Transparent"
+                  ClipToBounds="False"
                   IsVisible="{Binding IsLibraryVisible}"
                   PointerPressed="DateScrubber_OnPointerPressed"
                   PointerMoved="DateScrubber_OnPointerMoved"
                   PointerReleased="DateScrubber_OnPointerReleased"
                   PointerEntered="DateScrubber_OnPointerEntered"
                   PointerExited="DateScrubber_OnPointerExited">
-            <Panel>
+            <Panel ClipToBounds="False">
+              <Border x:Name="DateScrubberLabelHost"
+                      Width="72"
+                      Margin="-78,0,0,0"
+                      HorizontalAlignment="Left"
+                      Background="#E60E151B"
+                      BorderBrush="#1E2A33"
+                      BorderThickness="1"
+                      CornerRadius="7"
+                      Opacity="0"
+                      IsHitTestVisible="False">
+                <Border.Transitions>
+                  <Transitions>
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.14" />
+                  </Transitions>
+                </Border.Transitions>
+                <Canvas x:Name="DateScrubberLabelCanvas" ClipToBounds="True" />
+              </Border>
+
               <!-- Static rail the thumb rides in, so the track still reads
                    as a scrollbar when the library is short enough that the
                    thumb fills most of it. -->
@@ -556,12 +580,11 @@
                       Width="3"
                       CornerRadius="1.5"
                       Background="#18222B"
-                      HorizontalAlignment="Left"
-                      Margin="53,0,0,0"
+                      HorizontalAlignment="Right"
                       IsHitTestVisible="False" />
-              <Canvas x:Name="DateScrubberCanvas" ClipToBounds="True">
+              <Canvas x:Name="DateScrubberCanvas" ClipToBounds="False">
                 <Border x:Name="DateScrubberThumb"
-                        Canvas.Left="52"
+                        Canvas.Left="14"
                         Width="5"
                         MinHeight="28"
                         CornerRadius="2.5"

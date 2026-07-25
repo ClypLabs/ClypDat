@@ -114,7 +114,9 @@ public sealed partial class MainWindow : Window
                     if (e.PropertyName == nameof(MainWindowViewModel.AutoClippingEnabled)) UpdateAutoClipStates();
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
-                    if (e.PropertyName == nameof(MainWindowViewModel.IsSettingsVisible)) OnViewHistoryStateChanged();
+                    if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible)
+                        or nameof(MainWindowViewModel.IsEditorVisible)
+                        or nameof(MainWindowViewModel.SelectedVideoPath)) OnViewHistoryStateChanged();
                 };
                 foreach (var autoClipGame in ViewModel.AutoClipGames)
                 {
@@ -470,15 +472,7 @@ public sealed partial class MainWindow : Window
         if (signature == _scrubberSignature) return;
         _scrubberSignature = signature;
 
-        // Remove the previous run's labels but keep the thumb (a plain child
-        // of the same Canvas) so its position/size survive a rebuild.
-        for (var i = DateScrubberCanvas.Children.Count - 1; i >= 0; i--)
-        {
-            if (!ReferenceEquals(DateScrubberCanvas.Children[i], DateScrubberThumb))
-            {
-                DateScrubberCanvas.Children.RemoveAt(i);
-            }
-        }
+        DateScrubberLabelCanvas.Children.Clear();
         _scrubberLabels.Clear();
 
         UpdateDateScrubberThumb();
@@ -518,12 +512,12 @@ public sealed partial class MainWindow : Window
                 IsHitTestVisible = false,
                 // Right-aligned into a fixed column so every label ends flush
                 // against the track rather than starting ragged from the left.
-                Width = 44,
+                Width = 52,
                 TextAlignment = TextAlignment.Right
             };
             Canvas.SetTop(label, Math.Clamp(top - 6, 0, Math.Max(0, trackHeight - 14)));
-            Canvas.SetLeft(label, 0);
-            DateScrubberCanvas.Children.Add(label);
+            Canvas.SetLeft(label, 4);
+            DateScrubberLabelCanvas.Children.Add(label);
 
             // Tick joining the label to the rail, so a date reads as pointing
             // at a specific position rather than floating near one.
@@ -531,12 +525,12 @@ public sealed partial class MainWindow : Window
             {
                 Width = 5,
                 Height = 1,
-                Background = Avalonia.Media.Brush.Parse("#2A3844"),
+                Background = Avalonia.Media.Brush.Parse("#31404D"),
                 IsHitTestVisible = false
             };
             Canvas.SetTop(tick, Math.Clamp(top, 0, Math.Max(0, trackHeight - 1)));
-            Canvas.SetLeft(tick, 47);
-            DateScrubberCanvas.Children.Add(tick);
+            Canvas.SetLeft(tick, 60);
+            DateScrubberLabelCanvas.Children.Add(tick);
 
             _scrubberLabels.Add((label, contentY));
         }
@@ -646,6 +640,10 @@ public sealed partial class MainWindow : Window
         _draggingScrubber = true;
         e.Pointer.Capture(DateScrubberHost);
         DateScrubberThumb.Background = Avalonia.Media.Brush.Parse("#7C8EA3");
+        // The date timeline is a drag-time affordance only - it floats over
+        // the library rather than reserving space, so it stays hidden until
+        // there's actually a scrub in progress to label.
+        DateScrubberLabelHost.Opacity = _scrubberLabels.Count > 0 ? 1 : 0;
         e.Handled = true;
     }
 
@@ -661,6 +659,7 @@ public sealed partial class MainWindow : Window
         _draggingScrubber = false;
         e.Pointer.Capture(null);
         DateScrubberThumb.Background = Avalonia.Media.Brush.Parse("#4A5A6B");
+        DateScrubberLabelHost.Opacity = 0;
     }
 
     private void DateScrubber_OnPointerEntered(object? sender, PointerEventArgs e)
@@ -1492,22 +1491,43 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    // Back/Forward header nav (Library <-> Settings only - Editor has its
-    // own dedicated close button and can't be generically "re-entered" via
-    // history since it needs a specific clip, not just a view flag). true =
-    // Settings was showing at that point in history, false = Library.
-    private readonly List<bool> _viewHistory = new() { false };
+    // Back/Forward header nav across all three top-level views. The Editor
+    // needs its clip path recorded alongside the view kind, since re-entering
+    // it means reopening one specific clip rather than just flipping a flag -
+    // without that it couldn't be in the history at all, which is why Back
+    // sat permanently disabled while a clip was open.
+    private enum ViewHistoryKind { Library, Settings, Editor }
+
+    private readonly record struct ViewHistoryEntry(ViewHistoryKind Kind, string? ClipPath);
+
+    private readonly List<ViewHistoryEntry> _viewHistory = new() { new ViewHistoryEntry(ViewHistoryKind.Library, null) };
     private int _viewHistoryIndex;
     private bool _navigatingViewHistory;
+
+    private ViewHistoryEntry CurrentViewState()
+    {
+        if (ViewModel is null) return new ViewHistoryEntry(ViewHistoryKind.Library, null);
+        if (ViewModel.IsEditorVisible) return new ViewHistoryEntry(ViewHistoryKind.Editor, ViewModel.SelectedVideoPath);
+        if (ViewModel.IsSettingsVisible) return new ViewHistoryEntry(ViewHistoryKind.Settings, null);
+        return new ViewHistoryEntry(ViewHistoryKind.Library, null);
+    }
 
     private void OnViewHistoryStateChanged()
     {
         if (_navigatingViewHistory || ViewModel is null) return;
-        var isSettings = ViewModel.IsSettingsVisible;
-        if (_viewHistory[_viewHistoryIndex] == isSettings) return;
+
+        var state = CurrentViewState();
+        // Opening a clip raises IsEditorVisible and SelectedVideoPath
+        // separately, so this runs twice per open - the equality check keeps
+        // that from pushing a duplicate entry.
+        if (_viewHistory[_viewHistoryIndex] == state) return;
+
+        // An editor entry that arrives before its path is set would record a
+        // clip-less Editor state that Forward can't reopen.
+        if (state.Kind == ViewHistoryKind.Editor && string.IsNullOrWhiteSpace(state.ClipPath)) return;
 
         _viewHistory.RemoveRange(_viewHistoryIndex + 1, _viewHistory.Count - _viewHistoryIndex - 1);
-        _viewHistory.Add(isSettings);
+        _viewHistory.Add(state);
         _viewHistoryIndex++;
         UpdateViewNavButtons();
     }
@@ -1518,15 +1538,54 @@ public sealed partial class MainWindow : Window
         ForwardNavButton.IsEnabled = _viewHistoryIndex < _viewHistory.Count - 1;
     }
 
-    private void ApplyViewHistoryEntry()
+    // Shared by history navigation and the editor's own close button so both
+    // tear playback down the same way.
+    private void CloseEditorForNavigation()
+    {
+        if (ViewModel is null || !ViewModel.IsEditorVisible) return;
+        ViewModel.SaveSelectedClipEditState();
+        StopEditorPlayback(stopPlaybackAsync: true);
+        ViewModel.CloseEditor();
+    }
+
+    private async Task ApplyViewHistoryEntryAsync()
     {
         if (ViewModel is null) return;
         _navigatingViewHistory = true;
         try
         {
-            var wantsSettings = _viewHistory[_viewHistoryIndex];
-            if (wantsSettings && !ViewModel.IsSettingsVisible) ViewModel.OpenSettings();
-            else if (!wantsSettings && ViewModel.IsSettingsVisible) ViewModel.CloseSettings();
+            var entry = _viewHistory[_viewHistoryIndex];
+            switch (entry.Kind)
+            {
+                case ViewHistoryKind.Editor:
+                    var clip = ViewModel.AllClips.FirstOrDefault(c => string.Equals(c.Path, entry.ClipPath, StringComparison.OrdinalIgnoreCase));
+                    // Deleted or renamed since it was visited - drop the entry
+                    // rather than stranding the user on a dead history slot.
+                    if (clip is null)
+                    {
+                        _viewHistory.RemoveAt(_viewHistoryIndex);
+                        _viewHistoryIndex = Math.Max(0, _viewHistoryIndex - 1);
+                        break;
+                    }
+                    if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings();
+                    if (!string.Equals(ViewModel.SelectedVideoPath, entry.ClipPath, StringComparison.OrdinalIgnoreCase) || !ViewModel.IsEditorVisible)
+                    {
+                        await OpenClipCardAsync(clip);
+                    }
+                    break;
+
+                case ViewHistoryKind.Settings:
+                    // Close the editor first so CloseSettings' own
+                    // "restore whatever was open before" doesn't bring it back.
+                    CloseEditorForNavigation();
+                    if (!ViewModel.IsSettingsVisible) ViewModel.OpenSettings();
+                    break;
+
+                default:
+                    if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings();
+                    CloseEditorForNavigation();
+                    break;
+            }
         }
         finally
         {
@@ -1535,18 +1594,18 @@ public sealed partial class MainWindow : Window
         UpdateViewNavButtons();
     }
 
-    private void BackNavButton_OnClick(object? sender, RoutedEventArgs e)
+    private async void BackNavButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (_viewHistoryIndex <= 0) return;
         _viewHistoryIndex--;
-        ApplyViewHistoryEntry();
+        await ApplyViewHistoryEntryAsync();
     }
 
-    private void ForwardNavButton_OnClick(object? sender, RoutedEventArgs e)
+    private async void ForwardNavButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (_viewHistoryIndex >= _viewHistory.Count - 1) return;
         _viewHistoryIndex++;
-        ApplyViewHistoryEntry();
+        await ApplyViewHistoryEntryAsync();
     }
 
     private WindowState _preFullscreenWindowState = WindowState.Normal;
@@ -3674,8 +3733,14 @@ public sealed partial class MainWindow : Window
 
         if (!GetCursorPos(out var cursor)) return;
 
-        var videoTopLeft = EditorVideoView.PointToScreen(new Point(0, 0));
-        var videoBottomRight = EditorVideoView.PointToScreen(new Point(EditorVideoView.Bounds.Width, EditorVideoView.Bounds.Height));
+        // EditorVideoHost, not EditorVideoView: the view carries the zoom
+        // ScaleTransform (so its own PointToScreen moves and can extend well
+        // outside the visible area once zoomed) and gets reparented into
+        // FullscreenVideoHost and back. The host is the stable, untransformed
+        // rectangle the video is actually shown in.
+        if (EditorVideoHost.Bounds.Width <= 0 || EditorVideoHost.Bounds.Height <= 0) return;
+        var videoTopLeft = EditorVideoHost.PointToScreen(new Point(0, 0));
+        var videoBottomRight = EditorVideoHost.PointToScreen(new Point(EditorVideoHost.Bounds.Width, EditorVideoHost.Bounds.Height));
         var overVideo = cursor.X >= videoTopLeft.X && cursor.X < videoBottomRight.X
                         && cursor.Y >= videoTopLeft.Y && cursor.Y < videoBottomRight.Y;
 
@@ -3712,10 +3777,13 @@ public sealed partial class MainWindow : Window
 
     private void RepositionEditorHoverControls(Window bar)
     {
-        var topLeft = EditorVideoView.PointToScreen(new Point(0, 0));
-        var width = EditorVideoView.Bounds.Width;
+        // Same reasoning as PollEditorHoverControls - position against the
+        // untransformed host, not the zoom-transformed/reparented view.
+        if (EditorVideoHost.Bounds.Width <= 0 || EditorVideoHost.Bounds.Height <= 0) return;
+        var topLeft = EditorVideoHost.PointToScreen(new Point(0, 0));
+        var width = EditorVideoHost.Bounds.Width;
         const double barHeight = 64;
-        var bottomOnScreen = EditorVideoView.PointToScreen(new Point(0, EditorVideoView.Bounds.Height));
+        var bottomOnScreen = EditorVideoHost.PointToScreen(new Point(0, EditorVideoHost.Bounds.Height));
         bar.Width = Math.Max(1, width);
         bar.Height = barHeight;
         bar.Position = new PixelPoint(topLeft.X, bottomOnScreen.Y - (int)(barHeight * bar.RenderScaling));
