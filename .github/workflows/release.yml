@@ -4,11 +4,11 @@ name: Release
 # packages it four ways: a raw zip, a self-extracting portable exe, an NSIS
 # setup.exe, and an MSI - then attaches all four to a GitHub Release for
 # that tag. AppUpdateService.cs (in-app updater) specifically looks for the
-# zip asset named EVE-win-x64.zip, so that name must not change without
+# zip asset named ClypDat-win-x64.zip, so that name must not change without
 # also updating ExpectedAssetName there.
 #
 # native/vendor/obs-runtime is committed directly to the repo (trimmed to
-# only the plugins EveObsBridge.cpp loads), so checkout has it already -
+# only the plugins ClypDatObsBridge.cpp loads), so checkout has it already -
 # no separate download/extract step needed here.
 
 on:
@@ -50,34 +50,34 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Build native ObsBridge (C++)
-        run: msbuild native\src\Eve.ObsBridge\Eve.ObsBridge.vcxproj /p:Configuration=Release /p:Platform=x64 /nologo /v:minimal
+        run: msbuild native\src\ClypDat.ObsBridge\ClypDat.ObsBridge.vcxproj /p:Configuration=Release /p:Platform=x64 /nologo /v:minimal
 
-      - name: Stage ObsBridge.dll where Eve.App.csproj expects it
+      - name: Stage ObsBridge.dll where ClypDat.App.csproj expects it
         shell: pwsh
         run: |
-          $dll = Get-ChildItem -Recurse -Filter Eve.ObsBridge.dll native\src\Eve.ObsBridge |
+          $dll = Get-ChildItem -Recurse -Filter ClypDat.ObsBridge.dll native\src\ClypDat.ObsBridge |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if (-not $dll) { throw "Eve.ObsBridge.dll not found after build." }
-          New-Item -ItemType Directory -Force -Path native\src\Eve.ObsBridge\bin\x64\Release | Out-Null
-          Copy-Item $dll.FullName native\src\Eve.ObsBridge\bin\x64\Release\Eve.ObsBridge.dll -Force
+          if (-not $dll) { throw "ClypDat.ObsBridge.dll not found after build." }
+          New-Item -ItemType Directory -Force -Path native\src\ClypDat.ObsBridge\bin\x64\Release | Out-Null
+          Copy-Item $dll.FullName native\src\ClypDat.ObsBridge\bin\x64\Release\ClypDat.ObsBridge.dll -Force
 
-      - name: Publish EVE.App
+      - name: Publish ClypDat.App
         run: >
-          dotnet publish native\src\Eve.App\Eve.App.csproj
+          dotnet publish native\src\ClypDat.App\ClypDat.App.csproj
           -c Release -r win-x64 --self-contained true -p:Platform=x64
           -p:Version=${{ steps.version.outputs.version }}
           -o native\publish\win-x64-folder --nologo
 
       - name: Verify fresh ObsBridge.dll made it into publish output
-        # ObsRuntimeLocator.cs loads the bridge from {publish}\obs\Eve.ObsBridge.dll,
-        # not the publish root - that's where Eve.App.csproj's own
+        # ObsRuntimeLocator.cs loads the bridge from {publish}\obs\ClypDat.ObsBridge.dll,
+        # not the publish root - that's where ClypDat.App.csproj's own
         # CopyObsRuntimeToPublish target places it.
         shell: pwsh
         run: |
-          $built = Get-FileHash native\src\Eve.ObsBridge\bin\x64\Release\Eve.ObsBridge.dll
-          $published = Get-FileHash native\publish\win-x64-folder\obs\Eve.ObsBridge.dll
+          $built = Get-FileHash native\src\ClypDat.ObsBridge\bin\x64\Release\ClypDat.ObsBridge.dll
+          $published = Get-FileHash native\publish\win-x64-folder\obs\ClypDat.ObsBridge.dll
           if ($built.Hash -ne $published.Hash) {
-            Copy-Item native\src\Eve.ObsBridge\bin\x64\Release\Eve.ObsBridge.dll native\publish\win-x64-folder\obs\Eve.ObsBridge.dll -Force
+            Copy-Item native\src\ClypDat.ObsBridge\bin\x64\Release\ClypDat.ObsBridge.dll native\publish\win-x64-folder\obs\ClypDat.ObsBridge.dll -Force
           }
 
       - name: Trim non-Windows runtime assets
@@ -88,7 +88,7 @@ jobs:
 
       - name: Build zip artifact
         shell: pwsh
-        run: Compress-Archive -Path native\publish\win-x64-folder\* -DestinationPath EVE-win-x64.zip
+        run: Compress-Archive -Path native\publish\win-x64-folder\* -DestinationPath ClypDat-win-x64.zip
 
       - name: Install packaging tools
         run: choco install nsis wixtoolset 7zip -y --no-progress
@@ -101,20 +101,20 @@ jobs:
           & $sevenZip a -mx=5 payload.7z ".\native\publish\win-x64-folder\*"
           $configLines = @(
             ';!@Install@!UTF-8!',
-            'Title="EVE"',
-            'RunProgram="EVE.exe"',
+            'Title="ClypDat"',
+            'RunProgram="ClypDat.exe"',
             ';!@InstallEnd@!'
           )
           [System.IO.File]::WriteAllText("sfx-config.txt", ($configLines -join "`r`n"), [System.Text.Encoding]::UTF8)
-          cmd /c copy /b "$sfxModule" + sfx-config.txt + payload.7z EVE-Portable.exe
+          cmd /c copy /b "$sfxModule" + sfx-config.txt + payload.7z ClypDat-Portable.exe
 
       - name: Build NSIS installer
         run: >
           & "C:\Program Files (x86)\NSIS\makensis.exe"
-          /DEVE_VERSION=${{ steps.version.outputs.version }}
-          /DEVE_SOURCE_DIR=..\native\publish\win-x64-folder
-          /DEVE_OUTPUT_FILE=..\EVE-Setup.exe
-          installer\EVE.nsi
+          /DCLYPDAT_VERSION=${{ steps.version.outputs.version }}
+          /DCLYPDAT_SOURCE_DIR=..\native\publish\win-x64-folder
+          /DCLYPDAT_OUTPUT_FILE=..\ClypDat-Setup.exe
+          installer\ClypDat.nsi
         shell: pwsh
 
       - name: Locate WiX toolset
@@ -141,7 +141,7 @@ jobs:
           $heatArgs = @(
             "dir", "native\publish\win-x64-folder",
             "-cg", "AppFiles", "-dr", "INSTALLFOLDER", "-srd", "-sreg", "-gg", "-g1", "-sfrag",
-            "-var", "var.EveSourceDir",
+            "-var", "var.ClypDatSourceDir",
             "-out", "installer\AppFiles.wxs"
           )
           & "$wixBin\heat.exe" @heatArgs
@@ -156,8 +156,8 @@ jobs:
 
           $candleArgs = @(
             "-arch", "x64",
-            "-dEveVersion=$version",
-            "-dEveSourceDir=$srcDir",
+            "-dClypDatVersion=$version",
+            "-dClypDatSourceDir=$srcDir",
             "-ext", "WixUtilExtension", "-ext", "WixUIExtension",
             "installer\Product.wxs", "installer\AppFiles.wxs",
             "-out", "installer\"
@@ -173,7 +173,7 @@ jobs:
           $lightArgs = @(
             "-ext", "WixUtilExtension", "-ext", "WixUIExtension",
             "installer\Product.wixobj", "installer\AppFiles.wixobj",
-            "-out", "EVE.msi", "-sice:ICE61", "-sice:ICE38", "-sice:ICE64"
+            "-out", "ClypDat.msi", "-sice:ICE61", "-sice:ICE38", "-sice:ICE64"
           )
           & "$wixBin\light.exe" @lightArgs
           if ($LASTEXITCODE -ne 0) { throw "light.exe failed with exit code $LASTEXITCODE" }
@@ -185,6 +185,6 @@ jobs:
         run: |
           $tag = "${{ steps.version.outputs.tag }}"
           gh release create $tag `
-            EVE-win-x64.zip EVE-Portable.exe EVE-Setup.exe EVE.msi `
-            --title "EVE $tag" `
+            ClypDat-win-x64.zip ClypDat-Portable.exe ClypDat-Setup.exe ClypDat.msi `
+            --title "ClypDat $tag" `
             --generate-notes
