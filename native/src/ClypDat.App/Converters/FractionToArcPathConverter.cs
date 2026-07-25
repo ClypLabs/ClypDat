@@ -14,9 +14,14 @@ public sealed class FractionToArcPathConverter : IValueConverter
 {
     public static readonly FractionToArcPathConverter Instance = new();
 
-    private const double CenterX = 16;
-    private const double CenterY = 16;
-    private const double Radius = 13.25;
+    // Must match the sidebar ring's actual box in MainWindow.axaml: a 30x30
+    // Panel/Ellipse with StrokeThickness 2.5, so the stroke's centerline
+    // radius is (30 - 2.5) / 2 and the center is 15,15. These were still the
+    // 32x32 values after the ring was resized to 30, which drew the progress
+    // arc on a slightly larger circle offset from the track behind it.
+    private const double CenterX = 15;
+    private const double CenterY = 15;
+    private const double Radius = 13.75;
 
     public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {

@@ -641,6 +641,12 @@
        tinted row, since the rail is icon-only and narrow. Button itself is
        square so CornerRadius at exactly half its side renders a full
        circle; centered in the 64px-wide rail via HorizontalAlignment. -->
+  <!-- Left-aligned with an explicit 8px margin rather than centered: the
+       rail is 64 wide and the button 44, so dead-center would be 10 - 8
+       shifts the whole control (hover circle AND the icon inside it) 2px
+       left as one unit. Nudging the icon's own Margin instead left it
+       off-center inside its own hover circle, which is what read as
+       "icons aren't aligned, including on hover". -->
   <Style Selector="Button.railIconButton">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
@@ -648,8 +654,8 @@
     <Setter Property="Width" Value="44" />
     <Setter Property="Height" Value="44" />
     <Setter Property="Padding" Value="0" />
-    <Setter Property="Margin" Value="0,0,0,4" />
-    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="Margin" Value="8,0,0,4" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
     <Setter Property="Transitions">
