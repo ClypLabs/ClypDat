@@ -60,6 +60,10 @@ public sealed partial class MainWindow : Window
     private ReplayBackendOption _activeReplayBackend = ReplayBackendOption.Auto;
     private GlobalHotkeyService? _globalHotkey;
     private readonly HashSet<string> _capturedHotkeyKeys = new(StringComparer.OrdinalIgnoreCase);
+    // Set only while capture was started from a control living in a popup
+    // (the Replay Buffer flyout), so its handlers can be detached again.
+    private TopLevel? _hotkeyCaptureTopLevel;
+    private DispatcherTimer? _hotkeyCaptureTimeout;
     private bool _replayTransitioning;
     private readonly SemaphoreSlim _clipSaveLock = new(1, 1);
     private bool _updateDialogOpen;
@@ -2074,9 +2078,60 @@ public sealed partial class MainWindow : Window
 
     private void HotkeyCaptureButton_OnClick(object? sender, RoutedEventArgs e)
     {
+        EndHotkeyCapture();
+        if (ViewModel is null) return;
+        ViewModel.IsCapturingHotkey = true;
+
+        // The key handlers live on this window, but a Flyout hosts its content
+        // in its own popup top level - keystrokes there never route through
+        // here, so capture started from the Replay Buffer flyout silently
+        // received nothing. Worse, IsCapturingHotkey stayed true after the
+        // flyout was dismissed, and the capture branch swallows every key it
+        // sees, which is what left the save hotkey dead afterwards. Attach the
+        // same handlers to whichever top level the button actually belongs to.
+        var buttonTopLevel = sender is Control control ? TopLevel.GetTopLevel(control) : null;
+        if (buttonTopLevel is not null && !ReferenceEquals(buttonTopLevel, this))
+        {
+            _hotkeyCaptureTopLevel = buttonTopLevel;
+            buttonTopLevel.AddHandler(KeyDownEvent, MainWindow_OnKeyDown, RoutingStrategies.Tunnel);
+            buttonTopLevel.AddHandler(KeyUpEvent, MainWindow_OnKeyUp, RoutingStrategies.Tunnel);
+        }
+        else
+        {
+            Focus();
+        }
+
+        // Backstop: dismissing the flyout (or just walking away) must never
+        // leave capture armed, because while it is armed every keystroke in
+        // the app is swallowed.
+        _hotkeyCaptureTimeout ??= new DispatcherTimer();
+        _hotkeyCaptureTimeout.Interval = TimeSpan.FromSeconds(6);
+        _hotkeyCaptureTimeout.Stop();
+        _hotkeyCaptureTimeout.Tick -= HotkeyCaptureTimeout_OnTick;
+        _hotkeyCaptureTimeout.Tick += HotkeyCaptureTimeout_OnTick;
+        _hotkeyCaptureTimeout.Start();
+    }
+
+    private void HotkeyCaptureTimeout_OnTick(object? sender, EventArgs e)
+    {
+        AppLog.Debug("Hotkey capture timed out without a key press - cancelling.");
+        EndHotkeyCapture();
+    }
+
+    // Detaches the popup handlers and disarms capture. Safe to call when
+    // capture was never started.
+    private void EndHotkeyCapture()
+    {
+        _hotkeyCaptureTimeout?.Stop();
+        if (_hotkeyCaptureTopLevel is not null)
+        {
+            _hotkeyCaptureTopLevel.RemoveHandler(KeyDownEvent, MainWindow_OnKeyDown);
+            _hotkeyCaptureTopLevel.RemoveHandler(KeyUpEvent, MainWindow_OnKeyUp);
+            _hotkeyCaptureTopLevel = null;
+        }
+
         _capturedHotkeyKeys.Clear();
-        if (ViewModel is not null) ViewModel.IsCapturingHotkey = true;
-        Focus();
+        if (ViewModel is not null) ViewModel.IsCapturingHotkey = false;
     }
 
     private void AddExcludedProcessButton_OnClick(object? sender, RoutedEventArgs e)
@@ -2141,8 +2196,7 @@ public sealed partial class MainWindow : Window
         {
             if (e.Key == Key.Escape)
             {
-                _capturedHotkeyKeys.Clear();
-                ViewModel.IsCapturingHotkey = false;
+                EndHotkeyCapture();
                 e.Handled = true;
                 return;
             }
@@ -2230,7 +2284,11 @@ public sealed partial class MainWindow : Window
             {
                 ViewModel.SetHotkey(hotkey);
                 _globalHotkey?.SetHotkey(hotkey);
+                AppLog.Info($"Save hotkey set to {hotkey}.");
             }
+
+            // Detaches the popup handlers too - SetHotkey only clears the flag.
+            EndHotkeyCapture();
             e.Handled = true;
             return;
         }
