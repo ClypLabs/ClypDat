@@ -402,9 +402,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (!HasLibraryStorageLimit) return "No limit";
             var percent = (int)Math.Round(LibraryUsedBytes * 100.0 / LibraryStorageLimitBytes);
-            return $"{FormatBytes(LibraryUsedBytes)} of {Settings.LibraryStorageLimitGb} GB ({percent}%)";
+            return $"{FormatBytes(LibraryUsedBytes)} of {LibraryStorageLimitLabel} ({percent}%)";
         }
     }
+
+    private string LibraryStorageLimitLabel => Settings.LibraryStorageLimitGb >= 1024 && Settings.LibraryStorageLimitGb % 1024 == 0
+        ? $"{Settings.LibraryStorageLimitGb / 1024} TB"
+        : $"{Settings.LibraryStorageLimitGb} GB";
+
+    // Shown stacked under the sidebar ring once a limit exists - has to fit
+    // the 64px rail, so it's just "of <limit>" under the used figure.
+    public string LibraryStorageLimitShortDisplay => HasLibraryStorageLimit ? $"of {LibraryStorageLimitLabel}" : string.Empty;
 
     private void NotifyStorageChrome()
     {
@@ -414,6 +422,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(LibraryStorageRingFraction));
         OnPropertyChanged(nameof(LibraryStorageRingBrush));
         OnPropertyChanged(nameof(LibraryStorageLimitSummary));
+        OnPropertyChanged(nameof(LibraryStorageLimitShortDisplay));
     }
     public double LibraryUsedFractionOfDrive => HasDriveStats ? Math.Clamp(LibraryUsedBytes / (double)DriveStats.Total, 0, 1) : 0;
     public double LibraryOtherUsedFractionOfDrive => HasDriveStats
