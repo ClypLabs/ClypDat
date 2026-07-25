@@ -506,9 +506,10 @@ public sealed partial class MainWindow : Window
                 // enough to navigate by, and the full date is still on the
                 // card's own header.
                 Text = clip.CreatedAt.ToLocalTime().ToString("MMM d").ToUpperInvariant(),
-                FontSize = 10,
-                FontWeight = FontWeight.SemiBold,
-                Foreground = Avalonia.Media.Brush.Parse("#46566A"),
+                FontSize = 9.5,
+                FontWeight = FontWeight.Bold,
+                LetterSpacing = 0.6,
+                Foreground = Avalonia.Media.Brush.Parse("#4A5C70"),
                 IsHitTestVisible = false,
                 // Right-aligned into a fixed column so every label ends flush
                 // against the track rather than starting ragged from the left.
@@ -516,20 +517,20 @@ public sealed partial class MainWindow : Window
                 TextAlignment = TextAlignment.Right
             };
             Canvas.SetTop(label, Math.Clamp(top - 6, 0, Math.Max(0, trackHeight - 14)));
-            Canvas.SetLeft(label, 4);
+            Canvas.SetLeft(label, 6);
             DateScrubberLabelCanvas.Children.Add(label);
 
             // Tick joining the label to the rail, so a date reads as pointing
             // at a specific position rather than floating near one.
             var tick = new Border
             {
-                Width = 5,
+                Width = 6,
                 Height = 1,
-                Background = Avalonia.Media.Brush.Parse("#31404D"),
+                Background = Avalonia.Media.Brush.Parse("#2B3947"),
                 IsHitTestVisible = false
             };
             Canvas.SetTop(tick, Math.Clamp(top, 0, Math.Max(0, trackHeight - 1)));
-            Canvas.SetLeft(tick, 60);
+            Canvas.SetLeft(tick, 64);
             DateScrubberLabelCanvas.Children.Add(tick);
 
             _scrubberLabels.Add((label, contentY));
@@ -575,10 +576,15 @@ public sealed partial class MainWindow : Window
     }
 
     // Brightens whichever date the top of the viewport is currently inside,
-    // so the track shows where you are, not just where things are.
+    // so the track shows where you are, not just where things are, and feeds
+    // the same date to the bubble riding next to the thumb.
     private void HighlightCurrentScrubberDate()
     {
-        if (_scrubberLabels.Count == 0) return;
+        if (_scrubberLabels.Count == 0)
+        {
+            if (DateScrubberBubble is not null) DateScrubberBubble.Opacity = 0;
+            return;
+        }
 
         var offsetY = LibraryScrollViewer.Offset.Y;
         var currentIndex = -1;
@@ -592,8 +598,30 @@ public sealed partial class MainWindow : Window
 
         for (var i = 0; i < _scrubberLabels.Count; i++)
         {
-            _scrubberLabels[i].Label.Foreground = Avalonia.Media.Brush.Parse(i == currentIndex ? "#C9D6E4" : "#46566A");
+            var isCurrent = i == currentIndex;
+            var label = _scrubberLabels[i].Label;
+            label.Foreground = Avalonia.Media.Brush.Parse(isCurrent ? "#F0F5FB" : "#4A5C70");
+            label.FontSize = isCurrent ? 10.5 : 9.5;
         }
+
+        if (DateScrubberBubbleText is not null) DateScrubberBubbleText.Text = _scrubberLabels[currentIndex].Label.Text;
+        PositionDateScrubberBubble();
+    }
+
+    // Vertically centred on the thumb and hung off the left of the rail, so
+    // it reads as attached to the handle you're actually dragging.
+    private void PositionDateScrubberBubble()
+    {
+        if (DateScrubberBubble is null || DateScrubberThumb is null) return;
+
+        var thumbTop = Canvas.GetTop(DateScrubberThumb);
+        if (double.IsNaN(thumbTop)) thumbTop = 0;
+        var bubbleHeight = DateScrubberBubble.Bounds.Height;
+        var bubbleWidth = DateScrubberBubble.Bounds.Width;
+        if (bubbleHeight <= 0) bubbleHeight = 24;
+
+        Canvas.SetTop(DateScrubberBubble, thumbTop + DateScrubberThumb.Bounds.Height / 2 - bubbleHeight / 2);
+        Canvas.SetLeft(DateScrubberBubble, -(bubbleWidth > 0 ? bubbleWidth : 64) - 10);
     }
 
     // y is where the thumb's TOP should land, which by the shared mapping
@@ -639,12 +667,31 @@ public sealed partial class MainWindow : Window
 
         _draggingScrubber = true;
         e.Pointer.Capture(DateScrubberHost);
-        DateScrubberThumb.Background = Avalonia.Media.Brush.Parse("#7C8EA3");
+        SetScrubberThumbState(hovered: true, dragging: true);
         // The date timeline is a drag-time affordance only - it floats over
         // the library rather than reserving space, so it stays hidden until
         // there's actually a scrub in progress to label.
-        DateScrubberLabelHost.Opacity = _scrubberLabels.Count > 0 ? 1 : 0;
+        var hasDates = _scrubberLabels.Count > 0;
+        DateScrubberLabelHost.Opacity = hasDates ? 1 : 0;
+        DateScrubberBubble.Opacity = hasDates ? 1 : 0;
+        PositionDateScrubberBubble();
         e.Handled = true;
+    }
+
+    // Idle stays deliberately quiet so the library isn't competing with a
+    // bright scrollbar; hover widens it, dragging turns it accent.
+    private void SetScrubberThumbState(bool hovered, bool dragging)
+    {
+        if (DateScrubberThumb is null) return;
+
+        DateScrubberThumb.Background = dragging
+            ? (Avalonia.Media.IBrush?)Application.Current?.FindResource("AccentBrush") ?? Avalonia.Media.Brush.Parse("#5864E8")
+            : Avalonia.Media.Brush.Parse(hovered ? "#55697E" : "#3A4857");
+        DateScrubberThumb.RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse(hovered ? "scaleX(1.75)" : "scaleX(1)");
+        if (DateScrubberTrack is not null)
+        {
+            DateScrubberTrack.Background = Avalonia.Media.Brush.Parse(hovered ? "#1B2530" : "#141C24");
+        }
     }
 
     private void DateScrubber_OnPointerMoved(object? sender, PointerEventArgs e)
@@ -658,14 +705,17 @@ public sealed partial class MainWindow : Window
         if (!_draggingScrubber) return;
         _draggingScrubber = false;
         e.Pointer.Capture(null);
-        DateScrubberThumb.Background = Avalonia.Media.Brush.Parse("#4A5A6B");
+        // Still under the cursor right after releasing, so settle into hover
+        // rather than all the way back to idle.
+        SetScrubberThumbState(hovered: DateScrubberHost.IsPointerOver, dragging: false);
         DateScrubberLabelHost.Opacity = 0;
+        DateScrubberBubble.Opacity = 0;
     }
 
     private void DateScrubber_OnPointerEntered(object? sender, PointerEventArgs e)
     {
         if (_draggingScrubber) return;
-        DateScrubberThumb.Background = Avalonia.Media.Brush.Parse("#4A5A6B");
+        SetScrubberThumbState(hovered: true, dragging: false);
     }
 
     private void DateScrubber_OnPointerExited(object? sender, PointerEventArgs e)
@@ -673,7 +723,7 @@ public sealed partial class MainWindow : Window
         // Pointer capture keeps a drag alive past the track's edges, so this
         // only handles the plain hover-out case.
         if (_draggingScrubber) return;
-        DateScrubberThumb.Background = Avalonia.Media.Brush.Parse("#3E4C5A");
+        SetScrubberThumbState(hovered: false, dragging: false);
     }
 
     private async void OpenReplaySettingsButton_OnClick(object? sender, RoutedEventArgs e)
