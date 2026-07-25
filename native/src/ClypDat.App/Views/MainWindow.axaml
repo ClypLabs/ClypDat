@@ -189,16 +189,20 @@
               <ItemsControl ItemsSource="{Binding TopGameFilterOptions}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
-                    <Button Classes="railIconButton" Classes.active="{Binding IsChecked}" Click="LibraryGameSectionButton_OnClick" ToolTip.Tip="{Binding Label}">
+                    <Button Classes="railIconButton railGameButton" Classes.active="{Binding IsChecked}" Click="LibraryGameSectionButton_OnClick" ToolTip.Tip="{Binding Label}">
                       <Panel Width="30" Height="30">
                         <!-- Initial badge is the fallback for a game whose
                              executable icon hasn't been captured yet (it can
                              only be read while the game is running). -->
-                        <Border Classes="gameInitialBadge" Width="30" Height="30" CornerRadius="15" IsVisible="{Binding !HasIcon}">
+                        <Border Classes="gameInitialBadge" Width="30" Height="30" CornerRadius="8" IsVisible="{Binding !HasIcon}">
                           <TextBlock Text="{Binding Key, Converter={x:Static opconv:FirstLetterConverter.Instance}}" FontWeight="Bold" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
-                        <Border Width="30" Height="30" CornerRadius="15" ClipToBounds="True" IsVisible="{Binding HasIcon}">
-                          <Image Source="{Binding Icon}" Width="28" Height="28" Stretch="Uniform" />
+                        <!-- Rounded square, not a circle: game icons are square
+                             artwork, so a circular mask cut their corners off.
+                             UniformToFill lets that square art sit edge to edge
+                             in the tile. -->
+                        <Border Width="30" Height="30" CornerRadius="8" ClipToBounds="True" IsVisible="{Binding HasIcon}">
+                          <Image Source="{Binding Icon}" Width="30" Height="30" Stretch="UniformToFill" />
                         </Border>
                       </Panel>
                     </Button>
@@ -212,13 +216,17 @@
               <ItemsControl ItemsSource="{Binding OverflowGameFilterOptions}" IsVisible="{Binding IsGameListExpanded}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
-                    <Button Classes="railIconButton" Classes.active="{Binding IsChecked}" Click="LibraryGameSectionButton_OnClick" ToolTip.Tip="{Binding Label}">
+                    <Button Classes="railIconButton railGameButton" Classes.active="{Binding IsChecked}" Click="LibraryGameSectionButton_OnClick" ToolTip.Tip="{Binding Label}">
                       <Panel Width="30" Height="30">
-                        <Border Classes="gameInitialBadge" Width="30" Height="30" CornerRadius="15" IsVisible="{Binding !HasIcon}">
+                        <Border Classes="gameInitialBadge" Width="30" Height="30" CornerRadius="8" IsVisible="{Binding !HasIcon}">
                           <TextBlock Text="{Binding Key, Converter={x:Static opconv:FirstLetterConverter.Instance}}" FontWeight="Bold" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
-                        <Border Width="30" Height="30" CornerRadius="15" ClipToBounds="True" IsVisible="{Binding HasIcon}">
-                          <Image Source="{Binding Icon}" Width="28" Height="28" Stretch="Uniform" />
+                        <!-- Rounded square, not a circle: game icons are square
+                             artwork, so a circular mask cut their corners off.
+                             UniformToFill lets that square art sit edge to edge
+                             in the tile. -->
+                        <Border Width="30" Height="30" CornerRadius="8" ClipToBounds="True" IsVisible="{Binding HasIcon}">
+                          <Image Source="{Binding Icon}" Width="30" Height="30" Stretch="UniformToFill" />
                         </Border>
                       </Panel>
                     </Button>
