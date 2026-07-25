@@ -136,14 +136,33 @@ public sealed class NativeReplayBuffer : IReplayBuffer
         var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _captureCts = new CancellationTokenSource();
         var token = _captureCts.Token;
+
+        // Set BEFORE starting the capture loop, not after. CaptureLoop runs on
+        // its own thread and can fail almost immediately (e.g. the encoder
+        // isn't available at all), and its catch sets _sessionActive = false.
+        // Assigning true after StartNew raced that: _audio.Start below takes
+        // hundreds of ms (device enumeration, per-process loopback init), so a
+        // fast failure set false first and then this overwrote it back to true.
+        // The buffer then reported IsRecording forever with an empty ring, and
+        // every clip attempt surfaced the ring's "Replay just started. Try
+        // again in a second." instead of the actual start failure.
+        _sessionActive = true;
         _captureTask = Task.Factory.StartNew(
             () => CaptureLoop(token, ready),
             token,
             TaskCreationOptions.LongRunning,
             TaskScheduler.Default);
 
-        _audio.Start(config);
-        _sessionActive = true;
+        try
+        {
+            _audio.Start(config);
+        }
+        catch
+        {
+            _sessionActive = false;
+            throw;
+        }
+
         return ready.Task;
     }
 
@@ -1150,6 +1169,22 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             AppLog.Error("Native capture loop failed.", error);
             ready.TrySetException(error);
             _sessionActive = false;
+
+            // The session is dead, so nothing will ever consume these captures.
+            // StopAsync can't do this cleanup on our behalf - it early-returns
+            // on !_sessionActive, which we just cleared - so without stopping
+            // here the audio pipeline kept capturing (and re-resolving its
+            // route on every device change) indefinitely behind a capture loop
+            // that no longer exists.
+            try
+            {
+                _audio.Stop(deleteCaptureFiles: true);
+            }
+            catch (Exception audioError)
+            {
+                AppLog.Error("Native capture: audio shutdown after capture-loop failure failed.", audioError);
+            }
+
             RecordingStopped?.Invoke(this, EventArgs.Empty);
         }
         finally
