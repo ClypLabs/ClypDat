@@ -61,7 +61,6 @@ public sealed partial class MainWindow : Window
     private GlobalHotkeyService? _globalHotkey;
     private readonly HashSet<string> _capturedHotkeyKeys = new(StringComparer.OrdinalIgnoreCase);
     private bool _replayTransitioning;
-    private bool _replayArmed;
     private readonly SemaphoreSlim _clipSaveLock = new(1, 1);
     private bool _updateDialogOpen;
     // Closing the window (the X button) hides to the tray instead of quitting,
@@ -195,11 +194,11 @@ public sealed partial class MainWindow : Window
         ViewModel.ActiveGameDetection = detection;
         ViewModel.ActiveGame = detection.DisplayName;
 
-        if (_replayArmed && detection.IsDetected && _replayBuffer is { IsRecording: false } && !_replayTransitioning)
+        if (detection.IsDetected && _replayBuffer is { IsRecording: false } && !_replayTransitioning)
         {
             _ = StartReplayBufferAsync(showErrors: false);
         }
-        else if (_replayArmed && _replayBuffer is { IsRecording: true } && !detection.IsDetected && !_replayTransitioning)
+        else if (_replayBuffer is { IsRecording: true } && !detection.IsDetected && !_replayTransitioning)
         {
             _ = StopReplayBufferAsync();
         }
@@ -271,7 +270,6 @@ public sealed partial class MainWindow : Window
             // Global hotkey failure should not block editor startup.
         }
 
-        _replayArmed = true;
         ViewModel.RecorderStatus = "Replay Armed";
         UpdateDetectedGame();
     }
@@ -346,7 +344,7 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            Process.Start(new ProcessStartInfo("https://github.com/Stormanzanii/ClypDat/issues") { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo("https://github.com/ClypDat/ClypDat/issues") { UseShellExecute = true });
         }
         catch (Exception error)
         {
@@ -409,34 +407,12 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void ReplayButton_OnClick(object? sender, RoutedEventArgs e)
+    private async void OpenReplaySettingsButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
-        // Stopping a Full Session recording can take real time (ffmpeg muxing
-        // the whole session's audio) - without this guard, a click that
-        // landed while a previous stop was still finalizing would see
-        // IsRecording already false (it flips early, before the slow
-        // finalization work) and start a SECOND recording session on top of
-        // the first one's still-running finalization, which is exactly what
-        // "won't turn off, repeated clicks freeze it" was.
-        if (_replayTransitioning) return;
-        InitializeReplayServices();
-        if (_replayBuffer is null) return;
-
-        if (_replayArmed || _replayBuffer.IsRecording)
-        {
-            _replayArmed = false;
-            await StopReplayBufferAsync();
-        }
-        else
-        {
-            _replayArmed = true;
-            ViewModel.RecorderStatus = "Replay Armed";
-            if (ViewModel.ActiveGameDetection.IsDetected)
-            {
-                await StartReplayBufferAsync(showErrors: true);
-            }
-        }
+        ViewModel.SelectSettingsSection("Replay Buffer");
+        ViewModel.OpenSettings();
+        await ViewModel.RefreshOpenProcessesAsync();
     }
 
     private async Task StopReplayBufferAsync()
@@ -454,7 +430,7 @@ public sealed partial class MainWindow : Window
         {
             if (_replayBuffer.IsRecording) await _replayBuffer.StopAsync();
             ViewModel.IsReplayRecording = false;
-            ViewModel.RecorderStatus = _replayArmed ? "Replay Armed" : "Replay Off";
+            ViewModel.RecorderStatus = "Replay Armed";
         }
         finally
         {
@@ -486,7 +462,7 @@ public sealed partial class MainWindow : Window
             _replayTransitioning = true;
             if (!ViewModel.ActiveGameDetection.IsDetected)
             {
-                ViewModel.RecorderStatus = _replayArmed ? "Replay Armed" : "Replay Off";
+                ViewModel.RecorderStatus = "Replay Armed";
                 return;
             }
             EnsureReplayBufferMatchesGame();
@@ -505,7 +481,7 @@ public sealed partial class MainWindow : Window
             // (e.g. a second consecutive failed start while already false), which
             // would otherwise leave the status text frozen on stale "Replay Armed" -
             // set it directly so a failure always reflects in the UI.
-            ViewModel.RecorderStatus = _replayArmed ? "Replay Armed" : "Replay Off";
+            ViewModel.RecorderStatus = "Replay Armed";
             if (showErrors)
             {
                 await ShowMessageAsync("Replay unavailable", error.Message);
@@ -547,7 +523,7 @@ public sealed partial class MainWindow : Window
                 // worth interrupting the user over - just drop it.
                 if (isAutoClip) return;
                 if (ViewModel.IsReplayRecording) ViewModel.IsReplayRecording = false;
-                await ShowMessageAsync("Clip failed", _replayArmed ? "Replay is armed, but no game is being captured yet." : "Replay buffer is not running.");
+                await ShowMessageAsync("Clip failed", "Replay is armed, but no game is being captured yet.");
                 return;
             }
 
@@ -816,7 +792,7 @@ public sealed partial class MainWindow : Window
             if (ViewModel is not null)
             {
                 ViewModel.IsReplayRecording = false;
-                ViewModel.RecorderStatus = _replayArmed ? "Replay Armed" : "Replay Off";
+                ViewModel.RecorderStatus = "Replay Armed";
             }
         });
     }
@@ -1592,7 +1568,7 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            Process.Start(new ProcessStartInfo("https://github.com/Stormanzanii/ClypDat") { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo("https://github.com/ClypDat/ClypDat") { UseShellExecute = true });
         }
         catch (Exception error)
         {
