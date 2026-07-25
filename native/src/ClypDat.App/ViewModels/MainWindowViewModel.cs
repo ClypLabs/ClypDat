@@ -619,6 +619,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (string.IsNullOrWhiteSpace(detection.ExeName)) return;
         if (GameCatalog.BuiltIn.ContainsKey(detection.ExeName)) return;
         if (Settings.GameCaptureOverrides.Any(g => string.Equals(g.ExecutableName, detection.ExeName, StringComparison.OrdinalIgnoreCase))) return;
+        // Removing a game adds it here. Without this check the very next
+        // detection tick auto-added it straight back, which is why Remove
+        // looked like it did nothing for a game that was currently running.
+        if (Settings.IgnoredGameExecutables.Contains(detection.ExeName, StringComparer.OrdinalIgnoreCase)) return;
 
         Settings.GameCaptureOverrides.Add(new GameCaptureOverride
         {

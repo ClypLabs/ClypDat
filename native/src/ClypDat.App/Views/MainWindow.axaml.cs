@@ -1860,6 +1860,11 @@ public sealed partial class MainWindow : Window
         if (sender is Button { DataContext: GameBackendRowViewModel row } && ViewModel is not null)
         {
             ViewModel.RemoveGame(row);
+            // The detector holds its own copy of the ignore list, so without
+            // pushing the update it keeps detecting the game just removed -
+            // and re-adds it on the next tick.
+            _gameDetector.ApplyUserIgnoredExecutables(ViewModel.Settings.IgnoredGameExecutables);
+            UpdateDetectedGame();
         }
     }
 
