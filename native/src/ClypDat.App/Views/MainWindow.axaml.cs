@@ -327,17 +327,23 @@ public sealed partial class MainWindow : Window
     // Shared by the sidebar's "All Games"/per-game buttons - the "All"
     // button has no FilterOptionViewModel DataContext (it inherits the
     // window's own), so the cast falls through to null and clears the
-    // filter the same way a per-game click sets it.
+    // filter the same way a per-game click sets it. The rail now stays
+    // visible over Settings too, so a click there needs to jump back to
+    // the Library to actually see the filtered result.
     private void LibraryGameSectionButton_OnClick(object? sender, RoutedEventArgs e)
     {
+        if (ViewModel is null) return;
+        if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings();
         var key = (sender as Button)?.DataContext as FilterOptionViewModel;
-        ViewModel?.SelectGameSection(key?.Key);
+        ViewModel.SelectGameSection(key?.Key);
     }
 
     private void LibraryClipTypeSectionButton_OnClick(object? sender, RoutedEventArgs e)
     {
+        if (ViewModel is null) return;
+        if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings();
         var key = (sender as Button)?.DataContext as FilterOptionViewModel;
-        ViewModel?.SelectClipTypeSection(key?.Key);
+        ViewModel.SelectClipTypeSection(key?.Key);
     }
 
     private void FeedbackButton_OnClick(object? sender, RoutedEventArgs e)

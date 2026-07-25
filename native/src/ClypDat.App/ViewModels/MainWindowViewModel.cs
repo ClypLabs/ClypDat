@@ -271,7 +271,42 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         : Settings.LibraryFolder;
 
     public string LibraryLocationText => $"Location: {LibraryFolderDisplay}";
-    public string LibrarySizeDisplay => FormatBytes(AllClips.Sum(clip => clip.SizeBytes));
+    private long LibraryUsedBytes => AllClips.Sum(clip => clip.SizeBytes);
+    public string LibrarySizeDisplay => FormatBytes(LibraryUsedBytes);
+    public bool HasLibraryStorageLimit => Settings.LibraryStorageLimitGb > 0;
+    public string LibraryStorageLimitDisplay => HasLibraryStorageLimit ? $"of {Settings.LibraryStorageLimitGb} GB" : "No Limit";
+    public double LibraryStorageUsedFraction => HasLibraryStorageLimit
+        ? Math.Clamp(LibraryUsedBytes / (Settings.LibraryStorageLimitGb * 1_073_741_824.0), 0, 1)
+        : 0;
+
+    // 0/blank = No Limit - same "empty field = unlimited" convention as
+    // CustomFullSessionQuotaGb below, just for the library's total size
+    // instead of a single Full Session recording's quota.
+    public string LibraryStorageLimitGbText
+    {
+        get => Settings.LibraryStorageLimitGb > 0 ? Settings.LibraryStorageLimitGb.ToString() : string.Empty;
+        set
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                Settings.LibraryStorageLimitGb = 0;
+            }
+            else if (int.TryParse(value, out var gb))
+            {
+                Settings.LibraryStorageLimitGb = Math.Clamp(gb, 0, 100_000);
+            }
+            else
+            {
+                return;
+            }
+
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(HasLibraryStorageLimit));
+            OnPropertyChanged(nameof(LibraryStorageLimitDisplay));
+            OnPropertyChanged(nameof(LibraryStorageUsedFraction));
+            SaveSettings();
+        }
+    }
     public string HotkeyDisplay => IsCapturingHotkey ? "Press keys..." : Settings.SaveReplayHotkey;
 
     public int SelectedCount => _selectedPaths.Count;
@@ -3592,6 +3627,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(LibraryFolderDisplay));
         OnPropertyChanged(nameof(LibraryLocationText));
         OnPropertyChanged(nameof(LibrarySizeDisplay));
+        OnPropertyChanged(nameof(LibraryStorageUsedFraction));
         NotifySelectionChrome();
         RecomputeGameFilterBadges();
         UpdateFirstOfDateFlags();
