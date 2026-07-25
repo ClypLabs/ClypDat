@@ -14,7 +14,7 @@ namespace ClypDat.App.Services;
 // either way.
 public static class RemoteGameExclusionsService
 {
-    private const string ExclusionsUrl = "https://raw.githubusercontent.com/Stormanzanii/ClypDat/master/native/game-detection-exclusions.json";
+    private const string ExclusionsUrl = "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-detection-exclusions.json";
     private const string CacheFileName = "remote-game-exclusions.json";
 
     // Refetching every launch would hammer raw.githubusercontent.com for no
