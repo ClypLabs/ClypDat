@@ -2170,15 +2170,31 @@ public sealed class NativeReplayBuffer : IReplayBuffer
             }
         }
 
+        // Every saved clip is cut out of the ring buffer starting at a packet
+        // flagged AV_PKT_FLAG_KEY. That flag means "I-frame", which is NOT the
+        // same as IDR: without forced-idr, NVENC emits plain I-frames at GOP
+        // boundaries, and frames after one may still reference frames before
+        // it. A decoder starting cold at that cut therefore has references it
+        // never saw. Software decoding conceals the damage, but a hardware
+        // decoder shows it as blocky macroblock corruption - which is exactly
+        // the symptom that forced editor playback onto software decode
+        // (avcodec-hw=none in PlaybackSession) in the first place, and why the
+        // same clips looked fine in standalone VLC only after it fell back to
+        // software too. Making every keyframe a true IDR means any cut point
+        // is a self-contained stream start.
         switch (candidateName)
         {
             case "h264_nvenc":
                 TrySet("preset", "p2");
                 TrySet("tune", "ll");
+                TrySet("forced-idr", "1");
                 break;
             case "h264_amf":
                 TrySet("usage", "ultralowlatency");
                 TrySet("quality", "speed");
+                // AMF's equivalent knob; TrySet just logs and moves on if this
+                // build doesn't expose it.
+                TrySet("forced-idr", "1");
                 break;
             case "libx264":
                 TrySet("preset", "ultrafast");
