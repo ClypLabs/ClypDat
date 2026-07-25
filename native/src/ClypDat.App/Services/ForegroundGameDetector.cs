@@ -193,6 +193,26 @@ public sealed class ForegroundGameDetector
             .FirstOrDefault() ?? GameDetection.None;
     }
 
+    // Every game currently showing a window, rather than just the one Detect()
+    // settles on - Detect() deliberately narrows to a single "active" game,
+    // which would only ever yield one icon at a time to GameIconService.
+    // Deduplicated by executable since a game can own several windows.
+    public IReadOnlyList<GameDetection> DetectAllRunningGames()
+    {
+        var candidates = new List<GameDetection>();
+        EnumWindows((handle, _) =>
+        {
+            var detection = BuildDetection(handle);
+            if (detection.IsDetected) candidates.Add(detection);
+            return true;
+        }, IntPtr.Zero);
+
+        return candidates
+            .GroupBy(candidate => candidate.ExeName, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+    }
+
     private GameDetection BuildDetection(IntPtr handle) => BuildDetection(handle, out _, out _);
 
     private GameDetection BuildDetection(IntPtr handle, out string exeName, out string rejectReason)
