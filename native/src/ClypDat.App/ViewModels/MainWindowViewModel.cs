@@ -3824,6 +3824,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void ToggleGameListExpanded() => IsGameListExpanded = !IsGameListExpanded;
 
+    // Any game with clips but no icon yet gets one resolved from the internet,
+    // so artwork doesn't depend on this install ever having seen the game
+    // running. Fire-and-forget: each lookup caches to disk and pushes itself
+    // into the rail when it lands, and GameIconService only tries a given game
+    // once per session.
+    private void RequestMissingGameIcons()
+    {
+        var missing = GameFilterOptions.Where(option => !option.HasIcon).Select(option => option.Key).ToArray();
+        if (missing.Length == 0) return;
+
+        _ = Task.Run(async () =>
+        {
+            foreach (var gameKey in missing)
+            {
+                if (!await GameIconService.EnsureFromNetworkAsync(gameKey)) continue;
+                Dispatcher.UIThread.Post(() => ApplyGameIcon(gameKey));
+            }
+        });
+    }
+
     // A freshly-extracted icon has to reach the rail rows that were built
     // before it existed - they're the same instances in Top/Overflow, so
     // updating the GameFilterOptions entry updates whichever list shows it.
@@ -3886,6 +3906,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         foreach (var option in GameFilterOptions.Take(TopGameRailCount)) TopGameFilterOptions.Add(option);
         foreach (var option in GameFilterOptions.Skip(TopGameRailCount)) OverflowGameFilterOptions.Add(option);
         OnPropertyChanged(nameof(HasOverflowGames));
+        RequestMissingGameIcons();
 
         // Same "(count)" suffix the game filter rows above already get.
         var manualCount = AllClips.Count(clip => clip.IsManualClip);

@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Net.Http;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using Avalonia;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
@@ -32,6 +34,125 @@ public static class GameIconService
     {
         var safe = string.Join("_", displayName.Split(Path.GetInvalidFileNameChars()));
         return Path.Combine(CacheFolder, $"{safe}.png");
+    }
+
+    // Names are compared with punctuation, casing, trademark symbols and
+    // edition suffixes stripped, so "Counter-Strike 2" matches "Counter-Strike 2"
+    // but "Overwatch 2" does NOT match "Overwatch(R) Starter Pack 2026: Season 3".
+    // Without that guard a store search happily returns DLC or a soundtrack and
+    // the sidebar ends up showing art for the wrong product.
+    private static string NormalizeName(string name)
+    {
+        var chars = name
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToLowerInvariant)
+            .ToArray();
+        return new string(chars);
+    }
+
+    private static readonly HashSet<string> NetworkAttempted = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Resolves an icon for a game from the internet, so a game only ever
+    /// clipped (never seen running by this install) still gets real artwork.
+    /// Tried in order: the curated override list, Wikidata's logo for the game,
+    /// then the Steam store's capsule art. Entirely automatic - the curated
+    /// list exists only to correct the rare case the other two get wrong.
+    /// </summary>
+    public static async Task<bool> EnsureFromNetworkAsync(string displayName, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(displayName)) return false;
+        lock (NetworkAttempted)
+        {
+            if (!NetworkAttempted.Add(displayName)) return false;
+        }
+
+        try
+        {
+            if (File.Exists(CachePathFor(displayName))) return false;
+
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("ClypDat-GameIcons/1.0 (+https://github.com/ClypDat/ClypDat)");
+
+            var url = RemoteGameIconsService.LoadCached().TryGetValue(displayName, out var curated) && !string.IsNullOrWhiteSpace(curated)
+                ? curated
+                : await ResolveSteamAppIconAsync(client, displayName, cancellationToken);
+
+            if (string.IsNullOrWhiteSpace(url)) return false;
+
+            var bytes = await client.GetByteArrayAsync(url, cancellationToken);
+            using var stream = new MemoryStream(bytes);
+            using var bitmap = new Bitmap(stream);
+
+            Directory.CreateDirectory(CacheFolder);
+            bitmap.Save(CachePathFor(displayName));
+            AppLog.Info($"Game icon fetched for '{displayName}' from {url}.");
+            return true;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Game icon fetch failed for '{displayName}' (non-fatal)", error);
+            return false;
+        }
+    }
+
+    // Steam's own app icon - the same square artwork Steam puts on a desktop
+    // shortcut and the taskbar, which is what a small round badge wants.
+    // Deliberately NOT the store capsule or a wordmark logo: those are wide
+    // title art that reads as an unrecognisable crop (or an invisible dark
+    // wordmark) at 30px.
+    //
+    // Two keyless calls: the store search resolves a name to an appid, then
+    // ICommunityService/GetApps gives that app's icon hash, which addresses the
+    // icon on Steam's community CDN.
+    private static async Task<string?> ResolveSteamAppIconAsync(HttpClient client, string displayName, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var appId = await ResolveSteamAppIdAsync(client, displayName, cancellationToken);
+            if (appId is null) return null;
+
+            var json = await client.GetStringAsync(
+                $"https://api.steampowered.com/ICommunityService/GetApps/v1/?appids%5B0%5D={appId}",
+                cancellationToken);
+
+            using var document = JsonDocument.Parse(json);
+            if (!document.RootElement.TryGetProperty("response", out var response)) return null;
+            if (!response.TryGetProperty("apps", out var apps)) return null;
+
+            foreach (var app in apps.EnumerateArray())
+            {
+                if (!app.TryGetProperty("icon", out var iconElement)) continue;
+                var hash = iconElement.GetString();
+                if (string.IsNullOrWhiteSpace(hash)) continue;
+                return $"https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{appId}/{hash}.jpg";
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Steam icon lookup failed for '{displayName}' (non-fatal)", error);
+        }
+
+        return null;
+    }
+
+    private static async Task<int?> ResolveSteamAppIdAsync(HttpClient client, string displayName, CancellationToken cancellationToken)
+    {
+        var json = await client.GetStringAsync(
+            $"https://store.steampowered.com/api/storesearch/?term={Uri.EscapeDataString(displayName)}&cc=us&l=en",
+            cancellationToken);
+
+        using var document = JsonDocument.Parse(json);
+        if (!document.RootElement.TryGetProperty("items", out var items)) return null;
+
+        foreach (var item in items.EnumerateArray())
+        {
+            var name = item.TryGetProperty("name", out var nameElement) ? nameElement.GetString() ?? string.Empty : string.Empty;
+            if (!string.Equals(NormalizeName(name), NormalizeName(displayName), StringComparison.Ordinal)) continue;
+            if (item.TryGetProperty("id", out var idElement) && idElement.TryGetInt32(out var id)) return id;
+        }
+
+        return null;
     }
 
     public static Bitmap? TryLoad(string displayName)

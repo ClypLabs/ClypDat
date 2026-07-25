@@ -1,0 +1,23 @@
+{
+  "_comment": [
+    "Curated game-name -> icon-image-URL overrides for the Library sidebar.",
+    "Fetched from GitHub raw at runtime (RemoteGameIconsService), cached locally and",
+    "refreshed at most once a day - so a game can be covered for everyone by editing",
+    "this file on master, with no release needed. Same mechanism as",
+    "game-detection-exclusions.json.",
+    "",
+    "Only needed for games GameIconService can't resolve automatically. It already",
+    "looks games up on the Steam store by name, so Steam titles (including small indie",
+    "ones) generally need no entry here. Add a game when it is either not on Steam at",
+    "all (Fortnite, Rocket League, Valorant, League of Legends) or when the Steam search",
+    "matches the wrong product - searching 'Overwatch 2' returns a seasonal starter-pack",
+    "DLC rather than the game, which the strict name check rejects, leaving it to this",
+    "file.",
+    "",
+    "Keys are matched case-insensitively against the game name shown on a clip.",
+    "Prefer a square-ish image; wide art gets centre-cropped into the round badge.",
+    "Anything unresolved falls back to the icon extracted from the running game's own",
+    "executable, and finally to a letter badge - so a missing entry is never fatal."
+  ],
+  "icons": {}
+}

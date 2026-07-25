@@ -198,7 +198,7 @@
                           <TextBlock Text="{Binding Key, Converter={x:Static opconv:FirstLetterConverter.Instance}}" FontWeight="Bold" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <Border Width="30" Height="30" CornerRadius="15" ClipToBounds="True" IsVisible="{Binding HasIcon}">
-                          <Image Source="{Binding Icon}" Width="26" Height="26" Stretch="Uniform" />
+                          <Image Source="{Binding Icon}" Width="28" Height="28" Stretch="Uniform" />
                         </Border>
                       </Panel>
                     </Button>
@@ -218,7 +218,7 @@
                           <TextBlock Text="{Binding Key, Converter={x:Static opconv:FirstLetterConverter.Instance}}" FontWeight="Bold" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <Border Width="30" Height="30" CornerRadius="15" ClipToBounds="True" IsVisible="{Binding HasIcon}">
-                          <Image Source="{Binding Icon}" Width="26" Height="26" Stretch="Uniform" />
+                          <Image Source="{Binding Icon}" Width="28" Height="28" Stretch="Uniform" />
                         </Border>
                       </Panel>
                     </Button>
