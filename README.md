@@ -100,7 +100,7 @@ running install via a PowerShell helper that waits for the process to exit.
 ## Requirements
 
 - Windows 10 or 11, x64
-- .NET SDK 8+ to build from source
+- .NET SDK 10+ to build from source
 - The ClypDat (Native) backend works on NVIDIA, AMD, and (as a last-resort
   software fallback) any GPU-less machine. The OBS backend's encoder is
   still NVENC-only, with no AMD/software fallback.
