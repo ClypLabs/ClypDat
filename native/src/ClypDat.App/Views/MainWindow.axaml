@@ -14,10 +14,14 @@
         MinHeight="620"
         Background="#0D1116"
         Icon="/Assets/clypdat-icon.ico"
+        SystemDecorations="Full"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaTitleBarHeightHint="-1"
+        ExtendClientAreaChromeHints="NoChrome"
         SizeChanged="Window_OnSizeChanged">
-  <Grid RowDefinitions="48,*">
-    <Border Grid.Row="0" Background="#171F27" BorderBrush="#1E2A33" BorderThickness="0,0,0,1">
-      <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,0" VerticalAlignment="Center">
+  <Grid RowDefinitions="52,*">
+    <Border Grid.Row="0" Margin="0,4,0,0" Background="#171F27" BorderBrush="#1E2A33" BorderThickness="0,0,0,1" PointerPressed="HeaderBar_OnPointerPressed">
+      <Grid ColumnDefinitions="Auto,*,Auto,Auto" Margin="12,0,0,0" VerticalAlignment="Center">
         <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
           <Button Classes="brandButton" Padding="4,5,8,5" Click="LibraryHomeButton_OnClick" ToolTip.Tip="Library">
             <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
@@ -87,8 +91,6 @@
               </Button>
             </StackPanel>
           </Border>
-          <Button Content="Folder" Click="FolderButton_OnClick" />
-          <Button Content="Refresh" Click="RefreshButton_OnClick" />
         </StackPanel>
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsEditorVisible}">
           <Button Content="X" Classes="closeEditor" Click="CloseEditorButton_OnClick" />
@@ -98,6 +100,18 @@
                 Classes="closeEditor"
                 Click="CloseSettingsButton_OnClick"
                 IsVisible="{Binding ShowSettingsClose}" />
+
+        <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="16,0,0,0">
+          <Button Classes="windowChromeButton" Click="MinimizeButton_OnClick" ToolTip.Tip="Minimize">
+            <PathIcon Data="M19,13H5V11H19V13Z" Width="14" Height="14" />
+          </Button>
+          <Button x:Name="MaximizeRestoreButton" Classes="windowChromeButton" Click="MaximizeRestoreButton_OnClick" ToolTip.Tip="Maximize">
+            <PathIcon Data="M18,4H6C4.9,4,4,4.9,4,6v12c0,1.1,0.9,2,2,2h12c1.1,0,2-0.9,2-2V6C20,4.9,19.1,4,18,4z M18,18H6V6h12V18z" Width="14" Height="14" />
+          </Button>
+          <Button Classes="windowChromeButton windowCloseButton" Click="CloseWindowButton_OnClick" ToolTip.Tip="Close">
+            <PathIcon Data="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z" Width="13" Height="13" />
+          </Button>
+        </StackPanel>
       </Grid>
     </Border>
 
@@ -154,12 +168,12 @@
             </Button>
             <Button Grid.Column="5"
                     Classes="linkButton"
-                    Click="LibraryPathButton_OnClick"
-                    VerticalAlignment="Center">
-              <TextBlock Text="{Binding LibraryLocationText}"
-                         Foreground="#647181"
-                         FontSize="12"
-                         TextTrimming="CharacterEllipsis" />
+                    Click="RefreshButton_OnClick"
+                    VerticalAlignment="Center"
+                    Padding="6"
+                    ToolTip.Tip="Refresh library">
+              <PathIcon Data="M17.65,6.35C16.2,4.9,14.21,4,12,4c-4.42,0-7.99,3.58-7.99,8s3.57,8,7.99,8c3.73,0,6.84-2.55,7.73-6h-2.08c-0.82,2.33-3.04,4-5.65,4c-3.31,0-6-2.69-6-6s2.69-6,6-6c1.66,0,3.14,0.69,4.22,1.78L13,11h7V4L17.65,6.35z"
+                        Width="15" Height="15" Foreground="#8C98A7" />
             </Button>
           </Grid>
 
