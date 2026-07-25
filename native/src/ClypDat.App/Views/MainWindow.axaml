@@ -44,24 +44,25 @@
               ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,3*"
               Margin="18,0,0,0"
               VerticalAlignment="Center">
-          <Button Grid.Column="0" Content="{Binding RecorderStatus}" Classes="replayButton" Classes.recording="{Binding IsReplayRecording}">
+          <Button Grid.Column="0" Content="{Binding RecorderStatus}" Classes="replayButton" Classes.recording="{Binding IsReplayRecording}"
+                  ToolTip.Tip="Replay buffer status - click to change capture backend, replay length, frame rate, hotkey and microphone">
             <Button.Flyout>
               <Flyout Placement="BottomEdgeAlignedLeft">
                 <!-- Backend and microphone names run long ("Windows Capture
                      (Legacy)", full device names), so those get the full width;
                      only the genuinely short fields share a row. Two ~146px
                      columns truncated almost everything. -->
-                <StackPanel Width="348" Spacing="14" Margin="4,2">
-                  <StackPanel Spacing="3">
+                <StackPanel Width="352" Spacing="0" Margin="2,0">
+                  <StackPanel Spacing="3" Margin="0,2,0,14">
                     <TextBlock Text="Replay Buffer" Foreground="#EDF4FB" FontWeight="Bold" FontSize="15" />
                     <TextBlock Text="Always armed - records in the background the instant a game is detected, so there's nothing to turn off."
                                Foreground="#7C8EA3" FontSize="11.5" TextWrapping="Wrap" LineHeight="16" />
                   </StackPanel>
 
-                  <Border Height="1" Background="#22303A" />
+                  <Border Height="1" Background="#22303A" Margin="0,0,0,14" />
 
-                  <StackPanel Spacing="6">
-                    <TextBlock Text="Capture backend" Foreground="#B8C7D8" FontWeight="Bold" FontSize="12.5" />
+                  <StackPanel Spacing="6" Margin="0,0,0,12">
+                    <TextBlock Classes="flyoutLabel" Text="CAPTURE BACKEND" />
                     <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayBackends}" SelectedItem="{Binding SelectedReplayBackend}" HorizontalAlignment="Stretch">
                       <ComboBox.ItemTemplate>
                         <DataTemplate>
@@ -71,9 +72,9 @@
                     </ComboBox>
                   </StackPanel>
 
-                  <Grid ColumnDefinitions="*,12,*">
+                  <Grid ColumnDefinitions="*,12,*" Margin="0,0,0,12">
                     <StackPanel Grid.Column="0" Spacing="6">
-                      <TextBlock Text="Replay length" Foreground="#B8C7D8" FontWeight="Bold" FontSize="12.5" />
+                      <TextBlock Classes="flyoutLabel" Text="LENGTH" />
                       <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}" HorizontalAlignment="Stretch">
                         <ComboBox.ItemTemplate>
                           <DataTemplate>
@@ -83,19 +84,42 @@
                       </ComboBox>
                     </StackPanel>
                     <StackPanel Grid.Column="2" Spacing="6">
-                      <TextBlock Text="Save hotkey" Foreground="#B8C7D8" FontWeight="Bold" FontSize="12.5" />
-                      <Button Content="{Binding HotkeyDisplay}" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                      <TextBlock Classes="flyoutLabel" Text="FRAME RATE" />
+                      <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}" HorizontalAlignment="Stretch">
+                        <ComboBox.ItemTemplate>
+                          <DataTemplate>
+                            <TextBlock Text="{Binding StringFormat={}{0} fps}" />
+                          </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                      </ComboBox>
                     </StackPanel>
                   </Grid>
 
-                  <StackPanel Spacing="6">
-                    <TextBlock Text="Microphone" Foreground="#B8C7D8" FontWeight="Bold" FontSize="12.5" />
+                  <StackPanel Spacing="6" Margin="0,0,0,12">
+                    <TextBlock Classes="flyoutLabel" Text="MICROPHONE" />
                     <ComboBox Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" HorizontalAlignment="Stretch" />
                   </StackPanel>
 
-                  <Border Height="1" Background="#22303A" />
+                  <StackPanel Spacing="6" Margin="0,0,0,12">
+                    <TextBlock Classes="flyoutLabel" Text="SAVE HOTKEY" />
+                    <Button Content="{Binding HotkeyDisplay}" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                  </StackPanel>
 
-                  <Button Classes="linkButton" Content="More Replay Buffer settings" Click="OpenReplaySettingsButton_OnClick" HorizontalAlignment="Left" Padding="0" />
+                  <!-- Frame rate only takes effect on a fresh buffer, so the
+                       restart is offered right where it was changed rather
+                       than leaving the new value silently inactive. -->
+                  <Border Background="#1B2430" BorderBrush="#2C3B48" BorderThickness="1" CornerRadius="7"
+                          Padding="10,8" Margin="0,0,0,12" IsVisible="{Binding ReplayQualityRestartRequired}">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                      <TextBlock Grid.Column="0" Text="Restart the buffer to apply the new quality." Foreground="#E5A00D"
+                                 FontSize="11.5" FontWeight="Bold" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      <Button Grid.Column="1" Content="Restart" Click="RestartReplayBufferButton_OnClick" VerticalAlignment="Center" />
+                    </Grid>
+                  </Border>
+
+                  <Border Height="1" Background="#22303A" Margin="0,0,0,10" />
+
+                  <Button Classes="linkButton" Content="More Replay Buffer settings" Click="OpenReplaySettingsButton_OnClick" HorizontalAlignment="Left" Padding="0" Margin="0,0,0,2" />
                 </StackPanel>
               </Flyout>
             </Button.Flyout>
