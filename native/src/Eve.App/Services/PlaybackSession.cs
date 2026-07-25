@@ -77,12 +77,15 @@ public sealed class PlaybackSession : IDisposable
         _lastRequestedPosition = TimeSpan.Zero;
         _videoMedia = new Media(_libVlc, new Uri(path));
         _videoMedia.AddOption(":no-audio");
-        // "any" (not a hard-forced "d3d11va") lets libvlc negotiate hardware
-        // decode per-stream and fall back to software cleanly if it misbehaves -
-        // forcing d3d11va unconditionally was showing blocky macroblock
-        // corruption on some NVENC-encoded clips that play back clean in
-        // standalone VLC (which uses this same lenient default).
-        _videoMedia.AddOption(":avcodec-hw=any");
+        // Hardware decode (both hard-forced "d3d11va" and negotiated "any")
+        // still showed blocky macroblock corruption on some NVENC-encoded
+        // clips that play back clean in standalone VLC - the GPU decode path
+        // was opening successfully (so "any" had nothing to fall back from)
+        // and just decoding wrong, likely a stale-reference/driver quirk with
+        // this content's GOP structure. Forcing software decode removes the
+        // GPU decode path from the equation entirely; editor clips are short
+        // enough that CPU decode cost isn't a real concern.
+        _videoMedia.AddOption(":avcodec-hw=none");
         // LibVLC already streams windowed around the playhead (it never reads
         // the whole file), but its default read-ahead cache is sized for
         // local disks - on a network drive (UNC path or mapped SMB share) the
