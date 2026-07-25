@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
@@ -9,6 +10,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using System.Diagnostics;
 using Eve.Capture.Abstractions;
+using Eve.App.Converters;
 using Eve.App.Services;
 using Eve.App.ViewModels;
 using LibVLCSharp.Shared;
@@ -70,6 +72,9 @@ public sealed partial class MainWindow : Window
     public bool AllowRealClose { get; set; }
     private List<(double StartSeconds, double EndSeconds)> _pausedRanges = new();
     private Window? _recordingPausedOverlay;
+    private Window? _editorHoverControlsWindow;
+    private DispatcherTimer? _hoverControlsHideTimer;
+    private bool _editorHoverControlsPointerInside;
     public MainWindow()
     {
         InitializeComponent();
@@ -123,6 +128,7 @@ public sealed partial class MainWindow : Window
         // Click, too late to swallow it.
         AddHandler(KeyDownEvent, MainWindow_OnKeyDown, RoutingStrategies.Tunnel);
         TrackPausedOverlayToWindow();
+        SetupEditorHoverControls();
         AddHandler(KeyUpEvent, MainWindow_OnKeyUp, RoutingStrategies.Tunnel);
         Closing += (_, e) =>
         {
@@ -155,6 +161,7 @@ public sealed partial class MainWindow : Window
             _replayBuffer?.Dispose();
             _playback?.Dispose();
             _recordingPausedOverlay?.Close();
+            _editorHoverControlsWindow?.Close();
             ViewModel?.Dispose();
         };
         AddHandler(PointerPressedEvent, VolumeSlider_OnPointerPressedAny, RoutingStrategies.Tunnel, true);
@@ -1166,6 +1173,7 @@ public sealed partial class MainWindow : Window
         _preFullscreenWindowState = WindowState;
         WindowState = WindowState.FullScreen;
         ViewModel?.SetVideoFullscreen(true);
+        _editorHoverControlsWindow?.Hide();
 
         // Move the SAME EditorVideoView (already playing) into the
         // fullscreen host instead of hot-swapping MediaPlayer onto a second
@@ -3115,6 +3123,7 @@ public sealed partial class MainWindow : Window
         }
         EditorVideoView.MediaPlayer = null;
         _recordingPausedOverlay?.Hide();
+        _editorHoverControlsWindow?.Hide();
         if (ViewModel is not null)
         {
             ViewModel.IsPlaying = false;
@@ -3243,15 +3252,218 @@ public sealed partial class MainWindow : Window
         PositionChanged += (_, _) =>
         {
             if (_recordingPausedOverlay is { IsVisible: true } overlay) RepositionPausedOverlay(overlay);
+            if (_editorHoverControlsWindow is { IsVisible: true } hoverBar) RepositionEditorHoverControls(hoverBar);
         };
         EditorVideoView.LayoutUpdated += (_, _) =>
         {
             if (_recordingPausedOverlay is { IsVisible: true } overlay) RepositionPausedOverlay(overlay);
+            if (_editorHoverControlsWindow is { IsVisible: true } hoverBar) RepositionEditorHoverControls(hoverBar);
             // Covers window resize AND the fullscreen reparent (both change
             // EditorVideoView's rendered height, which the pan-range math
             // depends on) without needing separate handlers for each.
             UpdateVideoTransform();
         };
+    }
+
+    // The video hover bar mirrors the "Recording Paused" badge's owned-window
+    // technique above (see RepositionPausedOverlay/EnsureRecordingPausedOverlay) -
+    // LibVLCSharp's VideoView is a native (non-Avalonia) hwnd on Windows that
+    // always paints over Avalonia-rendered siblings regardless of z-order, so a
+    // plain in-tree Avalonia overlay would never actually show above the video.
+    // An owned Window (Owner = this, no Topmost) sits above it correctly while
+    // staying scoped to EVE and hidden/minimized together with its owner.
+    private void SetupEditorHoverControls()
+    {
+        EditorVideoHost.PointerEntered += (_, _) => ShowEditorHoverControls();
+        EditorVideoHost.PointerMoved += (_, _) => ShowEditorHoverControls();
+        EditorVideoHost.PointerExited += (_, _) => ScheduleHideEditorHoverControls();
+    }
+
+    private void ShowEditorHoverControls()
+    {
+        _editorHoverControlsPointerInside = true;
+        _hoverControlsHideTimer?.Stop();
+        if (ViewModel is null || !ViewModel.IsEditorVisible || ViewModel.IsVideoFullscreen || _playback is null) return;
+
+        var window = EnsureEditorHoverControlsWindow();
+        RepositionEditorHoverControls(window);
+        if (!window.IsVisible) window.Show(this);
+    }
+
+    // Delayed instead of hiding immediately on PointerExited - the bar is a
+    // SEPARATE owned window from EditorVideoHost, so moving the mouse from the
+    // video into the bar itself fires PointerExited on EditorVideoHost a
+    // moment before PointerEntered fires on the bar. Hiding right away would
+    // make the bar flicker away just as the cursor reaches it.
+    private void ScheduleHideEditorHoverControls()
+    {
+        _editorHoverControlsPointerInside = false;
+        _hoverControlsHideTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(220) };
+        _hoverControlsHideTimer.Tick -= OnHoverControlsHideTick;
+        _hoverControlsHideTimer.Tick += OnHoverControlsHideTick;
+        _hoverControlsHideTimer.Stop();
+        _hoverControlsHideTimer.Start();
+    }
+
+    private void OnHoverControlsHideTick(object? sender, EventArgs e)
+    {
+        _hoverControlsHideTimer!.Stop();
+        if (_editorHoverControlsPointerInside) return;
+        _editorHoverControlsWindow?.Hide();
+    }
+
+    private void RepositionEditorHoverControls(Window bar)
+    {
+        var topLeft = EditorVideoView.PointToScreen(new Point(0, 0));
+        var width = EditorVideoView.Bounds.Width;
+        const double barHeight = 64;
+        var bottomOnScreen = EditorVideoView.PointToScreen(new Point(0, EditorVideoView.Bounds.Height));
+        bar.Width = Math.Max(1, width);
+        bar.Height = barHeight;
+        bar.Position = new PixelPoint(topLeft.X, bottomOnScreen.Y - (int)(barHeight * bar.RenderScaling));
+    }
+
+    private Window EnsureEditorHoverControlsWindow()
+    {
+        if (_editorHoverControlsWindow is not null) return _editorHoverControlsWindow;
+
+        PathIcon Icon(string data, double size = 16) => new()
+        {
+            Width = size,
+            Height = size,
+            Foreground = new SolidColorBrush(Color.Parse("#C8D6E6")),
+            Data = Geometry.Parse(data),
+        };
+
+        Button TransportButton(string data, EventHandler<RoutedEventArgs> onClick, string? tip = null)
+        {
+            var button = new Button { Classes = { "transportButton" }, Content = Icon(data) };
+            button.Click += onClick;
+            if (tip is not null) ToolTip.SetTip(button, tip);
+            return button;
+        }
+
+        var playIcon = Icon("M8 5v14l11-7z", 16);
+        playIcon.Foreground = new SolidColorBrush(Color.Parse("#DDE8F6"));
+        playIcon.Bind(IsVisibleProperty, new Binding("!IsPlaying"));
+        var pauseIcon = Icon("M6 19h4V5H6v14zm8-14v14h4V5h-4z", 16);
+        pauseIcon.Foreground = new SolidColorBrush(Color.Parse("#DDE8F6"));
+        pauseIcon.Bind(IsVisibleProperty, new Binding("IsPlaying"));
+        var playPauseButton = new Button { Classes = { "playButton" }, Content = new Grid { Children = { playIcon, pauseIcon } } };
+        playPauseButton.Click += PlayPauseButton_OnClick;
+
+        var muteIcon = new PathIcon { Width = 15, Height = 15, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        muteIcon.Bind(PathIcon.ForegroundProperty, new Binding("IsMasterMuted") { Converter = BoolToMuteBrushConverter.Instance });
+        muteIcon.Bind(PathIcon.DataProperty, new Binding("EffectiveMasterVolumePercent") { Converter = VolumeLevelToIconConverter.Instance });
+        var muteToggle = new Border
+        {
+            Classes = { "muteToggle" },
+            Width = 26,
+            Height = 26,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Cursor = new Cursor(StandardCursorType.Hand),
+            Child = muteIcon,
+        };
+        ToolTip.SetTip(muteToggle, "Mute/unmute");
+        muteToggle.PointerPressed += MasterVolumeMuteToggle_OnPointerPressed;
+
+        var volumeSlider = new Slider
+        {
+            Classes = { "volumeSlider" },
+            Minimum = 0,
+            Maximum = 150,
+            TickFrequency = 1,
+            IsSnapToTickEnabled = true,
+            Width = 80,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        volumeSlider.Bind(Slider.ValueProperty, new Binding("MasterVolumePercent", BindingMode.TwoWay));
+        volumeSlider.Bind(OpacityProperty, new Binding("IsMasterMuted") { Converter = BoolToOpacityConverter.Instance });
+
+        var timeText = new TextBlock { Foreground = new SolidColorBrush(Color.Parse("#EDF4FB")), FontSize = 13, FontWeight = FontWeight.Bold, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
+        timeText.Bind(TextBlock.TextProperty, new Binding("CurrentTimeLabel"));
+        var slashText = new TextBlock { Text = " / ", Foreground = new SolidColorBrush(Color.Parse("#5C6D7E")), FontSize = 13, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
+        var durationText = new TextBlock { Foreground = new SolidColorBrush(Color.Parse("#8C98A7")), FontSize = 13, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
+        durationText.Bind(TextBlock.TextProperty, new Binding("DurationLabel"));
+
+        var centerGroup = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 7,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                TransportButton("M6 6h2v12H6zm3.5 6l8.5 6V6z", RestartButton_OnClick, "Restart"),
+                TransportButton("M16 5v14L5 12Z", StepBackButton_OnClick, "Step back"),
+                playPauseButton,
+                TransportButton("M8 5v14l11-7z", StepForwardButton_OnClick, "Step forward"),
+                TransportButton("M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z", EndButton_OnClick, "End"),
+                new Border { Width = 1, Height = 20, Background = new SolidColorBrush(Color.Parse("#26FFFFFF")), Margin = new Thickness(4, 0) },
+                new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Children = { timeText, slashText, durationText } },
+            },
+        };
+
+        var leftGroup = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children = { muteToggle, volumeSlider },
+        };
+
+        var fullscreenButton = TransportButton("M7,14H5v5h5v-2H7V14z M5,10h2V7h3V5H5V10z M17,17h-3v2h5v-5h-2V17z M14,5v2h3v3h2V5H14z", FullscreenButton_OnClick, "Fullscreen");
+        fullscreenButton.HorizontalAlignment = HorizontalAlignment.Right;
+
+        var layout = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
+            Margin = new Thickness(14, 0),
+        };
+        Grid.SetColumn(leftGroup, 0);
+        Grid.SetColumn(centerGroup, 1);
+        Grid.SetColumn(fullscreenButton, 2);
+        layout.Children.Add(leftGroup);
+        layout.Children.Add(centerGroup);
+        layout.Children.Add(fullscreenButton);
+
+        var backdrop = new Border
+        {
+            Background = new LinearGradientBrush
+            {
+                StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+                EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
+                GradientStops =
+                {
+                    new GradientStop(Color.FromArgb(0x00, 0x08, 0x0B, 0x0E), 0),
+                    new GradientStop(Color.FromArgb(0xE0, 0x08, 0x0B, 0x0E), 0.55),
+                },
+            },
+            Child = layout,
+        };
+
+        var window = new Window
+        {
+            SystemDecorations = SystemDecorations.None,
+            ShowInTaskbar = false,
+            CanResize = false,
+            ShowActivated = false,
+            Topmost = false,
+            Background = Brushes.Transparent,
+            TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
+            DataContext = DataContext,
+            Content = backdrop,
+        };
+        window.PointerEntered += (_, _) =>
+        {
+            _editorHoverControlsPointerInside = true;
+            _hoverControlsHideTimer?.Stop();
+        };
+        window.PointerExited += (_, _) => ScheduleHideEditorHoverControls();
+        _editorHoverControlsWindow = window;
+        return window;
     }
 
     // Recomputes the "Playback Paused" badge for the CURRENT position. Must
