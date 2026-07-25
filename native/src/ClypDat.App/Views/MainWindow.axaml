@@ -176,10 +176,6 @@
             </StackPanel>
           </Border>
         </StackPanel>
-        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsEditorVisible}">
-          <Button Content="X" Classes="closeEditor" Click="CloseEditorButton_OnClick" />
-        </StackPanel>
-
         <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="16,0,0,0">
           <Button Classes="windowChromeButton" Click="MinimizeButton_OnClick" ToolTip.Tip="Minimize">
             <PathIcon Data="M19,13H5V11H19V13Z" Width="14" Height="14" />
