@@ -3301,7 +3301,7 @@ public sealed partial class MainWindow : Window
                         && cursor.Y >= videoTopLeft.Y && cursor.Y < videoBottomRight.Y;
 
         var overBar = false;
-        if (_editorHoverControlsWindow is { } existingBar)
+        if (_editorHoverControlsWindow is { IsVisible: true } existingBar)
         {
             var barPos = existingBar.Position;
             var barWidthPx = (int)(existingBar.Width * existingBar.RenderScaling);
@@ -3313,8 +3313,17 @@ public sealed partial class MainWindow : Window
         if (overVideo || overBar)
         {
             var window = EnsureEditorHoverControlsWindow();
-            RepositionEditorHoverControls(window);
-            if (!window.IsVisible) window.Show(this);
+            // Reposition only on the hidden->shown transition, not every poll
+            // tick - repeatedly calling native SetWindowPos on a transparent/
+            // composited window ~8x/sec while just sitting there hovering was
+            // visibly janky. Actual repositioning while it's already visible
+            // (window move/resize) is handled separately by the
+            // PositionChanged/LayoutUpdated hooks in TrackPausedOverlayToWindow.
+            if (!window.IsVisible)
+            {
+                RepositionEditorHoverControls(window);
+                window.Show(this);
+            }
         }
         else
         {
