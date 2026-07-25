@@ -1,3 +1,5 @@
+using Avalonia.Media.Imaging;
+
 namespace ClypDat.App.ViewModels;
 
 // A single checkable row in the Game Filters / Clip Type Filters dropdown
@@ -22,6 +24,22 @@ public sealed class FilterOptionViewModel : ViewModelBase
 
     public string Key { get; }
     public string Label { get; }
+
+    // Only game rows carry one (extracted from the game's own executable by
+    // GameIconService); everything else falls back to its initial badge.
+    private Bitmap? _icon;
+
+    public Bitmap? Icon
+    {
+        get => _icon;
+        set
+        {
+            if (!SetProperty(ref _icon, value)) return;
+            OnPropertyChanged(nameof(HasIcon));
+        }
+    }
+
+    public bool HasIcon => _icon is not null;
 
     public bool IsChecked
     {

@@ -3811,6 +3811,33 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<FilterOptionViewModel> OverflowGameFilterOptions { get; } = new();
     public bool HasOverflowGames => OverflowGameFilterOptions.Count > 0;
 
+    private bool _isGameListExpanded;
+
+    // The rail's "more games" control expands the rail itself rather than
+    // opening a menu - the extra games are the same icon buttons, just
+    // revealed in place.
+    public bool IsGameListExpanded
+    {
+        get => _isGameListExpanded;
+        set => SetProperty(ref _isGameListExpanded, value);
+    }
+
+    public void ToggleGameListExpanded() => IsGameListExpanded = !IsGameListExpanded;
+
+    // A freshly-extracted icon has to reach the rail rows that were built
+    // before it existed - they're the same instances in Top/Overflow, so
+    // updating the GameFilterOptions entry updates whichever list shows it.
+    public void ApplyGameIcon(string gameKey)
+    {
+        var icon = GameIconService.TryLoad(gameKey);
+        if (icon is null) return;
+
+        foreach (var option in GameFilterOptions)
+        {
+            if (string.Equals(option.Key, gameKey, StringComparison.OrdinalIgnoreCase)) option.Icon = icon;
+        }
+    }
+
     public bool IsGameFilterActive => _activeGameFilters.Count > 0;
     public string ActiveGameFilterLabel => string.Join(", ", _activeGameFilters);
     public bool IsClipTypeFilterActive => _activeClipTypeFilters.Count > 0;
@@ -3843,7 +3870,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 game.Key,
                 $"{game.Key} ({game.Value})",
                 _activeGameFilters.Contains(game.Key),
-                OnGameFilterOptionChanged));
+                OnGameFilterOptionChanged)
+            {
+                Icon = GameIconService.TryLoad(game.Key)
+            });
         }
 
         // Sidebar rail shows only the most-clipped few inline and hides the
