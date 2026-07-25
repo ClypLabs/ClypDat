@@ -3685,6 +3685,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<FilterOptionViewModel> GameFilterOptions { get; } = new();
     public ObservableCollection<FilterOptionViewModel> ClipTypeFilterOptions { get; } = new();
 
+    // How many games the sidebar rail shows inline before the rest move
+    // into its "more" flyout.
+    private const int TopGameRailCount = 5;
+    public ObservableCollection<FilterOptionViewModel> TopGameFilterOptions { get; } = new();
+    public ObservableCollection<FilterOptionViewModel> OverflowGameFilterOptions { get; } = new();
+    public bool HasOverflowGames => OverflowGameFilterOptions.Count > 0;
+
     public bool IsGameFilterActive => _activeGameFilters.Count > 0;
     public string ActiveGameFilterLabel => string.Join(", ", _activeGameFilters);
     public bool IsClipTypeFilterActive => _activeClipTypeFilters.Count > 0;
@@ -3719,6 +3726,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 _activeGameFilters.Contains(game.Key),
                 OnGameFilterOptionChanged));
         }
+
+        // Sidebar rail shows only the most-clipped few inline and hides the
+        // rest behind a "more" flyout, so a large library doesn't produce a
+        // rail taller than the window. These hold the SAME instances as
+        // GameFilterOptions (not copies) so SelectGameSection's pass over
+        // GameFilterOptions still drives their checked state.
+        TopGameFilterOptions.Clear();
+        OverflowGameFilterOptions.Clear();
+        foreach (var option in GameFilterOptions.Take(TopGameRailCount)) TopGameFilterOptions.Add(option);
+        foreach (var option in GameFilterOptions.Skip(TopGameRailCount)) OverflowGameFilterOptions.Add(option);
+        OnPropertyChanged(nameof(HasOverflowGames));
 
         // Same "(count)" suffix the game filter rows above already get.
         var manualCount = AllClips.Count(clip => clip.IsManualClip);
