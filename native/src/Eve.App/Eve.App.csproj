@@ -56,6 +56,9 @@
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
     <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
     <PackageReference Include="FFmpeg.AutoGen" Version="8.1.0" />
+    <!-- Pinned above Avalonia's transitive 0.21.2 to pick up the CVE-2026-39959
+         backport fix (GHSA-xrw6-gwf8-vvr9); no direct usage otherwise. -->
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
   </ItemGroup>
 
   <ItemGroup>
