@@ -3070,6 +3070,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         OnboardingStep = OnboardingStepOrder[0];
         IsOnboardingVisible = true;
+
+        // The running-process list only ever got filled when Settings was
+        // opened or Refresh was pressed, so onboarding's Chat Audio App picker
+        // started empty and looked broken until the user hit Refresh.
+        _ = RefreshOpenProcessesAsync();
+
+        // Recorded the moment the walkthrough is SHOWN, not when it's
+        // finished. HasSeenOnboarding is false only while no settings file
+        // exists, but any save before the user finishes - changing a setting,
+        // picking a folder, or just closing the window, which saves bounds -
+        // writes that false to disk and makes it stick. Anyone who closed the
+        // app without completing the walkthrough then got it again on every
+        // single launch, forever. It can still be replayed deliberately from
+        // Settings > About > Show Walkthrough.
+        if (!Settings.HasSeenOnboarding)
+        {
+            Settings.HasSeenOnboarding = true;
+            SaveSettings();
+        }
     }
 
     public void OnboardingBack()
