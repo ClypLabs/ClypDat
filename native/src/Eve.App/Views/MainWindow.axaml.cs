@@ -1735,8 +1735,14 @@ public sealed partial class MainWindow : Window
             // before landing. Pausing at the actual position instead of the
             // smoothed estimate keeps resume within that threshold so it can
             // stay a plain unpause.
-            var pauseTime = _playback.Position;
+            //
+            // Position is read AFTER Pause() (not before) - VideoPlayer.SetPause(true)
+            // doesn't land instantly, so a snapshot taken beforehand is a moment
+            // behind wherever the video actually freezes. Resuming from that stale,
+            // earlier snapshot was rewinding to a spot already played and replaying
+            // it forward - visible as a brief "rewind and repeat" on every unpause.
             _playback.Pause();
+            var pauseTime = _playback.Position;
             ViewModel.CurrentTime = pauseTime;
             SetPlayheadBase(pauseTime);
             ViewModel.IsPlaying = false;
