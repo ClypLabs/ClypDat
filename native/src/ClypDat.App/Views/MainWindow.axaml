@@ -555,19 +555,21 @@
                   PointerEntered="DateScrubber_OnPointerEntered"
                   PointerExited="DateScrubber_OnPointerExited">
             <Panel ClipToBounds="False">
+              <!-- Full date list, faded in only while scrubbing. No hard
+                   border - a soft shadow reads as floating above the library
+                   instead of a box pasted over it. -->
               <Border x:Name="DateScrubberLabelHost"
-                      Width="72"
-                      Margin="-78,0,0,0"
+                      Width="78"
+                      Margin="-86,0,0,0"
                       HorizontalAlignment="Left"
-                      Background="#E60E151B"
-                      BorderBrush="#1E2A33"
-                      BorderThickness="1"
-                      CornerRadius="7"
+                      Background="#F5121A21"
+                      CornerRadius="9"
+                      BoxShadow="0 10 30 -8 #A0000000"
                       Opacity="0"
                       IsHitTestVisible="False">
                 <Border.Transitions>
                   <Transitions>
-                    <DoubleTransition Property="Opacity" Duration="0:0:0.14" />
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.16" />
                   </Transitions>
                 </Border.Transitions>
                 <Canvas x:Name="DateScrubberLabelCanvas" ClipToBounds="True" />
@@ -577,19 +579,52 @@
                    as a scrollbar when the library is short enough that the
                    thumb fills most of it. -->
               <Border x:Name="DateScrubberTrack"
-                      Width="3"
-                      CornerRadius="1.5"
-                      Background="#18222B"
+                      Width="4"
+                      CornerRadius="2"
+                      Background="#141C24"
                       HorizontalAlignment="Right"
                       IsHitTestVisible="False" />
+
               <Canvas x:Name="DateScrubberCanvas" ClipToBounds="False">
+                <!-- Grows from its own centre on hover/drag (scaleX, so the
+                     width change animates - Width itself can't transition). -->
                 <Border x:Name="DateScrubberThumb"
-                        Canvas.Left="14"
-                        Width="5"
-                        MinHeight="28"
-                        CornerRadius="2.5"
-                        Background="#3E4C5A"
-                        IsHitTestVisible="False" />
+                        Canvas.Left="12"
+                        Width="4"
+                        MinHeight="34"
+                        CornerRadius="2"
+                        Background="#3A4857"
+                        RenderTransformOrigin="50%,50%"
+                        RenderTransform="scaleX(1)"
+                        IsHitTestVisible="False">
+                  <Border.Transitions>
+                    <Transitions>
+                      <BrushTransition Property="Background" Duration="0:0:0.13" />
+                      <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.13" />
+                    </Transitions>
+                  </Border.Transitions>
+                </Border>
+
+                <!-- Rides alongside the thumb while dragging with the date
+                     you're currently on, so the position you're seeking to is
+                     readable without tracing across to the list. -->
+                <Border x:Name="DateScrubberBubble"
+                        Background="{StaticResource AccentBrush}"
+                        CornerRadius="6"
+                        Padding="10,5"
+                        BoxShadow="0 6 18 -4 #B0000000"
+                        Opacity="0"
+                        IsHitTestVisible="False">
+                  <Border.Transitions>
+                    <Transitions>
+                      <DoubleTransition Property="Opacity" Duration="0:0:0.16" />
+                    </Transitions>
+                  </Border.Transitions>
+                  <TextBlock x:Name="DateScrubberBubbleText"
+                             Foreground="#FFFFFF"
+                             FontSize="12"
+                             FontWeight="Bold" />
+                </Border>
               </Canvas>
             </Panel>
           </Border>
