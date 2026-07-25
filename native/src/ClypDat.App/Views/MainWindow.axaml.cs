@@ -80,6 +80,14 @@ public sealed partial class MainWindow : Window
     // leaves, so moving from the video to a control doesn't dismiss it.
     private static readonly TimeSpan HoverControlsGrace = TimeSpan.FromMilliseconds(1400);
     private DateTime _hoverControlsActiveUntilUtc = DateTime.MinValue;
+    // Slides the bar in from under the video's bottom edge. The window itself
+    // stays put - only its content moves - because animating an owned window's
+    // native position is visibly steppy next to a composited transform.
+    private const double HoverControlsSlideDistance = 72;
+    private static readonly TimeSpan HoverControlsSlideDuration = TimeSpan.FromMilliseconds(190);
+    private Border? _hoverControlsBackdrop;
+    private DispatcherTimer? _hoverControlsSlideOutTimer;
+    private bool _hoverControlsSlidingOut;
     public MainWindow()
     {
         InitializeComponent();
@@ -1691,7 +1699,7 @@ public sealed partial class MainWindow : Window
         _preFullscreenWindowState = WindowState;
         WindowState = WindowState.FullScreen;
         ViewModel?.SetVideoFullscreen(true);
-        _editorHoverControlsWindow?.Hide();
+        HideEditorHoverControls(immediate: true);
 
         // Move the SAME EditorVideoView (already playing) into the
         // fullscreen host instead of hot-swapping MediaPlayer onto a second
@@ -3635,7 +3643,7 @@ public sealed partial class MainWindow : Window
         }
         EditorVideoView.MediaPlayer = null;
         _recordingPausedOverlay?.Hide();
-        _editorHoverControlsWindow?.Hide();
+        HideEditorHoverControls(immediate: true);
         if (ViewModel is not null)
         {
             ViewModel.IsPlaying = false;
@@ -3794,15 +3802,47 @@ public sealed partial class MainWindow : Window
     private void SetupEditorHoverControls()
     {
         _hoverControlsHideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
-        _hoverControlsHideTimer.Tick += (_, _) => PollEditorHoverControls();
+        // Guarded: an exception escaping a DispatcherTimer tick kills the
+        // subscription, and this poll touches things that can legitimately
+        // throw mid-transition - PointToScreen on a visual that's momentarily
+        // detached (the fullscreen reparent), or RenderScaling on a window
+        // being torn down. One throw and the bar would never appear again for
+        // the rest of the session, which matches it "randomly" going away and
+        // staying away.
+        _hoverControlsHideTimer.Tick += (_, _) =>
+        {
+            try
+            {
+                PollEditorHoverControls();
+            }
+            catch (Exception error)
+            {
+                AppLog.Error("Editor hover bar poll failed (recovered)", error);
+            }
+        };
         _hoverControlsHideTimer.Start();
+    }
+
+    // Only logged on an actual show/hide transition - the poll runs ~8x a
+    // second and would otherwise bury the log.
+    private string _hoverControlsLastState = string.Empty;
+
+    private void LogHoverControlsState(string state)
+    {
+        if (_hoverControlsLastState == state) return;
+        _hoverControlsLastState = state;
+        AppLog.Debug($"Editor hover bar: {state}.");
     }
 
     private void PollEditorHoverControls()
     {
         if (ViewModel is null || !ViewModel.IsEditorVisible || ViewModel.IsVideoFullscreen || _playback is null)
         {
-            _editorHoverControlsWindow?.Hide();
+            if (_editorHoverControlsWindow is { IsVisible: true })
+            {
+                LogHoverControlsState($"hidden (editor={ViewModel?.IsEditorVisible}, fullscreen={ViewModel?.IsVideoFullscreen}, playback={_playback is not null})");
+            }
+            HideEditorHoverControls(immediate: true);
             return;
         }
 
@@ -3832,23 +3872,90 @@ public sealed partial class MainWindow : Window
         if (overVideo || overBar)
         {
             _hoverControlsActiveUntilUtc = DateTime.UtcNow + HoverControlsGrace;
-            var window = EnsureEditorHoverControlsWindow();
-            // Reposition only on the hidden->shown transition, not every poll
-            // tick - repeatedly calling native SetWindowPos on a transparent/
-            // composited window ~8x/sec while just sitting there hovering was
-            // visibly janky. Actual repositioning while it's already visible
-            // (window move/resize) is handled separately by the
-            // PositionChanged/LayoutUpdated hooks in TrackPausedOverlayToWindow.
-            if (!window.IsVisible)
-            {
-                RepositionEditorHoverControls(window);
-                window.Show(this);
-            }
+            ShowEditorHoverControls();
         }
         else if (DateTime.UtcNow >= _hoverControlsActiveUntilUtc)
         {
-            _editorHoverControlsWindow?.Hide();
+            if (_editorHoverControlsWindow is { IsVisible: true } && !_hoverControlsSlidingOut)
+            {
+                LogHoverControlsState($"sliding out (cursor={cursor.X},{cursor.Y} video={videoTopLeft.X},{videoTopLeft.Y}-{videoBottomRight.X},{videoBottomRight.Y})");
+            }
+            HideEditorHoverControls(immediate: false);
         }
+    }
+
+    private void ShowEditorHoverControls()
+    {
+        _hoverControlsSlideOutTimer?.Stop();
+        _hoverControlsSlidingOut = false;
+
+        var window = EnsureEditorHoverControlsWindow();
+        // Reposition only on the hidden->shown transition, not every poll
+        // tick - repeatedly calling native SetWindowPos on a transparent/
+        // composited window ~8x/sec while just sitting there hovering was
+        // visibly janky. Actual repositioning while it's already visible
+        // (window move/resize) is handled separately by the
+        // PositionChanged/LayoutUpdated hooks in TrackPausedOverlayToWindow.
+        if (!window.IsVisible)
+        {
+            RepositionEditorHoverControls(window);
+            // Parked below the window's own bounds so the first frame after
+            // Show is already off-screen; flipping it back one frame later
+            // gives the transition a "from" state to animate out of, rather
+            // than both values landing in the same layout pass.
+            SetHoverControlsOffset(HoverControlsSlideDistance);
+            window.Show(this);
+            LogHoverControlsState("sliding in");
+            Dispatcher.UIThread.Post(() => SetHoverControlsOffset(0), DispatcherPriority.Loaded);
+        }
+        else
+        {
+            SetHoverControlsOffset(0);
+        }
+    }
+
+    private void HideEditorHoverControls(bool immediate)
+    {
+        if (_editorHoverControlsWindow is not { IsVisible: true } window)
+        {
+            _hoverControlsSlidingOut = false;
+            return;
+        }
+
+        if (immediate)
+        {
+            _hoverControlsSlideOutTimer?.Stop();
+            _hoverControlsSlidingOut = false;
+            window.Hide();
+            return;
+        }
+
+        if (_hoverControlsSlidingOut) return;
+        _hoverControlsSlidingOut = true;
+        SetHoverControlsOffset(HoverControlsSlideDistance);
+
+        _hoverControlsSlideOutTimer ??= new DispatcherTimer();
+        _hoverControlsSlideOutTimer.Interval = HoverControlsSlideDuration;
+        _hoverControlsSlideOutTimer.Stop();
+        _hoverControlsSlideOutTimer.Tick -= HoverControlsSlideOut_OnTick;
+        _hoverControlsSlideOutTimer.Tick += HoverControlsSlideOut_OnTick;
+        _hoverControlsSlideOutTimer.Start();
+    }
+
+    private void HoverControlsSlideOut_OnTick(object? sender, EventArgs e)
+    {
+        _hoverControlsSlideOutTimer?.Stop();
+        if (!_hoverControlsSlidingOut) return;
+        _hoverControlsSlidingOut = false;
+        _editorHoverControlsWindow?.Hide();
+        LogHoverControlsState("hidden");
+    }
+
+    private void SetHoverControlsOffset(double offset)
+    {
+        if (_hoverControlsBackdrop is null) return;
+        _hoverControlsBackdrop.RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse(
+            offset == 0 ? "translateY(0px)" : $"translateY({offset.ToString(System.Globalization.CultureInfo.InvariantCulture)}px)");
     }
 
     private void RepositionEditorHoverControls(Window bar)
@@ -3984,7 +4091,18 @@ public sealed partial class MainWindow : Window
                 },
             },
             Child = layout,
+            RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse($"translateY({HoverControlsSlideDistance}px)"),
+            Transitions =
+            [
+                new Avalonia.Animation.TransformOperationsTransition
+                {
+                    Property = Visual.RenderTransformProperty,
+                    Duration = HoverControlsSlideDuration,
+                    Easing = new Avalonia.Animation.Easings.CubicEaseOut()
+                }
+            ],
         };
+        _hoverControlsBackdrop = backdrop;
 
         var window = new Window
         {
