@@ -271,6 +271,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         : Settings.LibraryFolder;
 
     public string LibraryLocationText => $"Location: {LibraryFolderDisplay}";
+    public string LibrarySizeDisplay => FormatBytes(AllClips.Sum(clip => clip.SizeBytes));
     public string HotkeyDisplay => IsCapturingHotkey ? "Press keys..." : Settings.SaveReplayHotkey;
 
     public int SelectedCount => _selectedPaths.Count;
@@ -3590,6 +3591,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(LibraryTitle));
         OnPropertyChanged(nameof(LibraryFolderDisplay));
         OnPropertyChanged(nameof(LibraryLocationText));
+        OnPropertyChanged(nameof(LibrarySizeDisplay));
         NotifySelectionChrome();
         RecomputeGameFilterBadges();
         UpdateFirstOfDateFlags();
@@ -3674,6 +3676,30 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(ActiveGameFilterLabel));
             OnPropertyChanged(nameof(IsClipTypeFilterActive));
         }
+    }
+
+    // Single-select nav (sidebar Games/Sections shortcuts) - unlike the
+    // checklist dropdowns above, only ever one game/section active at a
+    // time; passing null clears back to "All". Reuses the same
+    // FilterOptionViewModel/Apply*Filters machinery the dropdowns use so
+    // both UIs stay in sync with each other and with the underlying set.
+    public void SelectGameSection(string? gameKey)
+    {
+        _activeGameFilters.Clear();
+        if (gameKey is not null) _activeGameFilters.Add(gameKey);
+        foreach (var option in GameFilterOptions) option.SetCheckedSilently(string.Equals(option.Key, gameKey, StringComparison.OrdinalIgnoreCase));
+        ApplyGameFilters();
+        OnPropertyChanged(nameof(IsGameFilterActive));
+        OnPropertyChanged(nameof(ActiveGameFilterLabel));
+    }
+
+    public void SelectClipTypeSection(string? key)
+    {
+        _activeClipTypeFilters.Clear();
+        if (key is not null) _activeClipTypeFilters.Add(key);
+        foreach (var option in ClipTypeFilterOptions) option.SetCheckedSilently(string.Equals(option.Key, key, StringComparison.OrdinalIgnoreCase));
+        ApplyClipTypeFilters();
+        OnPropertyChanged(nameof(IsClipTypeFilterActive));
     }
 
     public void ClearGameFilters()
