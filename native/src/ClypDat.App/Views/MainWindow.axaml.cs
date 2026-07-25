@@ -76,6 +76,9 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        // ApplySavedWindowBounds can restore straight into Maximized, which
+        // won't raise an OffScreenMargin change of its own.
+        RootLayout.Margin = OffScreenMargin;
         UpdateViewNavButtons();
         LibraryScrollViewer.ScrollChanged += (_, _) => UpdateDateScrubberThumb();
         // Card layout follows the grid's real width, not the window's - the
@@ -1480,6 +1483,15 @@ public sealed partial class MainWindow : Window
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
+        // Windows oversizes a maximized window by the resize-border width so
+        // the border sits offscreen. With the client area extended into the
+        // decorations there's no chrome absorbing that, so the layout has to
+        // inset itself by the same amount or its edges are clipped away.
+        if (change.Property == OffScreenMarginProperty && RootLayout is not null)
+        {
+            RootLayout.Margin = OffScreenMargin;
+        }
+
         if (change.Property == WindowStateProperty && MaximizeRestoreButton?.Content is PathIcon icon)
         {
             var isMaximized = WindowState == WindowState.Maximized;
