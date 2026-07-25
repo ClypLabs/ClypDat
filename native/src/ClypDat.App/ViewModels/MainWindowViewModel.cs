@@ -2581,10 +2581,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // point this setting was calibrated against.
     private const double ScaledCardTargetWidth = 400;
 
+    // availableWidth is the card grid's OWN width (the library ScrollViewer's
+    // rendered width), not the window's. It used to be passed the window
+    // width minus a flat 48 for chrome, which stopped being anywhere near
+    // right once the sidebar rail and date scrubber took ~130px out of the
+    // row - the extra column that assumption bought never fit, leaving a
+    // column-wide empty gap down the right of the library.
     public void UpdateCardLayout(double availableWidth)
     {
         _lastCardLayoutWidth = availableWidth;
-        var contentWidth = Math.Max(320, availableWidth - 48);
+        var contentWidth = Math.Max(320, availableWidth);
 
         if (Settings.ScaleClipsWithWindow)
         {
