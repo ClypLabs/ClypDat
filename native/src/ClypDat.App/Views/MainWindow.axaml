@@ -305,8 +305,14 @@
 
             <!-- Used/limit under the ring, only once a limit is actually set.
                  Sits outside the button because railIconButton is a fixed
-                 44px circle with no room beneath the ring. -->
-            <StackPanel HorizontalAlignment="Center"
+                 44px circle with no room beneath the ring. Mirrors that
+                 button's own geometry exactly (left-aligned, 9px margin,
+                 44 wide) so its centre lands on the ring's centre - a plain
+                 HorizontalAlignment="Center" plus a left margin centres
+                 within the REMAINING width instead, which is what left this
+                 sitting a few px right of the circle. -->
+            <StackPanel HorizontalAlignment="Left"
+                        Width="44"
                         Margin="9,-6,0,0"
                         IsVisible="{Binding HasLibraryStorageLimit}">
               <TextBlock Text="{Binding LibrarySizeDisplay}"
@@ -603,28 +609,6 @@
                   PointerEntered="DateScrubber_OnPointerEntered"
                   PointerExited="DateScrubber_OnPointerExited">
             <Panel ClipToBounds="False">
-              <!-- Full date list, faded in only while scrubbing. No panel
-                   behind it - the dates sit directly over the library and
-                   stay legible against bright thumbnails via a drop shadow
-                   on the text itself rather than a backing box. -->
-              <Border x:Name="DateScrubberLabelHost"
-                      Width="78"
-                      Margin="-86,0,0,0"
-                      HorizontalAlignment="Left"
-                      Background="Transparent"
-                      Opacity="0"
-                      IsHitTestVisible="False">
-                <Border.Effect>
-                  <DropShadowEffect Color="#000000" BlurRadius="6" OffsetX="0" OffsetY="1" Opacity="0.85" />
-                </Border.Effect>
-                <Border.Transitions>
-                  <Transitions>
-                    <DoubleTransition Property="Opacity" Duration="0:0:0.16" />
-                  </Transitions>
-                </Border.Transitions>
-                <Canvas x:Name="DateScrubberLabelCanvas" ClipToBounds="True" />
-              </Border>
-
               <!-- Static rail the thumb rides in, so the track still reads
                    as a scrollbar when the library is short enough that the
                    thumb fills most of it. -->
