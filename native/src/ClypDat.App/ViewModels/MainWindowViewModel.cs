@@ -3472,7 +3472,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var isMedalImport = !string.IsNullOrWhiteSpace(ClipInfoSidecar.Load(Settings.LibraryFolder, media.Path)?.MedalImportKey);
         SelectedCaptureBackend = isMedalImport
             ? "Imported from Medal"
-            : (string.IsNullOrWhiteSpace(media.CaptureBackend) ? string.Empty : $"Captured with: {media.CaptureBackend}");
+            : (string.IsNullOrWhiteSpace(media.CaptureBackend) ? string.Empty : $"Captured with: {ClipMetadataTagger.NormalizeBackendLabel(media.CaptureBackend)}");
         SelectedMetadata = $"{SelectedQuality} - {SelectedSize}";
         Duration = media.Duration;
         CurrentTime = TimeSpan.Zero;

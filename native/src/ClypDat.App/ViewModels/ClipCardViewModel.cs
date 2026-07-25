@@ -185,7 +185,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     public string GameLabel => "VIDEO";
     public string CaptureBackendLabel => IsMedalImport
         ? "Imported from Medal"
-        : (string.IsNullOrWhiteSpace(Media.CaptureBackend) ? string.Empty : $"Captured with: {Media.CaptureBackend}");
+        : (string.IsNullOrWhiteSpace(Media.CaptureBackend) ? string.Empty : $"Captured with: {ClipMetadataTagger.NormalizeBackendLabel(Media.CaptureBackend)}");
     public bool HasCaptureBackendLabel => !string.IsNullOrWhiteSpace(CaptureBackendLabel);
 
     // The per-game filter's grouping key - reuses TileTopLabel since that
