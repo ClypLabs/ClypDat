@@ -382,6 +382,27 @@
     <Setter Property="Padding" Value="6" />
     <Setter Property="MinWidth" Value="180" />
   </Style>
+  <!-- Tooltips had no styling at all, so they rendered in Fluent's default
+       chrome - pale, square-cornered and a size larger than anything around
+       them, which read as borrowed from another app. Same surface/border/
+       radius as the menus and flyouts below, just tighter and lighter since
+       a tooltip is a passing label rather than a panel. -->
+  <Style Selector="ToolTip">
+    <Setter Property="Background" Value="#141D24" />
+    <Setter Property="BorderBrush" Value="#2C3B48" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="Foreground" Value="#D2DEEC" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Padding" Value="10,6" />
+    <!-- Fluent's default is wide enough to leave short labels adrift in
+         empty space; the rail's tooltips are mostly one or two words. -->
+    <Setter Property="MinWidth" Value="0" />
+    <Setter Property="MaxWidth" Value="320" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+  </Style>
+
   <!-- Plain Flyout (not MenuFlyout) uses its own FlyoutPresenter and falls
        back to Fluent's default light-themed chrome unless styled to match -
        used by the Game Filters / Clip Type Filters checklist dropdowns. -->
