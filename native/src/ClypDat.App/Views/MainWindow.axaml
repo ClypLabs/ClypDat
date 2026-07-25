@@ -348,7 +348,10 @@
             <TextBlock Text="{Binding ClipNotReadyMessage}" Foreground="#B8C7D8" FontSize="12" FontWeight="Bold" />
           </Border>
 
-          <ScrollViewer x:Name="LibraryScrollViewer" Margin="-4,14,-4,0">
+          <Grid ColumnDefinitions="*,Auto">
+          <!-- Date scrubber (right column, below) replaces the default
+               scrollbar, so hide the ScrollViewer's own. -->
+          <ScrollViewer Grid.Column="0" x:Name="LibraryScrollViewer" Margin="-4,14,-4,0" VerticalScrollBarVisibility="Hidden">
             <ItemsControl ItemsSource="{Binding AllClips}">
               <!-- WrapPanel, not UniformGrid - UniformGrid pre-computes its
                    row/column count from the total child count (including
@@ -528,6 +531,33 @@
               </ItemsControl.ItemTemplate>
             </ItemsControl>
         </ScrollViewer>
+
+          <!-- Date scrubber: labels are positioned in code-behind
+               (RebuildDateScrubber) from each first-of-date card's measured
+               offset inside the scroll content, since a WrapPanel gives no
+               way to derive that from the data alone. Clicking or dragging
+               anywhere on the track seeks the library to that point. -->
+          <Border Grid.Column="1"
+                  x:Name="DateScrubberHost"
+                  Width="56"
+                  Margin="4,14,6,0"
+                  Background="Transparent"
+                  IsVisible="{Binding IsLibraryVisible}"
+                  PointerPressed="DateScrubber_OnPointerPressed"
+                  PointerMoved="DateScrubber_OnPointerMoved"
+                  PointerReleased="DateScrubber_OnPointerReleased"
+                  PointerExited="DateScrubber_OnPointerExited">
+            <Canvas x:Name="DateScrubberCanvas" ClipToBounds="True">
+              <Border x:Name="DateScrubberThumb"
+                      Canvas.Left="46"
+                      Width="4"
+                      MinHeight="26"
+                      CornerRadius="2"
+                      Background="#4A5A6B"
+                      IsHitTestVisible="False" />
+            </Canvas>
+          </Border>
+          </Grid>
         </DockPanel>
       </Grid>
     </Border>
