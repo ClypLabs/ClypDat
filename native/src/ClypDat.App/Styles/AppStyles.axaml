@@ -641,9 +641,9 @@
        since the rail is icon-only and narrow - the button is square so
        CornerRadius at half its side renders a true circle.
 
-       Left-aligned with an explicit 8px margin rather than centered: the
-       rail is 64 wide and the button 44, so dead-center would be 10 - 8
-       shifts the whole control (hover circle AND the icon inside it) 2px
+       Left-aligned with an explicit 9px margin rather than centered: the
+       rail is 64 wide and the button 44, so dead-center would be 10 - 9
+       shifts the whole control (hover circle AND the icon inside it) 1px
        left as one unit. Nudging the icon's own Margin instead left it
        off-center inside its own hover circle. -->
   <Style Selector="Button.railIconButton">
@@ -653,7 +653,7 @@
     <Setter Property="Width" Value="44" />
     <Setter Property="Height" Value="44" />
     <Setter Property="Padding" Value="0" />
-    <Setter Property="Margin" Value="8,0,0,4" />
+    <Setter Property="Margin" Value="9,0,0,4" />
     <Setter Property="HorizontalAlignment" Value="Left" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
