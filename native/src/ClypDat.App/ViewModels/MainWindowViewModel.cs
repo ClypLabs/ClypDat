@@ -267,7 +267,37 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string LibraryHeaderDate => AllClips.Count > 0 ? AllClips[0].DateHeaderLabel : "LIBRARY";
     public string LibraryHeaderGame => AllClips.Count > 0 ? "Videos" : "No folder selected";
-    public string LibraryTitle => "Clips";
+    // Names whatever is actually on screen: the filtered-to game(s) and/or
+    // clip type(s), falling back to "Clips" with nothing filtered. Games come
+    // first because that's the coarser cut - "Fortnite - Auto-Clips" reads the
+    // way the user got there (picked the game, then narrowed the type).
+    public string LibraryTitle
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (_activeGameFilters.Count > 0) parts.Add(string.Join(", ", _activeGameFilters.OrderBy(name => name, StringComparer.OrdinalIgnoreCase)));
+
+            var types = ClipTypeFilterOptions
+                .Where(option => _activeClipTypeFilters.Contains(option.Key))
+                .Select(option => ClipTypeTitle(option.Key))
+                .ToArray();
+            if (types.Length > 0) parts.Add(string.Join(", ", types));
+
+            return parts.Count == 0 ? "Clips" : string.Join(" - ", parts);
+        }
+    }
+
+    // The filter rows carry a count in their label ("Auto-Clips (3)"), which
+    // has no business in a heading.
+    private static string ClipTypeTitle(string key) => key switch
+    {
+        ClipTypeManual => "Manual Clips",
+        ClipTypeAutoClip => "Auto-Clips",
+        ClipTypeVod => "Full Session / VODs",
+        ClipTypeMedalImport => "Medal Imports",
+        _ => key
+    };
     public string LibraryFolderDisplay => string.IsNullOrWhiteSpace(Settings.LibraryFolder)
         ? "Choose a folder"
         : Settings.LibraryFolder;
@@ -3998,6 +4028,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsGameFilterActive));
             OnPropertyChanged(nameof(ActiveGameFilterLabel));
             OnPropertyChanged(nameof(IsClipTypeFilterActive));
+            OnPropertyChanged(nameof(LibraryTitle));
         }
     }
 
@@ -4014,6 +4045,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ApplyGameFilters();
         OnPropertyChanged(nameof(IsGameFilterActive));
         OnPropertyChanged(nameof(ActiveGameFilterLabel));
+        OnPropertyChanged(nameof(LibraryTitle));
     }
 
     public void SelectClipTypeSection(string? key)
@@ -4023,6 +4055,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         foreach (var option in ClipTypeFilterOptions) option.SetCheckedSilently(string.Equals(option.Key, key, StringComparison.OrdinalIgnoreCase));
         ApplyClipTypeFilters();
         OnPropertyChanged(nameof(IsClipTypeFilterActive));
+        OnPropertyChanged(nameof(LibraryTitle));
     }
 
     public void ClearGameFilters()
@@ -4033,6 +4066,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ApplyGameFilters();
         OnPropertyChanged(nameof(IsGameFilterActive));
         OnPropertyChanged(nameof(ActiveGameFilterLabel));
+        OnPropertyChanged(nameof(LibraryTitle));
     }
 
     private void OnGameFilterOptionChanged(string gameName, bool isChecked)
@@ -4042,6 +4076,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ApplyGameFilters();
         OnPropertyChanged(nameof(IsGameFilterActive));
         OnPropertyChanged(nameof(ActiveGameFilterLabel));
+        OnPropertyChanged(nameof(LibraryTitle));
     }
 
     private void OnClipTypeFilterOptionChanged(string key, bool isChecked)
@@ -4050,6 +4085,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         else _activeClipTypeFilters.Remove(key);
         ApplyClipTypeFilters();
         OnPropertyChanged(nameof(IsClipTypeFilterActive));
+        OnPropertyChanged(nameof(LibraryTitle));
     }
 
     private void ApplyGameFilters()
