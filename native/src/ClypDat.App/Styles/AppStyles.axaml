@@ -710,6 +710,16 @@
   <Style Selector="Button.railGameButton">
     <Setter Property="CornerRadius" Value="12" />
   </Style>
+  <!-- The storage button is the one rail button that isn't a bare 30px glyph:
+       it holds the ring AND the used/limit caption, so it drops the fixed
+       44px square for an auto height (still 44 wide, so it stays aligned with
+       the rail) and a softer radius than the circle the others use. -->
+  <Style Selector="Button.storageRailButton">
+    <Setter Property="Height" Value="NaN" />
+    <Setter Property="CornerRadius" Value="14" />
+    <Setter Property="Padding" Value="0,7,0,6" />
+  </Style>
+
   <Style Selector="Button.railIconButton PathIcon">
     <Setter Property="Foreground" Value="#8C98A7" />
     <Setter Property="Transitions">

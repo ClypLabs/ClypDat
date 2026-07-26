@@ -1176,8 +1176,8 @@ public sealed partial class MainWindow : Window
         if (updated is not null) _gameDetector.ApplyRemoteIgnoredExecutables(updated);
 
         // Curated icon overrides ride the same once-a-day cadence. Only used
-        // for games Wikidata/Steam resolve wrongly or not at all, so a failure
-        // here costs nothing.
+        // for games the Steam store search resolves wrongly or not at all, so
+        // a failure here costs nothing.
         await RemoteGameIconsService.RefreshAsync();
     }
 

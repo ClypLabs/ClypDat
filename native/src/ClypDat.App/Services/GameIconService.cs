@@ -77,9 +77,10 @@ public static class GameIconService
     /// <summary>
     /// Resolves an icon for a game from the internet, so a game only ever
     /// clipped (never seen running by this install) still gets real artwork.
-    /// Tried in order: the curated override list, Wikidata's logo for the game,
-    /// then the Steam store's capsule art. Entirely automatic - the curated
-    /// list exists only to correct the rare case the other two get wrong.
+    /// Tried in order: an installed copy on this machine, the curated icon-URL
+    /// list, the curated Steam app ID, then a Steam store search by name.
+    /// Entirely automatic - the curated entries exist only for games the store
+    /// search can't resolve (not on Steam, delisted, or a different name).
     /// </summary>
     public static async Task<bool> EnsureFromNetworkAsync(string displayName, CancellationToken cancellationToken = default)
     {
@@ -118,11 +119,13 @@ public static class GameIconService
             using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
             client.DefaultRequestHeaders.UserAgent.ParseAdd("ClypDat-GameIcons/1.0 (+https://github.com/ClypDat/ClypDat)");
 
-            var url = RemoteGameIconsService.LoadCached().TryGetValue(displayName, out var curated) && !string.IsNullOrWhiteSpace(curated)
-                ? curated
-                : await ResolveSteamAppIconAsync(client, displayName, cancellationToken);
+            var url = await ResolveIconUrlAsync(client, displayName, cancellationToken);
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                AppLog.Info($"Game icon: nothing resolved online for '{displayName}'.");
+                return false;
+            }
 
-            if (string.IsNullOrWhiteSpace(url)) return false;
             if (!IsAllowedIconUrl(url))
             {
                 AppLog.Error($"Game icon URL rejected for '{displayName}': {url}", new InvalidOperationException("Icon URL is not an allowed HTTPS source."));
@@ -145,6 +148,24 @@ public static class GameIconService
         }
     }
 
+    // A curated URL wins outright (it's there because the automatic sources got
+    // this game wrong), then a curated app ID, then a name search on the store.
+    private static async Task<string?> ResolveIconUrlAsync(HttpClient client, string displayName, CancellationToken cancellationToken)
+    {
+        if (RemoteGameIconsService.LoadCached().TryGetValue(displayName, out var curated) && !string.IsNullOrWhiteSpace(curated))
+        {
+            return curated;
+        }
+
+        if (RemoteGameIconsService.LoadCachedAppIds().TryGetValue(displayName, out var curatedAppId) && curatedAppId > 0)
+        {
+            var curatedIcon = await ResolveSteamIconUrlAsync(client, curatedAppId, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(curatedIcon)) return curatedIcon;
+        }
+
+        return await ResolveSteamAppIconAsync(client, displayName, cancellationToken);
+    }
+
     // Steam's own app icon - the same square artwork Steam puts on a desktop
     // shortcut and the taskbar, which is what a small round badge wants.
     // Deliberately NOT the store capsule or a wordmark logo: those are wide
@@ -159,27 +180,31 @@ public static class GameIconService
         try
         {
             var appId = await ResolveSteamAppIdAsync(client, displayName, cancellationToken);
-            if (appId is null) return null;
-
-            var json = await client.GetStringAsync(
-                $"https://api.steampowered.com/ICommunityService/GetApps/v1/?appids%5B0%5D={appId}",
-                cancellationToken);
-
-            using var document = JsonDocument.Parse(json);
-            if (!document.RootElement.TryGetProperty("response", out var response)) return null;
-            if (!response.TryGetProperty("apps", out var apps)) return null;
-
-            foreach (var app in apps.EnumerateArray())
-            {
-                if (!app.TryGetProperty("icon", out var iconElement)) continue;
-                var hash = iconElement.GetString();
-                if (string.IsNullOrWhiteSpace(hash)) continue;
-                return $"https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{appId}/{hash}.jpg";
-            }
+            return appId is null ? null : await ResolveSteamIconUrlAsync(client, appId.Value, cancellationToken);
         }
         catch (Exception error)
         {
             AppLog.Error($"Steam icon lookup failed for '{displayName}' (non-fatal)", error);
+            return null;
+        }
+    }
+
+    private static async Task<string?> ResolveSteamIconUrlAsync(HttpClient client, int appId, CancellationToken cancellationToken)
+    {
+        var json = await client.GetStringAsync(
+            $"https://api.steampowered.com/ICommunityService/GetApps/v1/?appids%5B0%5D={appId}",
+            cancellationToken);
+
+        using var document = JsonDocument.Parse(json);
+        if (!document.RootElement.TryGetProperty("response", out var response)) return null;
+        if (!response.TryGetProperty("apps", out var apps)) return null;
+
+        foreach (var app in apps.EnumerateArray())
+        {
+            if (!app.TryGetProperty("icon", out var iconElement)) continue;
+            var hash = iconElement.GetString();
+            if (string.IsNullOrWhiteSpace(hash)) continue;
+            return $"https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{appId}/{hash}.jpg";
         }
 
         return null;
