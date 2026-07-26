@@ -608,6 +608,7 @@
                           <MenuItem Header="Export" Click="ClipContextExport_OnClick" />
                           <MenuItem Header="Open" Click="ClipContextOpen_OnClick" />
                           <MenuItem Header="{Binding RenameActionLabel}" Click="ClipContextRename_OnClick" />
+                          <MenuItem Header="{Binding SetGameActionLabel}" Click="ClipContextSetGame_OnClick" />
                           <MenuItem Header="Open file location" Click="ClipContextOpenLocation_OnClick" />
                           <Separator />
                           <MenuItem Header="Delete" Click="ClipContextDelete_OnClick" Foreground="#D85E61" />

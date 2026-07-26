@@ -3990,54 +3990,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         foreach (var (path, knownDuration) in targets)
         {
-            try
+            var destination = await MoveClipToGameAsync(path, knownDuration, newName);
+            if (destination is null)
             {
-                if (!File.Exists(path)) continue;
-
-                // Duration decides Clips/ vs VODs/, so it has to be right even
-                // for a clip hydration hasn't reached yet.
-                var duration = knownDuration > TimeSpan.Zero ? knownDuration : await _mediaProbe.GetDurationAsync(path);
-                var info = ClipInfoSidecar.Load(libraryRoot, path);
-                var timestamp = info?.CapturedAt?.LocalDateTime ?? File.GetCreationTime(path);
-                var title = string.IsNullOrWhiteSpace(info?.FileTitle)
-                    ? ClipFileNaming.StripTimestampSuffix(Path.GetFileNameWithoutExtension(path))
-                    : info.FileTitle;
-
-                var destinationDirectory = LibraryLayout.VideoDirectory(libraryRoot, duration, newName);
-                Directory.CreateDirectory(destinationDirectory);
-                var fileName = ClipFileNaming.BuildFileName(title, timestamp, Path.GetExtension(path), Settings.ClipFileNameScheme, Settings.CustomClipFileNameTemplate, newName);
-                var desiredPath = Path.Combine(destinationDirectory, fileName);
-                var destinationPath = string.Equals(path, desiredPath, StringComparison.OrdinalIgnoreCase)
-                    ? path
-                    : ClipFileNaming.BuildUniquePath(destinationDirectory, fileName);
-
-                if (!string.Equals(path, destinationPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    File.Move(path, destinationPath);
-                    MoveClipSidecars(path, destinationPath);
-                    _mediaProbe.DeleteCacheFor(path);
-                    if (Settings.ClipEdits.Remove(ClipEditKey(path), out var edit)) Settings.ClipEdits[ClipEditKey(destinationPath)] = edit;
-                    // Same marker AddOrUpdateLibraryClipAsync uses: the folder
-                    // watcher will see every one of these moves, and the
-                    // refresh at the end of this method already covers them.
-                    _recentlySelfAddedPaths[destinationPath] = DateTime.UtcNow;
-                    _recentlySelfAddedPaths[path] = DateTime.UtcNow;
-                }
-
-                ClipInfoSidecar.Save(libraryRoot, destinationPath, new ClipInfo(
-                    newName,
-                    info?.AutoClipEventType,
-                    title,
-                    info?.CapturedAt?.LocalDateTime ?? timestamp,
-                    info?.MedalImportKey));
-                moves.Add((path, destinationPath));
-                renamed++;
-            }
-            catch (Exception error)
-            {
-                AppLog.Error($"Game rename: failed moving {path}", error);
                 failed++;
+                continue;
             }
+
+            moves.Add((path, destination));
+            renamed++;
         }
 
         // Anything else holding the old name. The capture-backend rows are
@@ -4089,6 +4050,117 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         AppLog.Info($"Game renamed: '{currentName}' -> '{newName}' ({renamed} clips moved, {failed} failed).");
         return (renamed, failed);
+    }
+
+    /// <summary>
+    /// Files one clip under a game: moves it into that game's folder with a
+    /// filename built from the new name, brings its sidecars and per-clip
+    /// edits along, and records the game in its .info.json. Returns the new
+    /// path, or null if it couldn't be moved. Shared by renaming a whole game
+    /// and by assigning a game to individual clips.
+    /// </summary>
+    private async Task<string?> MoveClipToGameAsync(string path, TimeSpan knownDuration, string game)
+    {
+        var libraryRoot = Settings.LibraryFolder;
+        try
+        {
+            if (!File.Exists(path)) return null;
+
+            // Duration decides Clips/ vs VODs/, so it has to be right even for
+            // a clip hydration hasn't reached yet.
+            var duration = knownDuration > TimeSpan.Zero ? knownDuration : await _mediaProbe.GetDurationAsync(path);
+            var info = ClipInfoSidecar.Load(libraryRoot, path);
+            var timestamp = info?.CapturedAt?.LocalDateTime ?? File.GetCreationTime(path);
+            var title = string.IsNullOrWhiteSpace(info?.FileTitle)
+                ? ClipFileNaming.StripTimestampSuffix(Path.GetFileNameWithoutExtension(path))
+                : info.FileTitle;
+
+            var destinationDirectory = LibraryLayout.VideoDirectory(libraryRoot, duration, game);
+            Directory.CreateDirectory(destinationDirectory);
+            var fileName = ClipFileNaming.BuildFileName(title, timestamp, Path.GetExtension(path), Settings.ClipFileNameScheme, Settings.CustomClipFileNameTemplate, game);
+            var desiredPath = Path.Combine(destinationDirectory, fileName);
+            var destinationPath = string.Equals(path, desiredPath, StringComparison.OrdinalIgnoreCase)
+                ? path
+                : ClipFileNaming.BuildUniquePath(destinationDirectory, fileName);
+
+            if (!string.Equals(path, destinationPath, StringComparison.OrdinalIgnoreCase))
+            {
+                File.Move(path, destinationPath);
+                MoveClipSidecars(path, destinationPath);
+                _mediaProbe.DeleteCacheFor(path);
+                if (Settings.ClipEdits.Remove(ClipEditKey(path), out var edit)) Settings.ClipEdits[ClipEditKey(destinationPath)] = edit;
+                // Same marker AddOrUpdateLibraryClipAsync uses: the folder
+                // watcher will see the move, and the caller updates the card
+                // itself.
+                _recentlySelfAddedPaths[destinationPath] = DateTime.UtcNow;
+                _recentlySelfAddedPaths[path] = DateTime.UtcNow;
+            }
+
+            ClipInfoSidecar.Save(libraryRoot, destinationPath, new ClipInfo(
+                game,
+                info?.AutoClipEventType,
+                title,
+                info?.CapturedAt?.LocalDateTime ?? timestamp,
+                info?.MedalImportKey));
+            return destinationPath;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Could not file {path} under '{game}'", error);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Assigns a game to specific clips - the way out of "Unknown Game" and
+    /// "No game detected", where detection had nothing to go on at capture
+    /// time and the clips are all lumped together despite being from different
+    /// games. Renaming the group would be wrong for exactly that reason, so
+    /// this works per clip.
+    /// </summary>
+    public async Task<(int Moved, int Failed)> SetClipsGameAsync(IReadOnlyList<ClipCardViewModel> clips, string game)
+    {
+        game = game?.Trim() ?? string.Empty;
+        if (clips.Count == 0 || string.IsNullOrWhiteSpace(game)) return (0, 0);
+
+        var libraryRoot = Settings.LibraryFolder;
+        if (string.IsNullOrWhiteSpace(libraryRoot) || !Directory.Exists(libraryRoot)) return (0, 0);
+
+        var previousGames = clips
+            .Select(clip => clip.GameFilterKey)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var moved = 0;
+        var failed = 0;
+        foreach (var clip in clips.ToArray())
+        {
+            var destination = await MoveClipToGameAsync(clip.Path, clip.Duration, game);
+            if (destination is null)
+            {
+                failed++;
+                continue;
+            }
+
+            clip.UpdateMedia(_mediaProbe.CreateLibraryStub(destination));
+            moved++;
+        }
+
+        // A game the last of its clips just left has an empty folder behind it.
+        foreach (var previous in previousGames.Where(name => !string.Equals(name, game, StringComparison.OrdinalIgnoreCase)))
+        {
+            RemoveEmptyGameFolder(LibraryLayout.VideoDirectory(libraryRoot, TimeSpan.Zero, previous));
+            RemoveEmptyGameFolder(LibraryLayout.VodDirectory(libraryRoot, previous));
+        }
+
+        SaveSettings();
+        ClearSelection();
+        RecomputeGameFilterBadges();
+        NotifyLibraryChrome();
+        OnPropertyChanged(nameof(LibraryTitle));
+        AppLog.Info($"Clips filed under '{game}': {moved} moved, {failed} failed.");
+        return (moved, failed);
     }
 
     private static void RemoveEmptyGameFolder(string directory)
@@ -4416,7 +4488,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var bulk = SelectedCount > 1;
         foreach (var clip in AllClips)
         {
-            clip.RenameActionLabel = bulk && clip.IsSelected ? "Rename All" : "Rename";
+            var all = bulk && clip.IsSelected;
+            clip.RenameActionLabel = all ? "Rename All" : "Rename";
+            clip.SetGameActionLabel = all ? $"Set game for {SelectedCount} clips..." : "Set game...";
         }
     }
 
