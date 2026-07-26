@@ -134,6 +134,7 @@ public sealed partial class MainWindow : Window
                 ViewModel.PropertyChanged += (_, e) =>
                 {
                     if (e.PropertyName == nameof(MainWindowViewModel.AutoClippingEnabled)) UpdateAutoClipStates();
+                    if (e.PropertyName == nameof(MainWindowViewModel.ReplayBufferEnabled)) _ = ApplyReplayBufferEnabledAsync();
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible)
@@ -235,7 +236,7 @@ public sealed partial class MainWindow : Window
 
         HarvestGameIcons();
 
-        if (detection.IsDetected && _replayBuffer is { IsRecording: false } && !_replayTransitioning)
+        if (detection.IsDetected && ViewModel.Settings.ReplayBufferEnabled && _replayBuffer is { IsRecording: false } && !_replayTransitioning)
         {
             _ = StartReplayBufferAsync(showErrors: false);
         }
@@ -346,7 +347,7 @@ public sealed partial class MainWindow : Window
             // Global hotkey failure should not block editor startup.
         }
 
-        ViewModel.RecorderStatus = "Replay Armed";
+        ViewModel.RecorderStatus = ReplayIdleStatus;
         UpdateDetectedGame();
     }
 
@@ -755,6 +756,29 @@ public sealed partial class MainWindow : Window
         await ViewModel.RefreshOpenProcessesAsync();
     }
 
+    // Idle (not-recording) status text. With the buffer switched off it has
+    // to say so - "Replay Armed" while the master switch is off would be a
+    // flat lie about whether anything is being captured.
+    private string ReplayIdleStatus => ViewModel?.Settings.ReplayBufferEnabled == false ? "Replay Off" : "Replay Armed";
+
+    // Flipping the master switch takes effect now rather than at the next
+    // game-detection tick: on arms (and starts capturing straight away if a
+    // game is already up), off tears the capture down.
+    private async Task ApplyReplayBufferEnabledAsync()
+    {
+        if (ViewModel is null) return;
+        if (ViewModel.Settings.ReplayBufferEnabled)
+        {
+            await StartReplayBufferAsync(showErrors: false);
+        }
+        else
+        {
+            await StopReplayBufferAsync();
+        }
+
+        if (!ViewModel.IsReplayRecording) ViewModel.RecorderStatus = ReplayIdleStatus;
+    }
+
     private async Task StopReplayBufferAsync()
     {
         if (ViewModel is null || _replayBuffer is null || _replayTransitioning) return;
@@ -770,7 +794,7 @@ public sealed partial class MainWindow : Window
         {
             if (_replayBuffer.IsRecording) await _replayBuffer.StopAsync();
             ViewModel.IsReplayRecording = false;
-            ViewModel.RecorderStatus = "Replay Armed";
+            ViewModel.RecorderStatus = ReplayIdleStatus;
         }
         finally
         {
@@ -800,9 +824,9 @@ public sealed partial class MainWindow : Window
         try
         {
             _replayTransitioning = true;
-            if (!ViewModel.ActiveGameDetection.IsDetected)
+            if (!ViewModel.Settings.ReplayBufferEnabled || !ViewModel.ActiveGameDetection.IsDetected)
             {
-                ViewModel.RecorderStatus = "Replay Armed";
+                ViewModel.RecorderStatus = ReplayIdleStatus;
                 return;
             }
             EnsureReplayBufferMatchesGame();
@@ -821,7 +845,7 @@ public sealed partial class MainWindow : Window
             // (e.g. a second consecutive failed start while already false), which
             // would otherwise leave the status text frozen on stale "Replay Armed" -
             // set it directly so a failure always reflects in the UI.
-            ViewModel.RecorderStatus = "Replay Armed";
+            ViewModel.RecorderStatus = ReplayIdleStatus;
             if (showErrors)
             {
                 await ShowMessageAsync("Replay unavailable", error.Message);
@@ -863,7 +887,9 @@ public sealed partial class MainWindow : Window
                 // worth interrupting the user over - just drop it.
                 if (isAutoClip) return;
                 if (ViewModel.IsReplayRecording) ViewModel.IsReplayRecording = false;
-                await ShowMessageAsync("Clip failed", "Replay is armed, but no game is being captured yet.");
+                await ShowMessageAsync("Clip failed", ViewModel.Settings.ReplayBufferEnabled
+                    ? "Replay is armed, but no game is being captured yet."
+                    : "The replay buffer is turned off, so there's nothing to clip. Turn it back on from the Replay Buffer menu.");
                 return;
             }
 
@@ -1132,7 +1158,7 @@ public sealed partial class MainWindow : Window
             if (ViewModel is not null)
             {
                 ViewModel.IsReplayRecording = false;
-                ViewModel.RecorderStatus = "Replay Armed";
+                ViewModel.RecorderStatus = ReplayIdleStatus;
             }
         });
     }
@@ -1569,9 +1595,15 @@ public sealed partial class MainWindow : Window
         if (change.Property == WindowStateProperty && MaximizeRestoreButton?.Content is PathIcon icon)
         {
             var isMaximized = WindowState == WindowState.Maximized;
+            // Restore used to be two full rounded squares, which reads as a
+            // copy/duplicate glyph rather than "shrink this window back".
+            // Windows' own restore glyph is a single square with only the
+            // top and right EDGES of a second one peeking out behind it -
+            // that's the L-shape here (F0 = even-odd, so the front square
+            // renders as an outline instead of a filled block).
             icon.Data = Geometry.Parse(isMaximized
-                ? "M19,5H8C6.9,5,6,5.9,6,7v14c0,1.1,0.9,2,2,2h11c1.1,0,2-0.9,2-2V7C21,5.9,20.1,5,19,5z M19,21H8V7h11V21z M16,1H4C2.9,1,2,1.9,2,3v14h2V3h12V1z"
-                : "M18,4H6C4.9,4,4,4.9,4,6v12c0,1.1,0.9,2,2,2h12c1.1,0,2-0.9,2-2V6C20,4.9,19.1,4,18,4z M18,18H6V6h12V18z");
+                ? "F0 M5,8H16V19H5V8z M7,10V17H14V10H7z M8,5H19V16H17V7H8V5z"
+                : "F0 M4,4H20V20H4V4z M6,6V18H18V6H6z");
             ToolTip.SetTip(MaximizeRestoreButton, isMaximized ? "Restore" : "Maximize");
         }
     }

@@ -404,7 +404,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get
         {
-            if (!HasLibraryStorageLimit) return "No limit";
+            if (!HasLibraryStorageLimit) return $"{FormatBytes(LibraryUsedBytes)} used - No Limit";
             var percent = (int)Math.Round(LibraryUsedBytes * 100.0 / LibraryStorageLimitBytes);
             return $"{FormatBytes(LibraryUsedBytes)} of {LibraryStorageLimitLabel} ({percent}%)";
         }
@@ -414,9 +414,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ? $"{Settings.LibraryStorageLimitGb / 1024} TB"
         : $"{Settings.LibraryStorageLimitGb} GB";
 
-    // Shown stacked under the sidebar ring once a limit exists - has to fit
-    // the 64px rail, so it's just "of <limit>" under the used figure.
-    public string LibraryStorageLimitShortDisplay => HasLibraryStorageLimit ? $"of {LibraryStorageLimitLabel}" : string.Empty;
+    // Shown stacked under the sidebar ring, always - has to fit the 64px
+    // rail, so it's just "of <limit>" under the used figure, or "No Limit"
+    // when there's none, so the current setting is readable without opening
+    // the flyout (the used figure above it stays visible either way).
+    public string LibraryStorageLimitShortDisplay => HasLibraryStorageLimit ? $"of {LibraryStorageLimitLabel}" : "No Limit";
 
     private void NotifyStorageChrome()
     {
@@ -823,6 +825,27 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(HotkeyDisplay));
         }
     }
+
+    // Master switch for the buffer. MainWindow watches this property (see its
+    // ViewModel.PropertyChanged handler) and starts/stops the capture to
+    // match, so flipping it takes effect immediately rather than at the next
+    // game-detection tick.
+    public bool ReplayBufferEnabled
+    {
+        get => Settings.ReplayBufferEnabled;
+        set
+        {
+            if (Settings.ReplayBufferEnabled == value) return;
+            Settings.ReplayBufferEnabled = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ReplayBufferStateSummary));
+            SaveSettings();
+        }
+    }
+
+    public string ReplayBufferStateSummary => ReplayBufferEnabled
+        ? "Armed - records in the background the instant a game is detected."
+        : "Off - nothing is being recorded, and clips can't be saved.";
 
     public ReplayDurationPreset? SelectedReplayDurationPreset
     {
