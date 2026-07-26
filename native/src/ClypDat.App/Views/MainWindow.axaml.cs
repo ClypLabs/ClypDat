@@ -82,12 +82,17 @@ public sealed partial class MainWindow : Window
     // volume slider - made the controls disappear mid-interaction, which read
     // as the bar being broken. It now lingers briefly after the pointer
     // leaves, so moving from the video to a control doesn't dismiss it.
-    private static readonly TimeSpan HoverControlsGrace = TimeSpan.FromMilliseconds(1400);
+    private static readonly TimeSpan HoverControlsGrace = TimeSpan.FromMilliseconds(2000);
     private DateTime _hoverControlsActiveUntilUtc = DateTime.MinValue;
+    // Cursor position at the previous poll, so a resting pointer can be told
+    // apart from a moving one - see PollEditorHoverControls. A couple of
+    // pixels of tolerance keeps mouse jitter from counting as movement.
+    private CursorPoint _hoverControlsLastCursor;
+    private const int HoverControlsMoveThreshold = 2;
     // Slides the bar in from under the video's bottom edge. The window itself
     // stays put - only its content moves - because animating an owned window's
     // native position is visibly steppy next to a composited transform.
-    private const double HoverControlsSlideDistance = 72;
+    private const double HoverControlsSlideDistance = 92;
     private static readonly TimeSpan HoverControlsSlideDuration = TimeSpan.FromMilliseconds(190);
     private Border? _hoverControlsBackdrop;
     private DispatcherTimer? _hoverControlsSlideOutTimer;
@@ -3976,7 +3981,18 @@ public sealed partial class MainWindow : Window
                       && cursor.Y >= barPos.Y && cursor.Y < barPos.Y + barHeightPx;
         }
 
-        if (overVideo || overBar)
+        var moved = Math.Abs(cursor.X - _hoverControlsLastCursor.X) >= HoverControlsMoveThreshold ||
+                    Math.Abs(cursor.Y - _hoverControlsLastCursor.Y) >= HoverControlsMoveThreshold;
+        if (moved) _hoverControlsLastCursor = cursor;
+
+        // A resting pointer no longer holds the bar open. Parking the cursor
+        // anywhere over the video used to keep 64px of controls sitting on the
+        // picture for the whole clip; now it behaves like any other player -
+        // movement (or hovering the bar itself) wakes it, stillness lets it
+        // slide away. Paused is the exception: controls staying put is the
+        // whole point of pausing.
+        var keepAwake = overBar || (overVideo && (moved || !ViewModel.IsPlaying));
+        if (keepAwake)
         {
             _hoverControlsActiveUntilUtc = DateTime.UtcNow + HoverControlsGrace;
             ShowEditorHoverControls();
@@ -4072,7 +4088,8 @@ public sealed partial class MainWindow : Window
         if (EditorVideoHost.Bounds.Width <= 0 || EditorVideoHost.Bounds.Height <= 0) return;
         var topLeft = EditorVideoHost.PointToScreen(new Point(0, 0));
         var width = EditorVideoHost.Bounds.Width;
-        const double barHeight = 64;
+        // 64 for the controls row plus the 14px scrub strip above it.
+        const double barHeight = 78;
         var bottomOnScreen = EditorVideoHost.PointToScreen(new Point(0, EditorVideoHost.Bounds.Height));
         bar.Width = Math.Max(1, width);
         bar.Height = barHeight;
@@ -4161,17 +4178,73 @@ public sealed partial class MainWindow : Window
             },
         };
 
+        // Percentage and Reset mirror the fullscreen bar exactly - the two bars
+        // control the same master volume, so having the readout in one and a
+        // bare slider in the other made the same action feel like two features.
+        // Reset is disabled rather than hidden at 100%, matching that bar's
+        // reasoning: collapsing it would shuffle everything beside it.
+        var volumePercentText = new TextBlock
+        {
+            Foreground = new SolidColorBrush(Color.Parse("#C8D6E6")),
+            FontSize = 11,
+            Width = 30,
+            Margin = new Thickness(0, 2, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        volumePercentText.Bind(TextBlock.TextProperty, new Binding("MasterVolumePercent") { StringFormat = "{0:0}%" });
+
+        var volumeResetButton = new Button
+        {
+            Classes = { "linkButton" },
+            Content = "Reset",
+            FontSize = 10,
+            Padding = new Thickness(6, 1),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        volumeResetButton.Bind(IsEnabledProperty, new Binding("IsMasterVolumeNonDefault"));
+        volumeResetButton.Click += MasterVolumeReset_OnClick;
+        ToolTip.SetTip(volumeResetButton, "Reset to 100%");
+
         var leftGroup = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 8,
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center,
-            Children = { muteToggle, volumeSlider },
+            Children = { muteToggle, volumeSlider, volumePercentText, volumeResetButton },
         };
 
         var fullscreenButton = TransportButton("M7,14H5v5h5v-2H7V14z M5,10h2V7h3V5H5V10z M17,17h-3v2h5v-5h-2V17z M14,5v2h3v3h2V5H14z", FullscreenButton_OnClick, "Fullscreen");
         fullscreenButton.HorizontalAlignment = HorizontalAlignment.Right;
+
+        // Scrub strip along the top edge, same control (and same handler) the
+        // fullscreen bar uses. Seeking previously meant leaving the picture for
+        // the timeline panel below, even for a small nudge. The 14px Border is
+        // the hit target; the 3px bar inside it is hit-test invisible so a
+        // click anywhere in that band seeks rather than only a hit on the rail.
+        var progressBar = new ProgressBar
+        {
+            Minimum = 0,
+            Height = 3,
+            Padding = new Thickness(0),
+            BorderThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Background = new SolidColorBrush(Color.Parse("#33FFFFFF")),
+            Foreground = Application.Current?.Resources["AccentBrush"] as IBrush ?? new SolidColorBrush(Color.Parse("#5864E8")),
+            IsHitTestVisible = false,
+        };
+        progressBar.Bind(ProgressBar.MaximumProperty, new Binding("Duration.TotalSeconds"));
+        progressBar.Bind(ProgressBar.ValueProperty, new Binding("CurrentTime.TotalSeconds"));
+
+        var progressStrip = new Border
+        {
+            Height = 14,
+            Background = Brushes.Transparent,
+            Cursor = new Cursor(StandardCursorType.Hand),
+            Child = progressBar,
+        };
+        progressStrip.PointerPressed += FullscreenProgressBar_OnPointerPressed;
 
         var layout = new Grid
         {
@@ -4185,6 +4258,12 @@ public sealed partial class MainWindow : Window
         layout.Children.Add(centerGroup);
         layout.Children.Add(fullscreenButton);
 
+        var barContent = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
+        Grid.SetRow(progressStrip, 0);
+        Grid.SetRow(layout, 1);
+        barContent.Children.Add(progressStrip);
+        barContent.Children.Add(layout);
+
         var backdrop = new Border
         {
             Background = new LinearGradientBrush
@@ -4197,7 +4276,7 @@ public sealed partial class MainWindow : Window
                     new GradientStop(Color.FromArgb(0xE0, 0x08, 0x0B, 0x0E), 0.55),
                 },
             },
-            Child = layout,
+            Child = barContent,
             RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse($"translateY({HoverControlsSlideDistance}px)"),
             Transitions =
             [
