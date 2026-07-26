@@ -76,27 +76,16 @@ public sealed partial class MainWindow : Window
     private List<(double StartSeconds, double EndSeconds)> _pausedRanges = new();
     private Window? _recordingPausedOverlay;
     private Window? _editorHoverControlsWindow;
+    // Watches for the editor opening/closing rather than for the pointer - the
+    // bar is always up while a clip is open (see PollEditorHoverControls).
     private DispatcherTimer? _hoverControlsHideTimer;
-    // The bar used to vanish the instant the cursor left the video, so
-    // clicking anything below it - the timeline, a transport button, the
-    // volume slider - made the controls disappear mid-interaction, which read
-    // as the bar being broken. It now lingers briefly after the pointer
-    // leaves, so moving from the video to a control doesn't dismiss it.
-    private static readonly TimeSpan HoverControlsGrace = TimeSpan.FromMilliseconds(2000);
-    private DateTime _hoverControlsActiveUntilUtc = DateTime.MinValue;
-    // Cursor position at the previous poll, so a resting pointer can be told
-    // apart from a moving one - see PollEditorHoverControls. A couple of
-    // pixels of tolerance keeps mouse jitter from counting as movement.
-    private CursorPoint _hoverControlsLastCursor;
-    private const int HoverControlsMoveThreshold = 2;
-    // Slides the bar in from under the video's bottom edge. The window itself
-    // stays put - only its content moves - because animating an owned window's
-    // native position is visibly steppy next to a composited transform.
+    // Slides the bar in from under the video's bottom edge on first show. The
+    // window itself stays put - only its content moves - because animating an
+    // owned window's native position is visibly steppy next to a composited
+    // transform.
     private const double HoverControlsSlideDistance = 92;
     private static readonly TimeSpan HoverControlsSlideDuration = TimeSpan.FromMilliseconds(190);
     private Border? _hoverControlsBackdrop;
-    private DispatcherTimer? _hoverControlsSlideOutTimer;
-    private bool _hoverControlsSlidingOut;
     public MainWindow()
     {
         InitializeComponent();
@@ -1743,7 +1732,7 @@ public sealed partial class MainWindow : Window
         _preFullscreenWindowState = WindowState;
         WindowState = WindowState.FullScreen;
         ViewModel?.SetVideoFullscreen(true);
-        HideEditorHoverControls(immediate: true);
+        HideEditorHoverControls();
 
         // Move the SAME EditorVideoView (already playing) into the
         // fullscreen host instead of hot-swapping MediaPlayer onto a second
@@ -3755,7 +3744,7 @@ public sealed partial class MainWindow : Window
         }
         EditorVideoView.MediaPlayer = null;
         _recordingPausedOverlay?.Hide();
-        HideEditorHoverControls(immediate: true);
+        HideEditorHoverControls();
         if (ViewModel is not null)
         {
             ViewModel.IsPlaying = false;
@@ -3904,19 +3893,21 @@ public sealed partial class MainWindow : Window
     // plain in-tree Avalonia overlay would never actually show above the video.
     // An owned Window (Owner = this, no Topmost) sits above it correctly while
     // staying scoped to ClypDat and hidden/minimized together with its owner.
-    // PointerEntered/PointerMoved/PointerExited on EditorVideoHost never fire
-    // while the cursor is actually over the video - LibVLCSharp's VideoView is
-    // a native child hwnd occupying that whole area, and Windows routes plain
-    // mouse-move input straight to that hwnd instead of through Avalonia's
-    // input pipeline (mouse WHEEL routes differently, which is why zoom-via-
-    // scroll on this same host already worked). Polling the real cursor
-    // position against the video's on-screen rect sidesteps that entirely.
+    //
+    // The timer only asks whether the editor is open - the bar no longer
+    // tracks the pointer at all. It can't usefully: PointerEntered/Moved/
+    // Exited on EditorVideoHost never fire while the cursor is over the video,
+    // because that native child hwnd takes plain mouse-move input straight
+    // from Windows without it ever reaching Avalonia's input pipeline (WHEEL
+    // routes differently, which is why zoom-via-scroll on this same host does
+    // work). Cursor polling stood in for that and the result always read as
+    // controls vanishing on you, so the bar simply stays up instead.
     private void SetupEditorHoverControls()
     {
         _hoverControlsHideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
         // Guarded: an exception escaping a DispatcherTimer tick kills the
-        // subscription, and this poll touches things that can legitimately
-        // throw mid-transition - PointToScreen on a visual that's momentarily
+        // subscription, and this touches things that can legitimately throw
+        // mid-transition - PointToScreen on a visual that's momentarily
         // detached (the fullscreen reparent), or RenderScaling on a window
         // being torn down. One throw and the bar would never appear again for
         // the rest of the session, which matches it "randomly" going away and
@@ -3946,132 +3937,63 @@ public sealed partial class MainWindow : Window
         AppLog.Debug($"Editor hover bar: {state}.");
     }
 
+    // The bar is simply part of the editor now: open a clip and it's there,
+    // over the bottom of the picture, until the editor closes or goes
+    // fullscreen (which has its own controls). It used to come and go with the
+    // pointer - hover to summon, rest or leave to dismiss - and every version
+    // of that ended up feeling like the controls were disappearing on you.
+    // The only state left is "should it exist at all", so this is the whole
+    // decision.
     private void PollEditorHoverControls()
     {
-        if (ViewModel is null || !ViewModel.IsEditorVisible || ViewModel.IsVideoFullscreen || _playback is null)
+        var shouldShow = ViewModel is not null && ViewModel.IsEditorVisible && !ViewModel.IsVideoFullscreen && _playback is not null;
+        if (!shouldShow)
         {
             if (_editorHoverControlsWindow is { IsVisible: true })
             {
                 LogHoverControlsState($"hidden (editor={ViewModel?.IsEditorVisible}, fullscreen={ViewModel?.IsVideoFullscreen}, playback={_playback is not null})");
             }
-            HideEditorHoverControls(immediate: true);
+            HideEditorHoverControls();
             return;
         }
 
-        if (!GetCursorPos(out var cursor)) return;
-
-        // EditorVideoHost, not EditorVideoView: the view carries the zoom
-        // ScaleTransform (so its own PointToScreen moves and can extend well
-        // outside the visible area once zoomed) and gets reparented into
-        // FullscreenVideoHost and back. The host is the stable, untransformed
-        // rectangle the video is actually shown in.
+        // Nothing to attach to yet (the editor is up but the video pane hasn't
+        // been laid out); try again on the next tick rather than showing a bar
+        // positioned against a zero-sized host.
         if (EditorVideoHost.Bounds.Width <= 0 || EditorVideoHost.Bounds.Height <= 0) return;
-        var videoTopLeft = EditorVideoHost.PointToScreen(new Point(0, 0));
-        var videoBottomRight = EditorVideoHost.PointToScreen(new Point(EditorVideoHost.Bounds.Width, EditorVideoHost.Bounds.Height));
-        var overVideo = cursor.X >= videoTopLeft.X && cursor.X < videoBottomRight.X
-                        && cursor.Y >= videoTopLeft.Y && cursor.Y < videoBottomRight.Y;
 
-        var overBar = false;
-        if (_editorHoverControlsWindow is { IsVisible: true } existingBar)
-        {
-            var barPos = existingBar.Position;
-            var barWidthPx = (int)(existingBar.Width * existingBar.RenderScaling);
-            var barHeightPx = (int)(existingBar.Height * existingBar.RenderScaling);
-            overBar = cursor.X >= barPos.X && cursor.X < barPos.X + barWidthPx
-                      && cursor.Y >= barPos.Y && cursor.Y < barPos.Y + barHeightPx;
-        }
-
-        var moved = Math.Abs(cursor.X - _hoverControlsLastCursor.X) >= HoverControlsMoveThreshold ||
-                    Math.Abs(cursor.Y - _hoverControlsLastCursor.Y) >= HoverControlsMoveThreshold;
-        if (moved) _hoverControlsLastCursor = cursor;
-
-        // A resting pointer no longer holds the bar open. Parking the cursor
-        // anywhere over the video used to keep 64px of controls sitting on the
-        // picture for the whole clip; now it behaves like any other player -
-        // movement (or hovering the bar itself) wakes it, stillness lets it
-        // slide away. Paused is the exception: controls staying put is the
-        // whole point of pausing.
-        var keepAwake = overBar || (overVideo && (moved || !ViewModel.IsPlaying));
-        if (keepAwake)
-        {
-            _hoverControlsActiveUntilUtc = DateTime.UtcNow + HoverControlsGrace;
-            ShowEditorHoverControls();
-        }
-        else if (DateTime.UtcNow >= _hoverControlsActiveUntilUtc)
-        {
-            if (_editorHoverControlsWindow is { IsVisible: true } && !_hoverControlsSlidingOut)
-            {
-                LogHoverControlsState($"sliding out (cursor={cursor.X},{cursor.Y} video={videoTopLeft.X},{videoTopLeft.Y}-{videoBottomRight.X},{videoBottomRight.Y})");
-            }
-            HideEditorHoverControls(immediate: false);
-        }
+        ShowEditorHoverControls();
     }
 
     private void ShowEditorHoverControls()
     {
-        _hoverControlsSlideOutTimer?.Stop();
-        _hoverControlsSlidingOut = false;
-
         var window = EnsureEditorHoverControlsWindow();
-        // Reposition only on the hidden->shown transition, not every poll
-        // tick - repeatedly calling native SetWindowPos on a transparent/
-        // composited window ~8x/sec while just sitting there hovering was
-        // visibly janky. Actual repositioning while it's already visible
-        // (window move/resize) is handled separately by the
-        // PositionChanged/LayoutUpdated hooks in TrackPausedOverlayToWindow.
-        if (!window.IsVisible)
-        {
-            RepositionEditorHoverControls(window);
-            // Parked below the window's own bounds so the first frame after
-            // Show is already off-screen; flipping it back one frame later
-            // gives the transition a "from" state to animate out of, rather
-            // than both values landing in the same layout pass.
-            SetHoverControlsOffset(HoverControlsSlideDistance);
-            window.Show(this);
-            LogHoverControlsState("sliding in");
-            Dispatcher.UIThread.Post(() => SetHoverControlsOffset(0), DispatcherPriority.Loaded);
-        }
-        else
-        {
-            SetHoverControlsOffset(0);
-        }
-    }
+        // Already up - nothing to do. Reposition only happens on the
+        // hidden->shown transition, not every poll tick: repeatedly calling
+        // native SetWindowPos on a transparent/composited window ~8x/sec was
+        // visibly janky. Repositioning while it's already visible (window
+        // move/resize) is handled separately by the PositionChanged/
+        // LayoutUpdated hooks in TrackPausedOverlayToWindow.
+        if (window.IsVisible) return;
 
-    private void HideEditorHoverControls(bool immediate)
-    {
-        if (_editorHoverControlsWindow is not { IsVisible: true } window)
-        {
-            _hoverControlsSlidingOut = false;
-            return;
-        }
-
-        if (immediate)
-        {
-            _hoverControlsSlideOutTimer?.Stop();
-            _hoverControlsSlidingOut = false;
-            window.Hide();
-            return;
-        }
-
-        if (_hoverControlsSlidingOut) return;
-        _hoverControlsSlidingOut = true;
+        RepositionEditorHoverControls(window);
+        // Parked below the window's own bounds so the first frame after Show
+        // is already off-screen; flipping it back one frame later gives the
+        // transition a "from" state to animate out of, rather than both
+        // values landing in the same layout pass.
         SetHoverControlsOffset(HoverControlsSlideDistance);
-
-        _hoverControlsSlideOutTimer ??= new DispatcherTimer();
-        _hoverControlsSlideOutTimer.Interval = HoverControlsSlideDuration;
-        _hoverControlsSlideOutTimer.Stop();
-        _hoverControlsSlideOutTimer.Tick -= HoverControlsSlideOut_OnTick;
-        _hoverControlsSlideOutTimer.Tick += HoverControlsSlideOut_OnTick;
-        _hoverControlsSlideOutTimer.Start();
+        window.Show(this);
+        LogHoverControlsState("shown");
+        Dispatcher.UIThread.Post(() => SetHoverControlsOffset(0), DispatcherPriority.Loaded);
     }
 
-    private void HoverControlsSlideOut_OnTick(object? sender, EventArgs e)
+    // Only ever called on leaving the editor or entering fullscreen, so it's
+    // an outright hide - there's no dismiss-while-watching case left to
+    // animate out of.
+    private void HideEditorHoverControls()
     {
-        _hoverControlsSlideOutTimer?.Stop();
-        if (!_hoverControlsSlidingOut) return;
-        _hoverControlsSlidingOut = false;
-        _editorHoverControlsWindow?.Hide();
-        LogHoverControlsState("hidden");
+        if (_editorHoverControlsWindow is not { IsVisible: true } window) return;
+        window.Hide();
     }
 
     private void SetHoverControlsOffset(double offset)
@@ -4304,16 +4226,6 @@ public sealed partial class MainWindow : Window
         };
         _editorHoverControlsWindow = window;
         return window;
-    }
-
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern bool GetCursorPos(out CursorPoint point);
-
-    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
-    private readonly struct CursorPoint
-    {
-        public readonly int X;
-        public readonly int Y;
     }
 
     // Recomputes the "Playback Paused" badge for the CURRENT position. Must
