@@ -284,7 +284,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .ToArray();
             if (types.Length > 0) parts.Add(string.Join(", ", types));
 
-            return parts.Count == 0 ? "Clips" : string.Join(" - ", parts);
+            // Count is of what's actually on screen, so it follows the filter
+            // rather than always reporting the whole library.
+            var shown = AllClips.Count(clip => clip.IsVisibleInLibrary);
+            var name = parts.Count == 0 ? "Clips" : string.Join(" - ", parts);
+            return $"{name} ({shown})";
         }
     }
 
@@ -2790,7 +2794,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public void UpdateCardLayout(double availableWidth)
     {
         _lastCardLayoutWidth = availableWidth;
-        var contentWidth = Math.Max(320, availableWidth);
+        // The width handed in is the ScrollViewer's OUTER width, which includes
+        // the strip its vertical scrollbar occupies - the WrapPanel inside
+        // actually gets less than that. Both formulas below divide the width up
+        // almost exactly, so those few pixels were enough to push the last card
+        // of every row onto the next one: a window sized for three columns laid
+        // out two and left a card's worth of dead space down the right side.
+        const double scrollbarAllowance = 20;
+        var contentWidth = Math.Max(320, availableWidth - scrollbarAllowance);
 
         if (Settings.ScaleClipsWithWindow)
         {
@@ -2804,10 +2815,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         else
         {
-            // Original fixed-3-column formula, from before this setting
-            // existed - kept exact for anyone who turns scaling back off.
+            // Fixed three columns. Reserves the same 24px per card the scaled
+            // branch does (4 left + 20 right of margin) - the old formula took
+            // 64 off the total for three cards needing 72, so the third card
+            // never fit and wrapped, which is the other half of the dead space
+            // down the right side.
             CardColumns = 3;
-            CardWidth = Math.Max(220, Math.Floor((contentWidth - 64) / 3));
+            CardWidth = Math.Max(220, Math.Floor(contentWidth / 3) - 24);
         }
 
         CardImageHeight = Math.Floor(CardWidth * 9 / 16);
@@ -3769,21 +3783,29 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         var hasVideo = false;
         var audioIndex = 0;
-        // Medal always exports two audio streams: a full pre-mix ("All
+        // Medal usually exports two audio streams: a full pre-mix ("All
         // Audio" - game+mic+everything combined) first, then a second,
-        // narrower one ("All PC Audio") after it. The pre-mix just
-        // duplicates content the other track(s) already carry, so for a
-        // Medal import it's dropped before it's ever added to
-        // TimelineTracks - not shown, not muted, not selectable, just never
-        // exists as far as the editor or playback (which builds its audio
-        // list FROM TimelineTracks, see MainWindow.axaml.cs's
-        // StartEditorPlaybackAsync) are concerned.
+        // narrower one ("All PC Audio") after it. The pre-mix just duplicates
+        // content the other track(s) already carry, so for a Medal import it's
+        // dropped before it's ever added to TimelineTracks - not shown, not
+        // muted, not selectable, just never exists as far as the editor or
+        // playback (which builds its audio list FROM TimelineTracks, see
+        // MainWindow.axaml.cs's StartEditorPlaybackAsync) are concerned.
+        //
+        // Only when there IS something else to fall back on, though. A Medal
+        // clip exported with everything mixed down to a single track has that
+        // one track AS its audio, and dropping it left the clip silent with an
+        // empty timeline - the import looked broken rather than mixed.
+        var medalAudioTrackCount = isMedalImport
+            ? media.Tracks.Count(track => track.Type == "audio")
+            : 0;
+        var dropMedalPreMix = medalAudioTrackCount > 1;
         var skippedMedalPreMixTrack = false;
         var filmstrip = LoadBitmap(media.FilmstripPath);
         foreach (var track in media.Tracks)
         {
             if (track.Type == "subtitle") continue;
-            if (isMedalImport && track.Type == "audio" && !skippedMedalPreMixTrack)
+            if (dropMedalPreMix && track.Type == "audio" && !skippedMedalPreMixTrack)
             {
                 skippedMedalPreMixTrack = true;
                 continue;

@@ -120,6 +120,10 @@ public sealed partial class App : Application
         if (Resources["AccentSelectedBrush"] is SolidColorBrush selectedBrush) selectedBrush.Color = BlendWith(accent, RailBackground, 0.78);
         if (Resources["AccentSelectedHoverBrush"] is SolidColorBrush selectedHoverBrush) selectedHoverBrush.Color = BlendWith(accent, RailBackground, 0.68);
         if (Resources["AccentSelectedIconBrush"] is SolidColorBrush selectedIconBrush) selectedIconBrush.Color = BlendWithWhite(accent, 0.55);
+        // Hover on an unselected rail button - a darker wash of the same
+        // accent, well short of the selection tint so the two never read as
+        // the same state.
+        if (Resources["AccentHoverBrush"] is SolidColorBrush accentHoverBrush) accentHoverBrush.Color = BlendWith(accent, RailBackground, 0.88);
     }
 
     // #0D1116 - the sidebar rail's background, which selection tints are mixed

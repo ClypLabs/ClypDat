@@ -735,7 +735,12 @@
     </Setter>
   </Style>
   <Style Selector="Button.railIconButton:pointerover">
-    <Setter Property="Background" Value="#232F3A" />
+    <!-- Accent-tinted, not a grey wash: hovering used to just lighten the
+         rail, which read as the button greying out rather than responding.
+         This is the same accent the selection tints use (so it follows the
+         Windows colour), mixed much further down into the rail so hover and
+         selected stay clearly different. -->
+    <Setter Property="Background" Value="{StaticResource AccentHoverBrush}" />
   </Style>
   <Style Selector="Button.railIconButton:pointerover PathIcon">
     <Setter Property="Foreground" Value="#D8E4F2" />
@@ -761,7 +766,7 @@
     <Setter Property="Background" Value="#26323D" />
   </Style>
   <Style Selector="Button.railIconButton:pointerover Border.gameInitialBadge">
-    <Setter Property="Background" Value="#31404D" />
+    <Setter Property="Background" Value="{StaticResource AccentSelectedBrush}" />
   </Style>
   <Style Selector="Button.railIconButton.active Border.gameInitialBadge">
     <Setter Property="Background" Value="{StaticResource AccentBrush}" />
