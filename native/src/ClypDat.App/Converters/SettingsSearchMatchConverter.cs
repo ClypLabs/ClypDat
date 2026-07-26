@@ -69,10 +69,22 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         },
     };
 
+    // sectionName can be several, '|'-separated - used by the nav's own
+    // small-caps category headers (GENERAL/CAPTURE/ABOUT), which aren't
+    // themselves a section but should only show while at least one section
+    // underneath them is still showing. Searching "Sidebar filters" used to
+    // still show GENERAL, CAPTURE, and ABOUT as floating orphaned labels
+    // with every actual button beneath each of them hidden, since those
+    // headers had no visibility condition of their own at all.
     public static bool MatchesSection(string query, string sectionName)
     {
         query = query.Trim();
         if (query.Length == 0) return true;
+        return sectionName.Split('|').Any(name => MatchesSingleSection(query, name));
+    }
+
+    private static bool MatchesSingleSection(string query, string sectionName)
+    {
         if (sectionName.Contains(query, StringComparison.OrdinalIgnoreCase)) return true;
         return SectionKeywords.TryGetValue(sectionName, out var keywords) &&
                keywords.Any(keyword => keyword.Contains(query, StringComparison.OrdinalIgnoreCase));
