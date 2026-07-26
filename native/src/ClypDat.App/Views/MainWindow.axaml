@@ -247,10 +247,14 @@
               <!-- The whole game rail: a mix of loose game tiles and folder
                    tiles (GameRailEntries), drag-reorderable and drop-target-
                    able as one unit - see MainWindowViewModel's "Sidebar game
-                   rail" region for what backs it, and the code-behind's own
-                   "Sidebar game rail" region for the pointer-capture drag
-                   this runs on (no DragDrop/AllowDrop involved - see why in
-                   that region's opening comment). -->
+                   rail" region for what backs it. The drag itself isn't wired
+                   here on the individual buttons at all - PointerPressed on a
+                   Button never reached a same-element bubble handler (the
+                   Button's own internal press handling swallows it first), so
+                   it's three window-level Tunnel handlers registered in the
+                   constructor instead, same fix already used here for
+                   KeyDown/KeyUp. See the code-behind's own "Sidebar game
+                   rail" region. -->
               <StackPanel Spacing="2">
                 <ItemsControl ItemsSource="{Binding GameRailEntries}">
                   <ItemsControl.DataTemplates>
@@ -258,10 +262,7 @@
                       <Button Classes="railIconButton railGameButton"
                               Classes.active="{Binding IsChecked}"
                               Click="LibraryGameSectionButton_OnClick"
-                              ToolTip.Tip="{Binding Label}"
-                              PointerPressed="GameRailItem_OnPointerPressed"
-                              PointerMoved="GameRailItem_OnPointerMoved"
-                              PointerReleased="GameRailItem_OnPointerReleased">
+                              ToolTip.Tip="{Binding Label}">
                         <!-- Right-click to rename, or to move between folders -
                              games named after an executable ("RocketLeague")
                              or a Medal folder are common enough to want
@@ -301,10 +302,7 @@
                              itself a filter (per how folders should behave). -->
                         <Button Classes="railIconButton railGameButton"
                                 Click="GameRailFolder_OnClick"
-                                ToolTip.Tip="{Binding Name}"
-                                PointerPressed="GameRailItem_OnPointerPressed"
-                                PointerMoved="GameRailItem_OnPointerMoved"
-                                PointerReleased="GameRailItem_OnPointerReleased">
+                                ToolTip.Tip="{Binding Name}">
                           <Button.ContextMenu>
                             <ContextMenu>
                               <MenuItem Header="Rename folder..." Click="RenameFolderMenuItem_OnClick" />
@@ -338,10 +336,7 @@
                               <Button Classes="railIconButton railGameButton"
                                       Classes.active="{Binding IsChecked}"
                                       Click="LibraryGameSectionButton_OnClick"
-                                      ToolTip.Tip="{Binding Label}"
-                                      PointerPressed="GameRailItem_OnPointerPressed"
-                                      PointerMoved="GameRailItem_OnPointerMoved"
-                                      PointerReleased="GameRailItem_OnPointerReleased">
+                                      ToolTip.Tip="{Binding Label}">
                                 <Button.ContextMenu>
                                   <ContextMenu Opening="GameContextMenu_OnOpening">
                                     <MenuItem Header="Rename game..." Click="RenameGameMenuItem_OnClick" />
