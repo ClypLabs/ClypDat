@@ -439,7 +439,17 @@ public sealed partial class MainWindow : Window
 
         var newName = await PromptRenameAsync(option.Key, "Rename game", "Game name");
         if (string.IsNullOrWhiteSpace(newName)) return;
-        await ViewModel.RenameGameAsync(option.Key, newName);
+
+        var (renamed, failed) = await ViewModel.RenameGameAsync(option.Key, newName);
+        // Only surfaced when something actually went wrong - a clean rename
+        // speaks for itself in the sidebar a moment later.
+        if (failed > 0)
+        {
+            await ShowMessageAsync(
+                "Rename incomplete",
+                $"Renamed {renamed} clip(s) to \"{newName}\", but {failed} could not be moved - they're probably open in another program. " +
+                "Those clips still show under the old name; renaming again once they're free will finish the job.");
+        }
     }
 
     private async void RefreshGameIconsButton_OnClick(object? sender, RoutedEventArgs e)
