@@ -3942,15 +3942,11 @@ public sealed partial class MainWindow : Window
         AppLog.Debug($"Editor hover bar: {state}.");
     }
 
-    // One rule: the pointer is somewhere in the editor, or the bar goes.
-    //
-    // The zone is the whole editor pane, not the video rect. Scoping it to the
-    // picture meant the bar flapped constantly in ordinary use - the log for a
-    // single minute of editing shows a dozen show/hide cycles, every one of
-    // them the pointer moving between the video and the editor's own controls
-    // (the timeline below it at y~1900, the track panel to its right at
-    // x~3000) and straight back. Those are all "still using the player", so
-    // they no longer dismiss anything. Leave the editor entirely and it goes.
+    // One rule: the pointer is over the video (or over the bar itself), or the
+    // bar goes. Now that the hover bar is opt-in - the docked row under the
+    // video is the default - the point of choosing it is keeping the editor
+    // clear of controls except while you're actually on the picture, so the
+    // zone is the picture and nothing else.
     private void PollEditorHoverControls()
     {
         // Docked mode (the default) is the control row in the timeline panel,
@@ -3984,15 +3980,8 @@ public sealed partial class MainWindow : Window
 
         var videoTopLeft = EditorVideoHost.PointToScreen(new Point(0, 0));
         var videoBottomRight = EditorVideoHost.PointToScreen(new Point(EditorVideoHost.Bounds.Width, EditorVideoHost.Bounds.Height));
-
-        // EditorRoot covers the video, the timeline and the side panels, so
-        // working anywhere in the editor counts as being here. Falls back to
-        // the video rect if it somehow has no bounds yet.
-        var zone = EditorRoot.Bounds is { Width: > 0, Height: > 0 } ? EditorRoot : (Control)EditorVideoHost;
-        var zoneTopLeft = zone.PointToScreen(new Point(0, 0));
-        var zoneBottomRight = zone.PointToScreen(new Point(zone.Bounds.Width, zone.Bounds.Height));
-        var overEditor = cursor.X >= zoneTopLeft.X && cursor.X < zoneBottomRight.X
-                         && cursor.Y >= zoneTopLeft.Y && cursor.Y < zoneBottomRight.Y;
+        var overVideo = cursor.X >= videoTopLeft.X && cursor.X < videoBottomRight.X
+                        && cursor.Y >= videoTopLeft.Y && cursor.Y < videoBottomRight.Y;
 
         // The bar is its own top-level window hanging at the video's bottom
         // edge, and can extend a pixel past the pane it belongs to, so it's
@@ -4010,7 +3999,7 @@ public sealed partial class MainWindow : Window
                       && cursor.Y >= barPos.Y && cursor.Y < barPos.Y + barHeightPx;
         }
 
-        if (overEditor || overBar)
+        if (overVideo || overBar)
         {
             _hoverControlsActiveUntilUtc = DateTime.UtcNow + HoverControlsGrace;
             ShowEditorHoverControls();
@@ -4034,15 +4023,13 @@ public sealed partial class MainWindow : Window
         _hoverControlsSlidingOut = false;
 
         var window = EnsureEditorHoverControlsWindow();
-        // Reposition only on the hidden->shown transition, not every poll
-        // tick - repeatedly calling native SetWindowPos on a transparent/
-        // composited window ~8x/sec while just sitting there hovering was
-        // visibly janky. Actual repositioning while it's already visible
-        // (window move/resize) is handled separately by the
-        // PositionChanged/LayoutUpdated hooks in TrackPausedOverlayToWindow.
+        // Every tick, not just on the hidden->shown transition - see
+        // RepositionEditorHoverControls, which no-ops unless the video pane
+        // has actually moved or resized, so this costs nothing while the bar
+        // just sits there but keeps it glued to the video during a resize.
+        RepositionEditorHoverControls(window);
         if (!window.IsVisible)
         {
-            RepositionEditorHoverControls(window);
             // Parked below the window's own bounds so the first frame after
             // Show is already off-screen; flipping it back one frame later
             // gives the transition a "from" state to animate out of, rather
@@ -4121,18 +4108,23 @@ public sealed partial class MainWindow : Window
             offset == 0 ? "translateY(0px)" : $"translateY({offset.ToString(System.Globalization.CultureInfo.InvariantCulture)}px)");
     }
 
+    // Sizes and places the bar against the video pane as it currently is.
+    // Safe to call on every poll tick: it works out the target geometry and
+    // returns without touching the native window unless something actually
+    // moved. That's what keeps the bar matched to the video through window
+    // resizes, maximise/restore, a display-scale change or the pan slider
+    // appearing - the LayoutUpdated hook alone missed cases where the video
+    // pane's rect changed without EditorVideoView itself re-laying out.
     private void RepositionEditorHoverControls(Window bar)
     {
         // Same reasoning as PollEditorHoverControls - position against the
         // untransformed host, not the zoom-transformed/reparented view.
         if (EditorVideoHost.Bounds.Width <= 0 || EditorVideoHost.Bounds.Height <= 0) return;
         var topLeft = EditorVideoHost.PointToScreen(new Point(0, 0));
-        var width = EditorVideoHost.Bounds.Width;
+        var width = Math.Max(1, EditorVideoHost.Bounds.Width);
         // 64 for the controls row plus the 14px scrub strip above it.
         const double barHeight = 78;
         var bottomOnScreen = EditorVideoHost.PointToScreen(new Point(0, EditorVideoHost.Bounds.Height));
-        bar.Width = Math.Max(1, width);
-        bar.Height = barHeight;
         // The OWNER's scaling, not the bar's. Position is in physical pixels
         // while Height is in DIPs, so converting between them needs the real
         // scale factor of the display this is on - and a Window that has not
@@ -4140,7 +4132,13 @@ public sealed partial class MainWindow : Window
         // display that put the bar half its own height too low on the very
         // first show, hanging past the bottom of the video pane.
         var scaling = RenderScaling > 0 ? RenderScaling : 1;
-        bar.Position = new PixelPoint(topLeft.X, bottomOnScreen.Y - (int)(barHeight * scaling));
+        var position = new PixelPoint(topLeft.X, bottomOnScreen.Y - (int)(barHeight * scaling));
+
+        if (bar.Position == position && Math.Abs(bar.Width - width) < 0.5 && Math.Abs(bar.Height - barHeight) < 0.5) return;
+
+        bar.Width = width;
+        bar.Height = barHeight;
+        bar.Position = position;
     }
 
     // Contents of the floating hover bar. The docked alternative is plain XAML
