@@ -90,6 +90,8 @@ public sealed class GameRailFolderViewModel : ViewModelBase
         set
         {
             if (!SetProperty(ref _isExpanded, value)) return;
+            OnPropertyChanged(nameof(ShowFolderGlyph));
+            OnPropertyChanged(nameof(ShowMosaic));
             _onExpandedChanged?.Invoke(Id, value);
         }
     }
@@ -97,24 +99,27 @@ public sealed class GameRailFolderViewModel : ViewModelBase
     // Sets the initial state from the owner's remembered set without
     // re-announcing it right back - only a genuine UI-driven toggle should
     // fire the callback.
-    public void SetExpandedSilently(bool value) => _isExpanded = value;
+    public void SetExpandedSilently(bool value)
+    {
+        _isExpanded = value;
+        OnPropertyChanged(nameof(ShowFolderGlyph));
+        OnPropertyChanged(nameof(ShowMosaic));
+    }
 
     public void ToggleExpanded() => IsExpanded = !IsExpanded;
 
     public bool IsEmpty => Games.Count == 0;
     public string CountLabel => Games.Count.ToString();
 
-    // Which of four hand-laid-out arrangements the collapsed tile uses -
-    // mutually exclusive, so exactly one applies. A single fixed 2x2 grid for
-    // every count left empty cells (dead space) whenever a folder held fewer
-    // than 4 games, which is what actually made 2- and 3-game folders look
-    // lopsided rather than "the icons are just small". 1 game fills the
-    // whole tile, 2 sit side by side, 3 are two-over-one, and only 4+ uses
-    // the real 2x2 (see HasSlot4Cell below).
-    public bool IsSingleGame => Games.Count == 1;
-    public bool IsTwoGames => Games.Count == 2;
-    public bool IsThreeGames => Games.Count == 3;
-    public bool IsFourPlusGames => Games.Count >= 4;
+    // The header tile shows one of two things: the 4-cell mosaic (collapsed,
+    // non-empty - unused cells just sit blank rather than switching layout
+    // per count, so the tile's own shape never changes as games are added,
+    // removed, or the folder opens/closes) or a plain folder glyph (empty,
+    // or expanded - once open, the real icons are already visible below, so
+    // the header reads as "this is an open folder" instead of repeating a
+    // mosaic that's now redundant).
+    public bool ShowFolderGlyph => IsEmpty || IsExpanded;
+    public bool ShowMosaic => !IsEmpty && !IsExpanded;
 
     // Collapsed tile is a mosaic of up to the first 4 member icons, Discord-
     // folder style - exposed as flat per-slot bool/string/bitmap properties
@@ -157,10 +162,8 @@ public sealed class GameRailFolderViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(IsEmpty));
         OnPropertyChanged(nameof(CountLabel));
-        OnPropertyChanged(nameof(IsSingleGame));
-        OnPropertyChanged(nameof(IsTwoGames));
-        OnPropertyChanged(nameof(IsThreeGames));
-        OnPropertyChanged(nameof(IsFourPlusGames));
+        OnPropertyChanged(nameof(ShowFolderGlyph));
+        OnPropertyChanged(nameof(ShowMosaic));
         OnPropertyChanged(nameof(HasSlot1));
         OnPropertyChanged(nameof(HasSlot2));
         OnPropertyChanged(nameof(HasSlot3));
