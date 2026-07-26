@@ -1481,7 +1481,7 @@
                         <Image Source="{Binding CoverImage}" Stretch="UniformToFill" />
                       </Border>
                       <StackPanel Grid.Column="1" Spacing="8">
-                        <TextBlock Text="{Binding Name}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="16" />
+                        <TextBlock Text="{Binding Name}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="16" opconv:SettingsHighlight.Query="{Binding SearchQuery}" />
                         <TextBlock Text="{Binding StatusText}" Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
                         <Button Content="Set up Dota 2" Click="SetupDotaAutoClipButton_OnClick" IsVisible="{Binding IsSetupRequired}" HorizontalAlignment="Left" />
                         <ItemsControl ItemsSource="{Binding Groups}">

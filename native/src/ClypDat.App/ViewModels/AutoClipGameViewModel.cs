@@ -11,6 +11,7 @@ public sealed class AutoClipGameViewModel : ViewModelBase
     private readonly AutoClipGameSettings _settings;
     private readonly Action _save;
     private bool _isSearchMatch = true;
+    private string _searchQuery = string.Empty;
     private string _statusText = "Waiting for game";
 
     public AutoClipGameViewModel(AutoClipGameDefinition definition, AutoClipGameSettings settings, Action save)
@@ -32,6 +33,13 @@ public sealed class AutoClipGameViewModel : ViewModelBase
     public bool IsSetupRequired => Definition.RequiresSetup;
     public bool IsEnabled { get => _settings.Enabled; set { if (_settings.Enabled == value) return; _settings.Enabled = value; SaveAndRefresh(); } }
     public bool IsSearchMatch { get => _isSearchMatch; set => SetProperty(ref _isSearchMatch, value); }
+    // Bound to this row's own Name TextBlock via SettingsHighlight.Query -
+    // that attached property needs the query on the SAME DataContext as the
+    // TextBlock it's attached to (a per-game row here), not
+    // MainWindowViewModel.SettingsSearchText directly, which lives one
+    // level up and isn't reachable from this DataTemplate without an
+    // ancestor-relative binding.
+    public string SearchQuery { get => _searchQuery; set => SetProperty(ref _searchQuery, value); }
     public string StatusText { get => _statusText; set => SetProperty(ref _statusText, value); }
     public void Refresh() { foreach (var group in Groups) group.Refresh(); }
     private void SaveAndRefresh() { Refresh(); _save(); }
