@@ -190,7 +190,12 @@ public static class MedalImportService
     {
         ["beatsaber"] = "Beat Saber",
         ["rocketleague"] = "Rocket League",
-        ["vrchat"] = "VR Chat",
+        // "VRChat", one word, is the actual name. The camel-case split that
+        // ResolveGameDisplayName falls back to turns the compact export name
+        // into "VR Chat", and this entry exists to stop that - so it has to
+        // hold the real spelling. With the wrong one it renamed the game AND
+        // cost it its icon, since no store search for "VR Chat" finds it.
+        ["vrchat"] = "VRChat",
         ["amongus"] = "Among Us",
         ["splitgatearenawarfare"] = "Splitgate: Arena Warfare",
         ["uno"] = "UNO"
@@ -279,6 +284,18 @@ public static class MedalImportService
 
     public static bool IsLegacyMisparsedCounterStrike2Name(string? name) =>
         string.Equals(name, "Counter Strike2202", StringComparison.OrdinalIgnoreCase);
+
+    // Run over a game name that already exists in the library - from a clip's
+    // sidecar or the folder it sits in - so a clip written under an older or
+    // looser spelling still shows, filters and resolves its icon under the
+    // canonical one. Clips imported before an alias was corrected keep the old
+    // name on disk; this fixes them wherever they're read rather than
+    // rewriting sidecars and moving files around for a spelling change.
+    public static string CanonicalGameName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return name;
+        return GameAliases.TryGetValue(NormalizeForComparison(name), out var alias) ? alias : name;
+    }
 
     private static string ResolveGameDisplayName(string compactName)
     {
