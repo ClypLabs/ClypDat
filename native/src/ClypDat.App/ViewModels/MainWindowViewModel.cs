@@ -3986,6 +3986,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         var renamed = 0;
         var failed = 0;
+        var moves = new List<(string OldPath, string NewPath)>();
 
         foreach (var (path, knownDuration) in targets)
         {
@@ -4029,6 +4030,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     title,
                     info?.CapturedAt?.LocalDateTime ?? timestamp,
                     info?.MedalImportKey));
+                moves.Add((path, destinationPath));
                 renamed++;
             }
             catch (Exception error)
@@ -4067,8 +4069,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         RebuildGameCaptureRows();
         SaveSettings();
+
+        // The cards that moved are updated in place rather than rebuilding the
+        // library: a full refresh clears every card, re-enumerates the folder
+        // and re-reads a sidecar per clip, which on a big library is a visible
+        // stall and a scroll position lost - for what is only ever a change of
+        // name and folder on a handful of clips ClypDat has just moved itself.
+        foreach (var (oldPath, newPath) in moves)
+        {
+            var card = AllClips.FirstOrDefault(clip => string.Equals(clip.Path, oldPath, StringComparison.OrdinalIgnoreCase));
+            card?.UpdateMedia(_mediaProbe.CreateLibraryStub(newPath));
+        }
+
+        // Selection is tracked by path, and every one of those just changed.
+        ClearSelection();
+        RecomputeGameFilterBadges();
+        NotifyLibraryChrome();
+        OnPropertyChanged(nameof(LibraryTitle));
+
         AppLog.Info($"Game renamed: '{currentName}' -> '{newName}' ({renamed} clips moved, {failed} failed).");
-        await RefreshLibraryAsync();
         return (renamed, failed);
     }
 
@@ -4390,6 +4409,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasNoSelection));
         OnPropertyChanged(nameof(ShowLibraryActions));
         OnPropertyChanged(nameof(SelectionSummary));
+
+        // Each card's own context menu says whether renaming it would hit the
+        // whole selection - only the selected cards of a multi-selection do, a
+        // right-click on an unselected card being a plain single rename.
+        var bulk = SelectedCount > 1;
+        foreach (var clip in AllClips)
+        {
+            clip.RenameActionLabel = bulk && clip.IsSelected ? "Rename All" : "Rename";
+        }
     }
 
     private void StartLibraryHydration(IReadOnlyList<ClipCardViewModel> clips)

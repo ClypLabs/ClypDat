@@ -194,6 +194,18 @@ public sealed class ClipCardViewModel : ViewModelBase
     // ClypDat-recorded and Medal-imported clips.
     public string GameFilterKey => _clipInfo?.GameDisplayName ?? TileTopLabel;
 
+    private string _renameActionLabel = "Rename";
+
+    // What this card's context-menu rename entry reads - "Rename All" once
+    // it's part of a multi-selection, since the action then applies to every
+    // selected clip. Set by MainWindowViewModel whenever the selection
+    // changes; the card itself has no view of the selection as a whole.
+    public string RenameActionLabel
+    {
+        get => _renameActionLabel;
+        set => SetProperty(ref _renameActionLabel, value);
+    }
+
     private bool _isMatchedByGameFilter = true;
 
     // Drives this card's own visibility when a game filter is active -
@@ -359,6 +371,11 @@ public sealed class ClipCardViewModel : ViewModelBase
         _isVod = ComputeIsVod(media, _libraryRoot);
         PreviewImagePath = media.ThumbnailPath;
         OnPropertyChanged(nameof(Media));
+        // Path and GameFilterKey both move when a clip is renamed into another
+        // game's folder - without these the card kept filtering (and being
+        // looked up) under the game it used to belong to.
+        OnPropertyChanged(nameof(Path));
+        OnPropertyChanged(nameof(GameFilterKey));
         OnPropertyChanged(nameof(IsVod));
         OnPropertyChanged(nameof(IsMedalImport));
         OnPropertyChanged(nameof(IsManualClip));
