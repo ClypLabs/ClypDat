@@ -194,7 +194,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     // ClypDat-recorded and Medal-imported clips.
     public string GameFilterKey => _clipInfo?.GameDisplayName ?? TileTopLabel;
 
-    private string _setGameActionLabel = "Set game...";
+    private string _setGameActionLabel = "Change Game";
 
     // Mirrors RenameActionLabel for the "which game is this clip" action.
     public string SetGameActionLabel
@@ -202,6 +202,12 @@ public sealed class ClipCardViewModel : ViewModelBase
         get => _setGameActionLabel;
         set => SetProperty(ref _setGameActionLabel, value);
     }
+
+    // Medal imports only: their game comes from Medal's own folder/filename
+    // and is regularly wrong or unparseable, where a ClypDat capture's game
+    // came from detection at record time and belongs to the game-detection
+    // settings rather than a per-clip fix.
+    public bool CanChangeGame => IsMedalImport;
 
     private string _renameActionLabel = "Rename";
 
@@ -387,6 +393,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(GameFilterKey));
         OnPropertyChanged(nameof(IsVod));
         OnPropertyChanged(nameof(IsMedalImport));
+        OnPropertyChanged(nameof(CanChangeGame));
         OnPropertyChanged(nameof(IsManualClip));
         OnPropertyChanged(nameof(Name));
         OnPropertyChanged(nameof(CreatedAt));

@@ -1308,18 +1308,19 @@ public sealed partial class MainWindow : Window
         await RenameClipCardAsync(clip);
     }
 
-    // The way out of "Unknown Game" / "No game detected": detection had
-    // nothing to go on when these were captured, so they all pile into one
-    // bucket despite being from different games - which is also why this is
-    // per clip rather than a rename of the group.
+    // Medal imports whose game came through wrong or unparseable - they land
+    // in "Unknown Game" together despite being from different games, so this
+    // is per clip rather than a rename of the whole group.
     private async void ClipContextSetGame_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
 
-        var selected = ViewModel.AllClips.Where(item => item.IsSelected).ToArray();
+        // Only the Medal imports of a mixed selection - a ClypDat capture's
+        // game came from detection and isn't corrected here.
+        var selected = ViewModel.AllClips.Where(item => item.IsSelected && item.CanChangeGame).ToArray();
         var targets = clip.IsSelected && selected.Length > 1 ? selected : new[] { clip };
 
-        var heading = targets.Length > 1 ? $"Set game for {targets.Length} clips" : "Set game";
+        var heading = targets.Length > 1 ? $"Change game for {targets.Length} clips" : "Change game";
         // Prefilled with what it's filed under now, so correcting a spelling
         // doesn't mean retyping the whole name.
         var game = await PromptRenameAsync(clip.GameFilterKey, heading, "Game name");

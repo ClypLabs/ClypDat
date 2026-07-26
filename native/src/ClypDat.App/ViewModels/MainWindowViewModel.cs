@@ -2968,14 +2968,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public async Task RenameClipAsync(ClipCardViewModel clip, string newTitle)
     {
-        var sanitizedTitle = SanitizeFileTitle(newTitle);
+        var title = newTitle?.Trim() ?? string.Empty;
+        var sanitizedTitle = SanitizeFileTitle(title);
         if (string.IsNullOrWhiteSpace(sanitizedTitle)) return;
 
         var oldPath = clip.Path;
         var existingInfo = ClipInfoSidecar.Load(Settings.LibraryFolder, oldPath);
+        // The sidecar carries what the user actually typed; only the file on
+        // disk gets the substituted characters.
         var updatedInfo = existingInfo is null
-            ? new ClipInfo(null, null, sanitizedTitle)
-            : existingInfo with { FileTitle = sanitizedTitle };
+            ? new ClipInfo(null, null, title)
+            : existingInfo with { FileTitle = title };
         ClipInfoSidecar.Save(Settings.LibraryFolder, oldPath, updatedInfo);
 
         var newPath = await RenameClipFileAsync(clip, sanitizedTitle);
@@ -2983,12 +2986,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await RefreshClipInPlaceAsync(clip, newPath);
     }
 
-    private static string SanitizeFileTitle(string title)
-    {
-        var sanitized = title;
-        foreach (var invalid in Path.GetInvalidFileNameChars()) sanitized = sanitized.Replace(invalid, '-');
-        return sanitized.Trim().TrimEnd('.', ' ');
-    }
+    // Only the FILENAME needs to be legal - the title kept in the sidecar (and
+    // shown on the card) stays exactly as it was typed, punctuation and all.
+    private static string SanitizeFileTitle(string title) => ClipFileNaming.SanitizeSegment(title);
 
     // Renames the video file on disk, swapping just the title portion (game
     // name / custom label) while preserving whatever trailing date/time
@@ -4490,7 +4490,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             var all = bulk && clip.IsSelected;
             clip.RenameActionLabel = all ? "Rename All" : "Rename";
-            clip.SetGameActionLabel = all ? $"Set game for {SelectedCount} clips..." : "Set game...";
+            clip.SetGameActionLabel = all ? $"Change Game for {SelectedCount} clips" : "Change Game";
         }
     }
 
