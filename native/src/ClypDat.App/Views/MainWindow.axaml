@@ -1056,10 +1056,10 @@
                   </Grid>
                   <Grid ColumnDefinitions="*,Auto">
                     <StackPanel Spacing="2">
-                      <TextBlock Text="Select multiple sidebar filters" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
-                      <TextBlock Text="Sidebar game and section buttons stack instead of replacing each other, so you can view several at once. Off, each click selects only what you clicked." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                      <TextBlock Text="Combine sidebar filters" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
+                      <TextBlock Text="Hold one game and one section at the same time, e.g. Fortnite plus Auto-Clips. Off, picking either one clears the other. Selecting several games at once is still done from the Game Filters dropdown." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
                     </StackPanel>
-                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding MultiSelectSidebarFilters}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding CombineSidebarFilters}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
                 </StackPanel>
               </Border>

@@ -4068,39 +4068,45 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // time; passing null clears back to "All". Reuses the same
     // FilterOptionViewModel/Apply*Filters machinery the dropdowns use so
     // both UIs stay in sync with each other and with the underlying set.
+    // The rail is single-select WITHIN each group either way - one game, one
+    // section, never a stack of them. What CombineSidebarFilters decides is
+    // whether the two groups can be held at once ("Fortnite" plus
+    // "Auto-Clips") or whether picking from one drops the other, leaving
+    // exactly one filter active from the rail at any time.
     public void SelectGameSection(string? gameKey)
     {
-        // A null key is "All Games" and always clears, whichever mode is on.
-        if (gameKey is null || !Settings.MultiSelectSidebarFilters)
+        _activeGameFilters.Clear();
+        if (gameKey is not null) _activeGameFilters.Add(gameKey);
+        foreach (var option in GameFilterOptions) option.SetCheckedSilently(string.Equals(option.Key, gameKey, StringComparison.OrdinalIgnoreCase));
+        ApplyGameFilters();
+
+        if (!Settings.CombineSidebarFilters && gameKey is not null && _activeClipTypeFilters.Count > 0)
         {
-            _activeGameFilters.Clear();
-            if (gameKey is not null) _activeGameFilters.Add(gameKey);
-        }
-        else if (!_activeGameFilters.Remove(gameKey))
-        {
-            _activeGameFilters.Add(gameKey);
+            _activeClipTypeFilters.Clear();
+            foreach (var option in ClipTypeFilterOptions) option.SetCheckedSilently(false);
+            ApplyClipTypeFilters();
+            OnPropertyChanged(nameof(IsClipTypeFilterActive));
         }
 
-        foreach (var option in GameFilterOptions) option.SetCheckedSilently(_activeGameFilters.Contains(option.Key));
-        ApplyGameFilters();
         OnPropertyChanged(nameof(IsGameFilterActive));
         OnPropertyChanged(nameof(LibraryTitle));
     }
 
     public void SelectClipTypeSection(string? key)
     {
-        if (key is null || !Settings.MultiSelectSidebarFilters)
+        _activeClipTypeFilters.Clear();
+        if (key is not null) _activeClipTypeFilters.Add(key);
+        foreach (var option in ClipTypeFilterOptions) option.SetCheckedSilently(string.Equals(option.Key, key, StringComparison.OrdinalIgnoreCase));
+        ApplyClipTypeFilters();
+
+        if (!Settings.CombineSidebarFilters && key is not null && _activeGameFilters.Count > 0)
         {
-            _activeClipTypeFilters.Clear();
-            if (key is not null) _activeClipTypeFilters.Add(key);
-        }
-        else if (!_activeClipTypeFilters.Remove(key))
-        {
-            _activeClipTypeFilters.Add(key);
+            _activeGameFilters.Clear();
+            foreach (var option in GameFilterOptions) option.SetCheckedSilently(false);
+            ApplyGameFilters();
+            OnPropertyChanged(nameof(IsGameFilterActive));
         }
 
-        foreach (var option in ClipTypeFilterOptions) option.SetCheckedSilently(_activeClipTypeFilters.Contains(option.Key));
-        ApplyClipTypeFilters();
         OnPropertyChanged(nameof(IsClipTypeFilterActive));
         OnPropertyChanged(nameof(LibraryTitle));
     }
@@ -4122,15 +4128,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(LibraryTitle));
     }
 
-    public bool MultiSelectSidebarFilters
+    public bool CombineSidebarFilters
     {
-        get => Settings.MultiSelectSidebarFilters;
+        get => Settings.CombineSidebarFilters;
         set
         {
-            if (Settings.MultiSelectSidebarFilters == value) return;
-            Settings.MultiSelectSidebarFilters = value;
+            if (Settings.CombineSidebarFilters == value) return;
+            Settings.CombineSidebarFilters = value;
             OnPropertyChanged();
             SaveSettings();
+            // Turning it off with one of each already held would leave a
+            // combination the setting says isn't possible - drop back to just
+            // the game, which is the coarser of the two.
+            if (!value && _activeGameFilters.Count > 0 && _activeClipTypeFilters.Count > 0)
+            {
+                SelectClipTypeSection(null);
+            }
         }
     }
 

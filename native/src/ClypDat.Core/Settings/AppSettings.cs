@@ -66,11 +66,12 @@ public sealed class AppSettings
     // picture. Docked is the default - it never covers a frame and never
     // moves, which is what most people want out of a trimming view.
     public bool EditorHoverBarEnabled { get; set; }
-    // Off: a sidebar game/section button replaces whatever was selected, so
-    // exactly one filter is ever active from the rail. On: each click toggles
-    // its own filter, letting several stack up the way the checklist
-    // dropdowns already allow.
-    public bool MultiSelectSidebarFilters { get; set; }
+    // Off: exactly one sidebar filter is ever active - picking a game drops
+    // the section you were in and vice versa. On: one of each can be held at
+    // the same time ("Fortnite" + "Auto-Clips"). Either way the rail stays
+    // single-select within each group; stacking several games at once is what
+    // the Game Filters dropdown is for.
+    public bool CombineSidebarFilters { get; set; }
     public string ClipOverlayPosition { get; set; } = "Top Right";
     public string ClipOverlayVolume { get; set; } = "Medium";
     // Editor's master output volume (fullscreen playbar slider) - separate
