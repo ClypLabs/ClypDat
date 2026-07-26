@@ -110,8 +110,23 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
             {
                 if (_positionFrames >= _totalFrames)
                 {
-                    // True EOF - returning less than requested (or 0) tells the
-                    // mixer this input is done.
+                    // Past the end of the track: pad the rest of the buffer with
+                    // silence and keep the position advancing, rather than
+                    // returning a short read.
+                    //
+                    // A short read is how an ISampleProvider tells
+                    // MixingSampleProvider it is finished, and the mixer's
+                    // response is to DROP that input permanently. Doing that at
+                    // the end of every clip is what killed audio on replay: the
+                    // readers were still there, rewinding them still worked, but
+                    // nothing was connected to the output any more, so the clip
+                    // played back silent until the whole audio graph happened to
+                    // be rebuilt. Nothing here depends on audio signalling the
+                    // end anyway - playback stops on the video player's own
+                    // EndReached (see PlaybackSession).
+                    Array.Clear(buffer, offset + written, count - written);
+                    _positionFrames += (count - written) / Channels;
+                    written = count;
                     break;
                 }
 

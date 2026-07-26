@@ -248,7 +248,7 @@ public sealed class PlaybackSession : IDisposable
                 VideoPlayer.Play();
                 VideoPlayer.Time = milliseconds;
             }
-            EnsureAudioOutputCanSeek(time);
+            EnsureAudioOutputConnected();
             if (needsSeek) SeekAudio(time);
             VideoPlayer.Play();
             VideoPlayer.SetPause(false);
@@ -389,7 +389,7 @@ public sealed class PlaybackSession : IDisposable
                 // settling up to 650ms away from the request, and audio pinning to
                 // the unadjusted request instead of that actual position is what
                 // caused audible desync after a paused timeline click.
-                EnsureAudioOutputCanSeek(settledTime);
+                EnsureAudioOutputConnected();
                 SeekAudio(settledTime);
                 if (resumePlayback && videoReady)
                 {
@@ -603,7 +603,7 @@ public sealed class PlaybackSession : IDisposable
         }
     }
 
-    private void EnsureAudioOutputCanSeek(TimeSpan target)
+    private void EnsureAudioOutputConnected()
     {
         if (_audioStreamIndexes.Count == 0) return;
         if (_audioOutput is null)
@@ -612,13 +612,28 @@ public sealed class PlaybackSession : IDisposable
             return;
         }
 
-        var targetBeforeEnd = _audioSources.Values.Any(source => target < source.Reader.TotalTime - TimeSpan.FromMilliseconds(100));
-        if (!targetBeforeEnd) return;
+        // Readers no longer drop out of the mixer when the clip ends
+        // (ChunkedAudioReader pads past the end rather than short-reading, and
+        // a short read is what makes MixingSampleProvider discard an input for
+        // good). This stays as the backstop: a mixer missing any of its inputs
+        // renders silence no matter where the readers are seeked to, and only
+        // a rebuild reconnects them.
+        int connected;
+        try
+        {
+            connected = _audioMixer?.MixerInputs.Count() ?? 0;
+        }
+        catch (InvalidOperationException)
+        {
+            // MixerInputs hands back the live list, so the render thread can be
+            // mutating it mid-enumeration. Leave it for the next call rather
+            // than tearing down the output on a transient.
+            return;
+        }
 
-        var anyReaderAtEnd = _audioSources.Values.Any(source => source.Reader.AtEnd);
-        if (!anyReaderAtEnd) return;
+        if (connected >= _audioSources.Count) return;
 
-        AppLog.Info("Editor audio output reached EOF; rebuilding before replay.");
+        AppLog.Info($"Editor audio mixer lost inputs (connected={connected}, expected={_audioSources.Count}); rebuilding before replay.");
         RebuildAudioOutput();
     }
 
