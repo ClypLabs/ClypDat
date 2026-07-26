@@ -29,7 +29,7 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
     {
         ["General"] = new[]
         {
-            "Launch ClypDat on Windows boot", "Start minimized on boot", "Show status panel",
+            "Startup", "Launch ClypDat on Windows boot", "Start minimized on boot", "Layout", "Show status panel",
             "Playback Paused indicator", "Scale clips with window size", "Hoverbar",
             "Combine sidebar filters", "Clip Filenames", "Template", "Rename all"
         },
@@ -65,7 +65,8 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         ["Game Audio Exclusions"] = new[] { "Excluded", "exclusions" },
         ["About"] = new[]
         {
-            "Check for updates", "View on GitHub", "Log folder", "Setup walkthrough", "License"
+            "Updates", "Check for updates", "Source and Licenses", "View on GitHub", "Diagnostics",
+            "Log folder", "Get Started", "Setup walkthrough", "License"
         },
     };
 
@@ -85,9 +86,9 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
 
     private static bool MatchesSingleSection(string query, string sectionName)
     {
-        if (sectionName.Contains(query, StringComparison.OrdinalIgnoreCase)) return true;
-        return SectionKeywords.TryGetValue(sectionName, out var keywords) &&
-               keywords.Any(keyword => keyword.Contains(query, StringComparison.OrdinalIgnoreCase));
+        var haystack = sectionName;
+        if (SectionKeywords.TryGetValue(sectionName, out var keywords)) haystack += " " + string.Join(' ', keywords);
+        return SettingsSearchMatching.MatchesRelative(haystack, query);
     }
 
     public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)

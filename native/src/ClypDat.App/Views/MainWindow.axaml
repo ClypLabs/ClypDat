@@ -1190,7 +1190,7 @@
                 <TextBlock Text="Startup behavior, layout, and clip filenames." Foreground="#93A6B8" FontSize="14" TextWrapping="Wrap" />
               </StackPanel>
 
-              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Launch ClypDat on Windows boot|Start minimized on boot}">
+              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Launch ClypDat on Windows boot|Start minimized on boot|Startup}">
                 <StackPanel Spacing="18">
                   <TextBlock Text="STARTUP" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" />
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Launch ClypDat on Windows boot}">
@@ -1211,7 +1211,7 @@
                 </StackPanel>
               </Border>
 
-              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Show status panel|Show &quot;Playback Paused&quot; indicator|Scale clips with window size|Hoverbar|Combine sidebar filters'}">
+              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Show status panel|Show &quot;Playback Paused&quot; indicator|Scale clips with window size|Hoverbar|Combine sidebar filters|Layout'}">
                 <StackPanel Spacing="18">
                   <TextBlock Text="LAYOUT" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" />
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show status panel}">
@@ -1694,7 +1694,7 @@
                 </StackPanel>
               </Border>
 
-              <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Check for updates}">
+              <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Check for updates|Updates}">
                 <StackPanel Spacing="16">
                   <TextBlock Text="UPDATES" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" />
                   <Grid ColumnDefinitions="*,Auto">
@@ -1707,7 +1707,7 @@
                 </StackPanel>
               </Border>
 
-              <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=View on GitHub}">
+              <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=View on GitHub|Source and Licenses}">
                 <StackPanel Spacing="16">
                   <TextBlock Text="SOURCE AND LICENSES" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" />
                   <Grid ColumnDefinitions="*,Auto">
@@ -1720,7 +1720,7 @@
                 </StackPanel>
               </Border>
 
-              <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Log folder}">
+              <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Log folder|Diagnostics}">
                 <StackPanel Spacing="16">
                   <TextBlock Text="DIAGNOSTICS" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" />
                   <Grid ColumnDefinitions="*,Auto">
@@ -1733,7 +1733,7 @@
                 </StackPanel>
               </Border>
 
-              <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Setup walkthrough}">
+              <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Setup walkthrough|Get Started}">
                 <StackPanel Spacing="16">
                   <TextBlock Text="GET STARTED" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" />
                   <Grid ColumnDefinitions="*,Auto">
