@@ -1034,6 +1034,13 @@
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding ScaleClipsWithWindow}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
+                  <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="Hoverbar" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
+                      <TextBlock Text="Floats the Editor's playback controls over the bottom of the video, appearing while the pointer is in the Editor. Off keeps them docked under the video, always visible." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding EditorHoverBarEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                  </Grid>
                 </StackPanel>
               </Border>
 
@@ -1594,7 +1601,7 @@
     <!-- Named for the playback bar's hit-testing: the bar stays up while the
          pointer is anywhere in here, not just over the picture (see
          PollEditorHoverControls). -->
-    <Grid x:Name="EditorRoot" Grid.Row="1" RowDefinitions="*,320" IsVisible="{Binding IsEditorVisible}">
+    <Grid x:Name="EditorRoot" Grid.Row="1" RowDefinitions="*,Auto,320" IsVisible="{Binding IsEditorVisible}">
       <Grid Background="#0E141A" ColumnDefinitions="*,300">
         <Border Background="#05080B">
           <!-- Pan slider lives in its own column, not overlapping
@@ -1703,7 +1710,21 @@
         </Border>
       </Grid>
 
-      <Border Grid.Row="1" Background="#141D24" BorderBrush="#22303A" BorderThickness="0,1,0,0">
+      <!-- Docked playback controls: the alternative to the floating hover bar,
+           and the default. Sits between the picture and the timeline rather
+           than on top of the video, so nothing ever covers the frame and
+           nothing appears or disappears with the pointer. Its contents are
+           built in code-behind (BuildPlaybackBarLayout) from the same builder
+           the hover bar uses, so the two can't drift apart. Exactly one of the
+           two is ever live - see EnsureDockedPlaybackBar. -->
+      <Border x:Name="DockedPlaybackBar"
+              Grid.Row="1"
+              Background="#0B0F14"
+              BorderBrush="#22303A"
+              BorderThickness="0,1,0,0"
+              IsVisible="{Binding !EditorHoverBarEnabled}" />
+
+      <Border Grid.Row="2" Background="#141D24" BorderBrush="#22303A" BorderThickness="0,1,0,0">
         <Grid Margin="8,8,8,8">
           <Grid ColumnDefinitions="160,*" ColumnSpacing="12">
             <!-- Row 0 fixed at 34 (not Auto) so it matches the timeline column's

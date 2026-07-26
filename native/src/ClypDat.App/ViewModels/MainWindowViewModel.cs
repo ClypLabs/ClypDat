@@ -1768,6 +1768,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // Which of the editor's two playback bars is live. MainWindow watches this
+    // (its ViewModel.PropertyChanged handler) to build the docked bar on
+    // demand and to drop the floating one; the docked bar's own visibility is
+    // bound straight to it in XAML.
+    public bool EditorHoverBarEnabled
+    {
+        get => Settings.EditorHoverBarEnabled;
+        set
+        {
+            if (Settings.EditorHoverBarEnabled == value) return;
+            Settings.EditorHoverBarEnabled = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
     private bool _isRecordingPausedAtCurrentTime;
 
     // Driven from MainWindow.axaml.cs's SyncPlaybackPosition against the
