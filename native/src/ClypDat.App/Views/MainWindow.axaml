@@ -326,7 +326,7 @@
                                Clicking toggles the folder open rather than
                                filtering - grouping is organisational, not
                                itself a filter. -->
-                          <Button Classes="railIconButton railGameButton"
+                          <Button Classes="railIconButton railGameButton railFolderHeader"
                                   Click="GameRailFolder_OnClick"
                                   ToolTip.Tip="{Binding Name}">
                             <Button.ContextMenu>
