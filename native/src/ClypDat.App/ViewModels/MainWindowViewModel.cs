@@ -5013,6 +5013,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (!SetProperty(ref _settingsSearchText, value)) return;
 
+            // Auto-Clip's own per-game list already has a working search
+            // (AutoClipSearchText) - forwarding the sidebar query into it
+            // means typing "Counter" there also filters that list down to
+            // Counter-Strike 2, instead of the sidebar search only ever
+            // reaching section-level nav/labels and never the dynamically-
+            // bound game rows underneath.
+            AutoClipSearchText = value;
+
             // A query specific enough to narrow to exactly one section jumps
             // straight there instead of leaving the user to click the sole
             // remaining nav entry themselves - the whole point of searching
