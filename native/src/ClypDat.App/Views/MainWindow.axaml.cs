@@ -146,7 +146,9 @@ public sealed partial class MainWindow : Window
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible)
                         or nameof(MainWindowViewModel.IsEditorVisible)
-                        or nameof(MainWindowViewModel.SelectedVideoPath)) OnViewHistoryStateChanged();
+                        or nameof(MainWindowViewModel.SelectedVideoPath)
+                        or nameof(MainWindowViewModel.IsGameFilterActive)
+                        or nameof(MainWindowViewModel.IsClipTypeFilterActive)) OnViewHistoryStateChanged();
                 };
                 foreach (var autoClipGame in ViewModel.AutoClipGames)
                 {
@@ -1809,6 +1811,20 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // A MenuItem whose Items only get populated dynamically (from
+    // ClipContextMenu_OnOpening, right before the menu shows) also fires
+    // Click when clicked directly rather than hovered open, on at least some
+    // Avalonia MenuItem submenu behaviour - without this, that direct click
+    // did nothing, which read as "the whole feature doesn't work" even
+    // though hovering to reveal the game list underneath it was fine. Falls
+    // back to the original typed-name prompt, same as before this was a
+    // flyout at all.
+    private async void ClipContextSetGame_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { DataContext: ClipCardViewModel clip }) return;
+        await ChangeClipGameAsync(clip, null);
+    }
+
     private async Task ChangeClipGameAsync(ClipCardViewModel clip, string? gameName)
     {
         if (ViewModel is null) return;
@@ -2215,7 +2231,11 @@ public sealed partial class MainWindow : Window
     // sat permanently disabled while a clip was open.
     private enum ViewHistoryKind { Library, Settings, Editor }
 
-    private readonly record struct ViewHistoryEntry(ViewHistoryKind Kind, string? ClipPath);
+    // GameKey/ClipTypeKey only mean anything for a Library entry - the rail
+    // selection active at that point, so Back/Forward step through the
+    // sequence of game/section filters visited, not just editor and settings
+    // (which is all this used to track).
+    private readonly record struct ViewHistoryEntry(ViewHistoryKind Kind, string? ClipPath, string? GameKey = null, string? ClipTypeKey = null);
 
     private readonly List<ViewHistoryEntry> _viewHistory = new() { new ViewHistoryEntry(ViewHistoryKind.Library, null) };
     private int _viewHistoryIndex;
@@ -2226,7 +2246,7 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null) return new ViewHistoryEntry(ViewHistoryKind.Library, null);
         if (ViewModel.IsEditorVisible) return new ViewHistoryEntry(ViewHistoryKind.Editor, ViewModel.SelectedVideoPath);
         if (ViewModel.IsSettingsVisible) return new ViewHistoryEntry(ViewHistoryKind.Settings, null);
-        return new ViewHistoryEntry(ViewHistoryKind.Library, null);
+        return new ViewHistoryEntry(ViewHistoryKind.Library, null, ViewModel.ActiveGameFilterKey, ViewModel.ActiveClipTypeFilterKey);
     }
 
     private void OnViewHistoryStateChanged()
@@ -2301,6 +2321,13 @@ public sealed partial class MainWindow : Window
                 default:
                     if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings();
                     CloseEditorForNavigation();
+                    // Game first, then clip-type - SelectClipTypeSection's own
+                    // non-Combine clearing of the game side runs after the
+                    // game is already set, so it only fires (harmlessly) when
+                    // there really is no game to restore. Order matters; the
+                    // other way round would let it wipe out the game restore.
+                    ViewModel.SelectGameSection(entry.GameKey);
+                    ViewModel.SelectClipTypeSection(entry.ClipTypeKey);
                     break;
             }
         }

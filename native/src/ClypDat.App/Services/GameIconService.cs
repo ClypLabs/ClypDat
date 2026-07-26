@@ -90,10 +90,23 @@ public static class GameIconService
             if (!NetworkAttempted.Add(displayName)) return false;
         }
 
+        // A failed lookup (network hiccup, store search came up empty, curated
+        // data not covering it yet) used to stay marked attempted for the rest
+        // of the running process, same as a successful one - so a game that
+        // missed on its first try (or was only added to game-icons.json's
+        // curated list after that first try already failed) could never pick
+        // up an icon again without a full manual "Refresh game icons". Only a
+        // genuine success should stick; anything else clears the marker so
+        // the next missing-icon sweep (any library change) retries it.
+        var succeeded = false;
         try
         {
             var cachePath = CachePathFor(displayName);
-            if (File.Exists(cachePath)) return false;
+            if (File.Exists(cachePath))
+            {
+                succeeded = true;
+                return false;
+            }
 
             // An installed copy is the best source there is - it's the exact
             // icon Windows shows for the game - and it's the only one that
@@ -112,6 +125,7 @@ public static class GameIconService
                     }
 
                     AppLog.Info($"Game icon taken from installed game for '{displayName}': {installedExecutable}.");
+                    succeeded = true;
                     return true;
                 }
             }
@@ -139,12 +153,17 @@ public static class GameIconService
             Directory.CreateDirectory(CacheFolder);
             bitmap.Save(CachePathFor(displayName));
             AppLog.Info($"Game icon fetched for '{displayName}' from {url}.");
+            succeeded = true;
             return true;
         }
         catch (Exception error)
         {
             AppLog.Error($"Game icon fetch failed for '{displayName}' (non-fatal)", error);
             return false;
+        }
+        finally
+        {
+            if (!succeeded) lock (NetworkAttempted) NetworkAttempted.Remove(displayName);
         }
     }
 

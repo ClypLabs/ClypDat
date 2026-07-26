@@ -5,6 +5,9 @@ namespace ClypDat.Core.Settings;
 public sealed class AppSettings
 {
     public string LibraryFolder { get; set; } = string.Empty;
+    // Which Settings nav section was open last, so reopening Settings picks
+    // up where the user left off instead of always landing on the same page.
+    public string LastSettingsSection { get; set; } = string.Empty;
     // 0 = no limit, same convention as FullSessionQuotaGb. A soft target the
     // sidebar's storage ring fills against and warns past - nothing deletes
     // clips to enforce it.
