@@ -1063,7 +1063,7 @@ public sealed partial class MainWindow : Window
     // One tick per date, added/removed in RebuildDateScrubber - lets the
     // track itself show where each day's clips start, not just the single
     // date the thumb or cursor currently happens to be over.
-    private readonly List<Border> _scrubberTicks = new();
+    private readonly List<Control> _scrubberTicks = new();
 
     private void QueueDateScrubberRebuild()
     {
@@ -1141,15 +1141,15 @@ public sealed partial class MainWindow : Window
 
         foreach (var (_, contentY, _) in _scrubberDates)
         {
-            var tick = new Border
+            var tick = new Avalonia.Controls.Shapes.Ellipse
             {
-                Width = 8,
-                Height = 1.5,
-                Background = Avalonia.Media.Brush.Parse("#5A6B7D"),
+                Width = 4,
+                Height = 4,
+                Fill = Avalonia.Media.Brush.Parse("#5A6B7D"),
                 IsHitTestVisible = false
             };
-            Canvas.SetLeft(tick, 6);
-            Canvas.SetTop(tick, ContentOffsetToTrackY(contentY));
+            Canvas.SetLeft(tick, 7);
+            Canvas.SetTop(tick, ContentOffsetToTrackY(contentY) - 2);
             DateScrubberCanvas.Children.Add(tick);
             _scrubberTicks.Add(tick);
         }
