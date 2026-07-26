@@ -11,6 +11,10 @@
     <SolidColorBrush x:Key="AccentSelectedBrush" Color="#2A3350" />
     <SolidColorBrush x:Key="AccentSelectedHoverBrush" Color="#333D5E" />
     <SolidColorBrush x:Key="AccentSelectedIconBrush" Color="#A8B4F5" />
+    <!-- Hovering an UNselected rail button: the same accent wash as the
+         selection tints, mixed much further down into the rail so it reads as
+         "you're over this" rather than "this is chosen". -->
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="#1A1F33" />
   </Application.Resources>
   <Application.Styles>
     <FluentTheme />

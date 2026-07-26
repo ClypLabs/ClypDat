@@ -267,6 +267,21 @@
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
 
+              <!-- The toggle sits ABOVE the games it reveals, like a folder's
+                   own row: it stays put when the list opens, so closing it
+                   again is a second click in the same place rather than a
+                   hunt down a rail that just got taller. Chevron points down
+                   when closed, up when open. -->
+              <Button Classes="railIconButton"
+                      IsVisible="{Binding HasOverflowGames}"
+                      Click="ToggleGameListButton_OnClick"
+                      ToolTip.Tip="{Binding IsGameListExpanded, Converter={x:Static opconv:GameListToggleTipConverter.Instance}}">
+                <Panel>
+                  <PathIcon Data="M7,10L12,15L17,10Z" Width="16" Height="16" IsVisible="{Binding !IsGameListExpanded}" />
+                  <PathIcon Data="M7,14L12,9L17,14Z" Width="16" Height="16" IsVisible="{Binding IsGameListExpanded}" />
+                </Panel>
+              </Button>
+
               <!-- Everything past the top few games stays collapsed so a big
                    library can't grow the rail taller than the window;
                    expanding reveals them in place as more rail icons. -->
@@ -290,16 +305,6 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
-
-              <Button Classes="railIconButton"
-                      IsVisible="{Binding HasOverflowGames}"
-                      Click="ToggleGameListButton_OnClick"
-                      ToolTip.Tip="More games">
-                <Panel>
-                  <PathIcon Data="M7,10L12,15L17,10Z" Width="16" Height="16" IsVisible="{Binding !IsGameListExpanded}" />
-                  <PathIcon Data="M7,14L12,9L17,14Z" Width="16" Height="16" IsVisible="{Binding IsGameListExpanded}" />
-                </Panel>
-              </Button>
             </StackPanel>
           </ScrollViewer>
 
