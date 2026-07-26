@@ -321,7 +321,13 @@
           <StackPanel Grid.Row="1" Margin="0,10,0,16" Spacing="8">
             <Button Classes="railIconButton storageRailButton" ToolTip.Tip="Storage">
               <Button.Flyout>
-                <Flyout Placement="RightEdgeAlignedBottom">
+                <!-- Offset because the flyout anchors to the BUTTON's right
+                     edge, and the button is a 44px circle with a 9px left
+                     margin inside a 64px rail - so it opened 11px inside the
+                     sidebar, sitting on top of it. Pushing it out by the
+                     remainder lands its left edge just past the rail, hugging
+                     the sidebar instead of overlapping it. -->
+                <Flyout Placement="RightEdgeAlignedBottom" HorizontalOffset="12">
                   <StackPanel Width="320" Spacing="12" Margin="4,2">
                     <TextBlock Text="HARD DRIVE SPACE" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
                     <StackPanel IsVisible="{Binding HasDriveStats}" Spacing="12">
