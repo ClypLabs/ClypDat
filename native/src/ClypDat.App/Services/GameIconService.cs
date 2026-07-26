@@ -210,6 +210,17 @@ public static class GameIconService
         return null;
     }
 
+    // Words that mark a store entry as something other than the game itself.
+    // Checked against the part of a candidate's name that the game's own name
+    // doesn't account for, so "Rocket League" is unaffected by "League" here.
+    private static readonly string[] NonGameNameMarkers =
+    {
+        "soundtrack", "ost", "dlc", "pack", "bundle", "edition upgrade", "upgrade",
+        "season pass", "expansion", "demo", "beta", "test", "server", "sdk",
+        "artbook", "art book", "wallpaper", "skin", "currency", "coins", "credits",
+        "starter", "membership", "subscription", "highresolution", "high resolution"
+    };
+
     private static async Task<int?> ResolveSteamAppIdAsync(HttpClient client, string displayName, CancellationToken cancellationToken)
     {
         var json = await client.GetStringAsync(
@@ -219,14 +230,44 @@ public static class GameIconService
         using var document = JsonDocument.Parse(json);
         if (!document.RootElement.TryGetProperty("items", out var items)) return null;
 
+        var wanted = NormalizeName(displayName);
+        int? prefixMatch = null;
+
         foreach (var item in items.EnumerateArray())
         {
             var name = item.TryGetProperty("name", out var nameElement) ? nameElement.GetString() ?? string.Empty : string.Empty;
-            if (!string.Equals(NormalizeName(name), NormalizeName(displayName), StringComparison.Ordinal)) continue;
-            if (item.TryGetProperty("id", out var idElement) && idElement.TryGetInt32(out var id)) return id;
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            if (!item.TryGetProperty("id", out var idElement) || !idElement.TryGetInt32(out var id)) continue;
+
+            var candidate = NormalizeName(name);
+            if (candidate.Length == 0) continue;
+
+            // Exact match still wins outright, whatever its position.
+            if (string.Equals(candidate, wanted, StringComparison.Ordinal)) return id;
+
+            // Otherwise take the best-ranked candidate that is the same title
+            // under a longer or shorter name - "Umamusume" against "Umamusume:
+            // Pretty Derby", "Rainbow Six Siege" against "Tom Clancy's Rainbow
+            // Six Siege". Requiring exact equality meant every game whose
+            // store name carries a subtitle or publisher prefix resolved to
+            // nothing at all, which is most of them.
+            if (prefixMatch is not null) continue;
+            if (!candidate.StartsWith(wanted, StringComparison.Ordinal) &&
+                !wanted.StartsWith(candidate, StringComparison.Ordinal) &&
+                !candidate.EndsWith(wanted, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            // The extra words are what decide whether this is the game or
+            // merchandise attached to it.
+            var extra = candidate.Length > wanted.Length ? name : displayName;
+            if (NonGameNameMarkers.Any(marker => extra.Contains(marker, StringComparison.OrdinalIgnoreCase))) continue;
+
+            prefixMatch = id;
         }
 
-        return null;
+        return prefixMatch;
     }
 
     public static Bitmap? TryLoad(string displayName)
