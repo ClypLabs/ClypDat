@@ -14,6 +14,10 @@ public sealed class AppSettings
     // user can switch presets without losing their work-in-progress template.
     public string ClipFileNameScheme { get; set; } = "Standard";
     public string CustomClipFileNameTemplate { get; set; } = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}";
+    // Master on/off for the rolling buffer. On by default (the buffer is
+    // meant to be armed and forgotten); off means no game detection ever
+    // starts a capture, so nothing is recorded until it's turned back on.
+    public bool ReplayBufferEnabled { get; set; } = true;
     public int ReplayDurationSeconds { get; set; } = 60;
     public string ReplayQualityPreset { get; set; } = "Balanced";
     public int ReplayFrameRate { get; set; } = 60;

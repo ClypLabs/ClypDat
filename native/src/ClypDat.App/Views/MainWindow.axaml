@@ -45,7 +45,7 @@
               Margin="18,0,0,0"
               VerticalAlignment="Center">
           <Button Grid.Column="0" Content="{Binding RecorderStatus}" Classes="replayButton" Classes.recording="{Binding IsReplayRecording}"
-                  ToolTip.Tip="Replay buffer status - click to change capture backend, replay length, frame rate, hotkey and microphone">
+                  ToolTip.Tip="Replay buffer status - click to turn the buffer on or off, or change capture backend, replay length, resolution, frame rate, hotkey and microphone">
             <Button.Flyout>
               <Flyout Placement="BottomEdgeAlignedLeft">
                 <!-- Backend and microphone names run long ("Windows Capture
@@ -53,11 +53,23 @@
                      only the genuinely short fields share a row. Two ~146px
                      columns truncated almost everything. -->
                 <StackPanel Width="352" Spacing="0" Margin="2,0">
-                  <StackPanel Spacing="3" Margin="0,2,0,14">
-                    <TextBlock Text="Replay Buffer" Foreground="#EDF4FB" FontWeight="Bold" FontSize="15" />
-                    <TextBlock Text="Always armed - records in the background the instant a game is detected, so there's nothing to turn off."
-                               Foreground="#7C8EA3" FontSize="11.5" TextWrapping="Wrap" LineHeight="16" />
-                  </StackPanel>
+                  <!-- Title and master switch share a row so the switch lands
+                       at the top-right corner of the flyout, where a panel's
+                       on/off control is looked for. Everything below stays
+                       usable while it's off - changing length/quality with
+                       the buffer parked is a normal thing to want. -->
+                  <Grid ColumnDefinitions="*,Auto" Margin="0,2,0,14" ColumnSpacing="10">
+                    <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                      <TextBlock Text="Replay Buffer" Foreground="#EDF4FB" FontWeight="Bold" FontSize="15" />
+                      <TextBlock Text="{Binding ReplayBufferStateSummary}"
+                                 Foreground="#7C8EA3" FontSize="11.5" TextWrapping="Wrap" LineHeight="16" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1"
+                                  IsChecked="{Binding ReplayBufferEnabled}"
+                                  OnContent="{x:Null}" OffContent="{x:Null}"
+                                  VerticalAlignment="Center"
+                                  ToolTip.Tip="Turn the replay buffer on or off" />
+                  </Grid>
 
                   <Border Height="1" Background="#22303A" Margin="0,0,0,14" />
 
@@ -72,10 +84,28 @@
                     </ComboBox>
                   </StackPanel>
 
+                  <StackPanel Spacing="6" Margin="0,0,0,12">
+                    <TextBlock Classes="flyoutLabel" Text="LENGTH" />
+                    <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}" HorizontalAlignment="Stretch">
+                      <ComboBox.ItemTemplate>
+                        <DataTemplate>
+                          <TextBlock Text="{Binding Label}" />
+                        </DataTemplate>
+                      </ComboBox.ItemTemplate>
+                    </ComboBox>
+                  </StackPanel>
+
+                  <!-- Resolution and frame rate are the two halves of the same
+                       quality decision (and both drive the restart notice
+                       below), so they share a row. Length moved to its own
+                       full-width row above rather than squeezing three
+                       ComboBoxes across 352px - "2160p (4K)" alone needs most
+                       of a half-width box once padding and the chevron are
+                       accounted for. -->
                   <Grid ColumnDefinitions="*,12,*" Margin="0,0,0,12">
                     <StackPanel Grid.Column="0" Spacing="6">
-                      <TextBlock Classes="flyoutLabel" Text="LENGTH" />
-                      <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}" HorizontalAlignment="Stretch">
+                      <TextBlock Classes="flyoutLabel" Text="RESOLUTION" />
+                      <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}" HorizontalAlignment="Stretch">
                         <ComboBox.ItemTemplate>
                           <DataTemplate>
                             <TextBlock Text="{Binding Label}" />
@@ -181,7 +211,9 @@
             <PathIcon Data="M19,13H5V11H19V13Z" Width="14" Height="14" />
           </Button>
           <Button x:Name="MaximizeRestoreButton" Classes="windowChromeButton" Click="MaximizeRestoreButton_OnClick" ToolTip.Tip="Maximize">
-            <PathIcon Data="M18,4H6C4.9,4,4,4.9,4,6v12c0,1.1,0.9,2,2,2h12c1.1,0,2-0.9,2-2V6C20,4.9,19.1,4,18,4z M18,18H6V6h12V18z" Width="14" Height="14" />
+            <!-- Kept in sync with OnPropertyChanged's WindowState branch,
+                 which swaps this for the restore glyph while maximized. -->
+            <PathIcon Data="F0 M4,4H20V20H4V4z M6,6V18H18V6H6z" Width="14" Height="14" />
           </Button>
           <Button Classes="windowChromeButton windowCloseButton" Click="CloseWindowButton_OnClick" ToolTip.Tip="Close">
             <PathIcon Data="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z" Width="13" Height="13" />
@@ -338,10 +370,27 @@
                           </DataTemplate>
                         </ComboBox.ItemTemplate>
                       </ComboBox>
-                      <TextBox Classes="settingsInput"
-                               Text="{Binding CustomLibraryStorageLimitGb}"
-                               Watermark="Size in GB"
-                               IsVisible="{Binding IsCustomLibraryStorageLimit}" />
+                      <!-- The "Size in GB" watermark vanishes the moment the
+                           box holds a number (typed, or restored from a saved
+                           custom limit), leaving a bare figure with no unit.
+                           The suffix is a permanent overlay instead: the
+                           TextBox carries extra right padding to reserve room
+                           for it, and it's hit-test invisible so clicking it
+                           still lands in the box. -->
+                      <Grid IsVisible="{Binding IsCustomLibraryStorageLimit}">
+                        <TextBox Classes="settingsInput"
+                                 Text="{Binding CustomLibraryStorageLimitGb}"
+                                 Padding="14,10,42,10"
+                                 Watermark="Size" />
+                        <TextBlock Text="GB"
+                                   Foreground="#7C8EA3"
+                                   FontSize="13"
+                                   FontWeight="Bold"
+                                   HorizontalAlignment="Right"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,14,0"
+                                   IsHitTestVisible="False" />
+                      </Grid>
                       <Border Height="6" CornerRadius="3" Background="#26313C" IsVisible="{Binding HasLibraryStorageLimit}">
                         <Border Width="{Binding LibraryStorageLimitUsedFraction, Converter={x:Static opconv:FractionToWidthConverter.Instance}, ConverterParameter=280}"
                                 Height="6" CornerRadius="3"
@@ -364,7 +413,10 @@
               </Panel>
             </Button>
 
-            <!-- Used/limit under the ring, only once a limit is actually set.
+            <!-- Used/limit under the ring, always shown - with no limit set
+                 the second line reads "No Limit" instead of "of <limit>", so
+                 the used figure is readable either way and the active setting
+                 is obvious without opening the flyout.
                  Sits outside the button because railIconButton is a fixed
                  44px circle with no room beneath the ring. Mirrors that
                  button's own geometry exactly (left-aligned, 9px margin,
@@ -374,8 +426,7 @@
                  sitting a few px right of the circle. -->
             <StackPanel HorizontalAlignment="Left"
                         Width="44"
-                        Margin="9,-6,0,0"
-                        IsVisible="{Binding HasLibraryStorageLimit}">
+                        Margin="9,-6,0,0">
               <TextBlock Text="{Binding LibrarySizeDisplay}"
                          Foreground="#B8C7D8" FontSize="10" FontWeight="Bold"
                          HorizontalAlignment="Center" />
