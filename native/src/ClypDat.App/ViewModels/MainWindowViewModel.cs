@@ -40,6 +40,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // handler below.
     public bool IsSavingReplayClip { get; set; }
     private readonly SemaphoreSlim _libraryLayoutMigrationLock = new(1, 1);
+    // Guards RefreshLibraryAsync's snapshot-diff-apply sequence - two
+    // overlapping calls (there are 7 call sites, several timer/event-driven)
+    // could otherwise both snapshot AllClips before either applies its diff,
+    // both classify the same new file as "added", and both insert their own
+    // card for it.
+    private readonly SemaphoreSlim _libraryRefreshLock = new(1, 1);
     private readonly AudioDeviceService _audioDevices = new();
     private bool _isReplayRecording;
     private bool _isEditorVisible;
@@ -2468,62 +2474,129 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private sealed record LibraryDiffResult(
+        ClipCardViewModel[] Added,
+        (ClipCardViewModel Existing, MediaFileInfo FreshMedia)[] Changed,
+        ClipCardViewModel[] Removed);
+
+    // Pure and safe to run off the UI thread: only READS the immutable
+    // existingByPath snapshot handed in by the caller (never the live
+    // AllClips), and only touches disk read-only. A file whose size+mtime
+    // still match the card already showing it is left completely alone - no
+    // CreateLibraryStub call, no sidecar reload - so a "nothing changed"
+    // refresh costs one directory walk and nothing else. Building a new
+    // ClipCardViewModel here (for a file with no existing card) is fine
+    // off-thread since it isn't bound to anything yet; calling UpdateMedia on
+    // an EXISTING, already-bound card is NOT safe here
+    // (ViewModelBase.OnPropertyChanged doesn't marshal threads) - that's left
+    // to the caller, back on the UI thread.
+    private LibraryDiffResult DiffLibrary(string libraryFolder, IReadOnlyDictionary<string, ClipCardViewModel> existingByPath)
+    {
+        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var added = new List<ClipCardViewModel>();
+        var changed = new List<(ClipCardViewModel, MediaFileInfo)>();
+
+        foreach (var file in _mediaProbe.EnumerateVideos(libraryFolder))
+        {
+            seenPaths.Add(file.FullName);
+            if (existingByPath.TryGetValue(file.FullName, out var existing))
+            {
+                if (existing.SizeBytes == file.Length && existing.LastWriteTimeUtc == file.LastWriteTimeUtc)
+                {
+                    continue; // unchanged - leave the existing card exactly as-is
+                }
+                changed.Add((existing, _mediaProbe.CreateLibraryStub(file)));
+            }
+            else
+            {
+                added.Add(new ClipCardViewModel(_mediaProbe.CreateLibraryStub(file), libraryFolder));
+            }
+        }
+
+        var removed = existingByPath.Values.Where(clip => !seenPaths.Contains(clip.Path)).ToArray();
+        return new LibraryDiffResult(added.ToArray(), changed.ToArray(), removed);
+    }
+
     public async Task RefreshLibraryAsync()
     {
-        var scanClock = System.Diagnostics.Stopwatch.StartNew();
-        AllClips.Clear();
-        ClearSelection();
-
-        // A network share that's slow or briefly unreachable makes even
-        // Directory.Exists block for the OS's SMB timeout (can be several
-        // seconds) - offloading it (and the scan below) keeps that off the
-        // UI thread instead of freezing the whole window on every refresh.
-        if (string.IsNullOrWhiteSpace(Settings.LibraryFolder) || !await Task.Run(() => Directory.Exists(Settings.LibraryFolder)))
+        await _libraryRefreshLock.WaitAsync();
+        try
         {
+            var scanClock = System.Diagnostics.Stopwatch.StartNew();
+
+            // A network share that's slow or briefly unreachable makes even
+            // Directory.Exists block for the OS's SMB timeout (can be several
+            // seconds) - offloading it (and the scan below) keeps that off the
+            // UI thread instead of freezing the whole window on every refresh.
+            if (string.IsNullOrWhiteSpace(Settings.LibraryFolder) || !await Task.Run(() => Directory.Exists(Settings.LibraryFolder)))
+            {
+                StartLibraryWatcher();
+                NotifyLibraryChrome();
+                // A network share not mounted yet (ClypDat auto-starting at boot
+                // ahead of the OS reconnecting drives is the common case) used
+                // to leave the library permanently blank - nothing here ever
+                // rechecked, so even once the share came back nothing noticed
+                // until the user hit Refresh themselves. Retry on a timer
+                // instead; it stops itself the moment a refresh actually finds
+                // the folder (see below).
+                ScheduleLibraryFolderRetry();
+                return;
+            }
+
+            _libraryFolderRetryTimer?.Stop();
+            _libraryFolderRetryTimer = null;
+
+            LibraryLayout.EnsureRoots(Settings.LibraryFolder);
+            if (Settings.LibraryLayoutVersion < LibraryLayout.CurrentVersion)
+            {
+                await MigrateLibraryLayoutAsync();
+            }
+
+            MigrateLegacySessionTitles();
             StartLibraryWatcher();
+
+            // Snapshot what's already showing before handing off to a
+            // background thread. TryAdd (not ToDictionary) so a latent
+            // duplicate path can't throw and abort the whole refresh - same
+            // tolerance AddOrUpdateLibraryClipAsync's FirstOrDefault already
+            // has today.
+            var existingByPath = new Dictionary<string, ClipCardViewModel>(StringComparer.OrdinalIgnoreCase);
+            foreach (var clip in AllClips) existingByPath.TryAdd(clip.Path, clip);
+
+            var libraryFolder = Settings.LibraryFolder;
+            var diff = await Task.Run(() => DiffLibrary(libraryFolder, existingByPath));
+
+            foreach (var clip in diff.Removed) RemoveClipFromLibraryCore(clip);
+            foreach (var (existing, freshMedia) in diff.Changed) existing.UpdateMedia(freshMedia);
+            foreach (var clip in diff.Added) InsertClipSorted(clip);
+
+            // A clip that's new/changed defaults to (or is re-evaluated for)
+            // matched/visible - a still-active game/clip-type filter needs
+            // reapplying across the whole set, not just the delta, since
+            // RecomputeGameFilterBadges (via NotifyLibraryChrome below) only
+            // reapplies a filter when rebuilding its option list happens to
+            // invalidate one.
+            ApplyGameFilters();
+            ApplyClipTypeFilters();
+
             NotifyLibraryChrome();
-            // A network share not mounted yet (ClypDat auto-starting at boot
-            // ahead of the OS reconnecting drives is the common case) used
-            // to leave the library permanently blank - nothing here ever
-            // rechecked, so even once the share came back nothing noticed
-            // until the user hit Refresh themselves. Retry on a timer
-            // instead; it stops itself the moment a refresh actually finds
-            // the folder (see below).
-            ScheduleLibraryFolderRetry();
-            return;
+
+            // Full snapshot, not just diff.Added/Changed: HydrateLibraryClipsAsync
+            // cancels and restarts on every call, so passing only the delta
+            // would silently abandon hydration of any other clip still
+            // mid-flight from a previous call. A snapshot (not the live
+            // AllClips) because HydrateLibraryClipsAsync iterates it with
+            // LINQ, which would throw if AllClips mutated concurrently
+            // mid-hydration. Costs nothing extra either way - its own
+            // filtering is a cheap in-memory check, not I/O.
+            var currentClips = AllClips.ToArray();
+            StartLibraryHydration(currentClips);
+            AppLog.Info($"Library refresh: {currentClips.Length} clips ({diff.Added.Length} added, {diff.Changed.Length} changed, {diff.Removed.Length} removed) in {scanClock.ElapsedMilliseconds}ms.");
         }
-
-        _libraryFolderRetryTimer?.Stop();
-        _libraryFolderRetryTimer = null;
-
-        LibraryLayout.EnsureRoots(Settings.LibraryFolder);
-        if (Settings.LibraryLayoutVersion < LibraryLayout.CurrentVersion)
+        finally
         {
-            await MigrateLibraryLayoutAsync();
+            _libraryRefreshLock.Release();
         }
-
-        MigrateLegacySessionTitles();
-        StartLibraryWatcher();
-
-        var clips = await Task.Run(() => _mediaProbe.EnumerateVideos(Settings.LibraryFolder)
-            .Select(file => new ClipCardViewModel(_mediaProbe.CreateLibraryStub(file), Settings.LibraryFolder))
-            .OrderByDescending(clip => clip.CreatedAt)
-            .ToArray());
-
-        foreach (var clip in clips) AllClips.Add(clip);
-
-        // Every clip here is a brand new ClipCardViewModel, defaulting to
-        // matched/visible - RecomputeGameFilterBadges (called from
-        // NotifyLibraryChrome below) only reapplies a filter when rebuilding
-        // its option list happens to invalidate one, not on every refresh,
-        // so a still-active game/clip-type filter was silently dropped and
-        // the whole library showed instead.
-        ApplyGameFilters();
-        ApplyClipTypeFilters();
-
-        NotifyLibraryChrome();
-        StartLibraryHydration(clips);
-        AppLog.Info($"Library refresh: {clips.Length} clips in {scanClock.ElapsedMilliseconds}ms.");
     }
 
     private async Task MigrateLibraryLayoutAsync()
@@ -2686,6 +2759,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         LibraryLayout.MoveSidecars(Settings.LibraryFolder, oldVideoPath, newVideoPath);
     }
 
+    // Inserts at the position that keeps AllClips newest-first (CreatedAt
+    // descending) without a full re-sort.
+    private void InsertClipSorted(ClipCardViewModel clip)
+    {
+        var insertIndex = 0;
+        while (insertIndex < AllClips.Count && AllClips[insertIndex].CreatedAt > clip.CreatedAt) insertIndex++;
+        AllClips.Insert(insertIndex, clip);
+    }
+
     public async Task AddOrUpdateLibraryClipAsync(string filePath)
     {
         if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath)) return;
@@ -2707,9 +2789,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         else
         {
             clip = new ClipCardViewModel(media, Settings.LibraryFolder);
-            var insertIndex = 0;
-            while (insertIndex < AllClips.Count && AllClips[insertIndex].CreatedAt > clip.CreatedAt) insertIndex++;
-            AllClips.Insert(insertIndex, clip);
+            InsertClipSorted(clip);
         }
 
         NotifyLibraryChrome();
@@ -3016,9 +3096,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // place instead.
     private void RemoveClipFromLibrary(ClipCardViewModel clip)
     {
+        RemoveClipFromLibraryCore(clip);
+        NotifyLibraryChrome();
+    }
+
+    private void RemoveClipFromLibraryCore(ClipCardViewModel clip)
+    {
         if (clip.IsSelected) SetClipSelected(clip, false);
         AllClips.Remove(clip);
-        NotifyLibraryChrome();
     }
 
     public async Task RenameClipAsync(ClipCardViewModel clip, string newTitle)
