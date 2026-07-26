@@ -31,6 +31,38 @@ public static class RemoteGameIconsService
 
     private static Dictionary<string, string>? _memoryCache;
     private static Dictionary<string, int>? _appIdMemoryCache;
+    private static readonly SemaphoreSlim FetchGate = new(1, 1);
+
+    /// <summary>
+    /// Makes sure the curated list is actually available before it gets
+    /// consulted, fetching it once if this install has never had it.
+    ///
+    /// The once-a-day RefreshAsync is fire-and-forget from startup, and the
+    /// library's first icon sweep runs in parallel with it - so on a first run
+    /// icon resolution could read an empty list, miss both curated maps, and
+    /// give up on a game that only the curated data can cover (Rocket League
+    /// is delisted from Steam's search, so nothing else finds it). It marked
+    /// the game as attempted on the way out, so the icon only turned up on the
+    /// SECOND launch. Waiting here costs one fetch, once, on installs that
+    /// have no cached copy at all.
+    /// </summary>
+    public static async Task EnsureLoadedAsync(CancellationToken cancellationToken = default)
+    {
+        if (_memoryCache is not null || File.Exists(CachePath)) return;
+
+        await FetchGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // Re-checked inside the gate: several games resolve at once, and
+            // only the first of them should go to the network.
+            if (_memoryCache is not null || File.Exists(CachePath)) return;
+            await RefreshAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            FetchGate.Release();
+        }
+    }
 
     // Synchronous and network-free, so icon resolution can consult the curated
     // list immediately at startup rather than waiting on RefreshAsync.
