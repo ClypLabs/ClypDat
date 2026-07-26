@@ -121,6 +121,18 @@ public sealed class GameRailFolderViewModel : ViewModelBase
     public bool ShowFolderGlyph => IsEmpty || IsExpanded;
     public bool ShowMosaic => !IsEmpty && !IsExpanded;
 
+    // Which of four hand-laid-out arrangements the mosaic uses - mutually
+    // exclusive, so exactly one applies. A single fixed 2x2 grid for every
+    // count left an empty grey cell whenever a folder held fewer than 4
+    // games, which looked like a broken/placeholder tile rather than "the
+    // icons are just small". 1 game fills the whole tile, 2 sit side by
+    // side, 3 are two-over-one, and only 4+ uses the real 2x2 (see
+    // HasSlot4Cell below).
+    public bool IsSingleGame => Games.Count == 1;
+    public bool IsTwoGames => Games.Count == 2;
+    public bool IsThreeGames => Games.Count == 3;
+    public bool IsFourPlusGames => Games.Count >= 4;
+
     // Collapsed tile is a mosaic of up to the first 4 member icons, Discord-
     // folder style - exposed as flat per-slot bool/string/bitmap properties
     // rather than binding through Games[i].HasIcon etc directly in XAML, so
@@ -164,6 +176,10 @@ public sealed class GameRailFolderViewModel : ViewModelBase
         OnPropertyChanged(nameof(CountLabel));
         OnPropertyChanged(nameof(ShowFolderGlyph));
         OnPropertyChanged(nameof(ShowMosaic));
+        OnPropertyChanged(nameof(IsSingleGame));
+        OnPropertyChanged(nameof(IsTwoGames));
+        OnPropertyChanged(nameof(IsThreeGames));
+        OnPropertyChanged(nameof(IsFourPlusGames));
         OnPropertyChanged(nameof(HasSlot1));
         OnPropertyChanged(nameof(HasSlot2));
         OnPropertyChanged(nameof(HasSlot3));

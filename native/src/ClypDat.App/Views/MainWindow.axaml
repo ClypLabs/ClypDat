@@ -344,41 +344,92 @@
                                 <PathIcon Data="M10,4H4C2.9,4,2,4.9,2,6v12c0,1.1,0.9,2,2,2h16c1.1,0,2-0.9,2-2V8c0-1.1-0.9-2-2-2h-8L10,4z" Width="15" Height="15" HorizontalAlignment="Center" VerticalAlignment="Center" />
                               </Border>
 
-                              <!-- Always a fixed 2x2, whatever the count - an
-                                   unused cell just sits blank (no icon, no
-                                   letter) rather than the tile switching
-                                   shape as games are added or removed. The
-                                   4th cell is the 4th game's own icon only at
+                              <!-- Adaptive mosaic, gated as a whole on
+                                   ShowMosaic (non-empty, not expanded) - a
+                                   fixed 2x2 for every count left an unused
+                                   cell sitting blank/grey whenever a folder
+                                   held fewer than 4 games, which read as a
+                                   broken placeholder rather than "the icons
+                                   are just small". 1 game fills the whole
+                                   tile, 2 sit side by side, 3 are
+                                   two-over-one, and only 4+ uses the real
+                                   2x2 (see HasSlot4Cell below) - the 4th
+                                   cell is the 4th game's own icon only at
                                    exactly 4, becoming a "+N" count past that
                                    (same convention Discord uses for a big
                                    folder). -->
-                              <Grid ColumnDefinitions="*,*" RowDefinitions="*,*" IsVisible="{Binding ShowMosaic}">
-                                <Border Grid.Row="0" Grid.Column="0" Margin="0,0,1,1" CornerRadius="4" ClipToBounds="True" Background="#26323D">
+                              <Panel IsVisible="{Binding ShowMosaic}">
+                                <Border Width="30" Height="30" CornerRadius="8" ClipToBounds="True" Background="#26323D" IsVisible="{Binding IsSingleGame}">
                                   <Panel>
                                     <Image Source="{Binding Slot1Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot1Icon}" />
-                                    <TextBlock Text="{Binding Slot1Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot1Icon}" />
+                                    <TextBlock Text="{Binding Slot1Initial}" FontWeight="Bold" FontSize="13" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot1Icon}" />
                                   </Panel>
                                 </Border>
-                                <Border Grid.Row="0" Grid.Column="1" Margin="1,0,0,1" CornerRadius="4" ClipToBounds="True" Background="#26323D">
-                                  <Panel>
-                                    <Image Source="{Binding Slot2Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot2Icon}" />
-                                    <TextBlock Text="{Binding Slot2Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot2Icon}" />
-                                  </Panel>
-                                </Border>
-                                <Border Grid.Row="1" Grid.Column="0" Margin="0,1,1,0" CornerRadius="4" ClipToBounds="True" Background="#26323D">
-                                  <Panel>
-                                    <Image Source="{Binding Slot3Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot3Icon}" />
-                                    <TextBlock Text="{Binding Slot3Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot3Icon}" />
-                                  </Panel>
-                                </Border>
-                                <Border Grid.Row="1" Grid.Column="1" Margin="1,1,0,0" CornerRadius="4" ClipToBounds="True" Background="#26323D">
-                                  <Panel>
-                                    <Image Source="{Binding Slot4Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot4Icon}" />
-                                    <TextBlock Text="{Binding Slot4Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding ShowSlot4Initial}" />
-                                    <TextBlock Text="{Binding OverflowBadgeLabel}" FontWeight="Bold" FontSize="8" Foreground="#D8E4F2" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding HasOverflowBadge}" />
-                                  </Panel>
-                                </Border>
-                              </Grid>
+
+                                <Grid ColumnDefinitions="*,*" IsVisible="{Binding IsTwoGames}">
+                                  <Border Grid.Column="0" Width="30" Height="30" Margin="0,0,1,0" CornerRadius="6" ClipToBounds="True" Background="#26323D">
+                                    <Panel>
+                                      <Image Source="{Binding Slot1Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot1Icon}" />
+                                      <TextBlock Text="{Binding Slot1Initial}" FontWeight="Bold" FontSize="11" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot1Icon}" />
+                                    </Panel>
+                                  </Border>
+                                  <Border Grid.Column="1" Width="30" Height="30" Margin="1,0,0,0" CornerRadius="6" ClipToBounds="True" Background="#26323D">
+                                    <Panel>
+                                      <Image Source="{Binding Slot2Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot2Icon}" />
+                                      <TextBlock Text="{Binding Slot2Initial}" FontWeight="Bold" FontSize="11" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot2Icon}" />
+                                    </Panel>
+                                  </Border>
+                                </Grid>
+
+                                <Grid ColumnDefinitions="*,*" RowDefinitions="*,*" IsVisible="{Binding IsThreeGames}">
+                                  <Border Grid.Row="0" Grid.Column="0" Margin="0,0,1,1" CornerRadius="4" ClipToBounds="True" Background="#26323D">
+                                    <Panel>
+                                      <Image Source="{Binding Slot1Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot1Icon}" />
+                                      <TextBlock Text="{Binding Slot1Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot1Icon}" />
+                                    </Panel>
+                                  </Border>
+                                  <Border Grid.Row="0" Grid.Column="1" Margin="1,0,0,1" CornerRadius="4" ClipToBounds="True" Background="#26323D">
+                                    <Panel>
+                                      <Image Source="{Binding Slot2Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot2Icon}" />
+                                      <TextBlock Text="{Binding Slot2Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot2Icon}" />
+                                    </Panel>
+                                  </Border>
+                                  <Border Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,1,0,0" CornerRadius="4" ClipToBounds="True" Background="#26323D">
+                                    <Panel>
+                                      <Image Source="{Binding Slot3Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot3Icon}" />
+                                      <TextBlock Text="{Binding Slot3Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot3Icon}" />
+                                    </Panel>
+                                  </Border>
+                                </Grid>
+
+                                <Grid ColumnDefinitions="*,*" RowDefinitions="*,*" IsVisible="{Binding IsFourPlusGames}">
+                                  <Border Grid.Row="0" Grid.Column="0" Margin="0,0,1,1" CornerRadius="4" ClipToBounds="True" Background="#26323D">
+                                    <Panel>
+                                      <Image Source="{Binding Slot1Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot1Icon}" />
+                                      <TextBlock Text="{Binding Slot1Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot1Icon}" />
+                                    </Panel>
+                                  </Border>
+                                  <Border Grid.Row="0" Grid.Column="1" Margin="1,0,0,1" CornerRadius="4" ClipToBounds="True" Background="#26323D">
+                                    <Panel>
+                                      <Image Source="{Binding Slot2Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot2Icon}" />
+                                      <TextBlock Text="{Binding Slot2Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot2Icon}" />
+                                    </Panel>
+                                  </Border>
+                                  <Border Grid.Row="1" Grid.Column="0" Margin="0,1,1,0" CornerRadius="4" ClipToBounds="True" Background="#26323D">
+                                    <Panel>
+                                      <Image Source="{Binding Slot3Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot3Icon}" />
+                                      <TextBlock Text="{Binding Slot3Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot3Icon}" />
+                                    </Panel>
+                                  </Border>
+                                  <Border Grid.Row="1" Grid.Column="1" Margin="1,1,0,0" CornerRadius="4" ClipToBounds="True" Background="#26323D">
+                                    <Panel>
+                                      <Image Source="{Binding Slot4Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot4Icon}" />
+                                      <TextBlock Text="{Binding Slot4Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding ShowSlot4Initial}" />
+                                      <TextBlock Text="{Binding OverflowBadgeLabel}" FontWeight="Bold" FontSize="8" Foreground="#D8E4F2" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding HasOverflowBadge}" />
+                                    </Panel>
+                                  </Border>
+                                </Grid>
+                              </Panel>
                             </Panel>
                           </Button>
 
