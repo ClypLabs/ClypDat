@@ -1780,49 +1780,48 @@ public sealed partial class MainWindow : Window
     // Medal imports whose game came through wrong or unparseable - they land
     // in "Unknown Game" together despite being from different games, so this
     // is per clip rather than a rename of the whole group. Rebuilt right
-    // before the context menu shows, same as GameContextMenu_OnOpening's
-    // "Move to folder" submenu - which games exist changes constantly.
-    private void ClipContextMenu_OnOpening(object? sender, System.ComponentModel.CancelEventArgs e)
+    // A nested MenuItem submenu (Items populated dynamically from the
+    // ContextMenu's own Opening event, same pattern GameContextMenu_OnOpening
+    // already uses for "Move to folder") never actually showed its dropdown
+    // here despite being wired the same way - twice reported as "doesn't
+    // work" even after adding a Click fallback for a direct click on the
+    // parent item. Rather than keep guessing at why that specific submenu
+    // wouldn't open, this opens its own independent MenuFlyout instead - a
+    // control built specifically for "show this list of MenuItems as a
+    // dropdown", not dependent on nested-submenu chrome at all.
+    private void ClipContextSetGame_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
-        if (sender is not ContextMenu contextMenu) return;
-        if (contextMenu.PlacementTarget?.DataContext is not ClipCardViewModel clip) return;
-        if (contextMenu.Items.OfType<MenuItem>().FirstOrDefault(item => Equals(item.Tag, "ChangeGame")) is not { } changeGameSubmenu) return;
+        if (sender is not MenuItem { DataContext: ClipCardViewModel clip } menuItem) return;
 
-        changeGameSubmenu.Items.Clear();
+        // The ContextMenu that owns this item is already closing by the time
+        // Click fires - anchor the flyout to the clip card itself (the
+        // ContextMenu's PlacementTarget), which stays on screen, rather than
+        // to the closing menu's own items.
+        var anchor = menuItem.GetVisualAncestors().OfType<ContextMenu>().FirstOrDefault()?.PlacementTarget as Control ?? menuItem;
+
+        var flyout = new MenuFlyout();
 
         // Null gameName tells ChangeClipGameAsync to prompt for a brand new
         // name instead of using one already in the library.
         var addGame = new MenuItem { Header = "+ Add Game" };
         addGame.Click += async (_, _) => await ChangeClipGameAsync(clip, null);
-        changeGameSubmenu.Items.Add(addGame);
+        flyout.Items.Add(addGame);
 
         var otherGames = ViewModel.GameFilterOptions
             .Select(option => option.Key)
             .Where(key => !string.Equals(key, clip.GameFilterKey, StringComparison.OrdinalIgnoreCase))
             .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        if (otherGames.Length > 0) changeGameSubmenu.Items.Add(new Separator());
+        if (otherGames.Length > 0) flyout.Items.Add(new Separator());
         foreach (var game in otherGames)
         {
             var item = new MenuItem { Header = game };
             item.Click += async (_, _) => await ChangeClipGameAsync(clip, game);
-            changeGameSubmenu.Items.Add(item);
+            flyout.Items.Add(item);
         }
-    }
 
-    // A MenuItem whose Items only get populated dynamically (from
-    // ClipContextMenu_OnOpening, right before the menu shows) also fires
-    // Click when clicked directly rather than hovered open, on at least some
-    // Avalonia MenuItem submenu behaviour - without this, that direct click
-    // did nothing, which read as "the whole feature doesn't work" even
-    // though hovering to reveal the game list underneath it was fine. Falls
-    // back to the original typed-name prompt, same as before this was a
-    // flyout at all.
-    private async void ClipContextSetGame_OnClick(object? sender, RoutedEventArgs e)
-    {
-        if (sender is not MenuItem { DataContext: ClipCardViewModel clip }) return;
-        await ChangeClipGameAsync(clip, null);
+        flyout.ShowAt(anchor);
     }
 
     private async Task ChangeClipGameAsync(ClipCardViewModel clip, string? gameName)

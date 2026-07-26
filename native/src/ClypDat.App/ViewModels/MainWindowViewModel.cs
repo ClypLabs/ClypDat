@@ -4739,7 +4739,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         foreach (var option in GameFilterOptions) option.SetCheckedSilently(string.Equals(option.Key, gameKey, StringComparison.OrdinalIgnoreCase));
         ApplyGameFilters();
 
-        if (!Settings.CombineSidebarFilters && gameKey is not null && _activeClipTypeFilters.Count > 0)
+        // Not combined: only one filter is ever active, game or clip-type -
+        // this must clear the other side whether gameKey is a real game
+        // (picking one) or null (the rail's "All Games"/history restoring to
+        // no game), since null is exactly what should also mean "nothing
+        // else either" - a "gameKey is not null" guard here used to leave a
+        // stale clip-type filter behind whenever this cleared to null.
+        if (!Settings.CombineSidebarFilters && _activeClipTypeFilters.Count > 0)
         {
             _activeClipTypeFilters.Clear();
             foreach (var option in ClipTypeFilterOptions) option.SetCheckedSilently(false);
@@ -4759,7 +4765,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         foreach (var option in ClipTypeFilterOptions) option.SetCheckedSilently(string.Equals(option.Key, key, StringComparison.OrdinalIgnoreCase));
         ApplyClipTypeFilters();
 
-        if (!Settings.CombineSidebarFilters && key is not null && _activeGameFilters.Count > 0)
+        // Same reasoning as SelectGameSection's own clear-the-other-side
+        // block - "All Clips" (key null) must clear an active game filter
+        // too, not just picking a real clip-type section.
+        if (!Settings.CombineSidebarFilters && _activeGameFilters.Count > 0)
         {
             _activeGameFilters.Clear();
             foreach (var option in GameFilterOptions) option.SetCheckedSilently(false);
