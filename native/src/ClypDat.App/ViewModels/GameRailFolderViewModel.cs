@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Avalonia.Media.Imaging;
 
 namespace ClypDat.App.ViewModels;
 
@@ -11,11 +12,14 @@ namespace ClypDat.App.ViewModels;
 // a rebuild.
 public sealed class GameRailFolderViewModel : ViewModelBase
 {
-    public GameRailFolderViewModel(string id, string name, bool isAutomatic)
+    private readonly Action<string, bool>? _onExpandedChanged;
+
+    public GameRailFolderViewModel(string id, string name, bool isAutomatic, Action<string, bool>? onExpandedChanged = null)
     {
         Id = id;
         _name = name;
         IsAutomatic = isAutomatic;
+        _onExpandedChanged = onExpandedChanged;
     }
 
     public string Id { get; }
@@ -38,37 +42,91 @@ public sealed class GameRailFolderViewModel : ViewModelBase
 
     private bool _isExpanded;
 
+    // Every rail action (a drag, a rename, moving a game in or out) rebuilds
+    // GameRailEntries from scratch, which means a brand new instance of this
+    // class for every folder each time - without telling the owner when this
+    // opens or closes, that rebuild would silently reset every folder back to
+    // collapsed on the very next action, closing it out from under whoever
+    // just dragged something into it.
     public bool IsExpanded
     {
         get => _isExpanded;
-        set => SetProperty(ref _isExpanded, value);
+        set
+        {
+            if (!SetProperty(ref _isExpanded, value)) return;
+            _onExpandedChanged?.Invoke(Id, value);
+        }
     }
+
+    // Sets the initial state from the owner's remembered set without
+    // re-announcing it right back - only a genuine UI-driven toggle should
+    // fire the callback.
+    public void SetExpandedSilently(bool value) => _isExpanded = value;
 
     public void ToggleExpanded() => IsExpanded = !IsExpanded;
 
-    // Collapsed tile shows the first game's own icon (so it isn't a blank
-    // folder glyph) plus a count badge - not a multi-icon mosaic, which would
-    // need real screen time to size right and this can't get that before it
-    // ships. Exposed as flat bool/string properties rather than binding
-    // through PreviewGame.HasIcon etc directly in XAML, so there's no
-    // null-chain binding to reason about at runtime.
-    private FilterOptionViewModel? PreviewGame => Games.Count > 0 ? Games[0] : null;
     public bool IsEmpty => Games.Count == 0;
-    public bool HasPreviewIcon => PreviewGame?.HasIcon == true;
-    public bool HasPreviewInitial => PreviewGame is not null && !PreviewGame.HasIcon;
-    public Avalonia.Media.Imaging.Bitmap? PreviewIcon => PreviewGame?.Icon;
-    public string PreviewInitial => PreviewGame is null || string.IsNullOrEmpty(PreviewGame.Key)
-        ? string.Empty
-        : char.ToUpperInvariant(PreviewGame.Key[0]).ToString();
     public string CountLabel => Games.Count.ToString();
+
+    // Collapsed tile is a 2x2 mosaic of up to the first 4 member icons,
+    // Discord-folder style - exposed as flat per-slot bool/string/bitmap
+    // properties rather than binding through Games[i].HasIcon etc directly in
+    // XAML, so there's no null-chain or out-of-range binding to reason about
+    // at runtime. A 5th+ game doesn't get a 5th slot; the 4th cell becomes a
+    // "+N" count instead of that game's own icon once there are more than 4.
+    public bool HasSlot1 => Games.Count > 0;
+    public bool HasSlot2 => Games.Count > 1;
+    public bool HasSlot3 => Games.Count > 2;
+    public bool HasSlot4Cell => Games.Count >= 4;
+    public bool HasOverflowBadge => Games.Count > 4;
+    public string OverflowBadgeLabel => Games.Count > 4 ? $"+{Games.Count - 3}" : string.Empty;
+
+    public bool HasSlot1Icon => Games.Count > 0 && Games[0].HasIcon;
+    public bool HasSlot2Icon => Games.Count > 1 && Games[1].HasIcon;
+    public bool HasSlot3Icon => Games.Count > 2 && Games[2].HasIcon;
+    public bool HasSlot4Icon => Games.Count == 4 && Games[3].HasIcon;
+    // A plain condition rather than stacking two IsVisible bindings in XAML:
+    // the 4th cell's initial-letter fallback only makes sense when there IS
+    // a 4th game to letter AND it isn't already showing the overflow "+N".
+    public bool ShowSlot4Initial => HasSlot4Cell && !HasSlot4Icon && !HasOverflowBadge;
+
+    public Bitmap? Slot1Icon => Games.Count > 0 ? Games[0].Icon : null;
+    public Bitmap? Slot2Icon => Games.Count > 1 ? Games[1].Icon : null;
+    public Bitmap? Slot3Icon => Games.Count > 2 ? Games[2].Icon : null;
+    public Bitmap? Slot4Icon => Games.Count == 4 ? Games[3].Icon : null;
+
+    public string Slot1Initial => InitialOf(0);
+    public string Slot2Initial => InitialOf(1);
+    public string Slot3Initial => InitialOf(2);
+    public string Slot4Initial => Games.Count == 4 ? InitialOf(3) : string.Empty;
+
+    private string InitialOf(int index) =>
+        index < Games.Count && !string.IsNullOrEmpty(Games[index].Key)
+            ? char.ToUpperInvariant(Games[index].Key[0]).ToString()
+            : string.Empty;
 
     public void NotifyGamesChanged()
     {
         OnPropertyChanged(nameof(IsEmpty));
-        OnPropertyChanged(nameof(HasPreviewIcon));
-        OnPropertyChanged(nameof(HasPreviewInitial));
-        OnPropertyChanged(nameof(PreviewIcon));
-        OnPropertyChanged(nameof(PreviewInitial));
         OnPropertyChanged(nameof(CountLabel));
+        OnPropertyChanged(nameof(HasSlot1));
+        OnPropertyChanged(nameof(HasSlot2));
+        OnPropertyChanged(nameof(HasSlot3));
+        OnPropertyChanged(nameof(HasSlot4Cell));
+        OnPropertyChanged(nameof(HasOverflowBadge));
+        OnPropertyChanged(nameof(OverflowBadgeLabel));
+        OnPropertyChanged(nameof(HasSlot1Icon));
+        OnPropertyChanged(nameof(HasSlot2Icon));
+        OnPropertyChanged(nameof(HasSlot3Icon));
+        OnPropertyChanged(nameof(HasSlot4Icon));
+        OnPropertyChanged(nameof(ShowSlot4Initial));
+        OnPropertyChanged(nameof(Slot1Icon));
+        OnPropertyChanged(nameof(Slot2Icon));
+        OnPropertyChanged(nameof(Slot3Icon));
+        OnPropertyChanged(nameof(Slot4Icon));
+        OnPropertyChanged(nameof(Slot1Initial));
+        OnPropertyChanged(nameof(Slot2Initial));
+        OnPropertyChanged(nameof(Slot3Initial));
+        OnPropertyChanged(nameof(Slot4Initial));
     }
 }
