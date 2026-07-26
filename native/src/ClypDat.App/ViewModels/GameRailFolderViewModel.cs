@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using Avalonia.Media.Imaging;
 
 namespace ClypDat.App.ViewModels;
@@ -20,6 +22,40 @@ public sealed class GameRailFolderViewModel : ViewModelBase
         _name = name;
         IsAutomatic = isAutomatic;
         _onExpandedChanged = onExpandedChanged;
+        Games.CollectionChanged += OnGamesCollectionChanged;
+    }
+
+    // Slot1Icon/HasSlot1Icon/etc only re-raise on an explicit NotifyGamesChanged
+    // call, not automatically whenever a member FilterOptionViewModel changes -
+    // so a game's icon landing (or a refresh replacing it) asynchronously,
+    // after this folder was already built, left the collapsed tile stuck
+    // showing the letter fallback it started with. Forwarding each member's
+    // own PropertyChanged into a re-raise here keeps the mosaic live the same
+    // way the loose, non-folder rail icons already are (they bind Icon
+    // directly, so INotifyPropertyChanged alone is enough for them).
+    private void OnGamesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems is not null)
+        {
+            foreach (FilterOptionViewModel game in e.OldItems)
+                game.PropertyChanged -= OnGamePropertyChanged;
+        }
+
+        if (e.NewItems is not null)
+        {
+            foreach (FilterOptionViewModel game in e.NewItems)
+                game.PropertyChanged += OnGamePropertyChanged;
+        }
+
+        NotifyGamesChanged();
+    }
+
+    private void OnGamePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(FilterOptionViewModel.Icon) or nameof(FilterOptionViewModel.HasIcon))
+        {
+            NotifyGamesChanged();
+        }
     }
 
     public string Id { get; }
@@ -68,11 +104,23 @@ public sealed class GameRailFolderViewModel : ViewModelBase
     public bool IsEmpty => Games.Count == 0;
     public string CountLabel => Games.Count.ToString();
 
-    // Collapsed tile is a 2x2 mosaic of up to the first 4 member icons,
-    // Discord-folder style - exposed as flat per-slot bool/string/bitmap
-    // properties rather than binding through Games[i].HasIcon etc directly in
-    // XAML, so there's no null-chain or out-of-range binding to reason about
-    // at runtime. A 5th+ game doesn't get a 5th slot; the 4th cell becomes a
+    // Which of four hand-laid-out arrangements the collapsed tile uses -
+    // mutually exclusive, so exactly one applies. A single fixed 2x2 grid for
+    // every count left empty cells (dead space) whenever a folder held fewer
+    // than 4 games, which is what actually made 2- and 3-game folders look
+    // lopsided rather than "the icons are just small". 1 game fills the
+    // whole tile, 2 sit side by side, 3 are two-over-one, and only 4+ uses
+    // the real 2x2 (see HasSlot4Cell below).
+    public bool IsSingleGame => Games.Count == 1;
+    public bool IsTwoGames => Games.Count == 2;
+    public bool IsThreeGames => Games.Count == 3;
+    public bool IsFourPlusGames => Games.Count >= 4;
+
+    // Collapsed tile is a mosaic of up to the first 4 member icons, Discord-
+    // folder style - exposed as flat per-slot bool/string/bitmap properties
+    // rather than binding through Games[i].HasIcon etc directly in XAML, so
+    // there's no null-chain or out-of-range binding to reason about at
+    // runtime. A 5th+ game doesn't get a 5th slot; the 4th cell becomes a
     // "+N" count instead of that game's own icon once there are more than 4.
     public bool HasSlot1 => Games.Count > 0;
     public bool HasSlot2 => Games.Count > 1;
@@ -109,6 +157,10 @@ public sealed class GameRailFolderViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(IsEmpty));
         OnPropertyChanged(nameof(CountLabel));
+        OnPropertyChanged(nameof(IsSingleGame));
+        OnPropertyChanged(nameof(IsTwoGames));
+        OnPropertyChanged(nameof(IsThreeGames));
+        OnPropertyChanged(nameof(IsFourPlusGames));
         OnPropertyChanged(nameof(HasSlot1));
         OnPropertyChanged(nameof(HasSlot2));
         OnPropertyChanged(nameof(HasSlot3));

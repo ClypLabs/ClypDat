@@ -256,9 +256,22 @@ public static class GameIconService
 
     private static async Task<int?> ResolveSteamAppIdAsync(HttpClient client, string displayName, CancellationToken cancellationToken)
     {
+        var first = true;
         foreach (var term in SearchTermsFor(displayName))
         {
-            var id = await SearchSteamAppIdAsync(client, term, cancellationToken);
+            // Exact-match-wins is only trustworthy against the name actually
+            // being looked up, not a fragment of it we chose to try after the
+            // full name came up empty. Searching "Counter-Strike" (the
+            // trimmed-down fallback for "Counter-Strike: Global Offensive",
+            // since CS:GO itself no longer exists as a separate store
+            // listing - Valve renamed the same appid to Counter-Strike 2)
+            // finds THE ORIGINAL 1999 GAME as an exact name match - a real,
+            // separate, correctly-named product that just happens to share
+            // the franchise's base name. Once a term is a shortened fallback,
+            // only genuine prefix/suffix matching is trusted; a fallback term
+            // matching something exactly is coincidence, not confirmation.
+            var id = await SearchSteamAppIdAsync(client, term, cancellationToken, allowExactMatch: first);
+            first = false;
             if (id is null) continue;
             if (!string.Equals(term, displayName, StringComparison.OrdinalIgnoreCase))
             {
@@ -274,7 +287,7 @@ public static class GameIconService
     // Matches candidates against the term that was actually searched for, not
     // the original name - the whole point of a shortened term is that the full
     // name no longer corresponds to anything in the store.
-    private static async Task<int?> SearchSteamAppIdAsync(HttpClient client, string displayName, CancellationToken cancellationToken)
+    private static async Task<int?> SearchSteamAppIdAsync(HttpClient client, string displayName, CancellationToken cancellationToken, bool allowExactMatch)
     {
         var json = await client.GetStringAsync(
             $"https://store.steampowered.com/api/storesearch/?term={Uri.EscapeDataString(displayName)}&cc=us&l=en",
@@ -295,8 +308,9 @@ public static class GameIconService
             var candidate = NormalizeName(name);
             if (candidate.Length == 0) continue;
 
-            // Exact match still wins outright, whatever its position.
-            if (string.Equals(candidate, wanted, StringComparison.Ordinal)) return id;
+            // Exact match still wins outright, whatever its position - but
+            // only on the real name, see ResolveSteamAppIdAsync's comment.
+            if (allowExactMatch && string.Equals(candidate, wanted, StringComparison.Ordinal)) return id;
 
             // Otherwise take the best-ranked candidate that is the same title
             // under a longer or shorter name - "Umamusume" against "Umamusume:

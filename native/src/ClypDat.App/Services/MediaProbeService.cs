@@ -438,6 +438,40 @@ public sealed class MediaProbeService
         return waveforms;
     }
 
+    // Rename/move keeps the same media content under a new path - reuse the
+    // existing probe/thumbnail/filmstrip/waveform artifacts under the new
+    // path's cache key instead of deleting and forcing ffprobe/ffmpeg to
+    // regenerate everything, which is expensive on a network drive. Mirrors
+    // LibraryLayout.MoveSidecars's same move-don't-recreate approach for
+    // sidecar files.
+    public void MoveCacheFor(string oldFilePath, string newFilePath)
+    {
+        var oldKey = CacheKey(oldFilePath);
+        var newKey = CacheKey(newFilePath);
+        if (string.Equals(oldKey, newKey, StringComparison.Ordinal)) return;
+
+        foreach (var oldPath in Directory.EnumerateFiles(_cacheFolder, $"{oldKey}*.*"))
+        {
+            var newPath = Path.Combine(_cacheFolder, newKey + Path.GetFileName(oldPath)[oldKey.Length..]);
+            if (File.Exists(newPath)) TryDelete(oldPath);
+            else TryMove(oldPath, newPath);
+        }
+
+        var oldFrameFolder = Path.Combine(_cacheFolder, $"{oldKey}-frames");
+        var newFrameFolder = Path.Combine(_cacheFolder, $"{newKey}-frames");
+        if (Directory.Exists(oldFrameFolder))
+        {
+            if (Directory.Exists(newFrameFolder))
+            {
+                try { Directory.Delete(oldFrameFolder, true); } catch { /* best-effort */ }
+            }
+            else
+            {
+                try { Directory.Move(oldFrameFolder, newFrameFolder); } catch { /* best-effort - falls back to regeneration */ }
+            }
+        }
+    }
+
     public void DeleteCacheFor(string filePath)
     {
         var key = CacheKey(filePath);
@@ -940,6 +974,18 @@ public sealed class MediaProbeService
         catch
         {
             // Cache cleanup should not block deleting clips.
+        }
+    }
+
+    private static void TryMove(string oldPath, string newPath)
+    {
+        try
+        {
+            File.Move(oldPath, newPath);
+        }
+        catch
+        {
+            // Best effort - a failed move just falls back to regeneration.
         }
     }
 }
