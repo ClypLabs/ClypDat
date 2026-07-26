@@ -34,7 +34,7 @@
                  already-tiny, fairly compressed source - looked soft/muddy.
                  A bigger source (128px exists) downscaled to the same
                  on-screen size renders far crisper. -->
-            <Image Source="/Assets/clypdat-icon-128.png" Width="26" Height="26" />
+            <Image Source="/Assets/clypdat-icon-256.png" Width="26" Height="26" />
           </Button>
           <Button x:Name="BackNavButton" Classes="linkButton" Click="BackNavButton_OnClick" ToolTip.Tip="Back" Padding="6" Margin="6,0,0,0">
             <PathIcon Data="M15.41,7.41L14,6l-6,6l6,6l1.41-1.41L10.83,12L15.41,7.41z" Width="16" Height="16" />
