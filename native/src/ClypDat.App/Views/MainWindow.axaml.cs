@@ -1805,14 +1805,17 @@ public sealed partial class MainWindow : Window
     // StackPanel of ordinary Buttons styled to look like menu rows.
     //
     // StaysOpenOnClick on the XAML MenuItem keeps the parent ContextMenu
-    // open through this click (rather than the whole menu vanishing the
-    // instant "Change game" is clicked, only for this flyout to then appear
-    // in its place) - the MenuItem itself is now guaranteed to stay attached
-    // to the tree too, so it doubles as a real anchor: the flyout opens
-    // beside it, to the right, like a genuine submenu would.
+    // open (rather than the whole menu vanishing the instant "Change game"
+    // is interacted with, only for this flyout to then appear in its place)
+    // - the MenuItem itself is now guaranteed to stay attached to the tree
+    // too, so it doubles as a real anchor: the flyout opens beside it, to
+    // the right, like a genuine submenu would. Opens on hover
+    // (PointerEntered), same as a real submenu, rather than requiring a
+    // click - the row's own header carries a right-pointing arrow (in XAML)
+    // to signal that.
     private Flyout? _changeGameFlyout;
 
-    private void ClipContextSetGame_OnClick(object? sender, RoutedEventArgs e)
+    private void ClipContextSetGame_OnPointerEntered(object? sender, PointerEventArgs e)
     {
         if (ViewModel is null) return;
         if (sender is not MenuItem { DataContext: ClipCardViewModel clip } menuItem) return;
