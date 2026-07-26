@@ -1981,6 +1981,7 @@ public sealed partial class MainWindow : Window
     private Flyout? _changeGameFlyout;
     private MenuItem? _changeGameMenuItem;
     private Control? _changeGameFlyoutContent;
+    private bool _changeGameFlyoutReady;
 
     // Since Change Game opens on hover rather than a click, hovering any
     // OTHER row in the same context menu needs to close it too - otherwise
@@ -2002,6 +2003,11 @@ public sealed partial class MainWindow : Window
     // popup does not close it between PointerExited and PointerEntered.
     private void ChangeGameFlyoutArea_OnPointerExited(object? sender, PointerEventArgs e)
     {
+        // Showing a popup itself makes the anchor report PointerExited.
+        // Ignore that synthetic transition; real leave events start after
+        // the popup has completed opening.
+        if (!_changeGameFlyoutReady) return;
+
         Dispatcher.UIThread.Post(() =>
         {
             if (_changeGameFlyout is null) return;
@@ -2029,6 +2035,7 @@ public sealed partial class MainWindow : Window
                 _changeGameFlyout = null;
                 _changeGameMenuItem = null;
                 _changeGameFlyoutContent = null;
+                _changeGameFlyoutReady = false;
             }
         };
 
@@ -2065,6 +2072,10 @@ public sealed partial class MainWindow : Window
         flyout.Content = flyoutContent;
 
         flyout.ShowAt(menuItem);
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_changeGameFlyout == flyout) _changeGameFlyoutReady = true;
+        }, DispatcherPriority.Background);
     }
 
     private async Task ChangeClipGameAsync(ClipCardViewModel clip, string? gameName)
