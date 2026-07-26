@@ -4382,22 +4382,48 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // remaining-item count separately, unaffected by those per-phase
             // resets - the ETA is for the whole job finishing, not just
             // whichever phase happens to be running.
+            // Only clips that are actually missing something get a pass over
+            // them. CreateLibraryStub has already filled in everything the
+            // caches on disk could answer (probed duration/tracks, thumbnail,
+            // filmstrip), so on a library that hasn't changed since the last
+            // run all three of these are empty and hydration is a no-op -
+            // where it used to walk every clip, one at a time, three times,
+            // re-reading caches to arrive back at what the cards were already
+            // showing. That walk is what made a cold start crawl and put the
+            // "Building your library" banner up on every single launch.
+            var needProbe = clips.Where(clip => clip.Duration <= TimeSpan.Zero).ToArray();
+            var needThumbnail = clips.Where(clip => string.IsNullOrEmpty(clip.Media.ThumbnailPath)).ToArray();
+            var needFilmstrip = clips.Where(clip => string.IsNullOrEmpty(clip.Media.FilmstripPath)).ToArray();
+
             _hydrationOverallCompleted = 0;
-            _hydrationOverallTotal = clips.Count * 3;
+            _hydrationOverallTotal = needProbe.Length + needThumbnail.Length + needFilmstrip.Length;
+            var pending = _hydrationOverallTotal;
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                IsHydratingLibrary = clips.Count > 0;
+                IsHydratingLibrary = pending > 0;
                 HydrationEtaText = string.Empty;
             });
 
-            await RunHydrationPassAsync(clips, "Loading clip info", cancellationToken,
+            if (pending == 0)
+            {
+                AppLog.Info($"Library hydration: nothing to do, all {clips.Count} clips served from cache.");
+                return;
+            }
+
+            AppLog.Info($"Library hydration: {needProbe.Length} to probe, {needThumbnail.Length} thumbnails, {needFilmstrip.Length} filmstrips (of {clips.Count} clips).");
+
+            await RunHydrationPassAsync(needProbe, "Loading clip info", cancellationToken,
                 async clip =>
                 {
                     var media = await _mediaProbe.ProbeMetadataAsync(clip.Path);
                     await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(media));
                 });
 
-            await RunHydrationPassAsync(clips, "Loading thumbnails", cancellationToken,
+            // Recomputed rather than reusing the list from above: a clip that
+            // had no cached probe a moment ago has a real duration now, and
+            // the thumbnail/filmstrip grabs seek by duration.
+            needThumbnail = clips.Where(clip => string.IsNullOrEmpty(clip.Media.ThumbnailPath)).ToArray();
+            await RunHydrationPassAsync(needThumbnail, "Loading thumbnails", cancellationToken,
                 async clip =>
                 {
                     var path = await _mediaProbe.EnsureThumbnailAsync(clip.Path, clip.Duration);
@@ -4405,7 +4431,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(clip.Media with { ThumbnailPath = path }));
                 });
 
-            await RunHydrationPassAsync(clips, "Loading timelines", cancellationToken,
+            needFilmstrip = clips.Where(clip => string.IsNullOrEmpty(clip.Media.FilmstripPath)).ToArray();
+            await RunHydrationPassAsync(needFilmstrip, "Loading timelines", cancellationToken,
                 async clip =>
                 {
                     var path = await _mediaProbe.EnsureFilmstripAsync(clip.Path, clip.Duration);

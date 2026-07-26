@@ -1607,7 +1607,7 @@
     <!-- Named for the playback bar's hit-testing: the bar stays up while the
          pointer is anywhere in here, not just over the picture (see
          PollEditorHoverControls). -->
-    <Grid x:Name="EditorRoot" Grid.Row="1" RowDefinitions="*,Auto,320" IsVisible="{Binding IsEditorVisible}">
+    <Grid x:Name="EditorRoot" Grid.Row="1" RowDefinitions="*,320" IsVisible="{Binding IsEditorVisible}">
       <Grid Background="#0E141A" ColumnDefinitions="*,300">
         <Border Background="#05080B">
           <!-- Pan slider lives in its own column, not overlapping
@@ -1716,23 +1716,80 @@
         </Border>
       </Grid>
 
-      <!-- Docked playback controls: the alternative to the floating hover bar,
-           and the default. Sits between the picture and the timeline rather
-           than on top of the video, so nothing ever covers the frame and
-           nothing appears or disappears with the pointer. Its contents are
-           built in code-behind (BuildPlaybackBarLayout) from the same builder
-           the hover bar uses, so the two can't drift apart. Exactly one of the
-           two is ever live - see EnsureDockedPlaybackBar. -->
-      <Border x:Name="DockedPlaybackBar"
-              Grid.Row="1"
-              Background="#0B0F14"
-              BorderBrush="#22303A"
-              BorderThickness="0,1,0,0"
-              IsVisible="{Binding !EditorHoverBarEnabled}" />
+      <Border Grid.Row="1" Background="#141D24" BorderBrush="#22303A" BorderThickness="0,1,0,0">
+        <Grid RowDefinitions="Auto,*" Margin="8,8,8,8">
+          <!-- The docked control row, and the default: exactly the bar that sat
+               here before the hover bar replaced it. Auto row rather than a
+               fixed 44 so it collapses to nothing (not an empty gap) when the
+               Hoverbar setting moves these controls over the video instead. -->
+          <Grid Height="44" Margin="0,-4,0,4" IsVisible="{Binding !EditorHoverBarEnabled}">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center" Spacing="8" Margin="4,0,0,0">
+              <Border Classes="muteToggle"
+                      Width="26"
+                      Height="26"
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Center"
+                      PointerPressed="MasterVolumeMuteToggle_OnPointerPressed"
+                      Cursor="Hand"
+                      ToolTip.Tip="Mute/unmute">
+                <PathIcon Width="15"
+                          Height="15"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center"
+                          Foreground="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToMuteBrushConverter.Instance}}"
+                          Data="{Binding EffectiveMasterVolumePercent, Converter={x:Static opconv:VolumeLevelToIconConverter.Instance}}" />
+              </Border>
+              <Slider Classes="volumeSlider"
+                      Minimum="0" Maximum="150"
+                      TickFrequency="1" IsSnapToTickEnabled="True"
+                      Width="90"
+                      VerticalAlignment="Center"
+                      Value="{Binding MasterVolumePercent, Mode=TwoWay}"
+                      Opacity="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToOpacityConverter.Instance}}" />
+              <TextBlock Text="{Binding MasterVolumePercent, StringFormat={}{0:0}%}"
+                         Foreground="#93A6B8"
+                         FontSize="11"
+                         Width="30"
+                         Margin="0,2,0,0"
+                         VerticalAlignment="Center" />
+              <Button Classes="linkButton"
+                      Content="Reset"
+                      FontSize="10"
+                      Padding="6,1"
+                      VerticalAlignment="Center"
+                      IsVisible="{Binding IsMasterVolumeNonDefault}"
+                      Click="MasterVolumeReset_OnClick"
+                      ToolTip.Tip="Reset to 100%" />
+            </StackPanel>
+            <!-- Nudged right of true-center (Margin left offset) - centering
+                 on the video column's own width alone still reads as
+                 slightly left of the actual visible video content. -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="7" Margin="41,0,0,0">
+              <Button Classes="transportButton" Click="RestartButton_OnClick" ToolTip.Tip="Restart">
+                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+              </Button>
+              <Button Classes="transportButton" Click="StepBackButton_OnClick" ToolTip.Tip="Step back">
+                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M16 5v14L5 12Z" />
+              </Button>
+              <Button Classes="playButton" Click="PlayPauseButton_OnClick" ToolTip.Tip="Play/Pause">
+                <Grid>
+                  <PathIcon Width="16" Height="16" Foreground="#DDE8F6" Data="M8 5v14l11-7z" IsVisible="{Binding !IsPlaying}" />
+                  <PathIcon Width="16" Height="16" Foreground="#DDE8F6" Data="M6 19h4V5H6v14zm8-14v14h4V5h-4z" IsVisible="{Binding IsPlaying}" />
+                </Grid>
+              </Button>
+              <Button Classes="transportButton" Click="StepForwardButton_OnClick" ToolTip.Tip="Step forward">
+                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M8 5v14l11-7z" />
+              </Button>
+              <Button Classes="transportButton" Click="EndButton_OnClick" ToolTip.Tip="End">
+                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+              </Button>
+              <Button Classes="transportButton" Click="FullscreenButton_OnClick" ToolTip.Tip="Fullscreen">
+                <PathIcon Width="14" Height="14" Foreground="#C8D6E6" Data="M7,14H5v5h5v-2H7V14z M5,10h2V7h3V5H5V10z M17,17h-3v2h5v-5h-2V17z M14,5v2h3v3h2V5H14z" />
+              </Button>
+            </StackPanel>
+          </Grid>
 
-      <Border Grid.Row="2" Background="#141D24" BorderBrush="#22303A" BorderThickness="0,1,0,0">
-        <Grid Margin="8,8,8,8">
-          <Grid ColumnDefinitions="160,*" ColumnSpacing="12">
+          <Grid Grid.Row="1" ColumnDefinitions="160,*" ColumnSpacing="12">
             <!-- Row 0 fixed at 34 (not Auto) so it matches the timeline column's
                  own row 0 below - Auto sized this side's row 0 to the
                  time-badge's own content height instead, so row 1 (the track
