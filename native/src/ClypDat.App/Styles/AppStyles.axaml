@@ -728,7 +728,10 @@
     <Setter Property="BorderThickness" Value="1.5" />
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
     <Setter Property="Background" Value="#141D24" />
-    <Setter Property="Padding" Value="4,6" />
+    <!-- Was 4,6 - with the mosaic no longer leaving dead space per game
+         count, the extra breathing room read as the whole capsule being
+         oversized rather than snug around its contents. -->
+    <Setter Property="Padding" Value="2,3" />
   </Style>
   <!-- The storage button is the one rail button that isn't a bare 30px glyph:
        it holds the ring AND the used/limit caption, so it drops the fixed

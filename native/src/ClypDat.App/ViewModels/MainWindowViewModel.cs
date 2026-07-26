@@ -115,6 +115,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public MainWindowViewModel()
     {
         Settings = AppSettingsStore.Load();
+        // Curated game-icons.json entries (delisted store names, curated
+        // Steam app IDs like the CS:GO fix) only reach a running app through
+        // this - RequestMissingGameIcons only pulls it in as a side effect of
+        // a game actually missing an icon, which could be never for someone
+        // whose library is already fully resolved. Kicking it off here too
+        // means every launch picks up curated-list edits on its own, not
+        // just launches that happen to hit a missing icon. EnsureLoadedAsync
+        // (not ForceRefreshAsync) still respects its own once-a-day window,
+        // so this is cheap on every launch after the first that day.
+        _ = Task.Run(() => RemoteGameIconsService.EnsureLoadedAsync());
         MedalImportRows.CollectionChanged += MedalImportRows_OnCollectionChanged;
         MigrateLegacyMedalImportHistory();
         AllClips = new ObservableCollection<ClipCardViewModel>();
@@ -1508,7 +1518,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 LibraryLayout.MoveSidecars(libraryRoot, videoPath, destinationPath);
                 File.SetCreationTimeUtc(destinationPath, source.CreatedAtUtc);
                 File.SetLastWriteTimeUtc(destinationPath, source.CreatedAtUtc);
-                _mediaProbe.DeleteCacheFor(videoPath);
+                _mediaProbe.MoveCacheFor(videoPath, destinationPath);
                 if (Settings.ClipEdits.Remove(ClipEditKey(videoPath), out var edit)) Settings.ClipEdits[ClipEditKey(destinationPath)] = edit;
 
                 var newKey = MedalImportService.GetImportKey(source);
@@ -2342,7 +2352,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 ClipInfoSidecar.Save(Settings.LibraryFolder, sourcePath, new ClipInfo(game, info?.AutoClipEventType, title, timestamp, info?.MedalImportKey));
                 File.Move(sourcePath, targetPath);
                 MoveClipSidecars(sourcePath, targetPath);
-                _mediaProbe.DeleteCacheFor(sourcePath);
+                _mediaProbe.MoveCacheFor(sourcePath, targetPath);
                 movedPaths.Add((sourcePath, targetPath));
                 renamed++;
             }
@@ -2504,7 +2514,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     {
                         File.Move(sourcePath, destinationPath);
                         MoveClipSidecars(sourcePath, destinationPath);
-                        _mediaProbe.DeleteCacheFor(sourcePath);
+                        _mediaProbe.MoveCacheFor(sourcePath, destinationPath);
                         if (Settings.ClipEdits.Remove(ClipEditKey(sourcePath), out var edit)) Settings.ClipEdits[ClipEditKey(destinationPath)] = edit;
                         moved++;
                     }
@@ -3008,7 +3018,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         await FileRetry.RunAsync(() => File.Move(oldPath, newPath), $"Rename clip {oldPath} -> {newPath}");
         MoveClipSidecars(oldPath, newPath);
-        _mediaProbe.DeleteCacheFor(oldPath);
+        _mediaProbe.MoveCacheFor(oldPath, newPath);
         return newPath;
     }
 
@@ -4078,7 +4088,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 File.Move(path, destinationPath);
                 MoveClipSidecars(path, destinationPath);
-                _mediaProbe.DeleteCacheFor(path);
+                _mediaProbe.MoveCacheFor(path, destinationPath);
                 if (Settings.ClipEdits.Remove(ClipEditKey(path), out var edit)) Settings.ClipEdits[ClipEditKey(destinationPath)] = edit;
                 // Same marker AddOrUpdateLibraryClipAsync uses: the folder
                 // watcher will see the move, and the caller updates the card
@@ -4832,7 +4842,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             var all = bulk && clip.IsSelected;
             clip.RenameActionLabel = all ? "Rename All" : "Rename";
-            clip.SetGameActionLabel = all ? $"Change Game for {SelectedCount} clips" : "Change Game";
+            clip.SetGameActionLabel = all ? $"Change game for {SelectedCount} clips" : "Change game";
         }
     }
 
