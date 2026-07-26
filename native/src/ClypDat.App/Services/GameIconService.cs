@@ -226,7 +226,55 @@ public static class GameIconService
         "starter", "membership", "subscription", "highresolution", "high resolution"
     };
 
+    /// <summary>
+    /// The name to search for, then progressively shorter leading parts of it.
+    /// The store search is a text match on Steam's side, so a name that has
+    /// drifted from the store's returns NOTHING at all and no amount of
+    /// filtering the results helps: "Splitgate: Arena Warfare" is empty,
+    /// because Steam now calls it "SPLITGATE: Arena Reloaded", while
+    /// "Splitgate: Arena" finds it immediately.
+    ///
+    /// Dropping trailing words stops at two, unless the first word is long
+    /// enough to stand on its own (a "Splitgate" or an "Umamusume") - a
+    /// one-word search on something like "Rocket" would happily return a
+    /// completely different game.
+    /// </summary>
+    private static IEnumerable<string> SearchTermsFor(string displayName)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { displayName };
+        yield return displayName;
+
+        var words = displayName.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        for (var take = words.Length - 1; take >= 1; take--)
+        {
+            var term = string.Join(' ', words.Take(take)).Trim(':', '-', '–', ',', ' ');
+            if (term.Length == 0) continue;
+            if (take == 1 && term.Length < 8) yield break;
+            if (seen.Add(term)) yield return term;
+        }
+    }
+
     private static async Task<int?> ResolveSteamAppIdAsync(HttpClient client, string displayName, CancellationToken cancellationToken)
+    {
+        foreach (var term in SearchTermsFor(displayName))
+        {
+            var id = await SearchSteamAppIdAsync(client, term, cancellationToken);
+            if (id is null) continue;
+            if (!string.Equals(term, displayName, StringComparison.OrdinalIgnoreCase))
+            {
+                AppLog.Info($"Steam icon lookup: '{displayName}' matched by searching '{term}' (appid {id}).");
+            }
+
+            return id;
+        }
+
+        return null;
+    }
+
+    // Matches candidates against the term that was actually searched for, not
+    // the original name - the whole point of a shortened term is that the full
+    // name no longer corresponds to anything in the store.
+    private static async Task<int?> SearchSteamAppIdAsync(HttpClient client, string displayName, CancellationToken cancellationToken)
     {
         var json = await client.GetStringAsync(
             $"https://store.steampowered.com/api/storesearch/?term={Uri.EscapeDataString(displayName)}&cc=us&l=en",

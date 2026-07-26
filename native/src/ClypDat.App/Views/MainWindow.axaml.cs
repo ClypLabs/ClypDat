@@ -1294,7 +1294,36 @@ public sealed partial class MainWindow : Window
     private async void ClipContextRename_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
+
+        // Renaming from inside a multi-selection applies to all of it; a
+        // right-click on a card that isn't part of the selection is still a
+        // plain single rename of that card.
+        var selected = ViewModel.AllClips.Where(item => item.IsSelected).ToArray();
+        if (clip.IsSelected && selected.Length > 1)
+        {
+            await RenameClipsAsync(selected);
+            return;
+        }
+
         await RenameClipCardAsync(clip);
+    }
+
+    private async Task RenameClipsAsync(IReadOnlyList<ClipCardViewModel> clips)
+    {
+        if (ViewModel is null || clips.Count == 0) return;
+
+        var newTitle = await PromptRenameAsync(string.Empty, $"Rename {clips.Count} clips", "Clip title");
+        if (newTitle is null) return;
+        var trimmed = newTitle.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed)) return;
+
+        // Every clip gets the same title; the filename builder appends each
+        // clip's own timestamp (and de-duplicates beyond that), so they don't
+        // collide on disk.
+        foreach (var clip in clips)
+        {
+            await ApplyClipTitleRenameAsync(clip, trimmed);
+        }
     }
 
     // At most one inline title edit is open at a time - BeginInlineTitleEdit
