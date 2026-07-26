@@ -30,11 +30,13 @@
       <Grid ColumnDefinitions="Auto,*,Auto,Auto" Margin="12,2,0,0" VerticalAlignment="Center">
         <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
           <Button Classes="brandButton" Padding="6" Click="LibraryHomeButton_OnClick" ToolTip.Tip="Library">
-            <!-- clypdat-icon-24.png at 26px was barely-upscaled from an
-                 already-tiny, fairly compressed source - looked soft/muddy.
-                 A bigger source (128px exists) downscaled to the same
-                 on-screen size renders far crisper. -->
-            <Image Source="/Assets/clypdat-icon-256.png" Width="26" Height="26" />
+            <!-- 256px source downscaled to the actual 26px on-screen size
+                 (bigger than the display size, not a change to it) still
+                 looked soft - RenderOptions.BitmapInterpolationMode
+                 defaults to a lower-quality mode for the downscale itself,
+                 independent of how much source detail is available.
+                 HighQuality actually uses that detail. -->
+            <Image Source="/Assets/clypdat-icon-256.png" Width="26" Height="26" RenderOptions.BitmapInterpolationMode="HighQuality" />
           </Button>
           <Button x:Name="BackNavButton" Classes="linkButton" Click="BackNavButton_OnClick" ToolTip.Tip="Back" Padding="6" Margin="6,0,0,0">
             <PathIcon Data="M15.41,7.41L14,6l-6,6l6,6l1.41-1.41L10.83,12L15.41,7.41z" Width="16" Height="16" />
