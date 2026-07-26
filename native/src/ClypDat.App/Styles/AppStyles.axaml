@@ -726,11 +726,7 @@
     <Setter Property="Padding" Value="0,6,4,6" />
     <Setter Property="BorderThickness" Value="0,1.5,1.5,1.5" />
     <Setter Property="BorderBrush" Value="Transparent" />
-    <!-- Was fully transparent - a folder tile looked identical to a loose
-         game icon until you opened it. A subtle fill (the same shade the
-         mosaic's own cells and the empty-folder badge already use) marks it
-         as a group at a glance, even collapsed. -->
-    <Setter Property="Background" Value="#26323D" />
+    <Setter Property="Background" Value="Transparent" />
     <Setter Property="Transitions">
       <Transitions>
         <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
