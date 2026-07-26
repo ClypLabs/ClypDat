@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using Avalonia;
 using Avalonia.Media;
 using Avalonia.Threading;
+using ClypDat.App.Converters;
 using ClypDat.App.Services;
 using ClypDat.Core.Settings;
 
@@ -4995,10 +4996,32 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // narrower than searching every control's own text (a much bigger
     // undertaking), but a real, useful first cut at "find a setting" for
     // whichever page it lives on.
+    // Matches the ConverterParameter on every settingsNavButton in
+    // MainWindow.axaml, in nav order - the one list both the XAML's own
+    // per-button matching and this auto-navigate check work from.
+    private static readonly string[] SettingsSectionNames =
+    {
+        "General", "Game Detection", "Import from Medal",
+        "Replay Buffer", "Overlays and Notifications", "Auto-Clip", "Audio", "Game Audio Exclusions",
+        "About"
+    };
+
     public string SettingsSearchText
     {
         get => _settingsSearchText;
-        set => SetProperty(ref _settingsSearchText, value);
+        set
+        {
+            if (!SetProperty(ref _settingsSearchText, value)) return;
+
+            // A query specific enough to narrow to exactly one section jumps
+            // straight there instead of leaving the user to click the sole
+            // remaining nav entry themselves - the whole point of searching
+            // by a setting's own name (not just its section's) is landing on
+            // it in one step.
+            if (string.IsNullOrWhiteSpace(value)) return;
+            var matches = SettingsSectionNames.Where(name => SettingsSearchMatchConverter.MatchesSection(value, name)).ToArray();
+            if (matches.Length == 1) SelectedSettingsSection = matches[0];
+        }
     }
 
     private string _librarySearchText = string.Empty;
