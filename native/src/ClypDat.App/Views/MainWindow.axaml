@@ -1604,10 +1604,7 @@
     </Border>
     </Grid>
 
-    <!-- Named for the playback bar's hit-testing: the bar stays up while the
-         pointer is anywhere in here, not just over the picture (see
-         PollEditorHoverControls). -->
-    <Grid x:Name="EditorRoot" Grid.Row="1" RowDefinitions="*,320" IsVisible="{Binding IsEditorVisible}">
+    <Grid Grid.Row="1" RowDefinitions="*,320" IsVisible="{Binding IsEditorVisible}">
       <Grid Background="#0E141A" ColumnDefinitions="*,300">
         <Border Background="#05080B">
           <!-- Pan slider lives in its own column, not overlapping
