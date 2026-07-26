@@ -4362,16 +4362,12 @@ public sealed partial class MainWindow : Window
 
         var backdrop = new Border
         {
-            Background = new LinearGradientBrush
-            {
-                StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
-                EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
-                GradientStops =
-                {
-                    new GradientStop(Color.FromArgb(0x00, 0x08, 0x0B, 0x0E), 0),
-                    new GradientStop(Color.FromArgb(0xE0, 0x08, 0x0B, 0x0E), 0.55),
-                },
-            },
+            // No backplate - the controls sit straight on the picture. The
+            // Border stays because it's what carries the slide transform; it
+            // just doesn't paint anything of its own any more. Each control
+            // brings its own fill (the transport buttons, the play button, the
+            // mute tile), so they still read against bright frames.
+            Background = Brushes.Transparent,
             Child = BuildPlaybackBarLayout(),
             RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse($"translateY({HoverControlsSlideDistance}px)"),
             Transitions =
