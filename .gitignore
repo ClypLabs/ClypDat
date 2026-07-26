@@ -51,3 +51,4 @@ builder-debug.yml
 builder-effective-config.yaml
 publish.ps1
 AGENTS.md
+CLAUDE.md
