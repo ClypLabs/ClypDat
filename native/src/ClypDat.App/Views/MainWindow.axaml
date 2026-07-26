@@ -247,15 +247,11 @@
               <!-- The whole game rail: a mix of loose game tiles and folder
                    tiles (GameRailEntries), drag-reorderable and drop-target-
                    able as one unit - see MainWindowViewModel's "Sidebar game
-                   rail" region for what backs it. AllowDrop is scoped to just
-                   this panel (not the whole sidebar StackPanel above) so a
-                   drop that misses every tile falls back to "append at the
-                   end of the rail" rather than doing that for a drop
-                   anywhere in the sidebar. -->
-              <StackPanel Spacing="2"
-                          DragDrop.AllowDrop="True"
-                          DragDrop.DragOver="GameRailItem_OnDragOver"
-                          DragDrop.Drop="GameRailBackground_OnDrop">
+                   rail" region for what backs it, and the code-behind's own
+                   "Sidebar game rail" region for the pointer-capture drag
+                   this runs on (no DragDrop/AllowDrop involved - see why in
+                   that region's opening comment). -->
+              <StackPanel Spacing="2">
                 <ItemsControl ItemsSource="{Binding GameRailEntries}">
                   <ItemsControl.DataTemplates>
                     <DataTemplate DataType="vm:FilterOptionViewModel">
@@ -265,10 +261,7 @@
                               ToolTip.Tip="{Binding Label}"
                               PointerPressed="GameRailItem_OnPointerPressed"
                               PointerMoved="GameRailItem_OnPointerMoved"
-                              PointerReleased="GameRailItem_OnPointerReleased"
-                              DragDrop.AllowDrop="True"
-                              DragDrop.DragOver="GameRailItem_OnDragOver"
-                              DragDrop.Drop="GameRailGame_OnDrop">
+                              PointerReleased="GameRailItem_OnPointerReleased">
                         <!-- Right-click to rename, or to move between folders -
                              games named after an executable ("RocketLeague")
                              or a Medal folder are common enough to want
@@ -311,10 +304,7 @@
                                 ToolTip.Tip="{Binding Name}"
                                 PointerPressed="GameRailItem_OnPointerPressed"
                                 PointerMoved="GameRailItem_OnPointerMoved"
-                                PointerReleased="GameRailItem_OnPointerReleased"
-                                DragDrop.AllowDrop="True"
-                                DragDrop.DragOver="GameRailItem_OnDragOver"
-                                DragDrop.Drop="GameRailFolder_OnDrop">
+                                PointerReleased="GameRailItem_OnPointerReleased">
                           <Button.ContextMenu>
                             <ContextMenu>
                               <MenuItem Header="Rename folder..." Click="RenameFolderMenuItem_OnClick" />
@@ -351,10 +341,7 @@
                                       ToolTip.Tip="{Binding Label}"
                                       PointerPressed="GameRailItem_OnPointerPressed"
                                       PointerMoved="GameRailItem_OnPointerMoved"
-                                      PointerReleased="GameRailItem_OnPointerReleased"
-                                      DragDrop.AllowDrop="True"
-                                      DragDrop.DragOver="GameRailItem_OnDragOver"
-                                      DragDrop.Drop="GameRailGame_OnDrop">
+                                      PointerReleased="GameRailItem_OnPointerReleased">
                                 <Button.ContextMenu>
                                   <ContextMenu Opening="GameContextMenu_OnOpening">
                                     <MenuItem Header="Rename game..." Click="RenameGameMenuItem_OnClick" />
