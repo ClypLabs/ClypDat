@@ -1783,22 +1783,21 @@ public sealed partial class MainWindow : Window
     // A nested MenuItem submenu (Items populated dynamically from the
     // ContextMenu's own Opening event, same pattern GameContextMenu_OnOpening
     // already uses for "Move to folder") never actually showed its dropdown
-    // here despite being wired the same way - twice reported as "doesn't
-    // work" even after adding a Click fallback for a direct click on the
-    // parent item. Rather than keep guessing at why that specific submenu
-    // wouldn't open, this opens its own independent MenuFlyout instead - a
-    // control built specifically for "show this list of MenuItems as a
-    // dropdown", not dependent on nested-submenu chrome at all.
+    // here despite being wired the same way. Switching to an independent
+    // MenuFlyout still did nothing - because it was anchored to the clicked
+    // MenuItem's own ContextMenu.PlacementTarget, walked via
+    // GetVisualAncestors() from the MenuItem itself. A ContextMenu starts
+    // closing (and detaching its items from the visual tree) as part of the
+    // very same click that fires Click on one of its items, so by the time
+    // this ran, GetVisualAncestors() had nothing to walk - ShowAt got an
+    // already-detached fallback anchor and failed with no exception ever
+    // reaching the log (it's a synchronous UI-thread failure, not a Task
+    // one). Anchoring to the window itself - always attached - and asking
+    // for pointer placement sidesteps the whole detached-anchor problem.
     private void ClipContextSetGame_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
-        if (sender is not MenuItem { DataContext: ClipCardViewModel clip } menuItem) return;
-
-        // The ContextMenu that owns this item is already closing by the time
-        // Click fires - anchor the flyout to the clip card itself (the
-        // ContextMenu's PlacementTarget), which stays on screen, rather than
-        // to the closing menu's own items.
-        var anchor = menuItem.GetVisualAncestors().OfType<ContextMenu>().FirstOrDefault()?.PlacementTarget as Control ?? menuItem;
+        if (sender is not MenuItem { DataContext: ClipCardViewModel clip }) return;
 
         var flyout = new MenuFlyout();
 
@@ -1821,7 +1820,7 @@ public sealed partial class MainWindow : Window
             flyout.Items.Add(item);
         }
 
-        flyout.ShowAt(anchor);
+        flyout.ShowAt(this, showAtPointer: true);
     }
 
     private async Task ChangeClipGameAsync(ClipCardViewModel clip, string? gameName)
