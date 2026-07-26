@@ -649,8 +649,15 @@ public sealed partial class MainWindow : Window
         var draggingFolder = _gameDragToken is not null && _gameDragToken.StartsWith("folder:", StringComparison.Ordinal);
         if (draggingFolder) return fraction <= 0.5 ? GameDropZone.Before : GameDropZone.After;
 
-        if (fraction < 0.3) return GameDropZone.Before;
-        if (fraction > 0.7) return GameDropZone.After;
+        // A folder target gets wider Before/After margins than a loose game
+        // does - reordering a game past an EXISTING folder is the far more
+        // common intent than merging into it, but the tight 30% margins
+        // (about 13px on a 44px tile) made landing a reorder past a folder
+        // fiddly, tipping into "merge into folder" more often than intended.
+        var targetIsFolder = target.DataContext is GameRailFolderViewModel;
+        var margin = targetIsFolder ? 0.4 : 0.3;
+        if (fraction < margin) return GameDropZone.Before;
+        if (fraction > 1 - margin) return GameDropZone.After;
         return GameDropZone.Merge;
     }
 
