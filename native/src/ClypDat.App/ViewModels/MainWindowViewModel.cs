@@ -35,7 +35,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isReplayRecording;
     private bool _isEditorVisible;
     private bool _isSettingsVisible;
-    private string _selectedSettingsSection = "Replay Buffer";
+    private string _selectedSettingsSection = "General";
     private bool _wasEditorVisibleBeforeSettings;
     private bool _isCapturingHotkey;
     private AudioDeviceOption? _selectedChatAudioDevice;
@@ -115,6 +115,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public MainWindowViewModel()
     {
         Settings = AppSettingsStore.Load();
+        if (!string.IsNullOrWhiteSpace(Settings.LastSettingsSection)) _selectedSettingsSection = Settings.LastSettingsSection;
         // Curated game-icons.json entries (delisted store names, curated
         // Steam app IDs like the CS:GO fix) only reach a running app through
         // this - RequestMissingGameIcons only pulls it in as a side effect of
@@ -869,7 +870,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => SetProperty(ref _selectedSettingsSection, value);
     }
 
-    public void SelectSettingsSection(string section) => SelectedSettingsSection = section;
+    public void SelectSettingsSection(string section)
+    {
+        SelectedSettingsSection = section;
+        Settings.LastSettingsSection = section;
+        SaveSettings();
+    }
 
     public bool IsCapturingHotkey
     {
@@ -3138,7 +3144,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _wasEditorVisibleBeforeSettings = IsEditorVisible;
         IsEditorVisible = false;
         IsSettingsVisible = true;
-        SelectedSettingsSection = "Replay Buffer";
     }
 
     private static readonly string[] OnboardingStepOrder =
@@ -4289,6 +4294,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsGameFilterActive => _activeGameFilters.Count > 0;
     public bool IsClipTypeFilterActive => _activeClipTypeFilters.Count > 0;
 
+    // The rail's own single-select key, for the header Back/Forward history
+    // to snapshot - null when nothing's active, or when Combine has more
+    // than one held at once (history only tracks the rail's single-select
+    // navigation, not the checklist dropdowns' arbitrary multi-select).
+    public string? ActiveGameFilterKey => _activeGameFilters.Count == 1 ? _activeGameFilters.First() : null;
+    public string? ActiveClipTypeFilterKey => _activeClipTypeFilters.Count == 1 ? _activeClipTypeFilters.First() : null;
+
+    // With Combine off, only one thing in the whole rail can ever be
+    // selected at a time (a game and a section can't both be active, see
+    // SelectGameSection/SelectClipTypeSection), so "All Clips" there really
+    // means "nothing at all is selected" - it has to drop out the moment a
+    // game is picked, not just when a clip-type section is. Combine on, the
+    // two groups are independent again and "All Clips" goes back to meaning
+    // just its own group, same as "All Games" does for the game side.
+    public bool IsAllClipsActive => !IsClipTypeFilterActive && (Settings.CombineSidebarFilters || !IsGameFilterActive);
+
     private const string ClipTypeManual = "Manual";
     private const string ClipTypeAutoClip = "AutoClip";
     private const string ClipTypeVod = "Vod";
@@ -4349,6 +4370,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             OnPropertyChanged(nameof(IsGameFilterActive));
             OnPropertyChanged(nameof(IsClipTypeFilterActive));
+            OnPropertyChanged(nameof(IsAllClipsActive));
             OnPropertyChanged(nameof(LibraryTitle));
         }
     }
@@ -4726,6 +4748,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         OnPropertyChanged(nameof(IsGameFilterActive));
+        OnPropertyChanged(nameof(IsAllClipsActive));
         OnPropertyChanged(nameof(LibraryTitle));
     }
 
@@ -4745,6 +4768,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         OnPropertyChanged(nameof(IsClipTypeFilterActive));
+        OnPropertyChanged(nameof(IsAllClipsActive));
         OnPropertyChanged(nameof(LibraryTitle));
     }
 
@@ -4762,6 +4786,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ApplyClipTypeFilters();
         OnPropertyChanged(nameof(IsGameFilterActive));
         OnPropertyChanged(nameof(IsClipTypeFilterActive));
+        OnPropertyChanged(nameof(IsAllClipsActive));
         OnPropertyChanged(nameof(LibraryTitle));
     }
 
@@ -4773,6 +4798,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (Settings.CombineSidebarFilters == value) return;
             Settings.CombineSidebarFilters = value;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(IsAllClipsActive));
             SaveSettings();
             // Turning it off with one of each already held would leave a
             // combination the setting says isn't possible - drop back to just
@@ -4790,6 +4816,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         else _activeGameFilters.Remove(gameName);
         ApplyGameFilters();
         OnPropertyChanged(nameof(IsGameFilterActive));
+        OnPropertyChanged(nameof(IsAllClipsActive));
         OnPropertyChanged(nameof(LibraryTitle));
     }
 
@@ -4799,6 +4826,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         else _activeClipTypeFilters.Remove(key);
         ApplyClipTypeFilters();
         OnPropertyChanged(nameof(IsClipTypeFilterActive));
+        OnPropertyChanged(nameof(IsAllClipsActive));
         OnPropertyChanged(nameof(LibraryTitle));
     }
 
