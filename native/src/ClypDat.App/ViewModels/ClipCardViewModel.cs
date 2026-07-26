@@ -52,6 +52,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     public DateTimeOffset CreatedAt => Media.CreatedAt;
     public TimeSpan Duration => Media.Duration;
     public long SizeBytes => Media.SizeBytes;
+    public DateTime LastWriteTimeUtc => Media.LastWriteTimeUtc;
 
     // False while HydrateLibraryClipsAsync hasn't reached this card yet (or
     // its probe genuinely failed) - same stub-detection check OpenClipAsync
@@ -400,6 +401,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(Duration));
         OnPropertyChanged(nameof(IsHydrated));
         OnPropertyChanged(nameof(SizeBytes));
+        OnPropertyChanged(nameof(LastWriteTimeUtc));
         OnPropertyChanged(nameof(DateLabel));
         OnPropertyChanged(nameof(RelativeDateLabel));
         OnPropertyChanged(nameof(ClipFromLabel));

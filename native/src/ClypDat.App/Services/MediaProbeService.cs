@@ -115,7 +115,8 @@ public sealed class MediaProbeService
             cached?.Height ?? 0,
             cached?.Fps ?? 0,
             cached?.CaptureBackend ?? string.Empty,
-            File.Exists(filmstripPath) ? filmstripPath : string.Empty);
+            File.Exists(filmstripPath) ? filmstripPath : string.Empty,
+            info.LastWriteTimeUtc);
     }
 
     public async Task<TimeSpan> GetDurationAsync(string filePath, CancellationToken cancellationToken = default)
@@ -188,7 +189,8 @@ public sealed class MediaProbeService
                 cached.Height,
                 cached.Fps,
                 cached.CaptureBackend,
-                File.Exists(filmstripPath) ? filmstripPath : string.Empty);
+                File.Exists(filmstripPath) ? filmstripPath : string.Empty,
+                info.LastWriteTimeUtc);
         }
 
         var result = await RunProcessAsync("ffprobe", new[]
@@ -280,7 +282,8 @@ public sealed class MediaProbeService
             height,
             fps,
             captureBackend,
-            File.Exists(filmstripPath) ? filmstripPath : string.Empty);
+            File.Exists(filmstripPath) ? filmstripPath : string.Empty,
+            info.LastWriteTimeUtc);
 
         if (duration > TimeSpan.Zero)
         {
@@ -1002,7 +1005,8 @@ public sealed record MediaFileInfo(
     int Height,
     double Fps,
     string CaptureBackend = "",
-    string FilmstripPath = "");
+    string FilmstripPath = "",
+    DateTime LastWriteTimeUtc = default);
 
 public sealed record MediaTrackInfo(int Index, string Type, string Codec, string Label, double VolumePercent = 100);
 
