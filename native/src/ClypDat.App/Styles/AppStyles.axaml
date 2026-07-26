@@ -812,6 +812,25 @@
   <Style Selector="Button.railIconButton Border.gameInitialBadge TextBlock">
     <Setter Property="Foreground" Value="#B8C7D8" />
   </Style>
+
+  <!-- Change Game's flyout is a plain StackPanel of these instead of
+       MenuItems (see MainWindow.axaml.cs ClipContextSetGame_OnClick) - a
+       real Menu's dismiss behaviour proved unreliable built ad hoc, so
+       ordinary Buttons stand in, styled to read as menu rows rather than
+       buttons. -->
+  <Style Selector="Button.flyoutMenuItem">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Padding" Value="10,7" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="Foreground" Value="#D8E4F2" />
+    <Setter Property="FontSize" Value="13" />
+  </Style>
+  <Style Selector="Button.flyoutMenuItem:pointerover">
+    <Setter Property="Background" Value="#26323D" />
+  </Style>
   <Style Selector="Button.railIconButton.active Border.gameInitialBadge TextBlock">
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
