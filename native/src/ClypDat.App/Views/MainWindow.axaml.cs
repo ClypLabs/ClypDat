@@ -3967,7 +3967,15 @@ public sealed partial class MainWindow : Window
         // outside the visible area once zoomed) and gets reparented into
         // FullscreenVideoHost and back. The host is the stable, untransformed
         // rectangle the video is actually shown in.
-        if (EditorVideoHost.Bounds.Width <= 0 || EditorVideoHost.Bounds.Height <= 0) return;
+        if (EditorVideoHost.Bounds.Width <= 0 || EditorVideoHost.Bounds.Height <= 0)
+        {
+            // Logged because this path leaves the bar in whatever state it was
+            // already in - if it ever gets stuck here, the log says so instead
+            // of the bar just silently never coming back.
+            LogHoverControlsState("waiting for video bounds");
+            return;
+        }
+
         var videoTopLeft = EditorVideoHost.PointToScreen(new Point(0, 0));
         var videoBottomRight = EditorVideoHost.PointToScreen(new Point(EditorVideoHost.Bounds.Width, EditorVideoHost.Bounds.Height));
         var overVideo = cursor.X >= videoTopLeft.X && cursor.X < videoBottomRight.X
@@ -4024,7 +4032,23 @@ public sealed partial class MainWindow : Window
             // gives the transition a "from" state to animate out of, rather
             // than both values landing in the same layout pass.
             SetHoverControlsOffset(HoverControlsSlideDistance);
-            window.Show(this);
+            try
+            {
+                window.Show(this);
+            }
+            catch (Exception error)
+            {
+                // A Window that has been closed (rather than hidden) throws
+                // here and can never be shown again - one of those and the bar
+                // would be gone for the rest of the session. Drop the dead
+                // reference so the next tick builds a fresh one.
+                AppLog.Error("Editor hover bar show failed; rebuilding it", error);
+                _editorHoverControlsWindow = null;
+                _hoverControlsBackdrop = null;
+                _hoverControlsLastState = string.Empty;
+                return;
+            }
+
             LogHoverControlsState("sliding in");
             Dispatcher.UIThread.Post(() => SetHoverControlsOffset(0), DispatcherPriority.Loaded);
         }
