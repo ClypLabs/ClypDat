@@ -1055,10 +1055,15 @@ public sealed partial class MainWindow : Window
     // another LayoutUpdated - without a "nothing actually changed" guard that
     // would spin forever. Keyed on everything the marker layout depends on.
     private (double Extent, double Viewport, double Track, int VisibleClips) _scrubberSignature = (-1, -1, -1, -1);
-    // Each distinct date and the content offset it starts at. Pure data - the
-    // only thing that renders is the bubble on the thumb, which looks up
-    // whichever date the viewport currently sits in.
-    private readonly List<(string Text, double ContentY)> _scrubberDates = new();
+    // Each distinct date, the content offset it starts at, and how many
+    // visible clips fall on it - backs both the thumb's own bubble (whichever
+    // date the viewport currently sits in) and the hover bubble/line
+    // indicators (whichever date the CURSOR currently sits over).
+    private readonly List<(string Text, double ContentY, int Count)> _scrubberDates = new();
+    // One tick per date, added/removed in RebuildDateScrubber - lets the
+    // track itself show where each day's clips start, not just the single
+    // date the thumb or cursor currently happens to be over.
+    private readonly List<Border> _scrubberTicks = new();
 
     private void QueueDateScrubberRebuild()
     {
@@ -1095,6 +1100,13 @@ public sealed partial class MainWindow : Window
         var itemsControl = LibraryScrollViewer.Content as ItemsControl ?? LibraryScrollViewer.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault();
         if (itemsControl is null) return;
 
+        // Same local-date key UpdateFirstOfDateFlags groups by, so the count
+        // shown for a date matches what's actually on screen for it.
+        var countsByDate = ViewModel.AllClips
+            .Where(clip => clip.IsVisibleInLibrary)
+            .GroupBy(clip => clip.CreatedAt.ToLocalTime().Date)
+            .ToDictionary(group => group.Key, group => group.Count());
+
         foreach (var container in itemsControl.GetRealizedContainers() ?? Enumerable.Empty<Control>())
         {
             if (container.DataContext is not ClipCardViewModel clip) continue;
@@ -1111,10 +1123,36 @@ public sealed partial class MainWindow : Window
             // disambiguate.
             var localDate = clip.CreatedAt.ToLocalTime();
             var format = localDate.Year == DateTime.Now.Year ? "MMM d" : "MMM d, yyyy";
-            _scrubberDates.Add((localDate.ToString(format).ToUpperInvariant(), offset.Value.Y));
+            var count = countsByDate.GetValueOrDefault(localDate.Date, 1);
+            _scrubberDates.Add((localDate.ToString(format).ToUpperInvariant(), offset.Value.Y, count));
         }
 
+        RebuildScrubberTicks();
         HighlightCurrentScrubberDate();
+    }
+
+    // A thin line at each date's own track position - so the track itself
+    // shows where each day's clips start, not just whichever single date the
+    // thumb or cursor currently happens to be over.
+    private void RebuildScrubberTicks()
+    {
+        foreach (var tick in _scrubberTicks) DateScrubberCanvas.Children.Remove(tick);
+        _scrubberTicks.Clear();
+
+        foreach (var (_, contentY, _) in _scrubberDates)
+        {
+            var tick = new Border
+            {
+                Width = 8,
+                Height = 1.5,
+                Background = Avalonia.Media.Brush.Parse("#5A6B7D"),
+                IsHitTestVisible = false
+            };
+            Canvas.SetLeft(tick, 6);
+            Canvas.SetTop(tick, ContentOffsetToTrackY(contentY));
+            DateScrubberCanvas.Children.Add(tick);
+            _scrubberTicks.Add(tick);
+        }
     }
 
     // Single shared mapping between scroll-content space and track space, so
@@ -1173,9 +1211,12 @@ public sealed partial class MainWindow : Window
         }
         if (currentIndex < 0) currentIndex = 0;
 
-        if (DateScrubberBubbleText is not null) DateScrubberBubbleText.Text = _scrubberDates[currentIndex].Text;
+        if (DateScrubberBubbleText is not null) DateScrubberBubbleText.Text = FormatScrubberBubbleText(_scrubberDates[currentIndex]);
         PositionDateScrubberBubble();
     }
+
+    private static string FormatScrubberBubbleText((string Text, double ContentY, int Count) entry) =>
+        $"{entry.Text} · {entry.Count} clip{(entry.Count == 1 ? "" : "s")}";
 
     // Vertically centred on the thumb and hung off the left of the rail, so
     // it reads as attached to the handle you're actually dragging.
@@ -1190,6 +1231,34 @@ public sealed partial class MainWindow : Window
         if (bubbleHeight <= 0) bubbleHeight = 24;
 
         Canvas.SetTop(DateScrubberBubble, thumbTop + DateScrubberThumb.Bounds.Height / 2 - bubbleHeight / 2);
+        Canvas.SetLeft(DateScrubberBubble, -(bubbleWidth > 0 ? bubbleWidth : 64) - 10);
+    }
+
+    // Hover (not dragging) variant - shows whichever date the CURSOR is over
+    // rather than whichever date the viewport/thumb is on, and follows the
+    // cursor's own Y instead of the thumb's.
+    private void ShowHoverDateBubble(double trackY)
+    {
+        if (DateScrubberBubble is null || DateScrubberBubbleText is null || _scrubberDates.Count == 0)
+        {
+            if (DateScrubberBubble is not null) DateScrubberBubble.Opacity = 0;
+            return;
+        }
+
+        var index = -1;
+        for (var i = 0; i < _scrubberDates.Count; i++)
+        {
+            if (ContentOffsetToTrackY(_scrubberDates[i].ContentY) <= trackY + 1) index = i;
+        }
+        if (index < 0) index = 0;
+
+        DateScrubberBubbleText.Text = FormatScrubberBubbleText(_scrubberDates[index]);
+        DateScrubberBubble.Opacity = 1;
+
+        var bubbleHeight = DateScrubberBubble.Bounds.Height;
+        var bubbleWidth = DateScrubberBubble.Bounds.Width;
+        if (bubbleHeight <= 0) bubbleHeight = 24;
+        Canvas.SetTop(DateScrubberBubble, trackY - bubbleHeight / 2);
         Canvas.SetLeft(DateScrubberBubble, -(bubbleWidth > 0 ? bubbleWidth : 64) - 10);
     }
 
@@ -1263,8 +1332,17 @@ public sealed partial class MainWindow : Window
 
     private void DateScrubber_OnPointerMoved(object? sender, PointerEventArgs e)
     {
-        if (!_draggingScrubber) return;
-        SeekLibraryToThumbTop(e.GetPosition(DateScrubberHost).Y - _scrubberGrabOffset);
+        var y = e.GetPosition(DateScrubberHost).Y;
+        if (_draggingScrubber)
+        {
+            SeekLibraryToThumbTop(y - _scrubberGrabOffset);
+            return;
+        }
+
+        // Hovering (not dragging) previews whichever date/count is under the
+        // cursor, following the cursor rather than the thumb - lets you scan
+        // the whole timeline without committing to a scroll.
+        ShowHoverDateBubble(y);
     }
 
     private void DateScrubber_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
@@ -1282,6 +1360,7 @@ public sealed partial class MainWindow : Window
     {
         if (_draggingScrubber) return;
         SetScrubberThumbState(hovered: true, dragging: false);
+        ShowHoverDateBubble(e.GetPosition(DateScrubberHost).Y);
     }
 
     private void DateScrubber_OnPointerExited(object? sender, PointerEventArgs e)
@@ -1290,6 +1369,7 @@ public sealed partial class MainWindow : Window
         // only handles the plain hover-out case.
         if (_draggingScrubber) return;
         SetScrubberThumbState(hovered: false, dragging: false);
+        if (DateScrubberBubble is not null) DateScrubberBubble.Opacity = 0;
     }
 
     private async void OpenReplaySettingsButton_OnClick(object? sender, RoutedEventArgs e)

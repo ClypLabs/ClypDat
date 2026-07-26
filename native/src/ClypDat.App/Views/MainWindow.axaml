@@ -841,14 +841,14 @@
                       Width="4"
                       CornerRadius="2"
                       Background="#141C24"
-                      HorizontalAlignment="Right"
+                      HorizontalAlignment="Left"
                       IsHitTestVisible="False" />
 
               <Canvas x:Name="DateScrubberCanvas" ClipToBounds="False">
                 <!-- Grows from its own centre on hover/drag (scaleX, so the
                      width change animates - Width itself can't transition). -->
                 <Border x:Name="DateScrubberThumb"
-                        Canvas.Left="12"
+                        Canvas.Left="0"
                         Width="4"
                         MinHeight="34"
                         CornerRadius="2"
