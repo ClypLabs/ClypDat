@@ -424,7 +424,11 @@
                    even with no limit set (the second reads "No Limit"), so
                    the current setting is legible without opening the flyout. -->
               <StackPanel Spacing="1">
-                <Panel Width="30" Height="30" HorizontalAlignment="Center">
+                <!-- 2px below the ring on top of the stack's own 1px spacing:
+                     the figures sat close enough to the circle to read as
+                     touching it. Only the ring carries it, so the two text
+                     lines stay tight to each other. -->
+                <Panel Width="30" Height="30" HorizontalAlignment="Center" Margin="0,0,0,2">
                   <Ellipse Width="30" Height="30" Stroke="#3E4C5A" StrokeThickness="2.5" />
                   <Path Data="{Binding LibraryStorageRingFraction, Converter={x:Static opconv:FractionToArcPathConverter.Instance}}"
                         Stroke="{Binding LibraryStorageRingBrush}" StrokeThickness="2.5" StrokeLineCap="Round" />
