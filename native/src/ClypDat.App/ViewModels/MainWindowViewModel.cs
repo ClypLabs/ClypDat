@@ -2541,23 +2541,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private (string Game, bool Inferred) ResolveLibraryGame(string videoPath, ClipInfo? info)
-    {
-        var (game, inferred) = ResolveLibraryGameCore(videoPath, info);
-        return (ApplyGameNameOverride(game), inferred);
-    }
-
-    // A rename is a display-name override, not an edit to anything on disk -
-    // the sidecars and folders keep whatever the library originally worked
-    // out, and this maps that to what the user wants to see. Every read of a
-    // game name goes through ResolveLibraryGame, so one lookup here covers the
-    // cards, the filters, the heading and the icon key.
-    private string ApplyGameNameOverride(string game) =>
-        Settings.GameDisplayNameOverrides.TryGetValue(game, out var renamed) && !string.IsNullOrWhiteSpace(renamed)
-            ? renamed
-            : game;
-
-    private static (string Game, bool Inferred) ResolveLibraryGameCore(string videoPath, ClipInfo? info)
+    // Renames rewrite the sidecars and folders themselves (RenameGameAsync),
+    // so there's no display-name mapping layered on top - what the library
+    // shows is what's actually on disk.
+    private static (string Game, bool Inferred) ResolveLibraryGame(string videoPath, ClipInfo? info)
     {
         if (!string.IsNullOrWhiteSpace(info?.GameDisplayName) && !MedalImportService.IsStructuralFolderName(info.GameDisplayName))
         {
@@ -3970,42 +3957,134 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public void ToggleGameListExpanded() => IsGameListExpanded = !IsGameListExpanded;
 
     /// <summary>
-    /// Renames a game everywhere it's shown, without touching the clips. The
-    /// override is keyed by the name the library worked out for itself, so
-    /// renaming the same game a second time updates the existing entry rather
-    /// than stacking a second one that would never match anything. Renaming it
-    /// back to its original name drops the override entirely.
+    /// Renames a game for real: every clip of it moves into the new game's
+    /// folder under a filename built from the new name, its sidecar's stored
+    /// game is rewritten, and the settings that reference the old name follow.
+    /// A display-only override would have been far less work, but it leaves
+    /// the library on disk saying something different to the library on
+    /// screen - and the folder names are what a user browsing their clips in
+    /// Explorer actually sees.
+    ///
+    /// Per-clip failures (a file open in another program, a permission
+    /// problem) are counted and reported rather than aborting the rest: a
+    /// half-renamed game still shows both names and can simply be renamed
+    /// again.
     /// </summary>
-    public async Task RenameGameAsync(string currentName, string newName)
+    public async Task<(int Renamed, int Failed)> RenameGameAsync(string currentName, string newName)
     {
         newName = newName?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(currentName) || string.IsNullOrWhiteSpace(newName)) return;
-        if (string.Equals(currentName, newName, StringComparison.Ordinal)) return;
+        if (string.IsNullOrWhiteSpace(currentName) || string.IsNullOrWhiteSpace(newName)) return (0, 0);
+        if (string.Equals(currentName, newName, StringComparison.Ordinal)) return (0, 0);
 
-        // currentName is what's on screen, which for an already-renamed game is
-        // the override's VALUE - the original name is the key it's stored under.
-        var originalName = Settings.GameDisplayNameOverrides
-            .FirstOrDefault(pair => string.Equals(pair.Value, currentName, StringComparison.OrdinalIgnoreCase)).Key
-            ?? currentName;
+        var libraryRoot = Settings.LibraryFolder;
+        if (string.IsNullOrWhiteSpace(libraryRoot) || !Directory.Exists(libraryRoot)) return (0, 0);
 
-        if (string.Equals(originalName, newName, StringComparison.OrdinalIgnoreCase))
+        var targets = AllClips
+            .Where(clip => string.Equals(clip.GameFilterKey, currentName, StringComparison.OrdinalIgnoreCase))
+            .Select(clip => (clip.Path, clip.Duration))
+            .ToArray();
+
+        var renamed = 0;
+        var failed = 0;
+
+        foreach (var (path, knownDuration) in targets)
         {
-            Settings.GameDisplayNameOverrides.Remove(originalName);
+            try
+            {
+                if (!File.Exists(path)) continue;
+
+                // Duration decides Clips/ vs VODs/, so it has to be right even
+                // for a clip hydration hasn't reached yet.
+                var duration = knownDuration > TimeSpan.Zero ? knownDuration : await _mediaProbe.GetDurationAsync(path);
+                var info = ClipInfoSidecar.Load(libraryRoot, path);
+                var timestamp = info?.CapturedAt?.LocalDateTime ?? File.GetCreationTime(path);
+                var title = string.IsNullOrWhiteSpace(info?.FileTitle)
+                    ? ClipFileNaming.StripTimestampSuffix(Path.GetFileNameWithoutExtension(path))
+                    : info.FileTitle;
+
+                var destinationDirectory = LibraryLayout.VideoDirectory(libraryRoot, duration, newName);
+                Directory.CreateDirectory(destinationDirectory);
+                var fileName = ClipFileNaming.BuildFileName(title, timestamp, Path.GetExtension(path), Settings.ClipFileNameScheme, Settings.CustomClipFileNameTemplate, newName);
+                var desiredPath = Path.Combine(destinationDirectory, fileName);
+                var destinationPath = string.Equals(path, desiredPath, StringComparison.OrdinalIgnoreCase)
+                    ? path
+                    : ClipFileNaming.BuildUniquePath(destinationDirectory, fileName);
+
+                if (!string.Equals(path, destinationPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Move(path, destinationPath);
+                    MoveClipSidecars(path, destinationPath);
+                    _mediaProbe.DeleteCacheFor(path);
+                    if (Settings.ClipEdits.Remove(ClipEditKey(path), out var edit)) Settings.ClipEdits[ClipEditKey(destinationPath)] = edit;
+                    // Same marker AddOrUpdateLibraryClipAsync uses: the folder
+                    // watcher will see every one of these moves, and the
+                    // refresh at the end of this method already covers them.
+                    _recentlySelfAddedPaths[destinationPath] = DateTime.UtcNow;
+                    _recentlySelfAddedPaths[path] = DateTime.UtcNow;
+                }
+
+                ClipInfoSidecar.Save(libraryRoot, destinationPath, new ClipInfo(
+                    newName,
+                    info?.AutoClipEventType,
+                    title,
+                    info?.CapturedAt?.LocalDateTime ?? timestamp,
+                    info?.MedalImportKey));
+                renamed++;
+            }
+            catch (Exception error)
+            {
+                AppLog.Error($"Game rename: failed moving {path}", error);
+                failed++;
+            }
         }
-        else
+
+        // Anything else holding the old name. The capture-backend rows are
+        // keyed by executable, so only their label needs rewriting.
+        foreach (var over in Settings.GameCaptureOverrides.Where(row => string.Equals(row.DisplayName, currentName, StringComparison.OrdinalIgnoreCase)))
         {
-            Settings.GameDisplayNameOverrides[originalName] = newName;
+            over.DisplayName = newName;
+        }
+
+        // Any display-only override left over from before renames moved files.
+        Settings.GameDisplayNameOverrides.Remove(currentName);
+        foreach (var stale in Settings.GameDisplayNameOverrides
+                     .Where(pair => string.Equals(pair.Value, currentName, StringComparison.OrdinalIgnoreCase))
+                     .Select(pair => pair.Key)
+                     .ToArray())
+        {
+            Settings.GameDisplayNameOverrides.Remove(stale);
         }
 
         // The icon cache is keyed by display name, so carry the artwork across
-        // rather than making the new name go and resolve itself from scratch -
-        // which for a renamed game usually finds nothing, the rename often
-        // being the thing that made the name unrecognisable to a store search.
+        // rather than making the new name resolve from scratch - which for a
+        // renamed game often finds nothing, the rename frequently being the
+        // thing that made the old name unrecognisable in the first place.
         GameIconService.CopyCachedIcon(currentName, newName);
 
+        // The game's own folders are left behind empty by the moves above.
+        RemoveEmptyGameFolder(LibraryLayout.VideoDirectory(libraryRoot, TimeSpan.Zero, currentName));
+        RemoveEmptyGameFolder(LibraryLayout.VodDirectory(libraryRoot, currentName));
+
+        RebuildGameCaptureRows();
         SaveSettings();
-        AppLog.Info($"Game renamed: '{originalName}' shown as '{newName}'.");
+        AppLog.Info($"Game renamed: '{currentName}' -> '{newName}' ({renamed} clips moved, {failed} failed).");
         await RefreshLibraryAsync();
+        return (renamed, failed);
+    }
+
+    private static void RemoveEmptyGameFolder(string directory)
+    {
+        try
+        {
+            if (Directory.Exists(directory) && !Directory.EnumerateFileSystemEntries(directory).Any())
+            {
+                Directory.Delete(directory);
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Game rename: could not remove empty folder {directory}", error);
+        }
     }
 
     private bool _isRefreshingGameIcons;
