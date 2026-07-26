@@ -2541,7 +2541,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private static (string Game, bool Inferred) ResolveLibraryGame(string videoPath, ClipInfo? info)
+    private (string Game, bool Inferred) ResolveLibraryGame(string videoPath, ClipInfo? info)
+    {
+        var (game, inferred) = ResolveLibraryGameCore(videoPath, info);
+        return (ApplyGameNameOverride(game), inferred);
+    }
+
+    // A rename is a display-name override, not an edit to anything on disk -
+    // the sidecars and folders keep whatever the library originally worked
+    // out, and this maps that to what the user wants to see. Every read of a
+    // game name goes through ResolveLibraryGame, so one lookup here covers the
+    // cards, the filters, the heading and the icon key.
+    private string ApplyGameNameOverride(string game) =>
+        Settings.GameDisplayNameOverrides.TryGetValue(game, out var renamed) && !string.IsNullOrWhiteSpace(renamed)
+            ? renamed
+            : game;
+
+    private static (string Game, bool Inferred) ResolveLibraryGameCore(string videoPath, ClipInfo? info)
     {
         if (!string.IsNullOrWhiteSpace(info?.GameDisplayName) && !MedalImportService.IsStructuralFolderName(info.GameDisplayName))
         {
@@ -3952,6 +3968,45 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public void ToggleGameListExpanded() => IsGameListExpanded = !IsGameListExpanded;
+
+    /// <summary>
+    /// Renames a game everywhere it's shown, without touching the clips. The
+    /// override is keyed by the name the library worked out for itself, so
+    /// renaming the same game a second time updates the existing entry rather
+    /// than stacking a second one that would never match anything. Renaming it
+    /// back to its original name drops the override entirely.
+    /// </summary>
+    public async Task RenameGameAsync(string currentName, string newName)
+    {
+        newName = newName?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(currentName) || string.IsNullOrWhiteSpace(newName)) return;
+        if (string.Equals(currentName, newName, StringComparison.Ordinal)) return;
+
+        // currentName is what's on screen, which for an already-renamed game is
+        // the override's VALUE - the original name is the key it's stored under.
+        var originalName = Settings.GameDisplayNameOverrides
+            .FirstOrDefault(pair => string.Equals(pair.Value, currentName, StringComparison.OrdinalIgnoreCase)).Key
+            ?? currentName;
+
+        if (string.Equals(originalName, newName, StringComparison.OrdinalIgnoreCase))
+        {
+            Settings.GameDisplayNameOverrides.Remove(originalName);
+        }
+        else
+        {
+            Settings.GameDisplayNameOverrides[originalName] = newName;
+        }
+
+        // The icon cache is keyed by display name, so carry the artwork across
+        // rather than making the new name go and resolve itself from scratch -
+        // which for a renamed game usually finds nothing, the rename often
+        // being the thing that made the name unrecognisable to a store search.
+        GameIconService.CopyCachedIcon(currentName, newName);
+
+        SaveSettings();
+        AppLog.Info($"Game renamed: '{originalName}' shown as '{newName}'.");
+        await RefreshLibraryAsync();
+    }
 
     private bool _isRefreshingGameIcons;
     private string _gameIconRefreshStatus = string.Empty;
