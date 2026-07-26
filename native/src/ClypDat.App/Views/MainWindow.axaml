@@ -296,7 +296,7 @@
                                UniformToFill lets that square art sit edge to edge
                                in the tile. -->
                           <Border Width="30" Height="30" CornerRadius="8" ClipToBounds="True" IsVisible="{Binding HasIcon}">
-                            <Image Source="{Binding Icon}" Width="30" Height="30" Stretch="UniformToFill" />
+                            <Image Source="{Binding Icon}" Width="30" Height="30" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center" />
                           </Border>
                         </Panel>
                       </Button>
@@ -396,7 +396,7 @@
                                     <TextBlock Text="{Binding Key, Converter={x:Static opconv:FirstLetterConverter.Instance}}" FontWeight="Bold" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                   </Border>
                                   <Border Width="30" Height="30" CornerRadius="8" ClipToBounds="True" IsVisible="{Binding HasIcon}">
-                                    <Image Source="{Binding Icon}" Width="30" Height="30" Stretch="UniformToFill" />
+                                    <Image Source="{Binding Icon}" Width="30" Height="30" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                   </Border>
                                 </Panel>
                               </Button>
@@ -690,11 +690,11 @@
                             PointerEntered="ClipCard_OnPointerEntered"
                             PointerExited="ClipCard_OnPointerExited">
                       <Border.ContextMenu>
-                        <ContextMenu Opening="ClipContextMenu_OnOpening">
+                        <ContextMenu>
                           <MenuItem Header="Export" Click="ClipContextExport_OnClick" />
                           <MenuItem Header="Open" Click="ClipContextOpen_OnClick" />
                           <MenuItem Header="{Binding RenameActionLabel}" Click="ClipContextRename_OnClick" />
-                          <MenuItem Header="{Binding SetGameActionLabel}" IsVisible="{Binding CanChangeGame}" Tag="ChangeGame" Click="ClipContextSetGame_OnClick" />
+                          <MenuItem Header="{Binding SetGameActionLabel}" IsVisible="{Binding CanChangeGame}" Click="ClipContextSetGame_OnClick" />
                           <MenuItem Header="Open file location" Click="ClipContextOpenLocation_OnClick" />
                           <Separator />
                           <MenuItem Header="Delete" Click="ClipContextDelete_OnClick" Foreground="#D85E61" />
