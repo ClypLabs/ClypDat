@@ -14,7 +14,7 @@
     <!-- Hovering an UNselected rail button: the same accent wash as the
          selection tints, mixed much further down into the rail so it reads as
          "you're over this" rather than "this is chosen". -->
-    <SolidColorBrush x:Key="AccentHoverBrush" Color="#1A1F33" />
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="#2C3568" />
   </Application.Resources>
   <Application.Styles>
     <FluentTheme />

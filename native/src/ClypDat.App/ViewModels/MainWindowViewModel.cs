@@ -481,7 +481,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         : 0;
     public string LibraryClipsUsageDisplay => $"ClypDat clips: {FormatBytes(LibraryUsedBytes)} ({AllClips.Count} clips)";
     public string LibraryOtherUsageDisplay => HasDriveStats
-        ? $"Rest of PC: {FormatBytes(Math.Max(0, DriveStats.Total - DriveStats.Free - LibraryUsedBytes))}"
+        ? $"Rest of drive: {FormatBytes(Math.Max(0, DriveStats.Total - DriveStats.Free - LibraryUsedBytes))}"
         : string.Empty;
     // Rough "how many more clips could fit" estimate from this library's
     // own average clip size - meaningless with zero clips to average from.
@@ -3936,25 +3936,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<FilterOptionViewModel> GameFilterOptions { get; } = new();
     public ObservableCollection<FilterOptionViewModel> ClipTypeFilterOptions { get; } = new();
 
-    // How many games the sidebar rail shows inline before the rest move
-    // into its "more" flyout.
+    // How many games the sidebar rail shows inline before the rest fold into
+    // the automatic "More Games" folder.
     private const int TopGameRailCount = 5;
-    public ObservableCollection<FilterOptionViewModel> TopGameFilterOptions { get; } = new();
-    public ObservableCollection<FilterOptionViewModel> OverflowGameFilterOptions { get; } = new();
-    public bool HasOverflowGames => OverflowGameFilterOptions.Count > 0;
+    private const string AutomaticFolderId = "__more__";
 
-    private bool _isGameListExpanded;
-
-    // The rail's "more games" control expands the rail itself rather than
-    // opening a menu - the extra games are the same icon buttons, just
-    // revealed in place.
-    public bool IsGameListExpanded
-    {
-        get => _isGameListExpanded;
-        set => SetProperty(ref _isGameListExpanded, value);
-    }
-
-    public void ToggleGameListExpanded() => IsGameListExpanded = !IsGameListExpanded;
+    // What the sidebar rail actually renders, top to bottom: a mix of
+    // FilterOptionViewModel (a loose game) and GameRailFolderViewModel (a
+    // folder, expandable in place). Rebuilt by RebuildGameRail - see there for
+    // the automatic-vs-customised split.
+    public ObservableCollection<object> GameRailEntries { get; } = new();
 
     /// <summary>
     /// Renames a game for real: every clip of it moves into the new game's
@@ -4270,6 +4261,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (string.Equals(option.Key, gameKey, StringComparison.OrdinalIgnoreCase)) option.Icon = icon;
         }
+
+        // A folder's collapsed tile shows its FIRST game's icon, computed
+        // from Games[0] rather than observed live - if that first game is
+        // this one and its icon just landed, the folder needs telling
+        // directly, or the tile would sit on its fallback badge until
+        // something else happens to rebuild the whole rail.
+        foreach (var folder in GameRailEntries.OfType<GameRailFolderViewModel>())
+        {
+            if (folder.Games.Count > 0 && string.Equals(folder.Games[0].Key, gameKey, StringComparison.OrdinalIgnoreCase))
+            {
+                folder.NotifyGamesChanged();
+            }
+        }
     }
 
     public bool IsGameFilterActive => _activeGameFilters.Count > 0;
@@ -4309,16 +4313,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             });
         }
 
-        // Sidebar rail shows only the most-clipped few inline and hides the
-        // rest behind a "more" flyout, so a large library doesn't produce a
-        // rail taller than the window. These hold the SAME instances as
-        // GameFilterOptions (not copies) so SelectGameSection's pass over
-        // GameFilterOptions still drives their checked state.
-        TopGameFilterOptions.Clear();
-        OverflowGameFilterOptions.Clear();
-        foreach (var option in GameFilterOptions.Take(TopGameRailCount)) TopGameFilterOptions.Add(option);
-        foreach (var option in GameFilterOptions.Skip(TopGameRailCount)) OverflowGameFilterOptions.Add(option);
-        OnPropertyChanged(nameof(HasOverflowGames));
+        RebuildGameRail();
         RequestMissingGameIcons();
 
         // Same "(count)" suffix the game filter rows above already get.
@@ -4346,6 +4341,323 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsClipTypeFilterActive));
             OnPropertyChanged(nameof(LibraryTitle));
         }
+    }
+
+    // ---- Sidebar game rail: folders, ordering, drag/drop ------------------
+    //
+    // Two modes, chosen entirely by whether Settings.GameRailOrder has
+    // anything in it:
+    //
+    //  - Automatic (order empty): the rail is exactly what it always was -
+    //    the most-clipped few games inline, everything else folded into an
+    //    unnamed overflow folder. That folder is SYNTHETIC: it has no
+    //    GameRailFolder behind it in settings, can't be renamed, and rebuilds
+    //    itself from scratch (in clip-count order) every time. Nothing here
+    //    is persisted, so a library that's never been organised looks
+    //    identical to how it always did, just with the old expand-in-place
+    //    chevron replaced by a real (if temporary) folder tile.
+    //
+    //  - Customised (order non-empty): the rail renders Settings.GameRailOrder
+    //    literally - each token is either "game:<key>" (a loose game) or
+    //    "folder:<id>" (a real, persisted GameRailFolder). Any current game
+    //    that isn't mentioned by any token (new since the last customisation)
+    //    is appended at the end, so nothing a user organised can silently
+    //    swallow a game that shows up later.
+    //
+    // The switch from automatic to customised happens exactly once, the first
+    // time the user actually does something - see EnsureCustomOrderSeeded.
+    // Rendering itself (this method) never mutates settings.
+    private void RebuildGameRail()
+    {
+        var byKey = GameFilterOptions.ToDictionary(option => option.Key, StringComparer.OrdinalIgnoreCase);
+
+        GameRailEntries.Clear();
+
+        if (Settings.GameRailOrder.Count == 0)
+        {
+            foreach (var option in GameFilterOptions.Take(TopGameRailCount))
+            {
+                GameRailEntries.Add(option);
+            }
+
+            var overflow = GameFilterOptions.Skip(TopGameRailCount).ToArray();
+            if (overflow.Length > 0)
+            {
+                var automatic = new GameRailFolderViewModel(AutomaticFolderId, "More Games", isAutomatic: true);
+                foreach (var option in overflow) automatic.Games.Add(option);
+                automatic.NotifyGamesChanged();
+                GameRailEntries.Add(automatic);
+            }
+
+            return;
+        }
+
+        var placed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var token in Settings.GameRailOrder)
+        {
+            if (TryParseGameToken(token, out var gameKey))
+            {
+                if (!byKey.TryGetValue(gameKey, out var option) || !placed.Add(gameKey)) continue;
+                GameRailEntries.Add(option);
+            }
+            else if (TryParseFolderToken(token, out var folderId))
+            {
+                var folder = Settings.GameRailFolders.FirstOrDefault(f => string.Equals(f.Id, folderId, StringComparison.OrdinalIgnoreCase));
+                if (folder is null) continue;
+
+                var folderVm = new GameRailFolderViewModel(folder.Id, folder.Name, isAutomatic: false);
+                foreach (var key in folder.GameKeys)
+                {
+                    if (!byKey.TryGetValue(key, out var option) || !placed.Add(key)) continue;
+                    folderVm.Games.Add(option);
+                }
+                folderVm.NotifyGamesChanged();
+                // An empty folder (every game it held has since lost all its
+                // clips) still renders - deleting it out from under the user
+                // for something as transient as a clip count would be more
+                // surprising than a folder that's briefly empty.
+                GameRailEntries.Add(folderVm);
+            }
+        }
+
+        foreach (var option in GameFilterOptions)
+        {
+            if (placed.Add(option.Key)) GameRailEntries.Add(option);
+        }
+    }
+
+    // Which folder (if any) currently renders this game - drives the "Remove
+    // from folder" menu item's visibility and excludes a game's own folder
+    // from its "Move to folder" list. Reads the CURRENT render (GameRailEntries),
+    // so it answers correctly in both automatic and customised mode without
+    // caring which one is active.
+    public string? FindContainingFolderId(string gameKey) =>
+        GameRailEntries.OfType<GameRailFolderViewModel>()
+            .FirstOrDefault(folder => folder.Games.Any(game => string.Equals(game.Key, gameKey, StringComparison.OrdinalIgnoreCase)))
+            ?.Id;
+
+    private static bool TryParseGameToken(string token, out string key)
+    {
+        if (token.StartsWith("game:", StringComparison.Ordinal))
+        {
+            key = token["game:".Length..];
+            return true;
+        }
+        key = string.Empty;
+        return false;
+    }
+
+    private static bool TryParseFolderToken(string token, out string id)
+    {
+        if (token.StartsWith("folder:", StringComparison.Ordinal))
+        {
+            id = token["folder:".Length..];
+            return true;
+        }
+        id = string.Empty;
+        return false;
+    }
+
+    // Converts the automatic layout into a real, persisted one - a no-op once
+    // that's already happened. Called from every action that organises the
+    // rail (never from rendering), so simply looking at the sidebar never
+    // "customises" it, only touching it does. Returns the real folder ID that
+    // replaced the automatic overflow folder (AutomaticFolderId), so a caller
+    // that captured that sentinel ID from the UI before seeding can resolve
+    // it to the folder that actually exists afterward - see TranslateFolderId.
+    private string? EnsureCustomOrderSeeded()
+    {
+        if (Settings.GameRailOrder.Count > 0) return null;
+
+        var top = GameFilterOptions.Take(TopGameRailCount).ToArray();
+        var overflow = GameFilterOptions.Skip(TopGameRailCount).ToArray();
+
+        Settings.GameRailOrder = top.Select(option => "game:" + option.Key).ToList();
+        if (overflow.Length == 0) return null;
+
+        var folder = new GameRailFolder { Name = "More Games", GameKeys = overflow.Select(option => option.Key).ToList() };
+        Settings.GameRailFolders.Add(folder);
+        Settings.GameRailOrder.Add("folder:" + folder.Id);
+        return folder.Id;
+    }
+
+    private static string? TranslateFolderId(string? folderId, string? seededFolderId) =>
+        folderId == AutomaticFolderId ? seededFolderId : folderId;
+
+    private static string TranslateFolderToken(string token, string? seededFolderId) =>
+        seededFolderId is not null && string.Equals(token, "folder:" + AutomaticFolderId, StringComparison.Ordinal)
+            ? "folder:" + seededFolderId
+            : token;
+
+    /// <summary>
+    /// Moves one game to a specific spot on the rail - top-level (destinationFolderId
+    /// null) or inside a folder, before a given game (beforeGameKey) or at the
+    /// end. The single primitive behind every game-rail organising action:
+    /// reordering, filing into a folder, pulling out of one, and reordering
+    /// within one are all just different combinations of these two arguments.
+    /// </summary>
+    public void RelocateGame(string gameKey, string? destinationFolderId, string? beforeGameKey)
+    {
+        if (string.IsNullOrWhiteSpace(gameKey)) return;
+        var seededFolderId = EnsureCustomOrderSeeded();
+        destinationFolderId = TranslateFolderId(destinationFolderId, seededFolderId);
+
+        Settings.GameRailOrder.RemoveAll(token => TryParseGameToken(token, out var key) && string.Equals(key, gameKey, StringComparison.OrdinalIgnoreCase));
+        foreach (var folder in Settings.GameRailFolders)
+        {
+            folder.GameKeys.RemoveAll(key => string.Equals(key, gameKey, StringComparison.OrdinalIgnoreCase));
+        }
+        RemoveEmptyPersistedFolders();
+
+        if (destinationFolderId is null)
+        {
+            var token = "game:" + gameKey;
+            var index = beforeGameKey is null ? -1 : Settings.GameRailOrder.FindIndex(t => TryParseGameToken(t, out var key) && string.Equals(key, beforeGameKey, StringComparison.OrdinalIgnoreCase));
+            if (index < 0) index = beforeGameKey is null ? -1 : Settings.GameRailOrder.FindIndex(t => TryParseFolderToken(t, out var id) && ContainsGame(id, beforeGameKey));
+            if (index >= 0) Settings.GameRailOrder.Insert(index, token);
+            else Settings.GameRailOrder.Add(token);
+        }
+        else
+        {
+            var folder = Settings.GameRailFolders.FirstOrDefault(f => string.Equals(f.Id, destinationFolderId, StringComparison.OrdinalIgnoreCase));
+            if (folder is null) return;
+
+            EnsureFolderTokenPresent(folder.Id);
+            var index = beforeGameKey is null ? -1 : folder.GameKeys.FindIndex(key => string.Equals(key, beforeGameKey, StringComparison.OrdinalIgnoreCase));
+            if (index >= 0) folder.GameKeys.Insert(index, gameKey);
+            else folder.GameKeys.Add(gameKey);
+        }
+
+        SaveSettings();
+        RebuildGameRail();
+    }
+
+    private bool ContainsGame(string folderId, string gameKey) =>
+        Settings.GameRailFolders.Any(folder =>
+            string.Equals(folder.Id, folderId, StringComparison.OrdinalIgnoreCase) &&
+            folder.GameKeys.Any(key => string.Equals(key, gameKey, StringComparison.OrdinalIgnoreCase)));
+
+    private void EnsureFolderTokenPresent(string folderId)
+    {
+        var token = "folder:" + folderId;
+        if (!Settings.GameRailOrder.Any(t => string.Equals(t, token, StringComparison.OrdinalIgnoreCase)))
+        {
+            Settings.GameRailOrder.Add(token);
+        }
+    }
+
+    private void RemoveEmptyPersistedFolders()
+    {
+        var empty = Settings.GameRailFolders.Where(folder => folder.GameKeys.Count == 0).ToArray();
+        foreach (var folder in empty)
+        {
+            Settings.GameRailFolders.Remove(folder);
+            Settings.GameRailOrder.RemoveAll(token => TryParseFolderToken(token, out var id) && string.Equals(id, folder.Id, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    /// <summary>
+    /// Reorders a top-level entry (a loose game or a folder) relative to
+    /// another top-level entry. Folders never nest, so this only ever
+    /// operates on the top level - dragging a folder onto another folder
+    /// reorders them side by side rather than merging.
+    /// </summary>
+    public void RelocateTopLevelEntry(string sourceToken, string? beforeToken)
+    {
+        if (string.IsNullOrWhiteSpace(sourceToken) || string.Equals(sourceToken, beforeToken, StringComparison.OrdinalIgnoreCase)) return;
+        var seededFolderId = EnsureCustomOrderSeeded();
+        sourceToken = TranslateFolderToken(sourceToken, seededFolderId);
+        beforeToken = beforeToken is null ? null : TranslateFolderToken(beforeToken, seededFolderId);
+        if (string.Equals(sourceToken, beforeToken, StringComparison.OrdinalIgnoreCase)) return;
+
+        Settings.GameRailOrder.RemoveAll(t => string.Equals(t, sourceToken, StringComparison.OrdinalIgnoreCase));
+        var index = beforeToken is null ? -1 : Settings.GameRailOrder.FindIndex(t => string.Equals(t, beforeToken, StringComparison.OrdinalIgnoreCase));
+        if (index >= 0) Settings.GameRailOrder.Insert(index, sourceToken);
+        else Settings.GameRailOrder.Add(sourceToken);
+
+        SaveSettings();
+        RebuildGameRail();
+    }
+
+    /// <summary>
+    /// Creates a brand new folder holding the given games - the "New Folder"
+    /// context-menu action (a single game to start; more join later via each
+    /// game's own "Move to folder"). Dragging one game onto another reorders
+    /// instead of grouping - see GameRailGame_OnDrop's reasoning - so this
+    /// isn't reachable from a drag gesture, only the menu.
+    /// </summary>
+    public void CreateGameFolder(IReadOnlyList<string> gameKeys, string? name = null)
+    {
+        if (gameKeys.Count == 0) return;
+        EnsureCustomOrderSeeded();
+
+        var folder = new GameRailFolder
+        {
+            Name = string.IsNullOrWhiteSpace(name) ? gameKeys[0] : name.Trim(),
+        };
+        Settings.GameRailFolders.Add(folder);
+
+        // Anchor the new folder's rail position where the FIRST game being
+        // grouped used to sit, rather than at the end - dragging one icon
+        // onto another should feel like the pair merged in place, not like
+        // everything jumped to the back of the rail.
+        var anchorIndex = Settings.GameRailOrder.FindIndex(t => TryParseGameToken(t, out var key) && string.Equals(key, gameKeys[0], StringComparison.OrdinalIgnoreCase));
+
+        foreach (var gameKey in gameKeys)
+        {
+            Settings.GameRailOrder.RemoveAll(t => TryParseGameToken(t, out var key) && string.Equals(key, gameKey, StringComparison.OrdinalIgnoreCase));
+            foreach (var existing in Settings.GameRailFolders) existing.GameKeys.RemoveAll(key => string.Equals(key, gameKey, StringComparison.OrdinalIgnoreCase));
+            folder.GameKeys.Add(gameKey);
+        }
+        RemoveEmptyPersistedFolders();
+
+        var folderToken = "folder:" + folder.Id;
+        if (anchorIndex >= 0 && anchorIndex <= Settings.GameRailOrder.Count) Settings.GameRailOrder.Insert(anchorIndex, folderToken);
+        else Settings.GameRailOrder.Add(folderToken);
+
+        SaveSettings();
+        RebuildGameRail();
+    }
+
+    public void RenameGameFolder(string folderId, string newName)
+    {
+        newName = newName?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(newName)) return;
+
+        // The automatic overflow folder has nothing in settings to rename -
+        // naming it for real is itself an organising action.
+        var seededFolderId = EnsureCustomOrderSeeded();
+        folderId = TranslateFolderId(folderId, seededFolderId) ?? folderId;
+        var folder = Settings.GameRailFolders.FirstOrDefault(f => string.Equals(f.Id, folderId, StringComparison.OrdinalIgnoreCase));
+        if (folder is null) return;
+
+        folder.Name = newName;
+        SaveSettings();
+        RebuildGameRail();
+    }
+
+    /// <summary>
+    /// Ungroups a folder - every game it held goes back to the top level, in
+    /// the folder's own former position, in their former order within it.
+    /// </summary>
+    public void UngroupGameFolder(string folderId)
+    {
+        var seededFolderId = EnsureCustomOrderSeeded();
+        folderId = TranslateFolderId(folderId, seededFolderId) ?? folderId;
+        var folder = Settings.GameRailFolders.FirstOrDefault(f => string.Equals(f.Id, folderId, StringComparison.OrdinalIgnoreCase));
+        if (folder is null) return;
+
+        var folderToken = "folder:" + folder.Id;
+        var index = Settings.GameRailOrder.FindIndex(t => string.Equals(t, folderToken, StringComparison.OrdinalIgnoreCase));
+        if (index < 0) index = Settings.GameRailOrder.Count;
+        else Settings.GameRailOrder.RemoveAt(index);
+
+        Settings.GameRailFolders.Remove(folder);
+        var tokens = folder.GameKeys.Select(key => "game:" + key).ToList();
+        Settings.GameRailOrder.InsertRange(Math.Min(index, Settings.GameRailOrder.Count), tokens);
+
+        SaveSettings();
+        RebuildGameRail();
     }
 
     // Single-select nav (sidebar Games/Sections shortcuts) - unlike the
