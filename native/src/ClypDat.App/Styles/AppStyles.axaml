@@ -786,17 +786,18 @@
   <!-- Folder tiles permanently show the same tint a loose rail icon only
        shows on hover, so a folder stands out from a loose game icon at a
        glance - not the plain outer capsule background tried earlier, just
-       this. Hovering it for real goes one step stronger
-       (AccentSelectedHoverBrush, the same brush an active+hovered icon
-       already uses) so there's still a clear response to the cursor. Both
-       have to be declared AFTER Button.railIconButton's own base/hover
+       this. Has to be declared AFTER Button.railIconButton's own base/hover
        rules above to actually win - same same-specificity-loses-to-
-       declaration-order issue documented right above for :not(ToggleSwitch). -->
+       declaration-order issue documented right above for :not(ToggleSwitch).
+       Hovering it for real just dims the same tint (Opacity) rather than
+       swapping to AccentSelectedHoverBrush - that brush blends further
+       toward the dark rail background, which reads as turning grey rather
+       than a darker version of the same colour. -->
   <Style Selector="Button.railFolderHeader">
     <Setter Property="Background" Value="{StaticResource AccentHoverBrush}" />
   </Style>
   <Style Selector="Button.railFolderHeader:not(ToggleSwitch):pointerover">
-    <Setter Property="Background" Value="{StaticResource AccentSelectedHoverBrush}" />
+    <Setter Property="Opacity" Value="0.8" />
   </Style>
   <!-- Presses shrink slightly so a click registers physically even though
        nothing else about the button moves. -->
