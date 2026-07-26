@@ -3942,12 +3942,15 @@ public sealed partial class MainWindow : Window
         AppLog.Debug($"Editor hover bar: {state}.");
     }
 
-    // One rule: the pointer is somewhere over the video or over the bar, or
-    // the bar goes. No idle timer, no movement tracking, no "it stays while
-    // paused" special case - a still cursor over the picture keeps the
-    // controls up for as long as you leave it there. Both of the cleverer
-    // versions of this (idle-hide, and never hiding at all) were worse to
-    // actually use.
+    // One rule: the pointer is somewhere in the editor, or the bar goes.
+    //
+    // The zone is the whole editor pane, not the video rect. Scoping it to the
+    // picture meant the bar flapped constantly in ordinary use - the log for a
+    // single minute of editing shows a dozen show/hide cycles, every one of
+    // them the pointer moving between the video and the editor's own controls
+    // (the timeline below it at y~1900, the track panel to its right at
+    // x~3000) and straight back. Those are all "still using the player", so
+    // they no longer dismiss anything. Leave the editor entirely and it goes.
     private void PollEditorHoverControls()
     {
         if (ViewModel is null || !ViewModel.IsEditorVisible || ViewModel.IsVideoFullscreen || _playback is null)
@@ -3978,12 +3981,19 @@ public sealed partial class MainWindow : Window
 
         var videoTopLeft = EditorVideoHost.PointToScreen(new Point(0, 0));
         var videoBottomRight = EditorVideoHost.PointToScreen(new Point(EditorVideoHost.Bounds.Width, EditorVideoHost.Bounds.Height));
-        var overVideo = cursor.X >= videoTopLeft.X && cursor.X < videoBottomRight.X
-                        && cursor.Y >= videoTopLeft.Y && cursor.Y < videoBottomRight.Y;
 
-        // The bar hangs at the video's bottom edge, so this is mostly the same
-        // region - but it's checked separately so the bar counts as "here"
-        // even when a layout change has it sitting a pixel past the host.
+        // EditorRoot covers the video, the timeline and the side panels, so
+        // working anywhere in the editor counts as being here. Falls back to
+        // the video rect if it somehow has no bounds yet.
+        var zone = EditorRoot.Bounds is { Width: > 0, Height: > 0 } ? EditorRoot : (Control)EditorVideoHost;
+        var zoneTopLeft = zone.PointToScreen(new Point(0, 0));
+        var zoneBottomRight = zone.PointToScreen(new Point(zone.Bounds.Width, zone.Bounds.Height));
+        var overEditor = cursor.X >= zoneTopLeft.X && cursor.X < zoneBottomRight.X
+                         && cursor.Y >= zoneTopLeft.Y && cursor.Y < zoneBottomRight.Y;
+
+        // The bar is its own top-level window hanging at the video's bottom
+        // edge, and can extend a pixel past the pane it belongs to, so it's
+        // checked separately rather than assumed to be inside the zone.
         var overBar = false;
         if (_editorHoverControlsWindow is { IsVisible: true } existingBar)
         {
@@ -3994,7 +4004,7 @@ public sealed partial class MainWindow : Window
                       && cursor.Y >= barPos.Y && cursor.Y < barPos.Y + barHeightPx;
         }
 
-        if (overVideo || overBar)
+        if (overEditor || overBar)
         {
             _hoverControlsActiveUntilUtc = DateTime.UtcNow + HoverControlsGrace;
             ShowEditorHoverControls();
