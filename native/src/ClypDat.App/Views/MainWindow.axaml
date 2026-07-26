@@ -30,7 +30,11 @@
       <Grid ColumnDefinitions="Auto,*,Auto,Auto" Margin="12,2,0,0" VerticalAlignment="Center">
         <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
           <Button Classes="brandButton" Padding="6" Click="LibraryHomeButton_OnClick" ToolTip.Tip="Library">
-            <Image Source="/Assets/clypdat-icon-24.png" Width="26" Height="26" />
+            <!-- clypdat-icon-24.png at 26px was barely-upscaled from an
+                 already-tiny, fairly compressed source - looked soft/muddy.
+                 A bigger source (128px exists) downscaled to the same
+                 on-screen size renders far crisper. -->
+            <Image Source="/Assets/clypdat-icon-128.png" Width="26" Height="26" />
           </Button>
           <Button x:Name="BackNavButton" Classes="linkButton" Click="BackNavButton_OnClick" ToolTip.Tip="Back" Padding="6" Margin="6,0,0,0">
             <PathIcon Data="M15.41,7.41L14,6l-6,6l6,6l1.41-1.41L10.83,12L15.41,7.41z" Width="16" Height="16" />
