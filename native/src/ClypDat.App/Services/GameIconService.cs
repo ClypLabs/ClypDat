@@ -192,9 +192,9 @@ public static class GameIconService
 
     // Steam's own app icon - the same square artwork Steam puts on a desktop
     // shortcut and the taskbar, which is what a small round badge wants.
-    // Deliberately NOT the store capsule or a wordmark logo: those are wide
-    // title art that reads as an unrecognisable crop (or an invisible dark
-    // wordmark) at 30px.
+    // Some newer Steam apps expose an icon hash through ICommunityService
+    // while no longer serving that legacy image URL. In that case use the
+    // app's current header image rather than dropping back to a letter badge.
     //
     // Two keyless calls: the store search resolves a name to an appid, then
     // ICommunityService/GetApps gives that app's icon hash, which addresses the
@@ -228,10 +228,31 @@ public static class GameIconService
             if (!app.TryGetProperty("icon", out var iconElement)) continue;
             var hash = iconElement.GetString();
             if (string.IsNullOrWhiteSpace(hash)) continue;
-            return $"https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{appId}/{hash}.jpg";
+            var iconUrl = $"https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{appId}/{hash}.jpg";
+            using var iconResponse = await client.SendAsync(
+                new HttpRequestMessage(HttpMethod.Head, iconUrl),
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
+            if (iconResponse.StatusCode != System.Net.HttpStatusCode.NotFound) return iconUrl;
         }
 
-        return null;
+        return await ResolveSteamHeaderImageUrlAsync(client, appId, cancellationToken);
+    }
+
+    private static async Task<string?> ResolveSteamHeaderImageUrlAsync(HttpClient client, int appId, CancellationToken cancellationToken)
+    {
+        var json = await client.GetStringAsync(
+            $"https://store.steampowered.com/api/appdetails?appids={appId}&cc=us&l=en",
+            cancellationToken);
+
+        using var document = JsonDocument.Parse(json);
+        if (!document.RootElement.TryGetProperty(appId.ToString(), out var appDetails)) return null;
+        if (!appDetails.TryGetProperty("success", out var success) || !success.GetBoolean()) return null;
+        if (!appDetails.TryGetProperty("data", out var data)) return null;
+        if (!data.TryGetProperty("header_image", out var headerImage)) return null;
+
+        var url = headerImage.GetString();
+        return !string.IsNullOrWhiteSpace(url) && IsAllowedIconUrl(url) ? url : null;
     }
 
     // Words that mark a store entry as something other than the game itself.
