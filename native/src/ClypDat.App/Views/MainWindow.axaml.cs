@@ -430,6 +430,18 @@ public sealed partial class MainWindow : Window
         ViewModel?.ToggleGameListExpanded();
     }
 
+    private async void RenameGameMenuItem_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        // The MenuItem inherits the rail button's DataContext, which is the
+        // filter row for that game.
+        if ((sender as Control)?.DataContext is not FilterOptionViewModel option) return;
+
+        var newName = await PromptRenameAsync(option.Key, "Rename game", "Game name");
+        if (string.IsNullOrWhiteSpace(newName)) return;
+        await ViewModel.RenameGameAsync(option.Key, newName);
+    }
+
     private async void RefreshGameIconsButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
@@ -2946,14 +2958,14 @@ public sealed partial class MainWindow : Window
         await dialog.ShowDialog<bool>(this);
     }
 
-    private async Task<string?> PromptRenameAsync(string currentTitle)
+    private async Task<string?> PromptRenameAsync(string currentTitle, string heading = "Rename clip", string watermark = "Clip title")
     {
-        var (window, body) = CreateChromelessDialog("Rename clip");
+        var (window, body) = CreateChromelessDialog(heading);
 
         var textBox = new TextBox
         {
             Text = currentTitle,
-            Watermark = "Clip title"
+            Watermark = watermark
         };
 
         var rename = new Button
@@ -2985,7 +2997,7 @@ public sealed partial class MainWindow : Window
 
         body.Children.Add(new TextBlock
         {
-            Text = "Rename clip",
+            Text = heading,
             Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
             FontWeight = Avalonia.Media.FontWeight.Bold,
             FontSize = 18

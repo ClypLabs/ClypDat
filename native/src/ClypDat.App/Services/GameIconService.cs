@@ -315,6 +315,30 @@ public static class GameIconService
         return removed;
     }
 
+    /// <summary>
+    /// Carries a cached icon over to a new display name (a user rename). The
+    /// cache is keyed by name, so without this a renamed game loses its
+    /// artwork and has to resolve again under a name a store search is even
+    /// less likely to recognise. Leaves an existing icon at the destination
+    /// alone.
+    /// </summary>
+    public static void CopyCachedIcon(string fromDisplayName, string toDisplayName)
+    {
+        if (string.IsNullOrWhiteSpace(fromDisplayName) || string.IsNullOrWhiteSpace(toDisplayName)) return;
+        try
+        {
+            var source = CachePathFor(fromDisplayName);
+            var destination = CachePathFor(toDisplayName);
+            if (!File.Exists(source) || File.Exists(destination)) return;
+            Directory.CreateDirectory(CacheFolder);
+            File.Copy(source, destination);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Game icon copy failed for '{fromDisplayName}' -> '{toDisplayName}'", error);
+        }
+    }
+
     public static Bitmap? TryLoad(string displayName)
     {
         if (string.IsNullOrWhiteSpace(displayName)) return null;

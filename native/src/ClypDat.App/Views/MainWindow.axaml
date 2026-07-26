@@ -247,6 +247,15 @@
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
                     <Button Classes="railIconButton railGameButton" Classes.active="{Binding IsChecked}" Click="LibraryGameSectionButton_OnClick" ToolTip.Tip="{Binding Label}">
+                      <!-- Right-click to rename: games named after an
+                           executable ("RocketLeague") or a Medal folder are
+                           common enough to want fixing, and the rail is the
+                           only place games are listed. -->
+                      <Button.ContextMenu>
+                        <ContextMenu>
+                          <MenuItem Header="Rename game..." Click="RenameGameMenuItem_OnClick" />
+                        </ContextMenu>
+                      </Button.ContextMenu>
                       <Panel Width="30" Height="30">
                         <!-- Initial badge is the fallback for a game whose
                              executable icon hasn't been captured yet (it can
@@ -289,6 +298,15 @@
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
                     <Button Classes="railIconButton railGameButton" Classes.active="{Binding IsChecked}" Click="LibraryGameSectionButton_OnClick" ToolTip.Tip="{Binding Label}">
+                      <!-- Right-click to rename: games named after an
+                           executable ("RocketLeague") or a Medal folder are
+                           common enough to want fixing, and the rail is the
+                           only place games are listed. -->
+                      <Button.ContextMenu>
+                        <ContextMenu>
+                          <MenuItem Header="Rename game..." Click="RenameGameMenuItem_OnClick" />
+                        </ContextMenu>
+                      </Button.ContextMenu>
                       <Panel Width="30" Height="30">
                         <Border Classes="gameInitialBadge" Width="30" Height="30" CornerRadius="8" IsVisible="{Binding !HasIcon}">
                           <TextBlock Text="{Binding Key, Converter={x:Static opconv:FirstLetterConverter.Instance}}" FontWeight="Bold" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center" />

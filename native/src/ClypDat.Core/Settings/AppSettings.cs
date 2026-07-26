@@ -72,6 +72,13 @@ public sealed class AppSettings
     // single-select within each group; stacking several games at once is what
     // the Game Filters dropdown is for.
     public bool CombineSidebarFilters { get; set; }
+    // User-chosen display names for games, keyed by the name the library
+    // resolved on its own (an executable name for a game the catalog doesn't
+    // know, a Medal folder name, a detected title). Applied wherever a game
+    // name is read, so a rename follows through to the sidebar, the filters,
+    // the Library heading and the key its icon is looked up under - without
+    // touching a single file on disk.
+    public Dictionary<string, string> GameDisplayNameOverrides { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public string ClipOverlayPosition { get; set; } = "Top Right";
     public string ClipOverlayVolume { get; set; } = "Medium";
     // Editor's master output volume (fullscreen playbar slider) - separate
