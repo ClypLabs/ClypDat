@@ -327,6 +327,7 @@
                                filtering - grouping is organisational, not
                                itself a filter. -->
                           <Button Classes="railIconButton railGameButton railFolderHeader"
+                                  Classes.expanded="{Binding IsExpanded}"
                                   Click="GameRailFolder_OnClick"
                                   ToolTip.Tip="{Binding Name}">
                             <Button.ContextMenu>
