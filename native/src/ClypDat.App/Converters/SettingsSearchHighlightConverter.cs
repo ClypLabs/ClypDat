@@ -1,12 +1,16 @@
 using System.Globalization;
+using System.Linq;
 using Avalonia.Data.Converters;
 
 namespace ClypDat.App.Converters;
 
 // Bound value is MainWindowViewModel.SettingsSearchText, ConverterParameter is
-// a specific setting's own label text. Empty query matches everything (so
+// a specific setting's own label text - or several, '|'-separated, when the
+// element being bound is a settingsCard shared by more than one setting (the
+// card as a whole should only disappear once NONE of its settings match, not
+// the instant any single one stops). Empty query matches everything (so
 // Settings looks completely normal until the user actually searches); a
-// non-empty query matches only settings whose label actually contains it -
+// non-empty query matches if ANY of the '|'-separated labels contains it -
 // bound to each setting's row-wrapping element's IsVisible, so searching
 // narrows the page down to just what's relevant instead of leaving
 // everything on screen and only highlighting a match (see SettingsHighlight
@@ -21,8 +25,8 @@ public sealed class SettingsSearchHighlightConverter : IValueConverter
         var query = (value as string)?.Trim() ?? string.Empty;
         if (query.Length == 0) return true;
 
-        var label = parameter as string ?? string.Empty;
-        return label.Contains(query, StringComparison.OrdinalIgnoreCase);
+        var labels = (parameter as string ?? string.Empty).Split('|');
+        return labels.Any(label => label.Contains(query, StringComparison.OrdinalIgnoreCase));
     }
 
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
