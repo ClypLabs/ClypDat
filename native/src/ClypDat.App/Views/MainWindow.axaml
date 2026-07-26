@@ -359,10 +359,17 @@
                                    (same convention Discord uses for a big
                                    folder). -->
                               <Panel IsVisible="{Binding ShowMosaic}">
-                                <Border Width="30" Height="30" CornerRadius="8" ClipToBounds="True" Background="#26323D" IsVisible="{Binding IsSingleGame}">
+                                <!-- Same cell size the other layouts use for a
+                                     single icon, sitting in its own natural
+                                     top-left slot - not stretched to fill the
+                                     whole 30x30 tile (where a 2nd icon would
+                                     otherwise go), matching the "never
+                                     stretch past its own cell" rule the 3-
+                                     game layout now follows too. -->
+                                <Border Width="14" Height="14" HorizontalAlignment="Left" VerticalAlignment="Top" CornerRadius="4" ClipToBounds="True" Background="#26323D" IsVisible="{Binding IsSingleGame}">
                                   <Panel>
                                     <Image Source="{Binding Slot1Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot1Icon}" />
-                                    <TextBlock Text="{Binding Slot1Initial}" FontWeight="Bold" FontSize="13" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot1Icon}" />
+                                    <TextBlock Text="{Binding Slot1Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot1Icon}" />
                                   </Panel>
                                 </Border>
 
