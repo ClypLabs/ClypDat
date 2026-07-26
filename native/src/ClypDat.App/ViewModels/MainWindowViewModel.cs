@@ -2578,6 +2578,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // invalidate one.
             ApplyGameFilters();
             ApplyClipTypeFilters();
+            ApplySearchFilter();
 
             NotifyLibraryChrome();
 
@@ -4295,6 +4296,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // filter instead of instantly dropping out of view into its new
         // game's own grouping.
         ApplyGameFilters();
+        ApplySearchFilter();
         NotifyLibraryChrome();
         OnPropertyChanged(nameof(LibraryTitle));
         AppLog.Info($"Clips filed under '{game}': {moved} moved, {failed} failed.");
@@ -4986,6 +4988,49 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             clip.IsMatchedByClipTypeFilter = _activeClipTypeFilters.Count == 0 || MatchesClipTypeFilter(clip);
         }
     }
+
+    private string _settingsSearchText = string.Empty;
+
+    // Filters the Settings nav list down to sections whose name matches -
+    // narrower than searching every control's own text (a much bigger
+    // undertaking), but a real, useful first cut at "find a setting" for
+    // whichever page it lives on.
+    public string SettingsSearchText
+    {
+        get => _settingsSearchText;
+        set => SetProperty(ref _settingsSearchText, value);
+    }
+
+    private string _librarySearchText = string.Empty;
+
+    // Free-text search across a clip's own title and game name - narrows the
+    // library the same way a game/clip-type filter does (ANDed together via
+    // IsVisibleInLibrary), rather than being a separate search results view.
+    public string LibrarySearchText
+    {
+        get => _librarySearchText;
+        set
+        {
+            if (!SetProperty(ref _librarySearchText, value)) return;
+            ApplySearchFilter();
+            OnPropertyChanged(nameof(LibraryTitle));
+        }
+    }
+
+    private void ApplySearchFilter()
+    {
+        var query = _librarySearchText.Trim();
+        foreach (var clip in AllClips)
+        {
+            clip.IsMatchedBySearch = query.Length == 0 || MatchesSearch(clip, query);
+        }
+    }
+
+    private static bool MatchesSearch(ClipCardViewModel clip, string query) =>
+        clip.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+        clip.TileTopLabel.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+        clip.TileMainLabel.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+        clip.GameFilterKey.Contains(query, StringComparison.OrdinalIgnoreCase);
 
     private bool MatchesClipTypeFilter(ClipCardViewModel clip)
     {

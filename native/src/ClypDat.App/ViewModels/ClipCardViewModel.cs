@@ -253,10 +253,24 @@ public sealed class ClipCardViewModel : ViewModelBase
         }
     }
 
-    // What the card's own Border.IsVisible binds to - both the game and
-    // clip-type filter groups have to match (AND across groups; each
-    // group's own set membership is an OR).
-    public bool IsVisibleInLibrary => IsMatchedByGameFilter && IsMatchedByClipTypeFilter;
+    private bool _isMatchedBySearch = true;
+
+    // Same shape again, for the library search box - toggled by
+    // MainWindowViewModel against the clip's title/game text.
+    public bool IsMatchedBySearch
+    {
+        get => _isMatchedBySearch;
+        set
+        {
+            if (!SetProperty(ref _isMatchedBySearch, value)) return;
+            OnPropertyChanged(nameof(IsVisibleInLibrary));
+        }
+    }
+
+    // What the card's own Border.IsVisible binds to - the game filter,
+    // clip-type filter, and search box all have to match (AND across
+    // groups; each checklist group's own set membership is an OR).
+    public bool IsVisibleInLibrary => IsMatchedByGameFilter && IsMatchedByClipTypeFilter && IsMatchedBySearch;
 
     public string PreviewImagePath
     {
