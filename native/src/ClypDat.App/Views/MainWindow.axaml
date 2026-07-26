@@ -764,7 +764,7 @@
                           <MenuItem Header="Export" Click="ClipContextExport_OnClick" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
                           <MenuItem Header="Open" Click="ClipContextOpen_OnClick" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
                           <MenuItem Header="{Binding RenameActionLabel}" Click="ClipContextRename_OnClick" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
-                          <MenuItem IsVisible="{Binding CanChangeGame}" PointerEntered="ClipContextSetGame_OnPointerEntered" StaysOpenOnClick="True">
+                          <MenuItem IsVisible="{Binding CanChangeGame}" PointerEntered="ClipContextSetGame_OnPointerEntered" PointerExited="ChangeGameFlyoutArea_OnPointerExited" StaysOpenOnClick="True">
                             <MenuItem.Header>
                               <Grid ColumnDefinitions="*,Auto">
                                 <TextBlock Grid.Column="0" Text="{Binding SetGameActionLabel}" VerticalAlignment="Center" />

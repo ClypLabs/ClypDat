@@ -1996,21 +1996,20 @@ public sealed partial class MainWindow : Window
         _changeGameFlyout?.Hide();
     }
 
-    // The actual fix for the above: the flyout's own content is the one
-    // thing still reliably receiving pointer-moved events (it holds the
-    // capture) - so it manually checks whether the current pointer position
-    // still falls over either the flyout itself or the "Change game" row
-    // that opened it, and closes itself the moment it's over neither
-    // (i.e. the cursor has moved on to some other row).
-    private void ChangeGameFlyoutContent_OnPointerMoved(object? sender, PointerEventArgs e)
+    // Keep the submenu open while crossing its trigger row and popup, but
+    // close it as soon as the pointer leaves both. Delay the check until the
+    // current pointer transition finishes so moving from the row into the
+    // popup does not close it between PointerExited and PointerEntered.
+    private void ChangeGameFlyoutArea_OnPointerExited(object? sender, PointerEventArgs e)
     {
-        if (_changeGameFlyout is null) return;
-        if (sender is not Control flyoutContent) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_changeGameFlyout is null) return;
+            if (_changeGameMenuItem?.IsPointerOver == true) return;
+            if (_changeGameFlyoutContent?.IsPointerOver == true) return;
 
-        var overFlyout = new Rect(flyoutContent.Bounds.Size).Contains(e.GetPosition(flyoutContent));
-        var overRow = _changeGameMenuItem is not null &&
-                      new Rect(_changeGameMenuItem.Bounds.Size).Contains(e.GetPosition(_changeGameMenuItem));
-        if (!overFlyout && !overRow) _changeGameFlyout.Hide();
+            _changeGameFlyout.Hide();
+        }, DispatcherPriority.Background);
     }
 
     private void ClipContextSetGame_OnPointerEntered(object? sender, PointerEventArgs e)
@@ -2061,7 +2060,7 @@ public sealed partial class MainWindow : Window
         }
 
         var flyoutContent = new ScrollViewer { MaxHeight = 320, Content = list };
-        flyoutContent.PointerMoved += ChangeGameFlyoutContent_OnPointerMoved;
+        flyoutContent.PointerExited += ChangeGameFlyoutArea_OnPointerExited;
         _changeGameFlyoutContent = flyoutContent;
         flyout.Content = flyoutContent;
 
