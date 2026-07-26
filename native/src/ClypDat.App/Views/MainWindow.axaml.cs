@@ -1128,17 +1128,34 @@ public sealed partial class MainWindow : Window
             _scrubberDates.Add((localDate.ToString(format).ToUpperInvariant(), offset.Value.Y, count));
         }
 
-        RebuildScrubberTicks();
+        // Ticks only actually exist in the visual tree while hovered (see
+        // DateScrubber_OnPointerEntered/Exited) - rebuilding N Border
+        // controls on every single call here otherwise meant every resize
+        // frame (trackHeight changes continuously while dragging the window
+        // edge, so the early "nothing changed" return above doesn't help)
+        // churned the whole tick set, which was visibly laggy on anything
+        // but a tiny library. Not hovered right now just means the data is
+        // stale for next time; ClearScrubberTicks() below (called from
+        // PointerExited) is what actually empties the canvas.
+        if (_scrubberHovered) RebuildScrubberTicks();
         HighlightCurrentScrubberDate();
+    }
+
+    private bool _scrubberHovered;
+
+    private void ClearScrubberTicks()
+    {
+        foreach (var tick in _scrubberTicks) DateScrubberCanvas.Children.Remove(tick);
+        _scrubberTicks.Clear();
     }
 
     // A thin line at each date's own track position - so the track itself
     // shows where each day's clips start, not just whichever single date the
-    // thumb or cursor currently happens to be over.
+    // thumb or cursor currently happens to be over. Only built while
+    // actually hovered - see the dirty-tracking comment above.
     private void RebuildScrubberTicks()
     {
-        foreach (var tick in _scrubberTicks) DateScrubberCanvas.Children.Remove(tick);
-        _scrubberTicks.Clear();
+        ClearScrubberTicks();
 
         foreach (var (_, contentY, _) in _scrubberDates)
         {
@@ -1150,7 +1167,7 @@ public sealed partial class MainWindow : Window
                 Background = Avalonia.Media.Brush.Parse("#3E4C5A"),
                 IsHitTestVisible = false
             };
-            Canvas.SetLeft(tick, 7);
+            Canvas.SetLeft(tick, 0);
             Canvas.SetTop(tick, ContentOffsetToTrackY(contentY) - 1);
             DateScrubberCanvas.Children.Add(tick);
             _scrubberTicks.Add(tick);
@@ -1361,6 +1378,8 @@ public sealed partial class MainWindow : Window
     private void DateScrubber_OnPointerEntered(object? sender, PointerEventArgs e)
     {
         if (_draggingScrubber) return;
+        _scrubberHovered = true;
+        RebuildScrubberTicks();
         SetScrubberThumbState(hovered: true, dragging: false);
         ShowHoverDateBubble(e.GetPosition(DateScrubberHost).Y);
     }
@@ -1370,6 +1389,8 @@ public sealed partial class MainWindow : Window
         // Pointer capture keeps a drag alive past the track's edges, so this
         // only handles the plain hover-out case.
         if (_draggingScrubber) return;
+        _scrubberHovered = false;
+        ClearScrubberTicks();
         SetScrubberThumbState(hovered: false, dragging: false);
         if (DateScrubberBubble is not null) DateScrubberBubble.Opacity = 0;
     }
