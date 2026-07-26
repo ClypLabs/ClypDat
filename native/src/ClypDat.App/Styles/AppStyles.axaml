@@ -725,8 +725,14 @@
     <Setter Property="CornerRadius" Value="0,16,16,0" />
     <Setter Property="Padding" Value="0,6,4,6" />
     <Setter Property="BorderThickness" Value="0,1.5,1.5,1.5" />
-    <Setter Property="BorderBrush" Value="Transparent" />
-    <Setter Property="Background" Value="Transparent" />
+    <!-- Not Colors.Transparent (#00FFFFFF - white at zero alpha): the
+         BrushTransition below then interpolates through visible white when
+         the folder opens instead of just fading the accent/dark fill in
+         (see windowChromeButton for the same fix). Not a perfect colour
+         match for AccentBrush (unknown until the user's Windows accent is
+         read), but a dark zero-alpha neutral is far closer than white. -->
+    <Setter Property="BorderBrush" Value="#00141D24" />
+    <Setter Property="Background" Value="#00141D24" />
     <Setter Property="Transitions">
       <Transitions>
         <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
@@ -804,7 +810,11 @@
        header tile's own permanent tint on top of that doubled up and looked
        muddy. Drop back to plain transparent while open. -->
   <Style Selector="Button.railFolderHeader.expanded">
-    <Setter Property="Background" Value="Transparent" />
+    <!-- Not Colors.Transparent (#00FFFFFF - white at zero alpha) - matches
+         the base railIconButton idle colour's own zero-alpha hex instead,
+         same reasoning as windowChromeButton, so opening the folder doesn't
+         flash white as this fades in over the permanent tint. -->
+    <Setter Property="Background" Value="#0026323D" />
   </Style>
   <!-- Presses shrink slightly so a click registers physically even though
        nothing else about the button moves. -->
@@ -842,7 +852,11 @@
        ordinary Buttons stand in, styled to read as menu rows rather than
        buttons. -->
   <Style Selector="Button.flyoutMenuItem">
-    <Setter Property="Background" Value="Transparent" />
+    <!-- Not Colors.Transparent (#00FFFFFF - white at zero alpha): the
+         generic Button style's own BrushTransition on Background then
+         interpolates through visible white on hover instead of just fading
+         the hover fill in (see windowChromeButton for the same fix). -->
+    <Setter Property="Background" Value="#0026323D" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="4" />
     <Setter Property="Padding" Value="10,7" />

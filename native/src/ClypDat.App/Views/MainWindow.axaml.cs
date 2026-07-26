@@ -678,12 +678,26 @@ public sealed partial class MainWindow : Window
 
         if (targetControl.DataContext is GameRailFolderViewModel targetFolder)
         {
-            // The whole folder tile means "file into me" regardless of zone -
-            // there's no "before/after" sub-position worth distinguishing on
-            // a target that's already a compressed group.
             if (TryParseGameRailGameToken(sourceToken, out var sourceGameKey))
             {
-                ViewModel.RelocateGame(sourceGameKey, targetFolder.Id, null);
+                // Only the middle band ("Merge") means "file into me" - top/
+                // bottom now reorder the game as a top-level entry relative
+                // to the folder instead, same as dropping it near a loose
+                // game already does. RelocateGame has no "before this
+                // FOLDER" targeting of its own, so this moves the game to
+                // top level first (also handles removing it from wherever
+                // it currently lives, including a different folder) and
+                // then repositions that top-level token precisely.
+                if (zone == GameDropZone.Merge)
+                {
+                    ViewModel.RelocateGame(sourceGameKey, targetFolder.Id, null);
+                }
+                else
+                {
+                    var beforeToken = zone == GameDropZone.After ? NextTopLevelTokenAfter("folder:" + targetFolder.Id) : "folder:" + targetFolder.Id;
+                    ViewModel.RelocateGame(sourceGameKey, null, null);
+                    ViewModel.RelocateTopLevelEntry("game:" + sourceGameKey, beforeToken);
+                }
             }
             else if (TryParseGameRailFolderToken(sourceToken, out var sourceFolderId) && !string.Equals(sourceFolderId, targetFolder.Id, StringComparison.OrdinalIgnoreCase))
             {
