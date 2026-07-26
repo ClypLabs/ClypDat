@@ -5,6 +5,7 @@ using System.Text.Json;
 using Avalonia;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
+using Microsoft.Win32;
 
 namespace ClypDat.App.Services;
 
@@ -101,6 +102,17 @@ public static class GameIconService
         var succeeded = false;
         try
         {
+            // Steam has already downloaded the exact small square icon it
+            // displays in its own client. Prefer it over any web asset: some
+            // recent games publish a stale community icon hash, while the
+            // local library cache is the artwork the player actually sees.
+            await RemoteGameIconsService.EnsureLoadedAsync(cancellationToken);
+            if (TryCacheSteamLibraryIcon(displayName))
+            {
+                succeeded = true;
+                return true;
+            }
+
             var cachePath = CachePathFor(displayName);
             if (File.Exists(cachePath))
             {
@@ -192,9 +204,6 @@ public static class GameIconService
 
     // Steam's own app icon - the same square artwork Steam puts on a desktop
     // shortcut and the taskbar, which is what a small round badge wants.
-    // Some newer Steam apps expose an icon hash through ICommunityService
-    // while no longer serving that legacy image URL. In that case use the
-    // app's current header image rather than dropping back to a letter badge.
     //
     // Two keyless calls: the store search resolves a name to an appid, then
     // ICommunityService/GetApps gives that app's icon hash, which addresses the
@@ -228,31 +237,39 @@ public static class GameIconService
             if (!app.TryGetProperty("icon", out var iconElement)) continue;
             var hash = iconElement.GetString();
             if (string.IsNullOrWhiteSpace(hash)) continue;
-            var iconUrl = $"https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{appId}/{hash}.jpg";
-            using var iconResponse = await client.SendAsync(
-                new HttpRequestMessage(HttpMethod.Head, iconUrl),
-                HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
-            if (iconResponse.StatusCode != System.Net.HttpStatusCode.NotFound) return iconUrl;
+            return $"https://shared.fastly.steamstatic.com/community_assets/images/apps/{appId}/{hash}.ico";
         }
 
-        return await ResolveSteamHeaderImageUrlAsync(client, appId, cancellationToken);
+        return null;
     }
 
-    private static async Task<string?> ResolveSteamHeaderImageUrlAsync(HttpClient client, int appId, CancellationToken cancellationToken)
+    private static bool TryCacheSteamLibraryIcon(string displayName)
     {
-        var json = await client.GetStringAsync(
-            $"https://store.steampowered.com/api/appdetails?appids={appId}&cc=us&l=en",
-            cancellationToken);
+        try
+        {
+            if (!RemoteGameIconsService.LoadCachedAppIds().TryGetValue(displayName, out var appId) || appId <= 0) return false;
 
-        using var document = JsonDocument.Parse(json);
-        if (!document.RootElement.TryGetProperty(appId.ToString(), out var appDetails)) return null;
-        if (!appDetails.TryGetProperty("success", out var success) || !success.GetBoolean()) return null;
-        if (!appDetails.TryGetProperty("data", out var data)) return null;
-        if (!data.TryGetProperty("header_image", out var headerImage)) return null;
+            using var steamKey = Registry.CurrentUser.OpenSubKey(@"Software\Valve\Steam");
+            var steamPath = steamKey?.GetValue("SteamPath") as string;
+            if (string.IsNullOrWhiteSpace(steamPath)) return false;
 
-        var url = headerImage.GetString();
-        return !string.IsNullOrWhiteSpace(url) && IsAllowedIconUrl(url) ? url : null;
+            var iconFolder = Path.Combine(steamPath, "appcache", "librarycache", appId.ToString());
+            var iconPath = Directory.Exists(iconFolder)
+                ? Directory.EnumerateFiles(iconFolder, "*.jpg", SearchOption.TopDirectoryOnly).FirstOrDefault()
+                : null;
+            if (iconPath is null) return false;
+
+            using var icon = new Bitmap(iconPath);
+            Directory.CreateDirectory(CacheFolder);
+            icon.Save(CachePathFor(displayName));
+            AppLog.Info($"Game icon copied from Steam library cache for '{displayName}'.");
+            return true;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Steam library icon lookup failed for '{displayName}' (non-fatal)", error);
+            return false;
+        }
     }
 
     // Words that mark a store entry as something other than the game itself.
