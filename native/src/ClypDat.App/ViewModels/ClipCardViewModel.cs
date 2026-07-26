@@ -194,6 +194,15 @@ public sealed class ClipCardViewModel : ViewModelBase
     // ClypDat-recorded and Medal-imported clips.
     public string GameFilterKey => _clipInfo?.GameDisplayName ?? TileTopLabel;
 
+    private string _setGameActionLabel = "Set game...";
+
+    // Mirrors RenameActionLabel for the "which game is this clip" action.
+    public string SetGameActionLabel
+    {
+        get => _setGameActionLabel;
+        set => SetProperty(ref _setGameActionLabel, value);
+    }
+
     private string _renameActionLabel = "Rename";
 
     // What this card's context-menu rename entry reads - "Rename All" once

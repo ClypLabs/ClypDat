@@ -1308,6 +1308,32 @@ public sealed partial class MainWindow : Window
         await RenameClipCardAsync(clip);
     }
 
+    // The way out of "Unknown Game" / "No game detected": detection had
+    // nothing to go on when these were captured, so they all pile into one
+    // bucket despite being from different games - which is also why this is
+    // per clip rather than a rename of the group.
+    private async void ClipContextSetGame_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
+
+        var selected = ViewModel.AllClips.Where(item => item.IsSelected).ToArray();
+        var targets = clip.IsSelected && selected.Length > 1 ? selected : new[] { clip };
+
+        var heading = targets.Length > 1 ? $"Set game for {targets.Length} clips" : "Set game";
+        // Prefilled with what it's filed under now, so correcting a spelling
+        // doesn't mean retyping the whole name.
+        var game = await PromptRenameAsync(clip.GameFilterKey, heading, "Game name");
+        if (string.IsNullOrWhiteSpace(game)) return;
+
+        var (moved, failed) = await ViewModel.SetClipsGameAsync(targets, game);
+        if (failed > 0)
+        {
+            await ShowMessageAsync(
+                "Some clips couldn't be moved",
+                $"Filed {moved} clip(s) under \"{game.Trim()}\", but {failed} could not be moved - they're probably open in another program.");
+        }
+    }
+
     private async Task RenameClipsAsync(IReadOnlyList<ClipCardViewModel> clips)
     {
         if (ViewModel is null || clips.Count == 0) return;
