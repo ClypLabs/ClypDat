@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Linq;
 using Avalonia.Data.Converters;
+using ClypDat.App.Services;
 
 namespace ClypDat.App.Converters;
 
@@ -9,6 +11,11 @@ namespace ClypDat.App.Converters;
 public sealed class SettingsSearchMatchConverter : IValueConverter
 {
     public static readonly SettingsSearchMatchConverter Instance = new();
+
+    // Declared before SectionKeywords - static field initializers run in
+    // declaration order, and SectionKeywords' own "Auto-Clip" entry reads
+    // this one.
+    private static readonly string[] AutoClipGameNames = AutoClipCatalog.Active.Select(game => game.Name).ToArray();
 
     // The individual setting names living on each section's own page -
     // matching only the section's own title (the original version of this)
@@ -45,7 +52,11 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         {
             "clip saved overlay", "Overlay position", "clip saved sound", "Sound volume"
         },
-        ["Auto-Clip"] = new[] { "Auto Capture Events" },
+        // Plus every individual game's own name (Counter-Strike 2, Dota 2,
+        // etc.) via AutoClipGameNames below - a per-game name never appears
+        // in the section's own static keyword list, since the catalog is
+        // the actual source of truth for what games exist.
+        ["Auto-Clip"] = new[] { "Auto Capture Events" }.Concat(AutoClipGameNames).ToArray(),
         ["Audio"] = new[]
         {
             "Chat Audio App", "Multiple apps", "Microphone", "Multiple mics",

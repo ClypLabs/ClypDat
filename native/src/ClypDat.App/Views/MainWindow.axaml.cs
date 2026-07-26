@@ -144,7 +144,18 @@ public sealed partial class MainWindow : Window
                     if (e.PropertyName == nameof(MainWindowViewModel.AutoClippingEnabled)) UpdateAutoClipStates();
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayBufferEnabled)) _ = ApplyReplayBufferEnabledAsync();
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
-                    if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
+                    if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY))
+                    {
+                        UpdateVideoTransform();
+                        // The click-catcher tracks EditorVideoView's on-screen
+                        // rect, which a zoom/pan RenderTransform changes -
+                        // without this it stayed sized/positioned for
+                        // whatever zoom level was active when it was last
+                        // shown, so clicks after zooming/panning could land
+                        // outside its (now stale) bounds and silently do
+                        // nothing.
+                        if (_videoClickCatcherWindow is { IsVisible: true } clickCatcher) RepositionVideoClickCatcher(clickCatcher);
+                    }
                     if (e.PropertyName is nameof(MainWindowViewModel.IsEditorVisible) or nameof(MainWindowViewModel.IsEditorVideoAreaVisible)) UpdateVideoClickCatcher();
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible)
                         or nameof(MainWindowViewModel.IsEditorVisible)
