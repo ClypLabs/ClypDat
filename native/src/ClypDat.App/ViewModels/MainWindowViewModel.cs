@@ -4202,6 +4202,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SaveSettings();
         ClearSelection();
         RecomputeGameFilterBadges();
+        // The moved clips are the SAME ClipCardViewModel instances (just
+        // UpdateMedia'd onto their new path/game above), not freshly built
+        // ones - their IsMatchedByGameFilter flag still reflects whichever
+        // game they matched BEFORE the move. Without this, a clip moved out
+        // of the game currently being filtered on stayed visible under that
+        // filter instead of instantly dropping out of view into its new
+        // game's own grouping.
+        ApplyGameFilters();
         NotifyLibraryChrome();
         OnPropertyChanged(nameof(LibraryTitle));
         AppLog.Info($"Clips filed under '{game}': {moved} moved, {failed} failed.");

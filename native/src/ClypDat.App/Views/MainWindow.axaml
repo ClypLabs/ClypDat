@@ -27,7 +27,7 @@
        sidebar render past the screen edge. -->
   <Grid x:Name="RootLayout" RowDefinitions="48,*">
     <Border Grid.Row="0" Background="#171F27" BorderBrush="#1E2A33" BorderThickness="0,0,0,1" PointerPressed="HeaderBar_OnPointerPressed">
-      <Grid ColumnDefinitions="Auto,*,Auto,Auto" Margin="12,1,0,0" VerticalAlignment="Center">
+      <Grid ColumnDefinitions="Auto,*,Auto,Auto" Margin="12,2,0,0" VerticalAlignment="Center">
         <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
           <Button Classes="brandButton" Padding="6" Click="LibraryHomeButton_OnClick" ToolTip.Tip="Library">
             <Image Source="/Assets/clypdat-icon-24.png" Width="26" Height="26" />
@@ -38,7 +38,7 @@
           <Button x:Name="ForwardNavButton" Classes="linkButton" Click="ForwardNavButton_OnClick" ToolTip.Tip="Forward" Padding="6">
             <PathIcon Data="M8.59,16.59L10,18l6-6l-6-6L8.59,7.41L13.17,12L8.59,16.59z" Width="16" Height="16" />
           </Button>
-          <Button Classes="linkButton" Click="RefreshButton_OnClick" ToolTip.Tip="Refresh library" Padding="6" Margin="4,0,0,0">
+          <Button Classes="linkButton" Click="RefreshButton_OnClick" ToolTip.Tip="Refresh library" Padding="6" Margin="4,0,0,0" IsVisible="{Binding IsLibraryVisible}">
             <PathIcon Data="M17.65,6.35C16.2,4.9,14.21,4,12,4c-4.42,0-7.99,3.58-7.99,8s3.57,8,7.99,8c3.73,0,6.84-2.55,7.73-6h-2.08c-0.82,2.33-3.04,4-5.65,4c-3.31,0-6-2.69-6-6s2.69-6,6-6c1.66,0,3.14,0.69,4.22,1.78L13,11h7V4L17.65,6.35z"
                       Width="16" Height="16" />
           </Button>
@@ -689,7 +689,7 @@
                           <MenuItem Header="Export" Click="ClipContextExport_OnClick" />
                           <MenuItem Header="Open" Click="ClipContextOpen_OnClick" />
                           <MenuItem Header="{Binding RenameActionLabel}" Click="ClipContextRename_OnClick" />
-                          <MenuItem Header="{Binding SetGameActionLabel}" IsVisible="{Binding CanChangeGame}" Click="ClipContextSetGame_OnClick" />
+                          <MenuItem Header="{Binding SetGameActionLabel}" IsVisible="{Binding CanChangeGame}" Click="ClipContextSetGame_OnClick" StaysOpenOnClick="True" />
                           <MenuItem Header="Open file location" Click="ClipContextOpenLocation_OnClick" />
                           <Separator />
                           <MenuItem Header="Delete" Click="ClipContextDelete_OnClick" Foreground="#D85E61" />
