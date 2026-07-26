@@ -403,11 +403,6 @@ public sealed partial class MainWindow : Window
         await ViewModel.LoadLibraryFolderAsync(path);
     }
 
-    private void ClearGameFilterButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        ViewModel?.ClearGameFilters();
-    }
-
     // Shared by the sidebar's "All Games"/per-game buttons - the "All"
     // button has no FilterOptionViewModel DataContext (it inherits the
     // window's own), so the cast falls through to null and clears the

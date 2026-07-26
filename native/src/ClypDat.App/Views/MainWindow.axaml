@@ -200,17 +200,9 @@
           </Button>
         </Grid>
 
-        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" IsVisible="{Binding ShowLibraryActions}">
-          <Border Background="#1A2530" CornerRadius="14" Padding="10,0" Height="28" IsVisible="{Binding IsGameFilterActive}">
-            <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-              <TextBlock Text="{Binding ActiveGameFilterLabel}" Foreground="#D2DEEC" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
-              <Button Classes="linkButton" Click="ClearGameFilterButton_OnClick" Padding="4" VerticalAlignment="Center" ToolTip.Tip="Clear game filters">
-                <PathIcon Data="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"
-                          Width="10" Height="10" Foreground="#8C98A7" />
-              </Button>
-            </StackPanel>
-          </Border>
-        </StackPanel>
+        <!-- The active-game chip that used to sit here is gone: the Library
+             heading names the filter now, and the sidebar's All Games button
+             clears it, so the chip was saying the same thing twice. -->
         <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="16,0,0,0">
           <Button Classes="windowChromeButton" Click="MinimizeButton_OnClick" ToolTip.Tip="Minimize">
             <PathIcon Data="M19,13H5V11H19V13Z" Width="14" Height="14" />

@@ -3955,7 +3955,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public bool IsGameFilterActive => _activeGameFilters.Count > 0;
-    public string ActiveGameFilterLabel => string.Join(", ", _activeGameFilters);
     public bool IsClipTypeFilterActive => _activeClipTypeFilters.Count > 0;
 
     private const string ClipTypeManual = "Manual";
@@ -4026,7 +4025,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (removedAnyGameFilter || removedAnyClipTypeFilter)
         {
             OnPropertyChanged(nameof(IsGameFilterActive));
-            OnPropertyChanged(nameof(ActiveGameFilterLabel));
             OnPropertyChanged(nameof(IsClipTypeFilterActive));
             OnPropertyChanged(nameof(LibraryTitle));
         }
@@ -4044,7 +4042,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         foreach (var option in GameFilterOptions) option.SetCheckedSilently(string.Equals(option.Key, gameKey, StringComparison.OrdinalIgnoreCase));
         ApplyGameFilters();
         OnPropertyChanged(nameof(IsGameFilterActive));
-        OnPropertyChanged(nameof(ActiveGameFilterLabel));
         OnPropertyChanged(nameof(LibraryTitle));
     }
 
@@ -4058,24 +4055,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(LibraryTitle));
     }
 
-    public void ClearGameFilters()
-    {
-        if (_activeGameFilters.Count == 0) return;
-        _activeGameFilters.Clear();
-        foreach (var option in GameFilterOptions) option.SetCheckedSilently(false);
-        ApplyGameFilters();
-        OnPropertyChanged(nameof(IsGameFilterActive));
-        OnPropertyChanged(nameof(ActiveGameFilterLabel));
-        OnPropertyChanged(nameof(LibraryTitle));
-    }
-
     private void OnGameFilterOptionChanged(string gameName, bool isChecked)
     {
         if (isChecked) _activeGameFilters.Add(gameName);
         else _activeGameFilters.Remove(gameName);
         ApplyGameFilters();
         OnPropertyChanged(nameof(IsGameFilterActive));
-        OnPropertyChanged(nameof(ActiveGameFilterLabel));
         OnPropertyChanged(nameof(LibraryTitle));
     }
 
