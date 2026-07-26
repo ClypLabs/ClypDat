@@ -237,10 +237,25 @@ public static class GameIconService
             if (!app.TryGetProperty("icon", out var iconElement)) continue;
             var hash = iconElement.GetString();
             if (string.IsNullOrWhiteSpace(hash)) continue;
-            return $"https://shared.fastly.steamstatic.com/community_assets/images/apps/{appId}/{hash}.ico";
+
+            // Steam serves most established games from its original JPG path,
+            // while newer games such as Umamusume only expose the current ICO
+            // path. Check both paths instead of choosing one globally.
+            var legacyUrl = $"https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{appId}/{hash}.jpg";
+            if (await IsAvailableAsync(client, legacyUrl, cancellationToken)) return legacyUrl;
+
+            var communityUrl = $"https://shared.fastly.steamstatic.com/community_assets/images/apps/{appId}/{hash}.ico";
+            if (await IsAvailableAsync(client, communityUrl, cancellationToken)) return communityUrl;
         }
 
         return null;
+    }
+
+    private static async Task<bool> IsAvailableAsync(HttpClient client, string url, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Head, url);
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        return response.IsSuccessStatusCode;
     }
 
     private static bool TryCacheSteamLibraryIcon(string displayName)
