@@ -1165,7 +1165,7 @@ public sealed partial class MainWindow : Window
                 Width = 6,
                 Height = 2,
                 CornerRadius = new CornerRadius(1),
-                Background = Avalonia.Media.Brush.Parse("#3E4C5A"),
+                Background = Avalonia.Media.Brush.Parse("#8296AC"),
                 IsHitTestVisible = false,
                 // Starts invisible - UpdateTickProximity (called right after
                 // this, and on every subsequent hover move) is what actually
