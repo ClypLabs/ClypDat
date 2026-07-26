@@ -517,9 +517,11 @@ public sealed partial class MainWindow : Window
         _gameDragCandidate = null;
         _gameDragStartPoint = null;
 
-        // Dimmed rather than hidden, so there's still SOMETHING to look at
-        // while dragging over its own former spot.
-        _gameDragSourceControl.Opacity = 0.45;
+        // Dimmed noticeably (not just hidden), so there's clear confirmation
+        // something is actually being picked up - the previous 0.45 read as
+        // barely different from resting.
+        _gameDragSourceControl.Opacity = 0.3;
+        Cursor = new Cursor(StandardCursorType.Hand);
         e.Pointer.Capture(_gameDragSourceControl);
         e.Handled = true;
 
@@ -539,18 +541,49 @@ public sealed partial class MainWindow : Window
         _gameDragStartPoint = null;
     }
 
+    // The only visible sign of where a drag will land - there's no ghost icon
+    // following the cursor, so the target tile itself has to say it: a bar on
+    // its top or bottom edge for a reorder, a ring around the whole tile for
+    // a merge/file-into. Only touches styling when the target or zone has
+    // actually changed, so this can run on every pointer move without
+    // constantly rewriting the same values.
     private void UpdateGameDragTarget(Point windowPoint)
     {
         var hit = this.InputHitTest(windowPoint) as Control;
         var target = FindRailTileAncestor(hit);
-        if (target is null || ReferenceEquals(target, _gameDragSourceControl))
-        {
-            _gameDragTargetControl = null;
-            return;
-        }
+        if (target is not null && ReferenceEquals(target, _gameDragSourceControl)) target = null;
 
+        var zone = target is null ? GameDropZone.Before : ComputeDropZone(target, windowPoint);
+        if (ReferenceEquals(target, _gameDragTargetControl) && zone == _gameDragTargetZone) return;
+
+        ClearGameDragHighlight(_gameDragTargetControl);
         _gameDragTargetControl = target;
-        _gameDragTargetZone = ComputeDropZone(target, windowPoint);
+        _gameDragTargetZone = zone;
+        if (target is not null) ApplyGameDragHighlight(target, zone);
+    }
+
+    private static IBrush GameDragAccentBrush => Application.Current?.Resources["AccentBrush"] as IBrush ?? Brushes.CornflowerBlue;
+
+    private static void ApplyGameDragHighlight(Control target, GameDropZone zone)
+    {
+        if (target is not Button button) return;
+        button.BorderBrush = GameDragAccentBrush;
+        button.BorderThickness = zone switch
+        {
+            GameDropZone.Before => new Thickness(0, 3, 0, 0),
+            GameDropZone.After => new Thickness(0, 0, 0, 3),
+            _ => new Thickness(2),
+        };
+    }
+
+    // ClearValue rather than setting a hardcoded "off" value - restores
+    // whatever railIconButton's own style would normally supply (0 thickness,
+    // no explicit brush) instead of assuming what that is.
+    private static void ClearGameDragHighlight(Control? target)
+    {
+        if (target is not Button button) return;
+        button.ClearValue(Button.BorderBrushProperty);
+        button.ClearValue(Button.BorderThicknessProperty);
     }
 
     private void FinishGameDrag(Point releasePoint)
@@ -559,6 +592,9 @@ public sealed partial class MainWindow : Window
         var sourceControl = _gameDragSourceControl;
         var targetControl = _gameDragTargetControl;
         var zone = _gameDragTargetZone;
+
+        ClearGameDragHighlight(targetControl);
+        Cursor = Cursor.Default;
 
         _gameDragActive = false;
         _gameDragToken = null;
