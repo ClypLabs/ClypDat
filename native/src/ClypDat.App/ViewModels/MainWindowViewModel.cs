@@ -30,6 +30,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // for why the suppression check now happens against THIS set at debounce-fire
     // time instead of at the moment each watcher event arrives.
     private readonly HashSet<string> _pendingLibraryChangePaths = new(StringComparer.OrdinalIgnoreCase);
+    private int _libraryRefreshDebounceRetries;
+    // Set by MainWindow around a replay save's mux/remux - a save can run
+    // well past the debounce's own 650ms (the destination file often exists,
+    // and fires the watcher's Created event, from near the start of a mux
+    // that then keeps running for seconds more), so the debounce firing
+    // before AddOrUpdateLibraryClipAsync's own self-add mark has landed
+    // isn't necessarily an external change yet. See the debounce Tick
+    // handler below.
+    public bool IsSavingReplayClip { get; set; }
     private readonly SemaphoreSlim _libraryLayoutMigrationLock = new(1, 1);
     private readonly AudioDeviceService _audioDevices = new();
     private bool _isReplayRecording;
@@ -219,8 +228,29 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // this actually fires; if every pending path turns out to have
             // been self-added by now, there's nothing left to refresh for.
             var pending = _pendingLibraryChangePaths.ToArray();
+            if (pending.Length > 0 && pending.All(WasRecentlySelfAdded))
+            {
+                _pendingLibraryChangePaths.Clear();
+                _libraryRefreshDebounceRetries = 0;
+                return;
+            }
+
+            // A replay save's own remux can still be running well past 650ms
+            // (its self-add mark only lands once the mux finishes, but the
+            // destination file - and the watcher event for it - shows up on
+            // disk from near the mux's start) - that's not yet evidence of
+            // an external change, so keep waiting on the SAME pending set
+            // instead of refreshing the whole library out from under a save
+            // that's still in flight. Capped so a save that somehow never
+            // clears the flag can't wait forever.
+            if (IsSavingReplayClip && ++_libraryRefreshDebounceRetries < 60)
+            {
+                ScheduleLibraryRefresh();
+                return;
+            }
+
             _pendingLibraryChangePaths.Clear();
-            if (pending.Length > 0 && pending.All(WasRecentlySelfAdded)) return;
+            _libraryRefreshDebounceRetries = 0;
             await RefreshLibraryAsync();
         };
         _clipNotReadyMessageTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.5) };
@@ -2481,6 +2511,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             .ToArray());
 
         foreach (var clip in clips) AllClips.Add(clip);
+
+        // Every clip here is a brand new ClipCardViewModel, defaulting to
+        // matched/visible - RecomputeGameFilterBadges (called from
+        // NotifyLibraryChrome below) only reapplies a filter when rebuilding
+        // its option list happens to invalidate one, not on every refresh,
+        // so a still-active game/clip-type filter was silently dropped and
+        // the whole library showed instead.
+        ApplyGameFilters();
+        ApplyClipTypeFilters();
 
         NotifyLibraryChrome();
         StartLibraryHydration(clips);

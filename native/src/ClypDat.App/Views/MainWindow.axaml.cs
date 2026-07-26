@@ -1402,6 +1402,7 @@ public sealed partial class MainWindow : Window
         try
         {
             if (ViewModel is null) return;
+            ViewModel.IsSavingReplayClip = true;
             InitializeReplayServices();
             if (_replayBuffer is null || !_replayBuffer.IsRecording)
             {
@@ -1474,6 +1475,7 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
+            if (ViewModel is not null) ViewModel.IsSavingReplayClip = false;
             _clipSaveLock.Release();
         }
     }
