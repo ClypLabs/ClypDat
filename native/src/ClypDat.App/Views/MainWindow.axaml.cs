@@ -1777,28 +1777,62 @@ public sealed partial class MainWindow : Window
 
     // Medal imports whose game came through wrong or unparseable - they land
     // in "Unknown Game" together despite being from different games, so this
-    // is per clip rather than a rename of the whole group.
-    private async void ClipContextSetGame_OnClick(object? sender, RoutedEventArgs e)
+    // is per clip rather than a rename of the whole group. Rebuilt right
+    // before the context menu shows, same as GameContextMenu_OnOpening's
+    // "Move to folder" submenu - which games exist changes constantly.
+    private void ClipContextMenu_OnOpening(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (sender is not MenuItem { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
+        if (ViewModel is null) return;
+        if (sender is not ContextMenu contextMenu) return;
+        if (contextMenu.PlacementTarget?.DataContext is not ClipCardViewModel clip) return;
+        if (contextMenu.Items.OfType<MenuItem>().FirstOrDefault(item => Equals(item.Tag, "ChangeGame")) is not { } changeGameSubmenu) return;
+
+        changeGameSubmenu.Items.Clear();
+
+        // Null gameName tells ChangeClipGameAsync to prompt for a brand new
+        // name instead of using one already in the library.
+        var addGame = new MenuItem { Header = "+ Add Game" };
+        addGame.Click += async (_, _) => await ChangeClipGameAsync(clip, null);
+        changeGameSubmenu.Items.Add(addGame);
+
+        var otherGames = ViewModel.GameFilterOptions
+            .Select(option => option.Key)
+            .Where(key => !string.Equals(key, clip.GameFilterKey, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (otherGames.Length > 0) changeGameSubmenu.Items.Add(new Separator());
+        foreach (var game in otherGames)
+        {
+            var item = new MenuItem { Header = game };
+            item.Click += async (_, _) => await ChangeClipGameAsync(clip, game);
+            changeGameSubmenu.Items.Add(item);
+        }
+    }
+
+    private async Task ChangeClipGameAsync(ClipCardViewModel clip, string? gameName)
+    {
+        if (ViewModel is null) return;
 
         // Only the Medal imports of a mixed selection - a ClypDat capture's
         // game came from detection and isn't corrected here.
         var selected = ViewModel.AllClips.Where(item => item.IsSelected && item.CanChangeGame).ToArray();
         var targets = clip.IsSelected && selected.Length > 1 ? selected : new[] { clip };
 
-        var heading = targets.Length > 1 ? $"Change game for {targets.Length} clips" : "Change game";
-        // Prefilled with what it's filed under now, so correcting a spelling
-        // doesn't mean retyping the whole name.
-        var game = await PromptRenameAsync(clip.GameFilterKey, heading, "Game name");
-        if (string.IsNullOrWhiteSpace(game)) return;
+        if (gameName is null)
+        {
+            var heading = targets.Length > 1 ? $"Change game for {targets.Length} clips" : "Change game";
+            // Prefilled with what it's filed under now, so correcting a
+            // spelling doesn't mean retyping the whole name.
+            gameName = await PromptRenameAsync(clip.GameFilterKey, heading, "Game name");
+            if (string.IsNullOrWhiteSpace(gameName)) return;
+        }
 
-        var (moved, failed) = await ViewModel.SetClipsGameAsync(targets, game);
+        var (moved, failed) = await ViewModel.SetClipsGameAsync(targets, gameName);
         if (failed > 0)
         {
             await ShowMessageAsync(
                 "Some clips couldn't be moved",
-                $"Filed {moved} clip(s) under \"{game.Trim()}\", but {failed} could not be moved - they're probably open in another program.");
+                $"Filed {moved} clip(s) under \"{gameName.Trim()}\", but {failed} could not be moved - they're probably open in another program.");
         }
     }
 
