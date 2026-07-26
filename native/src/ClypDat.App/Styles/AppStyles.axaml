@@ -712,11 +712,21 @@
   </Style>
   <!-- Wraps a folder's header tile AND its revealed member tiles as one
        visually connected group once expanded - collapsed, it's invisible
-       (zero border, no fill), so it costs nothing when the folder is shut. -->
+       (transparent border/fill), so it looks like it costs nothing when the
+       folder is shut. Geometry (CornerRadius/Padding/BorderThickness) is
+       identical collapsed or expanded, ONLY the colour toggles - the header
+       tile's own on-screen position must never depend on IsExpanded, or
+       clicking to open a folder visibly shoves its icon sideways as the
+       border's inset suddenly appears around it. Left side has no border/
+       padding at all (flush with loose rail icons, which sit at the same
+       x as everything here via their own Margin) - the capsule opens only
+       to the right, top, and bottom, bracket-style. -->
   <Style Selector="Border.railFolderGroup">
-    <Setter Property="CornerRadius" Value="16" />
-    <Setter Property="Padding" Value="0" />
-    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="0,16,16,0" />
+    <Setter Property="Padding" Value="0,6,4,6" />
+    <Setter Property="BorderThickness" Value="0,1.5,1.5,1.5" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="Background" Value="Transparent" />
     <Setter Property="Transitions">
       <Transitions>
         <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
@@ -725,10 +735,8 @@
     </Setter>
   </Style>
   <Style Selector="Border.railFolderGroup.expanded">
-    <Setter Property="BorderThickness" Value="1.5" />
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
     <Setter Property="Background" Value="#141D24" />
-    <Setter Property="Padding" Value="4,6" />
   </Style>
   <!-- The storage button is the one rail button that isn't a bare 30px glyph:
        it holds the ring AND the used/limit caption, so it drops the fixed
