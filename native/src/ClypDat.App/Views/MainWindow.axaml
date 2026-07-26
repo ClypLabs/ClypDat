@@ -1722,8 +1722,13 @@
                here before the hover bar replaced it. Auto row rather than a
                fixed 44 so it collapses to nothing (not an empty gap) when the
                Hoverbar setting moves these controls over the video instead. -->
-          <Grid Height="44" Margin="0,-4,0,4" IsVisible="{Binding !EditorHoverBarEnabled}">
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center" Spacing="8" Margin="4,0,0,0">
+          <!-- The "*,300" split matters: it mirrors the video pane's own
+               columns above, so the centred transport group centres on the
+               VIDEO rather than on the whole panel. Without it the buttons
+               sat ~150px right of the picture's centre, pushed over by half
+               of the 300px track panel beside it. -->
+          <Grid ColumnDefinitions="*,300" Height="44" Margin="0,-4,0,4" IsVisible="{Binding !EditorHoverBarEnabled}">
+            <StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center" Spacing="8" Margin="4,0,0,0">
               <Border Classes="muteToggle"
                       Width="26"
                       Height="26"
@@ -1764,7 +1769,7 @@
             <!-- Nudged right of true-center (Margin left offset) - centering
                  on the video column's own width alone still reads as
                  slightly left of the actual visible video content. -->
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="7" Margin="41,0,0,0">
+            <StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="7" Margin="41,0,0,0">
               <Button Classes="transportButton" Click="RestartButton_OnClick" ToolTip.Tip="Restart">
                 <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
               </Button>
