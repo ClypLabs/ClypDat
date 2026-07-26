@@ -152,6 +152,11 @@ public static class GameIconService
     // this game wrong), then a curated app ID, then a name search on the store.
     private static async Task<string?> ResolveIconUrlAsync(HttpClient client, string displayName, CancellationToken cancellationToken)
     {
+        // Both curated maps are read below, so the list has to have actually
+        // arrived first - see EnsureLoadedAsync for what reading it too early
+        // used to cost.
+        await RemoteGameIconsService.EnsureLoadedAsync(cancellationToken);
+
         if (RemoteGameIconsService.LoadCached().TryGetValue(displayName, out var curated) && !string.IsNullOrWhiteSpace(curated))
         {
             return curated;
