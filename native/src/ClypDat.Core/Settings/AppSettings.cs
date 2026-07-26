@@ -79,6 +79,19 @@ public sealed class AppSettings
     // the Library heading and the key its icon is looked up under - without
     // touching a single file on disk.
     public Dictionary<string, string> GameDisplayNameOverrides { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    // Sidebar game-rail organisation, both empty until the user actually
+    // touches it (drags something, or uses a "Move to folder"/"New Folder"
+    // menu action) - see MainWindowViewModel.RebuildGameRail. Empty means the
+    // rail still uses its automatic layout: most-clipped games inline, the
+    // rest folded into an unnamed "More Games" folder. Touching it converts
+    // that automatic folder into a real one and locks in an explicit order
+    // from that point on.
+    public List<GameRailFolder> GameRailFolders { get; set; } = new();
+    // Top-level rail order once customised - each entry is "game:<key>" or
+    // "folder:<id>". A game/folder that exists but isn't listed here (a new
+    // game that showed up after the last customisation) is appended to the
+    // rail rather than hidden.
+    public List<string> GameRailOrder { get; set; } = new();
     public string ClipOverlayPosition { get; set; } = "Top Right";
     public string ClipOverlayVolume { get; set; } = "Medium";
     // Editor's master output volume (fullscreen playbar slider) - separate
@@ -154,6 +167,16 @@ public sealed class GameCaptureOverride
     // set only for a user-added game the built-in catalog doesn't know about.
     public string DisplayName { get; set; } = string.Empty;
     public string CaptureBackend { get; set; } = "Auto";
+}
+
+public sealed class GameRailFolder
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = "Folder";
+    // Game display names, in the order they render inside the folder. Not
+    // pruned when a game's clips are all gone - if it comes back, it lands
+    // straight back where the user put it instead of at the end.
+    public List<string> GameKeys { get; set; } = new();
 }
 
 public sealed class Cs2AutoClipSettings

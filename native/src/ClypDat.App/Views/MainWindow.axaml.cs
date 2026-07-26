@@ -425,9 +425,252 @@ public sealed partial class MainWindow : Window
         ViewModel.SelectClipTypeSection(key?.Key);
     }
 
-    private void ToggleGameListButton_OnClick(object? sender, RoutedEventArgs e)
+    // ---- Sidebar game rail: folders, ordering, drag/drop -------------------
+    //
+    // Drag start is manual (PointerPressed/Moved/Released) rather than
+    // Avalonia's Button.PointerPressed alone, because a plain click has to
+    // keep working (it's still how a game gets selected as a filter) - only
+    // a press that then MOVES past a small threshold turns into an actual
+    // drag. Once it does, Avalonia's own DragDrop.DoDragDrop takes over; drop
+    // targets are resolved by the standard bubbling DragOver/Drop events.
+
+    private Point? _gameDragStartPoint;
+    private Control? _gameDragCandidate;
+    private bool _gameDragInProgress;
+    private const double GameDragThreshold = 6;
+    private const string GameRailDragFormat = "ClypDat.GameRailToken";
+
+    private void GameRailItem_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        ViewModel?.ToggleGameListExpanded();
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
+        _gameDragCandidate = sender as Control;
+        _gameDragStartPoint = e.GetPosition(this);
+    }
+
+    private async void GameRailItem_OnPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_gameDragInProgress || _gameDragCandidate is null || _gameDragStartPoint is null) return;
+        if (!ReferenceEquals(sender, _gameDragCandidate)) return;
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        {
+            _gameDragCandidate = null;
+            _gameDragStartPoint = null;
+            return;
+        }
+
+        var delta = e.GetPosition(this) - _gameDragStartPoint.Value;
+        if (Math.Abs(delta.X) < GameDragThreshold && Math.Abs(delta.Y) < GameDragThreshold) return;
+
+        var token = GameRailTokenFor(_gameDragCandidate);
+        _gameDragCandidate = null;
+        _gameDragStartPoint = null;
+        if (token is null) return;
+
+        _gameDragInProgress = true;
+        try
+        {
+            var data = new DataObject();
+            data.Set(GameRailDragFormat, token);
+            await DragDrop.DoDragDrop(e, data, DragDropEffects.Move);
+        }
+        finally
+        {
+            _gameDragInProgress = false;
+        }
+    }
+
+    private void GameRailItem_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        _gameDragCandidate = null;
+        _gameDragStartPoint = null;
+    }
+
+    private static string? GameRailTokenFor(Control control) => control.DataContext switch
+    {
+        FilterOptionViewModel game => "game:" + game.Key,
+        GameRailFolderViewModel folder => "folder:" + folder.Id,
+        _ => null
+    };
+
+    private static bool TryParseGameRailGameToken(string token, out string key)
+    {
+        if (token.StartsWith("game:", StringComparison.Ordinal))
+        {
+            key = token["game:".Length..];
+            return true;
+        }
+        key = string.Empty;
+        return false;
+    }
+
+    private static bool TryParseGameRailFolderToken(string token, out string id)
+    {
+        if (token.StartsWith("folder:", StringComparison.Ordinal))
+        {
+            id = token["folder:".Length..];
+            return true;
+        }
+        id = string.Empty;
+        return false;
+    }
+
+    // Walks up from a rail control to find the folder it's rendered inside
+    // (null for anything at the top level) - how a drop target's own
+    // location in the rail is determined, regardless of how deep the
+    // DataTemplate nesting that put it there actually is.
+    private static GameRailFolderViewModel? FindEnclosingFolder(Control control)
+    {
+        foreach (var ancestor in control.GetVisualAncestors())
+        {
+            if (ancestor is Control ancestorControl && ancestorControl.DataContext is GameRailFolderViewModel folder) return folder;
+        }
+        return null;
+    }
+
+    private void GameRailItem_OnDragOver(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = e.Data.Contains(GameRailDragFormat) ? DragDropEffects.Move : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    // Dropping ON a game: reorders (source lands immediately before the
+    // target), pulling the source out of whatever folder it was in - unless
+    // the target ITSELF is inside a folder, in which case the source lands in
+    // that same folder, at that position. Dropping a folder onto a game only
+    // reorders it among other top-level entries; a folder can't be dropped
+    // "into" the position of a game that's inside another folder, since
+    // folders don't nest.
+    private void GameRailGame_OnDrop(object? sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        if (ViewModel is null) return;
+        if (e.Data.Get(GameRailDragFormat) is not string sourceToken) return;
+        if (sender is not Control targetControl || targetControl.DataContext is not FilterOptionViewModel target) return;
+
+        var enclosingFolder = FindEnclosingFolder(targetControl);
+
+        if (TryParseGameRailGameToken(sourceToken, out var sourceKey))
+        {
+            if (string.Equals(sourceKey, target.Key, StringComparison.OrdinalIgnoreCase)) return;
+            ViewModel.RelocateGame(sourceKey, enclosingFolder?.Id, target.Key);
+        }
+        else if (TryParseGameRailFolderToken(sourceToken, out var sourceFolderId) && enclosingFolder is null)
+        {
+            ViewModel.RelocateTopLevelEntry("folder:" + sourceFolderId, "game:" + target.Key);
+        }
+    }
+
+    // Dropping ON a folder tile: a game gets filed into it (appended); a
+    // folder just reorders alongside it - folders never merge into each
+    // other, only games ever join a folder.
+    private void GameRailFolder_OnDrop(object? sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        if (ViewModel is null) return;
+        if (e.Data.Get(GameRailDragFormat) is not string sourceToken) return;
+        if (sender is not Control targetControl || targetControl.DataContext is not GameRailFolderViewModel targetFolder) return;
+
+        if (TryParseGameRailGameToken(sourceToken, out var sourceKey))
+        {
+            ViewModel.RelocateGame(sourceKey, targetFolder.Id, null);
+        }
+        else if (TryParseGameRailFolderToken(sourceToken, out var sourceFolderId) && !string.Equals(sourceFolderId, targetFolder.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            ViewModel.RelocateTopLevelEntry("folder:" + sourceFolderId, "folder:" + targetFolder.Id);
+        }
+    }
+
+    // Dropping on empty rail space, past every tile: appends to the very end
+    // of the top level - the way to pull a game back out of a folder without
+    // needing a specific game to drop it "before".
+    private void GameRailBackground_OnDrop(object? sender, DragEventArgs e)
+    {
+        if (ViewModel is null) return;
+        if (e.Data.Get(GameRailDragFormat) is not string sourceToken) return;
+
+        if (TryParseGameRailGameToken(sourceToken, out var sourceKey))
+        {
+            ViewModel.RelocateGame(sourceKey, destinationFolderId: null, beforeGameKey: null);
+        }
+        else if (TryParseGameRailFolderToken(sourceToken, out _))
+        {
+            ViewModel.RelocateTopLevelEntry(sourceToken, beforeToken: null);
+        }
+    }
+
+    private void GameRailFolder_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is GameRailFolderViewModel folder) folder.ToggleExpanded();
+    }
+
+    // Rebuilds the dynamic parts of a game's context menu right before it
+    // shows: the "Move to folder" submenu (which folders exist changes
+    // constantly) and whether "Remove from folder" applies to this
+    // particular game at all.
+    private void GameContextMenu_OnOpening(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        if (ViewModel is null) return;
+        if (sender is not ContextMenu contextMenu) return;
+        if (contextMenu.PlacementTarget?.DataContext is not FilterOptionViewModel option) return;
+
+        var currentFolderId = ViewModel.FindContainingFolderId(option.Key);
+
+        if (contextMenu.Items.OfType<MenuItem>().FirstOrDefault(item => Equals(item.Tag, "MoveToFolder")) is { } moveSubmenu)
+        {
+            moveSubmenu.Items.Clear();
+
+            var newFolder = new MenuItem { Header = "New Folder..." };
+            newFolder.Click += async (_, _) => await CreateGameFolderViaPromptAsync(option.Key);
+            moveSubmenu.Items.Add(newFolder);
+
+            var otherFolders = ViewModel.GameRailEntries.OfType<GameRailFolderViewModel>()
+                .Where(folder => !string.Equals(folder.Id, currentFolderId, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (otherFolders.Length > 0) moveSubmenu.Items.Add(new Separator());
+            foreach (var folder in otherFolders)
+            {
+                var item = new MenuItem { Header = folder.Name };
+                var folderId = folder.Id;
+                item.Click += (_, _) => ViewModel.RelocateGame(option.Key, folderId, null);
+                moveSubmenu.Items.Add(item);
+            }
+        }
+
+        if (contextMenu.Items.OfType<MenuItem>().FirstOrDefault(item => Equals(item.Tag, "RemoveFromFolder")) is { } removeItem)
+        {
+            removeItem.IsVisible = currentFolderId is not null;
+        }
+    }
+
+    private async Task CreateGameFolderViaPromptAsync(string gameKey)
+    {
+        if (ViewModel is null) return;
+        var name = await PromptRenameAsync(gameKey, "New folder", "Folder name");
+        if (string.IsNullOrWhiteSpace(name)) return;
+        ViewModel.CreateGameFolder(new[] { gameKey }, name);
+    }
+
+    private void RemoveGameFromFolderMenuItem_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        if ((sender as Control)?.DataContext is not FilterOptionViewModel option) return;
+        ViewModel.RelocateGame(option.Key, destinationFolderId: null, beforeGameKey: null);
+    }
+
+    private async void RenameFolderMenuItem_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        if ((sender as Control)?.DataContext is not GameRailFolderViewModel folder) return;
+        var newName = await PromptRenameAsync(folder.Name, "Rename folder", "Folder name");
+        if (string.IsNullOrWhiteSpace(newName)) return;
+        ViewModel.RenameGameFolder(folder.Id, newName);
+    }
+
+    private void UngroupFolderMenuItem_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        if ((sender as Control)?.DataContext is not GameRailFolderViewModel folder) return;
+        ViewModel.UngroupGameFolder(folder.Id);
     }
 
     private async void RenameGameMenuItem_OnClick(object? sender, RoutedEventArgs e)
