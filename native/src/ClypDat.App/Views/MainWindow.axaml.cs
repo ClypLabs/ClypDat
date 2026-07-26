@@ -1,3 +1,4 @@
+using Avalonia.Animation;
 using Avalonia.Controls;
 using Avalonia.Data;
 using Avalonia.Input;
@@ -1165,12 +1166,32 @@ public sealed partial class MainWindow : Window
                 Height = 2,
                 CornerRadius = new CornerRadius(1),
                 Background = Avalonia.Media.Brush.Parse("#3E4C5A"),
-                IsHitTestVisible = false
+                IsHitTestVisible = false,
+                // Starts invisible - UpdateTickProximity (called right after
+                // this, and on every subsequent hover move) is what actually
+                // fades each one in, only near the cursor.
+                Opacity = 0,
+                Transitions = new Transitions { new DoubleTransition { Property = Border.OpacityProperty, Duration = TimeSpan.FromSeconds(0.08) } }
             };
-            Canvas.SetLeft(tick, 0);
+            Canvas.SetLeft(tick, 4);
             Canvas.SetTop(tick, ContentOffsetToTrackY(contentY) - 1);
             DateScrubberCanvas.Children.Add(tick);
             _scrubberTicks.Add(tick);
+        }
+    }
+
+    // Only ticks near the cursor actually show, fading out with distance -
+    // showing the whole timeline at once on a long library was cluttered
+    // (dozens of lines competing for attention) and defeated the point of a
+    // hover preview; this reads more like a magnifier following the cursor.
+    private void UpdateTickProximity(double cursorTrackY)
+    {
+        const double fadeDistance = 45;
+        for (var i = 0; i < _scrubberTicks.Count && i < _scrubberDates.Count; i++)
+        {
+            var tickY = ContentOffsetToTrackY(_scrubberDates[i].ContentY);
+            var distance = Math.Abs(tickY - cursorTrackY);
+            _scrubberTicks[i].Opacity = Math.Clamp(1 - distance / fadeDistance, 0, 1);
         }
     }
 
@@ -1362,6 +1383,7 @@ public sealed partial class MainWindow : Window
         // cursor, following the cursor rather than the thumb - lets you scan
         // the whole timeline without committing to a scroll.
         ShowHoverDateBubble(y);
+        UpdateTickProximity(y);
     }
 
     private void DateScrubber_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
@@ -1380,8 +1402,10 @@ public sealed partial class MainWindow : Window
         if (_draggingScrubber) return;
         _scrubberHovered = true;
         RebuildScrubberTicks();
+        var y = e.GetPosition(DateScrubberHost).Y;
         SetScrubberThumbState(hovered: true, dragging: false);
-        ShowHoverDateBubble(e.GetPosition(DateScrubberHost).Y);
+        ShowHoverDateBubble(y);
+        UpdateTickProximity(y);
     }
 
     private void DateScrubber_OnPointerExited(object? sender, PointerEventArgs e)
