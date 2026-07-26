@@ -1792,27 +1792,34 @@ public sealed partial class MainWindow : Window
 
     // Medal imports whose game came through wrong or unparseable - they land
     // in "Unknown Game" together despite being from different games, so this
-    // is per clip rather than a rename of the whole group. Rebuilt right
+    // is per clip rather than a rename of the whole group.
+    //
     // A nested MenuItem submenu (Items populated dynamically from the
     // ContextMenu's own Opening event, same pattern GameContextMenu_OnOpening
     // already uses for "Move to folder") never actually showed its dropdown
     // here. MenuFlyout next - fixed showing it up (see git history for the
     // detached-anchor cause), but its Menu-based dismiss semantics never
     // reliably light-dismissed on an outside click when built ad hoc like
-    // this, leaving it stuck open. Plain Flyout is a simpler primitive built
-    // specifically for "show a popover, close it on an outside click" with
-    // no Menu-family behaviour involved - its Content is just a StackPanel
-    // of ordinary Buttons styled to look like menu rows.
+    // this. Plain Flyout is a simpler primitive built specifically for "show
+    // a popover, close it on an outside click", with its Content just a
+    // StackPanel of ordinary Buttons styled to look like menu rows.
+    //
+    // StaysOpenOnClick on the XAML MenuItem keeps the parent ContextMenu
+    // open through this click (rather than the whole menu vanishing the
+    // instant "Change game" is clicked, only for this flyout to then appear
+    // in its place) - the MenuItem itself is now guaranteed to stay attached
+    // to the tree too, so it doubles as a real anchor: the flyout opens
+    // beside it, to the right, like a genuine submenu would.
     private Flyout? _changeGameFlyout;
 
     private void ClipContextSetGame_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
-        if (sender is not MenuItem { DataContext: ClipCardViewModel clip }) return;
+        if (sender is not MenuItem { DataContext: ClipCardViewModel clip } menuItem) return;
 
         _changeGameFlyout?.Hide();
 
-        var flyout = new Flyout();
+        var flyout = new Flyout { Placement = Avalonia.Controls.PlacementMode.RightEdgeAlignedTop };
         _changeGameFlyout = flyout;
         flyout.Closed += (_, _) => { if (_changeGameFlyout == flyout) _changeGameFlyout = null; };
 
@@ -1845,12 +1852,7 @@ public sealed partial class MainWindow : Window
 
         flyout.Content = new ScrollViewer { MaxHeight = 320, Content = list };
 
-        // GetVisualAncestors() from the clicked MenuItem finds nothing (the
-        // ContextMenu that owned it is already detaching as part of this
-        // same click) - walk the window's own current tree instead to find
-        // this specific clip card, which is still fully attached.
-        var anchor = this.GetVisualDescendants().OfType<Control>().FirstOrDefault(c => ReferenceEquals(c.DataContext, clip)) ?? (Control)this;
-        flyout.ShowAt(anchor, showAtPointer: true);
+        flyout.ShowAt(menuItem);
     }
 
     private async Task ChangeClipGameAsync(ClipCardViewModel clip, string? gameName)
