@@ -47,7 +47,12 @@
           <Button Grid.Column="0" Content="{Binding RecorderStatus}" Classes="replayButton" Classes.recording="{Binding IsReplayRecording}"
                   ToolTip.Tip="Replay buffer status - click to turn the buffer on or off, or change capture backend, replay length, resolution, frame rate, hotkey and microphone">
             <Button.Flyout>
-              <Flyout Placement="BottomEdgeAlignedLeft">
+              <!-- Anchored to the BUTTON's bottom edge, which sits ~6px above
+                   the header's own, so the flyout opened overlapping the top
+                   bar. The offset drops it to just under the header's bottom
+                   border instead, same reasoning as the storage flyout's
+                   horizontal one. -->
+              <Flyout Placement="BottomEdgeAlignedLeft" VerticalOffset="7">
                 <!-- Backend and microphone names run long ("Windows Capture
                      (Legacy)", full device names), so those get the full width;
                      only the genuinely short fields share a row. Two ~146px

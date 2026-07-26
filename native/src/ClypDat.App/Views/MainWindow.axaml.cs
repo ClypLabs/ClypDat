@@ -84,6 +84,12 @@ public sealed partial class MainWindow : Window
     // holds it up indefinitely, which is the whole point.
     private static readonly TimeSpan HoverControlsGrace = TimeSpan.FromMilliseconds(300);
     private DateTime _hoverControlsActiveUntilUtc = DateTime.MinValue;
+    // While the window is being resized the bar is taken down entirely and
+    // held down until this long after the last SizeChanged - long enough that
+    // a continuous drag never lets it back up mid-resize, short enough not to
+    // feel like a lag once the drag ends.
+    private static readonly TimeSpan HoverControlsResizeSettle = TimeSpan.FromMilliseconds(220);
+    private DateTime _hoverControlsSuppressedUntilUtc = DateTime.MinValue;
     // Slides the bar in from under the video's bottom edge on first show. The
     // window itself stays put - only its content moves - because animating an
     // owned window's native position is visibly steppy next to a composited
@@ -472,6 +478,14 @@ public sealed partial class MainWindow : Window
 
     private void Window_OnSizeChanged(object? sender, SizeChangedEventArgs e)
     {
+        // The hover bar is a separate top-level window sized and placed
+        // against the video pane, and dragging a window edge fires this
+        // continuously - trying to keep a second native window matched to a
+        // rect that's changing every frame is what makes it tear, lag behind
+        // and end up misplaced. Drop it for the duration instead: the poll
+        // brings it straight back, correctly placed, once the drag stops and
+        // the layout has settled.
+        SuspendHoverControlsForResize();
         // UpdateCardLayout changes CardWidth (and possibly CardColumns),
         // which reflows the WrapPanel into different rows - the ScrollViewer's
         // own Offset stays numerically the same afterward but no longer
@@ -3962,6 +3976,13 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        // Mid-resize: stay down until the layout stops moving.
+        if (DateTime.UtcNow < _hoverControlsSuppressedUntilUtc)
+        {
+            HideEditorHoverControls(immediate: true);
+            return;
+        }
+
         if (!GetCursorPos(out var cursor)) return;
 
         // EditorVideoHost, not EditorVideoView: the view carries the zoom
@@ -4011,6 +4032,19 @@ public sealed partial class MainWindow : Window
                 LogHoverControlsState($"sliding out (cursor={cursor.X},{cursor.Y} video={videoTopLeft.X},{videoTopLeft.Y}-{videoBottomRight.X},{videoBottomRight.Y})");
             }
             HideEditorHoverControls(immediate: false);
+        }
+    }
+
+    // Called from every path that changes the video pane's rect out from
+    // under the bar - a window resize today, and safe to call from anywhere
+    // else that has the same effect.
+    private void SuspendHoverControlsForResize()
+    {
+        _hoverControlsSuppressedUntilUtc = DateTime.UtcNow + HoverControlsResizeSettle;
+        if (_editorHoverControlsWindow is { IsVisible: true })
+        {
+            LogHoverControlsState("suspended for resize");
+            HideEditorHoverControls(immediate: true);
         }
     }
 
