@@ -1783,19 +1783,14 @@ public sealed partial class MainWindow : Window
     // A nested MenuItem submenu (Items populated dynamically from the
     // ContextMenu's own Opening event, same pattern GameContextMenu_OnOpening
     // already uses for "Move to folder") never actually showed its dropdown
-    // here despite being wired the same way. An independent MenuFlyout fixed
-    // that (see git history for why the submenu never opened), but anchoring
-    // it to the whole window at the pointer left it looking broken: no
-    // specific control to light-dismiss against, so it lingered on screen,
-    // and reopening it while already open left the old popup's items
-    // rendered behind the new one instead of being replaced cleanly. Now
-    // tracks the single open instance (closing it before showing a new one),
-    // explicitly hides itself the moment any item is picked rather than
-    // trusting default menu-close behaviour, and anchors to the actual clip
-    // card control (found by walking the window's current visual tree,
-    // since the closing ContextMenu's own items are unusable as an anchor -
-    // see below) instead of the whole window.
-    private MenuFlyout? _changeGameFlyout;
+    // here. MenuFlyout next - fixed showing it up (see git history for the
+    // detached-anchor cause), but its Menu-based dismiss semantics never
+    // reliably light-dismissed on an outside click when built ad hoc like
+    // this, leaving it stuck open. Plain Flyout is a simpler primitive built
+    // specifically for "show a popover, close it on an outside click" with
+    // no Menu-family behaviour involved - its Content is just a StackPanel
+    // of ordinary Buttons styled to look like menu rows.
+    private Flyout? _changeGameFlyout;
 
     private void ClipContextSetGame_OnClick(object? sender, RoutedEventArgs e)
     {
@@ -1804,7 +1799,7 @@ public sealed partial class MainWindow : Window
 
         _changeGameFlyout?.Hide();
 
-        var flyout = new MenuFlyout();
+        var flyout = new Flyout();
         _changeGameFlyout = flyout;
         flyout.Closed += (_, _) => { if (_changeGameFlyout == flyout) _changeGameFlyout = null; };
 
@@ -1814,24 +1809,28 @@ public sealed partial class MainWindow : Window
             _ = ChangeClipGameAsync(clip, gameName);
         }
 
+        var list = new StackPanel { Spacing = 2, MinWidth = 160 };
+
         // Null gameName tells ChangeClipGameAsync to prompt for a brand new
         // name instead of using one already in the library.
-        var addGame = new MenuItem { Header = "+ Add Game" };
+        var addGame = new Button { Classes = { "flyoutMenuItem" }, Content = "+ Add Game" };
         addGame.Click += (_, _) => PickGame(null);
-        flyout.Items.Add(addGame);
+        list.Children.Add(addGame);
 
         var otherGames = ViewModel.GameFilterOptions
             .Select(option => option.Key)
             .Where(key => !string.Equals(key, clip.GameFilterKey, StringComparison.OrdinalIgnoreCase))
             .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        if (otherGames.Length > 0) flyout.Items.Add(new Separator());
+        if (otherGames.Length > 0) list.Children.Add(new Separator());
         foreach (var game in otherGames)
         {
-            var item = new MenuItem { Header = game };
+            var item = new Button { Classes = { "flyoutMenuItem" }, Content = game };
             item.Click += (_, _) => PickGame(game);
-            flyout.Items.Add(item);
+            list.Children.Add(item);
         }
+
+        flyout.Content = new ScrollViewer { MaxHeight = 320, Content = list };
 
         // GetVisualAncestors() from the clicked MenuItem finds nothing (the
         // ContextMenu that owned it is already detaching as part of this
