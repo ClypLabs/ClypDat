@@ -3953,6 +3953,66 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void ToggleGameListExpanded() => IsGameListExpanded = !IsGameListExpanded;
 
+    private bool _isRefreshingGameIcons;
+    private string _gameIconRefreshStatus = string.Empty;
+
+    public bool IsRefreshingGameIcons
+    {
+        get => _isRefreshingGameIcons;
+        private set => SetProperty(ref _isRefreshingGameIcons, value);
+    }
+
+    public string GameIconRefreshStatus
+    {
+        get => _gameIconRefreshStatus;
+        private set => SetProperty(ref _gameIconRefreshStatus, value);
+    }
+
+    /// <summary>
+    /// Settings > Game Detection's "Refresh game icons". Icons are cached
+    /// forever once found, which is right almost always and useless the one
+    /// time a game resolved to a launcher's logo or the wrong store entry -
+    /// this is the way out of that without going and deleting AppData by hand.
+    /// Drops the cached images, refetches the curated list ignoring its
+    /// once-a-day window, and looks every game up again from scratch.
+    /// </summary>
+    public async Task RefreshGameIconsAsync()
+    {
+        if (IsRefreshingGameIcons) return;
+        IsRefreshingGameIcons = true;
+        GameIconRefreshStatus = "Refreshing...";
+        try
+        {
+            var removed = await Task.Run(GameIconService.ClearCache);
+            await RemoteGameIconsService.ForceRefreshAsync();
+
+            // Clearing the rail's own bitmaps is what makes the games count as
+            // missing again - RequestMissingGameIcons goes off HasIcon, and the
+            // options are still holding the images loaded before the wipe.
+            foreach (var option in GameFilterOptions) option.Icon = null;
+
+            var total = GameFilterOptions.Count;
+            RequestMissingGameIcons();
+
+            // The lookups themselves are fire-and-forget (each pushes its own
+            // icon into the rail as it lands), so this reports the wipe, not a
+            // finished download.
+            GameIconRefreshStatus = total == 0
+                ? $"Cleared {removed} cached icons."
+                : $"Cleared {removed} cached icons - looking up {total} games again.";
+            AppLog.Info($"Game icons refreshed by user: {removed} cached images removed, {total} games queued.");
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Game icon refresh failed", error);
+            GameIconRefreshStatus = "Refresh failed - see the log for details.";
+        }
+        finally
+        {
+            IsRefreshingGameIcons = false;
+        }
+    }
+
     // Any game with clips but no icon yet gets one resolved from the internet,
     // so artwork doesn't depend on this install ever having seen the game
     // running. Fire-and-forget: each lookup caches to disk and pushes itself

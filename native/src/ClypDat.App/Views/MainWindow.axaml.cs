@@ -430,6 +430,17 @@ public sealed partial class MainWindow : Window
         ViewModel?.ToggleGameListExpanded();
     }
 
+    private async void RefreshGameIconsButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        await ViewModel.RefreshGameIconsAsync();
+        // The harvest sweep is rate-limited to once every 30s and would
+        // otherwise sit out the window right after a wipe - the icons of games
+        // running RIGHT NOW are the cheapest ones to get back.
+        _lastIconSweepUtc = DateTime.MinValue;
+        HarvestGameIcons();
+    }
+
     private void FeedbackButton_OnClick(object? sender, RoutedEventArgs e)
     {
         try
