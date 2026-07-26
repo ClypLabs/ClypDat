@@ -30,5 +30,10 @@
     "Rainbow Six Siege": 359550,
     "Grand Theft Auto V": 271590
   },
-  "icons": {}
+  "icons": {
+    "VALORANT": "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons/valorant.png",
+    "League of Legends": "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons/league-of-legends.png",
+    "Roblox": "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons/roblox.png",
+    "Minecraft": "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons/minecraft.png"
+  }
 }
