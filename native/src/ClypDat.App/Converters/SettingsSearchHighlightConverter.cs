@@ -22,11 +22,9 @@ public sealed class SettingsSearchHighlightConverter : IValueConverter
 
     public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
-        var query = (value as string)?.Trim() ?? string.Empty;
-        if (query.Length == 0) return true;
-
-        var labels = (parameter as string ?? string.Empty).Split('|');
-        return labels.Any(label => label.Contains(query, StringComparison.OrdinalIgnoreCase));
+        var query = (value as string) ?? string.Empty;
+        var haystack = (parameter as string ?? string.Empty).Replace('|', ' ');
+        return SettingsSearchMatching.MatchesRelative(haystack, query);
     }
 
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
