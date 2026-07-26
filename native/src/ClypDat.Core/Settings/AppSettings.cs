@@ -61,6 +61,11 @@ public sealed class AppSettings
     public double MicrophoneNoiseSuppressionStrength { get; set; } = 12.0;
     public List<string> GameAudioExcludedProcesses { get; set; } = new();
     public bool EnableEditorKeyboardShortcuts { get; set; } = true;
+    // Off: the editor's playback controls are docked under the video, always
+    // there. On: they're the floating bar that follows the pointer over the
+    // picture. Docked is the default - it never covers a frame and never
+    // moves, which is what most people want out of a trimming view.
+    public bool EditorHoverBarEnabled { get; set; }
     public string ClipOverlayPosition { get; set; } = "Top Right";
     public string ClipOverlayVolume { get; set; } = "Medium";
     // Editor's master output volume (fullscreen playbar slider) - separate

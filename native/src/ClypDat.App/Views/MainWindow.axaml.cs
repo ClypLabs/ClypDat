@@ -3953,11 +3953,19 @@ public sealed partial class MainWindow : Window
     // they no longer dismiss anything. Leave the editor entirely and it goes.
     private void PollEditorHoverControls()
     {
-        if (ViewModel is null || !ViewModel.IsEditorVisible || ViewModel.IsVideoFullscreen || _playback is null)
+        // Docked mode (the default) is the XAML bar under the video, so the
+        // floating one never comes out at all.
+        if (ViewModel is not null && ViewModel.IsEditorVisible && !ViewModel.Settings.EditorHoverBarEnabled)
+        {
+            EnsureDockedPlaybackBar();
+        }
+
+        if (ViewModel is null || !ViewModel.IsEditorVisible || ViewModel.IsVideoFullscreen || _playback is null ||
+            !ViewModel.Settings.EditorHoverBarEnabled)
         {
             if (_editorHoverControlsWindow is { IsVisible: true })
             {
-                LogHoverControlsState($"hidden (editor={ViewModel?.IsEditorVisible}, fullscreen={ViewModel?.IsVideoFullscreen}, playback={_playback is not null})");
+                LogHoverControlsState($"hidden (editor={ViewModel?.IsEditorVisible}, fullscreen={ViewModel?.IsVideoFullscreen}, playback={_playback is not null}, hoverBar={ViewModel?.Settings.EditorHoverBarEnabled})");
             }
             HideEditorHoverControls(immediate: true);
             return;
@@ -4130,10 +4138,13 @@ public sealed partial class MainWindow : Window
         bar.Position = new PixelPoint(topLeft.X, bottomOnScreen.Y - (int)(barHeight * bar.RenderScaling));
     }
 
-    private Window EnsureEditorHoverControlsWindow()
+    // Both editor playback bars - the floating hover window and the docked row
+    // under the video - are this same layout. Built twice (once per host)
+    // rather than reparented: only one is ever live, and a Control can only
+    // have one parent, so sharing an instance would mean tearing it out of one
+    // visual tree and into another every time the setting flips.
+    private Control BuildPlaybackBarLayout()
     {
-        if (_editorHoverControlsWindow is not null) return _editorHoverControlsWindow;
-
         PathIcon Icon(string data, double size = 16) => new()
         {
             Width = size,
@@ -4297,6 +4308,23 @@ public sealed partial class MainWindow : Window
         Grid.SetRow(layout, 1);
         barContent.Children.Add(progressStrip);
         barContent.Children.Add(layout);
+        return barContent;
+    }
+
+    // Fills the docked host (MainWindow.axaml) the first time the editor needs
+    // it. Kept lazy so a user who never turns the hover bar off never builds
+    // the second copy, and vice versa.
+    private void EnsureDockedPlaybackBar()
+    {
+        if (DockedPlaybackBar.Child is not null) return;
+        var content = BuildPlaybackBarLayout();
+        content.Margin = new Thickness(0, 0, 0, 6);
+        DockedPlaybackBar.Child = content;
+    }
+
+    private Window EnsureEditorHoverControlsWindow()
+    {
+        if (_editorHoverControlsWindow is not null) return _editorHoverControlsWindow;
 
         var backdrop = new Border
         {
@@ -4310,7 +4338,7 @@ public sealed partial class MainWindow : Window
                     new GradientStop(Color.FromArgb(0xE0, 0x08, 0x0B, 0x0E), 0.55),
                 },
             },
-            Child = barContent,
+            Child = BuildPlaybackBarLayout(),
             RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse($"translateY({HoverControlsSlideDistance}px)"),
             Transitions =
             [
