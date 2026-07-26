@@ -86,6 +86,35 @@ public static class RemoteGameIconsService
         return _appIdMemoryCache;
     }
 
+    /// <summary>
+    /// Refetches the curated list right now, ignoring the once-a-day window -
+    /// for the manual "refresh game icons" action, where the whole point is
+    /// that the user believes what's cached is wrong.
+    /// </summary>
+    public static async Task ForceRefreshAsync(CancellationToken cancellationToken = default)
+    {
+        await FetchGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _memoryCache = null;
+            _appIdMemoryCache = null;
+            try
+            {
+                if (File.Exists(CachePath)) File.Delete(CachePath);
+            }
+            catch (Exception error)
+            {
+                AppLog.Error("Curated game-icons cache could not be deleted", error);
+            }
+
+            await RefreshAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            FetchGate.Release();
+        }
+    }
+
     public static async Task RefreshAsync(CancellationToken cancellationToken = default)
     {
         try

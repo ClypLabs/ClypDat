@@ -275,6 +275,46 @@ public static class GameIconService
         return prefixMatch;
     }
 
+    /// <summary>
+    /// Throws away every cached icon and the per-session "already tried this
+    /// one" marks, so the next lookup starts from nothing. The manual escape
+    /// hatch for the cache having no expiry: an icon that resolved to the
+    /// wrong artwork, or to a launcher's logo instead of the game's, would
+    /// otherwise stay wrong for good. Returns how many cached images went.
+    /// </summary>
+    public static int ClearCache()
+    {
+        lock (Attempted) Attempted.Clear();
+        lock (NetworkAttempted) NetworkAttempted.Clear();
+
+        var removed = 0;
+        try
+        {
+            if (!Directory.Exists(CacheFolder)) return 0;
+            foreach (var file in Directory.EnumerateFiles(CacheFolder, "*.png"))
+            {
+                try
+                {
+                    File.Delete(file);
+                    removed++;
+                }
+                catch (Exception error)
+                {
+                    // A file still open somewhere (the icon is loaded into a
+                    // live Bitmap) just stays put and gets reused.
+                    AppLog.Error($"Game icon cache: could not delete {file}", error);
+                }
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Game icon cache clear failed", error);
+        }
+
+        AppLog.Info($"Game icon cache cleared: {removed} images removed.");
+        return removed;
+    }
+
     public static Bitmap? TryLoad(string displayName)
     {
         if (string.IsNullOrWhiteSpace(displayName)) return null;

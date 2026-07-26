@@ -1124,6 +1124,28 @@
                 </StackPanel>
               </Border>
 
+              <Border Classes="settingsCard">
+                <StackPanel Spacing="10">
+                  <StackPanel Spacing="2">
+                    <TextBlock Text="Game icons" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
+                    <TextBlock Text="Sidebar artwork is found automatically and then kept forever, so a wrong or missing icon stays that way. Refreshing throws the cached images away and looks every game up again." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                    <Button Content="Refresh game icons"
+                            Click="RefreshGameIconsButton_OnClick"
+                            IsEnabled="{Binding !IsRefreshingGameIcons}"
+                            HorizontalAlignment="Left" />
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding GameIconRefreshStatus}"
+                               Foreground="#93A6B8"
+                               FontSize="12"
+                               VerticalAlignment="Center"
+                               TextWrapping="Wrap"
+                               IsVisible="{Binding GameIconRefreshStatus, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+                  </Grid>
+                </StackPanel>
+              </Border>
+
               <Border Classes="settingsCard" IsVisible="{Binding HasIgnoredGameExecutables}">
                 <StackPanel Spacing="10">
                   <StackPanel Spacing="2">
