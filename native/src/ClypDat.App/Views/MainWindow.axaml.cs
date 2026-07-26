@@ -229,6 +229,17 @@ public sealed partial class MainWindow : Window
         AddHandler(PointerPressedEvent, GameRailItem_OnPointerPressed, RoutingStrategies.Tunnel);
         AddHandler(PointerMovedEvent, GameRailItem_OnPointerMoved, RoutingStrategies.Tunnel);
         AddHandler(PointerReleasedEvent, GameRailItem_OnPointerReleased, RoutingStrategies.Tunnel);
+
+        // Change Game's flyout (see ClipContextSetGame_OnClick) never
+        // light-dismissed on an outside click on its own, through three
+        // different popup approaches - something about this window's own
+        // input handling swallows whatever signal a Popup normally listens
+        // for. A popup renders on its own separate surface, so any pointer
+        // press that reaches THIS window's own pipeline at all necessarily
+        // landed outside it - closing on every such press, rather than
+        // trusting the popup to notice on its own, sidesteps the problem
+        // entirely instead of chasing why light-dismiss itself won't fire.
+        AddHandler(PointerPressedEvent, (_, _) => _changeGameFlyout?.Hide(), RoutingStrategies.Tunnel);
     }
 
     private MainWindowViewModel? ViewModel => DataContext as MainWindowViewModel;
