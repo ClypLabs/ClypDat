@@ -402,14 +402,11 @@
                                     </Panel>
                                   </Border>
                                   <!-- Same size as the two cells above it, not
-                                       stretched to fill the row - just
-                                       centred under them. Spanning+stretching
-                                       this one across the full width (the
-                                       previous version) made the 3rd icon
-                                       visibly bigger than the other two,
-                                       which read as wrong/inconsistent rather
-                                       than "the layout for 3". -->
-                                  <Border Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Width="14" Height="14" Margin="0,1,0,0" HorizontalAlignment="Center" CornerRadius="4" ClipToBounds="True" Background="#26323D">
+                                       stretched to fill the row - sits at the
+                                       bottom-left, under Slot1, same as the
+                                       single-game layout's own top-left
+                                       placement, not centred under the row. -->
+                                  <Border Grid.Row="1" Grid.Column="0" Width="14" Height="14" Margin="0,1,0,0" HorizontalAlignment="Left" CornerRadius="4" ClipToBounds="True" Background="#26323D">
                                     <Panel>
                                       <Image Source="{Binding Slot3Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot3Icon}" />
                                       <TextBlock Text="{Binding Slot3Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot3Icon}" />
