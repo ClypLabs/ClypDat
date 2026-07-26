@@ -686,9 +686,9 @@
                             PointerExited="ClipCard_OnPointerExited">
                       <Border.ContextMenu>
                         <ContextMenu>
-                          <MenuItem Header="Export" Click="ClipContextExport_OnClick" />
-                          <MenuItem Header="Open" Click="ClipContextOpen_OnClick" />
-                          <MenuItem Header="{Binding RenameActionLabel}" Click="ClipContextRename_OnClick" />
+                          <MenuItem Header="Export" Click="ClipContextExport_OnClick" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
+                          <MenuItem Header="Open" Click="ClipContextOpen_OnClick" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
+                          <MenuItem Header="{Binding RenameActionLabel}" Click="ClipContextRename_OnClick" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
                           <MenuItem IsVisible="{Binding CanChangeGame}" PointerEntered="ClipContextSetGame_OnPointerEntered" StaysOpenOnClick="True">
                             <MenuItem.Header>
                               <Grid ColumnDefinitions="*,Auto">
@@ -697,9 +697,9 @@
                               </Grid>
                             </MenuItem.Header>
                           </MenuItem>
-                          <MenuItem Header="Open file location" Click="ClipContextOpenLocation_OnClick" />
+                          <MenuItem Header="Open file location" Click="ClipContextOpenLocation_OnClick" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
                           <Separator />
-                          <MenuItem Header="Delete" Click="ClipContextDelete_OnClick" Foreground="#D85E61" />
+                          <MenuItem Header="Delete" Click="ClipContextDelete_OnClick" Foreground="#D85E61" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
                         </ContextMenu>
                       </Border.ContextMenu>
                       <Border CornerRadius="12" ClipToBounds="True">

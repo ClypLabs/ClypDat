@@ -1815,6 +1815,15 @@ public sealed partial class MainWindow : Window
     // to signal that.
     private Flyout? _changeGameFlyout;
 
+    // Since Change Game opens on hover rather than a click, hovering any
+    // OTHER row in the same context menu needs to close it too - otherwise
+    // it just sits there covering/blocking the rest of the menu, since
+    // nothing was ever telling it to close on hovering away.
+    private void ClipContextMenuItem_OnPointerEntered(object? sender, PointerEventArgs e)
+    {
+        _changeGameFlyout?.Hide();
+    }
+
     private void ClipContextSetGame_OnPointerEntered(object? sender, PointerEventArgs e)
     {
         if (ViewModel is null) return;
