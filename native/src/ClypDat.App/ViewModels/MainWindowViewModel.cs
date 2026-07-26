@@ -2545,7 +2545,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         if (!string.IsNullOrWhiteSpace(info?.GameDisplayName) && !MedalImportService.IsStructuralFolderName(info.GameDisplayName))
         {
-            return (info.GameDisplayName, false);
+            return (MedalImportService.CanonicalGameName(info.GameDisplayName), false);
         }
 
         var sourceName = info?.FileTitle ?? Path.GetFileNameWithoutExtension(videoPath);
@@ -2557,7 +2557,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             !string.Equals(parent, "Clips", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(parent, "VODs", StringComparison.OrdinalIgnoreCase))
         {
-            return (parent, false);
+            return (MedalImportService.CanonicalGameName(parent), false);
         }
 
         return ("Unknown Game", false);
