@@ -16,6 +16,25 @@ public static class GameCatalog
         ["cs2.exe"] = "Counter-Strike 2",
         ["dota2.exe"] = "Dota 2",
         ["League of Legends.exe"] = "League of Legends",
+        // Without a catalog entry these fall back to a cleaned-up executable
+        // name ("RocketLeague", "r5apex"), which is both what the sidebar
+        // labels the game and the key every icon lookup is done under - so a
+        // missing entry costs the game its artwork as well as its name.
+        ["VALORANT-Win64-Shipping.exe"] = "VALORANT",
+        ["RocketLeague.exe"] = "Rocket League",
+        ["r5apex.exe"] = "Apex Legends",
+        ["r5apex_dx12.exe"] = "Apex Legends",
+        ["RainbowSix.exe"] = "Rainbow Six Siege",
+        ["RainbowSix_Vulkan.exe"] = "Rainbow Six Siege",
+        ["destiny2.exe"] = "Destiny 2",
+        ["RobloxPlayerBeta.exe"] = "Roblox",
+        ["Minecraft.Windows.exe"] = "Minecraft",
+        ["GTA5.exe"] = "Grand Theft Auto V",
+        ["GTA5_Enhanced.exe"] = "Grand Theft Auto V",
+        ["TslGame.exe"] = "PUBG: BATTLEGROUNDS",
+        ["RustClient.exe"] = "Rust",
+        ["EscapeFromTarkov.exe"] = "Escape from Tarkov",
+        ["Warframe.x64.exe"] = "Warframe",
         ["Marvel-Win64-Shipping.exe"] = "Marvel Rivals",
         ["Among Us.exe"] = "Among Us",
         ["Back4Blood.exe"] = "Back 4 Blood",
