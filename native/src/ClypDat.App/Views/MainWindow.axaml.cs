@@ -3953,13 +3953,8 @@ public sealed partial class MainWindow : Window
     // they no longer dismiss anything. Leave the editor entirely and it goes.
     private void PollEditorHoverControls()
     {
-        // Docked mode (the default) is the XAML bar under the video, so the
-        // floating one never comes out at all.
-        if (ViewModel is not null && ViewModel.IsEditorVisible && !ViewModel.Settings.EditorHoverBarEnabled)
-        {
-            EnsureDockedPlaybackBar();
-        }
-
+        // Docked mode (the default) is the control row in the timeline panel,
+        // so the floating one never comes out at all.
         if (ViewModel is null || !ViewModel.IsEditorVisible || ViewModel.IsVideoFullscreen || _playback is null ||
             !ViewModel.Settings.EditorHoverBarEnabled)
         {
@@ -4005,9 +4000,12 @@ public sealed partial class MainWindow : Window
         var overBar = false;
         if (_editorHoverControlsWindow is { IsVisible: true } existingBar)
         {
+            // Owner's scaling for the same reason as RepositionEditorHoverControls:
+            // Position is physical, Width/Height are DIPs.
+            var barScaling = RenderScaling > 0 ? RenderScaling : 1;
             var barPos = existingBar.Position;
-            var barWidthPx = (int)(existingBar.Width * existingBar.RenderScaling);
-            var barHeightPx = (int)(existingBar.Height * existingBar.RenderScaling);
+            var barWidthPx = (int)(existingBar.Width * barScaling);
+            var barHeightPx = (int)(existingBar.Height * barScaling);
             overBar = cursor.X >= barPos.X && cursor.X < barPos.X + barWidthPx
                       && cursor.Y >= barPos.Y && cursor.Y < barPos.Y + barHeightPx;
         }
@@ -4135,14 +4133,21 @@ public sealed partial class MainWindow : Window
         var bottomOnScreen = EditorVideoHost.PointToScreen(new Point(0, EditorVideoHost.Bounds.Height));
         bar.Width = Math.Max(1, width);
         bar.Height = barHeight;
-        bar.Position = new PixelPoint(topLeft.X, bottomOnScreen.Y - (int)(barHeight * bar.RenderScaling));
+        // The OWNER's scaling, not the bar's. Position is in physical pixels
+        // while Height is in DIPs, so converting between them needs the real
+        // scale factor of the display this is on - and a Window that has not
+        // been shown yet reports RenderScaling 1.0 regardless. On a 200%
+        // display that put the bar half its own height too low on the very
+        // first show, hanging past the bottom of the video pane.
+        var scaling = RenderScaling > 0 ? RenderScaling : 1;
+        bar.Position = new PixelPoint(topLeft.X, bottomOnScreen.Y - (int)(barHeight * scaling));
     }
 
-    // Both editor playback bars - the floating hover window and the docked row
-    // under the video - are this same layout. Built twice (once per host)
-    // rather than reparented: only one is ever live, and a Control can only
-    // have one parent, so sharing an instance would mean tearing it out of one
-    // visual tree and into another every time the setting flips.
+    // Contents of the floating hover bar. The docked alternative is plain XAML
+    // in the timeline panel (it predates this and is deliberately unchanged) -
+    // this one carries the extras that only make sense floating over the
+    // picture, the scrub strip and the elapsed/duration readout, since in
+    // docked mode the timeline right below already provides both.
     private Control BuildPlaybackBarLayout()
     {
         PathIcon Icon(string data, double size = 16) => new()
@@ -4309,17 +4314,6 @@ public sealed partial class MainWindow : Window
         barContent.Children.Add(progressStrip);
         barContent.Children.Add(layout);
         return barContent;
-    }
-
-    // Fills the docked host (MainWindow.axaml) the first time the editor needs
-    // it. Kept lazy so a user who never turns the hover bar off never builds
-    // the second copy, and vice versa.
-    private void EnsureDockedPlaybackBar()
-    {
-        if (DockedPlaybackBar.Child is not null) return;
-        var content = BuildPlaybackBarLayout();
-        content.Margin = new Thickness(0, 0, 0, 6);
-        DockedPlaybackBar.Child = content;
     }
 
     private Window EnsureEditorHoverControlsWindow()

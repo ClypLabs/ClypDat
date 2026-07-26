@@ -60,20 +60,34 @@ public sealed class MediaProbeService
         return VideoExtensions.Contains(Path.GetExtension(path));
     }
 
-    public IEnumerable<string> EnumerateVideos(string folderPath)
+    // Returns FileInfo, not paths: the directory enumeration already carries
+    // each entry's size and timestamps, so handing those along means the
+    // ordering below and CreateLibraryStub after it read what's already in
+    // hand instead of issuing a fresh stat per clip each. That was two extra
+    // disk round-trips per clip on a path that runs for the whole library at
+    // startup, when the disk is at its coldest.
+    public IEnumerable<FileInfo> EnumerateVideos(string folderPath)
     {
-        return Directory.EnumerateFiles(folderPath, "*.*", SearchOption.AllDirectories)
-            .Where(IsVideoFile)
-            .OrderByDescending(File.GetCreationTimeUtc);
+        return new DirectoryInfo(folderPath)
+            .EnumerateFiles("*.*", SearchOption.AllDirectories)
+            .Where(file => IsVideoFile(file.FullName))
+            .OrderByDescending(file => file.CreationTimeUtc);
     }
 
-    public MediaFileInfo CreateLibraryStub(string filePath)
+    public MediaFileInfo CreateLibraryStub(string filePath) => CreateLibraryStub(new FileInfo(filePath));
+
+    public MediaFileInfo CreateLibraryStub(FileInfo info)
     {
-        var info = new FileInfo(filePath);
+        var filePath = info.FullName;
         var thumbnailPath = GetThumbnailPath(filePath);
-        if (File.Exists(thumbnailPath))
+        var thumbnail = new FileInfo(thumbnailPath);
+        // Recency marker for PruneStaleCache - see its comment. Only rewritten
+        // once it's actually getting old: this runs for every clip on every
+        // library refresh, and a metadata WRITE per clip is far more expensive
+        // than the read beside it, especially on a cold disk at boot. The
+        // prune cutoff is 30 days, so a day's resolution is plenty.
+        if (thumbnail.Exists && DateTime.UtcNow - thumbnail.LastWriteTimeUtc > TimeSpan.FromDays(1))
         {
-            // Recency marker for PruneStaleCache - see its comment.
             try { File.SetLastWriteTimeUtc(thumbnailPath, DateTime.UtcNow); } catch { }
         }
 
@@ -95,7 +109,7 @@ public sealed class MediaProbeService
             info.CreationTimeUtc,
             cached?.Duration ?? TimeSpan.Zero,
             info.Length,
-            File.Exists(thumbnailPath) ? thumbnailPath : string.Empty,
+            thumbnail.Exists ? thumbnailPath : string.Empty,
             cached?.Tracks ?? Array.Empty<MediaTrackInfo>(),
             cached?.Width ?? 0,
             cached?.Height ?? 0,
