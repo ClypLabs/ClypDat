@@ -440,9 +440,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private string LibraryStorageLimitLabel => Settings.LibraryStorageLimitGb >= 1024 && Settings.LibraryStorageLimitGb % 1024 == 0
-        ? $"{Settings.LibraryStorageLimitGb / 1024} TB"
-        : $"{Settings.LibraryStorageLimitGb} GB";
+    // Any limit past 1024 GB reads in TB, not just the round multiples that
+    // divide exactly - a custom 1500 GB used to render as "1500 GB", wide
+    // enough to run out of the rail it sits in. One decimal, and no trailing
+    // ".0" on the round ones.
+    private string LibraryStorageLimitLabel
+    {
+        get
+        {
+            var gb = Settings.LibraryStorageLimitGb;
+            if (gb < 1024) return $"{gb} GB";
+            var tb = gb / 1024d;
+            return tb % 1 == 0 ? $"{tb:0} TB" : $"{tb:0.#} TB";
+        }
+    }
 
     // Shown stacked under the sidebar ring, always - has to fit the 64px
     // rail, so it's just "of <limit>" under the used figure, or "No Limit"
@@ -4641,7 +4652,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private static string FormatBytes(long bytes)
     {
-        string[] units = { "B", "KB", "MB", "GB" };
+        // TB included: a library past 1024 GB used to read "2048 GB", which is
+        // both wrong-looking and too wide for the sidebar rail it's shown in.
+        string[] units = { "B", "KB", "MB", "GB", "TB" };
         var value = (double)bytes;
         var unit = 0;
         while (value >= 1024 && unit < units.Length - 1)
