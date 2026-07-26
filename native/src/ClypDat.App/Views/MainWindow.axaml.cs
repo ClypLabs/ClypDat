@@ -1830,10 +1830,14 @@ public sealed partial class MainWindow : Window
 
     // The ClypDat logo button is a universal "go back to Library" from anywhere
     // else in the app (editor or Settings). Opening Settings has its own
-    // dedicated button now (bottom-left of the Library).
+    // dedicated button now (bottom-left of the Library). It's also the way
+    // back to the unfiltered library - "home" that left a game filter applied
+    // wasn't home, and with multi-select on there could be several to undo.
     private void LibraryHomeButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
+
+        ViewModel.ClearAllFilters();
 
         if (ViewModel.IsEditorVisible)
         {

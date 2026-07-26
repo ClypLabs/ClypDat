@@ -4070,9 +4070,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // both UIs stay in sync with each other and with the underlying set.
     public void SelectGameSection(string? gameKey)
     {
-        _activeGameFilters.Clear();
-        if (gameKey is not null) _activeGameFilters.Add(gameKey);
-        foreach (var option in GameFilterOptions) option.SetCheckedSilently(string.Equals(option.Key, gameKey, StringComparison.OrdinalIgnoreCase));
+        // A null key is "All Games" and always clears, whichever mode is on.
+        if (gameKey is null || !Settings.MultiSelectSidebarFilters)
+        {
+            _activeGameFilters.Clear();
+            if (gameKey is not null) _activeGameFilters.Add(gameKey);
+        }
+        else if (!_activeGameFilters.Remove(gameKey))
+        {
+            _activeGameFilters.Add(gameKey);
+        }
+
+        foreach (var option in GameFilterOptions) option.SetCheckedSilently(_activeGameFilters.Contains(option.Key));
         ApplyGameFilters();
         OnPropertyChanged(nameof(IsGameFilterActive));
         OnPropertyChanged(nameof(LibraryTitle));
@@ -4080,12 +4089,49 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void SelectClipTypeSection(string? key)
     {
-        _activeClipTypeFilters.Clear();
-        if (key is not null) _activeClipTypeFilters.Add(key);
-        foreach (var option in ClipTypeFilterOptions) option.SetCheckedSilently(string.Equals(option.Key, key, StringComparison.OrdinalIgnoreCase));
+        if (key is null || !Settings.MultiSelectSidebarFilters)
+        {
+            _activeClipTypeFilters.Clear();
+            if (key is not null) _activeClipTypeFilters.Add(key);
+        }
+        else if (!_activeClipTypeFilters.Remove(key))
+        {
+            _activeClipTypeFilters.Add(key);
+        }
+
+        foreach (var option in ClipTypeFilterOptions) option.SetCheckedSilently(_activeClipTypeFilters.Contains(option.Key));
         ApplyClipTypeFilters();
         OnPropertyChanged(nameof(IsClipTypeFilterActive));
         OnPropertyChanged(nameof(LibraryTitle));
+    }
+
+    // Back to the whole library in one action - both filter groups at once,
+    // however many are set. Used by the logo/home button.
+    public void ClearAllFilters()
+    {
+        if (_activeGameFilters.Count == 0 && _activeClipTypeFilters.Count == 0) return;
+
+        _activeGameFilters.Clear();
+        _activeClipTypeFilters.Clear();
+        foreach (var option in GameFilterOptions) option.SetCheckedSilently(false);
+        foreach (var option in ClipTypeFilterOptions) option.SetCheckedSilently(false);
+        ApplyGameFilters();
+        ApplyClipTypeFilters();
+        OnPropertyChanged(nameof(IsGameFilterActive));
+        OnPropertyChanged(nameof(IsClipTypeFilterActive));
+        OnPropertyChanged(nameof(LibraryTitle));
+    }
+
+    public bool MultiSelectSidebarFilters
+    {
+        get => Settings.MultiSelectSidebarFilters;
+        set
+        {
+            if (Settings.MultiSelectSidebarFilters == value) return;
+            Settings.MultiSelectSidebarFilters = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
     }
 
     private void OnGameFilterOptionChanged(string gameName, bool isChecked)

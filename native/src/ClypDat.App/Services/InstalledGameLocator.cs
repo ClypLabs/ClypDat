@@ -89,6 +89,15 @@ public static class InstalledGameLocator
             AppLog.Error("Uninstall-registry scan failed (non-fatal)", error);
         }
 
+        try
+        {
+            AddStartMenuShortcuts(index);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Start-menu shortcut scan failed (non-fatal)", error);
+        }
+
         AppLog.Info($"Installed-game index built: {index.Count} entries.");
         return index;
     }
@@ -126,6 +135,119 @@ public static class InstalledGameLocator
         }
     }
 
+    // Every launcher puts its games in the Start menu, whatever store they came
+    // from - Riot, EA, Ubisoft, GOG, Battle.net and standalone installers alike
+    // - so the shortcuts there cover the games the Epic manifests and the
+    // uninstall registry between them still miss. The shortcut's own name is
+    // the game's name as the user knows it, which is exactly the key icons are
+    // looked up under.
+    private static void AddStartMenuShortcuts(Dictionary<string, string> index)
+    {
+        string[] roots =
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu),
+            Environment.GetFolderPath(Environment.SpecialFolder.StartMenu)
+        };
+
+        var windowsFolder = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+
+        foreach (var root in roots)
+        {
+            if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) continue;
+
+            foreach (var shortcut in Directory.EnumerateFiles(root, "*.lnk", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    var name = Path.GetFileNameWithoutExtension(shortcut);
+                    if (string.IsNullOrWhiteSpace(name)) continue;
+
+                    var key = Normalize(name);
+                    // Whatever the Epic manifests and the registry found is
+                    // more precise than a shortcut, so they win.
+                    if (key.Length == 0 || index.ContainsKey(key)) continue;
+
+                    var target = ResolveShortcutTarget(shortcut);
+                    if (string.IsNullOrWhiteSpace(target)) continue;
+                    if (!target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
+                    // Windows' own accessories are not games and would happily
+                    // claim names like "Paint" or "Notepad".
+                    if (target.StartsWith(windowsFolder, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (Path.GetFileName(target).Contains("unins", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!File.Exists(target)) continue;
+
+                    index[key] = PreferGameExecutable(target, name);
+                }
+                catch
+                {
+                    // One unreadable shortcut shouldn't stop the sweep.
+                }
+            }
+        }
+    }
+
+    // COM rather than parsing the .lnk binary: shortcut files carry their
+    // target in several different structures depending on how they were
+    // created, and the shell already knows how to read all of them.
+    private static string? ResolveShortcutTarget(string shortcutPath)
+    {
+        ShellLink? link = null;
+        try
+        {
+            link = new ShellLink();
+            ((IPersistFile)link).Load(shortcutPath, 0);
+            var buffer = new System.Text.StringBuilder(260);
+            // SLGP_RAWPATH (4) - the path as stored, without the shell
+            // resolving a moved target over the network, which can block.
+            ((IShellLinkW)link).GetPath(buffer, buffer.Capacity, IntPtr.Zero, 4);
+            var path = buffer.ToString();
+            return string.IsNullOrWhiteSpace(path) ? null : Environment.ExpandEnvironmentVariables(path);
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            if (link is not null) System.Runtime.InteropServices.Marshal.FinalReleaseComObject(link);
+        }
+    }
+
+    [System.Runtime.InteropServices.ComImport]
+    [System.Runtime.InteropServices.Guid("00021401-0000-0000-C000-000000000046")]
+    private class ShellLink
+    {
+    }
+
+    [System.Runtime.InteropServices.ComImport]
+    [System.Runtime.InteropServices.Guid("000214F9-0000-0000-C000-000000000046")]
+    [System.Runtime.InteropServices.InterfaceType(System.Runtime.InteropServices.ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IShellLinkW
+    {
+        // Only GetPath is declared because it is first in the vtable; the rest
+        // of IShellLinkW is never called.
+        void GetPath(
+            [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPWStr)] System.Text.StringBuilder file,
+            int maxPath,
+            IntPtr findData,
+            uint flags);
+    }
+
+    [System.Runtime.InteropServices.ComImport]
+    [System.Runtime.InteropServices.Guid("0000010b-0000-0000-C000-000000000046")]
+    [System.Runtime.InteropServices.InterfaceType(System.Runtime.InteropServices.ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IPersistFile
+    {
+        // Declared in vtable order (IPersist::GetClassID first, then
+        // IPersistFile's own) so Load lands on the right slot.
+        void GetClassID(out Guid classId);
+        [System.Runtime.InteropServices.PreserveSig] int IsDirty();
+        void Load([System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPWStr)] string fileName, uint mode);
+        void Save([System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPWStr)] string? fileName, bool remember);
+        void SaveCompleted([System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPWStr)] string? fileName);
+        void GetCurFile([System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPWStr)] out string fileName);
+    }
+
     private static void AddUninstallEntries(Dictionary<string, string> index)
     {
         (RegistryKey Hive, string Path)[] roots =
@@ -155,13 +277,18 @@ public static class InstalledGameLocator
                     if (comma > 2) iconPath = iconPath[..comma];
                     iconPath = iconPath.Trim().Trim('"');
 
-                    // .ico files aren't readable by the executable-icon path, and
-                    // uninstaller stubs are the wrong icon for the game anyway.
-                    if (!iconPath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
+                    // .ico is accepted alongside .exe - ExtractIconEx reads
+                    // icon files too, and plenty of launchers (Steam writes
+                    // one per game under steam\games) point DisplayIcon at an
+                    // .ico rather than the binary. Skipping those was why an
+                    // installed game could still end up with a letter badge.
+                    // Uninstaller stubs stay out: wrong icon for the game.
+                    var isIcon = iconPath.EndsWith(".ico", StringComparison.OrdinalIgnoreCase);
+                    if (!isIcon && !iconPath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
                     if (Path.GetFileName(iconPath).Contains("unins", StringComparison.OrdinalIgnoreCase)) continue;
                     if (!File.Exists(iconPath)) continue;
 
-                    index.TryAdd(Normalize(name), PreferGameExecutable(iconPath, name));
+                    index.TryAdd(Normalize(name), isIcon ? iconPath : PreferGameExecutable(iconPath, name));
                 }
                 catch
                 {
