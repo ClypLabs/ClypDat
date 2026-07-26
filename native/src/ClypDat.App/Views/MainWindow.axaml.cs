@@ -1376,6 +1376,12 @@ public sealed partial class MainWindow : Window
         if (_draggingScrubber)
         {
             SeekLibraryToThumbTop(y - _scrubberGrabOffset);
+            // Ticks are already built (PointerEntered always fires before a
+            // drag can start) but this early return used to skip the one
+            // call that actually keeps them tracking the cursor - only the
+            // hover-not-dragging branch below updated proximity, so the
+            // ticks just froze wherever they were the instant a drag began.
+            UpdateTickProximity(y);
             return;
         }
 
