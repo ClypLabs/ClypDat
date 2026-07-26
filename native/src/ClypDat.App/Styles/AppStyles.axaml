@@ -710,6 +710,26 @@
   <Style Selector="Button.railGameButton">
     <Setter Property="CornerRadius" Value="12" />
   </Style>
+  <!-- Wraps a folder's header tile AND its revealed member tiles as one
+       visually connected group once expanded - collapsed, it's invisible
+       (zero border, no fill), so it costs nothing when the folder is shut. -->
+  <Style Selector="Border.railFolderGroup">
+    <Setter Property="CornerRadius" Value="16" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Border.railFolderGroup.expanded">
+    <Setter Property="BorderThickness" Value="1.5" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="Background" Value="#141D24" />
+    <Setter Property="Padding" Value="4,6" />
+  </Style>
   <!-- The storage button is the one rail button that isn't a bare 30px glyph:
        it holds the ring AND the used/limit caption, so it drops the fixed
        44px square for an auto height (still 44 wide, so it stays aligned with

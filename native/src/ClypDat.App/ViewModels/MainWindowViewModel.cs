@@ -4367,6 +4367,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // The switch from automatic to customised happens exactly once, the first
     // time the user actually does something - see EnsureCustomOrderSeeded.
     // Rendering itself (this method) never mutates settings.
+    // GameRailFolderViewModel instances are rebuilt from scratch on every
+    // rail action, so IsExpanded can't just live on the (disposable) view
+    // model - this is what actually survives across rebuilds, keyed by
+    // folder id (the automatic overflow folder's fixed sentinel id while
+    // it's still automatic, a real GUID once it's been organised).
+    private readonly HashSet<string> _expandedGameFolderIds = new(StringComparer.OrdinalIgnoreCase);
+
+    private void OnGameFolderExpandedChanged(string folderId, bool expanded)
+    {
+        if (expanded) _expandedGameFolderIds.Add(folderId);
+        else _expandedGameFolderIds.Remove(folderId);
+    }
+
     private void RebuildGameRail()
     {
         var byKey = GameFilterOptions.ToDictionary(option => option.Key, StringComparer.OrdinalIgnoreCase);
@@ -4383,7 +4396,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var overflow = GameFilterOptions.Skip(TopGameRailCount).ToArray();
             if (overflow.Length > 0)
             {
-                var automatic = new GameRailFolderViewModel(AutomaticFolderId, "More Games", isAutomatic: true);
+                var automatic = new GameRailFolderViewModel(AutomaticFolderId, "More Games", isAutomatic: true, OnGameFolderExpandedChanged);
+                automatic.SetExpandedSilently(_expandedGameFolderIds.Contains(AutomaticFolderId));
                 foreach (var option in overflow) automatic.Games.Add(option);
                 automatic.NotifyGamesChanged();
                 GameRailEntries.Add(automatic);
@@ -4405,7 +4419,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 var folder = Settings.GameRailFolders.FirstOrDefault(f => string.Equals(f.Id, folderId, StringComparison.OrdinalIgnoreCase));
                 if (folder is null) continue;
 
-                var folderVm = new GameRailFolderViewModel(folder.Id, folder.Name, isAutomatic: false);
+                var folderVm = new GameRailFolderViewModel(folder.Id, folder.Name, isAutomatic: false, OnGameFolderExpandedChanged);
+                folderVm.SetExpandedSilently(_expandedGameFolderIds.Contains(folder.Id));
                 foreach (var key in folder.GameKeys)
                 {
                     if (!byKey.TryGetValue(key, out var option) || !placed.Add(key)) continue;
@@ -4507,7 +4522,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             folder.GameKeys.RemoveAll(key => string.Equals(key, gameKey, StringComparison.OrdinalIgnoreCase));
         }
-        RemoveEmptyPersistedFolders();
+        NormalizeFolders();
 
         if (destinationFolderId is null)
         {
@@ -4546,13 +4561,28 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private void RemoveEmptyPersistedFolders()
+    // Keeps every persisted folder at 0 or 2+ members - a "folder" of exactly
+    // one game isn't a group any more, so moving a game out of a two-game
+    // folder dissolves it rather than leaving a single-icon folder behind
+    // holding what used to be its partner. Called after anything that can
+    // shrink a folder's membership.
+    private void NormalizeFolders()
     {
-        var empty = Settings.GameRailFolders.Where(folder => folder.GameKeys.Count == 0).ToArray();
-        foreach (var folder in empty)
+        foreach (var folder in Settings.GameRailFolders.ToArray())
         {
-            Settings.GameRailFolders.Remove(folder);
-            Settings.GameRailOrder.RemoveAll(token => TryParseFolderToken(token, out var id) && string.Equals(id, folder.Id, StringComparison.OrdinalIgnoreCase));
+            if (folder.GameKeys.Count == 0)
+            {
+                Settings.GameRailFolders.Remove(folder);
+                Settings.GameRailOrder.RemoveAll(token => TryParseFolderToken(token, out var id) && string.Equals(id, folder.Id, StringComparison.OrdinalIgnoreCase));
+            }
+            else if (folder.GameKeys.Count == 1)
+            {
+                var index = Settings.GameRailOrder.FindIndex(token => TryParseFolderToken(token, out var id) && string.Equals(id, folder.Id, StringComparison.OrdinalIgnoreCase));
+                var gameToken = "game:" + folder.GameKeys[0];
+                Settings.GameRailFolders.Remove(folder);
+                if (index >= 0) Settings.GameRailOrder[index] = gameToken;
+                else Settings.GameRailOrder.Add(gameToken);
+            }
         }
     }
 
@@ -4609,7 +4639,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             foreach (var existing in Settings.GameRailFolders) existing.GameKeys.RemoveAll(key => string.Equals(key, gameKey, StringComparison.OrdinalIgnoreCase));
             folder.GameKeys.Add(gameKey);
         }
-        RemoveEmptyPersistedFolders();
+        NormalizeFolders();
 
         var folderToken = "folder:" + folder.Id;
         if (anchorIndex >= 0 && anchorIndex <= Settings.GameRailOrder.Count) Settings.GameRailOrder.Insert(anchorIndex, folderToken);
