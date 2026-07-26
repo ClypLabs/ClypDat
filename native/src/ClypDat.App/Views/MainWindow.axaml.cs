@@ -1186,7 +1186,7 @@ public sealed partial class MainWindow : Window
     // hover preview; this reads more like a magnifier following the cursor.
     private void UpdateTickProximity(double cursorTrackY)
     {
-        const double fadeDistance = 45;
+        const double fadeDistance = 90;
         for (var i = 0; i < _scrubberTicks.Count && i < _scrubberDates.Count; i++)
         {
             var tickY = ContentOffsetToTrackY(_scrubberDates[i].ContentY);
