@@ -427,18 +427,33 @@ public sealed partial class MainWindow : Window
 
     // ---- Sidebar game rail: folders, ordering, drag/drop -------------------
     //
-    // Drag start is manual (PointerPressed/Moved/Released) rather than
-    // Avalonia's Button.PointerPressed alone, because a plain click has to
-    // keep working (it's still how a game gets selected as a filter) - only
-    // a press that then MOVES past a small threshold turns into an actual
-    // drag. Once it does, Avalonia's own DragDrop.DoDragDrop takes over; drop
-    // targets are resolved by the standard bubbling DragOver/Drop events.
+    // Drag is fully manual pointer-tracking, not Avalonia's DragDrop.DoDragDrop
+    // (tried first - never actually engaged when started from inside a
+    // Button's own PointerMoved, apparently losing the gesture to the
+    // Button's own internal press/capture handling before the native OS drag
+    // ever got going). This instead just captures the pointer to the source
+    // control on press-and-move, hit-tests whatever's actually under the
+    // cursor on every subsequent move via InputHitTest, and applies the move
+    // directly on release - no native drag session, no DataObject, entirely
+    // Avalonia's own input pipeline start to finish.
+    //
+    // Drop zones, based on where inside the TARGET tile the release lands:
+    // the top ~30% inserts the source before it, the bottom ~30% after it,
+    // and the middle ~40% - the bulk of the tile - merges the two into a
+    // folder (or files into one, if the target already is a folder). A
+    // dragged FOLDER never merges (folders don't nest), so for a folder
+    // source the split is just top-half/bottom-half, always a reorder.
+
+    private enum GameDropZone { Before, After, Merge }
 
     private Point? _gameDragStartPoint;
     private Control? _gameDragCandidate;
-    private bool _gameDragInProgress;
+    private bool _gameDragActive;
+    private string? _gameDragToken;
+    private Control? _gameDragSourceControl;
+    private Control? _gameDragTargetControl;
+    private GameDropZone _gameDragTargetZone;
     private const double GameDragThreshold = 6;
-    private const string GameRailDragFormat = "ClypDat.GameRailToken";
 
     private void GameRailItem_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
@@ -447,10 +462,20 @@ public sealed partial class MainWindow : Window
         _gameDragStartPoint = e.GetPosition(this);
     }
 
-    private async void GameRailItem_OnPointerMoved(object? sender, PointerEventArgs e)
+    private void GameRailItem_OnPointerMoved(object? sender, PointerEventArgs e)
     {
-        if (_gameDragInProgress || _gameDragCandidate is null || _gameDragStartPoint is null) return;
-        if (!ReferenceEquals(sender, _gameDragCandidate)) return;
+        if (_gameDragActive)
+        {
+            // The pointer is captured to the control the drag started on, so
+            // this SAME handler keeps firing for every subsequent move no
+            // matter what the cursor is actually over now - that's what makes
+            // hit-testing against the live cursor position necessary here,
+            // rather than trusting "sender".
+            UpdateGameDragTarget(e.GetPosition(this));
+            return;
+        }
+
+        if (_gameDragCandidate is null || _gameDragStartPoint is null || !ReferenceEquals(sender, _gameDragCandidate)) return;
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
         {
             _gameDragCandidate = null;
@@ -462,35 +487,252 @@ public sealed partial class MainWindow : Window
         if (Math.Abs(delta.X) < GameDragThreshold && Math.Abs(delta.Y) < GameDragThreshold) return;
 
         var token = GameRailTokenFor(_gameDragCandidate);
+        if (token is null)
+        {
+            _gameDragCandidate = null;
+            _gameDragStartPoint = null;
+            return;
+        }
+
+        _gameDragActive = true;
+        _gameDragToken = token;
+        _gameDragSourceControl = _gameDragCandidate;
         _gameDragCandidate = null;
         _gameDragStartPoint = null;
-        if (token is null) return;
 
-        _gameDragInProgress = true;
-        try
-        {
-            var data = new DataObject();
-            data.Set(GameRailDragFormat, token);
-            await DragDrop.DoDragDrop(e, data, DragDropEffects.Move);
-        }
-        finally
-        {
-            _gameDragInProgress = false;
-        }
+        // Dimmed rather than hidden, so there's still SOMETHING to look at
+        // while dragging over its own former spot.
+        _gameDragSourceControl.Opacity = 0.45;
+        e.Pointer.Capture(_gameDragSourceControl);
+        e.Handled = true;
+
+        UpdateGameDragTarget(e.GetPosition(this));
     }
 
     private void GameRailItem_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        if (_gameDragActive)
+        {
+            e.Pointer.Capture(null);
+            FinishGameDrag(e.GetPosition(this));
+            e.Handled = true;
+        }
+
         _gameDragCandidate = null;
         _gameDragStartPoint = null;
     }
 
-    private static string? GameRailTokenFor(Control control) => control.DataContext switch
+    private void UpdateGameDragTarget(Point windowPoint)
+    {
+        var hit = this.InputHitTest(windowPoint) as Control;
+        var target = FindRailTileAncestor(hit);
+        if (target is null || ReferenceEquals(target, _gameDragSourceControl))
+        {
+            _gameDragTargetControl = null;
+            return;
+        }
+
+        _gameDragTargetControl = target;
+        _gameDragTargetZone = ComputeDropZone(target, windowPoint);
+    }
+
+    private void FinishGameDrag(Point releasePoint)
+    {
+        var sourceToken = _gameDragToken;
+        var sourceControl = _gameDragSourceControl;
+        var targetControl = _gameDragTargetControl;
+        var zone = _gameDragTargetZone;
+
+        _gameDragActive = false;
+        _gameDragToken = null;
+        _gameDragSourceControl = null;
+        _gameDragTargetControl = null;
+
+        if (sourceControl is not null) sourceControl.Opacity = 1;
+        if (ViewModel is null || sourceToken is null) return;
+
+        if (targetControl is not null)
+        {
+            ApplyGameDrag(sourceToken, targetControl, zone);
+            return;
+        }
+
+        // No target under the cursor at release. If that's because the
+        // pointer never really left the source (dragged out and back), treat
+        // it as a cancel rather than shoving the game to the end of the rail
+        // for what amounted to no real move.
+        if (sourceControl is not null && IsPointWithin(sourceControl, releasePoint)) return;
+        ApplyGameDragToEnd(sourceToken);
+    }
+
+    private bool IsPointWithin(Control control, Point windowPoint)
+    {
+        var topLeft = control.TranslatePoint(new Point(0, 0), this);
+        if (topLeft is null) return false;
+        return new Rect(topLeft.Value, control.Bounds.Size).Contains(windowPoint);
+    }
+
+    // Where in TARGET's own bounds windowPoint falls, top to bottom - see the
+    // region comment above for what each third means.
+    private GameDropZone ComputeDropZone(Control target, Point windowPoint)
+    {
+        var topLeft = target.TranslatePoint(new Point(0, 0), this) ?? default;
+        var height = target.Bounds.Height;
+        var fraction = height > 0 ? (windowPoint.Y - topLeft.Y) / height : 0.5;
+
+        var draggingFolder = _gameDragToken is not null && _gameDragToken.StartsWith("folder:", StringComparison.Ordinal);
+        if (draggingFolder) return fraction <= 0.5 ? GameDropZone.Before : GameDropZone.After;
+
+        if (fraction < 0.3) return GameDropZone.Before;
+        if (fraction > 0.7) return GameDropZone.After;
+        return GameDropZone.Merge;
+    }
+
+    private static Control? FindRailTileAncestor(Control? control)
+    {
+        var current = control;
+        while (current is not null)
+        {
+            if (current is Button && current.DataContext is FilterOptionViewModel or GameRailFolderViewModel) return current;
+            current = current.GetVisualParent() as Control;
+        }
+        return null;
+    }
+
+    private void ApplyGameDrag(string sourceToken, Control targetControl, GameDropZone zone)
+    {
+        if (ViewModel is null) return;
+
+        if (targetControl.DataContext is GameRailFolderViewModel targetFolder)
+        {
+            // The whole folder tile means "file into me" regardless of zone -
+            // there's no "before/after" sub-position worth distinguishing on
+            // a target that's already a compressed group.
+            if (TryParseGameRailGameToken(sourceToken, out var sourceGameKey))
+            {
+                ViewModel.RelocateGame(sourceGameKey, targetFolder.Id, null);
+            }
+            else if (TryParseGameRailFolderToken(sourceToken, out var sourceFolderId) && !string.Equals(sourceFolderId, targetFolder.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                var beforeToken = zone == GameDropZone.After ? NextTopLevelTokenAfter("folder:" + targetFolder.Id) : "folder:" + targetFolder.Id;
+                ViewModel.RelocateTopLevelEntry("folder:" + sourceFolderId, beforeToken);
+            }
+            return;
+        }
+
+        if (targetControl.DataContext is not FilterOptionViewModel targetGame) return;
+        var enclosingFolder = FindEnclosingFolder(targetControl);
+
+        if (TryParseGameRailFolderToken(sourceToken, out var draggedFolderId))
+        {
+            // Folders only ever reorder among top-level entries - dropping one
+            // on a game that's inside another folder has nowhere sensible to
+            // land (folders don't nest), so it's ignored.
+            if (enclosingFolder is not null) return;
+            var beforeToken = zone == GameDropZone.After ? NextTopLevelTokenAfter("game:" + targetGame.Key) : "game:" + targetGame.Key;
+            ViewModel.RelocateTopLevelEntry("folder:" + draggedFolderId, beforeToken);
+            return;
+        }
+
+        if (!TryParseGameRailGameToken(sourceToken, out var sourceKey)) return;
+        if (string.Equals(sourceKey, targetGame.Key, StringComparison.OrdinalIgnoreCase)) return;
+
+        switch (zone)
+        {
+            case GameDropZone.Merge when enclosingFolder is not null:
+                // Target already belongs to a folder - join it there instead
+                // of trying to nest a second folder inside it.
+                ViewModel.RelocateGame(sourceKey, enclosingFolder.Id, null);
+                break;
+            case GameDropZone.Merge:
+                // Anchored on the TARGET (goes first into the new folder) -
+                // dropping A onto B should read as "B absorbed A", landing
+                // where B was, not where A came from.
+                ViewModel.CreateGameFolder(new[] { targetGame.Key, sourceKey });
+                break;
+            case GameDropZone.Before:
+                ViewModel.RelocateGame(sourceKey, enclosingFolder?.Id, targetGame.Key);
+                break;
+            case GameDropZone.After:
+                var afterKey = enclosingFolder is null
+                    ? NextTopLevelGameKeyAfter(targetGame.Key)
+                    : NextFolderGameKeyAfter(enclosingFolder, targetGame.Key);
+                ViewModel.RelocateGame(sourceKey, enclosingFolder?.Id, afterKey);
+                break;
+        }
+    }
+
+    private void ApplyGameDragToEnd(string sourceToken)
+    {
+        if (ViewModel is null) return;
+        if (TryParseGameRailGameToken(sourceToken, out var sourceKey))
+        {
+            ViewModel.RelocateGame(sourceKey, destinationFolderId: null, beforeGameKey: null);
+        }
+        else if (TryParseGameRailFolderToken(sourceToken, out _))
+        {
+            ViewModel.RelocateTopLevelEntry(sourceToken, beforeToken: null);
+        }
+    }
+
+    // The top-level token (game or folder) rendered immediately after the
+    // given one, or null if it's last - used to express "insert AFTER target"
+    // in terms RelocateTopLevelEntry already understands ("insert before X").
+    private string? NextTopLevelTokenAfter(string token)
+    {
+        if (ViewModel is null) return null;
+        var entries = ViewModel.GameRailEntries;
+        for (var i = 0; i < entries.Count; i++)
+        {
+            if (string.Equals(GameRailTokenForEntry(entries[i]), token, StringComparison.OrdinalIgnoreCase))
+            {
+                return i + 1 < entries.Count ? GameRailTokenForEntry(entries[i + 1]) : null;
+            }
+        }
+        return null;
+    }
+
+    // Same idea for a GAME landing at the top level specifically - null when
+    // the target is last, or when the very next entry is a folder rather than
+    // a game (RelocateGame's beforeGameKey only understands games), in which
+    // case the source just appends at the end instead of slotting exactly
+    // between the two. A minor imprecision in that one case, not worth a
+    // bigger API for.
+    private string? NextTopLevelGameKeyAfter(string gameKey)
+    {
+        if (ViewModel is null) return null;
+        var entries = ViewModel.GameRailEntries;
+        for (var i = 0; i < entries.Count; i++)
+        {
+            if (entries[i] is FilterOptionViewModel game && string.Equals(game.Key, gameKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return i + 1 < entries.Count && entries[i + 1] is FilterOptionViewModel next ? next.Key : null;
+            }
+        }
+        return null;
+    }
+
+    // Within a folder every entry is a game, so this one's always exact.
+    private static string? NextFolderGameKeyAfter(GameRailFolderViewModel folder, string gameKey)
+    {
+        for (var i = 0; i < folder.Games.Count; i++)
+        {
+            if (string.Equals(folder.Games[i].Key, gameKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return i + 1 < folder.Games.Count ? folder.Games[i + 1].Key : null;
+            }
+        }
+        return null;
+    }
+
+    private static string? GameRailTokenForEntry(object entry) => entry switch
     {
         FilterOptionViewModel game => "game:" + game.Key,
         GameRailFolderViewModel folder => "folder:" + folder.Id,
         _ => null
     };
+
+    private static string? GameRailTokenFor(Control control) => GameRailTokenForEntry(control.DataContext!);
 
     private static bool TryParseGameRailGameToken(string token, out string key)
     {
@@ -525,77 +767,6 @@ public sealed partial class MainWindow : Window
             if (ancestor is Control ancestorControl && ancestorControl.DataContext is GameRailFolderViewModel folder) return folder;
         }
         return null;
-    }
-
-    private void GameRailItem_OnDragOver(object? sender, DragEventArgs e)
-    {
-        e.DragEffects = e.Data.Contains(GameRailDragFormat) ? DragDropEffects.Move : DragDropEffects.None;
-        e.Handled = true;
-    }
-
-    // Dropping ON a game: reorders (source lands immediately before the
-    // target), pulling the source out of whatever folder it was in - unless
-    // the target ITSELF is inside a folder, in which case the source lands in
-    // that same folder, at that position. Dropping a folder onto a game only
-    // reorders it among other top-level entries; a folder can't be dropped
-    // "into" the position of a game that's inside another folder, since
-    // folders don't nest.
-    private void GameRailGame_OnDrop(object? sender, DragEventArgs e)
-    {
-        e.Handled = true;
-        if (ViewModel is null) return;
-        if (e.Data.Get(GameRailDragFormat) is not string sourceToken) return;
-        if (sender is not Control targetControl || targetControl.DataContext is not FilterOptionViewModel target) return;
-
-        var enclosingFolder = FindEnclosingFolder(targetControl);
-
-        if (TryParseGameRailGameToken(sourceToken, out var sourceKey))
-        {
-            if (string.Equals(sourceKey, target.Key, StringComparison.OrdinalIgnoreCase)) return;
-            ViewModel.RelocateGame(sourceKey, enclosingFolder?.Id, target.Key);
-        }
-        else if (TryParseGameRailFolderToken(sourceToken, out var sourceFolderId) && enclosingFolder is null)
-        {
-            ViewModel.RelocateTopLevelEntry("folder:" + sourceFolderId, "game:" + target.Key);
-        }
-    }
-
-    // Dropping ON a folder tile: a game gets filed into it (appended); a
-    // folder just reorders alongside it - folders never merge into each
-    // other, only games ever join a folder.
-    private void GameRailFolder_OnDrop(object? sender, DragEventArgs e)
-    {
-        e.Handled = true;
-        if (ViewModel is null) return;
-        if (e.Data.Get(GameRailDragFormat) is not string sourceToken) return;
-        if (sender is not Control targetControl || targetControl.DataContext is not GameRailFolderViewModel targetFolder) return;
-
-        if (TryParseGameRailGameToken(sourceToken, out var sourceKey))
-        {
-            ViewModel.RelocateGame(sourceKey, targetFolder.Id, null);
-        }
-        else if (TryParseGameRailFolderToken(sourceToken, out var sourceFolderId) && !string.Equals(sourceFolderId, targetFolder.Id, StringComparison.OrdinalIgnoreCase))
-        {
-            ViewModel.RelocateTopLevelEntry("folder:" + sourceFolderId, "folder:" + targetFolder.Id);
-        }
-    }
-
-    // Dropping on empty rail space, past every tile: appends to the very end
-    // of the top level - the way to pull a game back out of a folder without
-    // needing a specific game to drop it "before".
-    private void GameRailBackground_OnDrop(object? sender, DragEventArgs e)
-    {
-        if (ViewModel is null) return;
-        if (e.Data.Get(GameRailDragFormat) is not string sourceToken) return;
-
-        if (TryParseGameRailGameToken(sourceToken, out var sourceKey))
-        {
-            ViewModel.RelocateGame(sourceKey, destinationFolderId: null, beforeGameKey: null);
-        }
-        else if (TryParseGameRailFolderToken(sourceToken, out _))
-        {
-            ViewModel.RelocateTopLevelEntry(sourceToken, beforeToken: null);
-        }
     }
 
     private void GameRailFolder_OnClick(object? sender, RoutedEventArgs e)

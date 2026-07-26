@@ -734,7 +734,17 @@
       </Transitions>
     </Setter>
   </Style>
-  <Style Selector="Button.railIconButton:pointerover">
+  <!-- :not(ToggleSwitch) is load-bearing, not decoration - a plain
+       "Button.railIconButton:pointerover" reliably LOST to the generic
+       "Button:not(ToggleSwitch):pointerover" rule above (same bug already
+       hit and documented for Button.primaryButton:pointerover): a class
+       selector doesn't automatically outrank a same-position :not() pseudo-
+       class in Avalonia's specificity scoring the way it would in CSS.
+       Matching that rule's shape as a strict superset (this class AND that
+       negation) is what actually wins. Without this the rail just showed the
+       generic grey #263544 hover on every game/section icon, which read as
+       "still grey" no matter how the accent blend below was tuned. -->
+  <Style Selector="Button.railIconButton:not(ToggleSwitch):pointerover">
     <!-- Accent-tinted, not a grey wash: hovering used to just lighten the
          rail, which read as the button greying out rather than responding.
          This is the same accent the selection tints use (so it follows the
@@ -759,7 +769,7 @@
   <Style Selector="Button.railIconButton.active PathIcon">
     <Setter Property="Foreground" Value="{StaticResource AccentSelectedIconBrush}" />
   </Style>
-  <Style Selector="Button.railIconButton.active:pointerover">
+  <Style Selector="Button.railIconButton.active:not(ToggleSwitch):pointerover">
     <Setter Property="Background" Value="{StaticResource AccentSelectedHoverBrush}" />
   </Style>
   <Style Selector="Button.railIconButton Border.gameInitialBadge">
