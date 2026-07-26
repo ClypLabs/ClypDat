@@ -635,6 +635,15 @@
   <Style Selector="Button.autoClipCardHeader.allKillsHeader:pointerover">
     <Setter Property="Background" Value="#1C2733" />
   </Style>
+  <!-- Settings search (see SettingsSearchHighlightConverter) - a matched
+       setting's own label gets the OS accent colour behind its text, same
+       as a text-selection highlight, so it's findable at a glance among
+       everything else already on the page instead of the user having to
+       re-read every label themselves. -->
+  <Style Selector="TextBlock.searchHighlight">
+    <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+  </Style>
   <Style Selector="Button.settingsNavButton">
     <!-- Not Transparent (#00FFFFFF - white at zero alpha): the BrushTransition
          below interpolates RGB as well as alpha, so unhovering flashed white
