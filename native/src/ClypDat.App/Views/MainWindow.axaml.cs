@@ -1783,28 +1783,41 @@ public sealed partial class MainWindow : Window
     // A nested MenuItem submenu (Items populated dynamically from the
     // ContextMenu's own Opening event, same pattern GameContextMenu_OnOpening
     // already uses for "Move to folder") never actually showed its dropdown
-    // here despite being wired the same way. Switching to an independent
-    // MenuFlyout still did nothing - because it was anchored to the clicked
-    // MenuItem's own ContextMenu.PlacementTarget, walked via
-    // GetVisualAncestors() from the MenuItem itself. A ContextMenu starts
-    // closing (and detaching its items from the visual tree) as part of the
-    // very same click that fires Click on one of its items, so by the time
-    // this ran, GetVisualAncestors() had nothing to walk - ShowAt got an
-    // already-detached fallback anchor and failed with no exception ever
-    // reaching the log (it's a synchronous UI-thread failure, not a Task
-    // one). Anchoring to the window itself - always attached - and asking
-    // for pointer placement sidesteps the whole detached-anchor problem.
+    // here despite being wired the same way. An independent MenuFlyout fixed
+    // that (see git history for why the submenu never opened), but anchoring
+    // it to the whole window at the pointer left it looking broken: no
+    // specific control to light-dismiss against, so it lingered on screen,
+    // and reopening it while already open left the old popup's items
+    // rendered behind the new one instead of being replaced cleanly. Now
+    // tracks the single open instance (closing it before showing a new one),
+    // explicitly hides itself the moment any item is picked rather than
+    // trusting default menu-close behaviour, and anchors to the actual clip
+    // card control (found by walking the window's current visual tree,
+    // since the closing ContextMenu's own items are unusable as an anchor -
+    // see below) instead of the whole window.
+    private MenuFlyout? _changeGameFlyout;
+
     private void ClipContextSetGame_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
         if (sender is not MenuItem { DataContext: ClipCardViewModel clip }) return;
 
+        _changeGameFlyout?.Hide();
+
         var flyout = new MenuFlyout();
+        _changeGameFlyout = flyout;
+        flyout.Closed += (_, _) => { if (_changeGameFlyout == flyout) _changeGameFlyout = null; };
+
+        void PickGame(string? gameName)
+        {
+            flyout.Hide();
+            _ = ChangeClipGameAsync(clip, gameName);
+        }
 
         // Null gameName tells ChangeClipGameAsync to prompt for a brand new
         // name instead of using one already in the library.
         var addGame = new MenuItem { Header = "+ Add Game" };
-        addGame.Click += async (_, _) => await ChangeClipGameAsync(clip, null);
+        addGame.Click += (_, _) => PickGame(null);
         flyout.Items.Add(addGame);
 
         var otherGames = ViewModel.GameFilterOptions
@@ -1816,11 +1829,16 @@ public sealed partial class MainWindow : Window
         foreach (var game in otherGames)
         {
             var item = new MenuItem { Header = game };
-            item.Click += async (_, _) => await ChangeClipGameAsync(clip, game);
+            item.Click += (_, _) => PickGame(game);
             flyout.Items.Add(item);
         }
 
-        flyout.ShowAt(this, showAtPointer: true);
+        // GetVisualAncestors() from the clicked MenuItem finds nothing (the
+        // ContextMenu that owned it is already detaching as part of this
+        // same click) - walk the window's own current tree instead to find
+        // this specific clip card, which is still fully attached.
+        var anchor = this.GetVisualDescendants().OfType<Control>().FirstOrDefault(c => ReferenceEquals(c.DataContext, clip)) ?? (Control)this;
+        flyout.ShowAt(anchor, showAtPointer: true);
     }
 
     private async Task ChangeClipGameAsync(ClipCardViewModel clip, string? gameName)
