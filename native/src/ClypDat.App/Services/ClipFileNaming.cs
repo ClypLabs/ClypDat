@@ -21,15 +21,67 @@ public static class ClipFileNaming
     public static string StripTimestampSuffix(string nameWithoutExtension) =>
         TrailingTimestampPattern.Replace(nameWithoutExtension, string.Empty);
 
-    public static string BuildBaseName(string gameDisplayName)
+    // Windows forbids nine printable characters in a name, and users type them
+    // constantly - "Tom Clancy's Rainbow Six: Siege", a clip called Who?, a
+    // title in "quotes". Flattening them all to _ or - threw away what they
+    // said; each maps to the nearest character Explorer will accept instead,
+    // so the name still reads as the name. The two with no ASCII equivalent
+    // use their full-width twins, which are ordinary filename characters.
+    private static readonly Dictionary<char, string> InvalidCharacterReplacements = new()
     {
-        var name = string.IsNullOrWhiteSpace(gameDisplayName) ? "Replay" : gameDisplayName.Trim();
-        foreach (var invalid in Path.GetInvalidFileNameChars())
+        ['"'] = "'",
+        [':'] = ";",
+        ['<'] = "(",
+        ['>'] = ")",
+        ['/'] = "-",
+        ['\\'] = "-",
+        ['|'] = "-",
+        ['?'] = "？",
+        ['*'] = "＊",
+    };
+
+    /// <summary>
+    /// Makes one path segment (a filename stem or a folder name) legal on
+    /// Windows while keeping it readable. Note this is only ever applied to
+    /// what goes ON DISK - the clip's sidecar keeps the title and game name
+    /// exactly as the user typed them, so the library still displays the real
+    /// characters.
+    /// </summary>
+    public static string SanitizeSegment(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+
+        var builder = new System.Text.StringBuilder(value.Length);
+        foreach (var character in value)
         {
-            name = name.Replace(invalid, '_');
+            if (InvalidCharacterReplacements.TryGetValue(character, out var replacement))
+            {
+                builder.Append(replacement);
+            }
+            else if (char.IsControl(character))
+            {
+                // No sensible stand-in for a control character, and nothing is
+                // lost by dropping one.
+            }
+            else if (Array.IndexOf(Path.GetInvalidFileNameChars(), character) >= 0)
+            {
+                builder.Append('-');
+            }
+            else
+            {
+                builder.Append(character);
+            }
         }
 
-        return name;
+        // Windows silently strips these from the end of a name, so a file
+        // written as "Game." comes back as "Game" and never matches again.
+        return builder.ToString().Trim().TrimEnd('.', ' ');
+    }
+
+    public static string BuildBaseName(string gameDisplayName)
+    {
+        var name = SanitizeSegment(gameDisplayName);
+        return string.IsNullOrWhiteSpace(name) ? "Replay" : name;
     }
 
     public static string BuildFileName(string gameDisplayName, DateTime timestamp, string extension)
@@ -112,8 +164,7 @@ public static class ClipFileNaming
 
     private static string SanitizeStem(string value)
     {
-        foreach (var invalid in Path.GetInvalidFileNameChars()) value = value.Replace(invalid, '-');
-        value = value.Trim().TrimEnd('.', ' ');
+        value = SanitizeSegment(value);
         if (string.IsNullOrWhiteSpace(value)) value = "Replay";
         if (value.Length > 180) value = value[..180].TrimEnd('.', ' ');
         var reserved = new[] { "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9" };
