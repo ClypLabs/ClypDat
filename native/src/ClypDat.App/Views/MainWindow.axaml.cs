@@ -1814,14 +1814,38 @@ public sealed partial class MainWindow : Window
     // click - the row's own header carries a right-pointing arrow (in XAML)
     // to signal that.
     private Flyout? _changeGameFlyout;
+    private MenuItem? _changeGameMenuItem;
+    private Control? _changeGameFlyoutContent;
 
     // Since Change Game opens on hover rather than a click, hovering any
     // OTHER row in the same context menu needs to close it too - otherwise
-    // it just sits there covering/blocking the rest of the menu, since
-    // nothing was ever telling it to close on hovering away.
+    // it just sits there covering/blocking the rest of the menu. This alone
+    // turned out not to be enough: an open Popup captures the pointer for
+    // its own light-dismiss tracking, which means the sibling rows stop
+    // receiving PointerEntered at all while the flyout is open, not just
+    // while the cursor happens to be over it - "hovering another row" never
+    // fires in the first place. Kept as a harmless backup for whichever
+    // path (if any) still gets through.
     private void ClipContextMenuItem_OnPointerEntered(object? sender, PointerEventArgs e)
     {
         _changeGameFlyout?.Hide();
+    }
+
+    // The actual fix for the above: the flyout's own content is the one
+    // thing still reliably receiving pointer-moved events (it holds the
+    // capture) - so it manually checks whether the current pointer position
+    // still falls over either the flyout itself or the "Change game" row
+    // that opened it, and closes itself the moment it's over neither
+    // (i.e. the cursor has moved on to some other row).
+    private void ChangeGameFlyoutContent_OnPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_changeGameFlyout is null) return;
+        if (sender is not Control flyoutContent) return;
+
+        var overFlyout = new Rect(flyoutContent.Bounds.Size).Contains(e.GetPosition(flyoutContent));
+        var overRow = _changeGameMenuItem is not null &&
+                      new Rect(_changeGameMenuItem.Bounds.Size).Contains(e.GetPosition(_changeGameMenuItem));
+        if (!overFlyout && !overRow) _changeGameFlyout.Hide();
     }
 
     private void ClipContextSetGame_OnPointerEntered(object? sender, PointerEventArgs e)
@@ -1830,10 +1854,19 @@ public sealed partial class MainWindow : Window
         if (sender is not MenuItem { DataContext: ClipCardViewModel clip } menuItem) return;
 
         _changeGameFlyout?.Hide();
+        _changeGameMenuItem = menuItem;
 
         var flyout = new Flyout { Placement = Avalonia.Controls.PlacementMode.RightEdgeAlignedTop };
         _changeGameFlyout = flyout;
-        flyout.Closed += (_, _) => { if (_changeGameFlyout == flyout) _changeGameFlyout = null; };
+        flyout.Closed += (_, _) =>
+        {
+            if (_changeGameFlyout == flyout)
+            {
+                _changeGameFlyout = null;
+                _changeGameMenuItem = null;
+                _changeGameFlyoutContent = null;
+            }
+        };
 
         void PickGame(string? gameName)
         {
@@ -1862,7 +1895,10 @@ public sealed partial class MainWindow : Window
             list.Children.Add(item);
         }
 
-        flyout.Content = new ScrollViewer { MaxHeight = 320, Content = list };
+        var flyoutContent = new ScrollViewer { MaxHeight = 320, Content = list };
+        flyoutContent.PointerMoved += ChangeGameFlyoutContent_OnPointerMoved;
+        _changeGameFlyoutContent = flyoutContent;
+        flyout.Content = flyoutContent;
 
         flyout.ShowAt(menuItem);
     }
