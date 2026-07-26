@@ -217,6 +217,16 @@ public sealed partial class MainWindow : Window
         // Covers the Settings page's own hotkey button, which lives in this
         // window rather than a popup.
         AddHandler(PointerPressedEvent, HotkeyCapture_OnAnyPointerPressed, RoutingStrategies.Tunnel);
+        // Game-rail drag - same reasoning as KeyDown/KeyUp above: a plain
+        // (bubble) PointerPressed wired directly on a rail Button never saw
+        // the press at all, because Button's OWN internal press handling (it
+        // captures the pointer and tracks click state) runs first and marks
+        // the event Handled before a same-element bubble handler gets a
+        // turn. Tunnel runs top-down BEFORE that, so it sees every press
+        // regardless of what the Button goes on to do with it.
+        AddHandler(PointerPressedEvent, GameRailItem_OnPointerPressed, RoutingStrategies.Tunnel);
+        AddHandler(PointerMovedEvent, GameRailItem_OnPointerMoved, RoutingStrategies.Tunnel);
+        AddHandler(PointerReleasedEvent, GameRailItem_OnPointerReleased, RoutingStrategies.Tunnel);
     }
 
     private MainWindowViewModel? ViewModel => DataContext as MainWindowViewModel;
@@ -455,10 +465,17 @@ public sealed partial class MainWindow : Window
     private GameDropZone _gameDragTargetZone;
     private const double GameDragThreshold = 6;
 
+    // Registered at the window level (Tunnel - see the constructor) rather
+    // than per-button, so "sender" here is always the window; the actual
+    // rail tile, if any, comes from walking up from e.Source (the specific
+    // PathIcon/Image/TextBlock the press actually landed on).
     private void GameRailItem_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
-        _gameDragCandidate = sender as Control;
+        var tile = FindRailTileAncestor(e.Source as Control);
+        if (tile is null) return;
+
+        _gameDragCandidate = tile;
         _gameDragStartPoint = e.GetPosition(this);
     }
 
@@ -470,12 +487,12 @@ public sealed partial class MainWindow : Window
             // this SAME handler keeps firing for every subsequent move no
             // matter what the cursor is actually over now - that's what makes
             // hit-testing against the live cursor position necessary here,
-            // rather than trusting "sender".
+            // rather than trusting where the event says it originated.
             UpdateGameDragTarget(e.GetPosition(this));
             return;
         }
 
-        if (_gameDragCandidate is null || _gameDragStartPoint is null || !ReferenceEquals(sender, _gameDragCandidate)) return;
+        if (_gameDragCandidate is null || _gameDragStartPoint is null) return;
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
         {
             _gameDragCandidate = null;
