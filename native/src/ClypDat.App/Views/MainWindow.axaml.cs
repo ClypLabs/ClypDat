@@ -3965,12 +3965,19 @@ public sealed partial class MainWindow : Window
     {
         // Docked mode (the default) is the control row in the timeline panel,
         // so the floating one never comes out at all.
-        if (ViewModel is null || !ViewModel.IsEditorVisible || ViewModel.IsVideoFullscreen || _playback is null ||
+        // IsVisible is the main window's own. Closing ClypDat hides it to the
+        // tray rather than exiting, and Avalonia refuses outright to show a
+        // window whose owner isn't visible ("Cannot show window with
+        // non-visible owner"). Without this the poll threw on that every
+        // 120ms for as long as the app sat in the tray, and the recovery path
+        // - drop the window, build a fresh one - just produced a new window to
+        // fail on, so the bar never came back after a restore.
+        if (ViewModel is null || !IsVisible || !ViewModel.IsEditorVisible || ViewModel.IsVideoFullscreen || _playback is null ||
             !ViewModel.Settings.EditorHoverBarEnabled)
         {
             if (_editorHoverControlsWindow is { IsVisible: true })
             {
-                LogHoverControlsState($"hidden (editor={ViewModel?.IsEditorVisible}, fullscreen={ViewModel?.IsVideoFullscreen}, playback={_playback is not null}, hoverBar={ViewModel?.Settings.EditorHoverBarEnabled})");
+                LogHoverControlsState($"hidden (window={IsVisible}, editor={ViewModel?.IsEditorVisible}, fullscreen={ViewModel?.IsVideoFullscreen}, playback={_playback is not null}, hoverBar={ViewModel?.Settings.EditorHoverBarEnabled})");
             }
             HideEditorHoverControls(immediate: true);
             return;
@@ -4078,11 +4085,17 @@ public sealed partial class MainWindow : Window
                 // A Window that has been closed (rather than hidden) throws
                 // here and can never be shown again - one of those and the bar
                 // would be gone for the rest of the session. Drop the dead
-                // reference so the next tick builds a fresh one.
+                // reference so a fresh one gets built.
+                //
+                // Backing off matters as much as the rebuild: whatever made
+                // Show fail is usually still true a tick later, and retrying
+                // at 8/sec turned one real problem into thousands of log
+                // lines. A second between attempts still recovers promptly.
                 AppLog.Error("Editor hover bar show failed; rebuilding it", error);
                 _editorHoverControlsWindow = null;
                 _hoverControlsBackdrop = null;
                 _hoverControlsLastState = string.Empty;
+                _hoverControlsSuppressedUntilUtc = DateTime.UtcNow + TimeSpan.FromSeconds(1);
                 return;
             }
 
