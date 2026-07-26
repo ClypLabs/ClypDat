@@ -799,6 +799,13 @@
   <Style Selector="Button.railFolderHeader:not(ToggleSwitch):pointerover">
     <Setter Property="Opacity" Value="0.8" />
   </Style>
+  <!-- Expanded, the outline capsule (Border.railFolderGroup.expanded) already
+       carries its own accent border/background around the whole group - the
+       header tile's own permanent tint on top of that doubled up and looked
+       muddy. Drop back to plain transparent while open. -->
+  <Style Selector="Button.railFolderHeader.expanded">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
   <!-- Presses shrink slightly so a click registers physically even though
        nothing else about the button moves. -->
   <Style Selector="Button.railIconButton:pressed">
