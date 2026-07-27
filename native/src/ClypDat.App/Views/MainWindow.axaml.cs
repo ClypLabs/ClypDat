@@ -108,6 +108,16 @@ public sealed partial class MainWindow : Window
     private DispatcherTimer? _libraryResizeAnchorSettleTimer;
     private int _libraryResizeAnchorGeneration;
     private double? _libraryResizeExpectedOffsetY;
+    // Separate from the drag-resize anchor above: captured right before
+    // opening a clip into the editor (OpenClipCardAsync), and restored on
+    // the way back if the window was resized while away.
+    // CaptureLibraryResizeAnchor bails out whenever Library isn't visible,
+    // so a resize taken entirely inside the editor previously left
+    // LibraryScrollViewer's Offset.Y pointing at pixels from the OLD
+    // cards-per-row layout once Library became visible (and re-measured
+    // with the new width) again.
+    private string? _libraryReturnAnchorPath;
+    private bool _libraryReturnAnchorDirty;
     private const double ScrollToTopButtonThreshold = 320;
     private static readonly TimeSpan ScrollToTopDuration = TimeSpan.FromMilliseconds(380);
     public MainWindow()
@@ -159,6 +169,17 @@ public sealed partial class MainWindow : Window
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayBufferEnabled)) _ = ApplyReplayBufferEnabledAsync();
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
+                    if (e.PropertyName == nameof(MainWindowViewModel.IsEditorVisible) && ViewModel.IsLibraryVisible && _libraryReturnAnchorDirty)
+                    {
+                        _libraryReturnAnchorDirty = false;
+                        var anchorPath = _libraryReturnAnchorPath;
+                        // Loaded priority so this runs after the layout pass that
+                        // finally re-measures LibraryScrollViewer/the WrapPanel at
+                        // its current width - it was collapsed (no layout at all)
+                        // for the whole time the editor was open, so the resize
+                        // that happened during that window only takes effect now.
+                        Dispatcher.UIThread.Post(() => RestoreLibraryResizeAnchor(anchorPath), DispatcherPriority.Loaded);
+                    }
                     if (e.PropertyName == nameof(MainWindowViewModel.IsRestoringLibraryCache) && !ViewModel.IsRestoringLibraryCache)
                     {
                         // Adding cached cards in low-priority batches grows the
@@ -1051,6 +1072,14 @@ public sealed partial class MainWindow : Window
             QueueLibraryResizeAnchorRestore();
             ResetLibraryResizeAnchorSettleTimer();
         }
+        else if (ViewModel?.IsLibraryVisible != true && _libraryReturnAnchorPath is not null)
+        {
+            // Library is collapsed right now (editor's open) - it won't see
+            // its own SizeChanged/reflow until it becomes visible again, so
+            // just flag that a restore is owed once that happens (see the
+            // IsEditorVisible handler above) instead of trying to act now.
+            _libraryReturnAnchorDirty = true;
+        }
 
         UpdateTimelineChrome();
     }
@@ -1064,17 +1093,26 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel?.IsLibraryVisible != true) return;
 
-        var viewportHeight = LibraryScrollViewer.Viewport.Height;
-        if (viewportHeight <= 0) return;
-
-        var itemsControl = LibraryScrollViewer.Content as ItemsControl
-            ?? LibraryScrollViewer.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault();
-        if (itemsControl is null) return;
-
         // First SizeChanged latches the pre-reflow card. Do not replace it
         // during the same resize drag: subsequent events can already see the
         // newly wrapped layout, which is exactly what this workaround avoids.
         if (_libraryResizeAnchorPath is not null) return;
+
+        _libraryResizeAnchorPath = ComputeLibraryAnchorPath();
+    }
+
+    // Shared by the drag-resize anchor (CaptureLibraryResizeAnchor) and the
+    // editor round-trip anchor (OpenClipCardAsync) - both need "which card is
+    // effectively at the top of the viewport right now", just captured at
+    // different moments.
+    private string? ComputeLibraryAnchorPath()
+    {
+        var viewportHeight = LibraryScrollViewer.Viewport.Height;
+        if (viewportHeight <= 0) return null;
+
+        var itemsControl = LibraryScrollViewer.Content as ItemsControl
+            ?? LibraryScrollViewer.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault();
+        if (itemsControl is null) return null;
 
         var viewportTop = LibraryScrollViewer.Offset.Y;
         var viewportBottom = viewportTop + viewportHeight;
@@ -1120,7 +1158,7 @@ public sealed partial class MainWindow : Window
             }
         }
 
-        _libraryResizeAnchorPath = (firstFullyVisible ?? firstIntersecting)?.Path;
+        return (firstFullyVisible ?? firstIntersecting)?.Path;
     }
 
     private void LibraryScrollViewer_OnScrollChanged(object? sender, ScrollChangedEventArgs e)
@@ -1198,7 +1236,7 @@ public sealed partial class MainWindow : Window
         Dispatcher.UIThread.Post(() =>
         {
             _libraryResizeAnchorRestoreQueued = false;
-            RestoreLibraryResizeAnchor();
+            RestoreLibraryResizeAnchor(_libraryResizeAnchorPath);
         }, DispatcherPriority.Loaded);
     }
 
@@ -1224,13 +1262,12 @@ public sealed partial class MainWindow : Window
         Dispatcher.UIThread.Post(() =>
         {
             if (generation != _libraryResizeAnchorGeneration) return;
-            if (!RestoreLibraryResizeAnchor()) ClearLibraryResizeAnchor();
+            if (!RestoreLibraryResizeAnchor(_libraryResizeAnchorPath)) ClearLibraryResizeAnchor();
         }, DispatcherPriority.Loaded);
     }
 
-    private bool RestoreLibraryResizeAnchor()
+    private bool RestoreLibraryResizeAnchor(string? anchorPath)
     {
-        var anchorPath = _libraryResizeAnchorPath;
         if (string.IsNullOrWhiteSpace(anchorPath)) return false;
 
         var itemsControl = LibraryScrollViewer.Content as ItemsControl
@@ -2154,6 +2191,16 @@ public sealed partial class MainWindow : Window
     private async Task<bool> OpenClipCardAsync(ClipCardViewModel clip)
     {
         if (ViewModel is null) return false;
+        // Snapshot while Library is still visible/laid out - once
+        // OpenClipAsync flips IsEditorVisible, LibraryScrollViewer collapses
+        // and its containers stop reflecting real layout until it's shown
+        // again. See the IsEditorVisible PropertyChanged handler for the
+        // restore half of this.
+        if (ViewModel.IsLibraryVisible)
+        {
+            _libraryReturnAnchorPath = ComputeLibraryAnchorPath();
+            _libraryReturnAnchorDirty = false;
+        }
         if (!await ViewModel.OpenClipAsync(clip)) return false;
         QueueEditorPlayback();
         return true;
