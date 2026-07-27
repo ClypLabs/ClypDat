@@ -6,7 +6,7 @@ namespace ClypDat.App.Services;
 // Curated game-name -> icon-URL overrides, hosted in the repo
 // (native/game-icons.json) and fetched at runtime, so a game can be covered
 // for every user by editing one file on master instead of shipping a release.
-// Exactly the same mechanism (and reasoning) as RemoteGameExclusionsService.
+// Cached remote overrides, refreshed once per day.
 //
 // This only has to carry games GameIconService can't resolve on its own -
 // it searches the Steam store by name first, so this is for titles that
