@@ -524,7 +524,12 @@
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="0" />
     <Setter Property="Width" Value="46" />
-    <Setter Property="Height" Value="36" />
+    <!-- Stretch, not a fixed Height - the header bar is a fixed 48px row
+         (RootLayout's RowDefinitions) taller than this button's own content,
+         so a fixed height here just centered a smaller hover box inside it,
+         leaving a visible gap above and below instead of the hover filling
+         the whole bar edge-to-edge like real window chrome buttons do. -->
+    <Setter Property="VerticalAlignment" Value="Stretch" />
     <Setter Property="Padding" Value="0" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
