@@ -3644,6 +3644,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             Settings.GameCaptureOverrides.RemoveAll(g => string.Equals(g.ExecutableName, row.ExecutableName, StringComparison.OrdinalIgnoreCase));
             SaveSettings();
+            RebuildGameCaptureRows();
+            GameCatalogChanged?.Invoke(this, EventArgs.Empty);
+            return;
         }
         AddIgnoredGameExecutable(row.ExecutableName);
     }
