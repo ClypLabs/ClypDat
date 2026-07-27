@@ -15,6 +15,7 @@ namespace ClypDat.App.ViewModels;
 public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
     private readonly MediaProbeService _mediaProbe = new();
+    private readonly LibraryCacheStore _libraryCache = new();
     private readonly HashSet<string> _selectedPaths = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _libraryHydrationCts;
     private CancellationTokenSource? _waveformCts;
@@ -22,6 +23,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private DispatcherTimer? _libraryFolderRetryTimer;
     private readonly DispatcherTimer _libraryRefreshDebounce;
     private readonly DispatcherTimer _clipNotReadyMessageTimer;
+    private readonly DispatcherTimer _libraryCacheWriteTimer;
+    private CancellationTokenSource? _cachedLibraryRestoreCts;
+    private bool _isRestoringCachedLibrary;
+    private bool _libraryCacheDirty;
+    private (long Total, long Free) _driveStats;
     // See WasRecentlySelfAdded - suppresses the redundant full-library
     // refresh the folder watcher used to trigger for a clip
     // AddOrUpdateLibraryClipAsync had already added directly.
@@ -269,7 +275,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _clipNotReadyMessageTimer.Stop();
             ClipNotReadyMessage = string.Empty;
         };
-        _ = RefreshLibraryAsync();
+        _libraryCacheWriteTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _libraryCacheWriteTimer.Tick += (_, _) => WriteLibraryCacheIfDirty();
+        StartInitialLibraryLoad();
     }
 
     public AppSettings Settings { get; }
@@ -362,27 +370,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private long LibraryUsedBytes => AllClips.Sum(clip => clip.SizeBytes);
     public string LibrarySizeDisplay => FormatBytes(LibraryUsedBytes);
 
-    // Real disk stats for the library folder's drive, queried fresh each
-    // access (cheap - a single DriveInfo lookup) rather than cached, since
-    // free space drifts over time and this is only read when the storage
-    // flyout is actually open. Network drives / a not-yet-chosen folder
-    // just fall back to (0, 0) - HasDriveStats gates the flyout's content
-    // on that instead of showing a nonsense "0 B free of 0 B".
-    private (long Total, long Free) DriveStats
+    // Must be a plain field read: bindings can evaluate repeatedly during
+    // layout, and Directory.Exists on an SMB path can block for seconds.
+    // RefreshLibraryAsync updates this off the UI thread after it verifies
+    // the configured root.
+    private (long Total, long Free) DriveStats => _driveStats;
+
+    private static (long Total, long Free) ReadDriveStats(string folder)
     {
-        get
+        try
         {
-            try
-            {
-                var folder = Settings.LibraryFolder;
-                if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) return (0, 0);
-                var drive = new DriveInfo(Path.GetPathRoot(folder) ?? folder);
-                return (drive.TotalSize, drive.AvailableFreeSpace);
-            }
-            catch
-            {
-                return (0, 0);
-            }
+            if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) return (0, 0);
+            var drive = new DriveInfo(Path.GetPathRoot(folder) ?? folder);
+            return (drive.TotalSize, drive.AvailableFreeSpace);
+        }
+        catch
+        {
+            return (0, 0);
         }
     }
 
@@ -2331,15 +2335,125 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string RightShadeWidth => $"{Math.Max(0, 100 - PercentValue(TrimEnd)):0.###}%";
     public string ExportButtonText => IsExporting ? "Exporting..." : "Export";
 
-    public async Task LoadLibraryFolderAsync(string folderPath)
+    // A cache hit must not wait for the SMB directory walk. Restore enough
+    // cards for several rows immediately, then let the UI breathe between
+    // bounded batches while the remaining cached cards arrive.
+    private void StartInitialLibraryLoad()
     {
+        var root = Settings.LibraryFolder;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var cached = _libraryCache.Load(root);
+        if (cached.Count == 0)
+        {
+            _ = RefreshLibraryAsync();
+            return;
+        }
+
+        _isRestoringCachedLibrary = true;
+        const int initialCardCount = 18;
+        foreach (var state in cached.Take(initialCardCount)) AddCachedClip(state);
+        ApplyGameFilters();
+        ApplyClipTypeFilters();
+        ApplySearchFilter();
+        NotifyLibraryChrome();
+        AppLog.Info($"Library cache: restored {Math.Min(initialCardCount, cached.Count)}/{cached.Count} cards in {clock.ElapsedMilliseconds}ms.");
+
+        _cachedLibraryRestoreCts = new CancellationTokenSource();
+        _ = RestoreRemainingCachedClipsAsync(cached.Skip(initialCardCount).ToArray(), root, _cachedLibraryRestoreCts.Token);
+    }
+
+    private async Task RestoreRemainingCachedClipsAsync(IReadOnlyList<CachedClipState> states, string root, CancellationToken cancellationToken)
+    {
+        const int batchSize = 24;
+        try
+        {
+            for (var offset = 0; offset < states.Count; offset += batchSize)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var batch = states.Skip(offset).Take(batchSize).ToArray();
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (cancellationToken.IsCancellationRequested || !string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase)) return;
+                    foreach (var state in batch) AddCachedClip(state);
+                    ApplyGameFilters();
+                    ApplyClipTypeFilters();
+                    ApplySearchFilter();
+                }, DispatcherPriority.Background);
+            }
+
+            if (!cancellationToken.IsCancellationRequested && string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase))
+            {
+                NotifyLibraryChrome();
+                AppLog.Info($"Library cache: restore complete, {AllClips.Count} cards available before disk reconciliation.");
+                _ = RefreshLibraryAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Another library root superseded this cached snapshot.
+        }
+        finally
+        {
+            if (_cachedLibraryRestoreCts?.Token == cancellationToken)
+            {
+                _cachedLibraryRestoreCts.Dispose();
+                _cachedLibraryRestoreCts = null;
+                _isRestoringCachedLibrary = false;
+            }
+        }
+    }
+
+    private void AddCachedClip(CachedClipState state)
+    {
+        if (AllClips.Any(clip => string.Equals(clip.Path, state.Media.Path, StringComparison.OrdinalIgnoreCase))) return;
+        var media = state.Media with
+        {
+            ThumbnailPath = File.Exists(state.Media.ThumbnailPath) ? state.Media.ThumbnailPath : string.Empty,
+            FilmstripPath = File.Exists(state.Media.FilmstripPath) ? state.Media.FilmstripPath : string.Empty
+        };
+        var clip = new ClipCardViewModel(state with { Media = media }, Settings.LibraryFolder);
+        AttachClip(clip);
+        AllClips.Add(clip);
+    }
+
+    private void AttachClip(ClipCardViewModel clip) => clip.PersistentStateChanged += Clip_OnPersistentStateChanged;
+
+    private void DetachClip(ClipCardViewModel clip) => clip.PersistentStateChanged -= Clip_OnPersistentStateChanged;
+
+    private void Clip_OnPersistentStateChanged(object? sender, EventArgs e) => MarkLibraryCacheDirty();
+
+    private void MarkLibraryCacheDirty()
+    {
+        if (_isRestoringCachedLibrary || string.IsNullOrWhiteSpace(Settings.LibraryFolder)) return;
+        _libraryCacheDirty = true;
+        if (!_libraryCacheWriteTimer.IsEnabled) _libraryCacheWriteTimer.Start();
+    }
+
+    private void WriteLibraryCacheIfDirty()
+    {
+        _libraryCacheWriteTimer.Stop();
+        if (!_libraryCacheDirty) return;
+        _libraryCacheDirty = false;
+        var root = Settings.LibraryFolder;
+        var snapshot = AllClips.Select(clip => clip.ToCachedState()).ToArray();
+        _ = Task.Run(() => _libraryCache.Save(root, snapshot));
+    }
+
+    public Task LoadLibraryFolderAsync(string folderPath)
+    {
+        _cachedLibraryRestoreCts?.Cancel();
+        _libraryCacheWriteTimer.Stop();
+        _libraryCacheDirty = false;
         Settings.LibraryFolder = folderPath;
         MigrateLegacyMedalImportHistory();
         SaveSettings();
         OnPropertyChanged(nameof(CanRenameAllClips));
-        await RefreshLibraryAsync();
+        foreach (var clip in AllClips) DetachClip(clip);
+        AllClips.Clear();
+        StartInitialLibraryLoad();
         IsEditorVisible = false;
         SelectedCaptureBackend = string.Empty;
+        return Task.CompletedTask;
     }
 
     public void SaveSettings()
@@ -2550,7 +2664,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // UI thread instead of freezing the whole window on every refresh.
             if (string.IsNullOrWhiteSpace(Settings.LibraryFolder) || !await Task.Run(() => Directory.Exists(Settings.LibraryFolder)))
             {
-                StartLibraryWatcher();
+                _driveStats = (0, 0);
+                StartLibraryWatcher(folderVerified: false);
                 NotifyLibraryChrome();
                 // A network share not mounted yet (ClypDat auto-starting at boot
                 // ahead of the OS reconnecting drives is the common case) used
@@ -2566,14 +2681,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _libraryFolderRetryTimer?.Stop();
             _libraryFolderRetryTimer = null;
 
-            LibraryLayout.EnsureRoots(Settings.LibraryFolder);
+            var libraryFolder = Settings.LibraryFolder;
+            _driveStats = await Task.Run(() => ReadDriveStats(libraryFolder));
+            await Task.Run(() => LibraryLayout.EnsureRoots(libraryFolder));
             if (Settings.LibraryLayoutVersion < LibraryLayout.CurrentVersion)
             {
                 await MigrateLibraryLayoutAsync();
             }
 
-            MigrateLegacySessionTitles();
-            StartLibraryWatcher();
+            await Task.Run(MigrateLegacySessionTitles);
+            StartLibraryWatcher(folderVerified: true);
 
             // Snapshot what's already showing before handing off to a
             // background thread. TryAdd (not ToDictionary) so a latent
@@ -2583,7 +2700,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var existingByPath = new Dictionary<string, ClipCardViewModel>(StringComparer.OrdinalIgnoreCase);
             foreach (var clip in AllClips) existingByPath.TryAdd(clip.Path, clip);
 
-            var libraryFolder = Settings.LibraryFolder;
             var diff = await Task.Run(() => DiffLibrary(libraryFolder, existingByPath));
 
             foreach (var clip in diff.Removed) RemoveClipFromLibraryCore(clip);
@@ -2786,7 +2902,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         var insertIndex = 0;
         while (insertIndex < AllClips.Count && AllClips[insertIndex].CreatedAt > clip.CreatedAt) insertIndex++;
+        AttachClip(clip);
         AllClips.Insert(insertIndex, clip);
+        MarkLibraryCacheDirty();
     }
 
     public async Task AddOrUpdateLibraryClipAsync(string filePath)
@@ -2896,11 +3014,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        _cachedLibraryRestoreCts?.Cancel();
+        _cachedLibraryRestoreCts?.Dispose();
+        _cachedLibraryRestoreCts = null;
         CancelLibraryHydration();
         _waveformCts?.Cancel();
         _waveformCts?.Dispose();
         _waveformCts = null;
         _libraryRefreshDebounce.Stop();
+        _libraryCacheWriteTimer.Stop();
+        if (_libraryCacheDirty)
+        {
+            _libraryCacheDirty = false;
+            _libraryCache.Save(Settings.LibraryFolder, AllClips.Select(clip => clip.ToCachedState()).ToArray());
+        }
         _libraryWatcher?.Dispose();
         _libraryWatcher = null;
     }
@@ -3124,7 +3251,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private void RemoveClipFromLibraryCore(ClipCardViewModel clip)
     {
         if (clip.IsSelected) SetClipSelected(clip, false);
+        DetachClip(clip);
         AllClips.Remove(clip);
+        MarkLibraryCacheDirty();
     }
 
     public async Task RenameClipAsync(ClipCardViewModel clip, string newTitle)
@@ -5143,12 +5272,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _libraryFolderRetryTimer.Start();
     }
 
-    private void StartLibraryWatcher()
+    private void StartLibraryWatcher(bool folderVerified = false)
     {
         _libraryWatcher?.Dispose();
         _libraryWatcher = null;
 
-        if (string.IsNullOrWhiteSpace(Settings.LibraryFolder) || !Directory.Exists(Settings.LibraryFolder)) return;
+        if (string.IsNullOrWhiteSpace(Settings.LibraryFolder) || !folderVerified) return;
 
         var watcher = new FileSystemWatcher(Settings.LibraryFolder)
         {
@@ -5176,7 +5305,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Dispatcher.UIThread.Post(async () =>
         {
             await Task.Delay(TimeSpan.FromSeconds(5));
-            StartLibraryWatcher();
+            await RefreshLibraryAsync();
         });
     }
 
@@ -5441,7 +5570,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 async clip =>
                 {
                     var media = await _mediaProbe.ProbeMetadataAsync(clip.Path);
-                    await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(media));
+                    await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(media, reloadSidecars: false));
                 });
 
             // Recomputed rather than reusing the list from above: a clip that
@@ -5453,7 +5582,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 {
                     var path = await _mediaProbe.EnsureThumbnailAsync(clip.Path, clip.Duration);
                     if (string.IsNullOrEmpty(path)) return;
-                    await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(clip.Media with { ThumbnailPath = path }));
+                    await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(clip.Media with { ThumbnailPath = path }, reloadSidecars: false));
                 });
 
             needFilmstrip = clips.Where(clip => string.IsNullOrEmpty(clip.Media.FilmstripPath)).ToArray();
@@ -5462,7 +5591,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 {
                     var path = await _mediaProbe.EnsureFilmstripAsync(clip.Path, clip.Duration);
                     if (string.IsNullOrEmpty(path)) return;
-                    await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(clip.Media with { FilmstripPath = path }));
+                    await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(clip.Media with { FilmstripPath = path }, reloadSidecars: false));
                 });
         }
         catch (OperationCanceledException)

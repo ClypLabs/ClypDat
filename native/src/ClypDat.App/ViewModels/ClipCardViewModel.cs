@@ -18,13 +18,25 @@ public sealed class ClipCardViewModel : ViewModelBase
     private bool _isVod;
     private bool _isPreviewVisible;
 
+    public event EventHandler? PersistentStateChanged;
+
     public ClipCardViewModel(MediaFileInfo media, string libraryRoot)
+        : this(media, libraryRoot, null, null, false)
+    {
+    }
+
+    internal ClipCardViewModel(CachedClipState state, string libraryRoot)
+        : this(state.Media, libraryRoot, state.ClipInfo, state.ClipEdit, true)
+    {
+    }
+
+    private ClipCardViewModel(MediaFileInfo media, string libraryRoot, ClipInfo? clipInfo, ClipEditSettings? clipEdit, bool hasCachedSidecars)
     {
         _media = media;
         _libraryRoot = libraryRoot;
         _previewImagePath = media.ThumbnailPath;
-        _clipInfo = ClipInfoSidecar.Load(_libraryRoot, media.Path);
-        _clipEdit = ClipEditSidecar.Load(_libraryRoot, media.Path);
+        _clipInfo = hasCachedSidecars ? clipInfo : ClipInfoSidecar.Load(_libraryRoot, media.Path);
+        _clipEdit = hasCachedSidecars ? clipEdit : ClipEditSidecar.Load(_libraryRoot, media.Path);
         _isVod = ComputeIsVod(media, libraryRoot);
         // Thumbnail Bitmap is NOT decoded here - a library can have hundreds
         // of cards and only a screenful are ever actually on screen at once.
@@ -392,11 +404,16 @@ public sealed class ClipCardViewModel : ViewModelBase
     public IBrush SelectionBorderBrush => IsSelected ? Brush.Parse("#5864E8") : IsHovered ? Brush.Parse("#5C6D7E") : Brush.Parse("#24303A");
     public Avalonia.Thickness SelectionBorderThickness => IsSelected || IsHovered ? new Avalonia.Thickness(2) : new Avalonia.Thickness(0);
 
-    public void UpdateMedia(MediaFileInfo media)
+    internal CachedClipState ToCachedState() => new(_media, _clipInfo, _clipEdit);
+
+    public void UpdateMedia(MediaFileInfo media, bool reloadSidecars = true)
     {
         _media = media;
-        _clipInfo = ClipInfoSidecar.Load(_libraryRoot, media.Path);
-        _clipEdit = ClipEditSidecar.Load(_libraryRoot, media.Path);
+        if (reloadSidecars)
+        {
+            _clipInfo = ClipInfoSidecar.Load(_libraryRoot, media.Path);
+            _clipEdit = ClipEditSidecar.Load(_libraryRoot, media.Path);
+        }
         _isVod = ComputeIsVod(media, _libraryRoot);
         PreviewImagePath = media.ThumbnailPath;
         OnPropertyChanged(nameof(Media));
@@ -434,6 +451,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(AutoClipKillCount));
         OnPropertyChanged(nameof(HasAutoClipKillCount));
         OnPropertyChanged(nameof(GameFilterKey));
+        PersistentStateChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void SetPreviewImage(string path)
