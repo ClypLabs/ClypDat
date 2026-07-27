@@ -54,6 +54,16 @@ namespace ClypDat.App.Services;
 // as a wall-clock event so SaveReplayAsync can tell the editor which parts of a
 // saved clip were frozen, via a "Recording Paused" sidecar.
 //
+// Same DWM dependency also explains low/laggy capture when the GAME has
+// vsync off: AcquireNextFrame only gets a new frame on DWM's own present/
+// composition cadence, and an uncapped/tearing game presents outside that
+// cadence, so DWM skips composing most of its frames and duplication starves
+// - confirmed via avgPresentGapMs in the diag log spiking to hundreds of ms
+// (vs. ~13ms at a clean 60fps) during exactly this symptom. Turning the
+// game's vsync on locks its presents to refresh, so DWM composes every one
+// and duplication gets them reliably again. Nothing to fix here - not
+// something Desktop Duplication can be worked around from application code.
+//
 // Falls back to capturing the primary monitor (no crop, no occlusion pausing)
 // when no game window is detected. NVENC only for now (no software fallback -
 // machines without NVENC should stay on Legacy/OBS). Audio reuses

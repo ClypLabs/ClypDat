@@ -25,7 +25,21 @@ public sealed class MediaProbeService
             "ClypDat",
             "media-cache");
         Directory.CreateDirectory(_cacheFolder);
-        Task.Run(PruneStaleCache);
+        // Delayed, not fired immediately: this constructor runs during cold
+        // boot alongside the library cache load, thumbnail File.Exists
+        // checks, and the disk/network scan in RefreshLibraryAsync - all
+        // real work the user is waiting on. A full EnumerateFiles+stat sweep
+        // of this folder (which only grows over months of use) competing
+        // with those for the same disk right at the coldest moment is
+        // exactly the kind of "everything at once" contention that shows up
+        // as a brief system-wide stutter. The prune only cares about
+        // entries untouched for 30 days, so a few seconds' delay costs
+        // nothing.
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(15));
+            PruneStaleCache();
+        });
     }
 
     // Thumbnails (and cached probe metadata) are keyed by clip path+size, so
