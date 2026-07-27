@@ -27,7 +27,7 @@
        sidebar render past the screen edge. -->
   <Grid x:Name="RootLayout" RowDefinitions="48,*">
     <Border Grid.Row="0" Background="#171F27" BorderBrush="#1E2A33" BorderThickness="0,0,0,1" PointerPressed="HeaderBar_OnPointerPressed">
-      <Grid ColumnDefinitions="Auto,*,Auto,Auto" Margin="12,2,0,0" VerticalAlignment="Center">
+      <Grid ColumnDefinitions="Auto,*,Auto,Auto" Margin="12,2,0,0" VerticalAlignment="Stretch">
         <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
           <Button Classes="brandButton" Padding="6" Click="LibraryHomeButton_OnClick" ToolTip.Tip="Library">
             <!-- 256px source downscaled to the actual 26px on-screen size
