@@ -936,7 +936,7 @@
           <Border Grid.Column="1"
                   x:Name="DateScrubberHost"
                   Width="22"
-                  Margin="2,14,4,0"
+                  Margin="2,14,4,10"
                   Background="Transparent"
                   ClipToBounds="False"
                   IsVisible="{Binding IsLibraryVisible}"
