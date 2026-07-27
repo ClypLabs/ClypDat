@@ -78,10 +78,27 @@ function Find-MSBuild {
             continue
         }
 
-        $found = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' |
+        $found = & $vswhere -latest -products * -find 'MSBuild\**\Bin\MSBuild.exe' |
             Select-Object -First 1
         if ($LASTEXITCODE -eq 0 -and $found -and (Test-Path -LiteralPath $found)) {
             return $found
+        }
+    }
+
+    $visualStudioRoots = @(
+        (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio'),
+        (Join-Path $env:ProgramFiles 'Microsoft Visual Studio')
+    )
+    foreach ($visualStudioRoot in $visualStudioRoots) {
+        if (-not (Test-Path -LiteralPath $visualStudioRoot)) {
+            continue
+        }
+
+        $found = Get-ChildItem -LiteralPath $visualStudioRoot -Filter MSBuild.exe -File -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\MSBuild\\Current\\Bin\\MSBuild\.exe$' } |
+            Select-Object -First 1
+        if ($found) {
+            return $found.FullName
         }
     }
 
