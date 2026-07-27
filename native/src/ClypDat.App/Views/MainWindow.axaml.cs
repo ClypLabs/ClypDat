@@ -11,6 +11,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using System.Diagnostics;
 using ClypDat.Capture.Abstractions;
+using ClypDat.App.Controls;
 using ClypDat.App.Converters;
 using ClypDat.App.Services;
 using ClypDat.App.ViewModels;
@@ -90,6 +91,8 @@ public sealed partial class MainWindow : Window
     // a continuous drag never lets it back up mid-resize, short enough not to
     // feel like a lag once the drag ends.
     private static readonly TimeSpan HoverControlsResizeSettle = TimeSpan.FromMilliseconds(220);
+    private static readonly TimeSpan LibraryResizeAnchorSettle = TimeSpan.FromMilliseconds(220);
+    private const double LibraryScrollOffsetTolerance = 0.01;
     private DateTime _hoverControlsSuppressedUntilUtc = DateTime.MinValue;
     // Slides the bar in from under the video's bottom edge on first show. The
     // window itself stays put - only its content moves - because animating an
@@ -100,14 +103,20 @@ public sealed partial class MainWindow : Window
     private Border? _hoverControlsBackdrop;
     private DispatcherTimer? _hoverControlsSlideOutTimer;
     private bool _hoverControlsSlidingOut;
+    private string? _libraryResizeAnchorPath;
+    private bool _libraryResizeAnchorRestoreQueued;
+    private DispatcherTimer? _libraryResizeAnchorSettleTimer;
+    private int _libraryResizeAnchorGeneration;
+    private double? _libraryResizeExpectedOffsetY;
     public MainWindow()
     {
         InitializeComponent();
+        EditorVideoView.VideoClicked += (_, _) => PlayPauseButton_OnClick(this, new RoutedEventArgs());
         // ApplySavedWindowBounds can restore straight into Maximized, which
         // won't raise an OffScreenMargin change of its own.
         RootLayout.Margin = OffScreenMargin;
         UpdateViewNavButtons();
-        LibraryScrollViewer.ScrollChanged += (_, _) => UpdateDateScrubberThumb();
+        LibraryScrollViewer.ScrollChanged += LibraryScrollViewer_OnScrollChanged;
         // Card layout follows the grid's real width, not the window's - the
         // sidebar rail and date scrubber both sit outside this ScrollViewer.
         LibraryScrollViewer.SizeChanged += (_, sizeArgs) => ViewModel?.UpdateCardLayout(sizeArgs.NewSize.Width);
@@ -124,12 +133,15 @@ public sealed partial class MainWindow : Window
         {
             // Card layout comes from LibraryScrollViewer's own SizeChanged
             // (wired above) - at Opened its width may still be 0.
+            ClearLibraryResizeAnchor();
+            LibraryScrollViewer.Offset = default;
             InitializeReplayServices();
             UpdateDetectedGame();
             _gameDetectionTimer.Start();
             _ = EnsureLibraryFolderAsync();
             _ = RunStartupDialogsAsync();
-            _ = RefreshRemoteGameExclusionsAsync();
+            _ = RefreshRemoteGameIconsAsync();
+            _ = RefreshRemoteGameCatalogAsync();
             if (ViewModel is not null)
             {
                 _gameDetector.ApplyCustomGameNames(ViewModel.Settings.GameCaptureOverrides);
@@ -144,19 +156,22 @@ public sealed partial class MainWindow : Window
                     if (e.PropertyName == nameof(MainWindowViewModel.AutoClippingEnabled)) UpdateAutoClipStates();
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayBufferEnabled)) _ = ApplyReplayBufferEnabledAsync();
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
-                    if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY))
+                    if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
+                    if (e.PropertyName == nameof(MainWindowViewModel.IsRestoringLibraryCache) && !ViewModel.IsRestoringLibraryCache)
                     {
-                        UpdateVideoTransform();
-                        // The click-catcher tracks EditorVideoView's on-screen
-                        // rect, which a zoom/pan RenderTransform changes -
-                        // without this it stayed sized/positioned for
-                        // whatever zoom level was active when it was last
-                        // shown, so clicks after zooming/panning could land
-                        // outside its (now stale) bounds and silently do
-                        // nothing.
-                        if (_videoClickCatcherWindow is { IsVisible: true } clickCatcher) RepositionVideoClickCatcher(clickCatcher);
+                        // Adding cached cards in low-priority batches grows the
+                        // WrapPanel several times during first layout. Avalonia
+                        // can preserve a transient child offset through those
+                        // extent changes, leaving a fresh library slightly
+                        // below its real top. A cache restore is initial/root
+                        // navigation, so its final position is always top.
+                        Dispatcher.UIThread.Post(() =>
+                        {
+                            if (ViewModel?.IsRestoringLibraryCache == true) return;
+                            ClearLibraryResizeAnchor();
+                            LibraryScrollViewer.Offset = default;
+                        }, DispatcherPriority.Loaded);
                     }
-                    if (e.PropertyName is nameof(MainWindowViewModel.IsEditorVisible) or nameof(MainWindowViewModel.IsEditorVideoAreaVisible)) UpdateVideoClickCatcher();
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible)
                         or nameof(MainWindowViewModel.IsEditorVisible)
                         or nameof(MainWindowViewModel.SelectedVideoPath)
@@ -209,6 +224,7 @@ public sealed partial class MainWindow : Window
         };
         Closed += (_, _) =>
         {
+            _libraryResizeAnchorSettleTimer?.Stop();
             _globalHotkey?.Dispose();
             _cs2GsiListener?.Dispose();
             _dotaGsiListener?.Dispose();
@@ -219,6 +235,7 @@ public sealed partial class MainWindow : Window
             _playback?.Dispose();
             _recordingPausedOverlay?.Close();
             _editorHoverControlsWindow?.Close();
+            EditorVideoView.DisposeClickHandling();
             ViewModel?.Dispose();
         };
         AddHandler(PointerPressedEvent, VolumeSlider_OnPointerPressedAny, RoutingStrategies.Tunnel, true);
@@ -326,29 +343,27 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    // The header's detected-game text - clicking it offers "Don't detect X as
-    // a game" so a wrongly-detected app (the built-in ignore list can't cover
-    // everything) can be excluded on the spot instead of digging through
-    // settings.
+    // Header menu lets user exclude a detected game.
     private void ActiveGameButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button button || ViewModel is null) return;
         var detection = ViewModel.ActiveGameDetection;
-        if (detection is not { IsDetected: true } || string.IsNullOrWhiteSpace(detection.ExeName)) return;
+        var detectionKey = string.IsNullOrWhiteSpace(detection.DetectionKey) ? detection.ExeName : detection.DetectionKey;
+        if (detection is not { IsDetected: true } || string.IsNullOrWhiteSpace(detectionKey)) return;
 
         var flyout = new MenuFlyout();
         var exclude = new MenuItem
         {
             Header = new TextBlock
             {
-                Text = $"Don't detect \"{detection.DisplayName}\" ({detection.ExeName}) as a game",
+                Text = $"Don't detect \"{detection.DisplayName}\" ({detectionKey}) as a game",
                 TextWrapping = TextWrapping.Wrap,
                 MaxWidth = 320
             }
         };
         exclude.Click += (_, _) =>
         {
-            ViewModel.AddIgnoredGameExecutable(detection.ExeName);
+            ViewModel.AddIgnoredGameExecutable(detectionKey);
             _gameDetector.ApplyUserIgnoredExecutables(ViewModel.Settings.IgnoredGameExecutables);
             UpdateDetectedGame();
         };
@@ -1028,27 +1043,199 @@ public sealed partial class MainWindow : Window
         // brings it straight back, correctly placed, once the drag stops and
         // the layout has settled.
         SuspendHoverControlsForResize();
-        // UpdateCardLayout changes CardWidth (and possibly CardColumns),
-        // which reflows the WrapPanel into different rows - the ScrollViewer's
-        // own Offset stays numerically the same afterward but no longer
-        // points at the same clips, since everything above it just shifted
-        // to a different height. Preserving Offset as a FRACTION of the
-        // total scrollable extent instead keeps roughly the same spot in the
-        // library in view across the reflow, rather than the resize looking
-        // like it randomly jumped somewhere else.
-        var previousExtentHeight = LibraryScrollViewer.Extent.Height;
-        var scrollFraction = previousExtentHeight > 0 ? LibraryScrollViewer.Offset.Y / previousExtentHeight : 0;
+        CaptureLibraryResizeAnchor();
+        if (ViewModel?.IsLibraryVisible == true && _libraryResizeAnchorPath is not null)
+        {
+            QueueLibraryResizeAnchorRestore();
+            ResetLibraryResizeAnchorSettleTimer();
+        }
 
         UpdateTimelineChrome();
+    }
 
-        if (scrollFraction > 0)
+    // TODO: Replace this with a proper layout-level anchor once the library
+    // moves away from its non-virtualized WrapPanel. This deliberately hacky
+    // fallback latches the first fully visible card before reflow, then makes
+    // sure it is fully visible again after reflow instead of preserving an
+    // unstable exact viewport fraction.
+    private void CaptureLibraryResizeAnchor()
+    {
+        if (ViewModel?.IsLibraryVisible != true) return;
+
+        var viewportHeight = LibraryScrollViewer.Viewport.Height;
+        if (viewportHeight <= 0) return;
+
+        var itemsControl = LibraryScrollViewer.Content as ItemsControl
+            ?? LibraryScrollViewer.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault();
+        if (itemsControl is null) return;
+
+        // First SizeChanged latches the pre-reflow card. Do not replace it
+        // during the same resize drag: subsequent events can already see the
+        // newly wrapped layout, which is exactly what this workaround avoids.
+        if (_libraryResizeAnchorPath is not null) return;
+
+        var viewportTop = LibraryScrollViewer.Offset.Y;
+        var viewportBottom = viewportTop + viewportHeight;
+        const double fullyVisibleTolerance = 1;
+        ClipCardViewModel? firstFullyVisible = null;
+        ClipCardViewModel? firstIntersecting = null;
+        var firstFullyVisibleTop = double.MaxValue;
+        var firstFullyVisibleLeft = double.MaxValue;
+        var firstIntersectingTop = double.MaxValue;
+        var firstIntersectingLeft = double.MaxValue;
+
+        foreach (var container in itemsControl.GetRealizedContainers() ?? Enumerable.Empty<Control>())
         {
-            Dispatcher.UIThread.Post(() =>
+            if (container.DataContext is not ClipCardViewModel clip || !clip.IsVisibleInLibrary || !container.IsVisible || container.Bounds.Height <= 0) continue;
+
+            var point = container.TranslatePoint(default, itemsControl);
+            if (point is null) continue;
+
+            var itemTop = point.Value.Y;
+            var itemBottom = itemTop + container.Bounds.Height;
+            if (itemBottom <= viewportTop || itemTop >= viewportBottom) continue;
+            var itemLeft = point.Value.X;
+
+            var isFirstInRow = itemTop < firstIntersectingTop - fullyVisibleTolerance ||
+                               (Math.Abs(itemTop - firstIntersectingTop) <= fullyVisibleTolerance && itemLeft < firstIntersectingLeft);
+            if (isFirstInRow)
             {
-                var newExtentHeight = LibraryScrollViewer.Extent.Height;
-                LibraryScrollViewer.Offset = new Vector(LibraryScrollViewer.Offset.X, scrollFraction * newExtentHeight);
-            });
+                firstIntersecting = clip;
+                firstIntersectingTop = itemTop;
+                firstIntersectingLeft = itemLeft;
+            }
+
+            var fullyVisible = itemTop >= viewportTop - fullyVisibleTolerance &&
+                               itemBottom <= viewportBottom + fullyVisibleTolerance;
+            var isFirstFullyVisible = fullyVisible &&
+                                      (itemTop < firstFullyVisibleTop - fullyVisibleTolerance ||
+                                       (Math.Abs(itemTop - firstFullyVisibleTop) <= fullyVisibleTolerance && itemLeft < firstFullyVisibleLeft));
+            if (isFirstFullyVisible)
+            {
+                firstFullyVisible = clip;
+                firstFullyVisibleTop = itemTop;
+                firstFullyVisibleLeft = itemLeft;
+            }
         }
+
+        _libraryResizeAnchorPath = (firstFullyVisible ?? firstIntersecting)?.Path;
+    }
+
+    private void LibraryScrollViewer_OnScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        UpdateDateScrubberThumb();
+        if (e.OffsetDelta.Y == 0) return;
+
+        if (_libraryResizeExpectedOffsetY is double expectedOffsetY)
+        {
+            _libraryResizeExpectedOffsetY = null;
+            if (Math.Abs(LibraryScrollViewer.Offset.Y - expectedOffsetY) <= LibraryScrollOffsetTolerance) return;
+        }
+
+        if (e.ExtentDelta.X != 0 || e.ExtentDelta.Y != 0 || e.ViewportDelta.X != 0 || e.ViewportDelta.Y != 0) return;
+
+        // User wheel, keyboard, and date-scrubber navigation become the next
+        // resize baseline. Extent/layout changes are revalidated on resize.
+        ClearLibraryResizeAnchor();
+    }
+
+    private void QueueLibraryResizeAnchorRestore()
+    {
+        if (_libraryResizeAnchorPath is null || _libraryResizeAnchorRestoreQueued) return;
+
+        _libraryResizeAnchorRestoreQueued = true;
+        Dispatcher.UIThread.Post(() =>
+        {
+            _libraryResizeAnchorRestoreQueued = false;
+            RestoreLibraryResizeAnchor();
+        }, DispatcherPriority.Loaded);
+    }
+
+    private void ResetLibraryResizeAnchorSettleTimer()
+    {
+        if (_libraryResizeAnchorPath is null) return;
+
+        _libraryResizeAnchorGeneration++;
+        if (_libraryResizeAnchorSettleTimer is null)
+        {
+            _libraryResizeAnchorSettleTimer = new DispatcherTimer { Interval = LibraryResizeAnchorSettle };
+            _libraryResizeAnchorSettleTimer.Tick += LibraryResizeAnchorSettleTimer_OnTick;
+        }
+
+        _libraryResizeAnchorSettleTimer.Stop();
+        _libraryResizeAnchorSettleTimer.Start();
+    }
+
+    private void LibraryResizeAnchorSettleTimer_OnTick(object? sender, EventArgs e)
+    {
+        _libraryResizeAnchorSettleTimer?.Stop();
+        var generation = _libraryResizeAnchorGeneration;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (generation != _libraryResizeAnchorGeneration) return;
+            if (!RestoreLibraryResizeAnchor()) ClearLibraryResizeAnchor();
+        }, DispatcherPriority.Loaded);
+    }
+
+    private bool RestoreLibraryResizeAnchor()
+    {
+        var anchorPath = _libraryResizeAnchorPath;
+        if (string.IsNullOrWhiteSpace(anchorPath)) return false;
+
+        var itemsControl = LibraryScrollViewer.Content as ItemsControl
+            ?? LibraryScrollViewer.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault();
+        if (itemsControl is null || LibraryScrollViewer.Viewport.Height <= 0) return false;
+
+        var anchorContainer = (itemsControl.GetRealizedContainers() ?? Enumerable.Empty<Control>())
+            .FirstOrDefault(container => container.DataContext is ClipCardViewModel clip
+                && clip.IsVisibleInLibrary
+                && string.Equals(clip.Path, anchorPath, StringComparison.OrdinalIgnoreCase));
+        if (anchorContainer is null) return false;
+
+        var point = anchorContainer.TranslatePoint(default, itemsControl);
+        if (point is null || anchorContainer.Bounds.Height <= 0) return false;
+
+        var viewportTop = LibraryScrollViewer.Offset.Y;
+        var viewportHeight = LibraryScrollViewer.Viewport.Height;
+        var viewportBottom = viewportTop + viewportHeight;
+        var itemTop = point.Value.Y;
+        var itemBottom = itemTop + anchorContainer.Bounds.Height;
+        const double fullyVisibleTolerance = 1;
+
+        double targetOffset;
+        if (anchorContainer.Bounds.Height >= viewportHeight)
+        {
+            // Oversized cards cannot fully fit. Keep their beginning visible.
+            targetOffset = itemTop;
+        }
+        else if (itemTop < viewportTop - fullyVisibleTolerance)
+        {
+            targetOffset = itemTop;
+        }
+        else if (itemBottom > viewportBottom + fullyVisibleTolerance)
+        {
+            targetOffset = itemBottom - viewportHeight;
+        }
+        else
+        {
+            return true;
+        }
+
+        var maxOffset = Math.Max(0, LibraryScrollViewer.Extent.Height - LibraryScrollViewer.Viewport.Height);
+        LibraryScrollViewer.Offset = new Vector(
+            LibraryScrollViewer.Offset.X,
+            Math.Clamp(targetOffset, 0, maxOffset));
+        // ScrollChanged comes on a later layout pass. Remember actual coerced
+        // offset so that delayed event does not erase this resize anchor.
+        _libraryResizeExpectedOffsetY = LibraryScrollViewer.Offset.Y;
+
+        return true;
+    }
+
+    private void ClearLibraryResizeAnchor()
+    {
+        _libraryResizeAnchorPath = null;
+        _libraryResizeExpectedOffsetY = null;
     }
 
     // ---- Library date scrubber ----------------------------------------
@@ -1853,22 +2040,18 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    // Best-effort, throttled internally (see RemoteGameExclusionsService) so
-    // this is safe to fire on every startup - only actually hits the network
-    // roughly once a day. _gameDetector already has whatever was cached from
-    // a previous successful fetch applied synchronously before this ever
-    // runs (see its constructor), so a slow/failed network here just means
-    // this session doesn't get today's update, not that detection has no
-    // remote list at all.
-    private async Task RefreshRemoteGameExclusionsAsync()
+    private async Task RefreshRemoteGameIconsAsync()
     {
-        var updated = await RemoteGameExclusionsService.RefreshAsync();
-        if (updated is not null) _gameDetector.ApplyRemoteIgnoredExecutables(updated);
-
         // Curated icon overrides ride the same once-a-day cadence. Only used
         // for games the Steam store search resolves wrongly or not at all, so
         // a failure here costs nothing.
         await RemoteGameIconsService.RefreshAsync();
+    }
+
+    private async Task RefreshRemoteGameCatalogAsync()
+    {
+        var updated = await RemoteGameCatalogService.RefreshAsync();
+        if (updated is not null) _gameDetector.ApplyRemoteCatalog(updated);
     }
 
     private async Task EnsureLibraryFolderAsync()
@@ -1981,6 +2164,7 @@ public sealed partial class MainWindow : Window
     private Flyout? _changeGameFlyout;
     private MenuItem? _changeGameMenuItem;
     private Control? _changeGameFlyoutContent;
+    private DispatcherTimer? _changeGameFlyoutHoverTimer;
 
     // Since Change Game opens on hover rather than a click, hovering any
     // OTHER row in the same context menu needs to close it too - otherwise
@@ -1996,21 +2180,83 @@ public sealed partial class MainWindow : Window
         _changeGameFlyout?.Hide();
     }
 
-    // The actual fix for the above: the flyout's own content is the one
-    // thing still reliably receiving pointer-moved events (it holds the
-    // capture) - so it manually checks whether the current pointer position
-    // still falls over either the flyout itself or the "Change game" row
-    // that opened it, and closes itself the moment it's over neither
-    // (i.e. the cursor has moved on to some other row).
-    private void ChangeGameFlyoutContent_OnPointerMoved(object? sender, PointerEventArgs e)
+    // A Flyout lives on a separate popup surface and captures pointer input,
+    // so neither the trigger row nor sibling menu rows reliably receive
+    // leave/enter events while it is open. Poll the screen cursor while this
+    // one flyout is visible instead; both controls can always report their
+    // screen bounds regardless of the popup's input routing.
+    private void StartChangeGameFlyoutHoverTracking()
     {
-        if (_changeGameFlyout is null) return;
-        if (sender is not Control flyoutContent) return;
+        _changeGameFlyoutHoverTimer ??= new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(30)
+        };
+        _changeGameFlyoutHoverTimer.Tick -= ChangeGameFlyoutHoverTimer_OnTick;
+        _changeGameFlyoutHoverTimer.Tick += ChangeGameFlyoutHoverTimer_OnTick;
+        _changeGameFlyoutHoverTimer.Start();
+    }
 
-        var overFlyout = new Rect(flyoutContent.Bounds.Size).Contains(e.GetPosition(flyoutContent));
-        var overRow = _changeGameMenuItem is not null &&
-                      new Rect(_changeGameMenuItem.Bounds.Size).Contains(e.GetPosition(_changeGameMenuItem));
-        if (!overFlyout && !overRow) _changeGameFlyout.Hide();
+    private void StopChangeGameFlyoutHoverTracking()
+    {
+        _changeGameFlyoutHoverTimer?.Stop();
+    }
+
+    private void ChangeGameFlyoutHoverTimer_OnTick(object? sender, EventArgs e)
+    {
+        if (_changeGameFlyout is null)
+        {
+            StopChangeGameFlyoutHoverTracking();
+            return;
+        }
+
+        if (!GetCursorPos(out var cursor)) return;
+        if (!IsCursorOverChangeGameFlyout(cursor)) _changeGameFlyout.Hide();
+    }
+
+    private bool IsCursorOverChangeGameFlyout(CursorPoint cursor)
+    {
+        if (_changeGameMenuItem is null || _changeGameFlyoutContent is null) return false;
+        if (!TryGetScreenBounds(_changeGameMenuItem, out var rowTopLeft, out var rowBottomRight)) return false;
+
+        if (IsCursorWithin(cursor, rowTopLeft, rowBottomRight)) return true;
+        if (!TryGetScreenBounds(_changeGameFlyoutContent, out var flyoutTopLeft, out var flyoutBottomRight)) return false;
+
+        // Includes the presenter's border/padding around the ScrollViewer.
+        const int flyoutPadding = 8;
+        if (IsCursorWithin(cursor, flyoutTopLeft, flyoutBottomRight, flyoutPadding)) return true;
+
+        // Keep a narrow bridge across the intentional placement offset, so
+        // crossing from the parent row into the submenu cannot dismiss it.
+        var bridgeLeft = Math.Min(rowBottomRight.X, flyoutTopLeft.X - flyoutPadding);
+        var bridgeRight = Math.Max(rowBottomRight.X, flyoutTopLeft.X - flyoutPadding);
+        var bridgeTop = Math.Max(rowTopLeft.Y, flyoutTopLeft.Y - flyoutPadding);
+        var bridgeBottom = Math.Min(rowBottomRight.Y, flyoutBottomRight.Y + flyoutPadding);
+        return cursor.X >= bridgeLeft && cursor.X < bridgeRight
+               && cursor.Y >= bridgeTop && cursor.Y < bridgeBottom;
+    }
+
+    private static bool TryGetScreenBounds(Control control, out PixelPoint topLeft, out PixelPoint bottomRight)
+    {
+        topLeft = default;
+        bottomRight = default;
+        if (control.Bounds.Width <= 0 || control.Bounds.Height <= 0) return false;
+
+        try
+        {
+            topLeft = control.PointToScreen(new Point(0, 0));
+            bottomRight = control.PointToScreen(new Point(control.Bounds.Width, control.Bounds.Height));
+            return bottomRight.X > topLeft.X && bottomRight.Y > topLeft.Y;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsCursorWithin(CursorPoint cursor, PixelPoint topLeft, PixelPoint bottomRight, int padding = 0)
+    {
+        return cursor.X >= topLeft.X - padding && cursor.X < bottomRight.X + padding
+               && cursor.Y >= topLeft.Y - padding && cursor.Y < bottomRight.Y + padding;
     }
 
     private void ClipContextSetGame_OnPointerEntered(object? sender, PointerEventArgs e)
@@ -2021,15 +2267,22 @@ public sealed partial class MainWindow : Window
         _changeGameFlyout?.Hide();
         _changeGameMenuItem = menuItem;
 
-        var flyout = new Flyout { Placement = Avalonia.Controls.PlacementMode.RightEdgeAlignedTop };
+        var flyout = new Flyout
+        {
+            Placement = Avalonia.Controls.PlacementMode.RightEdgeAlignedTop,
+            HorizontalOffset = 8
+        };
         _changeGameFlyout = flyout;
+        if (!menuItem.Classes.Contains("changeGameMenuItemOpen")) menuItem.Classes.Add("changeGameMenuItemOpen");
         flyout.Closed += (_, _) =>
         {
+            menuItem.Classes.Remove("changeGameMenuItemOpen");
             if (_changeGameFlyout == flyout)
             {
                 _changeGameFlyout = null;
                 _changeGameMenuItem = null;
                 _changeGameFlyoutContent = null;
+                StopChangeGameFlyoutHoverTracking();
             }
         };
 
@@ -2061,20 +2314,18 @@ public sealed partial class MainWindow : Window
         }
 
         var flyoutContent = new ScrollViewer { MaxHeight = 320, Content = list };
-        flyoutContent.PointerMoved += ChangeGameFlyoutContent_OnPointerMoved;
         _changeGameFlyoutContent = flyoutContent;
         flyout.Content = flyoutContent;
 
         flyout.ShowAt(menuItem);
+        StartChangeGameFlyoutHoverTracking();
     }
 
     private async Task ChangeClipGameAsync(ClipCardViewModel clip, string? gameName)
     {
         if (ViewModel is null) return;
 
-        // Only the Medal imports of a mixed selection - a ClypDat capture's
-        // game came from detection and isn't corrected here.
-        var selected = ViewModel.AllClips.Where(item => item.IsSelected && item.CanChangeGame).ToArray();
+        var selected = ViewModel.AllClips.Where(item => item.IsSelected).ToArray();
         var targets = clip.IsSelected && selected.Length > 1 ? selected : new[] { clip };
 
         if (gameName is null)
@@ -2394,7 +2645,7 @@ public sealed partial class MainWindow : Window
     private async void RenameAllClipsButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || !ViewModel.CanRenameAllClips) return;
-        var dialog = CreateDialog("Rename all clips?", "This renames every video in the current library to the selected filename scheme. Existing files are never overwritten.", true);
+        var dialog = CreateDialog("Rename all clips?", "This renames every video in the current library to the selected filename scheme. Existing files are never overwritten.", true, "Rename", destructive: false);
         if (!await dialog.ShowDialog<bool>(this)) return;
         await ViewModel.RenameAllClipsAsync();
     }
@@ -2617,6 +2868,7 @@ public sealed partial class MainWindow : Window
         // black). The control's MediaPlayer is never touched here.
         EditorVideoHost.Children.Remove(EditorVideoView);
         FullscreenVideoHost.Children.Add(EditorVideoView);
+        Dispatcher.UIThread.Post(EditorVideoView.RefreshClickHook, DispatcherPriority.Loaded);
         AppLog.Info("Video fullscreen entered: EditorVideoView reparented into FullscreenVideoHost.");
     }
 
@@ -2667,6 +2919,7 @@ public sealed partial class MainWindow : Window
 
         FullscreenVideoHost.Children.Remove(EditorVideoView);
         EditorVideoHost.Children.Insert(0, EditorVideoView);
+        Dispatcher.UIThread.Post(EditorVideoView.RefreshClickHook, DispatcherPriority.Loaded);
         AppLog.Info("Video fullscreen exited: EditorVideoView reparented back into EditorVideoHost.");
     }
 
@@ -4480,6 +4733,7 @@ public sealed partial class MainWindow : Window
             _recordingPausedOverlay?.Hide();
             AppLog.Info($"Editor open: {ViewModel.SelectedVideoPath}");
             EditorVideoView.MediaPlayer = playback.VideoPlayer;
+            EditorVideoView.WatchMediaPlayer(playback.VideoPlayer);
             var audioTracks = ViewModel.TimelineTracks
                 .Where(track => track.IsAudio)
                 .Select(track => new AudioPreviewTrack(track.StreamIndex, track.VolumePercent))
@@ -4622,6 +4876,7 @@ public sealed partial class MainWindow : Window
         {
             _playback?.Stop();
         }
+        EditorVideoView.WatchMediaPlayer(null);
         EditorVideoView.MediaPlayer = null;
         _recordingPausedOverlay?.Hide();
         HideEditorHoverControls(immediate: true);
@@ -4676,77 +4931,6 @@ public sealed partial class MainWindow : Window
 
     private sealed record PausedRangeEntry(double start, double end);
 
-    // Clicking the video picture itself never toggled play/pause - the same
-    // native-hwnd "airspace" problem documented on EnsureRecordingPausedOverlay
-    // right below (VideoView always paints over, and eats pointer input
-    // meant for, any Avalonia sibling) means a plain PointerPressed handler
-    // on EditorVideoHost/EditorVideoView would just never fire. Same fix:
-    // a transparent owned Window sitting over the video's own on-screen
-    // rect. Tracks EditorVideoView directly (not whichever host currently
-    // holds it) so the same window keeps working across the windowed/
-    // fullscreen reparent for free, like RepositionPausedOverlay already
-    // does. Stops short of the bottom ~78px (EditorHoverBar's own height)
-    // so it can never end up racing that window's own z-order for clicks
-    // on ITS buttons when the optional hover bar is turned on - the
-    // trade-off is a click in that strip while the hover bar is off (the
-    // default) does nothing, rather than risk swallowing hover-bar clicks
-    // when it's on.
-    private Window? _videoClickCatcherWindow;
-
-    private Window EnsureVideoClickCatcherWindow()
-    {
-        if (_videoClickCatcherWindow is not null) return _videoClickCatcherWindow;
-
-        // Content is a real, filled, hit-testable Panel rather than leaving
-        // Content null - an empty Window's client area isn't reliably
-        // hit-testable for pointer events even with Background set.
-        var surface = new Panel { Background = Brushes.Transparent };
-        surface.PointerPressed += (_, e) =>
-        {
-            if (!e.GetCurrentPoint(surface).Properties.IsLeftButtonPressed) return;
-            PlayPauseButton_OnClick(this, new RoutedEventArgs());
-        };
-
-        var window = new Window
-        {
-            SystemDecorations = SystemDecorations.None,
-            ShowInTaskbar = false,
-            CanResize = false,
-            ShowActivated = false,
-            Topmost = false,
-            Background = Brushes.Transparent,
-            TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
-            Content = surface,
-        };
-        _videoClickCatcherWindow = window;
-        return window;
-    }
-
-    private const double VideoClickCatcherBottomReserve = 78;
-
-    private void RepositionVideoClickCatcher(Window window)
-    {
-        var topLeft = EditorVideoView.PointToScreen(new Point(0, 0));
-        var bottomRight = EditorVideoView.PointToScreen(new Point(EditorVideoView.Bounds.Width, EditorVideoView.Bounds.Height));
-        window.Position = topLeft;
-        window.Width = Math.Max(1, (bottomRight.X - topLeft.X) / window.RenderScaling);
-        window.Height = Math.Max(1, (bottomRight.Y - topLeft.Y) / window.RenderScaling - VideoClickCatcherBottomReserve);
-    }
-
-    private void UpdateVideoClickCatcher()
-    {
-        var shouldShow = ViewModel is { IsEditorVisible: true, IsEditorVideoAreaVisible: true };
-        if (!shouldShow)
-        {
-            _videoClickCatcherWindow?.Hide();
-            return;
-        }
-
-        var window = EnsureVideoClickCatcherWindow();
-        RepositionVideoClickCatcher(window);
-        if (!window.IsVisible) window.Show(this);
-    }
-
     // A plain in-tree Border never actually rendered over the video because
     // LibVLCSharp's VideoView is backed by a native (non-Avalonia) hwnd
     // surface on Windows, which always paints above sibling Avalonia visuals
@@ -4785,8 +4969,16 @@ public sealed partial class MainWindow : Window
                 }
             }
         };
+        overlay.AddHandler(PointerPressedEvent, RecordingPausedOverlay_OnPointerPressed, RoutingStrategies.Tunnel);
         _recordingPausedOverlay = overlay;
         return overlay;
+    }
+
+    private void RecordingPausedOverlay_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is not Window overlay || !e.GetCurrentPoint(overlay).Properties.IsLeftButtonPressed) return;
+        e.Handled = true;
+        PlayPauseButton_OnClick(this, new RoutedEventArgs());
     }
 
     private void UpdateRecordingPausedOverlay(bool shouldShow)
@@ -4825,13 +5017,11 @@ public sealed partial class MainWindow : Window
         {
             if (_recordingPausedOverlay is { IsVisible: true } overlay) RepositionPausedOverlay(overlay);
             if (_editorHoverControlsWindow is { IsVisible: true } hoverBar) RepositionEditorHoverControls(hoverBar);
-            if (_videoClickCatcherWindow is { IsVisible: true } clickCatcher) RepositionVideoClickCatcher(clickCatcher);
         };
         EditorVideoView.LayoutUpdated += (_, _) =>
         {
             if (_recordingPausedOverlay is { IsVisible: true } overlay) RepositionPausedOverlay(overlay);
             if (_editorHoverControlsWindow is { IsVisible: true } hoverBar) RepositionEditorHoverControls(hoverBar);
-            if (_videoClickCatcherWindow is { IsVisible: true } clickCatcher) RepositionVideoClickCatcher(clickCatcher);
             // Covers window resize AND the fullscreen reparent (both change
             // EditorVideoView's rendered height, which the pan-range math
             // depends on) without needing separate handlers for each.

@@ -347,7 +347,11 @@
                                    mosaic below is redundant once the real
                                    icons are already showing underneath). -->
                               <Border Classes="gameInitialBadge" Width="30" Height="30" CornerRadius="8" IsVisible="{Binding ShowFolderGlyph}">
-                                <PathIcon Data="M10,4H4C2.9,4,2,4.9,2,6v12c0,1.1,0.9,2,2,2h16c1.1,0,2-0.9,2-2V8c0-1.1-0.9-2-2-2h-8L10,4z" Width="15" Height="15" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                <PathIcon Data="M10,4H4C2.9,4,2,4.9,2,6v12c0,1.1,0.9,2,2,2h16c1.1,0,2-0.9,2-2V8c0-1.1-0.9-2-2-2h-8L10,4z" Width="15" Height="15" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                  <PathIcon.RenderTransform>
+                                    <TranslateTransform X="-1" Y="-1" />
+                                  </PathIcon.RenderTransform>
+                                </PathIcon>
                               </Border>
 
                               <!-- Adaptive mosaic, gated as a whole on
@@ -764,10 +768,10 @@
                           <MenuItem Header="Export" Click="ClipContextExport_OnClick" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
                           <MenuItem Header="Open" Click="ClipContextOpen_OnClick" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
                           <MenuItem Header="{Binding RenameActionLabel}" Click="ClipContextRename_OnClick" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
-                          <MenuItem IsVisible="{Binding CanChangeGame}" PointerEntered="ClipContextSetGame_OnPointerEntered" StaysOpenOnClick="True">
+                          <MenuItem Classes="changeGameMenuItem" IsVisible="{Binding CanChangeGame}" PointerEntered="ClipContextSetGame_OnPointerEntered" StaysOpenOnClick="True">
                             <MenuItem.Header>
-                              <Grid ColumnDefinitions="*,Auto">
-                                <TextBlock Grid.Column="0" Text="{Binding SetGameActionLabel}" VerticalAlignment="Center" />
+                              <Grid ColumnDefinitions="*,Auto" Width="140">
+                                <TextBlock Grid.Column="0" Text="{Binding SetGameActionLabel}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                                 <PathIcon Grid.Column="1" Data="M8.59,16.59L10,18l6-6l-6-6L8.59,7.41L13.17,12L8.59,16.59z" Width="11" Height="11" Margin="10,0,0,0" Foreground="#8C98A7" VerticalAlignment="Center" />
                               </Grid>
                             </MenuItem.Header>
@@ -1190,7 +1194,7 @@
                 <TextBlock Text="Startup behavior, layout, and clip filenames." Foreground="#93A6B8" FontSize="14" TextWrapping="Wrap" />
               </StackPanel>
 
-              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Launch ClypDat on Windows boot|Start minimized on boot|Startup}">
+              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Launch ClypDat on Windows boot|Start minimized on boot|Process priority|Startup'}">
                 <StackPanel Spacing="18">
                   <TextBlock Text="STARTUP" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" />
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Launch ClypDat on Windows boot|Startup}">
@@ -1208,6 +1212,18 @@
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding StartMinimizedToTray}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
+                  <Border Height="1" Background="#1B242D" />
+                  <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Process priority}">
+                    <TextBlock Text="Process priority" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                    <TextBlock Text="Gives ClypDat's capture work more CPU scheduling priority when a demanding game is running. Changes apply immediately." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                    <ComboBox Classes="settingsInput" ItemsSource="{Binding ProcessPriorityOptions}" SelectedValue="{Binding SelectedProcessPriority}" SelectedValueBinding="{Binding Value}" HorizontalAlignment="Stretch">
+                      <ComboBox.ItemTemplate>
+                        <DataTemplate>
+                          <TextBlock Text="{Binding Label}" />
+                        </DataTemplate>
+                      </ComboBox.ItemTemplate>
+                    </ComboBox>
+                  </StackPanel>
                 </StackPanel>
               </Border>
 
@@ -1275,7 +1291,7 @@
                   </Border>
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Text="Apply the current scheme to every video in this library, including imports and Full Sessions stored here." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
-                    <Button Grid.Column="1" Content="Rename all to updated scheme" Click="RenameAllClipsButton_OnClick" IsEnabled="{Binding CanRenameAllClips}" VerticalAlignment="Center" />
+                    <Button Grid.Column="1" Content="Rename" Click="RenameAllClipsButton_OnClick" IsEnabled="{Binding CanRenameAllClips}" VerticalAlignment="Center" />
                   </Grid>
                   <TextBlock Text="{Binding RenameAllClipsStatus}" Foreground="#93A6B8" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding HasRenameAllClipsStatus}" />
                 </StackPanel>
@@ -1375,9 +1391,6 @@
                           <Button Grid.Column="2" Classes="deleteButton" Content="Remove" Padding="14,7" VerticalAlignment="Center" Click="RemoveGameButton_OnClick"
                                   ToolTip.Tip="Removes it from this list and stops ClypDat detecting it as a game again" />
                         </Grid>
-                        <TextBlock Text="? Since this game has an anti-cheat, OBS may black out or freeze the capture (or get the game closed) - Auto, ClypDat or Windows Capture are safer."
-                                   Foreground="#E5A00D" FontSize="11" FontWeight="Bold" TextWrapping="Wrap"
-                                   IsVisible="{Binding ShowAntiCheatWarning}" />
                       </StackPanel>
                     </Border>
                   </DataTemplate>
@@ -1847,7 +1860,7 @@
                  would visibly bleed out over the pan-slider/track panel
                  instead of just filling this pane. -->
             <Grid x:Name="EditorVideoHost" Grid.Column="0" ClipToBounds="True" PointerWheelChanged="VideoHost_OnPointerWheelChanged">
-              <vlc:VideoView x:Name="EditorVideoView"
+              <controls:ClickableVideoView x:Name="EditorVideoView"
                               IsVisible="{Binding IsEditorVideoAreaVisible}"
                               RenderTransformOrigin="0.5,0.5">
                 <!-- Same EditorVideoView instance gets reparented into
@@ -1856,7 +1869,7 @@
                      of this element, so it travels with it either way; only
                      MainWindow.axaml.cs's UpdateVideoTransform needs to know
                      which host is current (for the pan-range math). -->
-                <vlc:VideoView.RenderTransform>
+                <controls:ClickableVideoView.RenderTransform>
                   <!-- Retrieved by index in UpdateVideoTransform (code-behind) -
                        x:Name on a Transform nested this deep doesn't generate a
                        field the way a named Control does. -->
@@ -1864,8 +1877,8 @@
                     <ScaleTransform ScaleX="1" ScaleY="1" />
                     <TranslateTransform Y="0" />
                   </TransformGroup>
-                </vlc:VideoView.RenderTransform>
-              </vlc:VideoView>
+                </controls:ClickableVideoView.RenderTransform>
+              </controls:ClickableVideoView>
               <TextBlock Text="Loading"
                          Foreground="#93A6B8"
                          FontSize="16"

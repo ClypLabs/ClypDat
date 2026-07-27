@@ -430,6 +430,16 @@
   <Style Selector="MenuItem:pointerover /template/ Border#PART_LayoutRoot">
     <Setter Property="Background" Value="#263544" />
   </Style>
+  <!-- Change Game opens a separately hosted Flyout, which takes pointer
+       capture from its trigger row. Keep the trigger's hover treatment while
+       that child menu is open, matching a normal nested MenuItem. -->
+  <Style Selector="MenuItem.changeGameMenuItem.changeGameMenuItemOpen">
+    <Setter Property="Background" Value="#263544" />
+    <Setter Property="Foreground" Value="#D8E4F2" />
+  </Style>
+  <Style Selector="MenuItem.changeGameMenuItem.changeGameMenuItemOpen /template/ Border#PART_LayoutRoot">
+    <Setter Property="Background" Value="#263544" />
+  </Style>
   <Style Selector="Button.replayButton">
     <Setter Property="Background" Value="#1D2A36" />
     <Setter Property="Foreground" Value="#9FB0C3" />
@@ -697,6 +707,23 @@
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
     <Setter Property="RenderTransform" Value="scale(1)" />
+    <!-- Fluent's internal pointer-over surface ignores Button.Background and
+         can flash a bright theme color as hover ends. This direct template
+         keeps every rail tile on its own animated Background value. -->
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="{TemplateBinding CornerRadius}">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            Padding="{TemplateBinding Padding}"
+                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
     <Setter Property="Transitions">
       <Transitions>
         <BrushTransition Property="Background" Duration="0:0:0.13" />
@@ -789,21 +816,10 @@
   <Style Selector="Button.railIconButton:pointerover PathIcon">
     <Setter Property="Foreground" Value="#D8E4F2" />
   </Style>
-  <!-- Folder tiles permanently show the same tint a loose rail icon only
-       shows on hover, so a folder stands out from a loose game icon at a
-       glance - not the plain outer capsule background tried earlier, just
-       this. Has to be declared AFTER Button.railIconButton's own base/hover
-       rules above to actually win - same same-specificity-loses-to-
-       declaration-order issue documented right above for :not(ToggleSwitch).
-       Hovering it for real just dims the same tint (Opacity) rather than
-       swapping to AccentSelectedHoverBrush - that brush blends further
-       toward the dark rail background, which reads as turning grey rather
-       than a darker version of the same colour. -->
+  <!-- Folder tiles retain their brighter idle tint, distinct from loose
+       game icons and from the darker hover highlight. -->
   <Style Selector="Button.railFolderHeader">
-    <Setter Property="Background" Value="{StaticResource AccentHoverBrush}" />
-  </Style>
-  <Style Selector="Button.railFolderHeader:not(ToggleSwitch):pointerover">
-    <Setter Property="Opacity" Value="0.8" />
+    <Setter Property="Background" Value="{StaticResource AccentFolderBrush}" />
   </Style>
   <!-- Expanded, the outline capsule (Border.railFolderGroup.expanded) already
        carries its own accent border/background around the whole group - the
@@ -833,6 +849,12 @@
   <Style Selector="Button.railIconButton.active:not(ToggleSwitch):pointerover">
     <Setter Property="Background" Value="{StaticResource AccentSelectedHoverBrush}" />
   </Style>
+  <!-- Game filters and folders darken from their selected-color family when
+       hovered. This comes after generic/active rail hover rules so it wins
+       for both selected and unselected game tiles. -->
+  <Style Selector="Button.railGameButton:not(ToggleSwitch):pointerover">
+    <Setter Property="Background" Value="{StaticResource AccentGameHoverBrush}" />
+  </Style>
   <Style Selector="Button.railIconButton Border.gameInitialBadge">
     <Setter Property="Background" Value="#26323D" />
   </Style>
@@ -841,6 +863,25 @@
   </Style>
   <Style Selector="Button.railIconButton.active Border.gameInitialBadge">
     <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+  </Style>
+  <Style Selector="Button.railGameButton:pointerover Border.gameInitialBadge">
+    <Setter Property="Background" Value="{StaticResource AccentGameHoverBrush}" />
+  </Style>
+  <!-- Folder glyph badges never own hover feedback; the larger folder header
+       handles it. Empty, collapsed folders retain their normal neutral glyph. -->
+  <Style Selector="Button.railFolderHeader Border.gameInitialBadge">
+    <Setter Property="Background" Value="#26323D" />
+  </Style>
+  <Style Selector="Button.railFolderHeader:pointerover Border.gameInitialBadge">
+    <Setter Property="Background" Value="#26323D" />
+  </Style>
+  <!-- When open, the folder glyph replaces its closed mosaic. Its squircle
+       stays bright while the larger folder header owns hover feedback. -->
+  <Style Selector="Button.railFolderHeader.expanded Border.gameInitialBadge">
+    <Setter Property="Background" Value="{StaticResource AccentFolderBrush}" />
+  </Style>
+  <Style Selector="Button.railFolderHeader.expanded:pointerover Border.gameInitialBadge">
+    <Setter Property="Background" Value="{StaticResource AccentFolderBrush}" />
   </Style>
   <Style Selector="Button.railIconButton Border.gameInitialBadge TextBlock">
     <Setter Property="Foreground" Value="#B8C7D8" />

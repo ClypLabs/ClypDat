@@ -15,6 +15,7 @@ namespace ClypDat.App.ViewModels;
 public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
     private readonly MediaProbeService _mediaProbe = new();
+    private readonly LibraryCacheStore _libraryCache = new();
     private readonly HashSet<string> _selectedPaths = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _libraryHydrationCts;
     private CancellationTokenSource? _waveformCts;
@@ -22,6 +23,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private DispatcherTimer? _libraryFolderRetryTimer;
     private readonly DispatcherTimer _libraryRefreshDebounce;
     private readonly DispatcherTimer _clipNotReadyMessageTimer;
+    private readonly DispatcherTimer _libraryCacheWriteTimer;
+    private CancellationTokenSource? _cachedLibraryRestoreCts;
+    private bool _isRestoringCachedLibrary;
+    private bool _libraryCacheDirty;
+    private (long Total, long Free) _driveStats;
     // See WasRecentlySelfAdded - suppresses the redundant full-library
     // refresh the folder watcher used to trigger for a clip
     // AddOrUpdateLibraryClipAsync had already added directly.
@@ -131,6 +137,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public MainWindowViewModel()
     {
         Settings = AppSettingsStore.Load();
+        Settings.ProcessPriority = ProcessPriorityService.Normalize(Settings.ProcessPriority);
+        ProcessPriorityService.Apply(Settings.ProcessPriority);
         if (!string.IsNullOrWhiteSpace(Settings.LastSettingsSection)) _selectedSettingsSection = Settings.LastSettingsSection;
         // Curated game-icons.json entries (delisted store names, curated
         // Steam app IDs like the CS:GO fix) only reach a running app through
@@ -182,6 +190,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
         ClipOverlayPositions = new ObservableCollection<string> { "Top Left", "Top Right" };
         ClipOverlayVolumes = new ObservableCollection<string> { "Low", "Medium", "High" };
+        ProcessPriorityOptions = new ObservableCollection<ProcessPriorityOption>(ProcessPriorityService.Options);
         ClipFileNameSchemes = new ObservableCollection<FileNameSchemeOption>
         {
             new("Standard", ClipFileNaming.StandardScheme),
@@ -266,20 +275,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _clipNotReadyMessageTimer.Stop();
             ClipNotReadyMessage = string.Empty;
         };
-        _ = RefreshLibraryAsync();
+        _libraryCacheWriteTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _libraryCacheWriteTimer.Tick += (_, _) => WriteLibraryCacheIfDirty();
+        StartInitialLibraryLoad();
     }
 
     public AppSettings Settings { get; }
     public ObservableCollection<ClipCardViewModel> AllClips { get; }
+    public bool IsRestoringLibraryCache => _isRestoringCachedLibrary;
     public ObservableCollection<TrackLaneViewModel> TimelineTracks { get; }
     public ObservableCollection<AudioDeviceOption> ChatAudioDevices { get; }
     public ObservableCollection<AudioDeviceOption> MicrophoneDevices { get; }
     public ObservableCollection<ProcessOption> OpenProcesses { get; }
-    // Narrower than OpenProcesses (which deliberately stays broad for the Chat
-    // Audio App / exclusions pickers, where a browser or Discord is a valid
-    // choice) - "Add a running game" only wants things that plausibly are a
-    // game: not a browser/launcher/communication app, and not something already
-    // tracked as a game (built-in catalog or an existing override).
+    // "Add a running game" excludes processes already configured by user.
     public ObservableCollection<ProcessOption> GameCandidateProcesses { get; }
     public ObservableCollection<ReplayDurationPreset> ReplayDurationPresets { get; }
     public ObservableCollection<ResolutionOption> ReplayResolutions { get; }
@@ -294,6 +302,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<string> ComingSoonAutoClipGames { get; }
     public ObservableCollection<string> ClipOverlayPositions { get; }
     public ObservableCollection<string> ClipOverlayVolumes { get; }
+    public ObservableCollection<ProcessPriorityOption> ProcessPriorityOptions { get; }
     public ObservableCollection<FileNameSchemeOption> ClipFileNameSchemes { get; }
 
     public ObservableCollection<ThirdPartyLicenseEntry> ThirdPartyLicenseEntries { get; } = new()
@@ -358,27 +367,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private long LibraryUsedBytes => AllClips.Sum(clip => clip.SizeBytes);
     public string LibrarySizeDisplay => FormatBytes(LibraryUsedBytes);
 
-    // Real disk stats for the library folder's drive, queried fresh each
-    // access (cheap - a single DriveInfo lookup) rather than cached, since
-    // free space drifts over time and this is only read when the storage
-    // flyout is actually open. Network drives / a not-yet-chosen folder
-    // just fall back to (0, 0) - HasDriveStats gates the flyout's content
-    // on that instead of showing a nonsense "0 B free of 0 B".
-    private (long Total, long Free) DriveStats
+    // Must be a plain field read: bindings can evaluate repeatedly during
+    // layout, and Directory.Exists on an SMB path can block for seconds.
+    // RefreshLibraryAsync updates this off the UI thread after it verifies
+    // the configured root.
+    private (long Total, long Free) DriveStats => _driveStats;
+
+    private static (long Total, long Free) ReadDriveStats(string folder)
     {
-        get
+        try
         {
-            try
-            {
-                var folder = Settings.LibraryFolder;
-                if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) return (0, 0);
-                var drive = new DriveInfo(Path.GetPathRoot(folder) ?? folder);
-                return (drive.TotalSize, drive.AvailableFreeSpace);
-            }
-            catch
-            {
-                return (0, 0);
-            }
+            if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) return (0, 0);
+            var drive = new DriveInfo(Path.GetPathRoot(folder) ?? folder);
+            return (drive.TotalSize, drive.AvailableFreeSpace);
+        }
+        catch
+        {
+            return (0, 0);
         }
     }
 
@@ -711,24 +716,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // display name, so the per-game backend override is discoverable.
     private void EnsureGameCaptureRow(GameDetection detection)
     {
-        if (string.IsNullOrWhiteSpace(detection.ExeName)) return;
-        if (GameCatalog.BuiltIn.ContainsKey(detection.ExeName)) return;
-        if (Settings.GameCaptureOverrides.Any(g => string.Equals(g.ExecutableName, detection.ExeName, StringComparison.OrdinalIgnoreCase))) return;
+        var detectionKey = string.IsNullOrWhiteSpace(detection.DetectionKey) ? detection.ExeName : detection.DetectionKey;
+        if (string.IsNullOrWhiteSpace(detectionKey)) return;
+        if (Settings.GameCaptureOverrides.Any(g => string.Equals(g.ExecutableName, detectionKey, StringComparison.OrdinalIgnoreCase))) return;
         // Removing a game adds it here. Without this check the very next
         // detection tick auto-added it straight back, which is why Remove
         // looked like it did nothing for a game that was currently running.
-        if (Settings.IgnoredGameExecutables.Contains(detection.ExeName, StringComparer.OrdinalIgnoreCase)) return;
+        if (Settings.IgnoredGameExecutables.Contains(detectionKey, StringComparer.OrdinalIgnoreCase)) return;
 
         Settings.GameCaptureOverrides.Add(new GameCaptureOverride
         {
-            ExecutableName = detection.ExeName,
+            ExecutableName = detectionKey,
             DisplayName = detection.DisplayName,
-            CaptureBackend = "Auto"
+            CaptureBackend = "Auto",
+            Origin = detection.MatchSource is GameMatchSource.Catalog or GameMatchSource.Steam ? "Catalog" : "UserCustom"
         });
         SaveSettings();
         RebuildGameCaptureRows();
         GameCatalogChanged?.Invoke(this, EventArgs.Empty);
-        AppLog.Info($"Game detection: auto-added {detection.DisplayName} ({detection.ExeName}) to Game Detection settings.");
+        AppLog.Info($"Game detection: auto-added {detection.DisplayName} ({detectionKey}) to Game Detection settings.");
     }
 
     public bool IsEditorVisible
@@ -1826,6 +1832,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public string SelectedProcessPriority
+    {
+        get => Settings.ProcessPriority;
+        set
+        {
+            var normalized = ProcessPriorityService.Normalize(value);
+            if (Settings.ProcessPriority == normalized) return;
+            Settings.ProcessPriority = normalized;
+            ProcessPriorityService.Apply(normalized);
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
     public bool IsStatusAreaVisible
     {
         get => Settings.IsStatusAreaVisible;
@@ -2313,15 +2333,127 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string RightShadeWidth => $"{Math.Max(0, 100 - PercentValue(TrimEnd)):0.###}%";
     public string ExportButtonText => IsExporting ? "Exporting..." : "Export";
 
-    public async Task LoadLibraryFolderAsync(string folderPath)
+    // A cache hit must not wait for the SMB directory walk. Restore enough
+    // cards for several rows immediately, then let the UI breathe between
+    // bounded batches while the remaining cached cards arrive.
+    private void StartInitialLibraryLoad()
     {
+        var root = Settings.LibraryFolder;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var cached = _libraryCache.Load(root);
+        if (cached.Count == 0)
+        {
+            _ = RefreshLibraryAsync();
+            return;
+        }
+
+        _isRestoringCachedLibrary = true;
+        OnPropertyChanged(nameof(IsRestoringLibraryCache));
+        const int initialCardCount = 18;
+        foreach (var state in cached.Take(initialCardCount)) AddCachedClip(state);
+        ApplyGameFilters();
+        ApplyClipTypeFilters();
+        ApplySearchFilter();
+        NotifyLibraryChrome();
+        AppLog.Info($"Library cache: restored {Math.Min(initialCardCount, cached.Count)}/{cached.Count} cards in {clock.ElapsedMilliseconds}ms.");
+
+        _cachedLibraryRestoreCts = new CancellationTokenSource();
+        _ = RestoreRemainingCachedClipsAsync(cached.Skip(initialCardCount).ToArray(), root, _cachedLibraryRestoreCts.Token);
+    }
+
+    private async Task RestoreRemainingCachedClipsAsync(IReadOnlyList<CachedClipState> states, string root, CancellationToken cancellationToken)
+    {
+        const int batchSize = 24;
+        try
+        {
+            for (var offset = 0; offset < states.Count; offset += batchSize)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var batch = states.Skip(offset).Take(batchSize).ToArray();
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (cancellationToken.IsCancellationRequested || !string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase)) return;
+                    foreach (var state in batch) AddCachedClip(state);
+                    ApplyGameFilters();
+                    ApplyClipTypeFilters();
+                    ApplySearchFilter();
+                }, DispatcherPriority.Background);
+            }
+
+            if (!cancellationToken.IsCancellationRequested && string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase))
+            {
+                NotifyLibraryChrome();
+                AppLog.Info($"Library cache: restore complete, {AllClips.Count} cards available before disk reconciliation.");
+                _ = RefreshLibraryAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Another library root superseded this cached snapshot.
+        }
+        finally
+        {
+            if (_cachedLibraryRestoreCts?.Token == cancellationToken)
+            {
+                _cachedLibraryRestoreCts.Dispose();
+                _cachedLibraryRestoreCts = null;
+                _isRestoringCachedLibrary = false;
+                OnPropertyChanged(nameof(IsRestoringLibraryCache));
+            }
+        }
+    }
+
+    private void AddCachedClip(CachedClipState state)
+    {
+        if (AllClips.Any(clip => string.Equals(clip.Path, state.Media.Path, StringComparison.OrdinalIgnoreCase))) return;
+        var media = state.Media with
+        {
+            ThumbnailPath = File.Exists(state.Media.ThumbnailPath) ? state.Media.ThumbnailPath : string.Empty,
+            FilmstripPath = File.Exists(state.Media.FilmstripPath) ? state.Media.FilmstripPath : string.Empty
+        };
+        var clip = new ClipCardViewModel(state with { Media = media }, Settings.LibraryFolder);
+        AttachClip(clip);
+        AllClips.Add(clip);
+    }
+
+    private void AttachClip(ClipCardViewModel clip) => clip.PersistentStateChanged += Clip_OnPersistentStateChanged;
+
+    private void DetachClip(ClipCardViewModel clip) => clip.PersistentStateChanged -= Clip_OnPersistentStateChanged;
+
+    private void Clip_OnPersistentStateChanged(object? sender, EventArgs e) => MarkLibraryCacheDirty();
+
+    private void MarkLibraryCacheDirty()
+    {
+        if (_isRestoringCachedLibrary || string.IsNullOrWhiteSpace(Settings.LibraryFolder)) return;
+        _libraryCacheDirty = true;
+        if (!_libraryCacheWriteTimer.IsEnabled) _libraryCacheWriteTimer.Start();
+    }
+
+    private void WriteLibraryCacheIfDirty()
+    {
+        _libraryCacheWriteTimer.Stop();
+        if (!_libraryCacheDirty) return;
+        _libraryCacheDirty = false;
+        var root = Settings.LibraryFolder;
+        var snapshot = AllClips.Select(clip => clip.ToCachedState()).ToArray();
+        _ = Task.Run(() => _libraryCache.Save(root, snapshot));
+    }
+
+    public Task LoadLibraryFolderAsync(string folderPath)
+    {
+        _cachedLibraryRestoreCts?.Cancel();
+        _libraryCacheWriteTimer.Stop();
+        _libraryCacheDirty = false;
         Settings.LibraryFolder = folderPath;
         MigrateLegacyMedalImportHistory();
         SaveSettings();
         OnPropertyChanged(nameof(CanRenameAllClips));
-        await RefreshLibraryAsync();
+        foreach (var clip in AllClips) DetachClip(clip);
+        AllClips.Clear();
+        StartInitialLibraryLoad();
         IsEditorVisible = false;
         SelectedCaptureBackend = string.Empty;
+        return Task.CompletedTask;
     }
 
     public void SaveSettings()
@@ -2532,7 +2664,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // UI thread instead of freezing the whole window on every refresh.
             if (string.IsNullOrWhiteSpace(Settings.LibraryFolder) || !await Task.Run(() => Directory.Exists(Settings.LibraryFolder)))
             {
-                StartLibraryWatcher();
+                _driveStats = (0, 0);
+                StartLibraryWatcher(folderVerified: false);
                 NotifyLibraryChrome();
                 // A network share not mounted yet (ClypDat auto-starting at boot
                 // ahead of the OS reconnecting drives is the common case) used
@@ -2548,14 +2681,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _libraryFolderRetryTimer?.Stop();
             _libraryFolderRetryTimer = null;
 
-            LibraryLayout.EnsureRoots(Settings.LibraryFolder);
+            var libraryFolder = Settings.LibraryFolder;
+            _driveStats = await Task.Run(() => ReadDriveStats(libraryFolder));
+            await Task.Run(() => LibraryLayout.EnsureRoots(libraryFolder));
             if (Settings.LibraryLayoutVersion < LibraryLayout.CurrentVersion)
             {
                 await MigrateLibraryLayoutAsync();
             }
 
-            MigrateLegacySessionTitles();
-            StartLibraryWatcher();
+            await Task.Run(MigrateLegacySessionTitles);
+            StartLibraryWatcher(folderVerified: true);
 
             // Snapshot what's already showing before handing off to a
             // background thread. TryAdd (not ToDictionary) so a latent
@@ -2565,7 +2700,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var existingByPath = new Dictionary<string, ClipCardViewModel>(StringComparer.OrdinalIgnoreCase);
             foreach (var clip in AllClips) existingByPath.TryAdd(clip.Path, clip);
 
-            var libraryFolder = Settings.LibraryFolder;
             var diff = await Task.Run(() => DiffLibrary(libraryFolder, existingByPath));
 
             foreach (var clip in diff.Removed) RemoveClipFromLibraryCore(clip);
@@ -2768,7 +2902,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         var insertIndex = 0;
         while (insertIndex < AllClips.Count && AllClips[insertIndex].CreatedAt > clip.CreatedAt) insertIndex++;
+        AttachClip(clip);
         AllClips.Insert(insertIndex, clip);
+        MarkLibraryCacheDirty();
     }
 
     public async Task AddOrUpdateLibraryClipAsync(string filePath)
@@ -2878,11 +3014,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        _cachedLibraryRestoreCts?.Cancel();
+        _cachedLibraryRestoreCts?.Dispose();
+        _cachedLibraryRestoreCts = null;
         CancelLibraryHydration();
         _waveformCts?.Cancel();
         _waveformCts?.Dispose();
         _waveformCts = null;
         _libraryRefreshDebounce.Stop();
+        _libraryCacheWriteTimer.Stop();
+        if (_libraryCacheDirty)
+        {
+            _libraryCacheDirty = false;
+            _libraryCache.Save(Settings.LibraryFolder, AllClips.Select(clip => clip.ToCachedState()).ToArray());
+        }
         _libraryWatcher?.Dispose();
         _libraryWatcher = null;
     }
@@ -3106,7 +3251,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private void RemoveClipFromLibraryCore(ClipCardViewModel clip)
     {
         if (clip.IsSelected) SetClipSelected(clip, false);
+        DetachClip(clip);
         AllClips.Remove(clip);
+        MarkLibraryCacheDirty();
     }
 
     public async Task RenameClipAsync(ClipCardViewModel clip, string newTitle)
@@ -3462,14 +3609,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (string.IsNullOrWhiteSpace(exe)) return;
         if (!exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) exe += ".exe";
         if (string.IsNullOrWhiteSpace(NewCustomGameDisplayName)) return;
-        if (GameCatalog.BuiltIn.ContainsKey(exe)) return;
-
         Settings.GameCaptureOverrides.RemoveAll(g => string.Equals(g.ExecutableName, exe, StringComparison.OrdinalIgnoreCase));
         Settings.GameCaptureOverrides.Add(new GameCaptureOverride
         {
             ExecutableName = exe,
             DisplayName = NewCustomGameDisplayName.Trim(),
-            CaptureBackend = "Auto"
+            CaptureBackend = "Auto",
+            Origin = "UserCustom"
         });
         NewCustomGameExecutable = string.Empty;
         NewCustomGameDisplayName = string.Empty;
@@ -3490,18 +3636,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedGameProcess = null;
     }
 
-    // Handles both a user-added custom row (delete its override entry) and a
-    // built-in catalog row (nothing to delete there - GameCatalog.BuiltIn is a
-    // static dict, not per-user data). Either way, excluding the exe is what
-    // actually makes removal stick: RebuildGameCaptureRows filters ignored
-    // exes out of the built-in list too, and detection itself skips anything
-    // on the ignore list, so it won't just reappear next time it's opened.
+    // Excluding an executable makes removal stick, so a running game does not
+    // reappear in settings on its next detection pass.
     public void RemoveGame(GameBackendRowViewModel row)
     {
         if (row.IsCustom)
         {
             Settings.GameCaptureOverrides.RemoveAll(g => string.Equals(g.ExecutableName, row.ExecutableName, StringComparison.OrdinalIgnoreCase));
             SaveSettings();
+            RebuildGameCaptureRows();
+            GameCatalogChanged?.Invoke(this, EventArgs.Empty);
+            return;
         }
         AddIgnoredGameExecutable(row.ExecutableName);
     }
@@ -3511,23 +3656,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         foreach (var row in GameCaptureRows) row.PropertyChanged -= GameCaptureRow_OnPropertyChanged;
         GameCaptureRows.Clear();
 
-        var builtIn = GameCatalog.BuiltIn
-            .Where(kv => !Settings.IgnoredGameExecutables.Contains(kv.Key, StringComparer.OrdinalIgnoreCase))
-            .Select(kv => (ExecutableName: kv.Key, DisplayName: kv.Value, IsCustom: false));
-        var custom = Settings.GameCaptureOverrides
-            .Where(g => !GameCatalog.BuiltIn.ContainsKey(g.ExecutableName))
-            .Select(g => (ExecutableName: g.ExecutableName, DisplayName: g.DisplayName, IsCustom: true));
+        var supplemental = Settings.GameCaptureOverrides
+            .Where(g => !Settings.IgnoredGameExecutables.Contains(g.ExecutableName, StringComparer.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(g.DisplayName))
+            .Select(g => (ExecutableName: g.ExecutableName, DisplayName: g.DisplayName,
+                IsCustom: string.Equals(g.Origin, "UserCustom", StringComparison.OrdinalIgnoreCase)));
 
-        // One alphabetical list instead of "sorted built-ins, then whatever
-        // order custom/auto-added games happened to land in Settings" - a
-        // newly detected game should slot in by name, not always show up at
-        // the bottom.
-        foreach (var entry in builtIn.Concat(custom).OrderBy(e => e.DisplayName, StringComparer.OrdinalIgnoreCase))
+        // Alphabetical list keeps newly detected games in predictable spots.
+        foreach (var entry in supplemental.OrderBy(e => e.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
             var overrideEntry = Settings.GameCaptureOverrides.FirstOrDefault(g => string.Equals(g.ExecutableName, entry.ExecutableName, StringComparison.OrdinalIgnoreCase));
             var backend = ReplayBackends.FirstOrDefault(preset => string.Equals(preset.Value, overrideEntry?.CaptureBackend, StringComparison.OrdinalIgnoreCase))
                           ?? ReplayBackends.First(preset => preset.Value == "Auto");
-            var row = new GameBackendRowViewModel(entry.ExecutableName, entry.DisplayName, entry.IsCustom, GameCatalog.AntiCheatSensitive.Contains(entry.ExecutableName), backend);
+            var row = new GameBackendRowViewModel(entry.ExecutableName, entry.DisplayName, entry.IsCustom, backend);
             row.PropertyChanged += GameCaptureRow_OnPropertyChanged;
             GameCaptureRows.Add(row);
         }
@@ -3557,7 +3697,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var entry = Settings.GameCaptureOverrides.FirstOrDefault(g => string.Equals(g.ExecutableName, row.ExecutableName, StringComparison.OrdinalIgnoreCase));
         if (entry is null)
         {
-            entry = new GameCaptureOverride { ExecutableName = row.ExecutableName, DisplayName = row.IsCustom ? row.DisplayName : string.Empty };
+            entry = new GameCaptureOverride { ExecutableName = row.ExecutableName, DisplayName = row.IsCustom ? row.DisplayName : string.Empty, Origin = row.IsCustom ? "UserCustom" : "Backend" };
             Settings.GameCaptureOverrides.Add(entry);
         }
 
@@ -3638,31 +3778,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedGameProcess = GameCandidateProcesses.FirstOrDefault(process => string.Equals(process.Name, selectedGameName, StringComparison.OrdinalIgnoreCase));
     }
 
-    // Common non-game apps that legitimately keep a visible titled window open
-    // (so ProcessListService's own filtering doesn't catch them) but that
-    // nobody is adding as a "game" from this picker.
-    private static readonly HashSet<string> NonGameExecutables = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "discord.exe", "discordcanary.exe", "discordptb.exe",
-        "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "zen.exe", "vivaldi.exe",
-        "spotify.exe", "slack.exe", "teams.exe", "zoom.exe", "telegram.exe", "whatsapp.exe",
-        "steam.exe", "steamwebhelper.exe", "epicgameslauncher.exe", "battle.net.exe",
-        "origin.exe", "eaapp.exe", "eadesktop.exe", "ubisoftconnect.exe", "upc.exe", "galaxyclient.exe",
-        "obs64.exe", "obs32.exe", "clypdat.exe", "code.exe", "notion.exe"
-    };
-
     private bool IsGameCandidate(ProcessOption process)
     {
-        if (NonGameExecutables.Contains(process.Name)) return false;
-        if (GameCatalog.BuiltIn.ContainsKey(process.Name)) return false;
         if (Settings.GameCaptureOverrides.Any(g => string.Equals(g.ExecutableName, process.Name, StringComparison.OrdinalIgnoreCase))) return false;
         return true;
     }
 
     public ReplayBufferConfig CreateReplayConfig()
     {
+        var detectionKey = string.IsNullOrWhiteSpace(ActiveGameDetection.DetectionKey) ? ActiveGameDetection.ExeName : ActiveGameDetection.DetectionKey;
         var gameOverride = Settings.GameCaptureOverrides
-            .FirstOrDefault(g => string.Equals(g.ExecutableName, ActiveGameDetection.ExeName, StringComparison.OrdinalIgnoreCase));
+            .FirstOrDefault(g => string.Equals(g.ExecutableName, detectionKey, StringComparison.OrdinalIgnoreCase));
         var effectiveBackend = !string.IsNullOrWhiteSpace(gameOverride?.CaptureBackend) &&
                                 !string.Equals(gameOverride.CaptureBackend, "Auto", StringComparison.OrdinalIgnoreCase)
             ? gameOverride.CaptureBackend
@@ -5125,12 +5251,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _libraryFolderRetryTimer.Start();
     }
 
-    private void StartLibraryWatcher()
+    private void StartLibraryWatcher(bool folderVerified = false)
     {
         _libraryWatcher?.Dispose();
         _libraryWatcher = null;
 
-        if (string.IsNullOrWhiteSpace(Settings.LibraryFolder) || !Directory.Exists(Settings.LibraryFolder)) return;
+        if (string.IsNullOrWhiteSpace(Settings.LibraryFolder) || !folderVerified) return;
 
         var watcher = new FileSystemWatcher(Settings.LibraryFolder)
         {
@@ -5158,7 +5284,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Dispatcher.UIThread.Post(async () =>
         {
             await Task.Delay(TimeSpan.FromSeconds(5));
-            StartLibraryWatcher();
+            await RefreshLibraryAsync();
         });
     }
 
@@ -5423,7 +5549,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 async clip =>
                 {
                     var media = await _mediaProbe.ProbeMetadataAsync(clip.Path);
-                    await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(media));
+                    await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(media, reloadSidecars: false));
                 });
 
             // Recomputed rather than reusing the list from above: a clip that
@@ -5435,7 +5561,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 {
                     var path = await _mediaProbe.EnsureThumbnailAsync(clip.Path, clip.Duration);
                     if (string.IsNullOrEmpty(path)) return;
-                    await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(clip.Media with { ThumbnailPath = path }));
+                    await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(clip.Media with { ThumbnailPath = path }, reloadSidecars: false));
                 });
 
             needFilmstrip = clips.Where(clip => string.IsNullOrEmpty(clip.Media.FilmstripPath)).ToArray();
@@ -5444,7 +5570,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 {
                     var path = await _mediaProbe.EnsureFilmstripAsync(clip.Path, clip.Duration);
                     if (string.IsNullOrEmpty(path)) return;
-                    await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(clip.Media with { FilmstripPath = path }));
+                    await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(clip.Media with { FilmstripPath = path }, reloadSidecars: false));
                 });
         }
         catch (OperationCanceledException)

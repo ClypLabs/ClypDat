@@ -26,10 +26,23 @@ public static class AppSettingsStore
             if (settings.ReplayFrameRate <= 0) settings.ReplayFrameRate = 60;
             if (settings.ReplayMaxHeight <= 0) settings.ReplayMaxHeight = 1080;
             if (string.IsNullOrWhiteSpace(settings.ExportVideoCodec)) settings.ExportVideoCodec = "H.264";
+            settings.ProcessPriority = settings.ProcessPriority switch
+            {
+                "Idle" or "BelowNormal" or "Normal" or "AboveNormal" or "High" => settings.ProcessPriority,
+                _ => "High"
+            };
             settings.ChatAudioProcessName ??= string.Empty;
             settings.ChatAudioProcessNames ??= new List<string>();
             settings.MicrophoneDeviceIds ??= new List<string>();
             settings.IgnoredGameExecutables ??= new List<string>();
+            settings.GameCaptureOverrides ??= new List<GameCaptureOverride>();
+            foreach (var game in settings.GameCaptureOverrides)
+            {
+                // Older settings had no origin. A display name meant user
+                // intentionally added process, while empty names only stored
+                // a backend choice.
+                if (game.Origin is null) game.Origin = string.IsNullOrWhiteSpace(game.DisplayName) ? "Backend" : "UserCustom";
+            }
             settings.AutoClipping ??= new AutoClippingSettings();
             settings.AutoClipping.Games ??= new Dictionary<string, AutoClipGameSettings>(StringComparer.OrdinalIgnoreCase);
             foreach (var game in settings.AutoClipping.Games.Values)
