@@ -38,9 +38,9 @@ public static class AppSettingsStore
             settings.GameCaptureOverrides ??= new List<GameCaptureOverride>();
             foreach (var game in settings.GameCaptureOverrides)
             {
-                // Older settings had no origin. A display name meant the user
-                // intentionally added the process, while empty names only
-                // stored a built-in game's backend choice.
+                // Older settings had no origin. A display name meant user
+                // intentionally added process, while empty names only stored
+                // a backend choice.
                 if (game.Origin is null) game.Origin = string.IsNullOrWhiteSpace(game.DisplayName) ? "Backend" : "UserCustom";
             }
             settings.AutoClipping ??= new AutoClippingSettings();

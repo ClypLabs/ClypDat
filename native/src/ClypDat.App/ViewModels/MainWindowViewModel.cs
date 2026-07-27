@@ -287,11 +287,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<AudioDeviceOption> ChatAudioDevices { get; }
     public ObservableCollection<AudioDeviceOption> MicrophoneDevices { get; }
     public ObservableCollection<ProcessOption> OpenProcesses { get; }
-    // Narrower than OpenProcesses (which deliberately stays broad for the Chat
-    // Audio App / exclusions pickers, where a browser or Discord is a valid
-    // choice) - "Add a running game" only wants things that plausibly are a
-    // game: not a browser/launcher/communication app, and not something already
-    // tracked as a game (built-in catalog or an existing override).
+    // "Add a running game" excludes processes already configured by user.
     public ObservableCollection<ProcessOption> GameCandidateProcesses { get; }
     public ObservableCollection<ReplayDurationPreset> ReplayDurationPresets { get; }
     public ObservableCollection<ResolutionOption> ReplayResolutions { get; }
@@ -720,17 +716,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // display name, so the per-game backend override is discoverable.
     private void EnsureGameCaptureRow(GameDetection detection)
     {
-        if (string.IsNullOrWhiteSpace(detection.ExeName)) return;
-        if (GameCatalog.BuiltIn.ContainsKey(detection.ExeName)) return;
-        if (Settings.GameCaptureOverrides.Any(g => string.Equals(g.ExecutableName, detection.ExeName, StringComparison.OrdinalIgnoreCase))) return;
+        var detectionKey = string.IsNullOrWhiteSpace(detection.DetectionKey) ? detection.ExeName : detection.DetectionKey;
+        if (string.IsNullOrWhiteSpace(detectionKey)) return;
+        if (Settings.GameCaptureOverrides.Any(g => string.Equals(g.ExecutableName, detectionKey, StringComparison.OrdinalIgnoreCase))) return;
         // Removing a game adds it here. Without this check the very next
         // detection tick auto-added it straight back, which is why Remove
         // looked like it did nothing for a game that was currently running.
-        if (Settings.IgnoredGameExecutables.Contains(detection.ExeName, StringComparer.OrdinalIgnoreCase)) return;
+        if (Settings.IgnoredGameExecutables.Contains(detectionKey, StringComparer.OrdinalIgnoreCase)) return;
 
         Settings.GameCaptureOverrides.Add(new GameCaptureOverride
         {
-            ExecutableName = detection.ExeName,
+            ExecutableName = detectionKey,
             DisplayName = detection.DisplayName,
             CaptureBackend = "Auto",
             Origin = detection.MatchSource is GameMatchSource.Catalog or GameMatchSource.Steam ? "Catalog" : "UserCustom"
@@ -738,7 +734,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SaveSettings();
         RebuildGameCaptureRows();
         GameCatalogChanged?.Invoke(this, EventArgs.Empty);
-        AppLog.Info($"Game detection: auto-added {detection.DisplayName} ({detection.ExeName}) to Game Detection settings.");
+        AppLog.Info($"Game detection: auto-added {detection.DisplayName} ({detectionKey}) to Game Detection settings.");
     }
 
     public bool IsEditorVisible
@@ -3613,8 +3609,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (string.IsNullOrWhiteSpace(exe)) return;
         if (!exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) exe += ".exe";
         if (string.IsNullOrWhiteSpace(NewCustomGameDisplayName)) return;
-        if (GameCatalog.BuiltIn.ContainsKey(exe)) return;
-
         Settings.GameCaptureOverrides.RemoveAll(g => string.Equals(g.ExecutableName, exe, StringComparison.OrdinalIgnoreCase));
         Settings.GameCaptureOverrides.Add(new GameCaptureOverride
         {
@@ -3642,12 +3636,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedGameProcess = null;
     }
 
-    // Handles both a user-added custom row (delete its override entry) and a
-    // built-in catalog row (nothing to delete there - GameCatalog.BuiltIn is a
-    // static dict, not per-user data). Either way, excluding the exe is what
-    // actually makes removal stick: RebuildGameCaptureRows filters ignored
-    // exes out of the built-in list too, and detection itself skips anything
-    // on the ignore list, so it won't just reappear next time it's opened.
+    // Excluding an executable makes removal stick, so a running game does not
+    // reappear in settings on its next detection pass.
     public void RemoveGame(GameBackendRowViewModel row)
     {
         if (row.IsCustom)
@@ -3663,24 +3653,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         foreach (var row in GameCaptureRows) row.PropertyChanged -= GameCaptureRow_OnPropertyChanged;
         GameCaptureRows.Clear();
 
-        var builtIn = GameCatalog.BuiltIn
-            .Where(kv => !Settings.IgnoredGameExecutables.Contains(kv.Key, StringComparer.OrdinalIgnoreCase))
-            .Select(kv => (ExecutableName: kv.Key, DisplayName: kv.Value, IsCustom: false));
         var supplemental = Settings.GameCaptureOverrides
-            .Where(g => !GameCatalog.BuiltIn.ContainsKey(g.ExecutableName) && !string.IsNullOrWhiteSpace(g.DisplayName))
+            .Where(g => !Settings.IgnoredGameExecutables.Contains(g.ExecutableName, StringComparer.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(g.DisplayName))
             .Select(g => (ExecutableName: g.ExecutableName, DisplayName: g.DisplayName,
                 IsCustom: string.Equals(g.Origin, "UserCustom", StringComparison.OrdinalIgnoreCase)));
 
-        // One alphabetical list instead of "sorted built-ins, then whatever
-        // order custom/auto-added games happened to land in Settings" - a
-        // newly detected game should slot in by name, not always show up at
-        // the bottom.
-        foreach (var entry in builtIn.Concat(supplemental).OrderBy(e => e.DisplayName, StringComparer.OrdinalIgnoreCase))
+        // Alphabetical list keeps newly detected games in predictable spots.
+        foreach (var entry in supplemental.OrderBy(e => e.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
             var overrideEntry = Settings.GameCaptureOverrides.FirstOrDefault(g => string.Equals(g.ExecutableName, entry.ExecutableName, StringComparison.OrdinalIgnoreCase));
             var backend = ReplayBackends.FirstOrDefault(preset => string.Equals(preset.Value, overrideEntry?.CaptureBackend, StringComparison.OrdinalIgnoreCase))
                           ?? ReplayBackends.First(preset => preset.Value == "Auto");
-            var row = new GameBackendRowViewModel(entry.ExecutableName, entry.DisplayName, entry.IsCustom, GameCatalog.AntiCheatSensitive.Contains(entry.ExecutableName), backend);
+            var row = new GameBackendRowViewModel(entry.ExecutableName, entry.DisplayName, entry.IsCustom, backend);
             row.PropertyChanged += GameCaptureRow_OnPropertyChanged;
             GameCaptureRows.Add(row);
         }
@@ -3791,31 +3775,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedGameProcess = GameCandidateProcesses.FirstOrDefault(process => string.Equals(process.Name, selectedGameName, StringComparison.OrdinalIgnoreCase));
     }
 
-    // Common non-game apps that legitimately keep a visible titled window open
-    // (so ProcessListService's own filtering doesn't catch them) but that
-    // nobody is adding as a "game" from this picker.
-    private static readonly HashSet<string> NonGameExecutables = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "discord.exe", "discordcanary.exe", "discordptb.exe",
-        "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "zen.exe", "vivaldi.exe",
-        "spotify.exe", "slack.exe", "teams.exe", "zoom.exe", "telegram.exe", "whatsapp.exe",
-        "steam.exe", "steamwebhelper.exe", "epicgameslauncher.exe", "battle.net.exe",
-        "origin.exe", "eaapp.exe", "eadesktop.exe", "ubisoftconnect.exe", "upc.exe", "galaxyclient.exe",
-        "obs64.exe", "obs32.exe", "clypdat.exe", "code.exe", "notion.exe"
-    };
-
     private bool IsGameCandidate(ProcessOption process)
     {
-        if (NonGameExecutables.Contains(process.Name)) return false;
-        if (GameCatalog.BuiltIn.ContainsKey(process.Name)) return false;
         if (Settings.GameCaptureOverrides.Any(g => string.Equals(g.ExecutableName, process.Name, StringComparison.OrdinalIgnoreCase))) return false;
         return true;
     }
 
     public ReplayBufferConfig CreateReplayConfig()
     {
+        var detectionKey = string.IsNullOrWhiteSpace(ActiveGameDetection.DetectionKey) ? ActiveGameDetection.ExeName : ActiveGameDetection.DetectionKey;
         var gameOverride = Settings.GameCaptureOverrides
-            .FirstOrDefault(g => string.Equals(g.ExecutableName, ActiveGameDetection.ExeName, StringComparison.OrdinalIgnoreCase));
+            .FirstOrDefault(g => string.Equals(g.ExecutableName, detectionKey, StringComparison.OrdinalIgnoreCase));
         var effectiveBackend = !string.IsNullOrWhiteSpace(gameOverride?.CaptureBackend) &&
                                 !string.Equals(gameOverride.CaptureBackend, "Auto", StringComparison.OrdinalIgnoreCase)
             ? gameOverride.CaptureBackend

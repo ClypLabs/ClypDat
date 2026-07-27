@@ -138,7 +138,7 @@ public sealed partial class MainWindow : Window
             _gameDetectionTimer.Start();
             _ = EnsureLibraryFolderAsync();
             _ = RunStartupDialogsAsync();
-            _ = RefreshRemoteGameExclusionsAsync();
+            _ = RefreshRemoteGameIconsAsync();
             _ = RefreshRemoteGameCatalogAsync();
             if (ViewModel is not null)
             {
@@ -352,29 +352,27 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    // The header's detected-game text - clicking it offers "Don't detect X as
-    // a game" so a wrongly-detected app (the built-in ignore list can't cover
-    // everything) can be excluded on the spot instead of digging through
-    // settings.
+    // Header menu lets user exclude a detected game.
     private void ActiveGameButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button button || ViewModel is null) return;
         var detection = ViewModel.ActiveGameDetection;
-        if (detection is not { IsDetected: true } || string.IsNullOrWhiteSpace(detection.ExeName)) return;
+        var detectionKey = string.IsNullOrWhiteSpace(detection.DetectionKey) ? detection.ExeName : detection.DetectionKey;
+        if (detection is not { IsDetected: true } || string.IsNullOrWhiteSpace(detectionKey)) return;
 
         var flyout = new MenuFlyout();
         var exclude = new MenuItem
         {
             Header = new TextBlock
             {
-                Text = $"Don't detect \"{detection.DisplayName}\" ({detection.ExeName}) as a game",
+                Text = $"Don't detect \"{detection.DisplayName}\" ({detectionKey}) as a game",
                 TextWrapping = TextWrapping.Wrap,
                 MaxWidth = 320
             }
         };
         exclude.Click += (_, _) =>
         {
-            ViewModel.AddIgnoredGameExecutable(detection.ExeName);
+            ViewModel.AddIgnoredGameExecutable(detectionKey);
             _gameDetector.ApplyUserIgnoredExecutables(ViewModel.Settings.IgnoredGameExecutables);
             UpdateDetectedGame();
         };
@@ -2051,18 +2049,8 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    // Best-effort, throttled internally (see RemoteGameExclusionsService) so
-    // this is safe to fire on every startup - only actually hits the network
-    // roughly once a day. _gameDetector already has whatever was cached from
-    // a previous successful fetch applied synchronously before this ever
-    // runs (see its constructor), so a slow/failed network here just means
-    // this session doesn't get today's update, not that detection has no
-    // remote list at all.
-    private async Task RefreshRemoteGameExclusionsAsync()
+    private async Task RefreshRemoteGameIconsAsync()
     {
-        var updated = await RemoteGameExclusionsService.RefreshAsync();
-        if (updated is not null) _gameDetector.ApplyRemoteIgnoredExecutables(updated);
-
         // Curated icon overrides ride the same once-a-day cadence. Only used
         // for games the Steam store search resolves wrongly or not at all, so
         // a failure here costs nothing.

@@ -16,30 +16,17 @@ public sealed record GameDetection(
     int ProcessId,
     bool IsDetected,
     bool IsForeground = false,
-    GameMatchSource MatchSource = GameMatchSource.None)
+    GameMatchSource MatchSource = GameMatchSource.None,
+    string DetectionKey = "")
 {
     public static GameDetection None { get; } = new("No game detected", string.Empty, string.Empty, string.Empty, 0, 0, false);
 }
 
 public sealed class ForegroundGameDetector
 {
-    private static readonly HashSet<string> IgnoredExecutables = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "applicationframehost.exe", "cmd.exe", "conhost.exe", "discord.exe", "discordcanary.exe", "dwm.exe",
-        "epicgameslauncher.exe", "clypdat.exe", "explorer.exe", "firefox.exe", "gamebar.exe", "gamebarftserver.exe",
-        "gamebarpresencewriter.exe", "msedge.exe", "medal.exe", "medalencoder.exe", "microsoft.photos.exe",
-        "msiafterburner.exe", "notepad.exe", "nvidia app.exe", "nvidia overlay.exe", "nvidia share.exe",
-        "nvidia web helper.exe", "nvcontainer.exe", "nvdisplay.container.exe", "obs64.exe", "overwolf.exe",
-        "parsecd.exe", "photos.exe", "powershell.exe", "rtss.exe", "rtsshooksloader64.exe", "screenclippinghost.exe",
-        "screensketch.exe", "searchhost.exe", "shellexperiencehost.exe", "snippingtool.exe", "spotify.exe",
-        "steam.exe", "steamwebhelper.exe", "streamdeck.exe", "taskmgr.exe", "textinputhost.exe", "vlc.exe",
-        "wmplayer.exe", "mpc-hc.exe", "mpc-hc64.exe", "windowsterminal.exe", "zen.exe"
-    };
-
     private readonly SteamGameLibrary _steamGames = new();
     private readonly ConcurrentDictionary<nint, CachedWindow> _windowCache = new();
     private volatile HashSet<string> _userIgnoredExecutables = new(StringComparer.OrdinalIgnoreCase);
-    private volatile HashSet<string> _remoteIgnoredExecutables = new(StringComparer.OrdinalIgnoreCase);
     private volatile Dictionary<string, string> _customGames = new(StringComparer.OrdinalIgnoreCase);
     private volatile CatalogState _catalog;
     private int _catalogGeneration;
@@ -47,36 +34,19 @@ public sealed class ForegroundGameDetector
 
     public ForegroundGameDetector()
     {
-        var bundled = GameCatalog.BuiltIn.Select(pair => new GameCatalogEntry
-        {
-            Id = pair.Key,
-            DisplayName = pair.Value,
-            AntiCheatSensitive = GameCatalog.AntiCheatSensitive.Contains(pair.Key),
-            Matchers = new List<GameWindowMatcher> { new() { Executable = pair.Key } }
-        });
         var local = LoadRules(Path.Combine(AppContext.BaseDirectory, "game-catalog.json"))
             .Concat(LoadRules(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClypDat", "game-catalog.json")));
-        _catalog = BuildCatalog(bundled.Concat(local).Concat(RemoteGameCatalogService.LoadCached()));
-        ApplyRemoteIgnoredExecutables(RemoteGameExclusionsService.LoadCached());
+        _catalog = BuildCatalog(local.Concat(RemoteGameCatalogService.LoadCached()));
     }
 
     public void ApplyUserIgnoredExecutables(IEnumerable<string> executableNames) =>
         _userIgnoredExecutables = new HashSet<string>(executableNames.Where(name => !string.IsNullOrWhiteSpace(name)), StringComparer.OrdinalIgnoreCase);
 
-    public void ApplyRemoteIgnoredExecutables(IEnumerable<string> executableNames) =>
-        _remoteIgnoredExecutables = new HashSet<string>(executableNames.Where(name => !string.IsNullOrWhiteSpace(name)), StringComparer.OrdinalIgnoreCase);
-
     public void ApplyRemoteCatalog(IEnumerable<GameCatalogEntry> entries)
     {
-        var bundled = GameCatalog.BuiltIn.Select(pair => new GameCatalogEntry
-        {
-            Id = pair.Key, DisplayName = pair.Value,
-            AntiCheatSensitive = GameCatalog.AntiCheatSensitive.Contains(pair.Key),
-            Matchers = new List<GameWindowMatcher> { new() { Executable = pair.Key } }
-        });
         var local = LoadRules(Path.Combine(AppContext.BaseDirectory, "game-catalog.json"))
             .Concat(LoadRules(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClypDat", "game-catalog.json")));
-        _catalog = BuildCatalog(bundled.Concat(local).Concat(entries));
+        _catalog = BuildCatalog(local.Concat(entries));
         Interlocked.Increment(ref _catalogGeneration);
         _windowCache.Clear();
     }
@@ -104,7 +74,7 @@ public sealed class ForegroundGameDetector
             return _lastGame;
         }
 
-        if (_lastGame.IsDetected && IsStillUsable(_lastGame) && !IsIgnored(_lastGame.ExeName))
+        if (_lastGame.IsDetected && IsStillUsable(_lastGame) && !IsIgnored(_lastGame.ExeName) && !IsIgnored(_lastGame.DetectionKey))
         {
             _lastGame = _lastGame with { IsForeground = false };
             return _lastGame;
@@ -117,7 +87,7 @@ public sealed class ForegroundGameDetector
     public string DetectDisplayName() => Detect().DisplayName;
 
     public IReadOnlyList<GameDetection> DetectAllRunningGames() => ScanWindows()
-        .GroupBy(game => game.ExeName, StringComparer.OrdinalIgnoreCase)
+        .GroupBy(game => string.IsNullOrWhiteSpace(game.DetectionKey) ? game.ExeName : game.DetectionKey, StringComparer.OrdinalIgnoreCase)
         .Select(group => group.OrderByDescending(game => WindowArea(game.WindowHandle)).First())
         .ToArray();
 
@@ -175,17 +145,19 @@ public sealed class ForegroundGameDetector
             GameDetection detection;
             if (_customGames.TryGetValue(exeName, out var customName))
             {
-                detection = Create(customName, exeName, title, className, handle, (int)processId, GameMatchSource.UserCustom);
+                detection = Create(customName, exeName, title, className, handle, (int)processId, GameMatchSource.UserCustom, exeName);
             }
             else if (TryCatalogMatch(exeName, title, className, width, height, out var rule))
             {
-                detection = Create(rule.DisplayName, exeName, title, className, handle, (int)processId, GameMatchSource.Catalog);
+                detection = Create(rule.DisplayName, exeName, title, className, handle, (int)processId, GameMatchSource.Catalog, rule.Id);
             }
             else if (_steamGames.FindByExecutablePath(executablePath) is { } steamGame)
             {
-                detection = Create(steamGame.DisplayName, exeName, title, className, handle, (int)processId, GameMatchSource.Steam);
+                detection = Create(steamGame.DisplayName, exeName, title, className, handle, (int)processId, GameMatchSource.Steam, $"steam-{steamGame.AppId}");
             }
             else detection = GameDetection.None;
+
+            if (detection.IsDetected && IsIgnored(detection.DetectionKey)) detection = GameDetection.None;
 
             _windowCache[handle] = new CachedWindow(signature, detection);
             return detection;
@@ -216,10 +188,10 @@ public sealed class ForegroundGameDetector
         return false;
     }
 
-    private static GameDetection Create(string displayName, string executable, string title, string className, nint handle, int processId, GameMatchSource source) =>
-        new(displayName, executable, title, className, handle, processId, true, false, source);
+    private static GameDetection Create(string displayName, string executable, string title, string className, nint handle, int processId, GameMatchSource source, string detectionKey) =>
+        new(displayName, executable, title, className, handle, processId, true, false, source, detectionKey);
 
-    private bool IsIgnored(string executable) => IgnoredExecutables.Contains(executable) || _userIgnoredExecutables.Contains(executable) || _remoteIgnoredExecutables.Contains(executable);
+    private bool IsIgnored(string executable) => _userIgnoredExecutables.Contains(executable);
     private static bool IsStillUsable(GameDetection detection) => detection.WindowHandle != 0 && IsWindow(detection.WindowHandle) && IsWindowVisible(detection.WindowHandle) && !IsIconic(detection.WindowHandle);
     private static long WindowArea(nint handle) => GetWindowRect(handle, out var rect) ? (long)Math.Max(0, rect.Right - rect.Left) * Math.Max(0, rect.Bottom - rect.Top) : 0;
 

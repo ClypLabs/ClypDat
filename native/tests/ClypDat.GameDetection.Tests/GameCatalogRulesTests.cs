@@ -36,4 +36,19 @@ public sealed class GameCatalogRulesTests
     {
         Assert.Throws<InvalidDataException>(() => GameCatalogRules.Parse("{\"schemaVersion\":99,\"games\":[]}"));
     }
+
+    [Fact]
+    public void CatalogEntryGroupsMultipleExecutablesUnderOneGame()
+    {
+        var games = GameCatalogRules.Parse("""
+            { "schemaVersion": 1, "games": [{ "id": "primary.exe", "displayName": "Fortnite", "matchers": [
+                { "executable": "launcher.exe" }, { "executable": "primary.exe" }
+            ] }] }
+            """);
+
+        var game = Assert.Single(games);
+        Assert.All(game.Matchers, matcher => Assert.True(
+            GameCatalogRules.Matches(matcher, matcher.Executable, "Title", "Class", 1920, 1080)));
+        Assert.Equal("primary.exe", game.Id);
+    }
 }

@@ -114,10 +114,7 @@ public sealed class AppSettings
     public bool EnableClipOverlay { get; set; } = true;
     public bool EnableClipOverlaySound { get; set; } = true;
     public List<GameCaptureOverride> GameCaptureOverrides { get; set; } = new();
-    // Executables the user explicitly told game detection to skip (via the
-    // detected-game header flyout or Settings > Game Detection) - on top of
-    // the built-in ignored list, which covers common non-game apps but can
-    // never cover everything.
+    // Executables user explicitly told game detection to skip.
     public List<string> IgnoredGameExecutables { get; set; } = new();
     // Auto-clipping is data-driven so new game providers do not need their own
     // one-off settings model. Cs2AutoClip remains below solely to migrate older
@@ -169,8 +166,7 @@ public sealed class ClipEditSettings
 public sealed class GameCaptureOverride
 {
     public string ExecutableName { get; set; } = string.Empty;
-    // Empty for a built-in catalog game (its name comes from the catalog);
-    // set only for a user-added game the built-in catalog doesn't know about.
+    // Empty when row only stores capture-backend choice.
     public string DisplayName { get; set; } = string.Empty;
     public string CaptureBackend { get; set; } = "Auto";
     // "Catalog" rows only remember a capture-backend choice for a game found
