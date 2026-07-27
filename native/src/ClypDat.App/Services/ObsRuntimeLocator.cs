@@ -5,6 +5,24 @@ public sealed record ObsRuntimeInfo(string RootFolder, string BinFolder, string 
 public static class ObsRuntimeLocator
 {
     private const string BridgeFileName = "ClypDat.ObsBridge.dll";
+    private static readonly string[] RequiredRuntimeFiles =
+    {
+        Path.Combine("bin", "64bit", "obs.dll"),
+        Path.Combine("bin", "64bit", "libobs-d3d11.dll"),
+        Path.Combine("bin", "64bit", "avfilter-10.dll"),
+        Path.Combine("bin", "64bit", "obs-ffmpeg-mux.exe"),
+        Path.Combine("bin", "64bit", "obs-nvenc-test.exe"),
+        Path.Combine("bin", "64bit", "obs-qsv-test.exe"),
+        Path.Combine("bin", "64bit", "obs-amf-test.exe"),
+        Path.Combine("obs-plugins", "64bit", "win-capture.dll"),
+        Path.Combine("obs-plugins", "64bit", "win-wasapi.dll"),
+        Path.Combine("obs-plugins", "64bit", "obs-ffmpeg.dll"),
+        Path.Combine("obs-plugins", "64bit", "obs-nvenc.dll"),
+        Path.Combine("data", "obs-plugins", "win-capture", "graphics-hook64.dll"),
+        Path.Combine("data", "obs-plugins", "win-capture", "inject-helper64.exe")
+    };
+
+    internal static IReadOnlyList<string> RequiredFiles => RequiredRuntimeFiles;
 
     public static ObsRuntimeInfo Locate()
     {
@@ -25,6 +43,14 @@ public static class ObsRuntimeLocator
         if (!File.Exists(runtime.BridgePath))
         {
             reason = $"OBS bridge missing: {runtime.BridgePath}";
+            return false;
+        }
+
+        foreach (var relativePath in RequiredRuntimeFiles)
+        {
+            var path = Path.Combine(runtime.RootFolder, relativePath);
+            if (File.Exists(path)) continue;
+            reason = $"OBS runtime incomplete: missing {path}";
             return false;
         }
 

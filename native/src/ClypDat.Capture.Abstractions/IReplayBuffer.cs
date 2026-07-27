@@ -4,6 +4,48 @@ namespace ClypDat.Capture.Abstractions;
 // and continue to use the user's configured replay duration.
 public sealed record ReplayClipWindow(DateTime StartUtc, DateTime EndUtc);
 
+public enum ReplayCaptureState
+{
+    Unknown,
+    Starting,
+    Healthy,
+    Degraded,
+    Failed,
+    Stopped
+}
+
+// Keep capture health separate from IReplayBuffer. Old/third-party backends can
+// remain valid while callers opt into richer diagnostics where available.
+public sealed record ReplayCaptureHealth(
+    string Backend,
+    string CaptureMode,
+    ReplayCaptureState State,
+    int TargetFrameRate,
+    double InputFrameRate,
+    double UniqueFrameRate,
+    double OutputFrameRate,
+    long DuplicateFrames,
+    long DroppedFrames,
+    int QueueDepth,
+    string Encoder,
+    string Adapter,
+    string LastFailure,
+    DateTime UpdatedUtc)
+{
+    public long TotalDroppedFrames { get; init; }
+    public int PeakQueueDepth { get; init; }
+    public DateTime? LastDegradedUtc { get; init; }
+
+    public static ReplayCaptureHealth Unknown(string backend = "Unknown") => new(
+        backend, "Unknown", ReplayCaptureState.Unknown, 0, 0, 0, 0, 0, 0, 0, string.Empty, string.Empty, string.Empty, DateTime.UtcNow);
+}
+
+public interface IReplayCaptureDiagnostics
+{
+    ReplayCaptureHealth GetHealthSnapshot();
+    event EventHandler<ReplayCaptureHealth>? HealthChanged;
+}
+
 public interface IReplayBuffer : IDisposable
 {
     bool IsRecording { get; }

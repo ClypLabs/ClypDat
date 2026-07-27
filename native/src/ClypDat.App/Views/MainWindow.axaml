@@ -1352,7 +1352,7 @@
                   <Border Background="#1D2A36" BorderBrush="#2C3B48" BorderThickness="1" CornerRadius="7" Padding="14,10">
                     <TextBlock Text="{Binding ClipFileNamePreview}" Foreground="#D2DEEC" FontSize="13" TextWrapping="Wrap" />
                   </Border>
-                  <Grid ColumnDefinitions="*,Auto">
+                  <Grid ColumnDefinitions="*,Auto,Auto">
                     <TextBlock Text="Apply the current scheme to every video in this library, including imports and Full Sessions stored here." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     <Button Grid.Column="1" Content="Rename" Click="RenameAllClipsButton_OnClick" IsEnabled="{Binding CanRenameAllClips}" VerticalAlignment="Center" />
                   </Grid>
@@ -1841,12 +1841,13 @@
               <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Log folder|Diagnostics}">
                 <StackPanel Spacing="16">
                   <TextBlock Text="DIAGNOSTICS" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" />
-                  <Grid ColumnDefinitions="*,Auto">
+                  <Grid ColumnDefinitions="*,Auto,Auto">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Log folder" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                       <TextBlock Text="Open ClypDat's log files for troubleshooting a crash or capture issue." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
-                    <Button Grid.Column="1" Content="Open Logs" Click="OpenLogsButton_OnClick" VerticalAlignment="Center" />
+                    <Button Grid.Column="1" Content="Export Bundle" Click="ExportCaptureDiagnosticsButton_OnClick" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <Button Grid.Column="2" Content="Open Logs" Click="OpenLogsButton_OnClick" VerticalAlignment="Center" />
                   </Grid>
                 </StackPanel>
               </Border>

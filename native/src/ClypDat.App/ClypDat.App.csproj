@@ -117,10 +117,17 @@
           DestinationFolder="$(PublishDir)obs"
           SkipUnchangedFiles="true"
           Condition="Exists('..\ClypDat.ObsBridge\bin\x64\$(Configuration)\ClypDat.ObsBridge.dll')" />
-    <Copy SourceFiles="..\..\vendor\obs-runtime\bin\64bit\obs-nvenc-test.exe"
+    <ItemGroup>
+      <ObsProcessHelpers Include="..\..\vendor\obs-runtime\bin\64bit\obs-nvenc-test.exe"
+                         Condition="Exists('..\..\vendor\obs-runtime\bin\64bit\obs-nvenc-test.exe')" />
+      <ObsProcessHelpers Include="..\..\vendor\obs-runtime\bin\64bit\obs-qsv-test.exe"
+                         Condition="Exists('..\..\vendor\obs-runtime\bin\64bit\obs-qsv-test.exe')" />
+      <ObsProcessHelpers Include="..\..\vendor\obs-runtime\bin\64bit\obs-amf-test.exe"
+                         Condition="Exists('..\..\vendor\obs-runtime\bin\64bit\obs-amf-test.exe')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ObsProcessHelpers)"
           DestinationFolder="$(PublishDir)"
-          SkipUnchangedFiles="true"
-          Condition="Exists('..\..\vendor\obs-runtime\bin\64bit\obs-nvenc-test.exe')" />
+          SkipUnchangedFiles="true" />
   </Target>
 
   <Target Name="CopyFfmpegToPublish" AfterTargets="Publish" Condition="Exists('..\..\vendor\ffmpeg')">
