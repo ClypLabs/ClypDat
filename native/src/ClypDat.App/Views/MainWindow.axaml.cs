@@ -132,6 +132,8 @@ public sealed partial class MainWindow : Window
         {
             // Card layout comes from LibraryScrollViewer's own SizeChanged
             // (wired above) - at Opened its width may still be 0.
+            ClearLibraryResizeAnchor();
+            LibraryScrollViewer.Offset = default;
             InitializeReplayServices();
             UpdateDetectedGame();
             _gameDetectionTimer.Start();
@@ -165,6 +167,21 @@ public sealed partial class MainWindow : Window
                         if (_videoClickCatcherWindow is { IsVisible: true } clickCatcher) RepositionVideoClickCatcher(clickCatcher);
                     }
                     if (e.PropertyName is nameof(MainWindowViewModel.IsEditorVisible) or nameof(MainWindowViewModel.IsEditorVideoAreaVisible)) UpdateVideoClickCatcher();
+                    if (e.PropertyName == nameof(MainWindowViewModel.IsRestoringLibraryCache) && !ViewModel.IsRestoringLibraryCache)
+                    {
+                        // Adding cached cards in low-priority batches grows the
+                        // WrapPanel several times during first layout. Avalonia
+                        // can preserve a transient child offset through those
+                        // extent changes, leaving a fresh library slightly
+                        // below its real top. A cache restore is initial/root
+                        // navigation, so its final position is always top.
+                        Dispatcher.UIThread.Post(() =>
+                        {
+                            if (ViewModel?.IsRestoringLibraryCache == true) return;
+                            ClearLibraryResizeAnchor();
+                            LibraryScrollViewer.Offset = default;
+                        }, DispatcherPriority.Loaded);
+                    }
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible)
                         or nameof(MainWindowViewModel.IsEditorVisible)
                         or nameof(MainWindowViewModel.SelectedVideoPath)
