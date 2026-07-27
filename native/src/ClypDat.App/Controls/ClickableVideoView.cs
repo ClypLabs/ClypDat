@@ -127,8 +127,12 @@ internal sealed class ClickableVideoView : VideoView
         var outputThreads = new HashSet<uint>();
         EnumChildWindows(_hostHandle, (window, _) =>
         {
+            // LibVLC suffixes its own HWND handle onto the class name (e.g.
+            // "VLC video main 000002131A804D80"), so this has to be a prefix
+            // match, not exact equality.
             var className = GetWindowClassName(window);
-            if (className is "VLC video main" or "VLC video output")
+            if (className.StartsWith("VLC video main", StringComparison.Ordinal) ||
+                className.StartsWith("VLC video output", StringComparison.Ordinal))
             {
                 uint processId;
                 var threadId = GetWindowThreadProcessId(window, out processId);
