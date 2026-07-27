@@ -106,7 +106,6 @@ public sealed partial class MainWindow : Window
     private bool _libraryResizeAnchorRestoreQueued;
     private DispatcherTimer? _libraryResizeAnchorSettleTimer;
     private int _libraryResizeAnchorGeneration;
-    private double? _libraryResizeAnchorViewportFraction;
     private double? _libraryResizeExpectedOffsetY;
     public MainWindow()
     {
@@ -1064,9 +1063,11 @@ public sealed partial class MainWindow : Window
         UpdateTimelineChrome();
     }
 
-    // Width changes reflow the WrapPanel, so an offset or document fraction
-    // can land on a different date. Keep one visible clip at its exact
-    // relative position in the viewport.
+    // TODO: Replace this with a proper layout-level anchor once the library
+    // moves away from its non-virtualized WrapPanel. This deliberately hacky
+    // fallback latches the first fully visible card before reflow, then makes
+    // sure it is fully visible again after reflow instead of preserving an
+    // unstable exact viewport fraction.
     private void CaptureLibraryResizeAnchor()
     {
         if (ViewModel?.IsLibraryVisible != true) return;
@@ -1078,24 +1079,22 @@ public sealed partial class MainWindow : Window
             ?? LibraryScrollViewer.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault();
         if (itemsControl is null) return;
 
-        var realizedContainers = itemsControl.GetRealizedContainers() ?? Enumerable.Empty<Control>();
-        if (_libraryResizeAnchorPath is not null && _libraryResizeAnchorViewportFraction is not null)
-        {
-            var anchorStillVisible = realizedContainers.Any(container => container.DataContext is ClipCardViewModel clip
-                && clip.IsVisibleInLibrary
-                && string.Equals(clip.Path, _libraryResizeAnchorPath, StringComparison.OrdinalIgnoreCase));
-            if (anchorStillVisible) return;
-            ClearLibraryResizeAnchor();
-        }
+        // First SizeChanged latches the pre-reflow card. Do not replace it
+        // during the same resize drag: subsequent events can already see the
+        // newly wrapped layout, which is exactly what this workaround avoids.
+        if (_libraryResizeAnchorPath is not null) return;
 
         var viewportTop = LibraryScrollViewer.Offset.Y;
         var viewportBottom = viewportTop + viewportHeight;
-        var viewportCentre = viewportTop + viewportHeight / 2;
-        ClipCardViewModel? closestClip = null;
-        double? closestViewportFraction = null;
-        var closestDistance = double.MaxValue;
+        const double fullyVisibleTolerance = 1;
+        ClipCardViewModel? firstFullyVisible = null;
+        ClipCardViewModel? firstIntersecting = null;
+        var firstFullyVisibleTop = double.MaxValue;
+        var firstFullyVisibleLeft = double.MaxValue;
+        var firstIntersectingTop = double.MaxValue;
+        var firstIntersectingLeft = double.MaxValue;
 
-        foreach (var container in realizedContainers)
+        foreach (var container in itemsControl.GetRealizedContainers() ?? Enumerable.Empty<Control>())
         {
             if (container.DataContext is not ClipCardViewModel clip || !clip.IsVisibleInLibrary || !container.IsVisible || container.Bounds.Height <= 0) continue;
 
@@ -1105,26 +1104,31 @@ public sealed partial class MainWindow : Window
             var itemTop = point.Value.Y;
             var itemBottom = itemTop + container.Bounds.Height;
             if (itemBottom <= viewportTop || itemTop >= viewportBottom) continue;
+            var itemLeft = point.Value.X;
 
-            var distance = Math.Abs(itemTop + container.Bounds.Height / 2 - viewportCentre);
-            if (distance >= closestDistance) continue;
+            var isFirstInRow = itemTop < firstIntersectingTop - fullyVisibleTolerance ||
+                               (Math.Abs(itemTop - firstIntersectingTop) <= fullyVisibleTolerance && itemLeft < firstIntersectingLeft);
+            if (isFirstInRow)
+            {
+                firstIntersecting = clip;
+                firstIntersectingTop = itemTop;
+                firstIntersectingLeft = itemLeft;
+            }
 
-            closestClip = clip;
-            closestDistance = distance;
-            closestViewportFraction = Math.Clamp(
-                (itemTop + container.Bounds.Height / 2 - viewportTop) / viewportHeight,
-                0,
-                1);
+            var fullyVisible = itemTop >= viewportTop - fullyVisibleTolerance &&
+                               itemBottom <= viewportBottom + fullyVisibleTolerance;
+            var isFirstFullyVisible = fullyVisible &&
+                                      (itemTop < firstFullyVisibleTop - fullyVisibleTolerance ||
+                                       (Math.Abs(itemTop - firstFullyVisibleTop) <= fullyVisibleTolerance && itemLeft < firstFullyVisibleLeft));
+            if (isFirstFullyVisible)
+            {
+                firstFullyVisible = clip;
+                firstFullyVisibleTop = itemTop;
+                firstFullyVisibleLeft = itemLeft;
+            }
         }
 
-        if (closestClip is null || closestViewportFraction is null)
-        {
-            ClearLibraryResizeAnchor();
-            return;
-        }
-
-        _libraryResizeAnchorPath = closestClip.Path;
-        _libraryResizeAnchorViewportFraction = closestViewportFraction;
+        _libraryResizeAnchorPath = (firstFullyVisible ?? firstIntersecting)?.Path;
     }
 
     private void LibraryScrollViewer_OnScrollChanged(object? sender, ScrollChangedEventArgs e)
@@ -1186,8 +1190,7 @@ public sealed partial class MainWindow : Window
     private bool RestoreLibraryResizeAnchor()
     {
         var anchorPath = _libraryResizeAnchorPath;
-        var viewportFraction = _libraryResizeAnchorViewportFraction;
-        if (string.IsNullOrWhiteSpace(anchorPath) || viewportFraction is null) return false;
+        if (string.IsNullOrWhiteSpace(anchorPath)) return false;
 
         var itemsControl = LibraryScrollViewer.Content as ItemsControl
             ?? LibraryScrollViewer.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault();
@@ -1202,8 +1205,32 @@ public sealed partial class MainWindow : Window
         var point = anchorContainer.TranslatePoint(default, itemsControl);
         if (point is null || anchorContainer.Bounds.Height <= 0) return false;
 
-        var targetOffset = point.Value.Y + anchorContainer.Bounds.Height / 2
-            - viewportFraction.Value * LibraryScrollViewer.Viewport.Height;
+        var viewportTop = LibraryScrollViewer.Offset.Y;
+        var viewportHeight = LibraryScrollViewer.Viewport.Height;
+        var viewportBottom = viewportTop + viewportHeight;
+        var itemTop = point.Value.Y;
+        var itemBottom = itemTop + anchorContainer.Bounds.Height;
+        const double fullyVisibleTolerance = 1;
+
+        double targetOffset;
+        if (anchorContainer.Bounds.Height >= viewportHeight)
+        {
+            // Oversized cards cannot fully fit. Keep their beginning visible.
+            targetOffset = itemTop;
+        }
+        else if (itemTop < viewportTop - fullyVisibleTolerance)
+        {
+            targetOffset = itemTop;
+        }
+        else if (itemBottom > viewportBottom + fullyVisibleTolerance)
+        {
+            targetOffset = itemBottom - viewportHeight;
+        }
+        else
+        {
+            return true;
+        }
+
         var maxOffset = Math.Max(0, LibraryScrollViewer.Extent.Height - LibraryScrollViewer.Viewport.Height);
         LibraryScrollViewer.Offset = new Vector(
             LibraryScrollViewer.Offset.X,
@@ -1218,7 +1245,6 @@ public sealed partial class MainWindow : Window
     private void ClearLibraryResizeAnchor()
     {
         _libraryResizeAnchorPath = null;
-        _libraryResizeAnchorViewportFraction = null;
         _libraryResizeExpectedOffsetY = null;
     }
 
