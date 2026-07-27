@@ -110,8 +110,9 @@ try {
         else {
             & git show-ref --verify --quiet "refs/heads/$Target"
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "Switching to branch $Target."
-                Invoke-Git switch $Target | Out-Null
+                $commit = (Invoke-Git rev-parse --verify "refs/heads/$Target^{commit}" | Select-Object -First 1).Trim()
+                Write-Host "Switching to branch $Target at commit $commit."
+                Invoke-Git switch --detach $commit | Out-Null
             }
             else {
                 $commit = & git rev-parse --verify --quiet "$Target^{commit}" 2>$null
@@ -131,7 +132,7 @@ try {
     $msbuild = Find-MSBuild
     if ($msbuild) {
         Write-Host "Building OBS bridge with $msbuild"
-        $solutionDirectory = "$nativeRoot\"
+        $solutionDirectory = "$($nativeRoot.Replace('\', '/'))/"
         & $msbuild $bridgeProject "/p:SolutionDir=$solutionDirectory" /p:Configuration=Release /p:Platform=x64 /nologo /v:minimal
         if ($LASTEXITCODE -ne 0) {
             throw "MSBuild failed with exit code $LASTEXITCODE."
