@@ -91,6 +91,7 @@ public sealed partial class MainWindow : Window
     // feel like a lag once the drag ends.
     private static readonly TimeSpan HoverControlsResizeSettle = TimeSpan.FromMilliseconds(220);
     private static readonly TimeSpan LibraryResizeAnchorSettle = TimeSpan.FromMilliseconds(220);
+    private const double LibraryScrollOffsetTolerance = 0.01;
     private DateTime _hoverControlsSuppressedUntilUtc = DateTime.MinValue;
     // Slides the bar in from under the video's bottom edge on first show. The
     // window itself stays put - only its content moves - because animating an
@@ -105,7 +106,8 @@ public sealed partial class MainWindow : Window
     private bool _libraryResizeAnchorRestoreQueued;
     private DispatcherTimer? _libraryResizeAnchorSettleTimer;
     private int _libraryResizeAnchorGeneration;
-    private bool _restoringLibraryResizeAnchor;
+    private double? _libraryResizeAnchorViewportFraction;
+    private double? _libraryResizeExpectedOffsetY;
     public MainWindow()
     {
         InitializeComponent();
@@ -1046,7 +1048,8 @@ public sealed partial class MainWindow : Window
     }
 
     // Width changes reflow the WrapPanel, so an offset or document fraction
-    // can land on a different date. Keep the centre-nearest visible clip.
+    // can land on a different date. Keep one visible clip at its exact
+    // relative position in the viewport.
     private void CaptureLibraryResizeAnchor()
     {
         if (ViewModel?.IsLibraryVisible != true) return;
@@ -1059,19 +1062,20 @@ public sealed partial class MainWindow : Window
         if (itemsControl is null) return;
 
         var realizedContainers = itemsControl.GetRealizedContainers() ?? Enumerable.Empty<Control>();
-        if (_libraryResizeAnchorPath is not null)
+        if (_libraryResizeAnchorPath is not null && _libraryResizeAnchorViewportFraction is not null)
         {
             var anchorStillVisible = realizedContainers.Any(container => container.DataContext is ClipCardViewModel clip
                 && clip.IsVisibleInLibrary
                 && string.Equals(clip.Path, _libraryResizeAnchorPath, StringComparison.OrdinalIgnoreCase));
             if (anchorStillVisible) return;
-            _libraryResizeAnchorPath = null;
+            ClearLibraryResizeAnchor();
         }
 
         var viewportTop = LibraryScrollViewer.Offset.Y;
         var viewportBottom = viewportTop + viewportHeight;
         var viewportCentre = viewportTop + viewportHeight / 2;
         ClipCardViewModel? closestClip = null;
+        double? closestViewportFraction = null;
         var closestDistance = double.MaxValue;
 
         foreach (var container in realizedContainers)
@@ -1090,20 +1094,38 @@ public sealed partial class MainWindow : Window
 
             closestClip = clip;
             closestDistance = distance;
+            closestViewportFraction = Math.Clamp(
+                (itemTop + container.Bounds.Height / 2 - viewportTop) / viewportHeight,
+                0,
+                1);
         }
 
-        _libraryResizeAnchorPath = closestClip?.Path;
+        if (closestClip is null || closestViewportFraction is null)
+        {
+            ClearLibraryResizeAnchor();
+            return;
+        }
+
+        _libraryResizeAnchorPath = closestClip.Path;
+        _libraryResizeAnchorViewportFraction = closestViewportFraction;
     }
 
     private void LibraryScrollViewer_OnScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
         UpdateDateScrubberThumb();
-        if (_restoringLibraryResizeAnchor || e.OffsetDelta.Y == 0) return;
+        if (e.OffsetDelta.Y == 0) return;
+
+        if (_libraryResizeExpectedOffsetY is double expectedOffsetY)
+        {
+            _libraryResizeExpectedOffsetY = null;
+            if (Math.Abs(LibraryScrollViewer.Offset.Y - expectedOffsetY) <= LibraryScrollOffsetTolerance) return;
+        }
+
         if (e.ExtentDelta.X != 0 || e.ExtentDelta.Y != 0 || e.ViewportDelta.X != 0 || e.ViewportDelta.Y != 0) return;
 
         // User wheel, keyboard, and date-scrubber navigation become the next
         // resize baseline. Extent/layout changes are revalidated on resize.
-        _libraryResizeAnchorPath = null;
+        ClearLibraryResizeAnchor();
     }
 
     private void QueueLibraryResizeAnchorRestore()
@@ -1140,14 +1162,15 @@ public sealed partial class MainWindow : Window
         Dispatcher.UIThread.Post(() =>
         {
             if (generation != _libraryResizeAnchorGeneration) return;
-            if (!RestoreLibraryResizeAnchor()) _libraryResizeAnchorPath = null;
+            if (!RestoreLibraryResizeAnchor()) ClearLibraryResizeAnchor();
         }, DispatcherPriority.Loaded);
     }
 
     private bool RestoreLibraryResizeAnchor()
     {
         var anchorPath = _libraryResizeAnchorPath;
-        if (string.IsNullOrWhiteSpace(anchorPath)) return false;
+        var viewportFraction = _libraryResizeAnchorViewportFraction;
+        if (string.IsNullOrWhiteSpace(anchorPath) || viewportFraction is null) return false;
 
         var itemsControl = LibraryScrollViewer.Content as ItemsControl
             ?? LibraryScrollViewer.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault();
@@ -1162,21 +1185,24 @@ public sealed partial class MainWindow : Window
         var point = anchorContainer.TranslatePoint(default, itemsControl);
         if (point is null || anchorContainer.Bounds.Height <= 0) return false;
 
-        var targetOffset = point.Value.Y + anchorContainer.Bounds.Height / 2 - LibraryScrollViewer.Viewport.Height / 2;
+        var targetOffset = point.Value.Y + anchorContainer.Bounds.Height / 2
+            - viewportFraction.Value * LibraryScrollViewer.Viewport.Height;
         var maxOffset = Math.Max(0, LibraryScrollViewer.Extent.Height - LibraryScrollViewer.Viewport.Height);
-        _restoringLibraryResizeAnchor = true;
-        try
-        {
-            LibraryScrollViewer.Offset = new Vector(
-                LibraryScrollViewer.Offset.X,
-                Math.Clamp(targetOffset, 0, maxOffset));
-        }
-        finally
-        {
-            _restoringLibraryResizeAnchor = false;
-        }
+        LibraryScrollViewer.Offset = new Vector(
+            LibraryScrollViewer.Offset.X,
+            Math.Clamp(targetOffset, 0, maxOffset));
+        // ScrollChanged comes on a later layout pass. Remember actual coerced
+        // offset so that delayed event does not erase this resize anchor.
+        _libraryResizeExpectedOffsetY = LibraryScrollViewer.Offset.Y;
 
         return true;
+    }
+
+    private void ClearLibraryResizeAnchor()
+    {
+        _libraryResizeAnchorPath = null;
+        _libraryResizeAnchorViewportFraction = null;
+        _libraryResizeExpectedOffsetY = null;
     }
 
     // ---- Library date scrubber ----------------------------------------
