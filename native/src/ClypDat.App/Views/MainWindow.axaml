@@ -1193,7 +1193,7 @@
               <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Launch ClypDat on Windows boot|Start minimized on boot|Startup}">
                 <StackPanel Spacing="18">
                   <TextBlock Text="STARTUP" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" />
-                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Launch ClypDat on Windows boot}">
+                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Launch ClypDat on Windows boot|Startup}">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Launch ClypDat on Windows boot" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                       <TextBlock Text="Starts ClypDat automatically when you sign in to Windows." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
@@ -1201,7 +1201,7 @@
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding LaunchOnWindowsStartup}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
                   <Border Height="1" Background="#1B242D" />
-                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Start minimized on boot}">
+                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Start minimized on boot|Startup}">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Start minimized on boot" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                       <TextBlock Text="Opens straight to the tray instead of showing the main window." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
@@ -1214,35 +1214,35 @@
               <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Show status panel|Show &quot;Playback Paused&quot; indicator|Scale clips with window size|Hoverbar|Combine sidebar filters|Layout'}">
                 <StackPanel Spacing="18">
                   <TextBlock Text="LAYOUT" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" />
-                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show status panel}">
+                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show status panel|Layout}">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Show status panel" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                       <TextBlock Text="The right-hand panel here in Settings showing replay buffer status, hotkey, and active game." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding IsStatusAreaVisible}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
-                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Show &quot;Playback Paused&quot; indicator'}">
+                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Show &quot;Playback Paused&quot; indicator|Layout'}">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Show &quot;Playback Paused&quot; indicator" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                       <TextBlock Text="Shows a badge over the video in Editor during moments the game window wasn't in focus while recording." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding ShowRecordingPausedIndicator}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
-                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Scale clips with window size}">
+                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Scale clips with window size|Layout}">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Scale clips with window size" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                       <TextBlock Text="Library cards target a fixed size and more columns fit on a wider window (e.g. ~6 across at 1440p), instead of always 3 columns that just grow or shrink with the window." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding ScaleClipsWithWindow}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
-                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Hoverbar}">
+                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Hoverbar|Layout}">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Hoverbar" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                       <TextBlock Text="Floats the Editor's playback controls over the bottom of the video, appearing while the pointer is in the Editor. Off keeps them docked under the video, always visible." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding EditorHoverBarEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
-                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Combine sidebar filters}">
+                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Combine sidebar filters|Layout}">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Combine sidebar filters" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                       <TextBlock Text="Hold one game and one section at the same time, e.g. Fortnite plus Auto-Clips. Off, picking either one clears the other. Selecting several games at once is still done from the Game Filters dropdown." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
