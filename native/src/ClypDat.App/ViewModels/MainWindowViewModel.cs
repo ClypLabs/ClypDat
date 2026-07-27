@@ -282,6 +282,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public AppSettings Settings { get; }
     public ObservableCollection<ClipCardViewModel> AllClips { get; }
+    public bool IsRestoringLibraryCache => _isRestoringCachedLibrary;
     public ObservableCollection<TrackLaneViewModel> TimelineTracks { get; }
     public ObservableCollection<AudioDeviceOption> ChatAudioDevices { get; }
     public ObservableCollection<AudioDeviceOption> MicrophoneDevices { get; }
@@ -2350,6 +2351,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         _isRestoringCachedLibrary = true;
+        OnPropertyChanged(nameof(IsRestoringLibraryCache));
         const int initialCardCount = 18;
         foreach (var state in cached.Take(initialCardCount)) AddCachedClip(state);
         ApplyGameFilters();
@@ -2399,6 +2401,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 _cachedLibraryRestoreCts.Dispose();
                 _cachedLibraryRestoreCts = null;
                 _isRestoringCachedLibrary = false;
+                OnPropertyChanged(nameof(IsRestoringLibraryCache));
             }
         }
     }
