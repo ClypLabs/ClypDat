@@ -79,6 +79,10 @@
     <AvaloniaResource Include="..\..\..\assets\league-cover.jpg" Link="Assets\league-cover.jpg" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\..\game-catalog.json" Link="game-catalog.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <!-- git rev-parse failing (no git on PATH, source distributed without
        .git) just leaves SourceRevisionId unset - InformationalVersion falls
        back to the plain "0.1.7" with no "+hash" suffix, so this degrades

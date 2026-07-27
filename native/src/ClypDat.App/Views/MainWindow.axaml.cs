@@ -139,6 +139,7 @@ public sealed partial class MainWindow : Window
             _ = EnsureLibraryFolderAsync();
             _ = RunStartupDialogsAsync();
             _ = RefreshRemoteGameExclusionsAsync();
+            _ = RefreshRemoteGameCatalogAsync();
             if (ViewModel is not null)
             {
                 _gameDetector.ApplyCustomGameNames(ViewModel.Settings.GameCaptureOverrides);
@@ -2066,6 +2067,12 @@ public sealed partial class MainWindow : Window
         // for games the Steam store search resolves wrongly or not at all, so
         // a failure here costs nothing.
         await RemoteGameIconsService.RefreshAsync();
+    }
+
+    private async Task RefreshRemoteGameCatalogAsync()
+    {
+        var updated = await RemoteGameCatalogService.RefreshAsync();
+        if (updated is not null) _gameDetector.ApplyRemoteCatalog(updated);
     }
 
     private async Task EnsureLibraryFolderAsync()

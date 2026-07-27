@@ -732,7 +732,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             ExecutableName = detection.ExeName,
             DisplayName = detection.DisplayName,
-            CaptureBackend = "Auto"
+            CaptureBackend = "Auto",
+            Origin = detection.MatchSource is GameMatchSource.Catalog or GameMatchSource.Steam ? "Catalog" : "UserCustom"
         });
         SaveSettings();
         RebuildGameCaptureRows();
@@ -3619,7 +3620,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             ExecutableName = exe,
             DisplayName = NewCustomGameDisplayName.Trim(),
-            CaptureBackend = "Auto"
+            CaptureBackend = "Auto",
+            Origin = "UserCustom"
         });
         NewCustomGameExecutable = string.Empty;
         NewCustomGameDisplayName = string.Empty;
@@ -3664,15 +3666,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var builtIn = GameCatalog.BuiltIn
             .Where(kv => !Settings.IgnoredGameExecutables.Contains(kv.Key, StringComparer.OrdinalIgnoreCase))
             .Select(kv => (ExecutableName: kv.Key, DisplayName: kv.Value, IsCustom: false));
-        var custom = Settings.GameCaptureOverrides
-            .Where(g => !GameCatalog.BuiltIn.ContainsKey(g.ExecutableName))
-            .Select(g => (ExecutableName: g.ExecutableName, DisplayName: g.DisplayName, IsCustom: true));
+        var supplemental = Settings.GameCaptureOverrides
+            .Where(g => !GameCatalog.BuiltIn.ContainsKey(g.ExecutableName) && !string.IsNullOrWhiteSpace(g.DisplayName))
+            .Select(g => (ExecutableName: g.ExecutableName, DisplayName: g.DisplayName,
+                IsCustom: string.Equals(g.Origin, "UserCustom", StringComparison.OrdinalIgnoreCase)));
 
         // One alphabetical list instead of "sorted built-ins, then whatever
         // order custom/auto-added games happened to land in Settings" - a
         // newly detected game should slot in by name, not always show up at
         // the bottom.
-        foreach (var entry in builtIn.Concat(custom).OrderBy(e => e.DisplayName, StringComparer.OrdinalIgnoreCase))
+        foreach (var entry in builtIn.Concat(supplemental).OrderBy(e => e.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
             var overrideEntry = Settings.GameCaptureOverrides.FirstOrDefault(g => string.Equals(g.ExecutableName, entry.ExecutableName, StringComparison.OrdinalIgnoreCase));
             var backend = ReplayBackends.FirstOrDefault(preset => string.Equals(preset.Value, overrideEntry?.CaptureBackend, StringComparison.OrdinalIgnoreCase))
@@ -3707,7 +3710,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var entry = Settings.GameCaptureOverrides.FirstOrDefault(g => string.Equals(g.ExecutableName, row.ExecutableName, StringComparison.OrdinalIgnoreCase));
         if (entry is null)
         {
-            entry = new GameCaptureOverride { ExecutableName = row.ExecutableName, DisplayName = row.IsCustom ? row.DisplayName : string.Empty };
+            entry = new GameCaptureOverride { ExecutableName = row.ExecutableName, DisplayName = row.IsCustom ? row.DisplayName : string.Empty, Origin = row.IsCustom ? "UserCustom" : "Backend" };
             Settings.GameCaptureOverrides.Add(entry);
         }
 
