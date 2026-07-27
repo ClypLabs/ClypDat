@@ -11,6 +11,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using System.Diagnostics;
 using ClypDat.Capture.Abstractions;
+using ClypDat.App.Controls;
 using ClypDat.App.Converters;
 using ClypDat.App.Services;
 using ClypDat.App.ViewModels;
@@ -164,7 +165,7 @@ public sealed partial class MainWindow : Window
                         // shown, so clicks after zooming/panning could land
                         // outside its (now stale) bounds and silently do
                         // nothing.
-                        if (_videoClickCatcherWindow is { IsVisible: true } clickCatcher) RepositionVideoClickCatcher(clickCatcher);
+                        if (_videoClickCatcher is { IsVisible: true }) UpdateVideoClickCatcher();
                     }
                     if (e.PropertyName is nameof(MainWindowViewModel.IsEditorVisible) or nameof(MainWindowViewModel.IsEditorVideoAreaVisible)) UpdateVideoClickCatcher();
                     if (e.PropertyName == nameof(MainWindowViewModel.IsRestoringLibraryCache) && !ViewModel.IsRestoringLibraryCache)
@@ -245,6 +246,7 @@ public sealed partial class MainWindow : Window
             _playback?.Dispose();
             _recordingPausedOverlay?.Close();
             _editorHoverControlsWindow?.Close();
+            _videoClickCatcher?.Dispose();
             ViewModel?.Dispose();
         };
         AddHandler(PointerPressedEvent, VolumeSlider_OnPointerPressedAny, RoutingStrategies.Tunnel, true);
@@ -4936,75 +4938,47 @@ public sealed partial class MainWindow : Window
 
     private sealed record PausedRangeEntry(double start, double end);
 
-    // Clicking the video picture itself never toggled play/pause - the same
-    // native-hwnd "airspace" problem documented on EnsureRecordingPausedOverlay
-    // right below (VideoView always paints over, and eats pointer input
-    // meant for, any Avalonia sibling) means a plain PointerPressed handler
-    // on EditorVideoHost/EditorVideoView would just never fire. Same fix:
-    // a transparent owned Window sitting over the video's own on-screen
-    // rect. Tracks EditorVideoView directly (not whichever host currently
-    // holds it) so the same window keeps working across the windowed/
-    // fullscreen reparent for free, like RepositionPausedOverlay already
-    // does. Stops short of the bottom ~78px (EditorHoverBar's own height)
-    // so it can never end up racing that window's own z-order for clicks
-    // on ITS buttons when the optional hover bar is turned on - the
-    // trade-off is a click in that strip while the hover bar is off (the
-    // default) does nothing, rather than risk swallowing hover-bar clicks
-    // when it's on.
-    private Window? _videoClickCatcherWindow;
-
-    private Window EnsureVideoClickCatcherWindow()
-    {
-        if (_videoClickCatcherWindow is not null) return _videoClickCatcherWindow;
-
-        // Content is a real, filled, hit-testable Panel rather than leaving
-        // Content null - an empty Window's client area isn't reliably
-        // hit-testable for pointer events even with Background set.
-        var surface = new Panel { Background = Brushes.Transparent };
-        surface.PointerPressed += (_, e) =>
-        {
-            if (!e.GetCurrentPoint(surface).Properties.IsLeftButtonPressed) return;
-            PlayPauseButton_OnClick(this, new RoutedEventArgs());
-        };
-
-        var window = new Window
-        {
-            SystemDecorations = SystemDecorations.None,
-            ShowInTaskbar = false,
-            CanResize = false,
-            ShowActivated = false,
-            Topmost = false,
-            Background = Brushes.Transparent,
-            TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
-            Content = surface,
-        };
-        _videoClickCatcherWindow = window;
-        return window;
-    }
-
+    // LibVLC's native HWND renders above Avalonia siblings. This click surface
+    // uses a native layered HWND with alpha 1/255, not an Avalonia transparent
+    // window: the latter can become click-through or paint grey on some GPUs.
+    private VideoClickCatcher? _videoClickCatcher;
+    private bool _videoClickCatcherFailed;
     private const double VideoClickCatcherBottomReserve = 78;
-
-    private void RepositionVideoClickCatcher(Window window)
-    {
-        var topLeft = EditorVideoView.PointToScreen(new Point(0, 0));
-        var bottomRight = EditorVideoView.PointToScreen(new Point(EditorVideoView.Bounds.Width, EditorVideoView.Bounds.Height));
-        window.Position = topLeft;
-        window.Width = Math.Max(1, (bottomRight.X - topLeft.X) / window.RenderScaling);
-        window.Height = Math.Max(1, (bottomRight.Y - topLeft.Y) / window.RenderScaling - VideoClickCatcherBottomReserve);
-    }
 
     private void UpdateVideoClickCatcher()
     {
         var shouldShow = ViewModel is { IsEditorVisible: true, IsEditorVideoAreaVisible: true };
         if (!shouldShow)
         {
-            _videoClickCatcherWindow?.Hide();
+            _videoClickCatcher?.Hide();
             return;
         }
+        if (_videoClickCatcherFailed || TryGetPlatformHandle()?.Handle == IntPtr.Zero) return;
 
-        var window = EnsureVideoClickCatcherWindow();
-        RepositionVideoClickCatcher(window);
-        if (!window.IsVisible) window.Show(this);
+        try
+        {
+            var topLeft = EditorVideoView.PointToScreen(new Point(0, 0));
+            var bottomRight = EditorVideoView.PointToScreen(new Point(EditorVideoView.Bounds.Width, EditorVideoView.Bounds.Height));
+            var reserve = (int)Math.Ceiling(VideoClickCatcherBottomReserve * RenderScaling);
+            var size = new PixelSize(
+                Math.Max(1, bottomRight.X - topLeft.X),
+                Math.Max(1, bottomRight.Y - topLeft.Y - reserve));
+            _videoClickCatcher ??= CreateVideoClickCatcher();
+            _videoClickCatcher.Show(topLeft, size);
+        }
+        catch (Exception error)
+        {
+            _videoClickCatcher?.Hide();
+            _videoClickCatcherFailed = true;
+            AppLog.Error("Editor video click surface unavailable", error);
+        }
+    }
+
+    private VideoClickCatcher CreateVideoClickCatcher()
+    {
+        var catcher = new VideoClickCatcher(this);
+        catcher.Clicked += (_, _) => PlayPauseButton_OnClick(this, new RoutedEventArgs());
+        return catcher;
     }
 
     // A plain in-tree Border never actually rendered over the video because
@@ -5085,13 +5059,13 @@ public sealed partial class MainWindow : Window
         {
             if (_recordingPausedOverlay is { IsVisible: true } overlay) RepositionPausedOverlay(overlay);
             if (_editorHoverControlsWindow is { IsVisible: true } hoverBar) RepositionEditorHoverControls(hoverBar);
-            if (_videoClickCatcherWindow is { IsVisible: true } clickCatcher) RepositionVideoClickCatcher(clickCatcher);
+            if (_videoClickCatcher is { IsVisible: true }) UpdateVideoClickCatcher();
         };
         EditorVideoView.LayoutUpdated += (_, _) =>
         {
             if (_recordingPausedOverlay is { IsVisible: true } overlay) RepositionPausedOverlay(overlay);
             if (_editorHoverControlsWindow is { IsVisible: true } hoverBar) RepositionEditorHoverControls(hoverBar);
-            if (_videoClickCatcherWindow is { IsVisible: true } clickCatcher) RepositionVideoClickCatcher(clickCatcher);
+            if (_videoClickCatcher is { IsVisible: true }) UpdateVideoClickCatcher();
             // Covers window resize AND the fullscreen reparent (both change
             // EditorVideoView's rendered height, which the pan-range math
             // depends on) without needing separate handlers for each.
