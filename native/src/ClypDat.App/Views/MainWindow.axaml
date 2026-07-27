@@ -996,7 +996,14 @@
         <ScrollViewer Grid.Column="1" Classes="settingsScroll">
           <StackPanel Margin="36,28,36,40" Spacing="22">
 
-            <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Replay Buffer}">
+            <StackPanel Spacing="18">
+              <StackPanel.IsVisible>
+                <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Replay Buffer">
+                  <Binding Path="SettingsSearchText" />
+                  <Binding Path="SelectedSettingsSection" />
+                </MultiBinding>
+              </StackPanel.IsVisible>
+              <Border Height="1" Background="#1B242D" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
               <StackPanel Spacing="4">
                 <TextBlock Text="REPLAY BUFFER" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
                 <TextBlock Text="Control how ClypDat records in the background and which capture backend it uses." Foreground="#93A6B8" TextWrapping="Wrap" />
@@ -1048,6 +1055,7 @@
                     </ListBox>
                     <TextBlock Text="Above 1080p60, Windows Capture clips take noticeably longer to process (the clip preview can sit black for a while before it loads)."
                                Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap"
+                               opconv:SettingsHighlight.Query="{Binding SettingsSearchText}"
                                IsVisible="{Binding ReplayQualityAboveDefault}" />
                     <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding ReplayQualityRestartRequired}">
                       <TextBlock Text="Restart the replay buffer for the resolution/frame rate change to take effect." Foreground="#E5A00D" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" TextWrapping="Wrap" />
@@ -1083,7 +1091,7 @@
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Full session recording}">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Full session recording" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                      <TextBlock Text="Also writes the entire session (video and audio) to ClypDat's VODs folder. ClypDat backend only for now." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                      <TextBlock Text="Also writes the entire session (video and audio) to ClypDat's VODs folder. ClypDat backend only for now." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding FullSessionRecordingEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
@@ -1096,7 +1104,7 @@
                     <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Session codec}">
                       <StackPanel Spacing="2" VerticalAlignment="Center">
                         <TextBlock Text="Session codec" Foreground="#B8C7D8" FontWeight="Bold" FontSize="13" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                        <TextBlock Text="H.264 saves instantly. H.265/AV1 re-encode on your GPU when the session ends - smaller files, longer finalize." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                        <TextBlock Text="H.264 saves instantly. H.265/AV1 re-encode on your GPU when the session ends - smaller files, longer finalize." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                       </StackPanel>
                       <ComboBox Grid.Column="1" Classes="settingsInput" Width="170" ItemsSource="{Binding FullSessionCodecs}" SelectedItem="{Binding SelectedFullSessionCodec}" VerticalAlignment="Center" />
                     </Grid>
@@ -1104,7 +1112,7 @@
                     <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Finalize in background}">
                       <StackPanel Spacing="2" VerticalAlignment="Center">
                         <TextBlock Text="Finalize in background" Foreground="#B8C7D8" FontWeight="Bold" FontSize="13" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                        <TextBlock Text="On: the session video appears the moment recording stops, and audio tracks attach quietly afterward (file is briefly video-only). Off: everything is processed before the file appears." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                        <TextBlock Text="On: the session video appears the moment recording stops, and audio tracks attach quietly afterward (file is briefly video-only). Off: everything is processed before the file appears." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                       </StackPanel>
                       <ToggleSwitch Grid.Column="1" IsChecked="{Binding FullSessionBackgroundFinalize}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                     </Grid>
@@ -1112,7 +1120,7 @@
                     <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Storage limit}">
                       <StackPanel Spacing="2" VerticalAlignment="Center">
                         <TextBlock Text="Storage limit" Foreground="#B8C7D8" FontWeight="Bold" FontSize="13" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                        <TextBlock Text="When session recordings exceed this, the oldest ones are deleted automatically after each save." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                        <TextBlock Text="When session recordings exceed this, the oldest ones are deleted automatically after each save." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                       </StackPanel>
                       <ComboBox Grid.Column="1" Classes="settingsInput" Width="170" ItemsSource="{Binding FullSessionQuotaOptions}" SelectedItem="{Binding SelectedFullSessionQuota}" VerticalAlignment="Center">
                         <ComboBox.ItemTemplate>
@@ -1136,7 +1144,14 @@
               </Border>
             </StackPanel>
 
-            <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Overlays and Notifications}">
+            <StackPanel Spacing="18">
+              <StackPanel.IsVisible>
+                <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Overlays and Notifications">
+                  <Binding Path="SettingsSearchText" />
+                  <Binding Path="SelectedSettingsSection" />
+                </MultiBinding>
+              </StackPanel.IsVisible>
+              <Border Height="1" Background="#1B242D" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
               <StackPanel Spacing="4">
                 <TextBlock Text="OVERLAYS AND NOTIFICATIONS" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
                 <TextBlock Text="Turn the on-screen confirmation and sound on or off, and choose where and how loud it is when a clip saves." Foreground="#93A6B8" TextWrapping="Wrap" />
@@ -1188,7 +1203,14 @@
               </Border>
             </StackPanel>
 
-            <StackPanel Spacing="22" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=General}">
+            <StackPanel Spacing="22">
+              <StackPanel.IsVisible>
+                <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="General">
+                  <Binding Path="SettingsSearchText" />
+                  <Binding Path="SelectedSettingsSection" />
+                </MultiBinding>
+              </StackPanel.IsVisible>
+              <Border Height="1" Background="#1B242D" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
               <StackPanel Spacing="4">
                 <TextBlock Text="GENERAL" Foreground="#5C6D7E" FontSize="13" FontWeight="Bold" />
                 <TextBlock Text="Startup behavior, layout, and clip filenames." Foreground="#93A6B8" FontSize="14" TextWrapping="Wrap" />
@@ -1200,7 +1222,7 @@
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Launch ClypDat on Windows boot|Startup}">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Launch ClypDat on Windows boot" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                      <TextBlock Text="Starts ClypDat automatically when you sign in to Windows." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                      <TextBlock Text="Starts ClypDat automatically when you sign in to Windows." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding LaunchOnWindowsStartup}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
@@ -1208,14 +1230,14 @@
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Start minimized on boot|Startup}">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Start minimized on boot" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                      <TextBlock Text="Opens straight to the tray instead of showing the main window." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                      <TextBlock Text="Opens straight to the tray instead of showing the main window." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding StartMinimizedToTray}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
                   <Border Height="1" Background="#1B242D" />
                   <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Process priority}">
                     <TextBlock Text="Process priority" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                    <TextBlock Text="Gives ClypDat's capture work more CPU scheduling priority when a demanding game is running. Changes apply immediately." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                    <TextBlock Text="Gives ClypDat's capture work more CPU scheduling priority when a demanding game is running. Changes apply immediately." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     <ComboBox Classes="settingsInput" ItemsSource="{Binding ProcessPriorityOptions}" SelectedValue="{Binding SelectedProcessPriority}" SelectedValueBinding="{Binding Value}" HorizontalAlignment="Stretch">
                       <ComboBox.ItemTemplate>
                         <DataTemplate>
@@ -1233,35 +1255,35 @@
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show status panel|Layout}">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Show status panel" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                      <TextBlock Text="The right-hand panel here in Settings showing replay buffer status, hotkey, and active game." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                      <TextBlock Text="The right-hand panel here in Settings showing replay buffer status, hotkey, and active game." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding IsStatusAreaVisible}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Show &quot;Playback Paused&quot; indicator|Layout'}">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Show &quot;Playback Paused&quot; indicator" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                      <TextBlock Text="Shows a badge over the video in Editor during moments the game window wasn't in focus while recording." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                      <TextBlock Text="Shows a badge over the video in Editor during moments the game window wasn't in focus while recording." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding ShowRecordingPausedIndicator}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Scale clips with window size|Layout}">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Scale clips with window size" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                      <TextBlock Text="Library cards target a fixed size and more columns fit on a wider window (e.g. ~6 across at 1440p), instead of always 3 columns that just grow or shrink with the window." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                      <TextBlock Text="Library cards target a fixed size and more columns fit on a wider window (e.g. ~6 across at 1440p), instead of always 3 columns that just grow or shrink with the window." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding ScaleClipsWithWindow}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Hoverbar|Layout}">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Hoverbar" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                      <TextBlock Text="Floats the Editor's playback controls over the bottom of the video, appearing while the pointer is in the Editor. Off keeps them docked under the video, always visible." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                      <TextBlock Text="Floats the Editor's playback controls over the bottom of the video, appearing while the pointer is in the Editor. Off keeps them docked under the video, always visible." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding EditorHoverBarEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Combine sidebar filters|Layout}">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Combine sidebar filters" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                      <TextBlock Text="Hold one game and one section at the same time, e.g. Fortnite plus Auto-Clips. Off, picking either one clears the other. Selecting several games at once is still done from the Game Filters dropdown." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                      <TextBlock Text="Hold one game and one section at the same time, e.g. Fortnite plus Auto-Clips. Off, picking either one clears the other. Selecting several games at once is still done from the Game Filters dropdown." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding CombineSidebarFilters}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
@@ -1271,7 +1293,7 @@
               <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Clip Filenames}">
                 <StackPanel Spacing="12">
                   <TextBlock Text="CLIP FILENAMES" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                  <TextBlock Text="Choose how newly saved clips are named. Windows replaces unsupported filename characters such as colons with hyphens." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                  <TextBlock Text="Choose how newly saved clips are named. Windows replaces unsupported filename characters such as colons with hyphens." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                   <ComboBox Classes="settingsInput" ItemsSource="{Binding ClipFileNameSchemes}" SelectedValue="{Binding SelectedClipFileNameScheme}" SelectedValueBinding="{Binding Value}">
                     <ComboBox.ItemTemplate>
                       <DataTemplate>
@@ -1290,7 +1312,7 @@
                     <TextBlock Text="{Binding ClipFileNamePreview}" Foreground="#D2DEEC" FontSize="13" TextWrapping="Wrap" />
                   </Border>
                   <Grid ColumnDefinitions="*,Auto">
-                    <TextBlock Text="Apply the current scheme to every video in this library, including imports and Full Sessions stored here." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
+                    <TextBlock Text="Apply the current scheme to every video in this library, including imports and Full Sessions stored here." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     <Button Grid.Column="1" Content="Rename" Click="RenameAllClipsButton_OnClick" IsEnabled="{Binding CanRenameAllClips}" VerticalAlignment="Center" />
                   </Grid>
                   <TextBlock Text="{Binding RenameAllClipsStatus}" Foreground="#93A6B8" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding HasRenameAllClipsStatus}" />
@@ -1298,7 +1320,14 @@
               </Border>
             </StackPanel>
 
-            <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Detection}">
+            <StackPanel Spacing="18">
+              <StackPanel.IsVisible>
+                <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Game Detection">
+                  <Binding Path="SettingsSearchText" />
+                  <Binding Path="SelectedSettingsSection" />
+                </MultiBinding>
+              </StackPanel.IsVisible>
+              <Border Height="1" Background="#1B242D" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
               <StackPanel Spacing="4">
                 <TextBlock Text="GAME DETECTION" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
                 <TextBlock Text="Add a game ClypDat doesn't recognize yet, and pick which capture backend any game should always use." Foreground="#93A6B8" TextWrapping="Wrap" />
@@ -1332,7 +1361,7 @@
                 <StackPanel Spacing="10">
                   <StackPanel Spacing="2">
                     <TextBlock Text="Game icons" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                    <TextBlock Text="Sidebar artwork is found automatically and then kept forever, so a wrong or missing icon stays that way. Refreshing throws the cached images away and looks every game up again." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    <TextBlock Text="Sidebar artwork is found automatically and then kept forever, so a wrong or missing icon stays that way. Refreshing throws the cached images away and looks every game up again." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                   </StackPanel>
                   <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
                     <Button Content="Refresh game icons"
@@ -1355,7 +1384,7 @@
                   <StackPanel Spacing="10">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Excluded from detection" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                      <TextBlock Text="Apps you told ClypDat not to treat as games (click the detected game in the header, or Remove a row below, to add one)." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                      <TextBlock Text="Apps you told ClypDat not to treat as games (click the detected game in the header, or Remove a row below, to add one)." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
                     <ItemsControl ItemsSource="{Binding IgnoredGameExecutableRows}">
                       <ItemsControl.ItemTemplate>
@@ -1398,7 +1427,14 @@
               </ItemsControl>
             </StackPanel>
 
-            <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Import from Medal}">
+            <StackPanel Spacing="18">
+              <StackPanel.IsVisible>
+                <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Import from Medal">
+                  <Binding Path="SettingsSearchText" />
+                  <Binding Path="SelectedSettingsSection" />
+                </MultiBinding>
+              </StackPanel.IsVisible>
+              <Border Height="1" Background="#1B242D" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
               <StackPanel Spacing="4">
                 <TextBlock Text="IMPORT FROM MEDAL" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
                 <TextBlock Text="Finds clips Medal has recorded locally and copies (or moves) them into your ClypDat library, keeping Medal's own clip titles." Foreground="#93A6B8" TextWrapping="Wrap" />
@@ -1413,7 +1449,7 @@
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Copy instead of move}">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Copy instead of move" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                      <TextBlock Text="On: Medal keeps its own copy. Off: clips are removed from Medal once imported." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                      <TextBlock Text="On: Medal keeps its own copy. Off: clips are removed from Medal once imported." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding MedalImportCopyNotMove}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
@@ -1470,7 +1506,14 @@
               </Border>
             </StackPanel>
 
-            <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Auto-Clip}">
+            <StackPanel Spacing="18">
+              <StackPanel.IsVisible>
+                <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Auto-Clip">
+                  <Binding Path="SettingsSearchText" />
+                  <Binding Path="SelectedSettingsSection" />
+                </MultiBinding>
+              </StackPanel.IsVisible>
+              <Border Height="1" Background="#1B242D" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
               <StackPanel Spacing="4">
                 <TextBlock Text="AUTO-CLIPPING" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
                 <TextBlock Text="Have ClypDat save the important moments from supported games using their local event feeds." Foreground="#93A6B8" TextWrapping="Wrap" />
@@ -1481,7 +1524,7 @@
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                   <StackPanel Spacing="2">
                     <TextBlock Text="Auto Capture Events" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                    <TextBlock Text="Turn this off to pause every game without losing your event choices." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    <TextBlock Text="Turn this off to pause every game without losing your event choices." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                   </StackPanel>
                   <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutoClippingEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                 </Grid>
@@ -1514,11 +1557,18 @@
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
               <Border Background="#10171D" BorderBrush="#1E2A33" BorderThickness="1" CornerRadius="8" Padding="14">
-                <StackPanel Spacing="8"><TextBlock Text="COMING SOON" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" /><TextBlock Text="More game integrations are planned. These are not enabled until ClypDat can reliably detect their events." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" /><ItemsControl ItemsSource="{Binding ComingSoonAutoClipGames}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><Border Background="#18222B" CornerRadius="5" Padding="8,4" Margin="0,0,6,6"><TextBlock Text="{Binding}" Foreground="#8B9AAA" FontSize="11" /></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+                <StackPanel Spacing="8"><TextBlock Text="COMING SOON" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" /><TextBlock Text="More game integrations are planned. These are not enabled until ClypDat can reliably detect their events." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" /><ItemsControl ItemsSource="{Binding ComingSoonAutoClipGames}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><Border Background="#18222B" CornerRadius="5" Padding="8,4" Margin="0,0,6,6"><TextBlock Text="{Binding}" Foreground="#8B9AAA" FontSize="11" /></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
               </Border>
             </StackPanel>
 
-            <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Audio}">
+            <StackPanel Spacing="18">
+              <StackPanel.IsVisible>
+                <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Audio">
+                  <Binding Path="SettingsSearchText" />
+                  <Binding Path="SelectedSettingsSection" />
+                </MultiBinding>
+              </StackPanel.IsVisible>
+              <Border Height="1" Background="#1B242D" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
               <StackPanel Spacing="4">
                 <TextBlock Text="AUDIO" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
                 <TextBlock Text="Choose which app's audio gets tagged as Chat Audio and which microphone is recorded." Foreground="#93A6B8" TextWrapping="Wrap" />
@@ -1536,7 +1586,7 @@
                     </Grid>
 
                     <StackPanel Spacing="6" IsVisible="{Binding !MultiChatAppEnabled}">
-                      <TextBlock Text="Pick the app whose audio should be tagged Chat Audio in clips." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                      <TextBlock Text="Pick the app whose audio should be tagged Chat Audio in clips." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                       <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
                         <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedChatProcess}" HorizontalAlignment="Stretch" />
                         <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
@@ -1544,7 +1594,7 @@
                     </StackPanel>
 
                     <StackPanel Spacing="6" IsVisible="{Binding MultiChatAppEnabled}">
-                      <TextBlock Text="Each app added here gets its own Chat Audio track in saved clips." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                      <TextBlock Text="Each app added here gets its own Chat Audio track in saved clips." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                       <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
                         <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedChatProcess}" HorizontalAlignment="Stretch" />
                         <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
@@ -1581,7 +1631,7 @@
                     </StackPanel>
 
                     <StackPanel Spacing="6" IsVisible="{Binding MultiMicrophoneEnabled}">
-                      <TextBlock Text="Each microphone added here gets its own track in saved clips." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                      <TextBlock Text="Each microphone added here gets its own track in saved clips." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                       <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
                         <ComboBox Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" HorizontalAlignment="Stretch" />
                         <Button Grid.Column="1" Content="Add" Click="AddSelectedMicrophoneButton_OnClick" />
@@ -1608,7 +1658,7 @@
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Microphone noise suppression}">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Microphone noise suppression" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                      <TextBlock Text="Reduces background noise (fans, keyboard, hum) on the mic track using ffmpeg's denoiser. Applied when a clip is saved." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                      <TextBlock Text="Reduces background noise (fans, keyboard, hum) on the mic track using ffmpeg's denoiser. Applied when a clip is saved." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding MicrophoneNoiseSuppressionEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
@@ -1620,7 +1670,7 @@
                         <TextBlock Grid.Column="1" Text="{Binding MicrophoneNoiseSuppressionStrength, StringFormat={}{0:0} dB}" Foreground="#8C98A7" FontSize="12" />
                       </Grid>
                       <Slider Minimum="0" Maximum="30" Value="{Binding MicrophoneNoiseSuppressionStrength}" TickFrequency="1" IsSnapToTickEnabled="True" />
-                      <TextBlock Text="Higher cuts more noise but can start eating into your voice past ~20." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                      <TextBlock Text="Higher cuts more noise but can start eating into your voice past ~20." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
                   </Border>
                 </StackPanel>
@@ -1632,13 +1682,20 @@
                     <TextBlock Text="Audio sync offset" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     <TextBlock Grid.Column="1" Text="{Binding AudioSyncOffsetMs, StringFormat={}{0:0} ms}" Foreground="#8C98A7" FontSize="12" />
                   </Grid>
-                  <TextBlock Text="Exact audio/video latency varies by hardware. If audio sounds delayed in your saved clips, raise this; if audio sounds ahead, lower it." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                  <TextBlock Text="Exact audio/video latency varies by hardware. If audio sounds delayed in your saved clips, raise this; if audio sounds ahead, lower it." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                   <Slider Minimum="-500" Maximum="500" Value="{Binding AudioSyncOffsetMs}" TickFrequency="10" />
                 </StackPanel>
               </Border>
             </StackPanel>
 
-            <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Audio Exclusions}">
+            <StackPanel Spacing="18">
+              <StackPanel.IsVisible>
+                <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Game Audio Exclusions">
+                  <Binding Path="SettingsSearchText" />
+                  <Binding Path="SelectedSettingsSection" />
+                </MultiBinding>
+              </StackPanel.IsVisible>
+              <Border Height="1" Background="#1B242D" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
               <StackPanel Spacing="4">
                 <TextBlock Text="GAME AUDIO EXCLUSIONS" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
                 <TextBlock Text="Apps here are removed from Game Audio. Chat Audio captures the selected app above." Foreground="#93A6B8" TextWrapping="Wrap" />
@@ -1672,7 +1729,14 @@
               </ItemsControl>
             </StackPanel>
 
-            <StackPanel Spacing="18" IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=About}">
+            <StackPanel Spacing="18">
+              <StackPanel.IsVisible>
+                <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="About">
+                  <Binding Path="SettingsSearchText" />
+                  <Binding Path="SelectedSettingsSection" />
+                </MultiBinding>
+              </StackPanel.IsVisible>
+              <Border Height="1" Background="#1B242D" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
               <StackPanel Spacing="4">
                 <TextBlock Text="ABOUT" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
                 <TextBlock Text="Version, updates, source, and open source licenses." Foreground="#93A6B8" TextWrapping="Wrap" />
@@ -1713,7 +1777,7 @@
                   <Grid ColumnDefinitions="*,Auto">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Check for updates" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                      <TextBlock Text="ClypDat also checks automatically on launch." Foreground="#6B7C8C" FontSize="12" />
+                      <TextBlock Text="ClypDat also checks automatically on launch." Foreground="#6B7C8C" FontSize="12" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
                     <Button Name="CheckNowButton" Grid.Column="1" Content="Check Now" Classes="primaryButton" Click="CheckUpdatesButton_OnClick" VerticalAlignment="Center" />
                   </Grid>
@@ -1726,7 +1790,7 @@
                   <Grid ColumnDefinitions="*,Auto">
                     <StackPanel Spacing="2">
                       <TextBlock Text="View on GitHub" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                      <TextBlock Text="Source code, releases, and issue tracker." Foreground="#6B7C8C" FontSize="12" />
+                      <TextBlock Text="Source code, releases, and issue tracker." Foreground="#6B7C8C" FontSize="12" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
                     <Button Grid.Column="1" Content="Open GitHub" Click="OpenGitHubButton_OnClick" VerticalAlignment="Center" />
                   </Grid>
@@ -1739,7 +1803,7 @@
                   <Grid ColumnDefinitions="*,Auto">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Log folder" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                      <TextBlock Text="Open ClypDat's log files for troubleshooting a crash or capture issue." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                      <TextBlock Text="Open ClypDat's log files for troubleshooting a crash or capture issue." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
                     <Button Grid.Column="1" Content="Open Logs" Click="OpenLogsButton_OnClick" VerticalAlignment="Center" />
                   </Grid>
@@ -1752,7 +1816,7 @@
                   <Grid ColumnDefinitions="*,Auto">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Setup walkthrough" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                      <TextBlock Text="Replay the first-time setup guide for library, capture, hotkey, and audio settings." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                      <TextBlock Text="Replay the first-time setup guide for library, capture, hotkey, and audio settings." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
                     <Button Grid.Column="1" Content="Show Walkthrough" Click="ShowWalkthroughButton_OnClick" VerticalAlignment="Center" />
                   </Grid>
@@ -1786,7 +1850,7 @@
                   <Grid ColumnDefinitions="*,Auto">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Full license text" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
-                      <TextBlock Text="Complete notices and source links for every bundled component." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" />
+                      <TextBlock Text="Complete notices and source links for every bundled component." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
                     <Button Grid.Column="1" Content="View Licenses" Click="OpenLicensesButton_OnClick" VerticalAlignment="Center" />
                   </Grid>

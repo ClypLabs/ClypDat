@@ -5139,6 +5139,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set
         {
             if (!SetProperty(ref _settingsSearchText, value)) return;
+            OnPropertyChanged(nameof(IsSettingsSearchActive));
 
             // Auto-Clip's own per-game list already has a working search
             // (AutoClipSearchText) - forwarding the sidebar query into it
@@ -5148,16 +5149,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // bound game rows underneath.
             AutoClipSearchText = value;
 
-            // A query specific enough to narrow to exactly one section jumps
-            // straight there instead of leaving the user to click the sole
-            // remaining nav entry themselves - the whole point of searching
-            // by a setting's own name (not just its section's) is landing on
-            // it in one step.
+            // A query specific enough to narrow to exactly one section
+            // updates SelectedSettingsSection even though every matching
+            // section's content shows at once now (see
+            // SettingsSectionVisibleConverter) - purely so that clearing the
+            // search leaves the user on the section they were just looking
+            // at, instead of dropping them back on whatever was selected
+            // before they searched.
             if (string.IsNullOrWhiteSpace(value)) return;
             var matches = SettingsSectionNames.Where(name => SettingsSearchMatchConverter.MatchesSection(value, name)).ToArray();
             if (matches.Length == 1) SelectedSettingsSection = matches[0];
         }
     }
+
+    // All of a section's settings now show inline together while searching
+    // (SettingsSectionVisibleConverter) rather than being confined to
+    // whichever single section is selected - this just gates the divider
+    // XAML draws above each visible section so multiple results stay
+    // visually separated, without a per-section flag telling it whether
+    // it's "the only content".
+    public bool IsSettingsSearchActive => !string.IsNullOrWhiteSpace(SettingsSearchText);
 
     private string _librarySearchText = string.Empty;
 
