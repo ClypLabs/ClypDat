@@ -35,6 +35,14 @@ public static class AppSettingsStore
             settings.ChatAudioProcessNames ??= new List<string>();
             settings.MicrophoneDeviceIds ??= new List<string>();
             settings.IgnoredGameExecutables ??= new List<string>();
+            settings.GameCaptureOverrides ??= new List<GameCaptureOverride>();
+            foreach (var game in settings.GameCaptureOverrides)
+            {
+                // Older settings had no origin. A display name meant the user
+                // intentionally added the process, while empty names only
+                // stored a built-in game's backend choice.
+                if (game.Origin is null) game.Origin = string.IsNullOrWhiteSpace(game.DisplayName) ? "Backend" : "UserCustom";
+            }
             settings.AutoClipping ??= new AutoClippingSettings();
             settings.AutoClipping.Games ??= new Dictionary<string, AutoClipGameSettings>(StringComparer.OrdinalIgnoreCase);
             foreach (var game in settings.AutoClipping.Games.Values)

@@ -26,10 +26,13 @@ Three capture backends, switchable in Settings (default is Auto):
   Graphics Capture / DXGI desktop duplication. Doesn't inject into the
   target process either, kept around as a fallback alongside ClypDat's own engine.
 
-Foreground-window polling drives game detection: a catalog of known
-executables plus a fallback that accepts any window whose
-process has loaded a Direct3D, OpenGL, or Vulkan module. Saved clips are
-named after the detected game and timestamp, e.g.
+Foreground-window scanning drives game detection: ClypDat accepts only
+known catalog entries, user-added games, and executables installed inside a
+Steam library listed in Steam's local manifests. Catalog rules can match an
+executable with exact or partial window titles/classes and reject known helper
+or overlay windows. The catalog is bundled with the app, cached locally, and
+can update from ClypDat's GitHub repository. Unknown GPU apps are not treated
+as games. Saved clips are named after the detected game and timestamp, e.g.
 `Counter-Strike 2 2026-07-10 17-30-00.mp4`. Games can also be added from
 Settings > Game Detection by picking a currently-running process or
 browsing for an executable directly.

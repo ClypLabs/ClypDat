@@ -173,6 +173,10 @@ public sealed class GameCaptureOverride
     // set only for a user-added game the built-in catalog doesn't know about.
     public string DisplayName { get; set; } = string.Empty;
     public string CaptureBackend { get; set; } = "Auto";
+    // "Catalog" rows only remember a capture-backend choice for a game found
+    // by the shared catalog or Steam manifest. They must not turn into a
+    // process-only detection rule on later launches.
+    public string? Origin { get; set; }
 }
 
 public sealed class GameRailFolder
