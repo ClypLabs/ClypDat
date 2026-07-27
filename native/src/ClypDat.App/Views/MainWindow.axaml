@@ -634,7 +634,11 @@
       </Border>
 
       <Border Grid.Column="1" Background="#101820" IsVisible="{Binding IsLibraryVisible}">
-        <Grid Margin="20,18">
+        <!-- Bottom margin dropped (was 18 all around) - a bottom inset here
+             stopped the library short of the window's actual bottom edge,
+             leaving a bare strip of background below the last row instead
+             of just letting a partial row clip against the real edge. -->
+        <Grid Margin="20,18,20,0">
         <DockPanel>
           <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,220" VerticalAlignment="Center">
             <TextBlock Grid.Column="0"
@@ -647,7 +651,15 @@
                      Classes="settingsInput"
                      Text="{Binding LibrarySearchText}"
                      Watermark="Search clips or games"
-                     VerticalAlignment="Center" />
+                     VerticalAlignment="Center"
+                     VerticalContentAlignment="Center">
+              <TextBox.InnerLeftContent>
+                <Canvas Width="16" Height="16" Margin="10,0,2,0" VerticalAlignment="Center">
+                  <Ellipse Canvas.Left="0" Canvas.Top="0" Width="11" Height="11" Stroke="#6B7C8C" StrokeThickness="1.6" />
+                  <Line StartPoint="9,9" EndPoint="15,15" Stroke="#6B7C8C" StrokeThickness="1.6" StrokeLineCap="Round" />
+                </Canvas>
+              </TextBox.InnerLeftContent>
+            </TextBox>
           </Grid>
 
           <!-- "Building your library..." banner - HydrateLibraryClipsAsync
@@ -908,7 +920,7 @@
                 <Binding Path="IsLibraryVisible" />
               </MultiBinding>
             </Button.IsVisible>
-            <Path Data="M6,15 L12,9 L18,15" Stroke="#D2DEEC" StrokeThickness="2.4" StrokeLineCap="Round" StrokeJoin="Round" />
+            <Path Data="M6,15 L12,9 L18,15" Stroke="#D2DEEC" StrokeThickness="2.4" StrokeLineCap="Round" StrokeJoin="Round" Width="16" Height="16" Stretch="Uniform" Margin="0,6,0,0" />
           </Button>
 
           <!-- Date scrubber: labels are positioned in code-behind
@@ -997,7 +1009,14 @@
       <Grid ColumnDefinitions="240,*,Auto">
         <Border Grid.Column="0" Background="#0D1116" BorderBrush="#1E2A33" BorderThickness="0,0,1,0">
           <StackPanel Margin="0,24,16,24" Spacing="2">
-            <TextBox Classes="settingsInput" Text="{Binding SettingsSearchText}" Watermark="Search settings" Margin="22,0,0,14" />
+            <TextBox Classes="settingsInput" Text="{Binding SettingsSearchText}" Watermark="Search settings" Margin="22,0,0,14" VerticalContentAlignment="Center">
+              <TextBox.InnerLeftContent>
+                <Canvas Width="16" Height="16" Margin="10,0,2,0" VerticalAlignment="Center">
+                  <Ellipse Canvas.Left="0" Canvas.Top="0" Width="11" Height="11" Stroke="#6B7C8C" StrokeThickness="1.6" />
+                  <Line StartPoint="9,9" EndPoint="15,15" Stroke="#6B7C8C" StrokeThickness="1.6" StrokeLineCap="Round" />
+                </Canvas>
+              </TextBox.InnerLeftContent>
+            </TextBox>
             <TextBlock Text="GENERAL" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" Margin="22,0,0,14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter='General|Game Detection|Import from Medal'}" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=General}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=General}" Tag="General" Content="General" Click="SettingsNavButton_OnClick" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Detection}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Game Detection}" Tag="Game Detection" Content="Game Detection" Click="SettingsNavButton_OnClick" />
