@@ -118,18 +118,12 @@ public sealed partial class App : Application
         // following the system colour instead of being fixed indigo shades
         // that only happened to match the default accent.
         if (Resources["AccentSelectedBrush"] is SolidColorBrush selectedBrush) selectedBrush.Color = BlendWith(accent, RailBackground, 0.78);
-        if (Resources["AccentSelectedHoverBrush"] is SolidColorBrush selectedHoverBrush) selectedHoverBrush.Color = BlendWith(accent, RailBackground, 0.68);
+        if (Resources["AccentSelectedHoverBrush"] is SolidColorBrush selectedHoverBrush) selectedHoverBrush.Color = BlendWith(accent, RailBackground, 0.84);
         if (Resources["AccentSelectedIconBrush"] is SolidColorBrush selectedIconBrush) selectedIconBrush.Color = BlendWithWhite(accent, 0.55);
         // Game and folder hover is intentionally darker than the selected
         // tint, preserving hue while making selection the stronger state.
         if (Resources["AccentGameHoverBrush"] is SolidColorBrush gameHoverBrush) gameHoverBrush.Color = BlendWith(accent, RailBackground, 0.84);
-        // Hover on an unselected rail button. 0.88 (12% accent) measured as
-        // indistinguishable from plain grey against the near-black rail
-        // background - a light tint needs far more strength than a tint over
-        // a bright surface to actually read as coloured. 0.55 is close to
-        // AccentSelectedHoverBrush's own weight so a hover is clearly tinted
-        // without out-saturating the persistent "this is selected" look.
-        if (Resources["AccentHoverBrush"] is SolidColorBrush accentHoverBrush) accentHoverBrush.Color = BlendWith(accent, RailBackground, 0.55);
+        if (Resources["AccentHoverBrush"] is SolidColorBrush accentHoverBrush) accentHoverBrush.Color = BlendWith(accent, RailBackground, 0.84);
     }
 
     // #0D1116 - the sidebar rail's background, which selection tints are mixed
