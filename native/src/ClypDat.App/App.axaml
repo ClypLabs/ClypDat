@@ -12,6 +12,8 @@
     <SolidColorBrush x:Key="AccentSelectedHoverBrush" Color="#222A43" />
     <SolidColorBrush x:Key="AccentSelectedIconBrush" Color="#A8B4F5" />
     <SolidColorBrush x:Key="AccentGameHoverBrush" Color="#222A43" />
+    <!-- Folder tiles use the former brighter rail tint while idle. -->
+    <SolidColorBrush x:Key="AccentFolderBrush" Color="#2C3568" />
     <!-- Hovering a rail button uses a darker version of its selection tint,
          keeping selected state visually stronger than pointer-over state. -->
     <SolidColorBrush x:Key="AccentHoverBrush" Color="#222A43" />

@@ -816,11 +816,10 @@
   <Style Selector="Button.railIconButton:pointerover PathIcon">
     <Setter Property="Foreground" Value="#D8E4F2" />
   </Style>
-  <!-- Folder tiles permanently show the same tint a loose rail icon only
-       shows on hover, so a folder stands out from a loose game icon at a
-       glance. -->
+  <!-- Folder tiles retain their brighter idle tint, distinct from loose
+       game icons and from the darker hover highlight. -->
   <Style Selector="Button.railFolderHeader">
-    <Setter Property="Background" Value="{StaticResource AccentHoverBrush}" />
+    <Setter Property="Background" Value="{StaticResource AccentFolderBrush}" />
   </Style>
   <!-- Expanded, the outline capsule (Border.railFolderGroup.expanded) already
        carries its own accent border/background around the whole group - the
@@ -866,6 +865,15 @@
     <Setter Property="Background" Value="{StaticResource AccentBrush}" />
   </Style>
   <Style Selector="Button.railGameButton:pointerover Border.gameInitialBadge">
+    <Setter Property="Background" Value="{StaticResource AccentGameHoverBrush}" />
+  </Style>
+  <!-- When open, the folder glyph replaces its closed mosaic. Keep its
+       squircle at the closed-folder brightness, then use the same dark
+       game hover highlight as the folder header. -->
+  <Style Selector="Button.railFolderHeader.expanded Border.gameInitialBadge">
+    <Setter Property="Background" Value="{StaticResource AccentFolderBrush}" />
+  </Style>
+  <Style Selector="Button.railFolderHeader.expanded:pointerover Border.gameInitialBadge">
     <Setter Property="Background" Value="{StaticResource AccentGameHoverBrush}" />
   </Style>
   <Style Selector="Button.railIconButton Border.gameInitialBadge TextBlock">
