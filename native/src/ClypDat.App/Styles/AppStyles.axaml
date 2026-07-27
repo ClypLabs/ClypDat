@@ -707,21 +707,9 @@
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
     <Setter Property="RenderTransform" Value="scale(1)" />
-    <Setter Property="Transitions">
-      <Transitions>
-        <BrushTransition Property="Background" Duration="0:0:0.13" />
-        <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.13" />
-      </Transitions>
-    </Setter>
-  </Style>
-  <!-- Game rows hold square artwork, so their hover/active backdrop is a
-       rounded square too - a circular one around a square icon reads as a
-       mismatch. Section rows keep the circle, which suits their glyphs. -->
-  <Style Selector="Button.railGameButton">
-    <Setter Property="CornerRadius" Value="12" />
     <!-- Fluent's internal pointer-over surface ignores Button.Background and
-         turns game/folder tiles grey. This direct template keeps every
-         hover/selection tint on the tile's own Background property. -->
+         can flash a bright theme color as hover ends. This direct template
+         keeps every rail tile on its own animated Background value. -->
     <Setter Property="Template">
       <ControlTemplate>
         <Border Background="{TemplateBinding Background}"
@@ -736,6 +724,18 @@
         </Border>
       </ControlTemplate>
     </Setter>
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.13" />
+        <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.13" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <!-- Game rows hold square artwork, so their hover/active backdrop is a
+       rounded square too - a circular one around a square icon reads as a
+       mismatch. Section rows keep the circle, which suits their glyphs. -->
+  <Style Selector="Button.railGameButton">
+    <Setter Property="CornerRadius" Value="12" />
   </Style>
   <!-- Wraps a folder's header tile AND its revealed member tiles as one
        visually connected group once expanded - collapsed, it's invisible
