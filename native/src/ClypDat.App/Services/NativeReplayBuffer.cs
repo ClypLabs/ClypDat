@@ -517,13 +517,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
             packet = ffmpeg.av_packet_alloc();
 
-            // Bounded generously past a worst-case single-iteration catch-up burst
-            // (see the pacing gate below, capped at FrameRate*2 duplicate-encoded
-            // frames) so a legitimate burst never spuriously drops frames - only a
-            // genuinely sustained backlog (the encoder truly can't keep pace, not
-            // just a transient stall) hits the cap and starts dropping in
-            // EncodeLoop's TryAdd below.
-            encodeQueue = new BlockingCollection<EncodeJob>(boundedCapacity: Math.Max(64, Math.Clamp(config.FrameRate, 15, 240) * 2));
+            // Keep at most roughly half a second of stale work. A 120-frame queue
+            // at 60 FPS turned a short GPU stall into seconds of old frames, then
+            // magnified it with catch-up work. Dropping early is recoverable;
+            // encoding stale frames is visible lag.
+            var encodeQueueCapacity = Math.Clamp(config.FrameRate / 2, 8, 60);
+            encodeQueue = new BlockingCollection<EncodeJob>(boundedCapacity: encodeQueueCapacity);
             // Pointer locals can't be captured by a lambda closure directly - cross
             // the thread boundary as nint instead, cast back inside EncodeLoop.
             var encodeCodecContextPtr = (nint)codecContext;
@@ -580,6 +579,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var lastRingTrim = TimeSpan.Zero;
             var framesSeen = 0;
             var framesSeenSinceLog = 0;
+            var framesProcessedSinceLog = 0;
             var framesEncoded = 0;
             var copyMapMs = 0.0;
             var scaleMs = 0.0;
@@ -643,6 +643,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // mid-session alt-tab) go back to the existing freeze-and-keep-
             // recording behavior above, unaffected.
             var hasCapturedRealFrame = false;
+            var hasProcessedSourceFrame = false;
+            var lastSourceProcessAt = TimeSpan.Zero;
             // See the content-write sites above and the pacing gate below -
             // measures how stale frame->data's content actually is at the
             // moment each output frame gets encoded, to find out whether a
@@ -698,12 +700,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var droppedSinceLog = Interlocked.Exchange(ref _encodeDroppedCount, 0);
                     var frameStalenessDenom = Math.Max(1, frameStalenessCount);
                     AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, ringBufferMb={ringBufferMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, droppedFrames={droppedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
+                    var outputFrameRate = framesEncodedSinceLog / diagElapsed;
+                    var overloaded = droppedSinceLog > 0 || encodeQueue.Count * 4 >= encodeQueueCapacity * 3 ||
+                                     (hasCapturedRealFrame && outputFrameRate < config.FrameRate * 0.9);
                     SetHealth(new ReplayCaptureHealth("Native", "Desktop Duplication",
-                        droppedSinceLog > 0 ? ReplayCaptureState.Degraded : ReplayCaptureState.Healthy,
-                        config.FrameRate, framesSeenSinceLog / diagElapsed, framesSeenSinceLog / diagElapsed,
-                        framesEncodedSinceLog / diagElapsed, 0, droppedSinceLog, encodeQueue.Count,
+                        overloaded ? ReplayCaptureState.Degraded : ReplayCaptureState.Healthy,
+                        config.FrameRate, framesSeenSinceLog / diagElapsed, framesProcessedSinceLog / diagElapsed,
+                        outputFrameRate, Math.Max(0, framesEncodedSinceLog - framesProcessedSinceLog), droppedSinceLog, encodeQueue.Count,
                         encoderName, "Default adapter",
-                        droppedSinceLog > 0 ? "Encoder queue full. Output may fall below target FPS." : string.Empty,
+                        overloaded ? "Capture overload. Output may fall below target FPS." : string.Empty,
                         DateTime.UtcNow));
                     copyMapMs = 0;
                     scaleMs = 0;
@@ -713,6 +718,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     frameStalenessCount = 0;
                     framesEncodedSinceLog = 0;
                     framesSeenSinceLog = 0;
+                    framesProcessedSinceLog = 0;
                     waitMs = 0;
                     getFrameMs = 0;
                     iterationsSinceLog = 0;
@@ -899,7 +905,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 }
                             }
 
-                            if (!occluded)
+                            // Capture can receive desktop updates hundreds of times per
+                            // second. Conversion/readback cannot improve a 60 FPS output
+                            // after the next scheduled frame is already fresh, so retain
+                            // the newest source frame and process at output cadence.
+                            var shouldProcessSourceFrame = !hasProcessedSourceFrame ||
+                                                           stopwatch.Elapsed - lastSourceProcessAt >= targetFrameInterval;
+                            if (!occluded && shouldProcessSourceFrame)
                             {
                                 // NVENC's actual encode runs asynchronously - avcodec_send_frame
                                 // can return before the encoder has finished reading a PREVIOUS
@@ -989,6 +1001,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 // and unsynchronized - a plausible source of visible judder despite
                                 // every output frame being unique and perfectly PTS-spaced.
                                 lastFrameContentCapturedUtc = MonotonicClock.UtcNow;
+                                lastSourceProcessAt = stopwatch.Elapsed;
+                                hasProcessedSourceFrame = true;
+                                framesProcessedSinceLog++;
                             }
                             // else: occluded - frame->data still holds the last successfully
                             // scaled content, re-encoded unchanged below (visual freeze).
@@ -1096,7 +1111,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 // session as real recorded content).
                 if (hasCapturedRealFrame)
                 {
-                var catchUpFramesRemaining = Math.Clamp(config.FrameRate, 15, 240) * 2;
+                // At most 250 ms of duplicate work after a stall. Longer bursts
+                // refill a saturated queue with stale copies and make recovery
+                // worse than dropping the missed interval.
+                var catchUpFramesRemaining = Math.Clamp(config.FrameRate / 4, 4, 60);
                 while (stopwatch.Elapsed - lastEncodedAt >= targetFrameInterval)
                 {
                     if (catchUpFramesRemaining-- <= 0)
@@ -1171,10 +1189,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     }
                     else
                     {
-                        // Keep packet timestamps contiguous. Advancing this before
-                        // TryAdd creates fake PTS gaps whenever backpressure drops
-                        // a frame, which is why players report random low FPS.
-                        encodedFrameIndex++;
+                        // PTS advances above once per scheduled frame. It must not
+                        // advance again here: doing both doubles every successful
+                        // frame's duration and turns a 60 FPS clip into ~30 FPS.
                         framesEncoded++;
                         framesEncodedSinceLog++;
                     }
@@ -2235,7 +2252,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         switch (candidateName)
         {
             case "h264_nvenc":
-                TrySet("preset", "p2");
+                // p1 gives GPU rendering priority during VSync-off/VRR bursts.
+                // Reliability wins over the small motion-quality gain from p2.
+                TrySet("preset", "p1");
                 TrySet("tune", "ll");
                 TrySet("forced-idr", "1");
                 break;
