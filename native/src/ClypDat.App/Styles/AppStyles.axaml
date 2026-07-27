@@ -430,6 +430,16 @@
   <Style Selector="MenuItem:pointerover /template/ Border#PART_LayoutRoot">
     <Setter Property="Background" Value="#263544" />
   </Style>
+  <!-- Change Game opens a separately hosted Flyout, which takes pointer
+       capture from its trigger row. Keep the trigger's hover treatment while
+       that child menu is open, matching a normal nested MenuItem. -->
+  <Style Selector="MenuItem.changeGameMenuItem.changeGameMenuItemOpen">
+    <Setter Property="Background" Value="#263544" />
+    <Setter Property="Foreground" Value="#D8E4F2" />
+  </Style>
+  <Style Selector="MenuItem.changeGameMenuItem.changeGameMenuItemOpen /template/ Border#PART_LayoutRoot">
+    <Setter Property="Background" Value="#263544" />
+  </Style>
   <Style Selector="Button.replayButton">
     <Setter Property="Background" Value="#1D2A36" />
     <Setter Property="Foreground" Value="#9FB0C3" />
