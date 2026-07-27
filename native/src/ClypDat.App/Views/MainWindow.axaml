@@ -347,7 +347,11 @@
                                    mosaic below is redundant once the real
                                    icons are already showing underneath). -->
                               <Border Classes="gameInitialBadge" Width="30" Height="30" CornerRadius="8" IsVisible="{Binding ShowFolderGlyph}">
-                                <PathIcon Data="M10,4H4C2.9,4,2,4.9,2,6v12c0,1.1,0.9,2,2,2h16c1.1,0,2-0.9,2-2V8c0-1.1-0.9-2-2-2h-8L10,4z" Width="15" Height="15" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                <PathIcon Data="M10,4H4C2.9,4,2,4.9,2,6v12c0,1.1,0.9,2,2,2h16c1.1,0,2-0.9,2-2V8c0-1.1-0.9-2-2-2h-8L10,4z" Width="15" Height="15" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                  <PathIcon.RenderTransform>
+                                    <TranslateTransform X="-1" Y="-1" />
+                                  </PathIcon.RenderTransform>
+                                </PathIcon>
                               </Border>
 
                               <!-- Adaptive mosaic, gated as a whole on
