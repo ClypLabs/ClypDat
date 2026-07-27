@@ -372,8 +372,8 @@
     <Setter Property="BorderBrush" Value="#2C3B48" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
-    <Setter Property="Padding" Value="6" />
-    <Setter Property="MinWidth" Value="180" />
+    <Setter Property="Padding" Value="5" />
+    <Setter Property="MinWidth" Value="160" />
   </Style>
   <!-- Small-caps field labels inside the Replay Buffer flyout - reads as a
        settings panel rather than a stack of sentence-case captions. -->
@@ -414,14 +414,14 @@
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
     <Setter Property="Padding" Value="6" />
-    <Setter Property="MinWidth" Value="200" />
+    <Setter Property="MinWidth" Value="160" />
   </Style>
   <Style Selector="MenuItem">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="#B8C7D8" />
-    <Setter Property="FontSize" Value="14" />
+    <Setter Property="FontSize" Value="13" />
     <Setter Property="CornerRadius" Value="6" />
-    <Setter Property="Padding" Value="13,9" />
+    <Setter Property="Padding" Value="11,7" />
   </Style>
   <Style Selector="MenuItem:pointerover">
     <Setter Property="Background" Value="#263544" />
@@ -944,11 +944,11 @@
     <Setter Property="Background" Value="#0026323D" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="4" />
-    <Setter Property="Padding" Value="10,7" />
+    <Setter Property="Padding" Value="9,6" />
     <Setter Property="HorizontalAlignment" Value="Stretch" />
     <Setter Property="HorizontalContentAlignment" Value="Left" />
     <Setter Property="Foreground" Value="#D8E4F2" />
-    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontSize" Value="12.5" />
   </Style>
   <Style Selector="Button.flyoutMenuItem:pointerover">
     <Setter Property="Background" Value="#26323D" />
