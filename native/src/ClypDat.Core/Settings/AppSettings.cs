@@ -31,6 +31,9 @@ public sealed class AppSettings
     public bool StartReplayOnLaunch { get; set; }
     public bool LaunchOnWindowsStartup { get; set; }
     public bool StartMinimizedToTray { get; set; }
+    // Windows process priority for ClypDat's in-process capture backends.
+    // High is the default so capture keeps CPU time when a game is demanding.
+    public string ProcessPriority { get; set; } = "High";
     public bool IsStatusAreaVisible { get; set; } = true;
     public bool ShowRecordingPausedIndicator { get; set; } = true;
     // On by default - MainWindowViewModel.UpdateCardLayout targets a fixed
