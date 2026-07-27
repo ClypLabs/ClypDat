@@ -855,6 +855,11 @@
   <Style Selector="Button.railGameButton:not(ToggleSwitch):pointerover">
     <Setter Property="Background" Value="{StaticResource AccentGameHoverBrush}" />
   </Style>
+  <!-- Folder header hover uses its brighter folder backdrop, including while
+       open. The 30px glyph badge keeps its separate dark hover state below. -->
+  <Style Selector="Button.railFolderHeader:not(ToggleSwitch):pointerover">
+    <Setter Property="Background" Value="{StaticResource AccentFolderBrush}" />
+  </Style>
   <Style Selector="Button.railIconButton Border.gameInitialBadge">
     <Setter Property="Background" Value="#26323D" />
   </Style>
@@ -868,8 +873,7 @@
     <Setter Property="Background" Value="{StaticResource AccentGameHoverBrush}" />
   </Style>
   <!-- When open, the folder glyph replaces its closed mosaic. Keep its
-       squircle at the closed-folder brightness, then use the same dark
-       game hover highlight as the folder header. -->
+       squircle at the closed-folder brightness, then darken it on hover. -->
   <Style Selector="Button.railFolderHeader.expanded Border.gameInitialBadge">
     <Setter Property="Background" Value="{StaticResource AccentFolderBrush}" />
   </Style>
