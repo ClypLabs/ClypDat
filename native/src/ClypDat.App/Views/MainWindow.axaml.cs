@@ -90,6 +90,7 @@ public sealed partial class MainWindow : Window
     // a continuous drag never lets it back up mid-resize, short enough not to
     // feel like a lag once the drag ends.
     private static readonly TimeSpan HoverControlsResizeSettle = TimeSpan.FromMilliseconds(220);
+    private static readonly TimeSpan LibraryResizeAnchorSettle = TimeSpan.FromMilliseconds(220);
     private DateTime _hoverControlsSuppressedUntilUtc = DateTime.MinValue;
     // Slides the bar in from under the video's bottom edge on first show. The
     // window itself stays put - only its content moves - because animating an
@@ -102,6 +103,8 @@ public sealed partial class MainWindow : Window
     private bool _hoverControlsSlidingOut;
     private string? _libraryResizeAnchorPath;
     private bool _libraryResizeAnchorRestoreQueued;
+    private DispatcherTimer? _libraryResizeAnchorSettleTimer;
+    private int _libraryResizeAnchorGeneration;
     public MainWindow()
     {
         InitializeComponent();
@@ -211,6 +214,7 @@ public sealed partial class MainWindow : Window
         };
         Closed += (_, _) =>
         {
+            _libraryResizeAnchorSettleTimer?.Stop();
             _globalHotkey?.Dispose();
             _cs2GsiListener?.Dispose();
             _dotaGsiListener?.Dispose();
@@ -1032,6 +1036,7 @@ public sealed partial class MainWindow : Window
         SuspendHoverControlsForResize();
         CaptureLibraryResizeAnchor();
         QueueLibraryResizeAnchorRestore();
+        ResetLibraryResizeAnchorSettleTimer();
 
         UpdateTimelineChrome();
     }
@@ -1084,29 +1089,60 @@ public sealed partial class MainWindow : Window
         Dispatcher.UIThread.Post(() =>
         {
             _libraryResizeAnchorRestoreQueued = false;
-            var anchorPath = _libraryResizeAnchorPath;
-            _libraryResizeAnchorPath = null;
-            if (string.IsNullOrWhiteSpace(anchorPath)) return;
-
-            var itemsControl = LibraryScrollViewer.Content as ItemsControl
-                ?? LibraryScrollViewer.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault();
-            if (itemsControl is null || LibraryScrollViewer.Viewport.Height <= 0) return;
-
-            var anchorContainer = (itemsControl.GetRealizedContainers() ?? Enumerable.Empty<Control>())
-                .FirstOrDefault(container => container.DataContext is ClipCardViewModel clip
-                    && clip.IsVisibleInLibrary
-                    && string.Equals(clip.Path, anchorPath, StringComparison.OrdinalIgnoreCase));
-            if (anchorContainer is null) return;
-
-            var point = anchorContainer.TranslatePoint(default, itemsControl);
-            if (point is null || anchorContainer.Bounds.Height <= 0) return;
-
-            var targetOffset = point.Value.Y + anchorContainer.Bounds.Height / 2 - LibraryScrollViewer.Viewport.Height / 2;
-            var maxOffset = Math.Max(0, LibraryScrollViewer.Extent.Height - LibraryScrollViewer.Viewport.Height);
-            LibraryScrollViewer.Offset = new Vector(
-                LibraryScrollViewer.Offset.X,
-                Math.Clamp(targetOffset, 0, maxOffset));
+            RestoreLibraryResizeAnchor();
         }, DispatcherPriority.Loaded);
+    }
+
+    private void ResetLibraryResizeAnchorSettleTimer()
+    {
+        if (_libraryResizeAnchorPath is null) return;
+
+        _libraryResizeAnchorGeneration++;
+        if (_libraryResizeAnchorSettleTimer is null)
+        {
+            _libraryResizeAnchorSettleTimer = new DispatcherTimer { Interval = LibraryResizeAnchorSettle };
+            _libraryResizeAnchorSettleTimer.Tick += LibraryResizeAnchorSettleTimer_OnTick;
+        }
+
+        _libraryResizeAnchorSettleTimer.Stop();
+        _libraryResizeAnchorSettleTimer.Start();
+    }
+
+    private void LibraryResizeAnchorSettleTimer_OnTick(object? sender, EventArgs e)
+    {
+        _libraryResizeAnchorSettleTimer?.Stop();
+        var generation = _libraryResizeAnchorGeneration;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (generation != _libraryResizeAnchorGeneration) return;
+            RestoreLibraryResizeAnchor();
+            _libraryResizeAnchorPath = null;
+        }, DispatcherPriority.Loaded);
+    }
+
+    private void RestoreLibraryResizeAnchor()
+    {
+        var anchorPath = _libraryResizeAnchorPath;
+        if (string.IsNullOrWhiteSpace(anchorPath)) return;
+
+        var itemsControl = LibraryScrollViewer.Content as ItemsControl
+            ?? LibraryScrollViewer.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault();
+        if (itemsControl is null || LibraryScrollViewer.Viewport.Height <= 0) return;
+
+        var anchorContainer = (itemsControl.GetRealizedContainers() ?? Enumerable.Empty<Control>())
+            .FirstOrDefault(container => container.DataContext is ClipCardViewModel clip
+                && clip.IsVisibleInLibrary
+                && string.Equals(clip.Path, anchorPath, StringComparison.OrdinalIgnoreCase));
+        if (anchorContainer is null) return;
+
+        var point = anchorContainer.TranslatePoint(default, itemsControl);
+        if (point is null || anchorContainer.Bounds.Height <= 0) return;
+
+        var targetOffset = point.Value.Y + anchorContainer.Bounds.Height / 2 - LibraryScrollViewer.Viewport.Height / 2;
+        var maxOffset = Math.Max(0, LibraryScrollViewer.Extent.Height - LibraryScrollViewer.Viewport.Height);
+        LibraryScrollViewer.Offset = new Vector(
+            LibraryScrollViewer.Offset.X,
+            Math.Clamp(targetOffset, 0, maxOffset));
     }
 
     // ---- Library date scrubber ----------------------------------------
