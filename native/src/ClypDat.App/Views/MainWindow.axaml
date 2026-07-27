@@ -889,6 +889,28 @@
             </ItemsControl>
         </ScrollViewer>
 
+          <!-- Floats over the library's bottom-right corner once scrolled
+               far enough down (ShowScrollToTopButton, toggled off
+               LibraryScrollViewer's own ScrollChanged). The scroll itself is
+               eased in code-behind (AnimateLibraryScrollToTop) rather than
+               an instant Offset snap - ScrollViewer.Offset isn't a
+               Transitions-animatable property in Avalonia. -->
+          <Button Grid.Column="0"
+                  Classes="scrollToTopButton"
+                  HorizontalAlignment="Right"
+                  VerticalAlignment="Bottom"
+                  Margin="0,0,20,20"
+                  Click="ScrollToTopButton_OnClick"
+                  ToolTip.Tip="Scroll to top">
+            <Button.IsVisible>
+              <MultiBinding Converter="{x:Static conv:BoolConverters.And}">
+                <Binding Path="ShowScrollToTopButton" />
+                <Binding Path="IsLibraryVisible" />
+              </MultiBinding>
+            </Button.IsVisible>
+            <Path Data="M6,15 L12,9 L18,15" Stroke="#D2DEEC" StrokeThickness="2.4" StrokeLineCap="Round" StrokeJoin="Round" />
+          </Button>
+
           <!-- Date scrubber: labels are positioned in code-behind
                (RebuildDateScrubber) from each first-of-date card's measured
                offset inside the scroll content, since a WrapPanel gives no

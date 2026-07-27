@@ -108,6 +108,10 @@ public sealed partial class MainWindow : Window
     private DispatcherTimer? _libraryResizeAnchorSettleTimer;
     private int _libraryResizeAnchorGeneration;
     private double? _libraryResizeExpectedOffsetY;
+    private const double ScrollToTopButtonThreshold = 320;
+    private static readonly TimeSpan ScrollToTopDuration = TimeSpan.FromMilliseconds(380);
+    private DispatcherTimer? _scrollToTopTimer;
+    private double _scrollToTopStartOffsetY;
     public MainWindow()
     {
         InitializeComponent();
@@ -1124,6 +1128,7 @@ public sealed partial class MainWindow : Window
     private void LibraryScrollViewer_OnScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
         UpdateDateScrubberThumb();
+        UpdateScrollToTopButtonVisibility();
         if (e.OffsetDelta.Y == 0) return;
 
         if (_libraryResizeExpectedOffsetY is double expectedOffsetY)
@@ -1137,6 +1142,42 @@ public sealed partial class MainWindow : Window
         // User wheel, keyboard, and date-scrubber navigation become the next
         // resize baseline. Extent/layout changes are revalidated on resize.
         ClearLibraryResizeAnchor();
+    }
+
+    private void UpdateScrollToTopButtonVisibility()
+    {
+        if (ViewModel is null) return;
+        ViewModel.ShowScrollToTopButton = LibraryScrollViewer.Offset.Y > ScrollToTopButtonThreshold;
+    }
+
+    private void ScrollToTopButton_OnClick(object? sender, RoutedEventArgs e) => AnimateLibraryScrollToTop();
+
+    // Manual eased Offset animation - ScrollViewer.Offset isn't a
+    // Transitions-animatable property in Avalonia, so this ticks it by hand
+    // rather than snapping straight to the top.
+    private void AnimateLibraryScrollToTop()
+    {
+        _scrollToTopTimer?.Stop();
+        var startOffsetY = LibraryScrollViewer.Offset.Y;
+        if (startOffsetY <= 0) return;
+
+        _scrollToTopStartOffsetY = startOffsetY;
+        var clock = Stopwatch.StartNew();
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        _scrollToTopTimer = timer;
+        timer.Tick += (_, _) =>
+        {
+            var t = Math.Min(1.0, clock.Elapsed.TotalMilliseconds / ScrollToTopDuration.TotalMilliseconds);
+            var eased = 1 - Math.Pow(1 - t, 3);
+            var newOffsetY = _scrollToTopStartOffsetY * (1 - eased);
+            LibraryScrollViewer.Offset = new Vector(LibraryScrollViewer.Offset.X, newOffsetY);
+            if (t >= 1.0)
+            {
+                timer.Stop();
+                if (ReferenceEquals(_scrollToTopTimer, timer)) _scrollToTopTimer = null;
+            }
+        };
+        timer.Start();
     }
 
     private void QueueLibraryResizeAnchorRestore()
