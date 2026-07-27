@@ -10,6 +10,11 @@ public static class ReplayBufferFactory
         if (!OperatingSystem.IsWindows()) return new FfmpegReplayBuffer(configProvider);
 
         var backend = ResolveEffectiveBackend(configProvider());
+        if (backend == ReplayBackendOption.Auto)
+        {
+            AppLog.Info("Replay backend selected: Hybrid Auto.");
+            return new HybridReplayBuffer(configProvider);
+        }
         if (backend == ReplayBackendOption.Legacy)
         {
             AppLog.Info("Replay backend selected: Legacy Windows.");
@@ -33,14 +38,11 @@ public static class ReplayBufferFactory
         return new WindowsReplayBuffer(configProvider);
     }
 
-    // Auto always means ClypDat (Native) - it never hooks the game process, so unlike
-    // OBS it has nothing for anti-cheat to block or object to, and unlike Legacy
-    // (ScreenRecorderLib's stop/start segment rotation) it has no gap at rotation
-    // boundaries. Only an explicit Obs/Legacy/Native choice overrides this.
+    // Auto is intentionally preserved here. Create chooses HybridAuto so explicit
+    // OBS/Native/Legacy selections remain deterministic and visible in settings.
     public static ReplayBackendOption ResolveEffectiveBackend(ReplayBufferConfig config)
     {
-        var backend = ParseBackend(config.Backend);
-        return backend == ReplayBackendOption.Auto ? ReplayBackendOption.Native : backend;
+        return ParseBackend(config.Backend);
     }
 
     private static ReplayBackendOption ParseBackend(string value)

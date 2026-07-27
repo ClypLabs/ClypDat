@@ -5,7 +5,7 @@ using System.Runtime.Versioning;
 namespace ClypDat.App.Services;
 
 [SupportedOSPlatform("windows")]
-public sealed class ObsReplayBuffer : IReplayBuffer
+public sealed class ObsReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics
 {
     // OBS's game_capture source has to inject a hook into the target process
     // and wait for it to report frames before real (non-black) video is
@@ -19,6 +19,7 @@ public sealed class ObsReplayBuffer : IReplayBuffer
     private readonly ObsNativeBridge _bridge = new();
     private bool _initialized;
     private DateTime _startedAtUtc;
+    private ReplayCaptureHealth _health = ReplayCaptureHealth.Unknown("OBS");
 
     public ObsReplayBuffer(Func<ReplayBufferConfig> configProvider)
     {
@@ -28,6 +29,9 @@ public sealed class ObsReplayBuffer : IReplayBuffer
     public bool IsRecording { get; private set; }
     public TimeSpan Duration { get; private set; } = TimeSpan.FromSeconds(60);
     public event EventHandler? RecordingStopped;
+    public event EventHandler<ReplayCaptureHealth>? HealthChanged;
+
+    public ReplayCaptureHealth GetHealthSnapshot() => _health;
 
     public Task StartAsync(CancellationToken cancellationToken = default)
     {
@@ -60,6 +64,9 @@ public sealed class ObsReplayBuffer : IReplayBuffer
             _bridge.StartReplayCapture();
             IsRecording = true;
             _startedAtUtc = DateTime.UtcNow;
+            SetHealth(new ReplayCaptureHealth("OBS", "Game hook", ReplayCaptureState.Starting,
+                config.FrameRate, 0, 0, 0, 0, 0, 0, "OBS", string.Empty,
+                "Waiting for game hook frames.", DateTime.UtcNow));
             AppLog.Info("OBS replay backend started.");
         }
         catch
@@ -96,6 +103,7 @@ public sealed class ObsReplayBuffer : IReplayBuffer
         {
             IsRecording = false;
             _initialized = false;
+            SetHealth(_health with { State = ReplayCaptureState.Stopped, UpdatedUtc = DateTime.UtcNow });
             RecordingStopped?.Invoke(this, EventArgs.Empty);
             AppLog.Info($"OBS replay backend stopped in {clock.ElapsedMilliseconds}ms.");
         }
@@ -192,6 +200,12 @@ public sealed class ObsReplayBuffer : IReplayBuffer
         {
             AppLog.Error("OBS capture pause toggle failed", error);
         }
+    }
+
+    private void SetHealth(ReplayCaptureHealth health)
+    {
+        _health = health;
+        HealthChanged?.Invoke(this, health);
     }
 
     private void CleanupAfterFailedStart()

@@ -3036,6 +3036,19 @@ public sealed partial class MainWindow : Window
         AppLog.OpenFolder();
     }
 
+    private void ExportCaptureDiagnosticsButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var path = CaptureDiagnosticBundle.Create(_replayBuffer);
+            ExplorerService.Open(path, selectFile: true);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Capture diagnostic bundle export failed", error);
+        }
+    }
+
     private void ToggleCs2CardButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is not null) ViewModel.Cs2CardExpanded = !ViewModel.Cs2CardExpanded;

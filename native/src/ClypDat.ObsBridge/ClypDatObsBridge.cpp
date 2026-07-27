@@ -476,6 +476,19 @@ bool create_scene()
         obs.data_set_string(settings, "window", window_match.c_str());
         obs.data_set_int(settings, "priority", 2);
         trace("init: capture_mode exact " + g_game_exe_name);
+
+        // Keep WGC window capture armed beneath the Present hook. On systems
+        // where injection is rejected or the game presents through a path the
+        // hook cannot see, this gives OBS a GPU-resident non-hook source before
+        // ClypDat has to fall all the way back to Desktop Duplication.
+        obs_data_t *fallback_settings = obs.data_create();
+        obs.data_set_string(fallback_settings, "window", window_match.c_str());
+        obs.data_set_int(fallback_settings, "priority", 2);
+        obs.data_set_int(fallback_settings, "method", 2); // WGC
+        obs.data_set_bool(fallback_settings, "cursor", false);
+        g_fallback_source = obs.source_create("window_capture", "ClypDat WGC Window Fallback", fallback_settings, nullptr);
+        obs.data_release(fallback_settings);
+        trace(g_fallback_source ? "init: capture_source WGC window fallback" : "init: WGC window fallback unavailable");
     } else {
         obs.data_set_string(settings, "capture_mode", "any_fullscreen");
         trace("init: capture_mode any_fullscreen");
@@ -773,13 +786,28 @@ bool create_replay_output()
     obs.data_set_bool(v, "psycho_aq", false);
     obs.data_set_int(v, "gpu", 0);
     obs.data_set_int(v, "bf", 0);
-    g_video_encoder = obs.video_encoder_create("jim_nvenc", "ClypDat NVENC H.264", v, nullptr);
+    // Hardware availability differs by machine. NVENC-only made Auto fail on
+    // AMD/Intel systems and forced a much slower Desktop Duplication route.
+    // OBS ignores properties unsupported by a selected encoder, so one common
+    // low-latency settings object is safe for this ordered probe.
+    static constexpr const char *encoder_ids[] = {
+        "jim_nvenc",          // NVIDIA
+        "h264_texture_amf",   // AMD
+        "obs_qsv11",          // Intel
+        "obs_x264"            // CPU last resort
+    };
+    for (const char *encoder_id : encoder_ids) {
+        g_video_encoder = obs.video_encoder_create(encoder_id, "ClypDat H.264", v, nullptr);
+        if (g_video_encoder) {
+            trace("init: video_encoder " + std::string(encoder_id) + " created");
+            break;
+        }
+    }
     obs.data_release(v);
     if (!g_video_encoder) {
-        set_error(L"OBS NVENC encoder create failed. ClypDat requires NVIDIA NVENC for replay to avoid CPU capture stutter.");
+        set_error(L"OBS could not create an H.264 encoder (NVENC, AMF, QSV, or x264).");
         return false;
     }
-    trace("init: video_encoder jim_nvenc created");
     obs.encoder_set_video(g_video_encoder, obs.get_video());
 
     if (!create_audio_encoder(0, "Game Audio")) return false;
@@ -870,7 +898,7 @@ extern "C" __declspec(dllexport) int clypdat_obs_init(const wchar_t *runtime_fol
     g_last_error.clear();
     g_runtime = runtime_folder ? runtime_folder : L"";
     g_max_height = std::clamp(max_height, 480, 2160);
-    g_frame_rate = std::clamp(frame_rate, 15, 60);
+    g_frame_rate = std::clamp(frame_rate, 15, 240);
     g_duration_seconds = std::clamp(duration_seconds, 5, 1200);
     g_chat_process_name = narrow(chat_process_name ? chat_process_name : L"");
     g_microphone_device_id = narrow(microphone_device_id ? microphone_device_id : L"");
@@ -934,11 +962,11 @@ extern "C" __declspec(dllexport) int clypdat_obs_init(const wchar_t *runtime_fol
     load_module(root, L"image-source");
     load_module(root, L"text-freetype2");
     load_module(root, L"obs-ffmpeg");
-    if (!load_module(root, L"obs-nvenc")) {
-        set_error(L"OBS NVENC module failed. Expected obs-nvenc-test.exe beside ClypDat.exe: " + nvenc_helper.wstring());
-        cleanup_obs();
-        return -5;
-    }
+    // Optional modules. create_replay_output selects first encoder that loads
+    // and creates successfully, then reports one useful error if none do.
+    load_module(root, L"obs-nvenc");
+    load_module(root, L"obs-amf");
+    load_module(root, L"obs-qsv11");
     obs.post_load_modules();
 
     auto [base_width, base_height] = primary_monitor_size();
