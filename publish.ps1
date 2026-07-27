@@ -127,8 +127,10 @@ try {
         else {
             & git show-ref --verify --quiet "refs/heads/$Target"
             if ($LASTEXITCODE -eq 0) {
-                $commit = (Invoke-Git rev-parse --verify "refs/heads/$Target^{commit}" | Select-Object -First 1).Trim()
-                Write-Host "Switching to branch $Target at commit $commit."
+                Write-Host "Fetching origin/$Target."
+                Invoke-Git fetch origin "refs/heads/$Target" | Out-Null
+                $commit = (Invoke-Git rev-parse --verify FETCH_HEAD | Select-Object -First 1).Trim()
+                Write-Host "Switching to branch $Target at fetched commit $commit."
                 Invoke-Git switch --detach $commit | Out-Null
             }
             else {
