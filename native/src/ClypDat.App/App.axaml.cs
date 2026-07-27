@@ -120,6 +120,9 @@ public sealed partial class App : Application
         if (Resources["AccentSelectedBrush"] is SolidColorBrush selectedBrush) selectedBrush.Color = BlendWith(accent, RailBackground, 0.78);
         if (Resources["AccentSelectedHoverBrush"] is SolidColorBrush selectedHoverBrush) selectedHoverBrush.Color = BlendWith(accent, RailBackground, 0.68);
         if (Resources["AccentSelectedIconBrush"] is SolidColorBrush selectedIconBrush) selectedIconBrush.Color = BlendWithWhite(accent, 0.55);
+        // Game and folder hover is intentionally darker than the selected
+        // tint, preserving hue while making selection the stronger state.
+        if (Resources["AccentGameHoverBrush"] is SolidColorBrush gameHoverBrush) gameHoverBrush.Color = BlendWith(accent, RailBackground, 0.84);
         // Hover on an unselected rail button. 0.88 (12% accent) measured as
         // indistinguishable from plain grey against the near-black rail
         // background - a light tint needs far more strength than a tint over

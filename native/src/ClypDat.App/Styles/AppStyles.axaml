@@ -719,6 +719,23 @@
        mismatch. Section rows keep the circle, which suits their glyphs. -->
   <Style Selector="Button.railGameButton">
     <Setter Property="CornerRadius" Value="12" />
+    <!-- Fluent's internal pointer-over surface ignores Button.Background and
+         turns game/folder tiles grey. This direct template keeps every
+         hover/selection tint on the tile's own Background property. -->
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="{TemplateBinding CornerRadius}">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            Padding="{TemplateBinding Padding}"
+                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
   </Style>
   <!-- Wraps a folder's header tile AND its revealed member tiles as one
        visually connected group once expanded - collapsed, it's invisible
@@ -801,19 +818,9 @@
   </Style>
   <!-- Folder tiles permanently show the same tint a loose rail icon only
        shows on hover, so a folder stands out from a loose game icon at a
-       glance - not the plain outer capsule background tried earlier, just
-       this. Has to be declared AFTER Button.railIconButton's own base/hover
-       rules above to actually win - same same-specificity-loses-to-
-       declaration-order issue documented right above for :not(ToggleSwitch).
-       Hovering it for real just dims the same tint (Opacity) rather than
-       swapping to AccentSelectedHoverBrush - that brush blends further
-       toward the dark rail background, which reads as turning grey rather
-       than a darker version of the same colour. -->
+       glance. -->
   <Style Selector="Button.railFolderHeader">
     <Setter Property="Background" Value="{StaticResource AccentHoverBrush}" />
-  </Style>
-  <Style Selector="Button.railFolderHeader:not(ToggleSwitch):pointerover">
-    <Setter Property="Opacity" Value="0.8" />
   </Style>
   <!-- Expanded, the outline capsule (Border.railFolderGroup.expanded) already
        carries its own accent border/background around the whole group - the
@@ -843,6 +850,12 @@
   <Style Selector="Button.railIconButton.active:not(ToggleSwitch):pointerover">
     <Setter Property="Background" Value="{StaticResource AccentSelectedHoverBrush}" />
   </Style>
+  <!-- Game filters and folders darken from their selected-color family when
+       hovered. This comes after generic/active rail hover rules so it wins
+       for both selected and unselected game tiles. -->
+  <Style Selector="Button.railGameButton:not(ToggleSwitch):pointerover">
+    <Setter Property="Background" Value="{StaticResource AccentGameHoverBrush}" />
+  </Style>
   <Style Selector="Button.railIconButton Border.gameInitialBadge">
     <Setter Property="Background" Value="#26323D" />
   </Style>
@@ -851,6 +864,9 @@
   </Style>
   <Style Selector="Button.railIconButton.active Border.gameInitialBadge">
     <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+  </Style>
+  <Style Selector="Button.railGameButton:pointerover Border.gameInitialBadge">
+    <Setter Property="Background" Value="{StaticResource AccentGameHoverBrush}" />
   </Style>
   <Style Selector="Button.railIconButton Border.gameInitialBadge TextBlock">
     <Setter Property="Foreground" Value="#B8C7D8" />
