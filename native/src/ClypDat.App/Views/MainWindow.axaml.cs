@@ -2654,7 +2654,7 @@ public sealed partial class MainWindow : Window
     private async void RenameAllClipsButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || !ViewModel.CanRenameAllClips) return;
-        var dialog = CreateDialog("Rename all clips?", "This renames every video in the current library to the selected filename scheme. Existing files are never overwritten.", true);
+        var dialog = CreateDialog("Rename all clips?", "This renames every video in the current library to the selected filename scheme. Existing files are never overwritten.", true, "Rename", destructive: false);
         if (!await dialog.ShowDialog<bool>(this)) return;
         await ViewModel.RenameAllClipsAsync();
     }

@@ -1291,7 +1291,7 @@
                   </Border>
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Text="Apply the current scheme to every video in this library, including imports and Full Sessions stored here." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
-                    <Button Grid.Column="1" Content="Rename all to updated scheme" Click="RenameAllClipsButton_OnClick" IsEnabled="{Binding CanRenameAllClips}" VerticalAlignment="Center" />
+                    <Button Grid.Column="1" Content="Rename" Click="RenameAllClipsButton_OnClick" IsEnabled="{Binding CanRenameAllClips}" VerticalAlignment="Center" />
                   </Grid>
                   <TextBlock Text="{Binding RenameAllClipsStatus}" Foreground="#93A6B8" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding HasRenameAllClipsStatus}" />
                 </StackPanel>
