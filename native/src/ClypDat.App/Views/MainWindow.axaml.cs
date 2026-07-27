@@ -110,8 +110,6 @@ public sealed partial class MainWindow : Window
     private double? _libraryResizeExpectedOffsetY;
     private const double ScrollToTopButtonThreshold = 320;
     private static readonly TimeSpan ScrollToTopDuration = TimeSpan.FromMilliseconds(380);
-    private DispatcherTimer? _scrollToTopTimer;
-    private double _scrollToTopStartOffsetY;
     public MainWindow()
     {
         InitializeComponent();
@@ -1152,32 +1150,44 @@ public sealed partial class MainWindow : Window
 
     private void ScrollToTopButton_OnClick(object? sender, RoutedEventArgs e) => AnimateLibraryScrollToTop();
 
-    // Manual eased Offset animation - ScrollViewer.Offset isn't a
-    // Transitions-animatable property in Avalonia, so this ticks it by hand
-    // rather than snapping straight to the top.
+    // Eased Offset animation, stepped off TopLevel.RequestAnimationFrame
+    // rather than a plain DispatcherTimer - a fixed-interval timer isn't
+    // synced to the compositor's actual frame clock (and assumes 60Hz),
+    // so its ticks drift against real vsync and the scroll reads as
+    // jittery instead of smooth. RequestAnimationFrame's callback gets the
+    // real frame timestamp, so progress tracks actual elapsed time exactly
+    // regardless of refresh rate or scheduling jitter.
+    private int _scrollToTopAnimationId;
+
     private void AnimateLibraryScrollToTop()
     {
-        _scrollToTopTimer?.Stop();
         var startOffsetY = LibraryScrollViewer.Offset.Y;
         if (startOffsetY <= 0) return;
 
-        _scrollToTopStartOffsetY = startOffsetY;
-        var clock = Stopwatch.StartNew();
-        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
-        _scrollToTopTimer = timer;
-        timer.Tick += (_, _) =>
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel is null)
         {
-            var t = Math.Min(1.0, clock.Elapsed.TotalMilliseconds / ScrollToTopDuration.TotalMilliseconds);
+            LibraryScrollViewer.Offset = new Vector(LibraryScrollViewer.Offset.X, 0);
+            return;
+        }
+
+        // Bumping this invalidates any still-running loop from a previous
+        // click (e.g. clicked again mid-animation) without needing to track
+        // or cancel the old callback directly.
+        var animationId = ++_scrollToTopAnimationId;
+        TimeSpan? startTime = null;
+
+        void Step(TimeSpan frameTime)
+        {
+            if (animationId != _scrollToTopAnimationId) return;
+            startTime ??= frameTime;
+            var t = Math.Min(1.0, (frameTime - startTime.Value).TotalMilliseconds / ScrollToTopDuration.TotalMilliseconds);
             var eased = 1 - Math.Pow(1 - t, 3);
-            var newOffsetY = _scrollToTopStartOffsetY * (1 - eased);
-            LibraryScrollViewer.Offset = new Vector(LibraryScrollViewer.Offset.X, newOffsetY);
-            if (t >= 1.0)
-            {
-                timer.Stop();
-                if (ReferenceEquals(_scrollToTopTimer, timer)) _scrollToTopTimer = null;
-            }
-        };
-        timer.Start();
+            LibraryScrollViewer.Offset = new Vector(LibraryScrollViewer.Offset.X, startOffsetY * (1 - eased));
+            if (t < 1.0) topLevel.RequestAnimationFrame(Step);
+        }
+
+        topLevel.RequestAnimationFrame(Step);
     }
 
     private void QueueLibraryResizeAnchorRestore()
