@@ -123,6 +123,7 @@ public sealed partial class App : Application
         // Game and folder hover is intentionally darker than the selected
         // tint, preserving hue while making selection the stronger state.
         if (Resources["AccentGameHoverBrush"] is SolidColorBrush gameHoverBrush) gameHoverBrush.Color = BlendWith(accent, RailBackground, 0.84);
+        if (Resources["AccentFolderBrush"] is SolidColorBrush folderBrush) folderBrush.Color = BlendWith(accent, RailBackground, 0.55);
         if (Resources["AccentHoverBrush"] is SolidColorBrush accentHoverBrush) accentHoverBrush.Color = BlendWith(accent, RailBackground, 0.84);
     }
 
