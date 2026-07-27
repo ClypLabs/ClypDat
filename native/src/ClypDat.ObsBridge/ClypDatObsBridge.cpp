@@ -967,6 +967,7 @@ extern "C" __declspec(dllexport) int clypdat_obs_init(const wchar_t *runtime_fol
     load_module(root, L"obs-nvenc");
     load_module(root, L"obs-amf");
     load_module(root, L"obs-qsv11");
+    load_module(root, L"obs-x264");
     obs.post_load_modules();
 
     auto [base_width, base_height] = primary_monitor_size();
