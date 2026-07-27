@@ -131,6 +131,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public MainWindowViewModel()
     {
         Settings = AppSettingsStore.Load();
+        Settings.ProcessPriority = ProcessPriorityService.Normalize(Settings.ProcessPriority);
+        ProcessPriorityService.Apply(Settings.ProcessPriority);
         if (!string.IsNullOrWhiteSpace(Settings.LastSettingsSection)) _selectedSettingsSection = Settings.LastSettingsSection;
         // Curated game-icons.json entries (delisted store names, curated
         // Steam app IDs like the CS:GO fix) only reach a running app through
@@ -182,6 +184,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
         ClipOverlayPositions = new ObservableCollection<string> { "Top Left", "Top Right" };
         ClipOverlayVolumes = new ObservableCollection<string> { "Low", "Medium", "High" };
+        ProcessPriorityOptions = new ObservableCollection<ProcessPriorityOption>(ProcessPriorityService.Options);
         ClipFileNameSchemes = new ObservableCollection<FileNameSchemeOption>
         {
             new("Standard", ClipFileNaming.StandardScheme),
@@ -294,6 +297,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<string> ComingSoonAutoClipGames { get; }
     public ObservableCollection<string> ClipOverlayPositions { get; }
     public ObservableCollection<string> ClipOverlayVolumes { get; }
+    public ObservableCollection<ProcessPriorityOption> ProcessPriorityOptions { get; }
     public ObservableCollection<FileNameSchemeOption> ClipFileNameSchemes { get; }
 
     public ObservableCollection<ThirdPartyLicenseEntry> ThirdPartyLicenseEntries { get; } = new()
@@ -1823,6 +1827,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged();
             SaveSettings();
             if (Settings.LaunchOnWindowsStartup) StartupService.SetLaunchOnStartup(true, value);
+        }
+    }
+
+    public string SelectedProcessPriority
+    {
+        get => Settings.ProcessPriority;
+        set
+        {
+            var normalized = ProcessPriorityService.Normalize(value);
+            if (Settings.ProcessPriority == normalized) return;
+            Settings.ProcessPriority = normalized;
+            ProcessPriorityService.Apply(normalized);
+            OnPropertyChanged();
+            SaveSettings();
         }
     }
 

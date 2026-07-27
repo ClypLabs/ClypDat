@@ -26,6 +26,11 @@ public static class AppSettingsStore
             if (settings.ReplayFrameRate <= 0) settings.ReplayFrameRate = 60;
             if (settings.ReplayMaxHeight <= 0) settings.ReplayMaxHeight = 1080;
             if (string.IsNullOrWhiteSpace(settings.ExportVideoCodec)) settings.ExportVideoCodec = "H.264";
+            settings.ProcessPriority = settings.ProcessPriority switch
+            {
+                "Idle" or "BelowNormal" or "Normal" or "AboveNormal" or "High" => settings.ProcessPriority,
+                _ => "High"
+            };
             settings.ChatAudioProcessName ??= string.Empty;
             settings.ChatAudioProcessNames ??= new List<string>();
             settings.MicrophoneDeviceIds ??= new List<string>();
