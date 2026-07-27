@@ -13,7 +13,6 @@ public sealed class GameCatalogEntry
     public string Id { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public List<int> SteamAppIds { get; set; } = new();
-    public bool AntiCheatSensitive { get; set; }
     public List<GameWindowMatcher> Matchers { get; set; } = new();
     public List<GameWindowMatcher> BlockedWindows { get; set; } = new();
 }

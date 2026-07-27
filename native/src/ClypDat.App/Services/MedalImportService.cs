@@ -301,8 +301,6 @@ public static class MedalImportService
     {
         var normalized = NormalizeForComparison(compactName);
         if (GameAliases.TryGetValue(normalized, out var alias)) return alias;
-        var known = GameCatalog.BuiltIn.Values.FirstOrDefault(value => NormalizeForComparison(value) == normalized);
-        if (!string.IsNullOrWhiteSpace(known)) return known;
         return Regex.Replace(compactName, @"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ").Trim();
     }
 

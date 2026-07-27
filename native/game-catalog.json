@@ -1,4 +1,16 @@
 {
   "schemaVersion": 1,
-  "games": []
+  "games": [
+    {
+      "id": "FortniteClient-Win64-Shipping.exe",
+      "displayName": "Fortnite",
+      "matchers": [
+        { "executable": "FortniteBootstrapper.exe" },
+        { "executable": "FortniteLauncher.exe" },
+        { "executable": "FortniteClient-Win64-Shipping.exe" },
+        { "executable": "FortniteClient-Win64-Shipping_EAC.exe" },
+        { "executable": "FortniteClient-Win64-Shipping_EAC_EOS.exe" }
+      ]
+    }
+  ]
 }

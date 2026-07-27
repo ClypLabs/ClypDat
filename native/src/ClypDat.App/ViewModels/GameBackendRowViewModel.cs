@@ -7,19 +7,17 @@ public sealed class GameBackendRowViewModel : ViewModelBase
     private ReplayBackendPreset? _selectedBackend;
     private bool _isVisible = true;
 
-    public GameBackendRowViewModel(string executableName, string displayName, bool isCustom, bool isAntiCheatSensitive, ReplayBackendPreset selectedBackend)
+    public GameBackendRowViewModel(string executableName, string displayName, bool isCustom, ReplayBackendPreset selectedBackend)
     {
         ExecutableName = executableName;
         DisplayName = displayName;
         IsCustom = isCustom;
-        IsAntiCheatSensitive = isAntiCheatSensitive;
         _selectedBackend = selectedBackend;
     }
 
     public string ExecutableName { get; }
     public string DisplayName { get; }
     public bool IsCustom { get; }
-    public bool IsAntiCheatSensitive { get; }
 
     // The search box hides non-matching rows by toggling this instead of removing
     // them from the bound collection - removing and later re-inserting a row tore
@@ -40,15 +38,6 @@ public sealed class GameBackendRowViewModel : ViewModelBase
         set
         {
             if (!SetProperty(ref _selectedBackend, value)) return;
-            OnPropertyChanged(nameof(ShowAntiCheatWarning));
         }
     }
-
-    // Only OBS's process-hook capture is actually at risk from anti-cheat (it can
-    // get blocked, or the game's anti-cheat can close the game outright) - Legacy
-    // (Windows Capture) and ClypDat (Native) never hook the game process, so they're
-    // both anti-cheat-safe and don't need this warning.
-    public bool ShowAntiCheatWarning => IsAntiCheatSensitive &&
-        SelectedBackend is not null &&
-        string.Equals(SelectedBackend.Value, "Obs", StringComparison.OrdinalIgnoreCase);
 }
