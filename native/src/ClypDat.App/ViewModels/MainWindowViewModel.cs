@@ -5170,6 +5170,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // it's "the only content".
     public bool IsSettingsSearchActive => !string.IsNullOrWhiteSpace(SettingsSearchText);
 
+    private bool _showScrollToTopButton;
+
+    // Toggled by MainWindow.axaml.cs's LibraryScrollViewer_OnScrollChanged
+    // once the user has scrolled far enough down for a jump-to-top shortcut
+    // to be worth showing.
+    public bool ShowScrollToTopButton { get => _showScrollToTopButton; set => SetProperty(ref _showScrollToTopButton, value); }
+
     private string _librarySearchText = string.Empty;
 
     // Free-text search across a clip's own title and game name - narrows the

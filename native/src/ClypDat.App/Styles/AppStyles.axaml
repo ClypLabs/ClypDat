@@ -471,6 +471,30 @@
        caption buttons (ExtendClientAreaChromeHints="NoChrome" on
        MainWindow removes those), matching Fluent's ~46x32 caption button
        proportions. -->
+  <!-- Floating circular "back to top" button over the Library grid - Width
+       == Height with CornerRadius at half that renders a true circle off
+       the default Button template, same trick used by the sidebar's
+       icon-only rail buttons. -->
+  <Style Selector="Button.scrollToTopButton">
+    <Setter Property="Width" Value="40" />
+    <Setter Property="Height" Value="40" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="20" />
+    <Setter Property="Background" Value="#DC1E2733" />
+    <Setter Property="BorderBrush" Value="#2A3640" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Button.scrollToTopButton:pointerover">
+    <Setter Property="Background" Value="#E8283645" />
+  </Style>
+
   <Style Selector="Button.windowChromeButton">
     <!-- Zero-alpha hover color rather than Transparent, so the transition
          doesn't interpolate through white on unhover (see settingsNavButton).
