@@ -1981,7 +1981,7 @@ public sealed partial class MainWindow : Window
     private Flyout? _changeGameFlyout;
     private MenuItem? _changeGameMenuItem;
     private Control? _changeGameFlyoutContent;
-    private bool _changeGameFlyoutReady;
+    private DispatcherTimer? _changeGameFlyoutHoverTimer;
 
     // Since Change Game opens on hover rather than a click, hovering any
     // OTHER row in the same context menu needs to close it too - otherwise
@@ -1997,25 +1997,83 @@ public sealed partial class MainWindow : Window
         _changeGameFlyout?.Hide();
     }
 
-    // Keep the submenu open while crossing its trigger row and popup, but
-    // close it as soon as the pointer leaves both. Delay the check until the
-    // current pointer transition finishes so moving from the row into the
-    // popup does not close it between PointerExited and PointerEntered.
-    private void ChangeGameFlyoutArea_OnPointerExited(object? sender, PointerEventArgs e)
+    // A Flyout lives on a separate popup surface and captures pointer input,
+    // so neither the trigger row nor sibling menu rows reliably receive
+    // leave/enter events while it is open. Poll the screen cursor while this
+    // one flyout is visible instead; both controls can always report their
+    // screen bounds regardless of the popup's input routing.
+    private void StartChangeGameFlyoutHoverTracking()
     {
-        // Showing a popup itself makes the anchor report PointerExited.
-        // Ignore that synthetic transition; real leave events start after
-        // the popup has completed opening.
-        if (!_changeGameFlyoutReady) return;
-
-        Dispatcher.UIThread.Post(() =>
+        _changeGameFlyoutHoverTimer ??= new DispatcherTimer
         {
-            if (_changeGameFlyout is null) return;
-            if (_changeGameMenuItem?.IsPointerOver == true) return;
-            if (_changeGameFlyoutContent?.IsPointerOver == true) return;
+            Interval = TimeSpan.FromMilliseconds(30)
+        };
+        _changeGameFlyoutHoverTimer.Tick -= ChangeGameFlyoutHoverTimer_OnTick;
+        _changeGameFlyoutHoverTimer.Tick += ChangeGameFlyoutHoverTimer_OnTick;
+        _changeGameFlyoutHoverTimer.Start();
+    }
 
-            _changeGameFlyout.Hide();
-        }, DispatcherPriority.Background);
+    private void StopChangeGameFlyoutHoverTracking()
+    {
+        _changeGameFlyoutHoverTimer?.Stop();
+    }
+
+    private void ChangeGameFlyoutHoverTimer_OnTick(object? sender, EventArgs e)
+    {
+        if (_changeGameFlyout is null)
+        {
+            StopChangeGameFlyoutHoverTracking();
+            return;
+        }
+
+        if (!GetCursorPos(out var cursor)) return;
+        if (!IsCursorOverChangeGameFlyout(cursor)) _changeGameFlyout.Hide();
+    }
+
+    private bool IsCursorOverChangeGameFlyout(CursorPoint cursor)
+    {
+        if (_changeGameMenuItem is null || _changeGameFlyoutContent is null) return false;
+        if (!TryGetScreenBounds(_changeGameMenuItem, out var rowTopLeft, out var rowBottomRight)) return false;
+
+        if (IsCursorWithin(cursor, rowTopLeft, rowBottomRight)) return true;
+        if (!TryGetScreenBounds(_changeGameFlyoutContent, out var flyoutTopLeft, out var flyoutBottomRight)) return false;
+
+        // Includes the presenter's border/padding around the ScrollViewer.
+        const int flyoutPadding = 8;
+        if (IsCursorWithin(cursor, flyoutTopLeft, flyoutBottomRight, flyoutPadding)) return true;
+
+        // Keep a narrow bridge across the intentional placement offset, so
+        // crossing from the parent row into the submenu cannot dismiss it.
+        var bridgeLeft = Math.Min(rowBottomRight.X, flyoutTopLeft.X - flyoutPadding);
+        var bridgeRight = Math.Max(rowBottomRight.X, flyoutTopLeft.X - flyoutPadding);
+        var bridgeTop = Math.Max(rowTopLeft.Y, flyoutTopLeft.Y - flyoutPadding);
+        var bridgeBottom = Math.Min(rowBottomRight.Y, flyoutBottomRight.Y + flyoutPadding);
+        return cursor.X >= bridgeLeft && cursor.X < bridgeRight
+               && cursor.Y >= bridgeTop && cursor.Y < bridgeBottom;
+    }
+
+    private static bool TryGetScreenBounds(Control control, out PixelPoint topLeft, out PixelPoint bottomRight)
+    {
+        topLeft = default;
+        bottomRight = default;
+        if (control.Bounds.Width <= 0 || control.Bounds.Height <= 0) return false;
+
+        try
+        {
+            topLeft = control.PointToScreen(new Point(0, 0));
+            bottomRight = control.PointToScreen(new Point(control.Bounds.Width, control.Bounds.Height));
+            return bottomRight.X > topLeft.X && bottomRight.Y > topLeft.Y;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsCursorWithin(CursorPoint cursor, PixelPoint topLeft, PixelPoint bottomRight, int padding = 0)
+    {
+        return cursor.X >= topLeft.X - padding && cursor.X < bottomRight.X + padding
+               && cursor.Y >= topLeft.Y - padding && cursor.Y < bottomRight.Y + padding;
     }
 
     private void ClipContextSetGame_OnPointerEntered(object? sender, PointerEventArgs e)
@@ -2026,7 +2084,11 @@ public sealed partial class MainWindow : Window
         _changeGameFlyout?.Hide();
         _changeGameMenuItem = menuItem;
 
-        var flyout = new Flyout { Placement = Avalonia.Controls.PlacementMode.RightEdgeAlignedTop };
+        var flyout = new Flyout
+        {
+            Placement = Avalonia.Controls.PlacementMode.RightEdgeAlignedTop,
+            HorizontalOffset = 8
+        };
         _changeGameFlyout = flyout;
         flyout.Closed += (_, _) =>
         {
@@ -2035,7 +2097,7 @@ public sealed partial class MainWindow : Window
                 _changeGameFlyout = null;
                 _changeGameMenuItem = null;
                 _changeGameFlyoutContent = null;
-                _changeGameFlyoutReady = false;
+                StopChangeGameFlyoutHoverTracking();
             }
         };
 
@@ -2067,15 +2129,11 @@ public sealed partial class MainWindow : Window
         }
 
         var flyoutContent = new ScrollViewer { MaxHeight = 320, Content = list };
-        flyoutContent.PointerExited += ChangeGameFlyoutArea_OnPointerExited;
         _changeGameFlyoutContent = flyoutContent;
         flyout.Content = flyoutContent;
 
         flyout.ShowAt(menuItem);
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (_changeGameFlyout == flyout) _changeGameFlyoutReady = true;
-        }, DispatcherPriority.Background);
+        StartChangeGameFlyoutHoverTracking();
     }
 
     private async Task ChangeClipGameAsync(ClipCardViewModel clip, string? gameName)
