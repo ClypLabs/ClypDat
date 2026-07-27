@@ -1860,7 +1860,7 @@
                  would visibly bleed out over the pan-slider/track panel
                  instead of just filling this pane. -->
             <Grid x:Name="EditorVideoHost" Grid.Column="0" ClipToBounds="True" PointerWheelChanged="VideoHost_OnPointerWheelChanged">
-              <vlc:VideoView x:Name="EditorVideoView"
+              <controls:ClickableVideoView x:Name="EditorVideoView"
                               IsVisible="{Binding IsEditorVideoAreaVisible}"
                               RenderTransformOrigin="0.5,0.5">
                 <!-- Same EditorVideoView instance gets reparented into
@@ -1869,7 +1869,7 @@
                      of this element, so it travels with it either way; only
                      MainWindow.axaml.cs's UpdateVideoTransform needs to know
                      which host is current (for the pan-range math). -->
-                <vlc:VideoView.RenderTransform>
+                <controls:ClickableVideoView.RenderTransform>
                   <!-- Retrieved by index in UpdateVideoTransform (code-behind) -
                        x:Name on a Transform nested this deep doesn't generate a
                        field the way a named Control does. -->
@@ -1877,8 +1877,8 @@
                     <ScaleTransform ScaleX="1" ScaleY="1" />
                     <TranslateTransform Y="0" />
                   </TransformGroup>
-                </vlc:VideoView.RenderTransform>
-              </vlc:VideoView>
+                </controls:ClickableVideoView.RenderTransform>
+              </controls:ClickableVideoView>
               <TextBlock Text="Loading"
                          Foreground="#93A6B8"
                          FontSize="16"

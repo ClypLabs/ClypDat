@@ -111,6 +111,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        EditorVideoView.VideoClicked += (_, _) => PlayPauseButton_OnClick(this, new RoutedEventArgs());
         // ApplySavedWindowBounds can restore straight into Maximized, which
         // won't raise an OffScreenMargin change of its own.
         RootLayout.Margin = OffScreenMargin;
@@ -155,19 +156,7 @@ public sealed partial class MainWindow : Window
                     if (e.PropertyName == nameof(MainWindowViewModel.AutoClippingEnabled)) UpdateAutoClipStates();
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayBufferEnabled)) _ = ApplyReplayBufferEnabledAsync();
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
-                    if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY))
-                    {
-                        UpdateVideoTransform();
-                        // The click-catcher tracks EditorVideoView's on-screen
-                        // rect, which a zoom/pan RenderTransform changes -
-                        // without this it stayed sized/positioned for
-                        // whatever zoom level was active when it was last
-                        // shown, so clicks after zooming/panning could land
-                        // outside its (now stale) bounds and silently do
-                        // nothing.
-                        if (_videoClickCatcher is { IsVisible: true }) UpdateVideoClickCatcher();
-                    }
-                    if (e.PropertyName is nameof(MainWindowViewModel.IsEditorVisible) or nameof(MainWindowViewModel.IsEditorVideoAreaVisible)) UpdateVideoClickCatcher();
+                    if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
                     if (e.PropertyName == nameof(MainWindowViewModel.IsRestoringLibraryCache) && !ViewModel.IsRestoringLibraryCache)
                     {
                         // Adding cached cards in low-priority batches grows the
@@ -246,7 +235,7 @@ public sealed partial class MainWindow : Window
             _playback?.Dispose();
             _recordingPausedOverlay?.Close();
             _editorHoverControlsWindow?.Close();
-            _videoClickCatcher?.Dispose();
+            EditorVideoView.DisposeClickHandling();
             ViewModel?.Dispose();
         };
         AddHandler(PointerPressedEvent, VolumeSlider_OnPointerPressedAny, RoutingStrategies.Tunnel, true);
@@ -2879,6 +2868,7 @@ public sealed partial class MainWindow : Window
         // black). The control's MediaPlayer is never touched here.
         EditorVideoHost.Children.Remove(EditorVideoView);
         FullscreenVideoHost.Children.Add(EditorVideoView);
+        Dispatcher.UIThread.Post(EditorVideoView.RefreshClickHook, DispatcherPriority.Loaded);
         AppLog.Info("Video fullscreen entered: EditorVideoView reparented into FullscreenVideoHost.");
     }
 
@@ -2929,6 +2919,7 @@ public sealed partial class MainWindow : Window
 
         FullscreenVideoHost.Children.Remove(EditorVideoView);
         EditorVideoHost.Children.Insert(0, EditorVideoView);
+        Dispatcher.UIThread.Post(EditorVideoView.RefreshClickHook, DispatcherPriority.Loaded);
         AppLog.Info("Video fullscreen exited: EditorVideoView reparented back into EditorVideoHost.");
     }
 
@@ -4742,6 +4733,7 @@ public sealed partial class MainWindow : Window
             _recordingPausedOverlay?.Hide();
             AppLog.Info($"Editor open: {ViewModel.SelectedVideoPath}");
             EditorVideoView.MediaPlayer = playback.VideoPlayer;
+            EditorVideoView.WatchMediaPlayer(playback.VideoPlayer);
             var audioTracks = ViewModel.TimelineTracks
                 .Where(track => track.IsAudio)
                 .Select(track => new AudioPreviewTrack(track.StreamIndex, track.VolumePercent))
@@ -4884,6 +4876,7 @@ public sealed partial class MainWindow : Window
         {
             _playback?.Stop();
         }
+        EditorVideoView.WatchMediaPlayer(null);
         EditorVideoView.MediaPlayer = null;
         _recordingPausedOverlay?.Hide();
         HideEditorHoverControls(immediate: true);
@@ -4938,49 +4931,6 @@ public sealed partial class MainWindow : Window
 
     private sealed record PausedRangeEntry(double start, double end);
 
-    // LibVLC's native HWND renders above Avalonia siblings. This click surface
-    // uses a native layered HWND with alpha 1/255, not an Avalonia transparent
-    // window: the latter can become click-through or paint grey on some GPUs.
-    private VideoClickCatcher? _videoClickCatcher;
-    private bool _videoClickCatcherFailed;
-    private const double VideoClickCatcherBottomReserve = 78;
-
-    private void UpdateVideoClickCatcher()
-    {
-        var shouldShow = ViewModel is { IsEditorVisible: true, IsEditorVideoAreaVisible: true };
-        if (!shouldShow)
-        {
-            _videoClickCatcher?.Hide();
-            return;
-        }
-        if (_videoClickCatcherFailed || TryGetPlatformHandle()?.Handle == IntPtr.Zero) return;
-
-        try
-        {
-            var topLeft = EditorVideoView.PointToScreen(new Point(0, 0));
-            var bottomRight = EditorVideoView.PointToScreen(new Point(EditorVideoView.Bounds.Width, EditorVideoView.Bounds.Height));
-            var reserve = (int)Math.Ceiling(VideoClickCatcherBottomReserve * RenderScaling);
-            var size = new PixelSize(
-                Math.Max(1, bottomRight.X - topLeft.X),
-                Math.Max(1, bottomRight.Y - topLeft.Y - reserve));
-            _videoClickCatcher ??= CreateVideoClickCatcher();
-            _videoClickCatcher.Show(topLeft, size);
-        }
-        catch (Exception error)
-        {
-            _videoClickCatcher?.Hide();
-            _videoClickCatcherFailed = true;
-            AppLog.Error("Editor video click surface unavailable", error);
-        }
-    }
-
-    private VideoClickCatcher CreateVideoClickCatcher()
-    {
-        var catcher = new VideoClickCatcher(this);
-        catcher.Clicked += (_, _) => PlayPauseButton_OnClick(this, new RoutedEventArgs());
-        return catcher;
-    }
-
     // A plain in-tree Border never actually rendered over the video because
     // LibVLCSharp's VideoView is backed by a native (non-Avalonia) hwnd
     // surface on Windows, which always paints above sibling Avalonia visuals
@@ -5019,8 +4969,16 @@ public sealed partial class MainWindow : Window
                 }
             }
         };
+        overlay.AddHandler(PointerPressedEvent, RecordingPausedOverlay_OnPointerPressed, RoutingStrategies.Tunnel);
         _recordingPausedOverlay = overlay;
         return overlay;
+    }
+
+    private void RecordingPausedOverlay_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is not Window overlay || !e.GetCurrentPoint(overlay).Properties.IsLeftButtonPressed) return;
+        e.Handled = true;
+        PlayPauseButton_OnClick(this, new RoutedEventArgs());
     }
 
     private void UpdateRecordingPausedOverlay(bool shouldShow)
@@ -5059,13 +5017,11 @@ public sealed partial class MainWindow : Window
         {
             if (_recordingPausedOverlay is { IsVisible: true } overlay) RepositionPausedOverlay(overlay);
             if (_editorHoverControlsWindow is { IsVisible: true } hoverBar) RepositionEditorHoverControls(hoverBar);
-            if (_videoClickCatcher is { IsVisible: true }) UpdateVideoClickCatcher();
         };
         EditorVideoView.LayoutUpdated += (_, _) =>
         {
             if (_recordingPausedOverlay is { IsVisible: true } overlay) RepositionPausedOverlay(overlay);
             if (_editorHoverControlsWindow is { IsVisible: true } hoverBar) RepositionEditorHoverControls(hoverBar);
-            if (_videoClickCatcher is { IsVisible: true }) UpdateVideoClickCatcher();
             // Covers window resize AND the fullscreen reparent (both change
             // EditorVideoView's rendered height, which the pan-range math
             // depends on) without needing separate handlers for each.
