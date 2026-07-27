@@ -80,6 +80,32 @@ jobs:
             Copy-Item native\src\ClypDat.ObsBridge\bin\x64\Release\ClypDat.ObsBridge.dll native\publish\win-x64-folder\obs\ClypDat.ObsBridge.dll -Force
           }
 
+      - name: Verify OBS capture runtime
+        shell: pwsh
+        run: |
+          $required = @(
+            "obs\bin\64bit\obs.dll",
+            "obs\bin\64bit\libobs-d3d11.dll",
+            "obs\bin\64bit\obs-ffmpeg-mux.exe",
+            "obs\bin\64bit\avfilter-10.dll",
+            "obs\bin\64bit\obs-nvenc-test.exe",
+            "obs\bin\64bit\obs-qsv-test.exe",
+            "obs\bin\64bit\obs-amf-test.exe",
+            "obs\obs-plugins\64bit\win-capture.dll",
+            "obs\obs-plugins\64bit\win-wasapi.dll",
+            "obs\obs-plugins\64bit\obs-ffmpeg.dll",
+            "obs\obs-plugins\64bit\obs-nvenc.dll",
+            "obs\data\obs-plugins\win-capture\graphics-hook64.dll",
+            "obs\data\obs-plugins\win-capture\inject-helper64.exe",
+            "obs-nvenc-test.exe",
+            "obs-qsv-test.exe",
+            "obs-amf-test.exe"
+          )
+          foreach ($relativePath in $required) {
+            $path = Join-Path "native\publish\win-x64-folder" $relativePath
+            if (-not (Test-Path -LiteralPath $path)) { throw "Missing OBS runtime file: $path" }
+          }
+
       - name: Trim non-Windows runtime assets
         shell: pwsh
         run: |

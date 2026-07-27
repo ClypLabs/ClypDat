@@ -5,20 +5,13 @@ using System.Runtime.Versioning;
 namespace ClypDat.App.Services;
 
 [SupportedOSPlatform("windows")]
-public sealed class ObsReplayBuffer : IReplayBuffer
+public sealed class ObsReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics
 {
-    // OBS's game_capture source has to inject a hook into the target process
-    // and wait for it to report frames before real (non-black) video is
-    // available; this is a real, observed OBS behaviour (not something ClypDat
-    // controls) and can take up to ~30s depending on the game. A clip saved
-    // before the hook has attached is silently all-black, so warn instead of
-    // returning a ruined clip.
-    private static readonly TimeSpan HookWarmup = TimeSpan.FromSeconds(30);
-
     private readonly Func<ReplayBufferConfig> _configProvider;
-    private readonly ObsNativeBridge _bridge = new();
+    private readonly ObsBridgeWorker _worker = new();
     private bool _initialized;
-    private DateTime _startedAtUtc;
+    private Timer? _healthTimer;
+    private ReplayCaptureHealth _health = ReplayCaptureHealth.Unknown("OBS");
 
     public ObsReplayBuffer(Func<ReplayBufferConfig> configProvider)
     {
@@ -28,10 +21,13 @@ public sealed class ObsReplayBuffer : IReplayBuffer
     public bool IsRecording { get; private set; }
     public TimeSpan Duration { get; private set; } = TimeSpan.FromSeconds(60);
     public event EventHandler? RecordingStopped;
+    public event EventHandler<ReplayCaptureHealth>? HealthChanged;
 
-    public Task StartAsync(CancellationToken cancellationToken = default)
+    public ReplayCaptureHealth GetHealthSnapshot() => _health;
+
+    public async Task StartAsync(CancellationToken cancellationToken = default)
     {
-        if (IsRecording) return Task.CompletedTask;
+        if (IsRecording) return;
         if (!ObsRuntimeLocator.IsAvailable(out var runtime, out var reason))
         {
             throw new InvalidOperationException(reason);
@@ -45,39 +41,46 @@ public sealed class ObsReplayBuffer : IReplayBuffer
         AppLog.Info($"OBS replay backend starting: pid={Environment.ProcessId}, process={process.ProcessName}, runtime={runtime.RootFolder}, maxHeight={config.MaxHeight}, fps={config.FrameRate}, duration={Duration.TotalSeconds:0}s, game={config.GameExecutableName}, chat={chatAudioProcessName}, mic={config.MicrophoneDeviceName}.");
         try
         {
-            _bridge.Initialize(
-                runtime.RootFolder,
-                config.MaxHeight,
-                config.FrameRate,
-                (int)Duration.TotalSeconds,
-                chatAudioProcessName,
-                microphoneDeviceId,
-                config.GameExecutableName,
-                config.GameWindowTitle,
-                config.GameWindowClass,
-                config.GameDisplayName);
+            var encoder = await _worker.InvokeAsync(bridge =>
+            {
+                bridge.Initialize(
+                    runtime.RootFolder,
+                    config.MaxHeight,
+                    config.FrameRate,
+                    (int)Duration.TotalSeconds,
+                    chatAudioProcessName,
+                    microphoneDeviceId,
+                    config.GameExecutableName,
+                    config.GameWindowTitle,
+                    config.GameWindowClass,
+                    config.GameDisplayName);
+                bridge.StartReplayCapture();
+                return bridge.GetActiveEncoder();
+            }).WaitAsync(cancellationToken);
             _initialized = true;
-            _bridge.StartReplayCapture();
             IsRecording = true;
-            _startedAtUtc = DateTime.UtcNow;
+            SetHealth(new ReplayCaptureHealth("OBS", "Game hook", ReplayCaptureState.Starting,
+                config.FrameRate, 0, 0, 0, 0, 0, 0, encoder, string.Empty,
+                "Waiting for game hook frames.", DateTime.UtcNow));
+            _healthTimer = new Timer(_ => _ = RefreshHealthAsync(), null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
             AppLog.Info("OBS replay backend started.");
         }
         catch
         {
-            CleanupAfterFailedStart();
+            await CleanupAfterFailedStartAsync();
             throw;
         }
-
-        return Task.CompletedTask;
     }
 
-    public Task StopAsync(CancellationToken cancellationToken = default)
+    public async Task StopAsync(CancellationToken cancellationToken = default)
     {
-        if (!IsRecording && !_initialized) return Task.CompletedTask;
+        if (!IsRecording && !_initialized) return;
+        _healthTimer?.Dispose();
+        _healthTimer = null;
         var clock = Stopwatch.StartNew();
         try
         {
-            if (IsRecording) _bridge.Stop();
+            if (IsRecording) await _worker.InvokeAsync(bridge => bridge.Stop()).WaitAsync(cancellationToken);
         }
         catch (Exception error)
         {
@@ -86,7 +89,7 @@ public sealed class ObsReplayBuffer : IReplayBuffer
 
         try
         {
-            if (_initialized) _bridge.Shutdown();
+            if (_initialized) await _worker.InvokeAsync(bridge => bridge.Shutdown()).WaitAsync(cancellationToken);
         }
         catch (Exception error)
         {
@@ -96,24 +99,24 @@ public sealed class ObsReplayBuffer : IReplayBuffer
         {
             IsRecording = false;
             _initialized = false;
+            SetHealth(_health with { State = ReplayCaptureState.Stopped, UpdatedUtc = DateTime.UtcNow });
             RecordingStopped?.Invoke(this, EventArgs.Empty);
             AppLog.Info($"OBS replay backend stopped in {clock.ElapsedMilliseconds}ms.");
         }
 
-        return Task.CompletedTask;
     }
 
     public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null)
     {
         if (!IsRecording) throw new InvalidOperationException("OBS replay buffer is not running.");
-        var warmupRemaining = HookWarmup - (DateTime.UtcNow - _startedAtUtc);
-        if (warmupRemaining > TimeSpan.Zero)
+        var capturePath = await _worker.InvokeAsync(bridge => bridge.GetCapturePath()).WaitAsync(cancellationToken);
+        if (capturePath == ObsCapturePath.NoFrames)
         {
-            throw new InvalidOperationException($"OBS is still hooking into the game, the clip would come out black. Try again in {Math.Ceiling(warmupRemaining.TotalSeconds):0}s.");
+            throw new InvalidOperationException("OBS has not received game or window frames yet.");
         }
 
         Directory.CreateDirectory(outputFolder);
-        var output = _bridge.SaveReplay(outputFolder);
+        var output = await _worker.InvokeAsync(bridge => bridge.SaveReplay(outputFolder)).WaitAsync(cancellationToken);
         if (string.IsNullOrWhiteSpace(output)) throw new InvalidOperationException("OBS replay backend returned no output path.");
         AppLog.Info($"OBS replay saved: {output}.");
 
@@ -184,9 +187,20 @@ public sealed class ObsReplayBuffer : IReplayBuffer
     public void SetCapturePaused(bool paused)
     {
         if (!IsRecording) return;
+        _ = SetCapturePausedAsync(paused);
+    }
+
+    private void SetHealth(ReplayCaptureHealth health)
+    {
+        _health = health;
+        HealthChanged?.Invoke(this, health);
+    }
+
+    private async Task SetCapturePausedAsync(bool paused)
+    {
         try
         {
-            _bridge.SetCapturePaused(paused);
+            await _worker.InvokeAsync(bridge => bridge.SetCapturePaused(paused));
         }
         catch (Exception error)
         {
@@ -194,11 +208,11 @@ public sealed class ObsReplayBuffer : IReplayBuffer
         }
     }
 
-    private void CleanupAfterFailedStart()
+    private async Task CleanupAfterFailedStartAsync()
     {
         try
         {
-            _bridge.Stop();
+            await _worker.InvokeAsync(bridge => bridge.Stop());
         }
         catch (Exception error)
         {
@@ -207,7 +221,7 @@ public sealed class ObsReplayBuffer : IReplayBuffer
 
         try
         {
-            if (_initialized) _bridge.Shutdown();
+            await _worker.InvokeAsync(bridge => bridge.Shutdown());
         }
         catch (Exception error)
         {
@@ -220,8 +234,29 @@ public sealed class ObsReplayBuffer : IReplayBuffer
         }
     }
 
+    private async Task RefreshHealthAsync()
+    {
+        if (!IsRecording) return;
+        try
+        {
+            var status = await _worker.InvokeAsync(bridge => (bridge.GetCapturePath(), bridge.GetActiveEncoder()));
+            var (path, state, message) = status.Item1 switch
+            {
+                ObsCapturePath.GameHook => ("Game hook", ReplayCaptureState.Healthy, string.Empty),
+                ObsCapturePath.WindowFallback => ("Window fallback", ReplayCaptureState.Degraded, "Game hook unavailable; OBS window fallback is capturing."),
+                _ => ("OBS", ReplayCaptureState.Starting, "Waiting for game or window frames.")
+            };
+            SetHealth(_health with { CaptureMode = path, State = state, Encoder = status.Item2, LastFailure = message, UpdatedUtc = DateTime.UtcNow });
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("OBS capture health query failed", error);
+        }
+    }
+
     public void Dispose()
     {
         StopAsync().GetAwaiter().GetResult();
+        _worker.Dispose();
     }
 }

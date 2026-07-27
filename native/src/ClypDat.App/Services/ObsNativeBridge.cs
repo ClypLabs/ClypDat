@@ -58,6 +58,15 @@ public sealed class ObsNativeBridge
         clypdat_obs_shutdown();
     }
 
+    public ObsCapturePath GetCapturePath() => (ObsCapturePath)Math.Clamp(clypdat_obs_capture_status(), 0, 2);
+
+    public string GetActiveEncoder()
+    {
+        var buffer = new StringBuilder(128);
+        clypdat_obs_active_encoder(buffer, buffer.Capacity);
+        return buffer.ToString();
+    }
+
     private static void ThrowIfFailed(int result)
     {
         if (result == 0) return;
@@ -111,6 +120,19 @@ public sealed class ObsNativeBridge
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     private static extern void clypdat_obs_shutdown();
 
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int clypdat_obs_capture_status();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+    private static extern void clypdat_obs_active_encoder(StringBuilder encoder, int encoderLength);
+
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
     private static extern void clypdat_obs_last_error(StringBuilder message, int messageLength);
+}
+
+public enum ObsCapturePath
+{
+    NoFrames,
+    WindowFallback,
+    GameHook
 }
