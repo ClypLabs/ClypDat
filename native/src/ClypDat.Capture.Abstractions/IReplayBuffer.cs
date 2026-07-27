@@ -32,6 +32,10 @@ public sealed record ReplayCaptureHealth(
     string LastFailure,
     DateTime UpdatedUtc)
 {
+    public long TotalDroppedFrames { get; init; }
+    public int PeakQueueDepth { get; init; }
+    public DateTime? LastDegradedUtc { get; init; }
+
     public static ReplayCaptureHealth Unknown(string backend = "Unknown") => new(
         backend, "Unknown", ReplayCaptureState.Unknown, 0, 0, 0, 0, 0, 0, 0, string.Empty, string.Empty, string.Empty, DateTime.UtcNow);
 }

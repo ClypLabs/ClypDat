@@ -87,9 +87,19 @@ jobs:
             "obs\bin\64bit\obs.dll",
             "obs\bin\64bit\libobs-d3d11.dll",
             "obs\bin\64bit\obs-ffmpeg-mux.exe",
+            "obs\bin\64bit\avfilter-10.dll",
+            "obs\bin\64bit\obs-nvenc-test.exe",
+            "obs\bin\64bit\obs-qsv-test.exe",
+            "obs\bin\64bit\obs-amf-test.exe",
             "obs\obs-plugins\64bit\win-capture.dll",
             "obs\obs-plugins\64bit\win-wasapi.dll",
-            "obs\obs-plugins\64bit\obs-ffmpeg.dll"
+            "obs\obs-plugins\64bit\obs-ffmpeg.dll",
+            "obs\obs-plugins\64bit\obs-nvenc.dll",
+            "obs\data\obs-plugins\win-capture\graphics-hook64.dll",
+            "obs\data\obs-plugins\win-capture\inject-helper64.exe",
+            "obs-nvenc-test.exe",
+            "obs-qsv-test.exe",
+            "obs-amf-test.exe"
           )
           foreach ($relativePath in $required) {
             $path = Join-Path "native\publish\win-x64-folder" $relativePath
