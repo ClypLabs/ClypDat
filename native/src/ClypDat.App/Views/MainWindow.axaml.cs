@@ -2090,8 +2090,10 @@ public sealed partial class MainWindow : Window
             HorizontalOffset = 8
         };
         _changeGameFlyout = flyout;
+        if (!menuItem.Classes.Contains("changeGameMenuItemOpen")) menuItem.Classes.Add("changeGameMenuItemOpen");
         flyout.Closed += (_, _) =>
         {
+            menuItem.Classes.Remove("changeGameMenuItemOpen");
             if (_changeGameFlyout == flyout)
             {
                 _changeGameFlyout = null;
@@ -2140,9 +2142,7 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null) return;
 
-        // Only the Medal imports of a mixed selection - a ClypDat capture's
-        // game came from detection and isn't corrected here.
-        var selected = ViewModel.AllClips.Where(item => item.IsSelected && item.CanChangeGame).ToArray();
+        var selected = ViewModel.AllClips.Where(item => item.IsSelected).ToArray();
         var targets = clip.IsSelected && selected.Length > 1 ? selected : new[] { clip };
 
         if (gameName is null)

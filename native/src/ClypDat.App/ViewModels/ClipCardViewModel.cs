@@ -204,11 +204,10 @@ public sealed class ClipCardViewModel : ViewModelBase
         set => SetProperty(ref _setGameActionLabel, value);
     }
 
-    // Medal imports only: their game comes from Medal's own folder/filename
-    // and is regularly wrong or unparseable, where a ClypDat capture's game
-    // came from detection at record time and belongs to the game-detection
-    // settings rather than a per-clip fix.
-    public bool CanChangeGame => IsMedalImport;
+    // Any clip can be filed under a different game from its context menu.
+    // This is especially useful for imports and captures made while game
+    // detection was unavailable or selected the wrong process.
+    public bool CanChangeGame => true;
 
     private string _renameActionLabel = "Rename";
 
