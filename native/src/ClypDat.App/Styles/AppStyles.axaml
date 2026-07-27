@@ -471,28 +471,48 @@
        caption buttons (ExtendClientAreaChromeHints="NoChrome" on
        MainWindow removes those), matching Fluent's ~46x32 caption button
        proportions. -->
-  <!-- Floating circular "back to top" button over the Library grid - Width
-       == Height with CornerRadius at half that renders a true circle off
-       the default Button template, same trick used by the sidebar's
-       icon-only rail buttons. -->
+  <!-- Floating "back to top" button over the Library grid - a rounded
+       square matching the settingsCard/settingsInput corner language used
+       everywhere else in the app, not a plain circle. -->
   <Style Selector="Button.scrollToTopButton">
-    <Setter Property="Width" Value="40" />
-    <Setter Property="Height" Value="40" />
+    <Setter Property="Width" Value="46" />
+    <Setter Property="Height" Value="46" />
     <Setter Property="Padding" Value="0" />
-    <Setter Property="CornerRadius" Value="20" />
-    <Setter Property="Background" Value="#DC1E2733" />
-    <Setter Property="BorderBrush" Value="#2A3640" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Background" Value="#EE141D24" />
+    <Setter Property="BorderBrush" Value="#232F3A" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
+    <!-- Fluent's default Button template owns pointerover/content-alignment
+         behavior through its own internal template parts, which ignore
+         plain instance Background/alignment setters no matter the selector
+         specificity - same root cause already worked around for
+         railIconButton/railGameButton. A flat custom template here means
+         OUR Background/CornerRadius/content-alignment setters are what
+         actually render, full stop. -->
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="{TemplateBinding CornerRadius}">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                            Padding="{TemplateBinding Padding}"
+                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
     <Setter Property="Transitions">
       <Transitions>
         <BrushTransition Property="Background" Duration="0:0:0.12" />
       </Transitions>
     </Setter>
   </Style>
-  <Style Selector="Button.scrollToTopButton:pointerover">
-    <Setter Property="Background" Value="#E8283645" />
+  <Style Selector="Button.scrollToTopButton:not(ToggleSwitch):pointerover">
+    <Setter Property="Background" Value="#EE1B2733" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
   </Style>
 
   <Style Selector="Button.windowChromeButton">
