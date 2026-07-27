@@ -100,6 +100,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private long _encodeMicrosAccum;
     private long _encodeCountAccum;
     private long _encodeDroppedCount;
+    private long _totalDroppedFrames;
+    private int _peakQueueDepth;
+    private DateTime? _lastDegradedUtc;
     private ReplayCaptureHealth _health = ReplayCaptureHealth.Unknown("Native");
 
     public NativeReplayBuffer(Func<ReplayBufferConfig> configProvider)
@@ -123,6 +126,17 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     {
         _health = health;
         HealthChanged?.Invoke(this, health);
+    }
+
+    private static void UpdatePeak(ref int value, int candidate)
+    {
+        var current = Volatile.Read(ref value);
+        while (candidate > current)
+        {
+            var observed = Interlocked.CompareExchange(ref value, candidate, current);
+            if (observed == current) return;
+            current = observed;
+        }
     }
 
     public Task StartAsync(CancellationToken cancellationToken = default)
@@ -151,6 +165,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // stride-mismatch smearing/corruption reported after a resolution
         // change.
         _extraData = null;
+        Interlocked.Exchange(ref _totalDroppedFrames, 0);
+        Volatile.Write(ref _peakQueueDepth, 0);
+        _lastDegradedUtc = null;
         lock (_bufferLock) _pauseEvents.Clear();
 
         var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -698,18 +715,25 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var encodeCountSinceLog = Math.Max(1, Interlocked.Exchange(ref _encodeCountAccum, 0));
                     var encodeMicrosSinceLog = Interlocked.Exchange(ref _encodeMicrosAccum, 0);
                     var droppedSinceLog = Interlocked.Exchange(ref _encodeDroppedCount, 0);
+                    UpdatePeak(ref _peakQueueDepth, encodeQueue.Count);
                     var frameStalenessDenom = Math.Max(1, frameStalenessCount);
                     AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, ringBufferMb={ringBufferMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, droppedFrames={droppedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
                     var outputFrameRate = framesEncodedSinceLog / diagElapsed;
                     var overloaded = droppedSinceLog > 0 || encodeQueue.Count * 4 >= encodeQueueCapacity * 3 ||
                                      (hasCapturedRealFrame && outputFrameRate < config.FrameRate * 0.9);
+                    if (overloaded) _lastDegradedUtc = DateTime.UtcNow;
                     SetHealth(new ReplayCaptureHealth("Native", "Desktop Duplication",
                         overloaded ? ReplayCaptureState.Degraded : ReplayCaptureState.Healthy,
                         config.FrameRate, framesSeenSinceLog / diagElapsed, framesProcessedSinceLog / diagElapsed,
                         outputFrameRate, Math.Max(0, framesEncodedSinceLog - framesProcessedSinceLog), droppedSinceLog, encodeQueue.Count,
                         encoderName, "Default adapter",
                         overloaded ? "Capture overload. Output may fall below target FPS." : string.Empty,
-                        DateTime.UtcNow));
+                        DateTime.UtcNow)
+                    {
+                        TotalDroppedFrames = Interlocked.Read(ref _totalDroppedFrames),
+                        PeakQueueDepth = Volatile.Read(ref _peakQueueDepth),
+                        LastDegradedUtc = _lastDegradedUtc
+                    });
                     copyMapMs = 0;
                     scaleMs = 0;
                     encodeMs = 0;
@@ -1177,6 +1201,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     {
                         AppLog.Error("Native capture: av_frame_clone failed, dropping a frame.");
                         Interlocked.Increment(ref _encodeDroppedCount);
+                        Interlocked.Increment(ref _totalDroppedFrames);
                     }
                     else if (!encodeQueue.TryAdd(new EncodeJob((nint)clonedFrame, MonotonicClock.UtcNow)))
                     {
@@ -1186,6 +1211,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         var droppedFrame = clonedFrame;
                         ffmpeg.av_frame_free(&droppedFrame);
                         Interlocked.Increment(ref _encodeDroppedCount);
+                        Interlocked.Increment(ref _totalDroppedFrames);
                     }
                     else
                     {

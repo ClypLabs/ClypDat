@@ -10,6 +10,7 @@ public sealed class HybridReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private readonly Func<ReplayBufferConfig> _configProvider;
     private IReplayBuffer? _inner;
     private ReplayCaptureHealth _health = ReplayCaptureHealth.Unknown("Hybrid");
+    private string _fallbackReason = string.Empty;
 
     public HybridReplayBuffer(Func<ReplayBufferConfig> configProvider) => _configProvider = configProvider;
 
@@ -35,6 +36,7 @@ public sealed class HybridReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             {
                 var obs = new ObsReplayBuffer(_configProvider);
                 await StartInnerAsync(obs, cancellationToken);
+                _fallbackReason = string.Empty;
                 SetHealth(new ReplayCaptureHealth("Hybrid", "Game hook", ReplayCaptureState.Starting,
                     config.FrameRate, 0, 0, 0, 0, 0, 0, "OBS", string.Empty,
                     "Waiting for game hook frames.", DateTime.UtcNow));
@@ -65,11 +67,12 @@ public sealed class HybridReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     public void SetCapturePaused(bool paused) => _inner?.SetCapturePaused(paused);
 
     public ReplayCaptureHealth GetHealthSnapshot() => _inner is IReplayCaptureDiagnostics diagnostics
-        ? diagnostics.GetHealthSnapshot() with { Backend = "Hybrid" }
+        ? ApplyFallbackReason(diagnostics.GetHealthSnapshot() with { Backend = "Hybrid" })
         : _health;
 
     private async Task StartNativeAsync(string reason, CancellationToken cancellationToken)
     {
+        _fallbackReason = reason;
         var config = _configProvider();
         var native = new NativeReplayBuffer(_configProvider);
         await StartInnerAsync(native, cancellationToken);
@@ -102,7 +105,12 @@ public sealed class HybridReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         RecordingStopped?.Invoke(this, EventArgs.Empty);
     }
 
-    private void InnerHealthChanged(object? sender, ReplayCaptureHealth health) => SetHealth(health with { Backend = "Hybrid" });
+    private void InnerHealthChanged(object? sender, ReplayCaptureHealth health) => SetHealth(ApplyFallbackReason(health with { Backend = "Hybrid" }));
+
+    private ReplayCaptureHealth ApplyFallbackReason(ReplayCaptureHealth health) =>
+        string.IsNullOrWhiteSpace(health.LastFailure) && !string.IsNullOrWhiteSpace(_fallbackReason)
+            ? health with { LastFailure = _fallbackReason }
+            : health;
 
     private void SetHealth(ReplayCaptureHealth health)
     {

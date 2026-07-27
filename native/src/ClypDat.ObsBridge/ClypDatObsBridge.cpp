@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdarg>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -77,6 +78,7 @@ obs_sceneitem_t *g_pause_image_item = nullptr;
 obs_sceneitem_t *g_pause_dark_item = nullptr;
 obs_sceneitem_t *g_pause_text_item = nullptr;
 bool g_capture_paused = false;
+bool g_fallback_is_monitor = false;
 obs_output_t *g_replay = nullptr;
 obs_encoder_t *g_video_encoder = nullptr;
 obs_encoder_t *g_audio_encoders[3] = {};
@@ -91,6 +93,7 @@ std::string g_game_exe_name;
 std::string g_game_window_title;
 std::string g_game_window_class;
 std::string g_game_display_name;
+std::string g_encoder_id;
 
 std::filesystem::path app_data_folder();
 std::filesystem::path pause_frame_path();
@@ -111,6 +114,13 @@ std::wstring widen(const char *value)
     std::wstring result(static_cast<size_t>(size - 1), L'\0');
     MultiByteToWideChar(CP_UTF8, 0, value, -1, result.data(), size);
     return result;
+}
+
+std::string obs_path(const std::filesystem::path &path)
+{
+    auto value = narrow(path.generic_wstring());
+    std::replace(value.begin(), value.end(), '\\', '/');
+    return value;
 }
 
 void set_error(const std::wstring &message)
@@ -160,6 +170,7 @@ struct ObsApi {
     void(__cdecl *data_set_bool)(obs_data_t *, const char *, bool) = nullptr;
     void(__cdecl *data_set_string)(obs_data_t *, const char *, const char *) = nullptr;
     obs_scene_t *(__cdecl *scene_create)(const char *) = nullptr;
+    void(__cdecl *scene_release)(obs_scene_t *) = nullptr;
     obs_source_t *(__cdecl *scene_get_source)(obs_scene_t *) = nullptr;
     obs_sceneitem_t *(__cdecl *scene_add)(obs_scene_t *, obs_source_t *) = nullptr;
     void(__cdecl *sceneitem_set_order)(obs_sceneitem_t *, int) = nullptr;
@@ -172,6 +183,7 @@ struct ObsApi {
     void(__cdecl *source_inc_active)(obs_source_t *) = nullptr;
     void(__cdecl *source_dec_active)(obs_source_t *) = nullptr;
     void(__cdecl *source_set_audio_mixers)(obs_source_t *, uint32_t) = nullptr;
+    proc_handler_t *(__cdecl *source_get_proc_handler)(const obs_source_t *) = nullptr;
     void(__cdecl *set_output_source)(uint32_t, obs_source_t *) = nullptr;
     void *(__cdecl *get_video)() = nullptr;
     void *(__cdecl *get_audio)() = nullptr;
@@ -193,6 +205,10 @@ struct ObsApi {
     proc_handler_t *(__cdecl *output_get_proc_handler)(const obs_output_t *) = nullptr;
     bool(__cdecl *proc_handler_call)(proc_handler_t *, const char *, Calldata *) = nullptr;
     bool(__cdecl *calldata_get_string)(const Calldata *, const char *, const char **) = nullptr;
+    bool(__cdecl *calldata_get_bool)(const Calldata *, const char *, bool *) = nullptr;
+    const char *(__cdecl *enum_encoder_types)(size_t) = nullptr;
+    const char *(__cdecl *enum_output_types)(size_t) = nullptr;
+    const char *(__cdecl *enum_input_types)(size_t) = nullptr;
     void(__cdecl *bfree)(void *) = nullptr;
 } obs;
 
@@ -201,7 +217,7 @@ bool load_obs_api(const std::filesystem::path &bin)
     SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_USER_DIRS);
     AddDllDirectory(bin.c_str());
     SetDllDirectoryW(bin.c_str());
-    g_bin_path = narrow(bin.wstring());
+    g_bin_path = obs_path(bin);
     g_obs = LoadLibraryW((bin / L"obs.dll").c_str());
     if (!g_obs) {
         set_error(L"Could not load obs.dll from " + bin.wstring());
@@ -225,6 +241,7 @@ bool load_obs_api(const std::filesystem::path &bin)
            load_fn(obs.data_set_bool, "obs_data_set_bool") &&
            load_fn(obs.data_set_string, "obs_data_set_string") &&
            load_fn(obs.scene_create, "obs_scene_create") &&
+           load_fn(obs.scene_release, "obs_scene_release") &&
            load_fn(obs.scene_get_source, "obs_scene_get_source") &&
            load_fn(obs.scene_add, "obs_scene_add") &&
            load_fn(obs.sceneitem_set_order, "obs_sceneitem_set_order") &&
@@ -237,6 +254,7 @@ bool load_obs_api(const std::filesystem::path &bin)
            load_fn(obs.source_inc_active, "obs_source_inc_active") &&
            load_fn(obs.source_dec_active, "obs_source_dec_active") &&
            load_fn(obs.source_set_audio_mixers, "obs_source_set_audio_mixers") &&
+           load_fn(obs.source_get_proc_handler, "obs_source_get_proc_handler") &&
            load_fn(obs.set_output_source, "obs_set_output_source") &&
            load_fn(obs.get_video, "obs_get_video") &&
            load_fn(obs.get_audio, "obs_get_audio") &&
@@ -258,6 +276,10 @@ bool load_obs_api(const std::filesystem::path &bin)
            load_fn(obs.output_get_proc_handler, "obs_output_get_proc_handler") &&
            load_fn(obs.proc_handler_call, "proc_handler_call") &&
            load_fn(obs.calldata_get_string, "calldata_get_string") &&
+           load_fn(obs.calldata_get_bool, "calldata_get_bool") &&
+           load_fn(obs.enum_encoder_types, "obs_enum_encoder_types") &&
+           load_fn(obs.enum_output_types, "obs_enum_output_types") &&
+           load_fn(obs.enum_input_types, "obs_enum_input_types") &&
            load_fn(obs.bfree, "bfree");
 }
 
@@ -291,6 +313,8 @@ void cleanup_obs()
     g_pause_dark_item = nullptr;
     g_pause_text_item = nullptr;
     g_capture_paused = false;
+    g_fallback_is_monitor = false;
+    g_encoder_id.clear();
     std::error_code delete_error;
     std::filesystem::remove(pause_frame_path(), delete_error);
     if (g_replay) {
@@ -319,10 +343,6 @@ void cleanup_obs()
             encoder = nullptr;
         }
     }
-    if (g_capture_source) {
-        if (obs.source_release) obs.source_release(g_capture_source);
-        g_capture_source = nullptr;
-    }
     if (g_chat_audio_source) {
         if (obs.set_output_source) obs.set_output_source(2, nullptr);
         if (obs.source_release) obs.source_release(g_chat_audio_source);
@@ -333,14 +353,21 @@ void cleanup_obs()
         if (obs.source_release) obs.source_release(g_microphone_source);
         g_microphone_source = nullptr;
     }
+    if (g_scene_source) {
+        if (obs.set_output_source) obs.set_output_source(0, nullptr);
+        g_scene_source = nullptr;
+    }
+    if (g_scene) {
+        if (obs.scene_release) obs.scene_release(g_scene);
+        g_scene = nullptr;
+    }
+    if (g_capture_source) {
+        if (obs.source_release) obs.source_release(g_capture_source);
+        g_capture_source = nullptr;
+    }
     if (g_fallback_source) {
         if (obs.source_release) obs.source_release(g_fallback_source);
         g_fallback_source = nullptr;
-    }
-    if (g_scene_source) {
-        if (obs.set_output_source) obs.set_output_source(0, nullptr);
-        if (obs.source_release) obs.source_release(g_scene_source);
-        g_scene_source = nullptr;
     }
     if (g_initialized && obs.shutdown) {
         obs.shutdown();
@@ -487,6 +514,7 @@ bool create_scene()
         obs.data_set_int(fallback_settings, "method", 2); // WGC
         obs.data_set_bool(fallback_settings, "cursor", false);
         g_fallback_source = obs.source_create("window_capture", "ClypDat WGC Window Fallback", fallback_settings, nullptr);
+        g_fallback_is_monitor = false;
         obs.data_release(fallback_settings);
         trace(g_fallback_source ? "init: capture_source WGC window fallback" : "init: WGC window fallback unavailable");
     } else {
@@ -497,6 +525,7 @@ bool create_scene()
         obs.data_set_bool(fallback_settings, "force_sdr", true);
         obs.data_set_int(fallback_settings, "method", 0);
         g_fallback_source = obs.source_create("monitor_capture", "ClypDat Monitor Fallback", fallback_settings, nullptr);
+        g_fallback_is_monitor = g_fallback_source != nullptr;
         obs.data_release(fallback_settings);
         if (!g_fallback_source) {
             obs_data_t *black_settings = obs.data_create();
@@ -554,12 +583,6 @@ bool create_scene()
     obs.source_inc_active(g_scene_source);
     g_scene_active_ref = true;
     trace("init: scene source forced showing+active");
-    obs.source_release(g_capture_source);
-    g_capture_source = nullptr;
-    if (g_fallback_source) {
-        obs.source_release(g_fallback_source);
-        g_fallback_source = nullptr;
-    }
     return true;
 }
 
@@ -773,12 +796,29 @@ bool create_audio_encoder(size_t index, const char *name)
     return true;
 }
 
+bool has_obs_type(const char *(__cdecl *enumerate)(size_t), const char *wanted)
+{
+    for (size_t index = 0; ; index++) {
+        const char *type = enumerate(index);
+        if (!type) return false;
+        if (strcmp(type, wanted) == 0) return true;
+    }
+}
+
 bool create_replay_output()
 {
+    if (!has_obs_type(obs.enum_output_types, "replay_buffer")) {
+        set_error(L"OBS replay_buffer output is unavailable. The obs-ffmpeg module did not load.");
+        return false;
+    }
+    if (!has_obs_type(obs.enum_encoder_types, "ffmpeg_aac")) {
+        set_error(L"OBS AAC encoder is unavailable. The obs-ffmpeg module did not load.");
+        return false;
+    }
     obs_data_t *v = obs.data_create();
     obs.data_set_string(v, "rate_control", "CQP");
     obs.data_set_int(v, "cqp", 18);
-    obs.data_set_string(v, "preset2", "p5");
+    obs.data_set_string(v, "preset2", "p1");
     obs.data_set_string(v, "multipass", "disabled");
     obs.data_set_string(v, "tune", "hq");
     obs.data_set_string(v, "profile", "high");
@@ -797,8 +837,10 @@ bool create_replay_output()
         "obs_x264"            // CPU last resort
     };
     for (const char *encoder_id : encoder_ids) {
+        if (!has_obs_type(obs.enum_encoder_types, encoder_id)) continue;
         g_video_encoder = obs.video_encoder_create(encoder_id, "ClypDat H.264", v, nullptr);
         if (g_video_encoder) {
+            g_encoder_id = encoder_id;
             trace("init: video_encoder " + std::string(encoder_id) + " created");
             break;
         }
@@ -839,7 +881,9 @@ bool load_module(const std::filesystem::path &root, const wchar_t *name)
     const auto data = root / L"data" / L"obs-plugins" / name;
     const auto module_name = narrow(std::wstring(name));
     obs_module_t *module = nullptr;
-    int result = obs.open_module(&module, narrow(path.wstring()).c_str(), narrow(data.wstring()).c_str());
+    const auto module_path = obs_path(path);
+    const auto data_path = obs_path(data);
+    int result = obs.open_module(&module, module_path.c_str(), data_path.c_str());
     trace("init: open_module " + module_name + " result=" + std::to_string(result));
     if (result == 0 && module) {
         bool loaded = obs.init_module(module);
@@ -923,9 +967,9 @@ extern "C" __declspec(dllexport) int clypdat_obs_init(const wchar_t *runtime_fol
     const auto data_root = root / L"data";
     const auto plugins = root / L"obs-plugins" / L"64bit";
     const auto data = data_root / L"obs-plugins" / L"%module%";
-    g_data_path = narrow(data_root.wstring());
-    g_plugin_binary_path = narrow((plugins / L"%module%.dll").wstring());
-    g_plugin_data_path = narrow(data.wstring());
+    g_data_path = obs_path(data_root);
+    g_plugin_binary_path = obs_path(plugins / L"%module%.dll");
+    g_plugin_data_path = obs_path(data);
     trace("init: add_data_path");
     obs.add_data_path(g_data_path.c_str());
     trace("init: add_module_path");
@@ -938,7 +982,7 @@ extern "C" __declspec(dllexport) int clypdat_obs_init(const wchar_t *runtime_fol
     CreateDirectoryW(app_folder.c_str(), nullptr);
     CreateDirectoryW(config_folder.c_str(), nullptr);
     trace("init: config_narrow");
-    g_config_path = narrow(config_folder.wstring());
+    g_config_path = obs_path(config_folder);
     trace("init: startup");
     if (!obs.startup("en-US", g_config_path.c_str(), nullptr)) {
         set_error(L"obs_startup failed.");
@@ -947,28 +991,14 @@ extern "C" __declspec(dllexport) int clypdat_obs_init(const wchar_t *runtime_fol
     }
     g_initialized = true;
 
-    const auto nvenc_helper = process_sibling(L"obs-nvenc-test.exe");
-    trace("init: process_id=" + std::to_string(GetCurrentProcessId()));
-    trace("init: nvenc_helper " + narrow(nvenc_helper.wstring()) + " exists=" + std::to_string(std::filesystem::exists(nvenc_helper) ? 1 : 0));
-    if (!ensure_process_helper(root, L"obs-ffmpeg-mux.exe")) {
-        set_error(L"OBS mux helper missing. Expected obs-ffmpeg-mux.exe beside ClypDat.exe.");
+    if (!ensure_process_helper(root, L"obs-ffmpeg-mux.exe") ||
+        !ensure_process_helper(root, L"obs-nvenc-test.exe") ||
+        !ensure_process_helper(root, L"obs-qsv-test.exe") ||
+        !ensure_process_helper(root, L"obs-amf-test.exe")) {
+        set_error(L"OBS process helper missing. Expected OBS helpers beside ClypDat.exe.");
         cleanup_obs();
         return -4;
     }
-
-    trace("init: load_selected_modules");
-    load_module(root, L"win-capture");
-    load_module(root, L"win-wasapi");
-    load_module(root, L"image-source");
-    load_module(root, L"text-freetype2");
-    load_module(root, L"obs-ffmpeg");
-    // Optional modules. create_replay_output selects first encoder that loads
-    // and creates successfully, then reports one useful error if none do.
-    load_module(root, L"obs-nvenc");
-    load_module(root, L"obs-amf");
-    load_module(root, L"obs-qsv11");
-    load_module(root, L"obs-x264");
-    obs.post_load_modules();
 
     auto [base_width, base_height] = primary_monitor_size();
     auto [out_width, out_height] = output_size();
@@ -1003,20 +1033,35 @@ extern "C" __declspec(dllexport) int clypdat_obs_init(const wchar_t *runtime_fol
         return -6;
     }
 
+    // win-capture selects WGC only after libobs owns a D3D11 device. Loading
+    // it before reset_video silently forces the BitBlt path on many systems.
+    trace("init: load_selected_modules");
+    if (!load_module(root, L"win-capture") || !load_module(root, L"win-wasapi") || !load_module(root, L"obs-ffmpeg")) {
+        set_error(L"A required OBS capture or encoding module failed to load.");
+        cleanup_obs();
+        return -7;
+    }
+    load_module(root, L"image-source");
+    load_module(root, L"text-freetype2");
+    load_module(root, L"obs-nvenc");
+    load_module(root, L"obs-qsv11");
+    load_module(root, L"obs-x264");
+    obs.post_load_modules();
+
     trace("init: create_scene");
     if (!create_scene()) {
         cleanup_obs();
-        return -7;
+        return -8;
     }
     trace("init: create_audio_sources");
     if (!create_audio_sources()) {
         cleanup_obs();
-        return -8;
+        return -9;
     }
     trace("init: create_replay_output");
     if (!create_replay_output()) {
         cleanup_obs();
-        return -9;
+        return -10;
     }
     trace("init: success");
     return 0;
@@ -1137,6 +1182,33 @@ extern "C" __declspec(dllexport) void clypdat_obs_shutdown()
     std::lock_guard lock(g_lock);
     if (!g_initialized) return;
     cleanup_obs();
+}
+
+bool source_is_hooked(obs_source_t *source)
+{
+    if (!source || !obs.source_get_proc_handler || !obs.proc_handler_call || !obs.calldata_get_bool) return false;
+    proc_handler_t *handler = obs.source_get_proc_handler(source);
+    Calldata params = {};
+    bool hooked = false;
+    const bool called = handler && obs.proc_handler_call(handler, "get_hooked", &params);
+    if (called) obs.calldata_get_bool(&params, "hooked", &hooked);
+    if (!params.fixed && params.stack && obs.bfree) obs.bfree(params.stack);
+    return called && hooked;
+}
+
+extern "C" __declspec(dllexport) int clypdat_obs_capture_status()
+{
+    std::lock_guard lock(g_lock);
+    if (!g_initialized) return 0;
+    if (source_is_hooked(g_capture_source)) return 2;
+    if (g_fallback_is_monitor || source_is_hooked(g_fallback_source)) return 1;
+    return 0;
+}
+
+extern "C" __declspec(dllexport) void clypdat_obs_active_encoder(wchar_t *encoder, int encoder_length)
+{
+    std::lock_guard lock(g_lock);
+    copy_string(encoder, encoder_length, widen(g_encoder_id.c_str()));
 }
 
 extern "C" __declspec(dllexport) void clypdat_obs_last_error(wchar_t *message, int message_length)

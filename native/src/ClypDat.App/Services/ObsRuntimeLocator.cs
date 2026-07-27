@@ -9,10 +9,17 @@ public static class ObsRuntimeLocator
     {
         Path.Combine("bin", "64bit", "obs.dll"),
         Path.Combine("bin", "64bit", "libobs-d3d11.dll"),
+        Path.Combine("bin", "64bit", "avfilter-10.dll"),
         Path.Combine("bin", "64bit", "obs-ffmpeg-mux.exe"),
+        Path.Combine("bin", "64bit", "obs-nvenc-test.exe"),
+        Path.Combine("bin", "64bit", "obs-qsv-test.exe"),
+        Path.Combine("bin", "64bit", "obs-amf-test.exe"),
         Path.Combine("obs-plugins", "64bit", "win-capture.dll"),
         Path.Combine("obs-plugins", "64bit", "win-wasapi.dll"),
-        Path.Combine("obs-plugins", "64bit", "obs-ffmpeg.dll")
+        Path.Combine("obs-plugins", "64bit", "obs-ffmpeg.dll"),
+        Path.Combine("obs-plugins", "64bit", "obs-nvenc.dll"),
+        Path.Combine("data", "obs-plugins", "win-capture", "graphics-hook64.dll"),
+        Path.Combine("data", "obs-plugins", "win-capture", "inject-helper64.exe")
     };
 
     internal static IReadOnlyList<string> RequiredFiles => RequiredRuntimeFiles;
