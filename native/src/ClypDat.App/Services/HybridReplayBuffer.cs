@@ -2,9 +2,14 @@ using ClypDat.Capture.Abstractions;
 
 namespace ClypDat.App.Services;
 
-// Auto must prefer Present-hook capture for games that allow it, but never make
-// recording depend on injection succeeding. Full sessions keep Native for now:
-// its mux/finalize path is the only implementation with feature parity.
+// Auto prefers Native (ClypDat's own DXGI Desktop Duplication engine) -
+// that's what the Settings description for "Auto (recommended)" has always
+// promised ("Uses ClypDat's own capture engine for every game"), and it's
+// the backend that's actually been proven reliable across every session.
+// OBS is only a fallback if Native itself fails to start, and even then its
+// replay_buffer output creation is currently disabled outright (crashes -
+// see ClypDatObsBridge.cpp's create_replay_output comment), so this fallback
+// exists for when that gets fixed, not for regular day-to-day use.
 public sealed class HybridReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics
 {
     private readonly Func<ReplayBufferConfig> _configProvider;
@@ -24,35 +29,40 @@ public sealed class HybridReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         if (IsRecording) return;
 
         var config = _configProvider();
-        if (config.FullSessionRecordingEnabled)
+        try
         {
-            await StartNativeAsync("Full-session recording uses Native until OBS session output reaches parity.", cancellationToken);
+            var native = new NativeReplayBuffer(_configProvider);
+            await StartInnerAsync(native, cancellationToken);
+            _fallbackReason = string.Empty;
+            SetHealth(new ReplayCaptureHealth("Hybrid", "Desktop Duplication", ReplayCaptureState.Starting,
+                config.FrameRate, 0, 0, 0, 0, 0, 0, string.Empty, string.Empty, string.Empty, DateTime.UtcNow));
             return;
         }
-
-        if (ObsRuntimeLocator.IsAvailable(out _, out var reason))
+        catch (Exception error)
         {
-            try
-            {
-                var obs = new ObsReplayBuffer(_configProvider);
-                await StartInnerAsync(obs, cancellationToken);
-                _fallbackReason = string.Empty;
-                SetHealth(new ReplayCaptureHealth("Hybrid", "Game hook", ReplayCaptureState.Starting,
-                    config.FrameRate, 0, 0, 0, 0, 0, 0, "OBS", string.Empty,
-                    "Waiting for game hook frames.", DateTime.UtcNow));
-                return;
-            }
-            catch (Exception error)
-            {
-                AppLog.Error("Hybrid capture: OBS game hook unavailable, falling back to Native.", error);
-            }
-        }
-        else
-        {
-            AppLog.Info($"Hybrid capture: OBS unavailable, falling back to Native. {reason}");
+            AppLog.Error("Hybrid capture: Native capture failed to start, falling back to OBS.", error);
         }
 
-        await StartNativeAsync("Game hook unavailable. Using Desktop Duplication.", cancellationToken);
+        await StartObsAsync("Native capture unavailable. Using OBS.", cancellationToken);
+    }
+
+    private async Task StartObsAsync(string reason, CancellationToken cancellationToken)
+    {
+        var config = _configProvider();
+        if (!ObsRuntimeLocator.IsAvailable(out _, out var obsReason))
+        {
+            AppLog.Info($"Hybrid capture: OBS unavailable too. {obsReason}");
+            _fallbackReason = reason;
+            SetHealth(new ReplayCaptureHealth("Hybrid", "Unavailable", ReplayCaptureState.Failed,
+                config.FrameRate, 0, 0, 0, 0, 0, 0, string.Empty, string.Empty, reason, DateTime.UtcNow));
+            throw new InvalidOperationException(reason);
+        }
+
+        _fallbackReason = reason;
+        var obs = new ObsReplayBuffer(_configProvider);
+        await StartInnerAsync(obs, cancellationToken);
+        SetHealth(new ReplayCaptureHealth("Hybrid", "Game hook", ReplayCaptureState.Starting,
+            config.FrameRate, 0, 0, 0, 0, 0, 0, "OBS", string.Empty, reason, DateTime.UtcNow));
     }
 
     public Task StopAsync(CancellationToken cancellationToken = default) =>
@@ -69,16 +79,6 @@ public sealed class HybridReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     public ReplayCaptureHealth GetHealthSnapshot() => _inner is IReplayCaptureDiagnostics diagnostics
         ? ApplyFallbackReason(diagnostics.GetHealthSnapshot() with { Backend = "Hybrid" })
         : _health;
-
-    private async Task StartNativeAsync(string reason, CancellationToken cancellationToken)
-    {
-        _fallbackReason = reason;
-        var config = _configProvider();
-        var native = new NativeReplayBuffer(_configProvider);
-        await StartInnerAsync(native, cancellationToken);
-        SetHealth(new ReplayCaptureHealth("Hybrid", "Desktop Duplication", ReplayCaptureState.Degraded,
-            config.FrameRate, 0, 0, 0, 0, 0, 0, string.Empty, string.Empty, reason, DateTime.UtcNow));
-    }
 
     private async Task StartInnerAsync(IReplayBuffer buffer, CancellationToken cancellationToken)
     {
