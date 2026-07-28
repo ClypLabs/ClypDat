@@ -667,6 +667,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // real, measurable contributor to perceived judder or not, before
             // touching the pacing algorithm itself.
             var lastFrameContentCapturedUtc = MonotonicClock.UtcNow;
+            // Same instant as lastFrameContentCapturedUtc, on the stopwatch
+            // timeline instead of the wall-clock one - adaptive mode's PTS is
+            // stopwatch-based, so it needs the capture moment in those units.
+            var lastFrameContentCapturedElapsed = TimeSpan.Zero;
             // Adaptive frame rate only: the lastFrameContentCapturedUtc value
             // as of the last frame actually encoded, so the pacing gate below
             // can tell "genuinely new content since last encode" apart from
@@ -684,7 +688,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     lastDiagLog = stopwatch.Elapsed;
                     var n = Math.Max(1, framesEncodedSinceLog);
                     var m = Math.Max(1, iterationsSinceLog);
-                    var realFrameCount = Math.Max(1, iterationsSinceLog - zeroPresentSkips);
+                    // accumulatedFramesSum is only added to on iterations that
+                    // actually delivered a real frame, so framesSeenSinceLog is
+                    // its matching denominator. Subtracting zeroPresentSkips from
+                    // total iterations (what this used to do) still left every
+                    // AcquireNextFrame TIMEOUT in the count - the majority of
+                    // iterations at any target below the poll rate - which scaled
+                    // avgAccumulatedFrames down by ~2.3x and made a healthy
+                    // one-present-per-acquire capture read as 0.43, i.e. as if
+                    // over half of all acquires were coming back empty.
+                    var realFrameCount = Math.Max(1, framesSeenSinceLog);
                     var presentGapDenom = Math.Max(1, presentGapCount);
                     // gen2Count/managedMb: if a stall coincides with gen2Count
                     // actually incrementing between two diag lines (or between
@@ -1051,6 +1064,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 // and unsynchronized - a plausible source of visible judder despite
                                 // every output frame being unique and perfectly PTS-spaced.
                                 lastFrameContentCapturedUtc = MonotonicClock.UtcNow;
+                                lastFrameContentCapturedElapsed = stopwatch.Elapsed;
                                 framesProcessedSinceLog++;
                             }
                             // else: occluded - frame->data still holds the last successfully
@@ -1274,7 +1288,19 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // up a debt of ticks to burst through on resume.
                         lastEncodedAt += targetFrameInterval;
                         if (stopwatch.Elapsed - lastEncodedAt >= targetFrameInterval) lastEncodedAt = stopwatch.Elapsed;
-                        frame->pts = (long)Math.Round(stopwatch.Elapsed.TotalMicroseconds);
+                        // Timestamp the frame with when its CONTENT was actually
+                        // captured, not with "now" (when this poll got around to
+                        // deciding to encode it). Those differ by however long ago
+                        // in this loop iteration the present landed - a variable
+                        // 0-7ms depending on where the present fell relative to the
+                        // poll, measured as avgFrameStalenessMs swinging between
+                        // 0.4 and 3.5ms line to line. Stamping "now" bakes that
+                        // scheduling jitter into the file's own frame spacing, so a
+                        // VFR clip judders on playback even though every frame is
+                        // unique and none were lost. The capture instants are the
+                        // real presentation timeline; the poll times are an artifact
+                        // of how often this loop happens to look.
+                        frame->pts = (long)Math.Round(lastFrameContentCapturedElapsed.TotalMicroseconds);
                         EncodeScheduledFrame();
                     }
                 }
