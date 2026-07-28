@@ -30,7 +30,9 @@ public sealed class AppSettings
     // "Constant quality" | "Constant bitrate" - picks which of the two values
     // below actually governs the encode.
     public string ReplayRateControlMode { get; set; } = "Constant quality";
-    // Constant-quality target (NVENC cq / x264 crf). Lower is better quality.
+    // Constant-quality target (NVENC cq / x264 crf) on the H.264 quantiser
+    // scale, 1-51. Lower is BETTER quality and bigger files - the scale runs
+    // the opposite way to how a "quality" number usually reads.
     public int ReplayConstantQuality { get; set; } = 20;
     // In constant-quality mode this is a ceiling (and what bounds the in-memory
     // ring buffer's size); in constant-bitrate mode it's the target itself.

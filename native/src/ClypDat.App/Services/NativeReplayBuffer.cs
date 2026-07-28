@@ -2468,7 +2468,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private static bool IsConstantBitrate(ReplayBufferConfig config) =>
         string.Equals(config.RateControlMode, "Constant bitrate", StringComparison.OrdinalIgnoreCase);
 
-    private static int ConstantQualityTarget(ReplayBufferConfig config) => Math.Clamp(config.ConstantQuality, 10, 40);
+    // 1-51 is the H.264 quantiser's own range, so this is the full span
+    // the encoders actually accept rather than an arbitrary narrowing.
+    // 0 is excluded deliberately: NVENC reads cq=0 as "auto", which would
+    // silently turn constant quality OFF rather than mean "best possible".
+    private static int ConstantQualityTarget(ReplayBufferConfig config) => Math.Clamp(config.ConstantQuality, 1, 51);
 
     private static long MaxBitrate(ReplayBufferConfig config) => Math.Clamp(config.MaxBitrateMbps, 5, 200) * 1_000_000L;
 
