@@ -240,7 +240,7 @@ public sealed partial class MainWindow : Window
                 // (and technically video, decoding for nobody) indefinitely
                 // in the background. A real quit already covers this via
                 // _playback?.Dispose() in Closed below.
-                StopEditorPlayback(stopPlaybackAsync: true);
+                StopEditorPlayback(stopMode: PlaybackStopMode.Background);
                 Hide();
                 ShowInTaskbar = false;
             }
@@ -2929,7 +2929,7 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null || !ViewModel.IsEditorVisible) return;
         ViewModel.SaveSelectedClipEditState();
-        StopEditorPlayback(stopPlaybackAsync: true);
+        StopEditorPlayback(stopMode: PlaybackStopMode.Background);
         ViewModel.CloseEditor();
     }
 
@@ -3091,7 +3091,7 @@ public sealed partial class MainWindow : Window
     private void CloseEditorButton_OnClick(object? sender, RoutedEventArgs e)
     {
         ViewModel?.SaveSelectedClipEditState();
-        StopEditorPlayback(stopPlaybackAsync: true);
+        StopEditorPlayback(stopMode: PlaybackStopMode.Background);
         ViewModel?.CloseEditor();
     }
 
@@ -3568,7 +3568,7 @@ public sealed partial class MainWindow : Window
             if (ViewModel.IsEditorVisible)
             {
                 ViewModel.SaveSelectedClipEditState();
-                StopEditorPlayback(stopPlaybackAsync: true);
+                StopEditorPlayback(stopMode: PlaybackStopMode.Background);
                 ViewModel.CloseEditor();
                 e.Handled = true;
                 return;
@@ -4875,7 +4875,7 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
         if (cancellationToken.IsCancellationRequested) return;
 
-        StopEditorPlayback(cancelQueuedStart: false, stopPlaybackAsync: true);
+        StopEditorPlayback(cancelQueuedStart: false, stopMode: PlaybackStopMode.Skip);
 
         try
         {
@@ -5012,7 +5012,23 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void StopEditorPlayback(bool cancelQueuedStart = true, bool stopPlaybackAsync = false)
+    // How this call should deal with the (reused) PlaybackSession itself, as
+    // opposed to the view/timer teardown every path does regardless.
+    private enum PlaybackStopMode
+    {
+        // Blocks until libvlc has finished unwinding. Only correct where
+        // nothing else is about to touch the session on another thread.
+        Synchronous,
+        // Fire-and-forget on a worker. For editor CLOSE, where the stop's cost
+        // shouldn't freeze the UI and nothing follows it.
+        Background,
+        // Leave the session alone entirely - the caller is about to run
+        // LoadVideoAsync, which stops it itself as the first thing in its own
+        // background body, correctly ordered ahead of the media swap.
+        Skip
+    }
+
+    private void StopEditorPlayback(bool cancelQueuedStart = true, PlaybackStopMode stopMode = PlaybackStopMode.Synchronous)
     {
         if (cancelQueuedStart)
         {
@@ -5036,12 +5052,20 @@ public sealed partial class MainWindow : Window
         // internally too either way), but doing it synchronously on editor
         // close just freezes the UI thread for however long libvlc takes to
         // unwind, well after the editor should already look closed.
-        if (stopPlaybackAsync)
+        //
+        // Skip exists because backgrounding it is NOT safe on the open path:
+        // LoadVideoAsync stops the same session on its own worker, so a
+        // fire-and-forget stop raced it with no ordering at all - free to land
+        // after the new Media was set, after the view had been re-attached, or
+        // in the middle of vout creation, tearing the video output down and
+        // leaving it rebuilt at a default size (rendering the clip upscaled and
+        // soft rather than at its real resolution).
+        if (stopMode == PlaybackStopMode.Background)
         {
             var playback = _playback;
             if (playback is not null) _ = Task.Run(() => playback.Stop());
         }
-        else
+        else if (stopMode == PlaybackStopMode.Synchronous)
         {
             _playback?.Stop();
         }
