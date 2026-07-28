@@ -3779,6 +3779,7 @@ public sealed partial class MainWindow : Window
         {
             await ApplyTimelineSeekAsync(ViewModel.CurrentTime, wasPlaying);
             ViewModel.SaveSelectedClipEditState();
+            if (mode == TimelineDragMode.TrimStart) ViewModel.RegenerateThumbnailAtTrimStart();
             // Warm the audio chunk cache at both trim markers - the very next
             // actions after placing a handle are usually jumping to it
             // (Restart plays from TrimStart, End jumps near TrimEnd), and on

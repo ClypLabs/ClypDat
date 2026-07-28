@@ -320,6 +320,16 @@ public sealed class ClipCardViewModel : ViewModelBase
         }
     }
 
+    // Called after the thumbnail file at PreviewImagePath has been
+    // regenerated IN PLACE (same path, new bytes - e.g. moving TrimStart in
+    // the editor) - PreviewImagePath's own setter no-ops when the string
+    // itself hasn't changed, so this bypasses it to force a redecode of
+    // whatever's actually on disk now.
+    public void RefreshPreviewImage()
+    {
+        if (_isPreviewVisible) SetPreviewImage(_previewImagePath);
+    }
+
     private int _selectionOrder;
 
     public bool IsSelected

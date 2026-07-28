@@ -19,6 +19,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly HashSet<string> _selectedPaths = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _libraryHydrationCts;
     private CancellationTokenSource? _waveformCts;
+    private CancellationTokenSource? _thumbnailRegenCts;
     private FileSystemWatcher? _libraryWatcher;
     private DispatcherTimer? _libraryFolderRetryTimer;
     private readonly DispatcherTimer _libraryRefreshDebounce;
@@ -65,7 +66,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private ProcessOption? _selectedChatProcess;
     private ProcessOption? _selectedProcessExclusion;
     private ReplayDurationPreset? _selectedReplayDurationPreset;
-    private ResolutionOption? _selectedReplayResolution;
+    private bool _customReplayResolutionSelected;
     private int _selectedReplayFrameRate;
     private ReplayBackendPreset? _selectedReplayBackend;
     private readonly string _initialReplayBackend;
@@ -167,12 +168,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("4 Minutes", 240),
             new("5 Minutes", 300)
         };
+        // Height=-1 is the "Custom" sentinel: the actual number comes from the
+        // CustomReplayHeight text field shown while it's selected. Same
+        // convention as FullSessionQuotaOptions/CustomFullSessionQuotaGb.
         ReplayResolutions = new ObservableCollection<ResolutionOption>
         {
             new("720p", 720),
             new("1080p", 1080),
             new("1440p", 1440),
-            new("2160p (4K)", 2160)
+            new("2160p (4K)", 2160),
+            new("Custom", -1)
         };
         ReplayFrameRates = new ObservableCollection<int> { 30, 60, 90, 120, 144, 165, 240 };
         ExportCodecs = new ObservableCollection<ExportCodecOption>
@@ -216,8 +221,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RefreshAudioDevices();
         SelectedReplayDurationPreset = ReplayDurationPresets.FirstOrDefault(preset => preset.Seconds == Settings.ReplayDurationSeconds) ??
                                        ReplayDurationPresets.First(preset => preset.Seconds == 60);
-        _selectedReplayResolution = ReplayResolutions.FirstOrDefault(option => option.Height == Settings.ReplayMaxHeight) ??
-                                     ReplayResolutions.First(option => option.Height == 1080);
         _selectedReplayFrameRate = ReplayFrameRates.Contains(Settings.ReplayFrameRate) ? Settings.ReplayFrameRate : 60;
         _activeReplayMaxHeight = Settings.ReplayMaxHeight;
         _activeReplayFrameRate = Settings.ReplayFrameRate;
@@ -963,13 +966,49 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public ResolutionOption? SelectedReplayResolution
+    public ResolutionOption SelectedReplayResolution
     {
-        get => _selectedReplayResolution;
+        get
+        {
+            if (IsCustomReplayResolution) return ReplayResolutions[^1];
+            return ReplayResolutions.FirstOrDefault(option => option.Height == Settings.ReplayMaxHeight) ?? ReplayResolutions.First(option => option.Height == 1080);
+        }
         set
         {
-            if (!SetProperty(ref _selectedReplayResolution, value) || value is null) return;
-            Settings.ReplayMaxHeight = value.Height;
+            if (value.Height < 0)
+            {
+                _customReplayResolutionSelected = true;
+            }
+            else
+            {
+                _customReplayResolutionSelected = false;
+                Settings.ReplayMaxHeight = value.Height;
+            }
+
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsCustomReplayResolution));
+            OnPropertyChanged(nameof(CustomReplayHeight));
+            SaveSettings();
+            UpdateReplayQualityRestartRequired();
+            OnPropertyChanged(nameof(ReplayQualityAboveDefault));
+        }
+    }
+
+    // Custom is active when explicitly picked, or when the saved value isn't
+    // one of the presets (a previously-entered custom height surviving a
+    // restart) - same convention as IsCustomFullSessionQuota.
+    public bool IsCustomReplayResolution =>
+        _customReplayResolutionSelected ||
+        ReplayResolutions.All(option => option.Height != Settings.ReplayMaxHeight);
+
+    public string CustomReplayHeight
+    {
+        get => Settings.ReplayMaxHeight.ToString();
+        set
+        {
+            if (!int.TryParse(value, out var height)) return;
+            Settings.ReplayMaxHeight = Math.Clamp(height, 480, 2160);
+            OnPropertyChanged();
             SaveSettings();
             UpdateReplayQualityRestartRequired();
             OnPropertyChanged(nameof(ReplayQualityAboveDefault));
@@ -2080,6 +2119,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set
         {
             Settings.FullSessionBackgroundFinalize = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    public bool NativeAdaptiveFrameRate
+    {
+        get => Settings.NativeAdaptiveFrameRate;
+        set
+        {
+            Settings.NativeAdaptiveFrameRate = value;
             OnPropertyChanged();
             SaveSettings();
         }
@@ -3846,7 +3896,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             AudioSyncOffsetMs: Settings.AudioSyncOffsetMs,
             ClipFileNameScheme: Settings.ClipFileNameScheme,
             CustomClipFileNameTemplate: Settings.CustomClipFileNameTemplate,
-            LibraryFolder: Settings.LibraryFolder);
+            LibraryFolder: Settings.LibraryFolder,
+            NativeAdaptiveFrameRate: Settings.NativeAdaptiveFrameRate);
     }
 
     public void SetDuration(TimeSpan duration)
@@ -5413,6 +5464,48 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         _libraryRefreshDebounce.Stop();
         _libraryRefreshDebounce.Start();
+    }
+
+    // Called once a TrimStart drag actually ends (see MainWindow.axaml.cs's
+    // TimelineSurface_OnPointerReleased) - not on every pointer-move tick
+    // during the drag itself, which would spawn an ffmpeg process per pixel
+    // of movement. The clip now opens on a different frame than before, so
+    // the library card representing it should show that frame too instead of
+    // whatever it looked like pre-trim.
+    public void RegenerateThumbnailAtTrimStart()
+    {
+        if (string.IsNullOrWhiteSpace(SelectedVideoPath)) return;
+        _thumbnailRegenCts?.Cancel();
+        _thumbnailRegenCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _thumbnailRegenCts = cts;
+        _ = RegenerateThumbnailAtTrimStartAsync(SelectedVideoPath, TrimStart, cts.Token);
+    }
+
+    private async Task RegenerateThumbnailAtTrimStartAsync(string path, TimeSpan trimStart, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var thumbnailPath = await _mediaProbe.RegenerateThumbnailAsync(path, trimStart);
+            if (cancellationToken.IsCancellationRequested || string.IsNullOrWhiteSpace(thumbnailPath)) return;
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (cancellationToken.IsCancellationRequested) return;
+                if (string.Equals(SelectedVideoPath, path, StringComparison.OrdinalIgnoreCase))
+                {
+                    SelectedThumbnail = LoadBitmap(thumbnailPath);
+                }
+                AllClips.FirstOrDefault(clip => string.Equals(clip.Path, path, StringComparison.OrdinalIgnoreCase))?.RefreshPreviewImage();
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // Another TrimStart move superseded this one.
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Thumbnail regeneration at TrimStart failed", error);
+        }
     }
 
     private void StartWaveformLoad(MediaFileInfo media)

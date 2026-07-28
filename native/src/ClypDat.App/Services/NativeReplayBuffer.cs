@@ -669,6 +669,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // real, measurable contributor to perceived judder or not, before
             // touching the pacing algorithm itself.
             var lastFrameContentCapturedUtc = MonotonicClock.UtcNow;
+            // Adaptive frame rate only: the lastFrameContentCapturedUtc value
+            // as of the last frame actually encoded, so the pacing gate below
+            // can tell "genuinely new content since last encode" apart from
+            // "still the same frame we already encoded" - see NativeAdaptiveFrameRate.
+            var lastEncodedContentCapturedUtc = DateTime.MinValue;
             var frameStalenessMs = 0.0;
             var frameStalenessMaxMs = 0.0;
             var frameStalenessCount = 0;
@@ -719,8 +724,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var frameStalenessDenom = Math.Max(1, frameStalenessCount);
                     AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, ringBufferMb={ringBufferMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, droppedFrames={droppedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
                     var outputFrameRate = framesEncodedSinceLog / diagElapsed;
+                    // Adaptive frame rate legitimately encodes below the target
+                    // rate whenever the screen is idle (that's the point of it) -
+                    // without excluding it here, every idle stretch would flag as
+                    // "capture overload" even though nothing is actually wrong.
                     var overloaded = droppedSinceLog > 0 || encodeQueue.Count * 4 >= encodeQueueCapacity * 3 ||
-                                     (hasCapturedRealFrame && outputFrameRate < config.FrameRate * 0.9);
+                                     (!config.NativeAdaptiveFrameRate && hasCapturedRealFrame && outputFrameRate < config.FrameRate * 0.9);
                     if (overloaded) _lastDegradedUtc = DateTime.UtcNow;
                     SetHealth(new ReplayCaptureHealth("Native", "Desktop Duplication",
                         overloaded ? ReplayCaptureState.Degraded : ReplayCaptureState.Healthy,
@@ -1133,34 +1142,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 // declaration above for why (avoids ever writing the
                 // FillFrameBlack placeholder into the ring buffer/full
                 // session as real recorded content).
-                if (hasCapturedRealFrame)
+                // Shared tail of both pacing modes below: force a keyframe on
+                // schedule, clone frame (already carrying whatever pts/pict_type
+                // the caller just set) and hand it to EncodeLoop. Factored out
+                // since the fixed-rate and adaptive-rate branches only differ in
+                // WHEN/how they decide to call this, not in what encoding a
+                // scheduled frame actually does.
+                unsafe void EncodeScheduledFrame()
                 {
-                // At most 250 ms of duplicate work after a stall. Longer bursts
-                // refill a saturated queue with stale copies and make recovery
-                // worse than dropping the missed interval.
-                var catchUpFramesRemaining = Math.Clamp(config.FrameRate / 4, 4, 60);
-                while (stopwatch.Elapsed - lastEncodedAt >= targetFrameInterval)
-                {
-                    if (catchUpFramesRemaining-- <= 0)
-                    {
-                        AppLog.Info($"Native capture: pacing gap of {(stopwatch.Elapsed - lastEncodedAt).TotalSeconds:0.0}s exceeded catch-up cap - snapping timeline forward instead of padding with duplicate frames.");
-                        lastEncodedAt = stopwatch.Elapsed;
-                        break;
-                    }
-                    lastEncodedAt += targetFrameInterval;
-
-                    // An ideal, constant-rate timestamp (frame index * the exact
-                    // target interval) instead of real elapsed time - the file's
-                    // computed average frame rate (what File Explorer/players
-                    // show) is then EXACTLY the configured target by construction,
-                    // instead of a close-but-jittery approximation from real
-                    // scheduler timing. Audio alignment doesn't use this - it gets
-                    // its own real wall-clock timestamp below, specifically so
-                    // idealizing video's timeline can't reintroduce the audio-sync
-                    // bug that was just fixed.
-                    frame->pts = (long)Math.Round(encodedFrameIndex * idealFrameIntervalMicroseconds);
-                    encodedFrameIndex++;
-
                     // Force a keyframe periodically so the ring buffer always has a nearby
                     // point to start a save-window at without waiting on the encoder's own
                     // GOP schedule.
@@ -1222,6 +1211,59 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         framesEncodedSinceLog++;
                     }
                     encodeMs += stageStopwatch.Elapsed.TotalMilliseconds;
+                }
+
+                if (hasCapturedRealFrame)
+                {
+                if (config.NativeAdaptiveFrameRate)
+                {
+                    // Variable frame rate: encode only when genuinely new content
+                    // has landed in frame->data since the last encoded frame,
+                    // instead of padding every scheduled tick with a duplicate -
+                    // no work spent re-encoding an unchanged frame while the
+                    // screen is idle (menus, loading screens, a paused game). PTS
+                    // is the real elapsed capture time rather than an idealized
+                    // fixed interval, so the file's own frame spacing reflects
+                    // when content actually changed. Audio alignment is
+                    // unaffected either way - see the ideal-timestamp comment
+                    // in the fixed-rate branch below for why.
+                    if (lastFrameContentCapturedUtc != lastEncodedContentCapturedUtc)
+                    {
+                        lastEncodedContentCapturedUtc = lastFrameContentCapturedUtc;
+                        lastEncodedAt = stopwatch.Elapsed;
+                        frame->pts = (long)Math.Round(stopwatch.Elapsed.TotalMicroseconds);
+                        EncodeScheduledFrame();
+                    }
+                }
+                else
+                {
+                // At most 250 ms of duplicate work after a stall. Longer bursts
+                // refill a saturated queue with stale copies and make recovery
+                // worse than dropping the missed interval.
+                var catchUpFramesRemaining = Math.Clamp(config.FrameRate / 4, 4, 60);
+                while (stopwatch.Elapsed - lastEncodedAt >= targetFrameInterval)
+                {
+                    if (catchUpFramesRemaining-- <= 0)
+                    {
+                        AppLog.Info($"Native capture: pacing gap of {(stopwatch.Elapsed - lastEncodedAt).TotalSeconds:0.0}s exceeded catch-up cap - snapping timeline forward instead of padding with duplicate frames.");
+                        lastEncodedAt = stopwatch.Elapsed;
+                        break;
+                    }
+                    lastEncodedAt += targetFrameInterval;
+
+                    // An ideal, constant-rate timestamp (frame index * the exact
+                    // target interval) instead of real elapsed time - the file's
+                    // computed average frame rate (what File Explorer/players
+                    // show) is then EXACTLY the configured target by construction,
+                    // instead of a close-but-jittery approximation from real
+                    // scheduler timing. Audio alignment doesn't use this - it gets
+                    // its own real wall-clock timestamp below, specifically so
+                    // idealizing video's timeline can't reintroduce the audio-sync
+                    // bug that was just fixed.
+                    frame->pts = (long)Math.Round(encodedFrameIndex * idealFrameIntervalMicroseconds);
+                    encodedFrameIndex++;
+                    EncodeScheduledFrame();
+                }
                 }
                 }
 

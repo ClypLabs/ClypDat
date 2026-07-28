@@ -26,6 +26,11 @@ public sealed class AppSettings
     public int ReplayFrameRate { get; set; } = 60;
     public int ReplayMaxHeight { get; set; } = 1080;
     public string ReplayBackend { get; set; } = "Auto";
+    // Native engine only: skip re-encoding a duplicate of the last frame to
+    // hold a constant rate during idle/no-new-frame stretches, and let real
+    // frame timestamps drive playback speed instead. Off by default - keeps
+    // today's constant-rate behavior unless explicitly opted into.
+    public bool NativeAdaptiveFrameRate { get; set; }
     public string ExportVideoCodec { get; set; } = "H.264";
     public string SaveReplayHotkey { get; set; } = "Ctrl+Shift+F9";
     public bool StartReplayOnLaunch { get; set; }

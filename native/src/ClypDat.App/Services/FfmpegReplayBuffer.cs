@@ -784,7 +784,8 @@ public sealed record ReplayBufferConfig(
     int AudioSyncOffsetMs = 0,
     string ClipFileNameScheme = "Standard",
     string CustomClipFileNameTemplate = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}",
-    string LibraryFolder = "");
+    string LibraryFolder = "",
+    bool NativeAdaptiveFrameRate = false);
 
 internal sealed class AudioCaptureSession : IDisposable
 {
