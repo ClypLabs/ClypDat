@@ -582,6 +582,38 @@ public sealed class MediaProbeService
         return output;
     }
 
+    // Re-grabs the cached library-card thumbnail at an explicit timestamp,
+    // overwriting the same cache path EnsureThumbnailAsync uses - called when
+    // the user moves a clip's TrimStart handle, so the card representing it
+    // shows the frame the clip now actually opens on instead of a stale one
+    // from before the trim. Unlike EnsureThumbnailAsync, there's no
+    // black-frame retry chain here: the user explicitly chose this exact
+    // position, so it's shown as-is even if it happens to be black.
+    public async Task<string> RegenerateThumbnailAsync(string filePath, TimeSpan atTime)
+    {
+        var output = GetThumbnailPath(filePath);
+        var result = await RunProcessAsync("ffmpeg", new[]
+        {
+            "-y",
+            "-ss", Math.Max(0, atTime.TotalSeconds).ToString("0.###"),
+            "-i", filePath,
+            "-frames:v", "1",
+            // Same -2 rounding as EnsureThumbnailAsync - an odd height from
+            // preserving aspect exactly fails the JPEG encoder's 4:2:0 output.
+            "-vf", "scale=960:-2",
+            "-q:v", "4",
+            output
+        });
+
+        if (result.ExitCode != 0 || !File.Exists(output))
+        {
+            AppLog.Error($"Thumbnail regeneration failed for {filePath}: {(string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg failed" : result.Error.Trim())}");
+            return string.Empty;
+        }
+
+        return output;
+    }
+
     // Editor timeline's video-lane filmstrip (TimelineLaneControl) - a single
     // cached image holding FilmstripFrameCount frames tiled left-to-right,
     // sampled evenly across the clip, generated once here during hydration

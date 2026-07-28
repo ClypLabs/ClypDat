@@ -127,6 +127,7 @@
                           </DataTemplate>
                         </ComboBox.ItemTemplate>
                       </ComboBox>
+                      <TextBox Classes="settingsInput" Text="{Binding CustomReplayHeight}" Watermark="1080" IsVisible="{Binding IsCustomReplayResolution}" HorizontalAlignment="Stretch" />
                     </StackPanel>
                     <StackPanel Grid.Column="2" Spacing="6">
                       <TextBlock Classes="flyoutLabel" Text="FRAME RATE" />
@@ -1081,6 +1082,10 @@
                         </DataTemplate>
                       </ListBox.ItemTemplate>
                     </ListBox>
+                    <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="8" IsVisible="{Binding IsCustomReplayResolution}">
+                      <TextBlock Text="Custom height" Foreground="#B8C7D8" FontSize="12" VerticalAlignment="Center" />
+                      <TextBox Grid.Column="1" Classes="settingsInput" Width="110" Text="{Binding CustomReplayHeight}" Watermark="1080" VerticalAlignment="Center" />
+                    </Grid>
                   </StackPanel>
 
                   <Border Height="1" Background="#1B242D" />
@@ -1124,6 +1129,14 @@
                     <TextBlock Text="Restart ClypDat for the backend change to take effect." Foreground="#E5A00D" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
                     <Button Content="Restart Now" Click="RestartAppButton_OnClick" />
                   </StackPanel>
+                  <Border Height="1" Background="#1B242D" Margin="0,6" />
+                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Adaptive frame rate}">
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                      <TextBlock Text="Adaptive frame rate" Foreground="#B8C7D8" FontWeight="Bold" FontSize="13" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                      <TextBlock Text="ClypDat backend only. Skips re-encoding a duplicate frame to hold a constant rate when nothing on screen changed, letting real frame timing drive playback speed instead - less encode work and smaller files during idle stretches (menus, loading screens, paused games)." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding NativeAdaptiveFrameRate}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                  </Grid>
                 </StackPanel>
               </Border>
 
