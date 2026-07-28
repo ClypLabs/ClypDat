@@ -231,24 +231,19 @@ bool load_obs_api(const std::filesystem::path &bin)
     SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_USER_DIRS);
     AddDllDirectory(bin.c_str());
     SetDllDirectoryW(bin.c_str());
-    // obs.dll itself loads fine with the directory-search calls above, but
-    // obs-ffmpeg.dll (loaded later, from obs-plugins\64bit, by libobs' own
-    // os_dlopen rather than through this process) has been observed failing
-    // with error 126 - an unresolved dependency - even though every DLL its
-    // import table names (avformat-61, avcodec-61, librist, srt, ...) is
-    // physically present right here in bin\64bit. AddDllDirectory/
-    // SetDllDirectoryW only affect LoadLibraryEx calls that opt into
-    // LOAD_LIBRARY_SEARCH_*; a plain LoadLibrary from inside libobs is not
-    // guaranteed to. Prepending PATH is the one search mechanism every
-    // LoadLibrary variant still honors regardless of how it's called.
-    std::vector<wchar_t> currentPath(32768);
-    const auto pathLength = GetEnvironmentVariableW(L"PATH", currentPath.data(), static_cast<DWORD>(currentPath.size()));
-    std::wstring newPath = bin.wstring();
-    if (pathLength > 0 && pathLength < currentPath.size()) {
-        newPath += L";";
-        newPath += currentPath.data();
-    }
-    SetEnvironmentVariableW(L"PATH", newPath.c_str());
+    // A PATH-prepend fix was tried here to get obs-ffmpeg.dll loading (it was
+    // failing with error 126 despite every dependency being present in
+    // bin\64bit). It worked - but that unblocked create_replay_output()
+    // running for the first time ever in this codebase (obs-ffmpeg.dll
+    // provides the "replay_buffer" output type it needs), and that path
+    // crashes the whole process with an access violation before even its
+    // first trace line. That code has never been exercised successfully, so
+    // this is a real, separate bug in encoder/output creation, not something
+    // safe to leave live. Reverted until that's debugged properly with an
+    // actual debugger attached - obs-ffmpeg.dll simply not loading is the
+    // known-safe state: create_replay_output fails its own
+    // has_obs_type("replay_buffer") check and returns cleanly, and Hybrid
+    // falls back to Native like it always has.
 
     g_bin_path = obs_path(bin);
     g_obs = LoadLibraryW((bin / L"obs.dll").c_str());
