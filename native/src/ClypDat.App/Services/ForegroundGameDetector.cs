@@ -5,7 +5,7 @@ using System.Text;
 
 namespace ClypDat.App.Services;
 
-public enum GameMatchSource { None, UserCustom, Catalog, Steam }
+public enum GameMatchSource { None, UserCustom, Catalog, Steam, Epic, BattleNet, Riot }
 
 public sealed record GameDetection(
     string DisplayName,
@@ -25,6 +25,9 @@ public sealed record GameDetection(
 public sealed class ForegroundGameDetector
 {
     private readonly SteamGameLibrary _steamGames = new();
+    private readonly EpicGameLibrary _epicGames = new();
+    private readonly BattleNetGameLibrary _battleNetGames = new();
+    private readonly RiotGameLibrary _riotGames = new();
     private readonly ConcurrentDictionary<nint, CachedWindow> _windowCache = new();
     private volatile HashSet<string> _userIgnoredExecutables = new(StringComparer.OrdinalIgnoreCase);
     private volatile Dictionary<string, string> _customGames = new(StringComparer.OrdinalIgnoreCase);
@@ -155,6 +158,18 @@ public sealed class ForegroundGameDetector
             {
                 detection = Create(steamGame.DisplayName, exeName, title, className, handle, (int)processId, GameMatchSource.Steam, $"steam-{steamGame.AppId}");
             }
+            else if (_epicGames.FindByExecutablePath(executablePath) is { } epicGame)
+            {
+                detection = Create(epicGame.DisplayName, exeName, title, className, handle, (int)processId, GameMatchSource.Epic, $"epic-{Normalize(epicGame.DisplayName)}");
+            }
+            else if (_battleNetGames.FindByExecutablePath(executablePath) is { } battleNetGame)
+            {
+                detection = Create(battleNetGame.DisplayName, exeName, title, className, handle, (int)processId, GameMatchSource.BattleNet, $"battlenet-{Normalize(battleNetGame.DisplayName)}");
+            }
+            else if (_riotGames.FindByExecutablePath(executablePath) is { } riotGame)
+            {
+                detection = Create(riotGame.DisplayName, exeName, title, className, handle, (int)processId, GameMatchSource.Riot, $"riot-{Normalize(riotGame.DisplayName)}");
+            }
             else detection = GameDetection.None;
 
             if (detection.IsDetected && IsIgnored(detection.DetectionKey)) detection = GameDetection.None;
@@ -190,6 +205,9 @@ public sealed class ForegroundGameDetector
 
     private static GameDetection Create(string displayName, string executable, string title, string className, nint handle, int processId, GameMatchSource source, string detectionKey) =>
         new(displayName, executable, title, className, handle, processId, true, false, source, detectionKey);
+
+    private static string Normalize(string name) =>
+        new(name.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 
     private bool IsIgnored(string executable) => _userIgnoredExecutables.Contains(executable);
     private static bool IsStillUsable(GameDetection detection) => detection.WindowHandle != 0 && IsWindow(detection.WindowHandle) && IsWindowVisible(detection.WindowHandle) && !IsIconic(detection.WindowHandle);

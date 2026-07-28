@@ -729,7 +729,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ExecutableName = detectionKey,
             DisplayName = detection.DisplayName,
             CaptureBackend = "Auto",
-            Origin = detection.MatchSource is GameMatchSource.Catalog or GameMatchSource.Steam ? "Catalog" : "UserCustom"
+            Origin = detection.MatchSource is GameMatchSource.Catalog or GameMatchSource.Steam or GameMatchSource.Epic or GameMatchSource.BattleNet or GameMatchSource.Riot ? "Catalog" : "UserCustom"
         });
         SaveSettings();
         RebuildGameCaptureRows();
