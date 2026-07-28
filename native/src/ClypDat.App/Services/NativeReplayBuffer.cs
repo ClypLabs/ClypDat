@@ -2416,7 +2416,21 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 // p1 gives GPU rendering priority during VSync-off/VRR bursts.
                 // Reliability wins over the small motion-quality gain from p2.
                 TrySet("preset", "p1");
-                TrySet("tune", "ll");
+                // "hq", NOT "ll". Low-latency tuning pins NVENC's VBV buffer to
+                // roughly a single frame's worth of bits, which hard-caps EVERY
+                // frame at bitrate/fps (~34KB at 1080p60) no matter how much
+                // motion it actually contains - a fast-panning gameplay frame
+                // needs several times that, so it gets crushed to fit and comes
+                // out soft and blocky while the file's AVERAGE bitrate still
+                // reads a healthy ~17Mbps. That constraint buys nothing here:
+                // this is a ring buffer being written to memory, not a live
+                // stream with a latency budget. "hq" lets the encoder spend bits
+                // where the content actually needs them, at the same average
+                // bitrate and so the same file size and ring-buffer footprint.
+                TrySet("tune", "hq");
+                // Explicit rather than relying on the implicit default that
+                // setting bit_rate alone selects.
+                TrySet("rc", "vbr");
                 TrySet("forced-idr", "1");
                 break;
             case "h264_amf":
@@ -2472,6 +2486,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // on playback despite the pixels themselves being correct.
             codecContext->color_range = AVColorRange.AVCOL_RANGE_JPEG;
             codecContext->bit_rate = CaptureBitrate(config);
+            // A real VBV to spend against, rather than leaving it unset and
+            // letting the encoder fall back to an effectively per-frame budget.
+            // One second of buffer lets a burst of hard-to-compress motion
+            // borrow bits from the quiet stretch around it, which is the whole
+            // mechanism that keeps fast gameplay from going soft - the average
+            // (and so the file size, and the ring buffer's memory footprint) is
+            // still governed by bit_rate above. rc_max_rate caps how far a
+            // single burst may run ahead of that average.
+            codecContext->rc_buffer_size = (int)codecContext->bit_rate;
+            codecContext->rc_max_rate = codecContext->bit_rate * 2;
             codecContext->gop_size = 240;
             codecContext->max_b_frames = 0;
             codecContext->flags |= ffmpeg.AV_CODEC_FLAG_GLOBAL_HEADER;
