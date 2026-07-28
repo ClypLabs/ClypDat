@@ -53,6 +53,7 @@ using proc_handler_t = void;
 constexpr int VIDEO_FORMAT_NV12 = 2;
 constexpr int VIDEO_CS_709 = 2;
 constexpr int VIDEO_RANGE_PARTIAL = 1;
+constexpr int VIDEO_RANGE_FULL = 2;
 constexpr int OBS_SCALE_BICUBIC = 2;
 constexpr int SPEAKERS_STEREO = 2;
 
@@ -1013,7 +1014,11 @@ extern "C" __declspec(dllexport) int clypdat_obs_init(const wchar_t *runtime_fol
     video.output_format = VIDEO_FORMAT_NV12;
     video.gpu_conversion = true;
     video.colorspace = VIDEO_CS_709;
-    video.range = VIDEO_RANGE_PARTIAL;
+    // Desktop Duplication content is full-range (0-255) RGB before this ever
+    // converts to YUV - tagging the pipeline PARTIAL (16-235) here was
+    // internally consistent but wrong for what's actually being captured,
+    // crushing blacks/whites once decoded and displayed at the correct range.
+    video.range = VIDEO_RANGE_FULL;
     video.scale_type = OBS_SCALE_BICUBIC;
     trace("init: reset_video");
     int video_result = obs.reset_video(&video);

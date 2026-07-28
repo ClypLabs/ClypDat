@@ -4818,7 +4818,7 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
         if (cancellationToken.IsCancellationRequested) return;
 
-        StopEditorPlayback(cancelQueuedStart: false);
+        StopEditorPlayback(cancelQueuedStart: false, stopPlaybackAsync: true);
 
         try
         {
@@ -4826,10 +4826,11 @@ public sealed partial class MainWindow : Window
             // PlaybackSession every time - PlaybackSession's constructor spins up a
             // whole new LibVLC engine + MediaPlayer, which was the bulk of the
             // "video stays black for a moment" delay on every single clip open.
-            // LoadVideo() already fully tears down and replaces the previous Media
-            // internally, so the same instance is safe to reuse.
+            // LoadVideoAsync() already fully tears down and replaces the previous
+            // Media internally, so the same instance is safe to reuse.
             var playback = _playback ?? new PlaybackSession();
-            playback.LoadVideo(ViewModel.SelectedVideoPath);
+            await playback.LoadVideoAsync(ViewModel.SelectedVideoPath);
+            if (cancellationToken.IsCancellationRequested) return;
             playback.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
             _playback = playback;
             _pausedRanges = LoadPausedRanges(ViewModel.SelectedVideoPath);
