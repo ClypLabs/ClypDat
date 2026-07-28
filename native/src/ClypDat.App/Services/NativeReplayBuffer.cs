@@ -1392,6 +1392,17 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             outputWidth, outputHeight, AVPixelFormat.AV_PIX_FMT_NV12,
             2 /* SWS_BILINEAR */, null, null, null);
         if (swsContext is null) throw new InvalidOperationException("sws_getContext failed.");
+
+        // Desktop Duplication's BGRA capture is full-range (0-255) - without
+        // this, sws_scale's default conversion targets studio/limited range
+        // (16-235) NV12 output, crushing blacks/whites once played back at
+        // the correct (full) range. Matrix stays the swscale default
+        // (BT.601); only range is in scope here.
+        var coefficientsPtr = ffmpeg.sws_getCoefficients(ffmpeg.SWS_CS_DEFAULT);
+        var coefficients = new int_array4();
+        coefficients.UpdateFrom(new[] { coefficientsPtr[0], coefficientsPtr[1], coefficientsPtr[2], coefficientsPtr[3] });
+        ffmpeg.sws_setColorspaceDetails(swsContext, in coefficients, 1 /* full */, in coefficients, 1 /* full */, 0, 1 << 16, 1 << 16);
+
         return swsContext;
     }
 
@@ -1454,6 +1465,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         {
             throw new InvalidOperationException($"CreateVideoProcessor failed: {error.Message}", error);
         }
+
+        // Desktop Duplication's input is full-range (0-255) RGB, and left at
+        // its driver defaults the Video Processor's NV12 output nominally
+        // targets studio/limited range (16-235) - same crushed blacks/whites
+        // problem as the CPU sws_scale path (see CreateScaler), just via a
+        // different API. RGB_Range/Usage/YCbCr_Matrix are left at their
+        // already-correct defaults (full-range RGB in, BT.601 matrix
+        // unchanged - only range is in scope here); Nominal_Range=1 is
+        // 0-255/full per D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE.
+        var colorSpace = new VideoProcessorColorSpace { Nominal_Range = 1 };
+        videoContext.VideoProcessorSetStreamColorSpace(processor, 0, colorSpace);
+        videoContext.VideoProcessorSetOutputColorSpace(processor, colorSpace);
 
         // Many D3D11 video processing samples create the VP output resource
         // with BindFlags.RenderTarget even though nothing ever binds it as
@@ -2220,9 +2243,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // either isn't present in this ffmpeg build or fails to open (no matching GPU/driver
     // present - e.g. h264_nvenc exists in the binary on any machine, but avcodec_open2
     // only succeeds if an actual NVIDIA GPU/driver answers it). h264_amf is AMD's
-    // equivalent via the AMF SDK; libx264 is the last-resort CPU fallback so capture
-    // still works even with no usable hardware encoder at all.
-    private static readonly string[] EncoderCandidates = { "h264_nvenc", "h264_amf", "libx264" };
+    // equivalent via the AMF SDK, h264_qsv is Intel's via Quick Sync; libx264 is the
+    // last-resort CPU fallback so capture still works even with no usable hardware
+    // encoder at all.
+    private static readonly string[] EncoderCandidates = { "h264_nvenc", "h264_amf", "h264_qsv", "libx264" };
 
     // h264_nvenc's default preset does real per-frame rate-distortion search,
     // which measured a sustained ~59-60ms/frame (vs. ~0.5ms on p1) during
@@ -2287,9 +2311,20 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             case "h264_amf":
                 TrySet("usage", "ultralowlatency");
                 TrySet("quality", "speed");
-                // AMF's equivalent knob; TrySet just logs and moves on if this
-                // build doesn't expose it.
-                TrySet("forced-idr", "1");
+                // AMF's equivalent knob is spelled with an underscore, not a
+                // dash like NVENC's - this was silently a no-op under the
+                // wrong name (TrySet just logs and moves on for an unknown
+                // option), so AMD captures weren't actually getting true IDR
+                // cut points despite the setting looking present here.
+                TrySet("forced_idr", "1");
+                break;
+            case "h264_qsv":
+                TrySet("preset", "veryfast");
+                TrySet("forced_idr", "1");
+                // QSV's default queues up to 4 frames deep before an encoded
+                // packet comes back out - same latency concern as NVENC's
+                // "ll" tune above, just a different knob for a different SDK.
+                TrySet("async_depth", "1");
                 break;
             case "libx264":
                 TrySet("preset", "ultrafast");
@@ -2318,6 +2353,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             codecContext->time_base = timeBase;
             codecContext->framerate = new AVRational { num = Math.Clamp(config.FrameRate, 15, 240), den = 1 };
             codecContext->pix_fmt = AVPixelFormat.AV_PIX_FMT_NV12;
+            // The scalers (CreateScaler/CreateGpuScaler) now convert the
+            // full-range capture into full-range NV12 - without also
+            // signaling that in the bitstream's VUI, a decoder (including
+            // this app's own editor) has no way to know and falls back to
+            // assuming limited range, crushing blacks/whites right back in
+            // on playback despite the pixels themselves being correct.
+            codecContext->color_range = AVColorRange.AVCOL_RANGE_JPEG;
             codecContext->bit_rate = CaptureBitrate(config);
             codecContext->gop_size = 240;
             codecContext->max_b_frames = 0;
@@ -2337,7 +2379,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             ffmpeg.avcodec_free_context(&failedContext);
         }
 
-        throw new InvalidOperationException("No usable H.264 encoder found (tried NVENC, AMD AMF, software libx264).");
+        throw new InvalidOperationException("No usable H.264 encoder found (tried NVENC, AMD AMF, Intel QSV, software libx264).");
     }
 
     private static int CaptureBitrate(ReplayBufferConfig config)

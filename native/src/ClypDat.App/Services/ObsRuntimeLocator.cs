@@ -18,6 +18,7 @@ public static class ObsRuntimeLocator
         Path.Combine("obs-plugins", "64bit", "win-wasapi.dll"),
         Path.Combine("obs-plugins", "64bit", "obs-ffmpeg.dll"),
         Path.Combine("obs-plugins", "64bit", "obs-nvenc.dll"),
+        Path.Combine("obs-plugins", "64bit", "obs-qsv11.dll"),
         Path.Combine("data", "obs-plugins", "win-capture", "graphics-hook64.dll"),
         Path.Combine("data", "obs-plugins", "win-capture", "inject-helper64.exe")
     };

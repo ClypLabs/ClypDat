@@ -76,7 +76,15 @@ public sealed class PlaybackSession : IDisposable
         using var libVlc = new LibVLC("--quiet");
     }
 
-    public void LoadVideo(string path)
+    // Runs its whole body on a background thread: Stop() is a genuinely
+    // blocking libvlc call (real time tearing down decode/output threads for
+    // whatever was previously loaded), and the network-path stat below can
+    // hang far longer on a slow/dropped share. Both used to run inline on the
+    // caller's thread - fine for a fire-and-forget background Stop(), but this
+    // is called synchronously from the UI thread on every editor open after
+    // the first, which froze the whole app for however long either of those
+    // took.
+    public Task LoadVideoAsync(string path) => Task.Run(() =>
     {
         Stop();
         DisposeMedia();
@@ -122,7 +130,7 @@ public sealed class PlaybackSession : IDisposable
         long sizeMb = 0;
         try { sizeMb = new FileInfo(path).Length / (1024 * 1024); } catch { }
         AppLog.Debug($"Editor video load: network={isNetwork}, sizeMB={sizeMb}, path={path}");
-    }
+    });
 
     public static bool IsNetworkPath(string path)
     {
