@@ -942,8 +942,24 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             // second. Conversion/readback cannot improve a 60 FPS output
                             // after the next scheduled frame is already fresh, so retain
                             // the newest source frame and process at output cadence.
+                            //
+                            // 90% of the interval, not the full interval: real presentation
+                            // timing is never perfectly uniform (confirmed via
+                            // maxPresentGapMs varying several ms around the mean even
+                            // during steady gameplay) - a present that lands a hair before
+                            // one full interval has elapsed is still a genuinely new frame,
+                            // not the source running slow, but a strict >= against the full
+                            // interval drops it outright with no later catch-up (unlike the
+                            // lastEncodedAt/encode-tick accumulator, which owes and repays
+                            // missed ticks). Measured at a real 60fps-ish source: this gate
+                            // alone was processing only ~90% of real presents (e.g. ~53fps
+                            // out of a genuine ~59fps source) even after the phase-lock fix
+                            // below, purely from that jitter falling on the wrong side of an
+                            // exact threshold. The accumulator itself still advances by the
+                            // FULL interval either way (see below), so this only forgives
+                            // early jitter - it doesn't change the long-run average rate.
                             var shouldProcessSourceFrame = !hasProcessedSourceFrame ||
-                                                           stopwatch.Elapsed - lastSourceProcessAt >= targetFrameInterval;
+                                                           stopwatch.Elapsed - lastSourceProcessAt >= targetFrameInterval * 0.9;
                             if (!occluded && shouldProcessSourceFrame)
                             {
                                 // NVENC's actual encode runs asynchronously - avcodec_send_frame
