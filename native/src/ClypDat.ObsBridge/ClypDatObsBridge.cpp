@@ -142,12 +142,21 @@ void trace(const std::string &message)
     CloseHandle(file);
 }
 
+// Collects every unresolved symbol instead of stopping at the first one - a
+// single missing export used to surface as one opaque "OBS function missing:
+// X" line with everything after it in the && chain silently unattempted,
+// which is exactly how a genuinely nonexistent export (calldata_get_bool -
+// never a real libobs export, only ever a static inline wrapper around
+// calldata_get_data) stayed invisible: nothing else in the chain ever got a
+// chance to also report missing. A libobs upgrade that renames/drops several
+// exports at once now shows up as a list, not a guessing game one rebuild at
+// a time.
 template <typename T>
-bool load_fn(T &target, const char *name)
+bool load_fn(T &target, const char *name, std::vector<std::string> &missing)
 {
     target = reinterpret_cast<T>(GetProcAddress(g_obs, name));
     if (!target) {
-        set_error(L"OBS function missing: " + widen(name));
+        missing.push_back(name);
         return false;
     }
     return true;
@@ -206,7 +215,11 @@ struct ObsApi {
     proc_handler_t *(__cdecl *output_get_proc_handler)(const obs_output_t *) = nullptr;
     bool(__cdecl *proc_handler_call)(proc_handler_t *, const char *, Calldata *) = nullptr;
     bool(__cdecl *calldata_get_string)(const Calldata *, const char *, const char **) = nullptr;
-    bool(__cdecl *calldata_get_bool)(const Calldata *, const char *, bool *) = nullptr;
+    // libobs exports calldata_get_data, not calldata_get_bool -
+    // calldata_get_bool is a static inline in callback/calldata.h that just
+    // wraps calldata_get_data, so GetProcAddress for it can never succeed.
+    // See calldata_bool_value below for the local reimplementation.
+    bool(__cdecl *calldata_get_data)(const Calldata *, const char *, void *, size_t) = nullptr;
     const char *(__cdecl *enum_encoder_types)(size_t) = nullptr;
     const char *(__cdecl *enum_output_types)(size_t) = nullptr;
     const char *(__cdecl *enum_input_types)(size_t) = nullptr;
@@ -218,6 +231,25 @@ bool load_obs_api(const std::filesystem::path &bin)
     SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_USER_DIRS);
     AddDllDirectory(bin.c_str());
     SetDllDirectoryW(bin.c_str());
+    // obs.dll itself loads fine with the directory-search calls above, but
+    // obs-ffmpeg.dll (loaded later, from obs-plugins\64bit, by libobs' own
+    // os_dlopen rather than through this process) has been observed failing
+    // with error 126 - an unresolved dependency - even though every DLL its
+    // import table names (avformat-61, avcodec-61, librist, srt, ...) is
+    // physically present right here in bin\64bit. AddDllDirectory/
+    // SetDllDirectoryW only affect LoadLibraryEx calls that opt into
+    // LOAD_LIBRARY_SEARCH_*; a plain LoadLibrary from inside libobs is not
+    // guaranteed to. Prepending PATH is the one search mechanism every
+    // LoadLibrary variant still honors regardless of how it's called.
+    std::vector<wchar_t> currentPath(32768);
+    const auto pathLength = GetEnvironmentVariableW(L"PATH", currentPath.data(), static_cast<DWORD>(currentPath.size()));
+    std::wstring newPath = bin.wstring();
+    if (pathLength > 0 && pathLength < currentPath.size()) {
+        newPath += L";";
+        newPath += currentPath.data();
+    }
+    SetEnvironmentVariableW(L"PATH", newPath.c_str());
+
     g_bin_path = obs_path(bin);
     g_obs = LoadLibraryW((bin / L"obs.dll").c_str());
     if (!g_obs) {
@@ -225,63 +257,78 @@ bool load_obs_api(const std::filesystem::path &bin)
         return false;
     }
 
-    return load_fn(obs.startup, "obs_startup") &&
-           load_fn(obs.shutdown, "obs_shutdown") &&
-           load_fn(obs.set_log_handler, "base_set_log_handler") &&
-           load_fn(obs.add_data_path, "obs_add_data_path") &&
-           load_fn(obs.add_module_path, "obs_add_module_path") &&
-           load_fn(obs.load_all_modules, "obs_load_all_modules") &&
-           load_fn(obs.open_module, "obs_open_module") &&
-           load_fn(obs.init_module, "obs_init_module") &&
-           load_fn(obs.post_load_modules, "obs_post_load_modules") &&
-           load_fn(obs.reset_video, "obs_reset_video") &&
-           load_fn(obs.reset_audio, "obs_reset_audio") &&
-           load_fn(obs.data_create, "obs_data_create") &&
-           load_fn(obs.data_release, "obs_data_release") &&
-           load_fn(obs.data_set_int, "obs_data_set_int") &&
-           load_fn(obs.data_set_bool, "obs_data_set_bool") &&
-           load_fn(obs.data_set_string, "obs_data_set_string") &&
-           load_fn(obs.scene_create, "obs_scene_create") &&
-           load_fn(obs.scene_release, "obs_scene_release") &&
-           load_fn(obs.scene_get_source, "obs_scene_get_source") &&
-           load_fn(obs.scene_add, "obs_scene_add") &&
-           load_fn(obs.sceneitem_set_order, "obs_sceneitem_set_order") &&
-           load_fn(obs.sceneitem_remove, "obs_sceneitem_remove") &&
-           load_fn(obs.sceneitem_set_visible, "obs_sceneitem_set_visible") &&
-           load_fn(obs.source_create, "obs_source_create") &&
-           load_fn(obs.source_release, "obs_source_release") &&
-           load_fn(obs.source_inc_showing, "obs_source_inc_showing") &&
-           load_fn(obs.source_dec_showing, "obs_source_dec_showing") &&
-           load_fn(obs.source_inc_active, "obs_source_inc_active") &&
-           load_fn(obs.source_dec_active, "obs_source_dec_active") &&
-           load_fn(obs.source_set_audio_mixers, "obs_source_set_audio_mixers") &&
-           load_fn(obs.source_get_proc_handler, "obs_source_get_proc_handler") &&
-           load_fn(obs.set_output_source, "obs_set_output_source") &&
-           load_fn(obs.get_video, "obs_get_video") &&
-           load_fn(obs.get_audio, "obs_get_audio") &&
-           load_fn(obs.video_encoder_create, "obs_video_encoder_create") &&
-           load_fn(obs.audio_encoder_create, "obs_audio_encoder_create") &&
-           load_fn(obs.encoder_set_video, "obs_encoder_set_video") &&
-           load_fn(obs.encoder_set_audio, "obs_encoder_set_audio") &&
-           load_fn(obs.encoder_release, "obs_encoder_release") &&
-           load_fn(obs.output_create, "obs_output_create") &&
-           load_fn(obs.output_set_video_encoder, "obs_output_set_video_encoder") &&
-           load_fn(obs.output_set_audio_encoder, "obs_output_set_audio_encoder") &&
-           load_fn(obs.output_start, "obs_output_start") &&
-           load_fn(obs.output_stop, "obs_output_stop") &&
-           load_fn(obs.output_active, "obs_output_active") &&
-           load_fn(obs.output_get_last_error, "obs_output_get_last_error") &&
-           load_fn(obs.output_get_total_bytes, "obs_output_get_total_bytes") &&
-           load_fn(obs.output_update, "obs_output_update") &&
-           load_fn(obs.output_release, "obs_output_release") &&
-           load_fn(obs.output_get_proc_handler, "obs_output_get_proc_handler") &&
-           load_fn(obs.proc_handler_call, "proc_handler_call") &&
-           load_fn(obs.calldata_get_string, "calldata_get_string") &&
-           load_fn(obs.calldata_get_bool, "calldata_get_bool") &&
-           load_fn(obs.enum_encoder_types, "obs_enum_encoder_types") &&
-           load_fn(obs.enum_output_types, "obs_enum_output_types") &&
-           load_fn(obs.enum_input_types, "obs_enum_input_types") &&
-           load_fn(obs.bfree, "bfree");
+    std::vector<std::string> missing;
+    // Every call below runs regardless of earlier ones failing - see load_fn's
+    // comment for why that matters. The & (not &&) is deliberate: it must not
+    // short-circuit.
+    bool ok = true;
+    ok &= load_fn(obs.startup, "obs_startup", missing);
+    ok &= load_fn(obs.shutdown, "obs_shutdown", missing);
+    ok &= load_fn(obs.set_log_handler, "base_set_log_handler", missing);
+    ok &= load_fn(obs.add_data_path, "obs_add_data_path", missing);
+    ok &= load_fn(obs.add_module_path, "obs_add_module_path", missing);
+    ok &= load_fn(obs.load_all_modules, "obs_load_all_modules", missing);
+    ok &= load_fn(obs.open_module, "obs_open_module", missing);
+    ok &= load_fn(obs.init_module, "obs_init_module", missing);
+    ok &= load_fn(obs.post_load_modules, "obs_post_load_modules", missing);
+    ok &= load_fn(obs.reset_video, "obs_reset_video", missing);
+    ok &= load_fn(obs.reset_audio, "obs_reset_audio", missing);
+    ok &= load_fn(obs.data_create, "obs_data_create", missing);
+    ok &= load_fn(obs.data_release, "obs_data_release", missing);
+    ok &= load_fn(obs.data_set_int, "obs_data_set_int", missing);
+    ok &= load_fn(obs.data_set_bool, "obs_data_set_bool", missing);
+    ok &= load_fn(obs.data_set_string, "obs_data_set_string", missing);
+    ok &= load_fn(obs.scene_create, "obs_scene_create", missing);
+    ok &= load_fn(obs.scene_release, "obs_scene_release", missing);
+    ok &= load_fn(obs.scene_get_source, "obs_scene_get_source", missing);
+    ok &= load_fn(obs.scene_add, "obs_scene_add", missing);
+    ok &= load_fn(obs.sceneitem_set_order, "obs_sceneitem_set_order", missing);
+    ok &= load_fn(obs.sceneitem_remove, "obs_sceneitem_remove", missing);
+    ok &= load_fn(obs.sceneitem_set_visible, "obs_sceneitem_set_visible", missing);
+    ok &= load_fn(obs.source_create, "obs_source_create", missing);
+    ok &= load_fn(obs.source_release, "obs_source_release", missing);
+    ok &= load_fn(obs.source_inc_showing, "obs_source_inc_showing", missing);
+    ok &= load_fn(obs.source_dec_showing, "obs_source_dec_showing", missing);
+    ok &= load_fn(obs.source_inc_active, "obs_source_inc_active", missing);
+    ok &= load_fn(obs.source_dec_active, "obs_source_dec_active", missing);
+    ok &= load_fn(obs.source_set_audio_mixers, "obs_source_set_audio_mixers", missing);
+    ok &= load_fn(obs.source_get_proc_handler, "obs_source_get_proc_handler", missing);
+    ok &= load_fn(obs.set_output_source, "obs_set_output_source", missing);
+    ok &= load_fn(obs.get_video, "obs_get_video", missing);
+    ok &= load_fn(obs.get_audio, "obs_get_audio", missing);
+    ok &= load_fn(obs.video_encoder_create, "obs_video_encoder_create", missing);
+    ok &= load_fn(obs.audio_encoder_create, "obs_audio_encoder_create", missing);
+    ok &= load_fn(obs.encoder_set_video, "obs_encoder_set_video", missing);
+    ok &= load_fn(obs.encoder_set_audio, "obs_encoder_set_audio", missing);
+    ok &= load_fn(obs.encoder_release, "obs_encoder_release", missing);
+    ok &= load_fn(obs.output_create, "obs_output_create", missing);
+    ok &= load_fn(obs.output_set_video_encoder, "obs_output_set_video_encoder", missing);
+    ok &= load_fn(obs.output_set_audio_encoder, "obs_output_set_audio_encoder", missing);
+    ok &= load_fn(obs.output_start, "obs_output_start", missing);
+    ok &= load_fn(obs.output_stop, "obs_output_stop", missing);
+    ok &= load_fn(obs.output_active, "obs_output_active", missing);
+    ok &= load_fn(obs.output_get_last_error, "obs_output_get_last_error", missing);
+    ok &= load_fn(obs.output_get_total_bytes, "obs_output_get_total_bytes", missing);
+    ok &= load_fn(obs.output_update, "obs_output_update", missing);
+    ok &= load_fn(obs.output_release, "obs_output_release", missing);
+    ok &= load_fn(obs.output_get_proc_handler, "obs_output_get_proc_handler", missing);
+    ok &= load_fn(obs.proc_handler_call, "proc_handler_call", missing);
+    ok &= load_fn(obs.calldata_get_string, "calldata_get_string", missing);
+    ok &= load_fn(obs.calldata_get_data, "calldata_get_data", missing);
+    ok &= load_fn(obs.enum_encoder_types, "obs_enum_encoder_types", missing);
+    ok &= load_fn(obs.enum_output_types, "obs_enum_output_types", missing);
+    ok &= load_fn(obs.enum_input_types, "obs_enum_input_types", missing);
+    ok &= load_fn(obs.bfree, "bfree", missing);
+
+    if (!ok) {
+        std::wstring message = L"OBS functions missing (" + std::to_wstring(missing.size()) + L"): ";
+        for (size_t i = 0; i < missing.size(); i++) {
+            if (i) message += L", ";
+            message += widen(missing[i].c_str());
+        }
+        set_error(message);
+    }
+    return ok;
 }
 
 std::filesystem::path app_data_folder()
@@ -1189,16 +1236,25 @@ extern "C" __declspec(dllexport) void clypdat_obs_shutdown()
     cleanup_obs();
 }
 
+// Reimplements libobs' own static inline calldata_bool(data, name) - see the
+// comment on ObsApi::calldata_get_data for why GetProcAddress can't resolve
+// that name directly.
+bool calldata_bool_value(const Calldata *data, const char *name)
+{
+    bool value = false;
+    if (obs.calldata_get_data) obs.calldata_get_data(data, name, &value, sizeof(value));
+    return value;
+}
+
 bool source_is_hooked(obs_source_t *source)
 {
-    if (!source || !obs.source_get_proc_handler || !obs.proc_handler_call || !obs.calldata_get_bool) return false;
+    if (!source || !obs.source_get_proc_handler || !obs.proc_handler_call || !obs.calldata_get_data) return false;
     proc_handler_t *handler = obs.source_get_proc_handler(source);
     Calldata params = {};
-    bool hooked = false;
     const bool called = handler && obs.proc_handler_call(handler, "get_hooked", &params);
-    if (called) obs.calldata_get_bool(&params, "hooked", &hooked);
+    const bool hooked = called && calldata_bool_value(&params, "hooked");
     if (!params.fixed && params.stack && obs.bfree) obs.bfree(params.stack);
-    return called && hooked;
+    return hooked;
 }
 
 extern "C" __declspec(dllexport) int clypdat_obs_capture_status()

@@ -2464,7 +2464,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // The encoder settings come straight from user input now, so they're
     // clamped here rather than trusted. Bitrate doubles as the ring buffer's
     // memory bound: the buffer lives entirely in RAM, so a 60s 1080p60 buffer
-    // costs roughly 125MB at 16Mbps and scales linearly from there.
+    // costs roughly 125MB at 16Mbps and scales linearly from there. Only
+    // Constant bitrate mode takes a user bitrate value now - Constant quality's
+    // ceiling is always derived (see MaxBitrate below).
     private static bool IsConstantBitrate(ReplayBufferConfig config) =>
         string.Equals(config.RateControlMode, "Constant bitrate", StringComparison.OrdinalIgnoreCase);
 
@@ -2474,7 +2476,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // silently turn constant quality OFF rather than mean "best possible".
     private static int ConstantQualityTarget(ReplayBufferConfig config) => Math.Clamp(config.ConstantQuality, 1, 51);
 
-    private static long MaxBitrate(ReplayBufferConfig config) => Math.Clamp(config.MaxBitrateMbps, 5, 1000) * 1_000_000L;
+    // Constant bitrate: the user's field is the ceiling by definition (it IS
+    // the target). Constant quality has no user-facing ceiling input anymore -
+    // derive a generous one from the same resolution/fps estimate CaptureBitrate
+    // uses, so a burst can still borrow bits without an unbounded ring buffer.
+    private static long MaxBitrate(ReplayBufferConfig config) =>
+        IsConstantBitrate(config)
+            ? Math.Clamp(config.MaxBitrateMbps, 5, 1000) * 1_000_000L
+            : Math.Clamp(CaptureBitrate(config) * 2L, 8_000_000L, 160_000_000L);
 
     // "P3" -> "p3". Anything unrecognised falls back to the default rather than
     // being passed through to av_opt_set as-is.
@@ -2542,8 +2551,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 TrySet("tune", "hq");
                 // Constant quality: cq drives the actual bit spend and
                 // bit_rate/rc_max_rate (set on the context) are only an average
-                // target and hard ceiling. Constant bitrate: the rate itself is
-                // the constraint, so no cq at all.
+                // target and a derived hard ceiling. Constant bitrate: the rate
+                // itself is the constraint, so no cq at all.
                 if (IsConstantBitrate(config))
                 {
                     TrySet("rc", "cbr");
@@ -2627,7 +2636,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // Constant bitrate means the configured rate IS the target, so
             // bit_rate and the ceiling are the same number. Constant quality
             // leaves the resolution/fps-derived estimate as the nominal average
-            // and lets the ceiling bound how far a burst may exceed it.
+            // and lets a derived ceiling bound how far a burst may exceed it.
             var maxBitrate = MaxBitrate(config);
             codecContext->bit_rate = IsConstantBitrate(config) ? maxBitrate : CaptureBitrate(config);
             // A real VBV to spend against, rather than leaving it unset and

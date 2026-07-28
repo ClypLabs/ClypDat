@@ -530,9 +530,37 @@
          leaving a visible gap above and below instead of the hover filling
          the whole bar edge-to-edge like real window chrome buttons do. -->
     <Setter Property="VerticalAlignment" Value="Stretch" />
+    <!-- Extends the hit-box 1px past the header row's own bounds, top and
+         bottom, so hover reaches all the way to the window's outer edge with
+         nothing left uncovered. -->
+    <Setter Property="Margin" Value="0,-1,0,-1" />
     <Setter Property="Padding" Value="0" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
+    <!-- Fluent's default Button template paints its own pointerover state on
+         an internal template part from a theme resource, ignoring a plain
+         instance Background setter no matter the selector specificity - same
+         root cause worked around elsewhere in this file (scrollToTopButton
+         directly above, railIconButton, etc). Without this override the
+         Background/Transitions setters here are silently inert: hovering
+         never shows red at all, and unhovering shows a red flash as Fluent's
+         own pointerover state deactivates mid this button's own Background
+         transition. A flat template makes OUR Background the only thing that
+         actually renders. -->
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="{TemplateBinding CornerRadius}">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                            Padding="{TemplateBinding Padding}"
+                            Foreground="{TemplateBinding Foreground}"
+                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
     <Setter Property="Transitions">
       <Transitions>
         <BrushTransition Property="Background" Duration="0:0:0.1" />

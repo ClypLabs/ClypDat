@@ -229,7 +229,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ComingSoonAutoClipGames = new ObservableCollection<string>(AutoClipCatalog.ComingSoon);
         RebuildGameCaptureRows();
         SyncIgnoredGameExecutableRows();
-        RefreshAudioDevices();
+        // Three synchronous MMDeviceEnumerator COM enumerations. At cold boot
+        // the Windows Audio service and USB/Bluetooth drivers are often still
+        // coming up and this can block for seconds - running it inline here
+        // blocked window construction itself. Posted at Background priority so
+        // the window finishes laying out and showing first; the device lists
+        // just populate a moment later instead of gating the whole launch.
+        Dispatcher.UIThread.Post(RefreshAudioDevices, DispatcherPriority.Background);
         SelectedReplayDurationPreset = ReplayDurationPresets.FirstOrDefault(preset => preset.Seconds == Settings.ReplayDurationSeconds) ??
                                        ReplayDurationPresets.First(preset => preset.Seconds == 60);
         _selectedReplayFrameRate = ReplayFrameRates.Contains(Settings.ReplayFrameRate) ? Settings.ReplayFrameRate : 60;
@@ -481,11 +487,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         get => Settings.LibraryStorageLimitGb > 0 ? Settings.LibraryStorageLimitGb.ToString() : string.Empty;
         set
         {
-            if (!int.TryParse(value, out var gb)) return;
-            Settings.LibraryStorageLimitGb = Math.Clamp(gb, 1, 1_000_000);
-            OnPropertyChanged();
-            NotifyStorageChrome();
-            SaveSettings();
+            if (int.TryParse(value, out var gb))
+            {
+                Settings.LibraryStorageLimitGb = Math.Clamp(gb, 1, 1_000_000);
+                NotifyStorageChrome();
+                SaveSettings();
+            }
+
+            SyncNumericBox(nameof(CustomLibraryStorageLimitGb), value, Settings.LibraryStorageLimitGb);
         }
     }
 
@@ -739,7 +748,38 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         var detectionKey = string.IsNullOrWhiteSpace(detection.DetectionKey) ? detection.ExeName : detection.DetectionKey;
         if (string.IsNullOrWhiteSpace(detectionKey)) return;
-        if (Settings.GameCaptureOverrides.Any(g => string.Equals(g.ExecutableName, detectionKey, StringComparison.OrdinalIgnoreCase))) return;
+
+        var existing = Settings.GameCaptureOverrides.FirstOrDefault(g => string.Equals(g.ExecutableName, detectionKey, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+        {
+            // ExecutableName is the detection key (e.g. "steam-381210" for a
+            // Catalog-origin row), not a real filename - ProcessName is what
+            // Game Detection's UI actually shows as the subtitle. Rows saved
+            // before this field existed have it empty; backfill it silently
+            // from the live detection instead of leaving the row permanently
+            // unresolved until the user removes and re-adds it.
+            var changed = false;
+            if (string.IsNullOrWhiteSpace(existing.ProcessName) && !string.IsNullOrWhiteSpace(detection.ExeName) && !string.Equals(existing.ProcessName, detection.ExeName, StringComparison.OrdinalIgnoreCase))
+            {
+                existing.ProcessName = detection.ExeName;
+                changed = true;
+            }
+            // A name saved before the SteamGameLibrary encoding fix landed can
+            // still carry a U+FFFD replacement character baked in permanently
+            // (the original bytes are already gone) - if a fresh detection
+            // resolves the same game cleanly now, repair the stored name.
+            if (existing.DisplayName.Contains('�') && !string.IsNullOrWhiteSpace(detection.DisplayName) && !detection.DisplayName.Contains('�'))
+            {
+                existing.DisplayName = detection.DisplayName;
+                changed = true;
+            }
+            if (changed)
+            {
+                SaveSettings();
+                RebuildGameCaptureRows();
+            }
+            return;
+        }
         // Removing a game adds it here. Without this check the very next
         // detection tick auto-added it straight back, which is why Remove
         // looked like it did nothing for a game that was currently running.
@@ -749,6 +789,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             ExecutableName = detectionKey,
             DisplayName = detection.DisplayName,
+            ProcessName = detection.ExeName,
             CaptureBackend = "Auto",
             Origin = detection.MatchSource is GameMatchSource.Catalog or GameMatchSource.Steam or GameMatchSource.Epic or GameMatchSource.BattleNet or GameMatchSource.Riot ? "Catalog" : "UserCustom"
         });
@@ -1024,12 +1065,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         get => Settings.ReplayMaxHeight.ToString();
         set
         {
-            if (!int.TryParse(value, out var height)) return;
-            Settings.ReplayMaxHeight = Math.Clamp(height, 480, 2160);
-            OnPropertyChanged();
-            SaveSettings();
-            UpdateReplayQualityRestartRequired();
-            OnPropertyChanged(nameof(ReplayQualityAboveDefault));
+            if (int.TryParse(value, out var height))
+            {
+                Settings.ReplayMaxHeight = Math.Clamp(height, 480, 2160);
+                SaveSettings();
+                UpdateReplayQualityRestartRequired();
+                OnPropertyChanged(nameof(ReplayQualityAboveDefault));
+            }
+
+            SyncNumericBox(nameof(CustomReplayHeight), value, Settings.ReplayMaxHeight);
         }
     }
 
@@ -1069,16 +1113,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Settings.ReplayRateControlMode = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsConstantQualityMode));
-            OnPropertyChanged(nameof(ReplayBitrateLabel));
+            OnPropertyChanged(nameof(IsConstantBitrateMode));
             SaveSettings();
             UpdateReplayQualityRestartRequired();
         }
     }
 
-    // Drives which of the two value fields the Encoder card shows, and how the
-    // bitrate one is labelled (ceiling vs target).
+    // Drives which of the two value fields the Encoder card shows. Constant
+    // quality's bitrate is derived automatically (see NativeReplayBuffer
+    // .MaxBitrate), so the bitrate field only appears in Constant bitrate mode.
     public bool IsConstantQualityMode => !string.Equals(Settings.ReplayRateControlMode, "Constant bitrate", StringComparison.OrdinalIgnoreCase);
-    public string ReplayBitrateLabel => IsConstantQualityMode ? "Max bitrate (Mbps)" : "Bitrate (Mbps)";
+    public bool IsConstantBitrateMode => !IsConstantQualityMode;
 
     // A TextBox binding ignores a PropertyChanged raised while it is itself
     // mid source-update, so a clamped or rejected value stayed on screen as
@@ -2351,10 +2396,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         get => Settings.FullSessionQuotaGb > 0 ? Settings.FullSessionQuotaGb.ToString() : string.Empty;
         set
         {
-            if (!int.TryParse(value, out var gb)) return;
-            Settings.FullSessionQuotaGb = Math.Clamp(gb, 1, 100_000);
-            OnPropertyChanged();
-            SaveSettings();
+            if (int.TryParse(value, out var gb))
+            {
+                Settings.FullSessionQuotaGb = Math.Clamp(gb, 1, 100_000);
+                SaveSettings();
+            }
+
+            SyncNumericBox(nameof(CustomFullSessionQuotaGb), value, Settings.FullSessionQuotaGb);
         }
     }
 
@@ -3820,6 +3868,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             ExecutableName = exe,
             DisplayName = NewCustomGameDisplayName.Trim(),
+            ProcessName = exe,
             CaptureBackend = "Auto",
             Origin = "UserCustom"
         });
@@ -3873,7 +3922,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var overrideEntry = Settings.GameCaptureOverrides.FirstOrDefault(g => string.Equals(g.ExecutableName, entry.ExecutableName, StringComparison.OrdinalIgnoreCase));
             var backend = ReplayBackends.FirstOrDefault(preset => string.Equals(preset.Value, overrideEntry?.CaptureBackend, StringComparison.OrdinalIgnoreCase))
                           ?? ReplayBackends.First(preset => preset.Value == "Auto");
-            var row = new GameBackendRowViewModel(entry.ExecutableName, entry.DisplayName, entry.IsCustom, backend);
+            var row = new GameBackendRowViewModel(entry.ExecutableName, entry.DisplayName, overrideEntry?.ProcessName ?? string.Empty, entry.IsCustom, backend);
             row.PropertyChanged += GameCaptureRow_OnPropertyChanged;
             GameCaptureRows.Add(row);
         }
@@ -3892,6 +3941,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             row.IsVisible = string.IsNullOrWhiteSpace(query) ||
                 row.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                row.ProcessName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
                 row.ExecutableName.Contains(query, StringComparison.OrdinalIgnoreCase);
         }
     }
@@ -3903,7 +3953,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var entry = Settings.GameCaptureOverrides.FirstOrDefault(g => string.Equals(g.ExecutableName, row.ExecutableName, StringComparison.OrdinalIgnoreCase));
         if (entry is null)
         {
-            entry = new GameCaptureOverride { ExecutableName = row.ExecutableName, DisplayName = row.IsCustom ? row.DisplayName : string.Empty, Origin = row.IsCustom ? "UserCustom" : "Backend" };
+            entry = new GameCaptureOverride { ExecutableName = row.ExecutableName, DisplayName = row.IsCustom ? row.DisplayName : string.Empty, ProcessName = row.ProcessName, Origin = row.IsCustom ? "UserCustom" : "Backend" };
             Settings.GameCaptureOverrides.Add(entry);
         }
 

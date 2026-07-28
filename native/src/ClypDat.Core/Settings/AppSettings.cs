@@ -27,18 +27,20 @@ public sealed class AppSettings
     // NVENC speed/quality preset, "P1".."P5" - higher spends more GPU time per
     // frame for better compression.
     public string ReplayEncoderPreset { get; set; } = "P4";
-    // "Constant quality" | "Constant bitrate" - picks which of the two values
-    // below actually governs the encode.
+    // "Constant quality" | "Constant bitrate" - picks whether ReplayConstantQuality
+    // or ReplayMaxBitrateMbps governs the encode.
     public string ReplayRateControlMode { get; set; } = "Constant quality";
     // Constant-quality target (NVENC cq / x264 crf) on the H.264 quantiser
     // scale, 1-51. Lower is BETTER quality and bigger files - the scale runs
     // the opposite way to how a "quality" number usually reads.
     public int ReplayConstantQuality { get; set; } = 20;
-    // In constant-quality mode this is a ceiling (and what bounds the in-memory
-    // ring buffer's size); in constant-bitrate mode it's the target itself.
-    // Allowed up to 1000 Mbps, which is far past anything sensible - the ring
-    // buffer keeps every buffered second in RAM, so rate x buffer length is
-    // roughly its footprint and the top of the range will eat gigabytes.
+    // Constant-bitrate mode's target (and what bounds the in-memory ring
+    // buffer's size). Constant-quality mode has no user-facing bitrate input -
+    // its ceiling is derived from resolution/fps instead (see NativeReplayBuffer
+    // .MaxBitrate). Allowed up to 1000 Mbps, which is far past anything
+    // sensible - the ring buffer keeps every buffered second in RAM, so rate x
+    // buffer length is roughly its footprint and the top of the range will eat
+    // gigabytes.
     public int ReplayMaxBitrateMbps { get; set; } = 40;
     public int ReplayFrameRate { get; set; } = 60;
     public int ReplayMaxHeight { get; set; } = 1080;
@@ -46,8 +48,17 @@ public sealed class AppSettings
     // Native engine only: skip re-encoding a duplicate of the last frame to
     // hold a constant rate during idle/no-new-frame stretches, and let real
     // frame timestamps drive playback speed instead. Off by default - keeps
-    // today's constant-rate behavior unless explicitly opted into.
+    // today's constant-rate behavior unless explicitly opted into. On the
+    // Native backend this made a clip's reported average frame rate collapse
+    // well below the configured target during idle stretches (menus, loading
+    // screens) - see AdaptiveFrameRateResetApplied for the one-time reset
+    // that turned it back off for anyone who already had it on.
     public bool NativeAdaptiveFrameRate { get; set; }
+    // Guards a one-time reset (AppSettingsStore.Load) that turned
+    // NativeAdaptiveFrameRate back off for existing installs. Without this
+    // flag the reset would refire every launch and fight a user who
+    // deliberately re-enables the toggle afterward.
+    public bool AdaptiveFrameRateResetApplied { get; set; }
     public string ExportVideoCodec { get; set; } = "H.264";
     public string SaveReplayHotkey { get; set; } = "Ctrl+Shift+F9";
     public bool StartReplayOnLaunch { get; set; }
@@ -205,9 +216,18 @@ public sealed class ClipEditSettings
 
 public sealed class GameCaptureOverride
 {
+    // The detection key, not necessarily a real filename - for Catalog-origin
+    // rows this is "steam-{appid}" / "epic-{slug}" / etc (see
+    // ForegroundGameDetector), so it must stay stable: it's the identity used
+    // for dedupe, removal, the ignore list, and per-game backend lookup.
     public string ExecutableName { get; set; } = string.Empty;
     // Empty when row only stores capture-backend choice.
     public string DisplayName { get; set; } = string.Empty;
+    // The actual exe filename (e.g. "Overwatch.exe"), separate from
+    // ExecutableName above - Game Detection's UI shows this as the row's
+    // subtitle. Rows saved before this field existed have it empty until the
+    // game is next detected.
+    public string ProcessName { get; set; } = string.Empty;
     public string CaptureBackend { get; set; } = "Auto";
     // "Catalog" rows only remember a capture-backend choice for a game found
     // by the shared catalog or Steam manifest. They must not turn into a
