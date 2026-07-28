@@ -22,14 +22,17 @@ public static class AppSettingsStore
             settings.GameAudioExcludedProcesses ??= new List<string>();
             if (string.IsNullOrWhiteSpace(settings.ClipFileNameScheme)) settings.ClipFileNameScheme = "Standard";
             if (string.IsNullOrWhiteSpace(settings.CustomClipFileNameTemplate)) settings.CustomClipFileNameTemplate = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}";
-            if (string.IsNullOrWhiteSpace(settings.ReplayQualityPreset)) settings.ReplayQualityPreset = "Balanced";
+            if (string.IsNullOrWhiteSpace(settings.ReplayEncoderPreset)) settings.ReplayEncoderPreset = "P4";
+            if (string.IsNullOrWhiteSpace(settings.ReplayRateControlMode)) settings.ReplayRateControlMode = "Constant quality";
+            if (settings.ReplayConstantQuality <= 0) settings.ReplayConstantQuality = 20;
+            if (settings.ReplayMaxBitrateMbps <= 0) settings.ReplayMaxBitrateMbps = 40;
             if (settings.ReplayFrameRate <= 0) settings.ReplayFrameRate = 60;
             if (settings.ReplayMaxHeight <= 0) settings.ReplayMaxHeight = 1080;
             if (string.IsNullOrWhiteSpace(settings.ExportVideoCodec)) settings.ExportVideoCodec = "H.264";
             settings.ProcessPriority = settings.ProcessPriority switch
             {
                 "Idle" or "BelowNormal" or "Normal" or "AboveNormal" or "High" => settings.ProcessPriority,
-                _ => "High"
+                _ => "Normal"
             };
             settings.ChatAudioProcessName ??= string.Empty;
             settings.ChatAudioProcessNames ??= new List<string>();

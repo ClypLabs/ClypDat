@@ -20,6 +20,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private CancellationTokenSource? _libraryHydrationCts;
     private CancellationTokenSource? _waveformCts;
     private CancellationTokenSource? _thumbnailRegenCts;
+    private CancellationTokenSource? _filmstripCts;
     private FileSystemWatcher? _libraryWatcher;
     private DispatcherTimer? _libraryFolderRetryTimer;
     private readonly DispatcherTimer _libraryRefreshDebounce;
@@ -77,7 +78,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _replayBackendRestartRequired;
     private int _activeReplayMaxHeight;
     private int _activeReplayFrameRate;
-    private string _activeReplayQualityPreset = "Balanced";
+    private string _activeReplayEncoderSignature = string.Empty;
     private bool _replayQualityRestartRequired;
     private string _selectedClipOverlayPosition = "Top Right";
     private string _selectedClipOverlayVolume = "Medium";
@@ -181,7 +182,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("Custom", -1)
         };
         ReplayFrameRates = new ObservableCollection<int> { 30, 60, 90, 120, 144, 165, 240 };
-        ReplayQualityPresets = new ObservableCollection<string> { "Balanced", "High", "Very High" };
+        ReplayEncoderPresets = new ObservableCollection<string> { "P1", "P2", "P3", "P4", "P5" };
+        ReplayRateControlModes = new ObservableCollection<string> { "Constant quality", "Constant bitrate" };
         ExportCodecs = new ObservableCollection<ExportCodecOption>
         {
             new("H.264", "h264_nvenc", "libx264"),
@@ -226,7 +228,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedReplayFrameRate = ReplayFrameRates.Contains(Settings.ReplayFrameRate) ? Settings.ReplayFrameRate : 60;
         _activeReplayMaxHeight = Settings.ReplayMaxHeight;
         _activeReplayFrameRate = Settings.ReplayFrameRate;
-        _activeReplayQualityPreset = Settings.ReplayQualityPreset;
+        _activeReplayEncoderSignature = EncoderSignature;
         SelectedExportCodec = ExportCodecs.FirstOrDefault(codec => string.Equals(codec.Label, Settings.ExportVideoCodec, StringComparison.OrdinalIgnoreCase)) ??
                               ExportCodecs.First(codec => codec.Label == "H.264");
         _initialReplayBackend = string.IsNullOrWhiteSpace(Settings.ReplayBackend) ? "Auto" : Settings.ReplayBackend;
@@ -298,7 +300,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ReplayDurationPreset> ReplayDurationPresets { get; }
     public ObservableCollection<ResolutionOption> ReplayResolutions { get; }
     public ObservableCollection<int> ReplayFrameRates { get; }
-    public ObservableCollection<string> ReplayQualityPresets { get; }
+    public ObservableCollection<string> ReplayEncoderPresets { get; }
+    public ObservableCollection<string> ReplayRateControlModes { get; }
     public ObservableCollection<ReplayBackendPreset> ReplayBackends { get; }
     public ObservableCollection<ExportCodecOption> ExportCodecs { get; }
     public ObservableCollection<string> ExcludedProcesses { get; }
@@ -1032,13 +1035,59 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public string SelectedReplayQualityPreset
+    public string SelectedReplayEncoderPreset
     {
-        get => ReplayQualityPresets.Contains(Settings.ReplayQualityPreset) ? Settings.ReplayQualityPreset : "Balanced";
+        get => ReplayEncoderPresets.Contains(Settings.ReplayEncoderPreset) ? Settings.ReplayEncoderPreset : "P4";
         set
         {
-            if (string.IsNullOrWhiteSpace(value) || Settings.ReplayQualityPreset == value) return;
-            Settings.ReplayQualityPreset = value;
+            if (string.IsNullOrWhiteSpace(value) || Settings.ReplayEncoderPreset == value) return;
+            Settings.ReplayEncoderPreset = value;
+            OnPropertyChanged();
+            SaveSettings();
+            UpdateReplayQualityRestartRequired();
+        }
+    }
+
+    public string SelectedReplayRateControlMode
+    {
+        get => ReplayRateControlModes.Contains(Settings.ReplayRateControlMode) ? Settings.ReplayRateControlMode : "Constant quality";
+        set
+        {
+            if (string.IsNullOrWhiteSpace(value) || Settings.ReplayRateControlMode == value) return;
+            Settings.ReplayRateControlMode = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsConstantQualityMode));
+            OnPropertyChanged(nameof(ReplayBitrateLabel));
+            SaveSettings();
+            UpdateReplayQualityRestartRequired();
+        }
+    }
+
+    // Drives which of the two value fields the Encoder card shows, and how the
+    // bitrate one is labelled (ceiling vs target).
+    public bool IsConstantQualityMode => !string.Equals(Settings.ReplayRateControlMode, "Constant bitrate", StringComparison.OrdinalIgnoreCase);
+    public string ReplayBitrateLabel => IsConstantQualityMode ? "Max bitrate (Mbps)" : "Bitrate (Mbps)";
+
+    public string ReplayConstantQuality
+    {
+        get => Settings.ReplayConstantQuality.ToString();
+        set
+        {
+            if (!int.TryParse(value, out var quality)) return;
+            Settings.ReplayConstantQuality = Math.Clamp(quality, 10, 40);
+            OnPropertyChanged();
+            SaveSettings();
+            UpdateReplayQualityRestartRequired();
+        }
+    }
+
+    public string ReplayMaxBitrateMbps
+    {
+        get => Settings.ReplayMaxBitrateMbps.ToString();
+        set
+        {
+            if (!int.TryParse(value, out var mbps)) return;
+            Settings.ReplayMaxBitrateMbps = Math.Clamp(mbps, 5, 200);
             OnPropertyChanged();
             SaveSettings();
             UpdateReplayQualityRestartRequired();
@@ -1047,12 +1096,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool ReplayQualityAboveDefault => Settings.ReplayMaxHeight > 1080 || Settings.ReplayFrameRate > 60;
 
+    // One string covering everything the running buffer baked in at start, so
+    // the restart notice doesn't need a field per encoder setting.
+    private string EncoderSignature =>
+        $"{Settings.ReplayEncoderPreset}|{Settings.ReplayRateControlMode}|{Settings.ReplayConstantQuality}|{Settings.ReplayMaxBitrateMbps}";
+
     private void UpdateReplayQualityRestartRequired()
     {
         ReplayQualityRestartRequired = IsReplayRecording &&
                                         (Settings.ReplayMaxHeight != _activeReplayMaxHeight ||
                                          Settings.ReplayFrameRate != _activeReplayFrameRate ||
-                                         Settings.ReplayQualityPreset != _activeReplayQualityPreset);
+                                         EncoderSignature != _activeReplayEncoderSignature);
     }
 
     public bool ReplayQualityRestartRequired
@@ -1065,7 +1119,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         _activeReplayMaxHeight = Settings.ReplayMaxHeight;
         _activeReplayFrameRate = Settings.ReplayFrameRate;
-        _activeReplayQualityPreset = Settings.ReplayQualityPreset;
+        _activeReplayEncoderSignature = EncoderSignature;
         ReplayQualityRestartRequired = false;
     }
 
@@ -3083,9 +3137,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         try
         {
+            // Thumbnail only. The filmstrip used to be generated here too, but
+            // it costs eleven separate ffmpeg processes (one per frame plus a
+            // tile pass, see MediaProbeService.EnsureFilmstripAsync) against a
+            // file that was just written - the bulk of the ~15-process burst
+            // that made every clip save stutter the whole machine. Nothing in
+            // the library needs it; only the editor timeline does, so it's
+            // generated on demand there instead (StartFilmstripLoad). It still
+            // caches to disk exactly as before, so that's a one-time cost per
+            // clip rather than a recurring one on the save path.
             var thumbnailPath = await _mediaProbe.EnsureThumbnailAsync(filePath, clip.Duration);
-            var filmstripPath = await _mediaProbe.EnsureFilmstripAsync(filePath, clip.Duration);
-            if (string.IsNullOrEmpty(thumbnailPath) && string.IsNullOrEmpty(filmstripPath)) return;
+            var filmstripPath = string.Empty;
+            if (string.IsNullOrEmpty(thumbnailPath)) return;
 
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
@@ -3954,7 +4017,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             CustomClipFileNameTemplate: Settings.CustomClipFileNameTemplate,
             LibraryFolder: Settings.LibraryFolder,
             NativeAdaptiveFrameRate: Settings.NativeAdaptiveFrameRate,
-            QualityPreset: Settings.ReplayQualityPreset);
+            EncoderPreset: Settings.ReplayEncoderPreset,
+            RateControlMode: Settings.ReplayRateControlMode,
+            ConstantQuality: Settings.ReplayConstantQuality,
+            MaxBitrateMbps: Settings.ReplayMaxBitrateMbps);
     }
 
     public void SetDuration(TimeSpan duration)
@@ -4216,6 +4282,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         ApplyClipEditState(media.Path);
         IsEditorVisible = true;
+        StartFilmstripLoad(media);
         StartWaveformLoad(media);
     }
 
@@ -5562,6 +5629,53 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         catch (Exception error)
         {
             AppLog.Error("Thumbnail regeneration at TrimStart failed", error);
+        }
+    }
+
+    // The editor timeline's video lane is the only consumer of the filmstrip,
+    // so it's built here on open rather than on the clip-save path (see
+    // HydrateClipImagesAsync for why). EnsureFilmstripAsync short-circuits on
+    // an existing file, so this is a no-op for any clip opened before.
+    private void StartFilmstripLoad(MediaFileInfo media)
+    {
+        _filmstripCts?.Cancel();
+        _filmstripCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _filmstripCts = cts;
+        _ = LoadFilmstripAsync(media, cts.Token);
+    }
+
+    private async Task LoadFilmstripAsync(MediaFileInfo media, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var filmstripPath = await _mediaProbe.EnsureFilmstripAsync(media.Path, media.Duration).ConfigureAwait(false);
+            if (cancellationToken.IsCancellationRequested || string.IsNullOrEmpty(filmstripPath)) return;
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                // Same guard the waveform loader uses - a superseded load must
+                // not paint the previous clip's strip over the current one.
+                if (cancellationToken.IsCancellationRequested) return;
+                if (!string.Equals(SelectedVideoPath, media.Path, StringComparison.OrdinalIgnoreCase)) return;
+
+                var filmstrip = LoadBitmap(filmstripPath);
+                foreach (var track in TimelineTracks.Where(track => track.IsVideo))
+                {
+                    track.Filmstrip = filmstrip;
+                }
+
+                var card = AllClips.FirstOrDefault(clip => string.Equals(clip.Path, media.Path, StringComparison.OrdinalIgnoreCase));
+                card?.UpdateMedia(card.Media with { FilmstripPath = filmstripPath });
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // Another clip replaced this load.
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Filmstrip load failed", error);
         }
     }
 

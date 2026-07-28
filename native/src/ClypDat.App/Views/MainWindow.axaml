@@ -350,7 +350,7 @@
                               <Border Classes="gameInitialBadge" Width="30" Height="30" CornerRadius="8" IsVisible="{Binding ShowFolderGlyph}">
                                 <PathIcon Data="M10,4H4C2.9,4,2,4.9,2,6v12c0,1.1,0.9,2,2,2h16c1.1,0,2-0.9,2-2V8c0-1.1-0.9-2-2-2h-8L10,4z" Width="15" Height="15" HorizontalAlignment="Center" VerticalAlignment="Center">
                                   <PathIcon.RenderTransform>
-                                    <TranslateTransform X="-1" Y="-1" />
+                                    <TranslateTransform X="0.5" Y="0.5" />
                                   </PathIcon.RenderTransform>
                                 </PathIcon>
                               </Border>
@@ -1105,24 +1105,51 @@
                                IsVisible="{Binding ReplayQualityAboveDefault}" />
                   </StackPanel>
 
-                  <Border Height="1" Background="#1B242D" />
-
-                  <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Capture quality}">
-                    <TextBlock Text="Capture quality" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                    <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayQualityPresets}" SelectedItem="{Binding SelectedReplayQualityPreset}" />
-                    <TextBlock Text="ClypDat backend only. Higher quality keeps more detail in fast motion, at the cost of larger clips and more memory held by the replay buffer."
-                               Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap"
-                               opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                  </StackPanel>
-
                   <!-- Card-level, not nested inside one of the sections above:
-                       it applies to whichever of resolution/frame rate/quality
+                       it applies to whichever of resolution/frame rate/encoder
                        was changed, so scoping it to a single section's search
                        filter would hide it exactly when it's relevant. -->
                   <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding ReplayQualityRestartRequired}">
                     <TextBlock Text="Restart the replay buffer for the capture quality change to take effect." Foreground="#E5A00D" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" TextWrapping="Wrap" />
                     <Button Content="Restart Buffer" Click="RestartReplayBufferButton_OnClick" />
                   </StackPanel>
+                </StackPanel>
+              </Border>
+
+              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Encoder preset|Rate control|Quality|Bitrate}">
+                <StackPanel Spacing="18">
+                  <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Encoder preset}">
+                    <TextBlock Text="Encoder preset" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                    <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayEncoderPresets}" SelectedItem="{Binding SelectedReplayEncoderPreset}" />
+                    <TextBlock Text="ClypDat backend only. P1 is fastest and lowest quality; higher presets spend more GPU time per frame for better compression. If capture starts dropping frames under heavy load, step this back down."
+                               Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap"
+                               opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                  </StackPanel>
+
+                  <Border Height="1" Background="#1B242D" />
+
+                  <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Rate control}">
+                    <TextBlock Text="Rate control" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                    <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayRateControlModes}" SelectedItem="{Binding SelectedReplayRateControlMode}" />
+                    <TextBlock Text="Constant quality spends bits where the picture needs them and only caps the peak, so file sizes vary with what's on screen. Constant bitrate holds a fixed rate for predictable sizes, at the cost of quality in busy scenes."
+                               Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap"
+                               opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                  </StackPanel>
+
+                  <Border Height="1" Background="#1B242D" />
+
+                  <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="8" IsVisible="{Binding IsConstantQualityMode}">
+                    <TextBlock Text="Quality" Foreground="#B8C7D8" FontSize="12" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                    <TextBox Grid.Column="1" Classes="settingsInput" Width="110" Text="{Binding ReplayConstantQuality}" Watermark="20" VerticalAlignment="Center" />
+                  </Grid>
+                  <TextBlock Text="Lower is better quality and larger files (10-40)." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" IsVisible="{Binding IsConstantQualityMode}" />
+
+                  <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="8">
+                    <TextBlock Text="{Binding ReplayBitrateLabel}" Foreground="#B8C7D8" FontSize="12" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                    <TextBox Grid.Column="1" Classes="settingsInput" Width="110" Text="{Binding ReplayMaxBitrateMbps}" Watermark="40" VerticalAlignment="Center" />
+                  </Grid>
+                  <TextBlock Text="Also bounds how much memory the replay buffer holds - it lives entirely in RAM, so the rate and the buffer length together decide its size (5-200)."
+                             Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
                 </StackPanel>
               </Border>
 

@@ -1868,8 +1868,15 @@ public sealed partial class MainWindow : Window
                     await EnsureLibraryFolderAsync();
                     outputFolder = ViewModel.Settings.LibraryFolder;
                 }
-                LibraryLayout.EnsureRoots(outputFolder);
-                outputFolder = LibraryLayout.ClipsRoot(outputFolder);
+                // Directory creation is disk IO with no UI affinity - it has no
+                // business blocking the UI thread mid-save, which is exactly
+                // when the app most needs to stay responsive.
+                var rootFolder = outputFolder;
+                outputFolder = await Task.Run(() =>
+                {
+                    LibraryLayout.EnsureRoots(rootFolder);
+                    return LibraryLayout.ClipsRoot(rootFolder);
+                });
 
                 AppLog.Info(isAutoClip ? $"Auto-clip triggered: {autoClipLabel}." : "Replay clip save requested.");
 
@@ -1900,11 +1907,14 @@ public sealed partial class MainWindow : Window
                 // "3K - Mirage" -> event type "3K", map dropped - the game name
                 // (not the map) is what belongs next to it as the game label.
                 var autoClipEventType = autoClipLabel?.Split(" - ", 2)[0];
-                ClipInfoSidecar.Save(ViewModel.Settings.LibraryFolder, outputPath, new ClipInfo(
+                var libraryFolder = ViewModel.Settings.LibraryFolder;
+                var clipInfo = new ClipInfo(
                     autoClipGameName ?? ViewModel.ActiveGameDetection.DisplayName,
                     autoClipEventType,
                     autoClipLabel ?? ViewModel.ActiveGameDetection.DisplayName,
-                    File.GetCreationTimeUtc(outputPath)));
+                    File.GetCreationTimeUtc(outputPath));
+                // Another plain file write with no UI affinity.
+                await Task.Run(() => ClipInfoSidecar.Save(libraryFolder, outputPath, clipInfo));
                 await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
             }
             catch (Exception error)
@@ -2018,14 +2028,22 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void ShowClipSavedOverlay(string position, string text, bool playSound)
-    {
-        _activeClipOverlayCloseTimer?.Stop();
-        _activeClipOverlayCloseTimer = null;
-        _activeClipOverlay?.Close();
-        _activeClipOverlay = null;
+    private const double OverlaySlideDistance = 28;
+    private Border? _overlayBadge;
+    private Border? _overlayAccent;
+    private TextBlock? _overlayLabel;
+    private TranslateTransform? _overlayTranslate;
+    private DispatcherTimer? _overlayHideTimer;
 
-        var isLeft = string.Equals(position, "Top Left", StringComparison.OrdinalIgnoreCase);
+    // Built once and reused for the process lifetime. Each notification used to
+    // construct a brand-new transparent, topmost Window (and destroy the
+    // previous one), so a single clip save churned two or three compositor
+    // surfaces in about two seconds - which is real GPU/DWM work landing at
+    // exactly the moment the machine is busiest, and the most likely reason a
+    // save made the mouse feel choppy. Show/Hide costs none of that.
+    private void EnsureClipOverlay()
+    {
+        if (_activeClipOverlay is not null) return;
 
         // A full-height accent stripe (not a small dot) plus a solid, near-
         // opaque background - meant to actually stand out at a glance over
@@ -2037,16 +2055,14 @@ public sealed partial class MainWindow : Window
         // rather than always showing ClypDat's old fixed teal regardless of
         // what the user picked in Windows.
         var accentBrush = (Application.Current?.Resources["AccentBrush"] as IBrush) ?? Avalonia.Media.Brush.Parse("#13C8B5");
-        var accent = new Border
+        _overlayAccent = new Border
         {
             Width = 7,
             Background = accentBrush,
-            CornerRadius = isLeft ? new CornerRadius(4, 0, 0, 4) : new CornerRadius(0, 4, 4, 0),
             VerticalAlignment = VerticalAlignment.Stretch
         };
-        var label = new TextBlock
+        _overlayLabel = new TextBlock
         {
-            Text = text,
             Foreground = Avalonia.Media.Brush.Parse("#F5F9FF"),
             FontWeight = Avalonia.Media.FontWeight.Bold,
             FontSize = 19,
@@ -2057,43 +2073,23 @@ public sealed partial class MainWindow : Window
             Orientation = Orientation.Horizontal,
             Spacing = 14,
             Margin = new Thickness(22, 20, 26, 20),
-            Children = { label }
+            Children = { _overlayLabel }
         };
-        var translate = new TranslateTransform();
-        var badge = new Border
+        _overlayTranslate = new TranslateTransform();
+        _overlayBadge = new Border
         {
             Background = Avalonia.Media.Brush.Parse("#F5141D24"),
             BorderBrush = Avalonia.Media.Brush.Parse("#3C4C5A"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
             BoxShadow = Avalonia.Media.BoxShadows.Parse("0 10 28 0 #70000000"),
-            RenderTransform = translate,
+            RenderTransform = _overlayTranslate,
             Opacity = 0,
             ClipToBounds = true,
-            Child = new DockPanel
-            {
-                Children =
-                {
-                    accent,
-                    content
-                }
-            }
+            Child = new DockPanel { Children = { _overlayAccent, content } }
         };
-        DockPanel.SetDock(accent, isLeft ? Dock.Left : Dock.Right);
 
-        badge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        var desiredWidth = badge.DesiredSize.Width;
-
-        var screen = Screens.ScreenFromWindow(this) ?? Screens.Primary ?? Screens.All.FirstOrDefault();
-        var area = screen?.WorkingArea ?? new PixelRect(0, 0, 1920, 1080);
-        var scaling = screen?.Scaling ?? 1.0;
-        var marginDevicePixels = (int)Math.Round(24 * scaling);
-        var widthDevicePixels = (int)Math.Round(desiredWidth * scaling);
-        var x = isLeft
-            ? area.X + marginDevicePixels
-            : area.X + area.Width - widthDevicePixels - marginDevicePixels;
-
-        var overlay = new Window
+        _activeClipOverlay = new Window
         {
             SystemDecorations = SystemDecorations.None,
             CanResize = false,
@@ -2104,24 +2100,13 @@ public sealed partial class MainWindow : Window
             TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
             SizeToContent = SizeToContent.WidthAndHeight,
             WindowStartupLocation = WindowStartupLocation.Manual,
-            Position = new PixelPoint(x, area.Y + marginDevicePixels),
-            Content = badge
+            Content = _overlayBadge
         };
 
-        // Slides in FROM the edge it's pinned to, toward its resting position -
-        // left-pinned slides in moving right, right-pinned slides in moving left
-        // (the "reverse"). Set before Show() (no transition yet, so this is the
-        // instant starting state, not an animated jump), then flipped to
-        // identity/opaque one frame later so the Transitions below actually have
-        // a "from" state to animate away from instead of both values landing in
-        // the same layout pass with nothing visibly in between.
-        const double SlideDistance = 28;
-        translate.X = isLeft ? -SlideDistance : SlideDistance;
-
-        _activeClipOverlay = overlay;
-        overlay.Show();
-
-        badge.Transitions =
+        // Transitions are attached once. They're only ever driven by assigning
+        // Opacity/X below, and the enter state is set without them in effect by
+        // assigning before the window is shown.
+        _overlayBadge.Transitions =
         [
             new Avalonia.Animation.DoubleTransition
             {
@@ -2129,7 +2114,7 @@ public sealed partial class MainWindow : Window
                 Duration = TimeSpan.FromMilliseconds(200)
             }
         ];
-        translate.Transitions =
+        _overlayTranslate.Transitions =
         [
             new Avalonia.Animation.DoubleTransition
             {
@@ -2138,10 +2123,55 @@ public sealed partial class MainWindow : Window
                 Easing = new Avalonia.Animation.Easings.CubicEaseOut()
             }
         ];
+    }
+
+    private void ShowClipSavedOverlay(string position, string text, bool playSound)
+    {
+        _activeClipOverlayCloseTimer?.Stop();
+        _activeClipOverlayCloseTimer = null;
+        _overlayHideTimer?.Stop();
+        _overlayHideTimer = null;
+
+        EnsureClipOverlay();
+        if (_activeClipOverlay is null || _overlayBadge is null || _overlayLabel is null || _overlayAccent is null || _overlayTranslate is null) return;
+
+        // Position is a live setting, so the side has to be re-applied on every
+        // show rather than baked in at construction.
+        var isLeft = string.Equals(position, "Top Left", StringComparison.OrdinalIgnoreCase);
+        _overlayLabel.Text = text;
+        _overlayAccent.CornerRadius = isLeft ? new CornerRadius(4, 0, 0, 4) : new CornerRadius(0, 4, 4, 0);
+        DockPanel.SetDock(_overlayAccent, isLeft ? Dock.Left : Dock.Right);
+
+        _overlayBadge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        var desiredWidth = _overlayBadge.DesiredSize.Width;
+
+        var screen = Screens.ScreenFromWindow(this) ?? Screens.Primary ?? Screens.All.FirstOrDefault();
+        var area = screen?.WorkingArea ?? new PixelRect(0, 0, 1920, 1080);
+        var scaling = screen?.Scaling ?? 1.0;
+        var marginDevicePixels = (int)Math.Round(24 * scaling);
+        var widthDevicePixels = (int)Math.Round(desiredWidth * scaling);
+        var x = isLeft
+            ? area.X + marginDevicePixels
+            : area.X + area.Width - widthDevicePixels - marginDevicePixels;
+        _activeClipOverlay.Position = new PixelPoint(x, area.Y + marginDevicePixels);
+
+        // Slides in FROM the edge it's pinned to, toward its resting position -
+        // left-pinned slides in moving right, right-pinned slides in moving left
+        // (the "reverse"). Set before Show() (the window isn't visible yet, so
+        // this is the instant starting state rather than an animated jump), then
+        // flipped to identity/opaque one frame later so the transitions have a
+        // "from" state to animate away from instead of both values landing in
+        // the same layout pass with nothing visibly in between.
+        _overlayBadge.Opacity = 0;
+        _overlayTranslate.X = isLeft ? -OverlaySlideDistance : OverlaySlideDistance;
+
+        _activeClipOverlay.Show();
+
         Dispatcher.UIThread.Post(() =>
         {
-            badge.Opacity = 1;
-            translate.X = 0;
+            if (_overlayBadge is null || _overlayTranslate is null) return;
+            _overlayBadge.Opacity = 1;
+            _overlayTranslate.X = 0;
             // Sound used to fire the instant this method was called - well
             // before the slide/fade-in transition below even started, so it
             // landed a couple hundred ms ahead of anything visibly happening.
@@ -2155,18 +2185,19 @@ public sealed partial class MainWindow : Window
         {
             closeTimer.Stop();
             _activeClipOverlayCloseTimer = null;
-            // Slide back out the same way it came in, then close once that
+            // Slide back out the same way it came in, then hide once that
             // transition has actually had time to finish playing.
-            badge.Opacity = 0;
-            translate.X = isLeft ? -SlideDistance : SlideDistance;
-            var closeAfterExit = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(260) };
-            closeAfterExit.Tick += (_, _) =>
+            if (_overlayBadge is not null) _overlayBadge.Opacity = 0;
+            if (_overlayTranslate is not null) _overlayTranslate.X = isLeft ? -OverlaySlideDistance : OverlaySlideDistance;
+            var hideAfterExit = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(260) };
+            hideAfterExit.Tick += (_, _) =>
             {
-                closeAfterExit.Stop();
-                overlay.Close();
-                if (_activeClipOverlay == overlay) _activeClipOverlay = null;
+                hideAfterExit.Stop();
+                _overlayHideTimer = null;
+                _activeClipOverlay?.Hide();
             };
-            closeAfterExit.Start();
+            _overlayHideTimer = hideAfterExit;
+            hideAfterExit.Start();
         };
         _activeClipOverlayCloseTimer = closeTimer;
         closeTimer.Start();

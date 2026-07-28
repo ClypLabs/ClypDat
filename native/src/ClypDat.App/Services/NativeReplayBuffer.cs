@@ -248,29 +248,34 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     {
         if (!_sessionActive) throw new InvalidOperationException("Replay buffer is not recording.");
 
-        RingPacket[] window;
-        lock (_bufferLock)
+        // Snapshot under the lock, then scan outside it. The encode thread takes
+        // this same lock to append every single packet, so holding it across two
+        // O(n) predicate scans plus a LINQ pipeline stalled encoding for the
+        // whole selection. Copying the list is a reference memcpy - far cheaper
+        // than the work it replaces, and the snapshot semantics are identical
+        // since the selection only ever needed a consistent view.
+        RingPacket[] ringSnapshot;
+        lock (_bufferLock) ringSnapshot = _packets.ToArray();
+
+        if (ringSnapshot.Length == 0) throw new InvalidOperationException("Replay just started. Try again in a second.");
+
+        var requestedStartUtc = clipWindow?.StartUtc ?? MonotonicClock.UtcNow - Duration;
+        var requestedEndUtc = clipWindow?.EndUtc ?? MonotonicClock.UtcNow;
+        if (requestedEndUtc <= requestedStartUtc)
         {
-            if (_packets.Count == 0) throw new InvalidOperationException("Replay just started. Try again in a second.");
-
-            var requestedStartUtc = clipWindow?.StartUtc ?? MonotonicClock.UtcNow - Duration;
-            var requestedEndUtc = clipWindow?.EndUtc ?? MonotonicClock.UtcNow;
-            if (requestedEndUtc <= requestedStartUtc)
-            {
-                throw new InvalidOperationException("The requested replay window is empty.");
-            }
-
-            // Saving from a keyframe immediately before the requested event keeps
-            // the remux playable while still producing an event-sized clip.
-            var cutoffUtc = requestedStartUtc;
-            var startIndex = _packets.FindLastIndex(p => p.WallClockUtc <= cutoffUtc && p.IsKeyframe);
-            if (startIndex < 0) startIndex = _packets.FindIndex(p => p.IsKeyframe);
-            if (startIndex < 0) throw new InvalidOperationException("Replay just started. Try again in a second.");
-            var endIndex = _packets.FindLastIndex(p => p.WallClockUtc <= requestedEndUtc);
-            if (endIndex < startIndex) throw new InvalidOperationException("The requested replay window is no longer available.");
-
-            window = _packets.Skip(startIndex).Take(endIndex - startIndex + 1).ToArray();
+            throw new InvalidOperationException("The requested replay window is empty.");
         }
+
+        // Saving from a keyframe immediately before the requested event keeps
+        // the remux playable while still producing an event-sized clip.
+        var cutoffUtc = requestedStartUtc;
+        var startIndex = Array.FindLastIndex(ringSnapshot, p => p.WallClockUtc <= cutoffUtc && p.IsKeyframe);
+        if (startIndex < 0) startIndex = Array.FindIndex(ringSnapshot, p => p.IsKeyframe);
+        if (startIndex < 0) throw new InvalidOperationException("Replay just started. Try again in a second.");
+        var endIndex = Array.FindLastIndex(ringSnapshot, p => p.WallClockUtc <= requestedEndUtc);
+        if (endIndex < startIndex) throw new InvalidOperationException("The requested replay window is no longer available.");
+
+        var window = ringSnapshot.AsSpan(startIndex, endIndex - startIndex + 1).ToArray();
 
         if (window.Length == 0) throw new InvalidOperationException("Replay just started. Try again in a second.");
 
@@ -284,7 +289,19 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         var snapshots = new List<string>();
         try
         {
-            await Task.Run(() => RemuxWindowToMp4(window, tempVideoPath), cancellationToken);
+            // Thousands of packet copies and disk writes back to back. Dropping
+            // the pooled thread's priority for the duration keeps that burst
+            // from competing with the game and the desktop compositor - the
+            // body is fully synchronous, so the restore in the finally really
+            // does bracket all of the work (the thread returns to the pool
+            // afterwards, so it must be put back).
+            await Task.Run(() =>
+            {
+                var previousPriority = Thread.CurrentThread.Priority;
+                Thread.CurrentThread.Priority = ThreadPriority.BelowNormal;
+                try { RemuxWindowToMp4(window, tempVideoPath); }
+                finally { Thread.CurrentThread.Priority = previousPriority; }
+            }, cancellationToken);
 
             // The ring buffer already remuxes exactly the desired window starting at a
             // real keyframe - no offset/trim needed here the way WindowsReplayBuffer's
@@ -2444,22 +2461,26 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // Best-effort: an unsupported option name just logs and moves on instead
     // of failing the whole encoder open, since exact option support varies by
     // ffmpeg build/driver version.
-    // Maps the user-facing capture quality setting onto a constant-quality
-    // target and a matching bitrate ceiling. Constant quality (rather than a
-    // flat bitrate) is what lets a busy frame actually spend what it needs -
-    // the previous fixed 16.4Mbps VBR target was the binding constraint on
-    // detailed content no matter how the encoder was otherwise tuned. The
-    // ceiling is what keeps the ring buffer's RAM bounded: it lives entirely
-    // in memory, so bitrate translates directly into footprint (a 60s 1080p60
-    // buffer is roughly 125MB at 16Mbps).
-    private static (int ConstantQuality, long MaxBitrate) QualityTarget(ReplayBufferConfig config) => config.QualityPreset switch
+    // The encoder settings come straight from user input now, so they're
+    // clamped here rather than trusted. Bitrate doubles as the ring buffer's
+    // memory bound: the buffer lives entirely in RAM, so a 60s 1080p60 buffer
+    // costs roughly 125MB at 16Mbps and scales linearly from there.
+    private static bool IsConstantBitrate(ReplayBufferConfig config) =>
+        string.Equals(config.RateControlMode, "Constant bitrate", StringComparison.OrdinalIgnoreCase);
+
+    private static int ConstantQualityTarget(ReplayBufferConfig config) => Math.Clamp(config.ConstantQuality, 10, 40);
+
+    private static long MaxBitrate(ReplayBufferConfig config) => Math.Clamp(config.MaxBitrateMbps, 5, 200) * 1_000_000L;
+
+    // "P3" -> "p3". Anything unrecognised falls back to the default rather than
+    // being passed through to av_opt_set as-is.
+    private static string NvencPreset(ReplayBufferConfig config) => config.EncoderPreset?.ToLowerInvariant() switch
     {
-        "Very High" => (18, 60_000_000L),
-        "High" => (20, 40_000_000L),
-        _ => (23, 25_000_000L)
+        "p1" or "p2" or "p3" or "p4" or "p5" => config.EncoderPreset!.ToLowerInvariant(),
+        _ => "p4"
     };
 
-    private static unsafe void ApplyLowLatencyEncoderOptions(AVCodecContext* codecContext, string candidateName, int constantQuality)
+    private static unsafe void ApplyLowLatencyEncoderOptions(AVCodecContext* codecContext, string candidateName, ReplayBufferConfig config)
     {
         void TrySet(string name, string value)
         {
@@ -2485,17 +2506,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         switch (candidateName)
         {
             case "h264_nvenc":
-                // p1 was chosen back when encode ran inline on the capture
-                // thread and gave GPU rendering priority during VSync-off/VRR
-                // bursts. p4 now, because that tradeoff has since moved: encode
-                // runs on its own thread (see EncodeLoop) and real logs measure
-                // it at ~0.5ms against a 16.67ms frame budget, so there is a
-                // large margin to spend on motion quality - which is exactly
-                // what p1, the fastest and lowest-quality preset, was giving
-                // away. The historical p4 warning in the comment above is still
-                // worth heeding though: watch droppedFrames/queueDepth under
-                // sustained heavy GPU load and fall back to p2 if they move.
-                TrySet("preset", "p4");
+                // User-selectable now (Settings -> Encoder), defaulting to p4.
+                // p1 was the old hardcoded value, chosen back when encode ran
+                // inline on the capture thread and gave GPU rendering priority
+                // during VSync-off/VRR bursts; encode has since moved to its own
+                // thread (see EncodeLoop) and real logs measure it at ~0.5ms
+                // against a 16.67ms frame budget, so there is margin to spend on
+                // motion quality. The historical warning in the comment above
+                // still applies at the top of the range: watch
+                // droppedFrames/queueDepth under sustained heavy GPU load.
+                TrySet("preset", NvencPreset(config));
                 // Main is NVENC's default profile and disables the 8x8
                 // transform - a free efficiency loss on precisely the detailed
                 // content that was coming out soft. (This app's own OBS engine
@@ -2516,12 +2536,19 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 // where the content actually needs them, at the same average
                 // bitrate and so the same file size and ring-buffer footprint.
                 TrySet("tune", "hq");
-                // Constant-quality VBR: cq drives the actual bit spend, with
-                // bit_rate/rc_max_rate (set on the context) acting as the
-                // average target and hard ceiling rather than the primary
-                // constraint. See QualityTarget for where cq comes from.
-                TrySet("rc", "vbr");
-                TrySet("cq", constantQuality.ToString());
+                // Constant quality: cq drives the actual bit spend and
+                // bit_rate/rc_max_rate (set on the context) are only an average
+                // target and hard ceiling. Constant bitrate: the rate itself is
+                // the constraint, so no cq at all.
+                if (IsConstantBitrate(config))
+                {
+                    TrySet("rc", "cbr");
+                }
+                else
+                {
+                    TrySet("rc", "vbr");
+                    TrySet("cq", ConstantQualityTarget(config).ToString());
+                }
                 TrySet("forced-idr", "1");
                 break;
             // AMF/QSV keep their existing usage/preset strings: there's no AMD
@@ -2550,8 +2577,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 TrySet("preset", "ultrafast");
                 TrySet("tune", "zerolatency");
                 // x264's own constant-quality knob, so the CPU fallback tracks
-                // the same user setting the hardware encoders do.
-                TrySet("crf", constantQuality.ToString());
+                // the same user setting the hardware encoders do. In
+                // constant-bitrate mode it's left off and bit_rate governs.
+                if (!IsConstantBitrate(config)) TrySet("crf", ConstantQualityTarget(config).ToString());
                 break;
         }
     }
@@ -2592,8 +2620,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             codecContext->colorspace = AVColorSpace.AVCOL_SPC_BT709;
             codecContext->color_primaries = AVColorPrimaries.AVCOL_PRI_BT709;
             codecContext->color_trc = AVColorTransferCharacteristic.AVCOL_TRC_BT709;
-            var (constantQuality, maxBitrate) = QualityTarget(config);
-            codecContext->bit_rate = CaptureBitrate(config);
+            // Constant bitrate means the configured rate IS the target, so
+            // bit_rate and the ceiling are the same number. Constant quality
+            // leaves the resolution/fps-derived estimate as the nominal average
+            // and lets the ceiling bound how far a burst may exceed it.
+            var maxBitrate = MaxBitrate(config);
+            codecContext->bit_rate = IsConstantBitrate(config) ? maxBitrate : CaptureBitrate(config);
             // A real VBV to spend against, rather than leaving it unset and
             // letting the encoder fall back to an effectively per-frame budget.
             // One second of buffer lets a burst of hard-to-compress motion
@@ -2607,7 +2639,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             codecContext->gop_size = 240;
             codecContext->max_b_frames = 0;
             codecContext->flags |= ffmpeg.AV_CODEC_FLAG_GLOBAL_HEADER;
-            ApplyLowLatencyEncoderOptions(codecContext, candidateName, constantQuality);
+            ApplyLowLatencyEncoderOptions(codecContext, candidateName, config);
 
             var openResult = ffmpeg.avcodec_open2(codecContext, candidateCodec, null);
             if (openResult == 0)

@@ -22,7 +22,19 @@ public sealed class AppSettings
     // starts a capture, so nothing is recorded until it's turned back on.
     public bool ReplayBufferEnabled { get; set; } = true;
     public int ReplayDurationSeconds { get; set; } = 60;
-    public string ReplayQualityPreset { get; set; } = "Balanced";
+    // Native engine encoder controls, surfaced directly in Settings rather
+    // than hidden behind a coarse quality label.
+    // NVENC speed/quality preset, "P1".."P5" - higher spends more GPU time per
+    // frame for better compression.
+    public string ReplayEncoderPreset { get; set; } = "P4";
+    // "Constant quality" | "Constant bitrate" - picks which of the two values
+    // below actually governs the encode.
+    public string ReplayRateControlMode { get; set; } = "Constant quality";
+    // Constant-quality target (NVENC cq / x264 crf). Lower is better quality.
+    public int ReplayConstantQuality { get; set; } = 20;
+    // In constant-quality mode this is a ceiling (and what bounds the in-memory
+    // ring buffer's size); in constant-bitrate mode it's the target itself.
+    public int ReplayMaxBitrateMbps { get; set; } = 40;
     public int ReplayFrameRate { get; set; } = 60;
     public int ReplayMaxHeight { get; set; } = 1080;
     public string ReplayBackend { get; set; } = "Auto";
@@ -37,8 +49,11 @@ public sealed class AppSettings
     public bool LaunchOnWindowsStartup { get; set; }
     public bool StartMinimizedToTray { get; set; }
     // Windows process priority for ClypDat's in-process capture backends.
-    // High is the default so capture keeps CPU time when a game is demanding.
-    public string ProcessPriority { get; set; } = "High";
+    // Normal by default: High lets capture win CPU against the game, but it
+    // also lets the save/hydration pipeline outrank the game and the desktop
+    // compositor, which reads as system-wide stutter on every clip save.
+    // Raise it manually if capture drops frames under load.
+    public string ProcessPriority { get; set; } = "Normal";
     public bool IsStatusAreaVisible { get; set; } = true;
     public bool ShowRecordingPausedIndicator { get; set; } = true;
     // On by default - MainWindowViewModel.UpdateCardLayout targets a fixed
