@@ -918,6 +918,44 @@ bool create_replay_output()
     return true;
 }
 
+// create_replay_output (and the plugin encoder/output code it calls into)
+// has never run to completion anywhere this bridge has shipped - the
+// obs-ffmpeg module it depends on has always previously failed to load, so
+// this is the first time it has ever actually executed, and it segfaults
+// (access violation) before even its first trace line, deep inside
+// obs.dll/a plugin rather than in code this file controls. No debugger is
+// available to root-cause it further right now. __try/__except (not a normal
+// C++ try/catch - an AccessViolationException from a P/Invoke call is a
+// hardware SEH exception that C++/.NET exception handling cannot reliably
+// catch) turns that from "the whole app crashes" into "OBS capture cleanly
+// fails and Hybrid falls back to Native," matching how every other OBS
+// failure here already degrades. Deliberately kept in its own tiny function
+// with no C++ objects requiring unwinding in its own scope - mixing __try
+// with such objects in the SAME function does not compile under this
+// project's default exception-handling mode.
+int create_replay_output_seh()
+{
+    __try {
+        return create_replay_output() ? 1 : 0;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        return -1;
+    }
+}
+
+// Tearing down whatever partial state a caught crash left behind is itself
+// calling back into OBS/plugin code that just proved it can segfault - same
+// SEH guard, same reasoning, so a corrupted teardown can't take the second
+// bite the original crash didn't get to.
+void cleanup_obs_seh()
+{
+    __try {
+        cleanup_obs();
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
 bool load_module(const std::filesystem::path &root, const wchar_t *name)
 {
     const auto path = root / L"obs-plugins" / L"64bit" / (std::wstring(name) + L".dll");
@@ -1105,13 +1143,25 @@ extern "C" __declspec(dllexport) int clypdat_obs_init(const wchar_t *runtime_fol
         cleanup_obs();
         return -9;
     }
-    trace("init: create_replay_output");
-    if (!create_replay_output()) {
-        cleanup_obs();
-        return -10;
-    }
-    trace("init: success");
-    return 0;
+    // DISABLED: create_replay_output (video/audio encoder + replay_buffer
+    // output creation) has never once completed successfully in this
+    // codebase - the obs-ffmpeg module it needs has always previously failed
+    // to load, so this is genuinely never-tested code. The first time it
+    // actually ran, it segfaulted inside obs.dll before its own first trace
+    // line, and __try/__except around that call (see create_replay_output_seh
+    // - left in place for whenever this gets debugged with a real debugger)
+    // only protects the calling thread: by the time create_replay_output
+    // runs, create_scene/create_audio_sources have already handed the scene's
+    // capture sources to libobs' own render thread, which was left pumping
+    // frames against GPU state the encoder-creation crash then corrupted -
+    // that thread crashed moments later regardless of what this thread caught
+    // or how carefully it tried to tear things down afterward. The only
+    // actually-safe fix is to never call it. Scene/audio setup above this
+    // point is unaffected and has run cleanly in every session ever.
+    trace("init: create_replay_output skipped (disabled - see comment)");
+    set_error(L"OBS replay output is temporarily disabled pending a fix for a crash in encoder/output creation.");
+    cleanup_obs();
+    return -10;
 }
 
 extern "C" __declspec(dllexport) int clypdat_obs_start_replay_capture()
