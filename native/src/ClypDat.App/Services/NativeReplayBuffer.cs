@@ -762,7 +762,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // "capture overload" even though nothing is actually wrong.
                     var overloaded = droppedSinceLog > 0 || encodeQueue.Count * 4 >= encodeQueueCapacity * 3 ||
                                      (!config.NativeAdaptiveFrameRate && hasCapturedRealFrame && outputFrameRate < config.FrameRate * 0.9);
-                    if (overloaded) _lastDegradedUtc = DateTime.UtcNow;
+                    if (overloaded)
+                    {
+                        _lastDegradedUtc = DateTime.UtcNow;
+                        // Same numbers as the DEBUG diag line above, but at INFO so
+                        // an overload shows up in the log a user would actually
+                        // send without needing a full diagnostics export - the
+                        // debug log is 1-8MB/day and isn't something to ask for
+                        // first when triaging "clips are choppy."
+                        AppLog.Info($"Native capture: overload - dropped {droppedSinceLog} frame(s) in the last {diagElapsed:0.0}s, queue {encodeQueue.Count}/{encodeQueueCapacity}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.0}, avgScaleMs={scaleMs / n:0.0}. If this is frequent, try a faster Encoder preset in Settings.");
+                    }
                     SetHealth(new ReplayCaptureHealth("Native", "Desktop Duplication",
                         overloaded ? ReplayCaptureState.Degraded : ReplayCaptureState.Healthy,
                         config.FrameRate, framesSeenSinceLog / diagElapsed, framesProcessedSinceLog / diagElapsed,
