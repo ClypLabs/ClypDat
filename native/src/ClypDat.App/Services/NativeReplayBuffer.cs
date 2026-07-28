@@ -1034,7 +1034,23 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 // and unsynchronized - a plausible source of visible judder despite
                                 // every output frame being unique and perfectly PTS-spaced.
                                 lastFrameContentCapturedUtc = MonotonicClock.UtcNow;
-                                lastSourceProcessAt = stopwatch.Elapsed;
+                                // Advance by exactly one ideal interval instead of snapping to
+                                // "now" (this present's own arrival time). Snapping re-anchors
+                                // the throttle to whatever instant each present happens to land
+                                // at, which phase-locks into every-OTHER-present when the source
+                                // cadence sits close to targetFrameInterval (the common case: a
+                                // 60fps game against a 60fps target) - a present arriving a hair
+                                // under one interval after the last snap fails the gate above, so
+                                // the NEXT present (now a hair under *two* intervals later) always
+                                // clears it comfortably, becomes the new snap point, and the
+                                // pattern repeats - silently halving the real processing rate to
+                                // ~30Hz despite a genuinely healthy 60Hz source (confirmed via
+                                // avgPresentGapMs staying ~16.67ms while framesEncoded tracked at
+                                // half framesSeen). Accumulating avoids that drift entirely; the
+                                // resync below still recovers a real stall (occlusion resume, GPU
+                                // hitch) in one step instead of owing a burst of catch-up ticks.
+                                lastSourceProcessAt += targetFrameInterval;
+                                if (stopwatch.Elapsed - lastSourceProcessAt >= targetFrameInterval) lastSourceProcessAt = stopwatch.Elapsed;
                                 hasProcessedSourceFrame = true;
                                 framesProcessedSinceLog++;
                             }
