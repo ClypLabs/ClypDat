@@ -676,6 +676,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // can tell "genuinely new content since last encode" apart from
             // "still the same frame we already encoded" - see NativeAdaptiveFrameRate.
             var lastEncodedContentCapturedUtc = DateTime.MinValue;
+            // Adaptive frame rate only: PTS of the last frame handed to the
+            // encoder, so the keepalive path below can guarantee strict
+            // monotonicity across the two different timestamp sources it picks from.
+            var lastEncodedPtsElapsed = TimeSpan.MinValue;
             var frameStalenessMs = 0.0;
             var frameStalenessMaxMs = 0.0;
             var frameStalenessCount = 0;
@@ -1266,8 +1270,25 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // lossless: frame->data is now always kept maximally fresh
                     // regardless of this gate, so the next due tick just picks up
                     // whatever's newest rather than losing a capture opportunity.
-                    if (lastFrameContentCapturedUtc != lastEncodedContentCapturedUtc &&
-                        stopwatch.Elapsed - lastEncodedAt >= targetFrameInterval)
+                    // "Nothing changed" must not mean "encode nothing, ever".
+                    // TrimRingBuffer prunes by wall-clock age regardless of
+                    // whether anything is being added, so a stretch with no new
+                    // content - most commonly an alt-tab, where the occlusion
+                    // check above stops refreshing frame->data entirely - drains
+                    // the ring to EMPTY once it outlasts the buffer duration,
+                    // and the next clip attempt has nothing to save ("Replay
+                    // just started. Try again in a second."). Confirmed from a
+                    // real session: framesSeen climbing past 41000 while
+                    // framesEncoded sat frozen at 5092 and ringPackets fell to 0.
+                    // The fixed-rate branch below never has this problem because
+                    // it pads duplicates unconditionally. So: still emit on a
+                    // slow keepalive cadence when idle, which keeps a populated,
+                    // keyframe-bearing ring (a frozen frame, exactly like the
+                    // fixed-rate path) for ~1/60th of the frames it would spend.
+                    var contentIsNew = lastFrameContentCapturedUtc != lastEncodedContentCapturedUtc;
+                    var newContentDue = contentIsNew && stopwatch.Elapsed - lastEncodedAt >= targetFrameInterval;
+                    var keepAliveDue = stopwatch.Elapsed - lastEncodedAt >= AdaptiveKeepAliveInterval;
+                    if (newContentDue || keepAliveDue)
                     {
                         lastEncodedContentCapturedUtc = lastFrameContentCapturedUtc;
                         // Advance along the ideal grid rather than snapping to
@@ -1300,7 +1321,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // unique and none were lost. The capture instants are the
                         // real presentation timeline; the poll times are an artifact
                         // of how often this loop happens to look.
-                        frame->pts = (long)Math.Round(lastFrameContentCapturedElapsed.TotalMicroseconds);
+                        //
+                        // A keepalive frame has no new content, so its capture
+                        // instant is the one already used by the previous encode -
+                        // stamping that again would emit a duplicate/backwards PTS
+                        // and break the remux. Those take "now" instead, which is
+                        // the honest timestamp for "this is what the screen still
+                        // looked like at this moment". Clamped so PTS is strictly
+                        // monotonic whichever branch produced it.
+                        var ptsElapsed = newContentDue ? lastFrameContentCapturedElapsed : stopwatch.Elapsed;
+                        if (ptsElapsed <= lastEncodedPtsElapsed) ptsElapsed = lastEncodedPtsElapsed + TimeSpan.FromMilliseconds(1);
+                        lastEncodedPtsElapsed = ptsElapsed;
+                        frame->pts = (long)Math.Round(ptsElapsed.TotalMicroseconds);
                         EncodeScheduledFrame();
                     }
                 }
@@ -2375,6 +2407,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // last-resort CPU fallback so capture still works even with no usable hardware
     // encoder at all.
     private static readonly string[] EncoderCandidates = { "h264_nvenc", "h264_amf", "h264_qsv", "libx264" };
+
+    // Adaptive frame rate: how long an unchanging screen may go without
+    // producing a frame at all. Short enough that the ring buffer always holds
+    // recent, keyframe-bearing content to cut a clip from (forced keyframes run
+    // on a 2s cadence, so this keeps several inside any buffer length), long
+    // enough that an idle screen still costs a tiny fraction of the frames a
+    // constant-rate capture would spend on it.
+    private static readonly TimeSpan AdaptiveKeepAliveInterval = TimeSpan.FromSeconds(1);
 
     // h264_nvenc's default preset does real per-frame rate-distortion search,
     // which measured a sustained ~59-60ms/frame (vs. ~0.5ms on p1) during
