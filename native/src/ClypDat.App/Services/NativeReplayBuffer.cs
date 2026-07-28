@@ -2474,7 +2474,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // silently turn constant quality OFF rather than mean "best possible".
     private static int ConstantQualityTarget(ReplayBufferConfig config) => Math.Clamp(config.ConstantQuality, 1, 51);
 
-    private static long MaxBitrate(ReplayBufferConfig config) => Math.Clamp(config.MaxBitrateMbps, 5, 200) * 1_000_000L;
+    private static long MaxBitrate(ReplayBufferConfig config) => Math.Clamp(config.MaxBitrateMbps, 5, 1000) * 1_000_000L;
 
     // "P3" -> "p3". Anything unrecognised falls back to the default rather than
     // being passed through to av_opt_set as-is.

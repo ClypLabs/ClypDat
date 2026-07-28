@@ -1165,7 +1165,7 @@
                     <TextBlock Text="Quality" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
                       <TextBox Classes="settingsInput compactNumber" Width="72" Text="{Binding ReplayConstantQuality}" Watermark="20" />
-                      <TextBlock Grid.Column="1" Text="Lower is better quality and larger files; higher is worse and smaller. 1-51, default 20 - most of the useful range sits between 16 and 28."
+                      <TextBlock Grid.Column="1" Text="1-51, default 20. Lower means better quality and bigger files."
                                  Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center" />
                     </Grid>
                   </StackPanel>
@@ -1174,7 +1174,7 @@
                     <TextBlock Text="{Binding ReplayBitrateLabel}" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
                       <TextBox Classes="settingsInput compactNumber" Width="72" Text="{Binding ReplayMaxBitrateMbps}" Watermark="40" />
-                      <TextBlock Grid.Column="1" Text="Caps clip size, and how much memory the replay buffer holds - it lives entirely in RAM (5-200)."
+                      <TextBlock Grid.Column="1" Text="5-1000, default 40. The replay buffer keeps every buffered second in RAM, so this times your replay length is roughly the memory it uses."
                                  Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center" />
                     </Grid>
                   </StackPanel>

@@ -36,6 +36,9 @@ public sealed class AppSettings
     public int ReplayConstantQuality { get; set; } = 20;
     // In constant-quality mode this is a ceiling (and what bounds the in-memory
     // ring buffer's size); in constant-bitrate mode it's the target itself.
+    // Allowed up to 1000 Mbps, which is far past anything sensible - the ring
+    // buffer keeps every buffered second in RAM, so rate x buffer length is
+    // roughly its footprint and the top of the range will eat gigabytes.
     public int ReplayMaxBitrateMbps { get; set; } = 40;
     public int ReplayFrameRate { get; set; } = 60;
     public int ReplayMaxHeight { get; set; } = 1080;

@@ -1080,16 +1080,38 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsConstantQualityMode => !string.Equals(Settings.ReplayRateControlMode, "Constant bitrate", StringComparison.OrdinalIgnoreCase);
     public string ReplayBitrateLabel => IsConstantQualityMode ? "Max bitrate (Mbps)" : "Bitrate (Mbps)";
 
+    // A TextBox binding ignores a PropertyChanged raised while it is itself
+    // mid source-update, so a clamped or rejected value stayed on screen as
+    // whatever was typed. The stored setting was right, but the box showed
+    // (say) 60 for a value clamped to 51, which reads as though the limit
+    // isn't enforced at all. Posting the notification lets the binding's own
+    // update finish first, so the box then snaps back to what was actually
+    // stored. Only posted when the text really differs - re-notifying on every
+    // keystroke would fight the caret.
+    private void SyncNumericBox(string propertyName, string typed, int stored)
+    {
+        if (string.Equals(typed, stored.ToString(), StringComparison.Ordinal))
+        {
+            OnPropertyChanged(propertyName);
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() => OnPropertyChanged(propertyName));
+    }
+
     public string ReplayConstantQuality
     {
         get => Settings.ReplayConstantQuality.ToString();
         set
         {
-            if (!int.TryParse(value, out var quality)) return;
-            Settings.ReplayConstantQuality = Math.Clamp(quality, 1, 51);
-            OnPropertyChanged();
-            SaveSettings();
-            UpdateReplayQualityRestartRequired();
+            if (int.TryParse(value, out var quality))
+            {
+                Settings.ReplayConstantQuality = Math.Clamp(quality, 1, 51);
+                SaveSettings();
+                UpdateReplayQualityRestartRequired();
+            }
+
+            SyncNumericBox(nameof(ReplayConstantQuality), value, Settings.ReplayConstantQuality);
         }
     }
 
@@ -1098,11 +1120,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         get => Settings.ReplayMaxBitrateMbps.ToString();
         set
         {
-            if (!int.TryParse(value, out var mbps)) return;
-            Settings.ReplayMaxBitrateMbps = Math.Clamp(mbps, 5, 200);
-            OnPropertyChanged();
-            SaveSettings();
-            UpdateReplayQualityRestartRequired();
+            if (int.TryParse(value, out var mbps))
+            {
+                Settings.ReplayMaxBitrateMbps = Math.Clamp(mbps, 5, 1000);
+                SaveSettings();
+                UpdateReplayQualityRestartRequired();
+            }
+
+            SyncNumericBox(nameof(ReplayMaxBitrateMbps), value, Settings.ReplayMaxBitrateMbps);
         }
     }
 
