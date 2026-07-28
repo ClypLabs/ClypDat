@@ -660,8 +660,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // mid-session alt-tab) go back to the existing freeze-and-keep-
             // recording behavior above, unaffected.
             var hasCapturedRealFrame = false;
-            var hasProcessedSourceFrame = false;
-            var lastSourceProcessAt = TimeSpan.Zero;
             // See the content-write sites above and the pacing gate below -
             // measures how stale frame->data's content actually is at the
             // moment each output frame gets encoded, to find out whether a
@@ -938,29 +936,32 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 }
                             }
 
-                            // Capture can receive desktop updates hundreds of times per
-                            // second. Conversion/readback cannot improve a 60 FPS output
-                            // after the next scheduled frame is already fresh, so retain
-                            // the newest source frame and process at output cadence.
-                            //
-                            // 90% of the interval, not the full interval: real presentation
-                            // timing is never perfectly uniform (confirmed via
-                            // maxPresentGapMs varying several ms around the mean even
-                            // during steady gameplay) - a present that lands a hair before
-                            // one full interval has elapsed is still a genuinely new frame,
-                            // not the source running slow, but a strict >= against the full
-                            // interval drops it outright with no later catch-up (unlike the
-                            // lastEncodedAt/encode-tick accumulator, which owes and repays
-                            // missed ticks). Measured at a real 60fps-ish source: this gate
-                            // alone was processing only ~90% of real presents (e.g. ~53fps
-                            // out of a genuine ~59fps source) even after the phase-lock fix
-                            // below, purely from that jitter falling on the wrong side of an
-                            // exact threshold. The accumulator itself still advances by the
-                            // FULL interval either way (see below), so this only forgives
-                            // early jitter - it doesn't change the long-run average rate.
-                            var shouldProcessSourceFrame = !hasProcessedSourceFrame ||
-                                                           stopwatch.Elapsed - lastSourceProcessAt >= targetFrameInterval * 0.9;
-                            if (!occluded && shouldProcessSourceFrame)
+                            // Always process every genuinely new present (this used to be
+                            // throttled to "at most once per target interval," reasoning that
+                            // conversion/readback can't improve on an already-fresh scheduled
+                            // frame) - two rounds of tuning that throttle (a phase-lock fix,
+                            // then a jitter tolerance) each helped but never eliminated a
+                            // real content-loss pattern: real presentation timing comes in
+                            // bursts (a short gap right after a long one, confirmed via
+                            // maxPresentGapMs swinging several ms around the mean even during
+                            // steady gameplay), and a reactive "was it due YET" gate checked
+                            // only at each present's own arrival moment permanently drops
+                            // whichever presents land during a burst, no matter how generous
+                            // the tolerance - there's no queue to catch up from later. That
+                            // capped real output at ~90-93% of the source's own rate regardless
+                            // of target fps (60/90/120/144 all equally affected, since the
+                            // mechanism has nothing to do with the specific numbers involved).
+                            // Scale/copy itself is cheap (~1ms, see avgScaleMs), so keeping
+                            // frame->data always maximally fresh costs little even at a
+                            // V-Sync-off source presenting in the hundreds of fps - the actual
+                            // rate cap that matters (respecting the user's chosen target)
+                            // still happens below: the fixed-rate encode-tick loop already
+                            // throttles correctly regardless of how fresh its input is, and
+                            // NativeAdaptiveFrameRate's own branch now enforces the same cap
+                            // at its encode decision instead of here, where a skip is
+                            // harmless (the next check just finds the still-fresh frame)
+                            // rather than a permanently lost capture.
+                            if (!occluded)
                             {
                                 // NVENC's actual encode runs asynchronously - avcodec_send_frame
                                 // can return before the encoder has finished reading a PREVIOUS
@@ -1050,24 +1051,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 // and unsynchronized - a plausible source of visible judder despite
                                 // every output frame being unique and perfectly PTS-spaced.
                                 lastFrameContentCapturedUtc = MonotonicClock.UtcNow;
-                                // Advance by exactly one ideal interval instead of snapping to
-                                // "now" (this present's own arrival time). Snapping re-anchors
-                                // the throttle to whatever instant each present happens to land
-                                // at, which phase-locks into every-OTHER-present when the source
-                                // cadence sits close to targetFrameInterval (the common case: a
-                                // 60fps game against a 60fps target) - a present arriving a hair
-                                // under one interval after the last snap fails the gate above, so
-                                // the NEXT present (now a hair under *two* intervals later) always
-                                // clears it comfortably, becomes the new snap point, and the
-                                // pattern repeats - silently halving the real processing rate to
-                                // ~30Hz despite a genuinely healthy 60Hz source (confirmed via
-                                // avgPresentGapMs staying ~16.67ms while framesEncoded tracked at
-                                // half framesSeen). Accumulating avoids that drift entirely; the
-                                // resync below still recovers a real stall (occlusion resume, GPU
-                                // hitch) in one step instead of owing a burst of catch-up ticks.
-                                lastSourceProcessAt += targetFrameInterval;
-                                if (stopwatch.Elapsed - lastSourceProcessAt >= targetFrameInterval) lastSourceProcessAt = stopwatch.Elapsed;
-                                hasProcessedSourceFrame = true;
                                 framesProcessedSinceLog++;
                             }
                             // else: occluded - frame->data still holds the last successfully
@@ -1259,7 +1242,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // when content actually changed. Audio alignment is
                     // unaffected either way - see the ideal-timestamp comment
                     // in the fixed-rate branch below for why.
-                    if (lastFrameContentCapturedUtc != lastEncodedContentCapturedUtc)
+                    //
+                    // The target frame rate is still an upper bound here too -
+                    // without the elapsed check, a V-Sync-off source presenting
+                    // in the hundreds of fps would encode at ITS native rate
+                    // instead of the user's chosen target. Unlike the old
+                    // upstream content-processing throttle this used to lean on
+                    // (removed - see the occluded check above), skipping here is
+                    // lossless: frame->data is now always kept maximally fresh
+                    // regardless of this gate, so the next due tick just picks up
+                    // whatever's newest rather than losing a capture opportunity.
+                    if (lastFrameContentCapturedUtc != lastEncodedContentCapturedUtc &&
+                        stopwatch.Elapsed - lastEncodedAt >= targetFrameInterval)
                     {
                         lastEncodedContentCapturedUtc = lastFrameContentCapturedUtc;
                         lastEncodedAt = stopwatch.Elapsed;
