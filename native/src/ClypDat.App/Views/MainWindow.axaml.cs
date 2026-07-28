@@ -1910,7 +1910,7 @@ public sealed partial class MainWindow : Window
             catch (Exception error)
             {
                 AppLog.Error("Replay clip save failed", error);
-                if (isAutoClip) ShowClipNotification("Auto clip failed", playSound: false);
+                if (isAutoClip) ShowAutoClipFailedNotification();
                 if (!isAutoClip) await ShowMessageAsync("Clip failed", error.Message);
             }
         }
@@ -1973,6 +1973,35 @@ public sealed partial class MainWindow : Window
         catch (Exception error)
         {
             AppLog.Error("Game detected overlay failed", error);
+        }
+    }
+
+    // "Auto clip started - X detected, ..." - a GSI listener spotting a
+    // highlight-worthy event, separate from the clip-saved family below
+    // (EnableClipOverlay covers the actual save lifecycle).
+    private void ShowAutoClipPendingNotification(string message)
+    {
+        if (ViewModel is null || !ViewModel.Settings.EnableAutoClipPendingOverlay) return;
+        try
+        {
+            ShowClipSavedOverlay(ViewModel.Settings.ClipOverlayPosition, message, playSound: false);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Auto clip pending overlay failed", error);
+        }
+    }
+
+    private void ShowAutoClipFailedNotification()
+    {
+        if (ViewModel is null || !ViewModel.Settings.EnableAutoClipFailedOverlay) return;
+        try
+        {
+            ShowClipSavedOverlay(ViewModel.Settings.ClipOverlayPosition, "Auto clip failed", playSound: false);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Auto clip failed overlay failed", error);
         }
     }
 
@@ -3268,7 +3297,7 @@ public sealed partial class MainWindow : Window
 
     private void Cs2GsiListener_OnAutoClipPending(object? sender, string message)
     {
-        Dispatcher.UIThread.Post(() => ShowClipNotification(message, playSound: false));
+        Dispatcher.UIThread.Post(() => ShowAutoClipPendingNotification(message));
     }
 
     private void Cs2GsiListener_OnAutoClipReady(object? sender, Cs2AutoClipRequest request)
@@ -3276,7 +3305,7 @@ public sealed partial class MainWindow : Window
         AutoClip_OnReady(sender, new AutoClipRequest("cs2", "Counter-Strike 2", request.Title, request.Title, request.StartUtc, request.EndUtc));
     }
 
-    private void AutoClip_OnPending(object? sender, string message) => Dispatcher.UIThread.Post(() => ShowClipNotification(message, playSound: false));
+    private void AutoClip_OnPending(object? sender, string message) => Dispatcher.UIThread.Post(() => ShowAutoClipPendingNotification(message));
 
     private void AutoClip_OnReady(object? sender, AutoClipRequest request)
     {

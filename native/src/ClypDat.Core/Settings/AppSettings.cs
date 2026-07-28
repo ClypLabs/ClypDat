@@ -123,6 +123,16 @@ public sealed class AppSettings
     // detected game) from the clip-saved family, and a user may want one
     // without the other.
     public bool EnableGameDetectedOverlay { get; set; } = true;
+    // "Auto clip started - X detected, ..." - fires the instant a GSI
+    // listener (CS2/Dota/League) spots a highlight-worthy event, well before
+    // the clip itself actually saves. Distinct concern from EnableClipOverlay
+    // (which covers the save lifecycle itself): this is about event
+    // detection, not file save mechanics.
+    public bool EnableAutoClipPendingOverlay { get; set; } = true;
+    // "Auto clip failed" - distinct from EnableClipOverlay's success-path
+    // notifications so a user can keep failure alerts even with save
+    // confirmations off, or vice versa.
+    public bool EnableAutoClipFailedOverlay { get; set; } = true;
     public List<GameCaptureOverride> GameCaptureOverrides { get; set; } = new();
     // Executables user explicitly told game detection to skip.
     public List<string> IgnoredGameExecutables { get; set; } = new();
