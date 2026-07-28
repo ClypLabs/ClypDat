@@ -1799,6 +1799,7 @@ public sealed partial class MainWindow : Window
             await Task.Run(() => _replayBuffer.StartAsync());
             AppLog.Info("Replay started.");
             ViewModel.IsReplayRecording = _replayBuffer.IsRecording;
+            if (ViewModel.IsReplayRecording) ShowGameDetectedNotification(ViewModel.ActiveGameDetection.DisplayName);
         }
         catch (Exception error)
         {
@@ -1956,6 +1957,25 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // Separate toggle from EnableClipOverlay - "clipping started" is a
+    // distinct notification kind (fires once per successful buffer start,
+    // see StartReplayBufferAsync) that a user may want independently of the
+    // clip-saved family. No sound: this fires the instant a game launches,
+    // and an audible cue for that (as opposed to a deliberate clip save) felt
+    // like noise rather than useful feedback.
+    private void ShowGameDetectedNotification(string gameName)
+    {
+        if (ViewModel is null || !ViewModel.Settings.EnableGameDetectedOverlay) return;
+        try
+        {
+            ShowClipSavedOverlay(ViewModel.Settings.ClipOverlayPosition, $"Clipping started - {gameName}", playSound: false);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Game detected overlay failed", error);
+        }
+    }
+
     private void PlayClipNotificationSound()
     {
         if (ViewModel is null || !ViewModel.Settings.EnableClipOverlaySound) return;
@@ -1980,11 +2000,18 @@ public sealed partial class MainWindow : Window
 
         // A full-height accent stripe (not a small dot) plus a solid, near-
         // opaque background - meant to actually stand out at a glance over
-        // gameplay, not blend in as a subtle little pill.
+        // gameplay, not blend in as a subtle little pill. "AccentBrush" is
+        // the same live, OS-accent-colour-tracking resource App.axaml.cs
+        // keeps in sync with Windows' own accent colour (see
+        // InitializeAccentColor/ApplyAccentColor) - using it here instead of
+        // a fixed hex means the overlay follows the system colour too,
+        // rather than always showing ClypDat's old fixed teal regardless of
+        // what the user picked in Windows.
+        var accentBrush = (Application.Current?.Resources["AccentBrush"] as IBrush) ?? Avalonia.Media.Brush.Parse("#13C8B5");
         var accent = new Border
         {
             Width = 7,
-            Background = Avalonia.Media.Brush.Parse("#13C8B5"),
+            Background = accentBrush,
             CornerRadius = isLeft ? new CornerRadius(4, 0, 0, 4) : new CornerRadius(0, 4, 4, 0),
             VerticalAlignment = VerticalAlignment.Stretch
         };

@@ -118,6 +118,11 @@ public sealed class AppSettings
     public Dictionary<string, ClipEditSettings> ClipEdits { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public bool EnableClipOverlay { get; set; } = true;
     public bool EnableClipOverlaySound { get; set; } = true;
+    // Separate from EnableClipOverlay - "clipping started" is a distinct
+    // notification kind (fires when the buffer actually starts recording a
+    // detected game) from the clip-saved family, and a user may want one
+    // without the other.
+    public bool EnableGameDetectedOverlay { get; set; } = true;
     public List<GameCaptureOverride> GameCaptureOverrides { get; set; } = new();
     // Executables user explicitly told game detection to skip.
     public List<string> IgnoredGameExecutables { get; set; } = new();

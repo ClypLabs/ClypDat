@@ -1188,6 +1188,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public bool EnableGameDetectedOverlay
+    {
+        get => Settings.EnableGameDetectedOverlay;
+        set
+        {
+            if (Settings.EnableGameDetectedOverlay == value) return;
+            Settings.EnableGameDetectedOverlay = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
     private string _cs2GsiStatusText = string.Empty;
 
     public string Cs2GsiStatusText
