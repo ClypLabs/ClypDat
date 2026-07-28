@@ -498,6 +498,26 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             _outputWidth = outputWidth;
             _outputHeight = outputHeight;
 
+            // Debounces the crop-size-changed resource rebuild below (staging
+            // texture, scaler, GPU crop view) against a single-iteration blip
+            // in DwmGetWindowAttribute's reported bounds. Alt-tabbing back into
+            // a window plays a compositor restore animation for a few frames
+            // (Windows' own alt-tab switcher, unless the user has disabled
+            // animations), during which the extended frame bounds genuinely
+            // read different sizes iteration to iteration before settling -
+            // rebuilding real GPU resources on every one of those transient
+            // reads, right as gameplay resumes, is expensive enough on its own
+            // to look exactly like the encoder overload this was chasing.
+            // Requiring the same new size to repeat a few times before
+            // committing to a rebuild costs at most a few iterations' (tens of
+            // ms) latency on a genuine resize, which is imperceptible, while
+            // skipping the rebuild entirely for a same-frame-or-two blip that
+            // never repeats.
+            var pendingCropWidth = captureWidth;
+            var pendingCropHeight = captureHeight;
+            var pendingCropStableCount = 0;
+            const int cropStableThreshold = 3;
+
             staging = CreateStagingTexture(device, captureWidth, captureHeight);
 
             // Copying+CPU-scaling the full captured crop (often the game's
@@ -964,19 +984,41 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
                             if (!occluded && (cropWidth != captureWidth || cropHeight != captureHeight))
                             {
-                                captureWidth = Math.Max(2, cropWidth);
-                                captureHeight = Math.Max(2, cropHeight);
-                                staging.Dispose();
-                                staging = CreateStagingTexture(device, captureWidth, captureHeight);
-                                ffmpeg.sws_freeContext(swsContext);
-                                swsContext = CreateScaler(captureWidth, captureHeight, outputWidth, outputHeight);
-
-                                if (useGpuScale)
+                                if (cropWidth == pendingCropWidth && cropHeight == pendingCropHeight)
                                 {
-                                    inputView!.Dispose();
-                                    croppedTexture!.Dispose();
-                                    (croppedTexture, inputView) = CreateGpuCropInputView(device, videoDevice!, vpEnumerator!, captureWidth, captureHeight);
+                                    pendingCropStableCount++;
                                 }
+                                else
+                                {
+                                    pendingCropWidth = cropWidth;
+                                    pendingCropHeight = cropHeight;
+                                    pendingCropStableCount = 1;
+                                }
+
+                                if (pendingCropStableCount >= cropStableThreshold)
+                                {
+                                    captureWidth = Math.Max(2, cropWidth);
+                                    captureHeight = Math.Max(2, cropHeight);
+                                    staging.Dispose();
+                                    staging = CreateStagingTexture(device, captureWidth, captureHeight);
+                                    ffmpeg.sws_freeContext(swsContext);
+                                    swsContext = CreateScaler(captureWidth, captureHeight, outputWidth, outputHeight);
+
+                                    if (useGpuScale)
+                                    {
+                                        inputView!.Dispose();
+                                        croppedTexture!.Dispose();
+                                        (croppedTexture, inputView) = CreateGpuCropInputView(device, videoDevice!, vpEnumerator!, captureWidth, captureHeight);
+                                    }
+
+                                    pendingCropStableCount = 0;
+                                }
+                            }
+                            else
+                            {
+                                pendingCropWidth = captureWidth;
+                                pendingCropHeight = captureHeight;
+                                pendingCropStableCount = 0;
                             }
 
                             // Always process every genuinely new present (this used to be
