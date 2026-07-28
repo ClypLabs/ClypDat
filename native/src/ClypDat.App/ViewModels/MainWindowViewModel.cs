@@ -182,7 +182,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("Custom", -1)
         };
         ReplayFrameRates = new ObservableCollection<int> { 30, 60, 90, 120, 144, 165, 240 };
-        ReplayEncoderPresets = new ObservableCollection<string> { "P1", "P2", "P3", "P4", "P5" };
+        ReplayEncoderPresets = new ObservableCollection<EncoderPresetOption>
+        {
+            new("P1", "Fastest. Cheapest on the GPU and the softest picture of the five. Worth dropping to only if capture is genuinely struggling."),
+            new("P2", "Very fast. A visible step up from P1 for very little extra GPU time."),
+            new("P3", "Fast. Sits between P2 and the default without much cost either way."),
+            new("P4", "Balanced, and the default. Noticeably better detail in motion than P1-P3, and comfortably within budget on most GPUs."),
+            new("P5", "Highest quality here, and the most GPU time per frame. Best on a card with headroom to spare - watch for dropped frames if the game is already pushing it.")
+        };
         ReplayRateControlModes = new ObservableCollection<string> { "Constant quality", "Constant bitrate" };
         ExportCodecs = new ObservableCollection<ExportCodecOption>
         {
@@ -300,7 +307,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ReplayDurationPreset> ReplayDurationPresets { get; }
     public ObservableCollection<ResolutionOption> ReplayResolutions { get; }
     public ObservableCollection<int> ReplayFrameRates { get; }
-    public ObservableCollection<string> ReplayEncoderPresets { get; }
+    // Label is what's persisted and handed to NVENC; Description is the hover
+    // text, since "P1".."P5" says nothing on its own about which way is faster.
+    public sealed record EncoderPresetOption(string Label, string Description);
+
+    public ObservableCollection<EncoderPresetOption> ReplayEncoderPresets { get; }
     public ObservableCollection<string> ReplayRateControlModes { get; }
     public ObservableCollection<ReplayBackendPreset> ReplayBackends { get; }
     public ObservableCollection<ExportCodecOption> ExportCodecs { get; }
@@ -1035,13 +1046,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public string SelectedReplayEncoderPreset
+    public EncoderPresetOption SelectedReplayEncoderPreset
     {
-        get => ReplayEncoderPresets.Contains(Settings.ReplayEncoderPreset) ? Settings.ReplayEncoderPreset : "P4";
+        get => ReplayEncoderPresets.FirstOrDefault(preset => preset.Label == Settings.ReplayEncoderPreset)
+               ?? ReplayEncoderPresets.First(preset => preset.Label == "P4");
         set
         {
-            if (string.IsNullOrWhiteSpace(value) || Settings.ReplayEncoderPreset == value) return;
-            Settings.ReplayEncoderPreset = value;
+            if (value is null || Settings.ReplayEncoderPreset == value.Label) return;
+            Settings.ReplayEncoderPreset = value.Label;
             OnPropertyChanged();
             SaveSettings();
             UpdateReplayQualityRestartRequired();
