@@ -1086,7 +1086,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set
         {
             if (!int.TryParse(value, out var quality)) return;
-            Settings.ReplayConstantQuality = Math.Clamp(quality, 10, 40);
+            Settings.ReplayConstantQuality = Math.Clamp(quality, 1, 51);
             OnPropertyChanged();
             SaveSettings();
             UpdateReplayQualityRestartRequired();
