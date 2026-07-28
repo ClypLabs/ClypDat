@@ -1155,18 +1155,26 @@
 
                   <Border Height="1" Background="#1B242D" />
 
-                  <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="8" IsVisible="{Binding IsConstantQualityMode}">
-                    <TextBlock Text="Quality" Foreground="#B8C7D8" FontSize="12" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                    <TextBox Grid.Column="1" Classes="settingsInput" Width="110" Text="{Binding ReplayConstantQuality}" Watermark="20" VerticalAlignment="Center" />
+                  <!-- Label and supporting text on the left, value on the
+                       right - the same row shape the Full session card uses for
+                       its codec/storage settings, rather than a wide input bar
+                       sitting directly under a heading. -->
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsVisible="{Binding IsConstantQualityMode}">
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                      <TextBlock Text="Quality" Foreground="#B8C7D8" FontWeight="Bold" FontSize="13" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                      <TextBlock Text="Lower is better quality and larger files (10-40)." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <TextBox Grid.Column="1" Classes="settingsInput compactNumber" Width="72" Text="{Binding ReplayConstantQuality}" Watermark="20" VerticalAlignment="Center" />
                   </Grid>
-                  <TextBlock Text="Lower is better quality and larger files (10-40)." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" IsVisible="{Binding IsConstantQualityMode}" />
 
-                  <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="8">
-                    <TextBlock Text="{Binding ReplayBitrateLabel}" Foreground="#B8C7D8" FontSize="12" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                    <TextBox Grid.Column="1" Classes="settingsInput" Width="110" Text="{Binding ReplayMaxBitrateMbps}" Watermark="40" VerticalAlignment="Center" />
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                      <TextBlock Text="{Binding ReplayBitrateLabel}" Foreground="#B8C7D8" FontWeight="Bold" FontSize="13" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                      <TextBlock Text="Also bounds how much memory the replay buffer holds - it lives entirely in RAM, so the rate and the buffer length together decide its size (5-200)."
+                                 Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <TextBox Grid.Column="1" Classes="settingsInput compactNumber" Width="72" Text="{Binding ReplayMaxBitrateMbps}" Watermark="40" VerticalAlignment="Center" />
                   </Grid>
-                  <TextBlock Text="Also bounds how much memory the replay buffer holds - it lives entirely in RAM, so the rate and the buffer length together decide its size (5-200)."
-                             Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
                 </StackPanel>
               </Border>
 
