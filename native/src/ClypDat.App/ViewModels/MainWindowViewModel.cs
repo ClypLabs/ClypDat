@@ -77,6 +77,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _replayBackendRestartRequired;
     private int _activeReplayMaxHeight;
     private int _activeReplayFrameRate;
+    private string _activeReplayQualityPreset = "Balanced";
     private bool _replayQualityRestartRequired;
     private string _selectedClipOverlayPosition = "Top Right";
     private string _selectedClipOverlayVolume = "Medium";
@@ -180,6 +181,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("Custom", -1)
         };
         ReplayFrameRates = new ObservableCollection<int> { 30, 60, 90, 120, 144, 165, 240 };
+        ReplayQualityPresets = new ObservableCollection<string> { "Balanced", "High", "Very High" };
         ExportCodecs = new ObservableCollection<ExportCodecOption>
         {
             new("H.264", "h264_nvenc", "libx264"),
@@ -224,6 +226,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedReplayFrameRate = ReplayFrameRates.Contains(Settings.ReplayFrameRate) ? Settings.ReplayFrameRate : 60;
         _activeReplayMaxHeight = Settings.ReplayMaxHeight;
         _activeReplayFrameRate = Settings.ReplayFrameRate;
+        _activeReplayQualityPreset = Settings.ReplayQualityPreset;
         SelectedExportCodec = ExportCodecs.FirstOrDefault(codec => string.Equals(codec.Label, Settings.ExportVideoCodec, StringComparison.OrdinalIgnoreCase)) ??
                               ExportCodecs.First(codec => codec.Label == "H.264");
         _initialReplayBackend = string.IsNullOrWhiteSpace(Settings.ReplayBackend) ? "Auto" : Settings.ReplayBackend;
@@ -295,6 +298,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ReplayDurationPreset> ReplayDurationPresets { get; }
     public ObservableCollection<ResolutionOption> ReplayResolutions { get; }
     public ObservableCollection<int> ReplayFrameRates { get; }
+    public ObservableCollection<string> ReplayQualityPresets { get; }
     public ObservableCollection<ReplayBackendPreset> ReplayBackends { get; }
     public ObservableCollection<ExportCodecOption> ExportCodecs { get; }
     public ObservableCollection<string> ExcludedProcesses { get; }
@@ -1028,12 +1032,27 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public string SelectedReplayQualityPreset
+    {
+        get => ReplayQualityPresets.Contains(Settings.ReplayQualityPreset) ? Settings.ReplayQualityPreset : "Balanced";
+        set
+        {
+            if (string.IsNullOrWhiteSpace(value) || Settings.ReplayQualityPreset == value) return;
+            Settings.ReplayQualityPreset = value;
+            OnPropertyChanged();
+            SaveSettings();
+            UpdateReplayQualityRestartRequired();
+        }
+    }
+
     public bool ReplayQualityAboveDefault => Settings.ReplayMaxHeight > 1080 || Settings.ReplayFrameRate > 60;
 
     private void UpdateReplayQualityRestartRequired()
     {
         ReplayQualityRestartRequired = IsReplayRecording &&
-                                        (Settings.ReplayMaxHeight != _activeReplayMaxHeight || Settings.ReplayFrameRate != _activeReplayFrameRate);
+                                        (Settings.ReplayMaxHeight != _activeReplayMaxHeight ||
+                                         Settings.ReplayFrameRate != _activeReplayFrameRate ||
+                                         Settings.ReplayQualityPreset != _activeReplayQualityPreset);
     }
 
     public bool ReplayQualityRestartRequired
@@ -1046,6 +1065,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         _activeReplayMaxHeight = Settings.ReplayMaxHeight;
         _activeReplayFrameRate = Settings.ReplayFrameRate;
+        _activeReplayQualityPreset = Settings.ReplayQualityPreset;
         ReplayQualityRestartRequired = false;
     }
 
@@ -3933,7 +3953,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ClipFileNameScheme: Settings.ClipFileNameScheme,
             CustomClipFileNameTemplate: Settings.CustomClipFileNameTemplate,
             LibraryFolder: Settings.LibraryFolder,
-            NativeAdaptiveFrameRate: Settings.NativeAdaptiveFrameRate);
+            NativeAdaptiveFrameRate: Settings.NativeAdaptiveFrameRate,
+            QualityPreset: Settings.ReplayQualityPreset);
     }
 
     public void SetDuration(TimeSpan duration)
