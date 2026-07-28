@@ -1256,7 +1256,24 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         stopwatch.Elapsed - lastEncodedAt >= targetFrameInterval)
                     {
                         lastEncodedContentCapturedUtc = lastFrameContentCapturedUtc;
-                        lastEncodedAt = stopwatch.Elapsed;
+                        // Advance along the ideal grid rather than snapping to
+                        // "now". This gate is only evaluated once per loop
+                        // iteration (~7ms apart, paced by AcquireNextFrame's own
+                        // timeout), so "now" is essentially always LATER than the
+                        // tick actually being served - and snapping to it carries
+                        // that quantization error into the next deadline, where it
+                        // happens again, ratcheting the effective period past the
+                        // target forever. Measured at 60fps target against a 59.5fps
+                        // source: a steady 49.5fps encoded, i.e. a 20.2ms period vs
+                        // the requested 16.67ms, with the 3.5ms excess landing at
+                        // almost exactly half the loop's own granularity - the
+                        // signature of this quantization, not of a slow source.
+                        // Same accumulate-then-resync shape the fixed-rate branch
+                        // below already uses; the resync clause keeps an idle
+                        // stretch (the whole point of adaptive mode) from building
+                        // up a debt of ticks to burst through on resume.
+                        lastEncodedAt += targetFrameInterval;
+                        if (stopwatch.Elapsed - lastEncodedAt >= targetFrameInterval) lastEncodedAt = stopwatch.Elapsed;
                         frame->pts = (long)Math.Round(stopwatch.Elapsed.TotalMicroseconds);
                         EncodeScheduledFrame();
                     }
