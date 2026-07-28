@@ -1058,7 +1058,7 @@
                 </StackPanel>
               </Border>
 
-              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Replay length|Resolution|Frame rate}">
+              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Replay length|Resolution|Frame rate|Capture quality}">
                 <StackPanel Spacing="18">
                   <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Replay length}">
                     <TextBlock Text="Replay length" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -1103,10 +1103,25 @@
                                Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap"
                                opconv:SettingsHighlight.Query="{Binding SettingsSearchText}"
                                IsVisible="{Binding ReplayQualityAboveDefault}" />
-                    <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding ReplayQualityRestartRequired}">
-                      <TextBlock Text="Restart the replay buffer for the resolution/frame rate change to take effect." Foreground="#E5A00D" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" TextWrapping="Wrap" />
-                      <Button Content="Restart Buffer" Click="RestartReplayBufferButton_OnClick" />
-                    </StackPanel>
+                  </StackPanel>
+
+                  <Border Height="1" Background="#1B242D" />
+
+                  <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Capture quality}">
+                    <TextBlock Text="Capture quality" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                    <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayQualityPresets}" SelectedItem="{Binding SelectedReplayQualityPreset}" />
+                    <TextBlock Text="ClypDat backend only. Higher quality keeps more detail in fast motion, at the cost of larger clips and more memory held by the replay buffer."
+                               Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap"
+                               opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                  </StackPanel>
+
+                  <!-- Card-level, not nested inside one of the sections above:
+                       it applies to whichever of resolution/frame rate/quality
+                       was changed, so scoping it to a single section's search
+                       filter would hide it exactly when it's relevant. -->
+                  <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding ReplayQualityRestartRequired}">
+                    <TextBlock Text="Restart the replay buffer for the capture quality change to take effect." Foreground="#E5A00D" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" TextWrapping="Wrap" />
+                    <Button Content="Restart Buffer" Click="RestartReplayBufferButton_OnClick" />
                   </StackPanel>
                 </StackPanel>
               </Border>

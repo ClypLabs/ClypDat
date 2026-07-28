@@ -785,7 +785,10 @@ public sealed record ReplayBufferConfig(
     string ClipFileNameScheme = "Standard",
     string CustomClipFileNameTemplate = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}",
     string LibraryFolder = "",
-    bool NativeAdaptiveFrameRate = false);
+    bool NativeAdaptiveFrameRate = false,
+    // "Balanced" | "High" | "Very High" - see NativeReplayBuffer.QualityTarget
+    // for the constant-quality/ceiling values each maps to.
+    string QualityPreset = "Balanced");
 
 internal sealed class AudioCaptureSession : IDisposable
 {
