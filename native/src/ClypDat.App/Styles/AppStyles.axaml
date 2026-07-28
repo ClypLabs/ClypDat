@@ -595,6 +595,44 @@
     <Setter Property="BorderBrush" Value="#4C6478" />
     <Setter Property="BorderThickness" Value="1" />
   </Style>
+  <!--
+    Same Fluent problem as inlineTitleEdit above, and for the same reason: the
+    settingsInput setters are instance-level, so Fluent's own theme repaints
+    PART_BorderElement on :pointerover and :focus with an opaque near-black
+    fill and a bright accent-blue ring. That flash is what made these fields
+    read as heavy and out of place against the muted settings cards - they
+    only looked right while idle. Pinning the template part for every state
+    keeps them on the card's palette throughout, with the focus ring following
+    the OS accent colour like the rest of the app.
+  -->
+  <Style Selector="TextBox.settingsInput /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="#1D2A36" />
+    <Setter Property="BorderBrush" Value="#2C3B48" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="TextBox.settingsInput:pointerover /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="#22303D" />
+    <Setter Property="BorderBrush" Value="#3A4C5C" />
+  </Style>
+  <Style Selector="TextBox.settingsInput:focus /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="#22303D" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="TextBox.settingsInput /template/ TextBlock#PART_Watermark">
+    <Setter Property="Foreground" Value="#5C6D7E" />
+  </Style>
+
+  <!-- A short numeric field sitting at the right-hand end of a settings row,
+       where the full-size settingsInput reads as an input bar rather than a
+       value. Centred because these hold two or three digits. -->
+  <Style Selector="TextBox.settingsInput.compactNumber">
+    <Setter Property="Padding" Value="10,6" />
+    <Setter Property="MinHeight" Value="34" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="TextAlignment" Value="Center" />
+  </Style>
+
   <Style Selector="TextBox.inlineTitleEdit /template/ TextBlock#PART_Watermark">
     <Setter Property="Foreground" Value="#5C6D7E" />
   </Style>
