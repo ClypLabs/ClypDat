@@ -1,4 +1,5 @@
 using Microsoft.Win32;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace ClypDat.App.Services;
@@ -55,7 +56,7 @@ public sealed class SteamGameLibrary
             if (!Directory.Exists(steamApps)) continue;
             foreach (var manifestPath in Directory.EnumerateFiles(steamApps, "appmanifest_*.acf"))
             {
-                var values = ManifestValue.Matches(File.ReadAllText(manifestPath))
+                var values = ManifestValue.Matches(ReadManifestText(manifestPath))
                     .Cast<Match>()
                     .GroupBy(match => match.Groups["key"].Value, StringComparer.OrdinalIgnoreCase)
                     .ToDictionary(group => group.Key, group => group.Last().Groups["value"].Value, StringComparer.OrdinalIgnoreCase);
@@ -68,6 +69,29 @@ public sealed class SteamGameLibrary
         }
 
         return games.OrderByDescending(game => game.InstallPath.Length).ToArray();
+    }
+
+    // File.ReadAllText(path) defaults to strict-ish UTF-8, which silently
+    // swaps any invalid byte for U+FFFD instead of throwing - most
+    // appmanifest_*.acf files are genuinely UTF-8, but some game names
+    // (trademark/registered symbols especially) come through from Steam's own
+    // metadata as a single-byte codepage, so a name like "Overwatch (R)"
+    // decodes as "Overwatch<FFFD>" instead of "Overwatch(R)". Decoding
+    // strictly first and only falling back on a real failure keeps the common
+    // UTF-8 case untouched while fixing the mis-encoded one. Latin1 (not a
+    // registered Windows-1252 provider, which .NET Core doesn't carry by
+    // default) - same byte range as the printable symbols actually seen here.
+    private static string ReadManifestText(string path)
+    {
+        var bytes = File.ReadAllBytes(path);
+        try
+        {
+            return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetString(bytes);
+        }
+        catch (DecoderFallbackException)
+        {
+            return Encoding.Latin1.GetString(bytes);
+        }
     }
 
     private static bool IsUnderPath(string candidate, string root)

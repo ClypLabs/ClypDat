@@ -24,9 +24,25 @@ public static class AppSettingsStore
             if (string.IsNullOrWhiteSpace(settings.CustomClipFileNameTemplate)) settings.CustomClipFileNameTemplate = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}";
             if (string.IsNullOrWhiteSpace(settings.ReplayEncoderPreset)) settings.ReplayEncoderPreset = "P4";
             if (string.IsNullOrWhiteSpace(settings.ReplayRateControlMode)) settings.ReplayRateControlMode = "Constant quality";
-            if (settings.ReplayConstantQuality <= 0) settings.ReplayConstantQuality = 20;
-            if (settings.ReplayMaxBitrateMbps <= 0) settings.ReplayMaxBitrateMbps = 40;
+            // Clamped on both ends, not just guarded against <= 0 - a
+            // hand-edited or pre-validation settings.json holding an
+            // out-of-range value (e.g. 52 before the UI's own 1-51 clamp
+            // existed) used to load as-is and show in the box indefinitely
+            // while the encoder silently re-clamped it underneath, reading as
+            // though the limit wasn't enforced at all.
+            settings.ReplayConstantQuality = settings.ReplayConstantQuality <= 0 ? 20 : Math.Clamp(settings.ReplayConstantQuality, 1, 51);
+            settings.ReplayMaxBitrateMbps = settings.ReplayMaxBitrateMbps <= 0 ? 40 : Math.Clamp(settings.ReplayMaxBitrateMbps, 5, 1000);
             if (settings.ReplayFrameRate <= 0) settings.ReplayFrameRate = 60;
+            // One-time reset: NativeAdaptiveFrameRate collapsed a clip's
+            // average reported frame rate well below the configured target
+            // during idle stretches on the Native backend. Only runs once per
+            // install - AdaptiveFrameRateResetApplied guards against fighting
+            // a user who turns it back on afterward.
+            if (!settings.AdaptiveFrameRateResetApplied)
+            {
+                settings.NativeAdaptiveFrameRate = false;
+                settings.AdaptiveFrameRateResetApplied = true;
+            }
             if (settings.ReplayMaxHeight <= 0) settings.ReplayMaxHeight = 1080;
             if (string.IsNullOrWhiteSpace(settings.ExportVideoCodec)) settings.ExportVideoCodec = "H.264";
             settings.ProcessPriority = settings.ProcessPriority switch

@@ -106,6 +106,16 @@ public sealed class ForegroundGameDetector
             return true;
         }, IntPtr.Zero);
         foreach (var cached in _windowCache.Keys.Where(handle => !seen.Contains(handle))) _windowCache.TryRemove(cached, out _);
+        // The window cache above is keyed by HWND and naturally stays small (one
+        // entry per visible window). The PID->path cache has no such natural
+        // eviction, so trim it to the PIDs actually seen this pass whenever it
+        // grows past a small multiple of that - keeps long sessions from
+        // accumulating an unbounded dictionary of exited processes.
+        if (_processPathCache.Count > 256)
+        {
+            var livePids = new HashSet<int>(results.Select(r => r.ProcessId));
+            foreach (var pid in _processPathCache.Keys.Where(pid => !livePids.Contains(pid))) _processPathCache.TryRemove(pid, out _);
+        }
         return results;
     }
 
@@ -120,21 +130,22 @@ public sealed class ForegroundGameDetector
 
         try
         {
-            using var process = Process.GetProcessById((int)processId);
-            var executablePath = GetExecutablePath(process);
+            var executablePath = ResolveExecutablePath((int)processId);
+            if (string.IsNullOrWhiteSpace(executablePath)) return GameDetection.None;
             var exeName = Path.GetFileName(executablePath);
-            if (string.IsNullOrWhiteSpace(exeName)) exeName = process.ProcessName + ".exe";
             if (string.Equals(exeName, "ApplicationFrameHost.exe", StringComparison.OrdinalIgnoreCase))
             {
                 var child = FindWindowEx(handle, IntPtr.Zero, "Windows.UI.Core.CoreWindow", null);
                 GetWindowThreadProcessId(child, out var childPid);
                 if (child != 0 && childPid != 0 && childPid != processId)
                 {
-                    using var hosted = Process.GetProcessById((int)childPid);
-                    executablePath = GetExecutablePath(hosted);
-                    exeName = Path.GetFileName(executablePath);
-                    if (string.IsNullOrWhiteSpace(exeName)) exeName = hosted.ProcessName + ".exe";
-                    processId = childPid;
+                    var hostedPath = ResolveExecutablePath((int)childPid);
+                    if (!string.IsNullOrWhiteSpace(hostedPath))
+                    {
+                        executablePath = hostedPath;
+                        exeName = Path.GetFileName(executablePath);
+                        processId = childPid;
+                    }
                 }
             }
 
@@ -213,16 +224,43 @@ public sealed class ForegroundGameDetector
     private static bool IsStillUsable(GameDetection detection) => detection.WindowHandle != 0 && IsWindow(detection.WindowHandle) && IsWindowVisible(detection.WindowHandle) && !IsIconic(detection.WindowHandle);
     private static long WindowArea(nint handle) => GetWindowRect(handle, out var rect) ? (long)Math.Max(0, rect.Right - rect.Left) * Math.Max(0, rect.Bottom - rect.Top) : 0;
 
-    private static string GetExecutablePath(Process process)
+    // Process.GetProcessById + MainModule used to sit here. On Windows,
+    // Process.GetProcessById validates its PID via NtQuerySystemInformation,
+    // which snapshots every process AND thread on the machine, and MainModule
+    // enumerates the target's module list (and throws for elevated/protected
+    // processes, so the old fallback below ran the work twice). Called once per
+    // visible top-level window on a 1s timer, that was dozens of full
+    // process-table snapshots per second - worst right at logon, against the
+    // coldest page cache, which is exactly when this was reported to lock up
+    // the whole PC. QueryFullProcessImageName on a handle from the window's own
+    // PID needs none of that. The creation-time cache below skips even this
+    // lightweight call on repeat ticks for a window that hasn't changed
+    // process, while still detecting PID reuse.
+    private readonly ConcurrentDictionary<int, (string ExecutablePath, long CreationTimeTicks)> _processPathCache = new();
+
+    private string ResolveExecutablePath(int processId)
     {
-        try { if (!string.IsNullOrWhiteSpace(process.MainModule?.FileName)) return process.MainModule.FileName; } catch { }
-        var builder = new StringBuilder(32768);
-        var handle = OpenProcess(0x1000, false, process.Id); // PROCESS_QUERY_LIMITED_INFORMATION
+        const uint ProcessQueryLimitedInformation = 0x1000;
+        var handle = OpenProcess(ProcessQueryLimitedInformation, false, processId);
         if (handle == IntPtr.Zero) return string.Empty;
         try
         {
+            long creationTicks = 0;
+            if (GetProcessTimes(handle, out var creation, out _, out _, out _))
+            {
+                creationTicks = ((long)creation.dwHighDateTime << 32) | (uint)creation.dwLowDateTime;
+            }
+
+            if (_processPathCache.TryGetValue(processId, out var cached) && cached.CreationTimeTicks == creationTicks)
+            {
+                return cached.ExecutablePath;
+            }
+
+            var builder = new StringBuilder(32768);
             var length = builder.Capacity;
-            return QueryFullProcessImageName(handle, 0, builder, ref length) ? builder.ToString() : string.Empty;
+            var path = QueryFullProcessImageName(handle, 0, builder, ref length) ? builder.ToString() : string.Empty;
+            _processPathCache[processId] = (path, creationTicks);
+            return path;
         }
         finally { CloseHandle(handle); }
     }
@@ -237,6 +275,7 @@ public sealed class ForegroundGameDetector
     private sealed record WindowSignature(int ProcessId, string Executable, string ExecutablePath, string Title, string ClassName, int Width, int Height, int Generation);
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
     [StructLayout(LayoutKind.Sequential)] private readonly struct Rect { public readonly int Left; public readonly int Top; public readonly int Right; public readonly int Bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct FileTime { public uint dwLowDateTime; public uint dwHighDateTime; }
 
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
@@ -252,4 +291,5 @@ public sealed class ForegroundGameDetector
     [DllImport("kernel32.dll")] private static extern IntPtr OpenProcess(uint access, bool inheritHandle, int processId);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern bool QueryFullProcessImageName(IntPtr process, uint flags, StringBuilder text, ref int size);
     [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll")] private static extern bool GetProcessTimes(IntPtr process, out FileTime creationTime, out FileTime exitTime, out FileTime kernelTime, out FileTime userTime);
 }

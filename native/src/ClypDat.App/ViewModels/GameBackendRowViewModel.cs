@@ -7,16 +7,23 @@ public sealed class GameBackendRowViewModel : ViewModelBase
     private ReplayBackendPreset? _selectedBackend;
     private bool _isVisible = true;
 
-    public GameBackendRowViewModel(string executableName, string displayName, bool isCustom, ReplayBackendPreset selectedBackend)
+    public GameBackendRowViewModel(string executableName, string displayName, string processName, bool isCustom, ReplayBackendPreset selectedBackend)
     {
         ExecutableName = executableName;
         DisplayName = displayName;
+        ProcessName = processName;
         IsCustom = isCustom;
         _selectedBackend = selectedBackend;
     }
 
+    // Identity key used for dedupe/removal/backend lookup - a Catalog-origin
+    // row's ExecutableName is a detection key like "steam-381210", NOT a real
+    // filename, so it must never be shown to the user as one.
     public string ExecutableName { get; }
     public string DisplayName { get; }
+    // The actual exe filename shown as the row's subtitle - empty for rows
+    // saved before this field existed, until the game is next detected.
+    public string ProcessName { get; }
     public bool IsCustom { get; }
 
     // The search box hides non-matching rows by toggling this instead of removing

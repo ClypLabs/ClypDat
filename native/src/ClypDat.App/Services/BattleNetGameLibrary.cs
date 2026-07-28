@@ -18,6 +18,16 @@ public sealed record BattleNetGameInstall(string DisplayName, string InstallPath
 public sealed class BattleNetGameLibrary
 {
     private static readonly Regex InstallPathPattern = new(@"[A-Za-z]:[\\/][ -~]{3,180}", RegexOptions.Compiled);
+    // Blizzard's own build-variant/cache subfolders, which the blob-grep below
+    // can just as easily land on as the real game folder one level up (e.g.
+    // "...\Overwatch\_retail_\Overwatch.exe" matches at "_retail_", not
+    // "Overwatch") - using the folder name directly there surfaced these as
+    // if they were games in their own right.
+    private static readonly HashSet<string> NonGameFolderNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "_retail_", "_ptr_", "_classic_", "_classic_era_", "_beta_", "_alpha_", "_wow_classic_era_",
+        "Cache", "Logs", "Support", "Screenshots", "Errors", "Interface", "WTF", "Data", "Temp"
+    };
     private readonly object _sync = new();
     private IReadOnlyList<BattleNetGameInstall> _installs = Array.Empty<BattleNetGameInstall>();
     private DateTime _nextRefreshUtc = DateTime.MinValue;
@@ -61,9 +71,22 @@ public sealed class BattleNetGameLibrary
             // the Agent's own path) lives under here - never a game.
             if (IsUnderPath(path, agentRoot) || string.Equals(Path.GetFullPath(path), Path.GetFullPath(agentRoot), StringComparison.OrdinalIgnoreCase)) continue;
 
-            var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(path));
+            // A matched path landing inside a build-variant/cache subfolder
+            // (see NonGameFolderNames) means the real game folder is one
+            // level up - walk up until the name looks like an actual game,
+            // or give up on this match if the walk runs out of path.
+            var displayPath = path;
+            var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(displayPath));
+            while (!string.IsNullOrWhiteSpace(name) && NonGameFolderNames.Contains(name))
+            {
+                var parent = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(displayPath));
+                if (string.IsNullOrWhiteSpace(parent) || string.Equals(parent, displayPath, StringComparison.OrdinalIgnoreCase)) { name = string.Empty; break; }
+                displayPath = parent;
+                name = Path.GetFileName(Path.TrimEndingDirectorySeparator(displayPath));
+            }
             // That's the client's own install folder, not a game.
             if (string.IsNullOrWhiteSpace(name) || string.Equals(name, "Battle.net", StringComparison.OrdinalIgnoreCase)) continue;
+            if (IsUnderPath(displayPath, agentRoot) || string.Equals(Path.GetFullPath(displayPath), Path.GetFullPath(agentRoot), StringComparison.OrdinalIgnoreCase)) continue;
 
             games.TryAdd(path, new BattleNetGameInstall(name, path));
         }

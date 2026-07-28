@@ -27,8 +27,15 @@ public sealed partial class App : Application
     {
         AppLog.Startup();
         InstallGlobalExceptionHandlers();
-        _ = Task.Run(PlaybackSession.WarmUp);
-        _ = Task.Run(StorageJanitor.CleanupAtStartup);
+        // Both of these are heavy disk IO with no user waiting on the result -
+        // LibVLC's warmup scans its whole plugin directory just to throw the
+        // instance away, and the janitor mass-deletes scratch files (real
+        // installs seen with 350MB+ of leftovers). Running either at process
+        // start meant paying that cost at the worst possible moment: logon,
+        // competing with the OS's own boot IO and every other autostart app.
+        // Neither is time-sensitive, so push both well past the window opening.
+        _ = Task.Delay(TimeSpan.FromSeconds(45)).ContinueWith(_ => PlaybackSession.WarmUp(), TaskScheduler.Default);
+        _ = Task.Delay(TimeSpan.FromSeconds(45)).ContinueWith(_ => StorageJanitor.CleanupAtStartup(), TaskScheduler.Default);
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {

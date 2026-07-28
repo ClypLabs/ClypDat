@@ -151,9 +151,14 @@ public sealed partial class MainWindow : Window
             UpdateDetectedGame();
             _gameDetectionTimer.Start();
             _ = EnsureLibraryFolderAsync();
+            // Four independent HTTPS calls used to fire in the same instant here.
+            // At logon the network stack is often not up yet, so each one can
+            // sit in its own DNS/TLS timeout concurrently - staggering them
+            // costs nothing (none of this gates the UI) and avoids piling that
+            // wait onto the exact moment everything else is also starting up.
             _ = RunStartupDialogsAsync();
-            _ = RefreshRemoteGameIconsAsync();
-            _ = RefreshRemoteGameCatalogAsync();
+            _ = Task.Delay(TimeSpan.FromSeconds(5)).ContinueWith(_ => RefreshRemoteGameIconsAsync(), TaskScheduler.Default);
+            _ = Task.Delay(TimeSpan.FromSeconds(10)).ContinueWith(_ => RefreshRemoteGameCatalogAsync(), TaskScheduler.Default);
             if (ViewModel is not null)
             {
                 _gameDetector.ApplyCustomGameNames(ViewModel.Settings.GameCaptureOverrides);
@@ -208,7 +213,13 @@ public sealed partial class MainWindow : Window
                         if (e.PropertyName == nameof(AutoClipGameViewModel.IsEnabled)) UpdateAutoClipStates();
                     };
                 }
-                UpdateAutoClipStates();
+                // TryDeploy for CS2/Dota does registry reads, Steam library
+                // enumeration and file IO synchronously - fine on demand, but
+                // running it inline in Opened blocked the window's first paint
+                // on it. Posted so the window shows first; still on the UI
+                // thread (these touch bound StatusText/listener state), just
+                // not gating Opened itself.
+                Dispatcher.UIThread.Post(UpdateAutoClipStates, DispatcherPriority.Background);
             }
         };
         // Tunnel, not bubble - a focused Button (Export, a transport button,
@@ -316,6 +327,12 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null) return;
         ViewModel.ActiveGameDetection = detection;
         ViewModel.ActiveGame = detection.DisplayName;
+
+        // Cheap per-window resolution now (see ForegroundGameDetector), but no
+        // reason to poll as fast while nothing is running - back off to 3s with
+        // no game present, snap back to 1s the moment one shows up so capture
+        // still starts promptly.
+        _gameDetectionTimer.Interval = TimeSpan.FromSeconds(detection.IsDetected ? 1 : 3);
 
         HarvestGameIcons();
 
@@ -4405,7 +4422,13 @@ public sealed partial class MainWindow : Window
         var titleLeft = new StackPanel { Orientation = Orientation.Horizontal, Children = { titleIcon, titleText } };
         Grid.SetColumn(titleLeft, 0);
         CancellationTokenSource? downloadCts = null;
-        var closeButton = new Button { Content = "✕", Width = 40, Height = 40, Padding = new Avalonia.Thickness(0), Background = Avalonia.Media.Brushes.Transparent, BorderThickness = new Avalonia.Thickness(0), CornerRadius = new Avalonia.CornerRadius(0), Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+        // Background/BorderThickness/CornerRadius/Foreground/Padding come from
+        // the windowChromeButton/windowCloseButton classes now, not local
+        // values - those classes carry the flat template that makes the red
+        // hover actually paint instead of only flashing on pointer-exit (see
+        // AppStyles.axaml). Width/Height stay local: this dialog's 40px
+        // titlebar is shorter than the main window's 48px chrome row.
+        var closeButton = new Button { Classes = { "windowChromeButton", "windowCloseButton" }, Content = "✕", Width = 40, Height = 40, Margin = new Avalonia.Thickness(0), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
         // downloadCts is null until Update Now starts one - X used to just
         // close the window while DownloadAndRestartAsync kept running
         // undisturbed in the background (nothing was ever cancelling it), so
@@ -4769,7 +4792,7 @@ public sealed partial class MainWindow : Window
         var titleText = new TextBlock { Text = "You're up to date", Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"), FontSize = 12, FontWeight = Avalonia.Media.FontWeight.SemiBold, Margin = new Avalonia.Thickness(8, 2, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         var titleLeft = new StackPanel { Orientation = Orientation.Horizontal, Children = { titleIcon, titleText } };
         Grid.SetColumn(titleLeft, 0);
-        var closeButton = new Button { Content = "✕", Width = 40, Height = 40, Padding = new Avalonia.Thickness(0), Background = Avalonia.Media.Brushes.Transparent, BorderThickness = new Avalonia.Thickness(0), CornerRadius = new Avalonia.CornerRadius(0), Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+        var closeButton = new Button { Classes = { "windowChromeButton", "windowCloseButton" }, Content = "✕", Width = 40, Height = 40, Margin = new Avalonia.Thickness(0), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
         closeButton.Click += (_, _) => window.Close();
         Grid.SetColumn(closeButton, 2);
         titleBar.Children.Add(titleLeft);
@@ -6190,14 +6213,11 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(titleLeft, 0);
         var closeButton = new Button
         {
+            Classes = { "windowChromeButton", "windowCloseButton" },
             Content = "✕",
             Width = 40,
             Height = 40,
-            Padding = new Avalonia.Thickness(0),
-            Background = Avalonia.Media.Brushes.Transparent,
-            BorderThickness = new Avalonia.Thickness(0),
-            CornerRadius = new Avalonia.CornerRadius(0),
-            Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"),
+            Margin = new Avalonia.Thickness(0),
             FontSize = 12,
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center
