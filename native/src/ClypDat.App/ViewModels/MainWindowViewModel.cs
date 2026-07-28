@@ -1200,6 +1200,30 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public bool EnableAutoClipPendingOverlay
+    {
+        get => Settings.EnableAutoClipPendingOverlay;
+        set
+        {
+            if (Settings.EnableAutoClipPendingOverlay == value) return;
+            Settings.EnableAutoClipPendingOverlay = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    public bool EnableAutoClipFailedOverlay
+    {
+        get => Settings.EnableAutoClipFailedOverlay;
+        set
+        {
+            if (Settings.EnableAutoClipFailedOverlay == value) return;
+            Settings.EnableAutoClipFailedOverlay = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
     private string _cs2GsiStatusText = string.Empty;
 
     public string Cs2GsiStatusText

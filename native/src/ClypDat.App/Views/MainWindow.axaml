@@ -1211,7 +1211,7 @@
                 <TextBlock Text="Turn the on-screen confirmation and sound on or off, and choose where and how loud it is when a clip saves." Foreground="#93A6B8" TextWrapping="Wrap" />
               </StackPanel>
 
-              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clip saved overlay|Show clipping started overlay|Overlay position}">
+              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clip saved overlay|Show clipping started overlay|Show auto-clip detected overlay|Show auto-clip failed overlay|Overlay position}">
                 <StackPanel Spacing="18">
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clip saved overlay}">
                     <TextBlock Text="Show clip saved overlay" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -1226,6 +1226,26 @@
                       <TextBlock Text="Shown when a detected game's replay buffer actually starts recording." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableGameDetectedOverlay}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                  </Grid>
+
+                  <Border Height="1" Background="#1B242D" />
+
+                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show auto-clip detected overlay}">
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                      <TextBlock Text="Show auto-clip detected overlay" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                      <TextBlock Text="Shown the instant CS2/Dota/League auto-clipping spots a highlight-worthy moment, before the clip itself finishes saving." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableAutoClipPendingOverlay}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                  </Grid>
+
+                  <Border Height="1" Background="#1B242D" />
+
+                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show auto-clip failed overlay}">
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                      <TextBlock Text="Show auto-clip failed overlay" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                      <TextBlock Text="Shown when an auto-clip save fails." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableAutoClipFailedOverlay}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
 
                   <Border Height="1" Background="#1B242D" />
