@@ -481,6 +481,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         ID3D11VideoProcessorOutputView? outputView = null;
         ID3D11VideoProcessorInputView? inputView = null;
         var useGpuScale = false;
+        // Set when a present has landed fresh pixels in croppedTexture that
+        // have not been converted into frame->data yet. The crop copy runs per
+        // present (it has to - the duplication frame is released immediately
+        // after), but the conversion it feeds only runs per ENCODED frame, so
+        // this is what tells the encode tick whether there is anything new to
+        // convert or whether it should just re-encode the last content as a
+        // duplicate. See the encode-time conversion in EncodeScheduledFrame.
+        var croppedDirty = false;
         AVCodecContext* codecContext = null;
         SwsContext* swsContext = null;
         AVFrame* frame = null;
@@ -1119,6 +1127,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                         inputView!.Dispose();
                                         croppedTexture!.Dispose();
                                         (croppedTexture, inputView) = CreateGpuCropInputView(device, videoDevice!, vpEnumerator!, captureWidth, captureHeight);
+                                        // The texture the pending crop lived in is gone - the
+                                        // replacement holds nothing yet, so there is nothing
+                                        // for the next encode tick to convert until a fresh
+                                        // present lands in it.
+                                        croppedDirty = false;
                                     }
 
                                     pendingCropStableCount = 0;
@@ -1166,53 +1179,39 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 // was mid-read on (observed as the frozen/occluded frame coming
                                 // out black instead of the real last frame). Only actually makes
                                 // a copy if something else still references the old buffer.
-                                ffmpeg.av_frame_make_writable(frame);
-
                                 if (useGpuScale)
                                 {
+                                    // Crop only. This is the one part that genuinely has to
+                                    // run per present, because the duplication frame is
+                                    // released the moment this block exits - everything
+                                    // downstream of it (the scale/convert Blt, the readback
+                                    // copy and the CPU-side plane copy) reads croppedTexture
+                                    // instead, so it can wait for a tick that will actually
+                                    // encode.
+                                    //
+                                    // It used to all run here, once per present. At a target
+                                    // well below the source's own rate that is mostly wasted
+                                    // work: a 240fps source feeding a 60fps target converted
+                                    // roughly four frames for every one that was ever
+                                    // encoded, and measured ~24% of a 4070 Ti doing it (the
+                                    // ~1ms conversion, 232x/second). The comment that called
+                                    // this "cheap (~1ms, see avgScaleMs)" was reading its own
+                                    // metric wrong - avgScaleMs divides by frames ENCODED,
+                                    // not by the far larger number of presents it actually
+                                    // ran on, so the true cost was understated by exactly the
+                                    // source/target ratio.
                                     stageStopwatch.Restart();
                                     using (var desktopTexture = desktopResource.QueryInterface<ID3D11Texture2D>())
                                     {
                                         var box = new Vortice.Mathematics.Box(cropLeft, cropTop, 0, cropLeft + captureWidth, cropTop + captureHeight, 1);
                                         device.ImmediateContext.CopySubresourceRegion(croppedTexture, 0, 0, 0, 0, desktopTexture, 0, box);
                                     }
-
-                                    var stream = new VideoProcessorStream { Enable = true, InputSurface = inputView };
-                                    videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, new[] { stream });
-                                    var currentRingIndex = nv12StagingIndex;
-                                    device.ImmediateContext.CopyResource(nv12StagingRing![currentRingIndex], nv12Output);
                                     copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
-
-                                    // Reads the OTHER ring slot - the copy issued for it last
-                                    // time has had a full iteration's worth of async time to
-                                    // actually finish, so this Map() doesn't stall waiting on
-                                    // the CopyResource that was JUST issued above. First real
-                                    // frame has no previous slot ready yet, so it's skipped
-                                    // (frame->data keeps its FillFrameBlack content for that
-                                    // one frame - same as any other single-frame freeze).
-                                    if (nv12RingPrimed)
-                                    {
-                                        var previousRingIndex = 1 - currentRingIndex;
-                                        stageStopwatch.Restart();
-                                        var mapped = device.ImmediateContext.Map(nv12StagingRing[previousRingIndex], 0, MapMode.Read, MapFlags.None);
-                                        try
-                                        {
-                                            CopyNv12PlanesToFrame(mapped, outputWidth, outputHeight, frame);
-                                        }
-                                        finally
-                                        {
-                                            device.ImmediateContext.Unmap(nv12StagingRing[previousRingIndex], 0);
-                                        }
-                                        scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
-                                    }
-                                    else
-                                    {
-                                        nv12RingPrimed = true;
-                                    }
-                                    nv12StagingIndex = 1 - currentRingIndex;
+                                    croppedDirty = true;
                                 }
                                 else
                                 {
+                                    ffmpeg.av_frame_make_writable(frame);
                                     stageStopwatch.Restart();
                                     using (var desktopTexture = desktopResource.QueryInterface<ID3D11Texture2D>())
                                     {
@@ -1392,6 +1391,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             }
                             nv12StagingIndex = 0;
                             nv12RingPrimed = false;
+                            // Every texture the pending crop referred to belongs to the
+                            // old device and has just been replaced.
+                            croppedDirty = false;
 
                             AppLog.Info("Native capture: D3D device rebuilt after a stalled duplication.");
                         }
@@ -1493,6 +1495,58 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 // scheduled frame actually does.
                 unsafe void EncodeScheduledFrame()
                 {
+                    // Convert whatever the latest present cropped, but only now that a
+                    // frame is actually being encoded - see the crop block above for why
+                    // this moved off the per-present path. Nothing new since the last
+                    // encode means frame->data still holds the right content and this is
+                    // a deliberate duplicate, exactly like the occlusion freeze.
+                    //
+                    // Still copies into one ring slot while mapping the OTHER: mapping the
+                    // slot just written stalls until the GPU drains everything queued
+                    // ahead of it (measured 12-14ms - see nv12StagingRing's declaration),
+                    // which would cost far more than the per-present conversion this is
+                    // replacing. Pairing across encode ticks rather than across presents
+                    // means frame->data trails by one encode interval instead of one
+                    // present interval; for a replay buffer that is immaterial, and it
+                    // makes staleness track the encode cadence rather than free-running
+                    // present timing, which is steadier than what it replaced.
+                    if (useGpuScale && croppedDirty)
+                    {
+                        ffmpeg.av_frame_make_writable(frame);
+                        stageStopwatch.Restart();
+                        var stream = new VideoProcessorStream { Enable = true, InputSurface = inputView };
+                        videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, new[] { stream });
+                        var currentRingIndex = nv12StagingIndex;
+                        device.ImmediateContext.CopyResource(nv12StagingRing![currentRingIndex], nv12Output);
+                        copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
+
+                        // First conversion has no previous slot ready yet, so it is
+                        // skipped (frame->data keeps its FillFrameBlack content for that
+                        // one frame - same as any other single-frame freeze).
+                        if (nv12RingPrimed)
+                        {
+                            var previousRingIndex = 1 - currentRingIndex;
+                            stageStopwatch.Restart();
+                            var mapped = device.ImmediateContext.Map(nv12StagingRing[previousRingIndex], 0, MapMode.Read, MapFlags.None);
+                            try
+                            {
+                                CopyNv12PlanesToFrame(mapped, outputWidth, outputHeight, frame);
+                            }
+                            finally
+                            {
+                                device.ImmediateContext.Unmap(nv12StagingRing[previousRingIndex], 0);
+                            }
+                            scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
+                        }
+                        else
+                        {
+                            nv12RingPrimed = true;
+                        }
+
+                        nv12StagingIndex = 1 - currentRingIndex;
+                        croppedDirty = false;
+                    }
+
                     // Force a keyframe periodically so the ring buffer always has a nearby
                     // point to start a save-window at without waiting on the encoder's own
                     // GOP schedule.
@@ -1577,9 +1631,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // instead of the user's chosen target. Unlike the old
                     // upstream content-processing throttle this used to lean on
                     // (removed - see the occluded check above), skipping here is
-                    // lossless: frame->data is now always kept maximally fresh
-                    // regardless of this gate, so the next due tick just picks up
-                    // whatever's newest rather than losing a capture opportunity.
+                    // lossless: every present keeps croppedTexture maximally
+                    // fresh regardless of this gate, and the tick that does
+                    // encode converts whatever is newest at that moment, so a
+                    // skip costs nothing rather than losing a capture
+                    // opportunity.
                     // "Nothing changed" must not mean "encode nothing, ever".
                     // TrimRingBuffer prunes by wall-clock age regardless of
                     // whether anything is being added, so a stretch with no new
