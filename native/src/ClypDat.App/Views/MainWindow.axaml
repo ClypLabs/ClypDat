@@ -2515,24 +2515,38 @@
                      playhead's own look (and GG's), instead of a thick
                      rounded block confined to just the video lane. -->
                 <Canvas x:Name="TimelineHandleLayer">
+                  <!-- The grabbable Border is deliberately much wider than the
+                       4px line drawn inside it, and transparent either side of
+                       it. A 4px target is fussy anywhere, but at the end of an
+                       untrimmed clip the end handle sits flush against the
+                       timeline's right edge - which is also where the window's
+                       own resize border is, so reaching for it resized the
+                       window instead. The padding extends the grab area inward,
+                       away from that edge, without moving the line itself.
+                       PositionTimelineChrome offsets by the padding so the
+                       visible line still lands exactly on the boundary. -->
                   <Border x:Name="TrimStartHandle"
-                          Width="4"
-                          Background="#13C8B5"
+                          Width="18"
+                          Background="Transparent"
                           Cursor="SizeWestEast"
                           PointerPressed="TrimStartHandle_OnPointerPressed"
                           PointerMoved="TimelineSurface_OnPointerMoved"
-                          PointerReleased="TimelineSurface_OnPointerReleased" />
+                          PointerReleased="TimelineSurface_OnPointerReleased">
+                    <Border Width="4" Background="#13C8B5" HorizontalAlignment="Center" />
+                  </Border>
                   <Polygon x:Name="TrimStartCap"
                            Points="0,0 10,0 5,7"
                            Fill="#13C8B5"
                            IsHitTestVisible="False" />
                   <Border x:Name="TrimEndHandle"
-                          Width="4"
-                          Background="#13C8B5"
+                          Width="18"
+                          Background="Transparent"
                           Cursor="SizeWestEast"
                           PointerPressed="TrimEndHandle_OnPointerPressed"
                           PointerMoved="TimelineSurface_OnPointerMoved"
-                          PointerReleased="TimelineSurface_OnPointerReleased" />
+                          PointerReleased="TimelineSurface_OnPointerReleased">
+                    <Border Width="4" Background="#13C8B5" HorizontalAlignment="Center" />
+                  </Border>
                   <Polygon x:Name="TrimEndCap"
                            Points="0,0 10,0 5,7"
                            Fill="#13C8B5"
