@@ -4820,6 +4820,14 @@ public sealed partial class MainWindow : Window
             AudioCapturePipeline.TryDelete(LibraryLayout.SidecarPath(ViewModel.Settings.LibraryFolder, sourcePath, ".paused.json"));
             AudioCapturePipeline.TryDelete(LibraryLayout.LegacySidecarPath(sourcePath, ".paused.json"));
             AudioCapturePipeline.TryDelete(LibraryLayout.LegacyAdjacentPausedPath(sourcePath));
+            // Durable half of the same fix: the deletes above are best-effort
+            // (TryDelete swallows failures, and a sidecar could be restored by a
+            // library move/rename), so record on the clip itself that it has
+            // been trimmed. LoadPausedRanges refuses to load ranges at all for a
+            // trimmed clip, which is what actually makes the badge impossible
+            // rather than merely unlikely.
+            var trimmedInfo = ClipInfoSidecar.Load(ViewModel.Settings.LibraryFolder, sourcePath) ?? new ClipInfo(null, null);
+            ClipInfoSidecar.Save(ViewModel.Settings.LibraryFolder, sourcePath, trimmedInfo with { IsTrimmed = true });
             _pausedRanges.Clear();
             RefreshPausedBadge();
 
@@ -5918,6 +5926,17 @@ public sealed partial class MainWindow : Window
     // means no badge ever shows - not an error.
     private List<(double StartSeconds, double EndSeconds)> LoadPausedRanges(string videoPath)
     {
+        // A trimmed clip's pause ranges describe the ORIGINAL recording's
+        // timeline, not the shorter file that replaced it, so they can only ever
+        // point at the wrong moment - refuse them outright rather than render a
+        // "Playback Paused" badge over content that was never paused. See
+        // ClipInfo.IsTrimmed for why this is checked here and not left to the
+        // best-effort sidecar deletion at trim time.
+        if (ViewModel is not null && ClipInfoSidecar.Load(ViewModel.Settings.LibraryFolder, videoPath)?.IsTrimmed == true)
+        {
+            return new();
+        }
+
         var sidecarPath = ViewModel is null ? string.Empty : LibraryLayout.SidecarPath(ViewModel.Settings.LibraryFolder, videoPath, ".paused.json");
         if (!File.Exists(sidecarPath))
         {
@@ -6005,6 +6024,12 @@ public sealed partial class MainWindow : Window
         var overlay = EnsureRecordingPausedOverlay();
         RepositionPausedOverlay(overlay);
         if (!overlay.IsVisible) overlay.Show(this);
+        // RepositionPausedOverlay just claimed the top of the owner's z-band, and
+        // this runs on every playback tick via RefreshPausedBadge - so without
+        // putting the hover bar back above it, the badge's dark scrim sits over
+        // the playback controls and dims them. force: the bar has not moved, so
+        // the skip-if-unchanged check would return before re-asserting z-order.
+        RepositionEditorHoverControlsSafe(force: true);
         ApplyCaptureExclusion(overlay, ViewModel.Settings.ExcludeOverlaysFromCapture);
     }
 
@@ -6078,12 +6103,12 @@ public sealed partial class MainWindow : Window
         };
     }
 
-    private void RepositionEditorHoverControlsSafe()
+    private void RepositionEditorHoverControlsSafe(bool force = false)
     {
         if (_editorHoverControlsWindow is not { IsVisible: true } hoverBar) return;
         try
         {
-            RepositionEditorHoverControls(hoverBar);
+            RepositionEditorHoverControls(hoverBar, force);
         }
         catch (Exception error)
         {
