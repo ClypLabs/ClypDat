@@ -619,9 +619,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             catch (Exception error) { AppLog.Error("Native capture: failed to raise encode thread priority (non-fatal)", error); }
             encodeThread.Start();
 
-            AppLog.Info($"Native capture started (DXGI Desktop Duplication): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, encoder={encoderName}, configFrameRate={config.FrameRate}.");
+            var adapterDescription = DescribeAdapter(device);
+            AppLog.Info($"Native capture started (DXGI Desktop Duplication): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, encoder={encoderName}, adapter={adapterDescription}, preset={config.EncoderPreset}, configFrameRate={config.FrameRate}.");
             SetHealth(new ReplayCaptureHealth("Native", "Desktop Duplication", ReplayCaptureState.Healthy,
-                config.FrameRate, 0, 0, 0, 0, 0, 0, encoderName, "Default adapter", string.Empty, DateTime.UtcNow));
+                config.FrameRate, 0, 0, 0, 0, 0, 0, encoderName, "Default adapter", string.Empty, DateTime.UtcNow)
+            {
+                AdapterDescription = adapterDescription,
+                EncoderPreset = config.EncoderPreset,
+                EncodeQueueCapacity = encodeQueueCapacity
+            });
             ready.TrySetResult();
 
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -868,7 +874,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     {
                         TotalDroppedFrames = Interlocked.Read(ref _totalDroppedFrames),
                         PeakQueueDepth = Volatile.Read(ref _peakQueueDepth),
-                        LastDegradedUtc = _lastDegradedUtc
+                        LastDegradedUtc = _lastDegradedUtc,
+                        // Stall wins when both are true: no frames are arriving,
+                        // so whatever the encoder looks like is a consequence of
+                        // that rather than the encode settings being too costly.
+                        DegradeReason = isStalled ? ReplayDegradeReason.CaptureStall
+                            : overloaded ? ReplayDegradeReason.EncoderOverload
+                            : ReplayDegradeReason.None,
+                        AdapterDescription = adapterDescription,
+                        EncoderPreset = config.EncoderPreset,
+                        EncodeQueueCapacity = encodeQueueCapacity
                     });
                     copyMapMs = 0;
                     scaleMs = 0;
@@ -2062,6 +2077,26 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private static nint ResolveTargetMonitor(nint targetHandle) => targetHandle != 0
         ? MonitorFromWindow(targetHandle, MONITOR_DEFAULTTONEAREST)
         : GetPrimaryMonitorHandle();
+
+    // The GPU's own name ("NVIDIA GeForce RTX 4070 Ti"), for diagnostics and for
+    // keying any learned per-machine encoder tuning - a learned value has no
+    // business following the user onto different hardware. Best-effort: this is
+    // reporting only, so a failure here must never take capture down with it.
+    private static string DescribeAdapter(ID3D11Device device)
+    {
+        try
+        {
+            using var dxgiDevice = device.QueryInterface<IDXGIDevice>();
+            using var adapter = dxgiDevice.GetParent<IDXGIAdapter>();
+            var description = adapter.Description.Description;
+            return string.IsNullOrWhiteSpace(description) ? "Unknown adapter" : description.Trim();
+        }
+        catch (Exception error)
+        {
+            AppLog.Info($"Native capture: could not read adapter description ({error.Message}).");
+            return "Unknown adapter";
+        }
+    }
 
     private static IDXGIOutputDuplication CreateDuplicationFor(ID3D11Device device, nint targetHandle, out Vortice.RawRect desktopBounds)
     {

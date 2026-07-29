@@ -14,6 +14,20 @@ public enum ReplayCaptureState
     Stopped
 }
 
+// Why a backend reported Degraded. Both causes look identical through State
+// alone, and they call for opposite responses: an encoder overload means the
+// encode settings are too expensive for this machine, while a stall means the
+// display stopped handing over frames (occlusion, driver reset, mode change)
+// with the encoder sitting idle and blameless. Anything reacting to Degraded -
+// notably the encoder auto-tuner - has to tell them apart, and matching on the
+// human-readable LastFailure text is far too brittle to hang that on.
+public enum ReplayDegradeReason
+{
+    None,
+    EncoderOverload,
+    CaptureStall
+}
+
 // Keep capture health separate from IReplayBuffer. Old/third-party backends can
 // remain valid while callers opt into richer diagnostics where available.
 public sealed record ReplayCaptureHealth(
@@ -35,6 +49,18 @@ public sealed record ReplayCaptureHealth(
     public long TotalDroppedFrames { get; init; }
     public int PeakQueueDepth { get; init; }
     public DateTime? LastDegradedUtc { get; init; }
+    // init property rather than a positional parameter: backends that can't
+    // distinguish the two causes (and every existing construction site) keep
+    // compiling unchanged and simply report None.
+    public ReplayDegradeReason DegradeReason { get; init; }
+    // What the encoder is actually running on, e.g. "NVIDIA GeForce RTX 4070 Ti".
+    // Adapter above is the capture path's own label, not the hardware's name.
+    public string AdapterDescription { get; init; } = string.Empty;
+    // Encoder settings in force for this session, so a consumer can attribute
+    // an overload to the preset that caused it without reaching into settings
+    // (which the user may have changed since this buffer started).
+    public string EncoderPreset { get; init; } = string.Empty;
+    public int EncodeQueueCapacity { get; init; }
 
     public static ReplayCaptureHealth Unknown(string backend = "Unknown") => new(
         backend, "Unknown", ReplayCaptureState.Unknown, 0, 0, 0, 0, 0, 0, 0, string.Empty, string.Empty, string.Empty, DateTime.UtcNow);
