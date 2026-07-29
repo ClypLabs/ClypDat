@@ -269,6 +269,12 @@ public sealed partial class MainWindow : Window
         // instead of trusting state the OS already invalidated behind us.
         Deactivated += (_, _) =>
         {
+            // Focus moving to one of our own overlays is not "the user left" -
+            // taking the bar down there would swallow the click that caused
+            // it. WS_EX_NOACTIVATE (MakeWindowNonActivating) should stop that
+            // ever happening; this covers the first show, before the style is
+            // on the window.
+            if (IsOverlayWindowForeground()) return;
             HideEditorHoverControls(immediate: true);
             _recordingPausedOverlay?.Hide();
         };
@@ -5625,6 +5631,10 @@ public sealed partial class MainWindow : Window
             // otherwise see Avalonia's already-correct Position and do
             // nothing), so the bar is guaranteed to be where the video is.
             RepositionEditorHoverControls(window, force: true);
+            // Applied after Show, since there's no hwnd to set styles on
+            // before it - keeps clicking a control from stealing activation
+            // and taking the bar down out from under the click.
+            MakeWindowNonActivating(window);
             LogHoverControlsState($"sliding in ({DescribeNativeWindow(window)})");
             Dispatcher.UIThread.Post(() => SetHoverControlsOffset(0), DispatcherPriority.Loaded);
         }
@@ -5890,7 +5900,12 @@ public sealed partial class MainWindow : Window
             Padding = new Thickness(0),
             BorderThickness = new Thickness(0),
             CornerRadius = new CornerRadius(0),
-            VerticalAlignment = VerticalAlignment.Center,
+            // Top, not Center: centering it in the 14px hit strip left a band
+            // of scrim sitting above the progress line, so the bar looked like
+            // it started with an empty grey strip instead of with the
+            // playback line itself. The strip keeps its full height as a hit
+            // target, the line just sits flush with the bar's top edge.
+            VerticalAlignment = VerticalAlignment.Top,
             Background = new SolidColorBrush(Color.Parse("#33FFFFFF")),
             Foreground = Application.Current?.Resources["AccentBrush"] as IBrush ?? new SolidColorBrush(Color.Parse("#5864E8")),
             IsHitTestVisible = false,
@@ -6004,12 +6019,47 @@ public sealed partial class MainWindow : Window
         public int Bottom;
     }
 
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
     private static readonly IntPtr HwndTop = IntPtr.Zero;
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoActivate = 0x0010;
+    private const int GwlExStyle = -20;
+    private const long WsExNoActivate = 0x08000000L;
 
     private static IntPtr NativeHandleOf(Window? window) =>
         window?.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+
+    // Clicking anything in an overlay would otherwise activate that window,
+    // which deactivates the main window - and the main window's Deactivated
+    // handler takes the overlays down. The click landed on a bar that was
+    // being hidden underneath it, so it read as a flash and the button had to
+    // be pressed a second time. WS_EX_NOACTIVATE means clicking never moves
+    // activation in the first place; mouse input still routes normally, it
+    // just doesn't steal focus.
+    private static void MakeWindowNonActivating(Window window)
+    {
+        var handle = NativeHandleOf(window);
+        if (handle == IntPtr.Zero) return;
+        var exStyle = (long)GetWindowLongPtr(handle, GwlExStyle);
+        if ((exStyle & WsExNoActivate) != 0) return;
+        SetWindowLongPtr(handle, GwlExStyle, (IntPtr)(exStyle | WsExNoActivate));
+    }
+
+    private bool IsOverlayWindowForeground()
+    {
+        var foreground = GetForegroundWindow();
+        if (foreground == IntPtr.Zero) return false;
+        return foreground == NativeHandleOf(_editorHoverControlsWindow)
+               || foreground == NativeHandleOf(_recordingPausedOverlay);
+    }
 
     // Recomputes the "Playback Paused" badge for the CURRENT position. Must
     // run on every path that moves/settles the playhead - it used to live
