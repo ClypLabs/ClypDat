@@ -5893,7 +5893,7 @@ public sealed partial class MainWindow : Window
             Orientation = Orientation.Horizontal,
             Spacing = 8,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, -8, 0, 0),
+            Margin = new Thickness(0, -6, 0, 0),
             Children = { muteToggle, volumeSlider, volumePercentText, volumeResetButton },
         };
 
