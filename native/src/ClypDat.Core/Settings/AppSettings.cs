@@ -45,20 +45,6 @@ public sealed class AppSettings
     public int ReplayFrameRate { get; set; } = 60;
     public int ReplayMaxHeight { get; set; } = 1080;
     public string ReplayBackend { get; set; } = "Auto";
-    // Native engine only: skip re-encoding a duplicate of the last frame to
-    // hold a constant rate during idle/no-new-frame stretches, and let real
-    // frame timestamps drive playback speed instead. Off by default - keeps
-    // today's constant-rate behavior unless explicitly opted into. On the
-    // Native backend this made a clip's reported average frame rate collapse
-    // well below the configured target during idle stretches (menus, loading
-    // screens) - see AdaptiveFrameRateResetApplied for the one-time reset
-    // that turned it back off for anyone who already had it on.
-    public bool NativeAdaptiveFrameRate { get; set; }
-    // Guards a one-time reset (AppSettingsStore.Load) that turned
-    // NativeAdaptiveFrameRate back off for existing installs. Without this
-    // flag the reset would refire every launch and fight a user who
-    // deliberately re-enables the toggle afterward.
-    public bool AdaptiveFrameRateResetApplied { get; set; }
     public string ExportVideoCodec { get; set; } = "H.264";
     public string SaveReplayHotkey { get; set; } = "Ctrl+Shift+F9";
     public bool StartReplayOnLaunch { get; set; }

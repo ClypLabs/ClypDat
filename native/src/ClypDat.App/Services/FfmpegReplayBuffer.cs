@@ -785,7 +785,6 @@ public sealed record ReplayBufferConfig(
     string ClipFileNameScheme = "Standard",
     string CustomClipFileNameTemplate = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}",
     string LibraryFolder = "",
-    bool NativeAdaptiveFrameRate = false,
     // Native engine encoder controls - see AppSettings for what each means.
     string EncoderPreset = "P4",
     string RateControlMode = "Constant quality",

@@ -748,19 +748,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // real, measurable contributor to perceived judder or not, before
             // touching the pacing algorithm itself.
             var lastFrameContentCapturedUtc = MonotonicClock.UtcNow;
-            // Same instant as lastFrameContentCapturedUtc, on the stopwatch
-            // timeline instead of the wall-clock one - adaptive mode's PTS is
-            // stopwatch-based, so it needs the capture moment in those units.
-            var lastFrameContentCapturedElapsed = TimeSpan.Zero;
-            // Adaptive frame rate only: the lastFrameContentCapturedUtc value
-            // as of the last frame actually encoded, so the pacing gate below
-            // can tell "genuinely new content since last encode" apart from
-            // "still the same frame we already encoded" - see NativeAdaptiveFrameRate.
-            var lastEncodedContentCapturedUtc = DateTime.MinValue;
-            // Adaptive frame rate only: PTS of the last frame handed to the
-            // encoder, so the keepalive path below can guarantee strict
-            // monotonicity across the two different timestamp sources it picks from.
-            var lastEncodedPtsElapsed = TimeSpan.MinValue;
             var frameStalenessMs = 0.0;
             var frameStalenessMaxMs = 0.0;
             var frameStalenessCount = 0;
@@ -851,12 +838,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var frameStalenessDenom = Math.Max(1, frameStalenessCount);
                     AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, ringBufferMb={ringBufferMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, droppedFrames={droppedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
                     var outputFrameRate = framesEncodedSinceLog / diagElapsed;
-                    // Adaptive frame rate legitimately encodes below the target
-                    // rate whenever the screen is idle (that's the point of it) -
-                    // without excluding it here, every idle stretch would flag as
-                    // "capture overload" even though nothing is actually wrong.
                     var overloaded = droppedSinceLog > 0 || encodeQueue.Count * 4 >= encodeQueueCapacity * 3 ||
-                                     (!config.NativeAdaptiveFrameRate && hasCapturedRealFrame && outputFrameRate < config.FrameRate * 0.9);
+                                     (hasCapturedRealFrame && outputFrameRate < config.FrameRate * 0.9);
                     // A stall is worse than an overload and reads nothing like one:
                     // no frames arrive at all, so nothing gets dropped and the queue
                     // stays empty - every overload signal above says "healthy" right
@@ -1167,11 +1150,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             // V-Sync-off source presenting in the hundreds of fps - the actual
                             // rate cap that matters (respecting the user's chosen target)
                             // still happens below: the fixed-rate encode-tick loop already
-                            // throttles correctly regardless of how fresh its input is, and
-                            // NativeAdaptiveFrameRate's own branch now enforces the same cap
-                            // at its encode decision instead of here, where a skip is
-                            // harmless (the next check just finds the still-fresh frame)
-                            // rather than a permanently lost capture.
+                            // throttles correctly regardless of how fresh its input is, where
+                            // a skip is harmless (the next check just finds the still-fresh
+                            // frame) rather than a permanently lost capture.
                             if (!occluded)
                             {
                                 // NVENC's actual encode runs asynchronously - avcodec_send_frame
@@ -1248,7 +1229,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 // and unsynchronized - a plausible source of visible judder despite
                                 // every output frame being unique and perfectly PTS-spaced.
                                 lastFrameContentCapturedUtc = MonotonicClock.UtcNow;
-                                lastFrameContentCapturedElapsed = stopwatch.Elapsed;
                                 Volatile.Write(ref _lastRealContentTicks, lastFrameContentCapturedUtc.Ticks);
                                 framesProcessedSinceLog++;
                             }
@@ -1626,98 +1606,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
                 if (hasCapturedRealFrame)
                 {
-                if (config.NativeAdaptiveFrameRate)
-                {
-                    // Variable frame rate: encode only when genuinely new content
-                    // has landed in frame->data since the last encoded frame,
-                    // instead of padding every scheduled tick with a duplicate -
-                    // no work spent re-encoding an unchanged frame while the
-                    // screen is idle (menus, loading screens, a paused game). PTS
-                    // is the real elapsed capture time rather than an idealized
-                    // fixed interval, so the file's own frame spacing reflects
-                    // when content actually changed. Audio alignment is
-                    // unaffected either way - see the ideal-timestamp comment
-                    // in the fixed-rate branch below for why.
-                    //
-                    // The target frame rate is still an upper bound here too -
-                    // without the elapsed check, a V-Sync-off source presenting
-                    // in the hundreds of fps would encode at ITS native rate
-                    // instead of the user's chosen target. Unlike the old
-                    // upstream content-processing throttle this used to lean on
-                    // (removed - see the occluded check above), skipping here is
-                    // lossless: every present keeps croppedTexture maximally
-                    // fresh regardless of this gate, and the tick that does
-                    // encode converts whatever is newest at that moment, so a
-                    // skip costs nothing rather than losing a capture
-                    // opportunity.
-                    // "Nothing changed" must not mean "encode nothing, ever".
-                    // TrimRingBuffer prunes by wall-clock age regardless of
-                    // whether anything is being added, so a stretch with no new
-                    // content - most commonly an alt-tab, where the occlusion
-                    // check above stops refreshing frame->data entirely - drains
-                    // the ring to EMPTY once it outlasts the buffer duration,
-                    // and the next clip attempt has nothing to save ("Replay
-                    // just started. Try again in a second."). Confirmed from a
-                    // real session: framesSeen climbing past 41000 while
-                    // framesEncoded sat frozen at 5092 and ringPackets fell to 0.
-                    // The fixed-rate branch below never has this problem because
-                    // it pads duplicates unconditionally. So: still emit on a
-                    // slow keepalive cadence when idle, which keeps a populated,
-                    // keyframe-bearing ring (a frozen frame, exactly like the
-                    // fixed-rate path) for ~1/60th of the frames it would spend.
-                    var contentIsNew = lastFrameContentCapturedUtc != lastEncodedContentCapturedUtc;
-                    var newContentDue = contentIsNew && stopwatch.Elapsed - lastEncodedAt >= targetFrameInterval;
-                    var keepAliveDue = stopwatch.Elapsed - lastEncodedAt >= AdaptiveKeepAliveInterval;
-                    if (newContentDue || keepAliveDue)
-                    {
-                        lastEncodedContentCapturedUtc = lastFrameContentCapturedUtc;
-                        // Advance along the ideal grid rather than snapping to
-                        // "now". This gate is only evaluated once per loop
-                        // iteration (~7ms apart, paced by AcquireNextFrame's own
-                        // timeout), so "now" is essentially always LATER than the
-                        // tick actually being served - and snapping to it carries
-                        // that quantization error into the next deadline, where it
-                        // happens again, ratcheting the effective period past the
-                        // target forever. Measured at 60fps target against a 59.5fps
-                        // source: a steady 49.5fps encoded, i.e. a 20.2ms period vs
-                        // the requested 16.67ms, with the 3.5ms excess landing at
-                        // almost exactly half the loop's own granularity - the
-                        // signature of this quantization, not of a slow source.
-                        // Same accumulate-then-resync shape the fixed-rate branch
-                        // below already uses; the resync clause keeps an idle
-                        // stretch (the whole point of adaptive mode) from building
-                        // up a debt of ticks to burst through on resume.
-                        lastEncodedAt += targetFrameInterval;
-                        if (stopwatch.Elapsed - lastEncodedAt >= targetFrameInterval) lastEncodedAt = stopwatch.Elapsed;
-                        // Timestamp the frame with when its CONTENT was actually
-                        // captured, not with "now" (when this poll got around to
-                        // deciding to encode it). Those differ by however long ago
-                        // in this loop iteration the present landed - a variable
-                        // 0-7ms depending on where the present fell relative to the
-                        // poll, measured as avgFrameStalenessMs swinging between
-                        // 0.4 and 3.5ms line to line. Stamping "now" bakes that
-                        // scheduling jitter into the file's own frame spacing, so a
-                        // VFR clip judders on playback even though every frame is
-                        // unique and none were lost. The capture instants are the
-                        // real presentation timeline; the poll times are an artifact
-                        // of how often this loop happens to look.
-                        //
-                        // A keepalive frame has no new content, so its capture
-                        // instant is the one already used by the previous encode -
-                        // stamping that again would emit a duplicate/backwards PTS
-                        // and break the remux. Those take "now" instead, which is
-                        // the honest timestamp for "this is what the screen still
-                        // looked like at this moment". Clamped so PTS is strictly
-                        // monotonic whichever branch produced it.
-                        var ptsElapsed = newContentDue ? lastFrameContentCapturedElapsed : stopwatch.Elapsed;
-                        if (ptsElapsed <= lastEncodedPtsElapsed) ptsElapsed = lastEncodedPtsElapsed + TimeSpan.FromMilliseconds(1);
-                        lastEncodedPtsElapsed = ptsElapsed;
-                        frame->pts = (long)Math.Round(ptsElapsed.TotalMicroseconds);
-                        EncodeScheduledFrame();
-                    }
-                }
-                else
-                {
                 // At most 250 ms of duplicate work after a stall. Longer bursts
                 // refill a saturated queue with stale copies and make recovery
                 // worse than dropping the missed interval.
@@ -1744,7 +1632,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     frame->pts = (long)Math.Round(encodedFrameIndex * idealFrameIntervalMicroseconds);
                     encodedFrameIndex++;
                     EncodeScheduledFrame();
-                }
                 }
                 }
 
@@ -2820,14 +2707,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // last-resort CPU fallback so capture still works even with no usable hardware
     // encoder at all.
     private static readonly string[] EncoderCandidates = { "h264_nvenc", "h264_amf", "h264_qsv", "libx264" };
-
-    // Adaptive frame rate: how long an unchanging screen may go without
-    // producing a frame at all. Short enough that the ring buffer always holds
-    // recent, keyframe-bearing content to cut a clip from (forced keyframes run
-    // on a 2s cadence, so this keeps several inside any buffer length), long
-    // enough that an idle screen still costs a tiny fraction of the frames a
-    // constant-rate capture would spend on it.
-    private static readonly TimeSpan AdaptiveKeepAliveInterval = TimeSpan.FromSeconds(1);
 
     // h264_nvenc's default preset does real per-frame rate-distortion search,
     // which measured a sustained ~59-60ms/frame (vs. ~0.5ms on p1) during

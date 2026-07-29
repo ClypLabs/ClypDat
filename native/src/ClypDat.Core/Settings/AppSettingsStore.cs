@@ -33,16 +33,6 @@ public static class AppSettingsStore
             settings.ReplayConstantQuality = settings.ReplayConstantQuality <= 0 ? 20 : Math.Clamp(settings.ReplayConstantQuality, 1, 51);
             settings.ReplayMaxBitrateMbps = settings.ReplayMaxBitrateMbps <= 0 ? 40 : Math.Clamp(settings.ReplayMaxBitrateMbps, 5, 1000);
             if (settings.ReplayFrameRate <= 0) settings.ReplayFrameRate = 60;
-            // One-time reset: NativeAdaptiveFrameRate collapsed a clip's
-            // average reported frame rate well below the configured target
-            // during idle stretches on the Native backend. Only runs once per
-            // install - AdaptiveFrameRateResetApplied guards against fighting
-            // a user who turns it back on afterward.
-            if (!settings.AdaptiveFrameRateResetApplied)
-            {
-                settings.NativeAdaptiveFrameRate = false;
-                settings.AdaptiveFrameRateResetApplied = true;
-            }
             // One-time switch-on: the floating hover bar is the default now,
             // but existing settings.json files already carry an explicit false
             // for it, so the changed property default alone would only reach

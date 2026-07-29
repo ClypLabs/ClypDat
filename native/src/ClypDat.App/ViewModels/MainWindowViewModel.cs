@@ -2340,16 +2340,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public bool NativeAdaptiveFrameRate
-    {
-        get => Settings.NativeAdaptiveFrameRate;
-        set
-        {
-            Settings.NativeAdaptiveFrameRate = value;
-            OnPropertyChanged();
-            SaveSettings();
-        }
-    }
 
     public IReadOnlyList<string> FullSessionCodecs { get; } = new[] { "H.264 (fastest)", "H.265 (smaller)", "AV1 (smallest)" };
 
@@ -4144,7 +4134,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ClipFileNameScheme: Settings.ClipFileNameScheme,
             CustomClipFileNameTemplate: Settings.CustomClipFileNameTemplate,
             LibraryFolder: Settings.LibraryFolder,
-            NativeAdaptiveFrameRate: Settings.NativeAdaptiveFrameRate,
             EncoderPreset: Settings.ReplayEncoderPreset,
             RateControlMode: Settings.ReplayRateControlMode,
             ConstantQuality: Settings.ReplayConstantQuality,
