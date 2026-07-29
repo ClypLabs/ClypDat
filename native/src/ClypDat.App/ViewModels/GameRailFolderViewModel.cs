@@ -125,8 +125,10 @@ public sealed class GameRailFolderViewModel : ViewModelBase
     // exclusive, so exactly one applies. A single fixed 2x2 grid for every
     // count left an empty grey cell whenever a folder held fewer than 4
     // games, which looked like a broken/placeholder tile rather than "the
-    // icons are just small". 1 game fills the whole tile, 2 sit side by
-    // side, 3 are two-over-one, and only 4+ uses the real 2x2 (see
+    // icons are just small". All four arrangements share the same 2x2 cell
+    // geometry and simply fill fewer cells, so an icon is the same size in
+    // every folder however many games it holds: 1 sits top-left alone, 2
+    // fill the top row, 3 are two-over-one, 4+ fill all four (see
     // HasSlot4Cell below).
     public bool IsSingleGame => Games.Count == 1;
     public bool IsTwoGames => Games.Count == 2;
