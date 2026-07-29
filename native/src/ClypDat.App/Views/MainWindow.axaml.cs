@@ -5478,6 +5478,28 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        // Windows can hide an owned window itself - owner minimized, owner
+        // losing foreground, the focus blips an interactive resize causes -
+        // and none of that runs through our Hide(), so Avalonia's IsVisible
+        // stays stuck true while the real window is gone. ShowEditorHoverControls
+        // only calls Show() again when IsVisible reads false, so that stale
+        // true meant the bar was never re-shown for the rest of the session.
+        // Believe the OS over our own flag and resync, so the next tick does a
+        // genuine Show() instead of the "already visible, just nudge the
+        // transform" path forever.
+        if (_editorHoverControlsWindow is { IsVisible: true } trackedBar)
+        {
+            var trackedHandle = NativeHandleOf(trackedBar);
+            if (trackedHandle != IntPtr.Zero && !IsWindowVisible(trackedHandle))
+            {
+                AppLog.Debug("Editor hover bar: native window was hidden by the OS - resyncing so it can be reshown.");
+                _hoverControlsSlideOutTimer?.Stop();
+                _hoverControlsSlidingOut = false;
+                trackedBar.Hide();
+                _hoverControlsLastState = string.Empty;
+            }
+        }
+
         if (!GetCursorPos(out var cursor)) return;
 
         // EditorVideoHost, not EditorVideoView: the view carries the zoom
@@ -5587,13 +5609,32 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            LogHoverControlsState("sliding in");
+            // Everything RepositionEditorHoverControls assigned above went to
+            // a window that had no native hwnd yet. Re-apply now that Show has
+            // made one, bypassing the skip-if-unchanged check (which would
+            // otherwise see Avalonia's already-correct Position and do
+            // nothing), so the bar is guaranteed to be where the video is.
+            RepositionEditorHoverControls(window, force: true);
+            LogHoverControlsState($"sliding in ({DescribeNativeWindow(window)})");
             Dispatcher.UIThread.Post(() => SetHoverControlsOffset(0), DispatcherPriority.Loaded);
         }
         else
         {
             SetHoverControlsOffset(0);
         }
+    }
+
+    // What the OS says about the window, for the log - Avalonia's own
+    // IsVisible/Position can't distinguish "shown where we asked" from "shown
+    // somewhere else" or "not actually shown at all".
+    private static string DescribeNativeWindow(Window window)
+    {
+        var handle = NativeHandleOf(window);
+        if (handle == IntPtr.Zero) return "no native handle";
+        var visible = IsWindowVisible(handle);
+        return GetWindowRect(handle, out var rect)
+            ? $"native={visible}, rect={rect.Left},{rect.Top}-{rect.Right},{rect.Bottom}"
+            : $"native={visible}, rect=unavailable";
     }
 
     // immediate: true for leaving the editor or entering fullscreen (the bar
@@ -5650,7 +5691,7 @@ public sealed partial class MainWindow : Window
     // resizes, maximise/restore, a display-scale change or the pan slider
     // appearing - the LayoutUpdated hook alone missed cases where the video
     // pane's rect changed without EditorVideoView itself re-laying out.
-    private void RepositionEditorHoverControls(Window bar)
+    private void RepositionEditorHoverControls(Window bar, bool force = false)
     {
         // Same reasoning as PollEditorHoverControls - position against the
         // untransformed host, not the zoom-transformed/reparented view.
@@ -5668,12 +5709,39 @@ public sealed partial class MainWindow : Window
         // first show, hanging past the bottom of the video pane.
         var scaling = RenderScaling > 0 ? RenderScaling : 1;
         var position = new PixelPoint(topLeft.X, bottomOnScreen.Y - (int)(barHeight * scaling));
+        var handle = NativeHandleOf(bar);
 
-        if (bar.Position == position && Math.Abs(bar.Width - width) < 0.5 && Math.Abs(bar.Height - barHeight) < 0.5) return;
+        // The skip-if-unchanged check reads the REAL window rect, not
+        // bar.Position. This method runs before Show() while the window is
+        // still hidden, and Avalonia's Position just echoes back whatever was
+        // last assigned to it - so once a hidden-window assignment failed to
+        // reach the OS, "already in the right place, nothing to do" was true
+        // forever while the actual window sat at a stale spot (its pre-resize
+        // rect, or wherever Windows defaulted it on Show). That is the bar
+        // reading as shown by every state check and still not being where the
+        // user is looking.
+        if (!force && handle != IntPtr.Zero && GetWindowRect(handle, out var nativeRect))
+        {
+            if (nativeRect.Left == position.X && nativeRect.Top == position.Y &&
+                Math.Abs(bar.Width - width) < 0.5 && Math.Abs(bar.Height - barHeight) < 0.5)
+            {
+                return;
+            }
+        }
 
         bar.Width = width;
         bar.Height = barHeight;
         bar.Position = position;
+
+        // Drive the move through Win32 too, so it lands whether or not
+        // Avalonia decides to flush a Position set on a hidden window - and
+        // take the top of the owner's z-band in the same call (NOACTIVATE, so
+        // it never steals focus) so the native video child hwnd can't end up
+        // painting over the bar after a resize or alt-tab reorders things.
+        if (handle != IntPtr.Zero)
+        {
+            SetWindowPos(handle, HwndTop, position.X, position.Y, 0, 0, SwpNoSize | SwpNoActivate);
+        }
     }
 
     // Contents of the floating hover bar. The docked alternative is plain XAML
@@ -5900,6 +5968,37 @@ public sealed partial class MainWindow : Window
         public readonly int X;
         public readonly int Y;
     }
+
+    // Ground truth for the owned overlay windows. Avalonia's Window.IsVisible
+    // and Window.Position are its OWN bookkeeping - they report back what we
+    // last assigned, whether or not the native window ever agreed. Every
+    // "the bar is showing per every state check but isn't on screen" symptom
+    // comes from trusting those two over what the OS actually did, so the
+    // hover-bar paths below check and drive the real hwnd instead.
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hWnd, out Win32Rect rect);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct Win32Rect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    private static readonly IntPtr HwndTop = IntPtr.Zero;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoActivate = 0x0010;
+
+    private static IntPtr NativeHandleOf(Window? window) =>
+        window?.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
 
     // Recomputes the "Playback Paused" badge for the CURRENT position. Must
     // run on every path that moves/settles the playhead - it used to live
