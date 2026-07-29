@@ -2724,9 +2724,9 @@
           <Border DockPanel.Dock="Bottom" Background="#141B23" BorderBrush="#232F3A" BorderThickness="0,1,0,0">
             <Grid ColumnDefinitions="Auto,*,Auto" Margin="24,16,24,16">
               <Button x:Name="NewClipsDeleteButton" Classes="deleteButton" MinWidth="150" Height="40"
-                      HorizontalContentAlignment="Center" Click="NewClipsDeleteButton_OnClick" />
+                      HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Click="NewClipsDeleteButton_OnClick" />
               <Button x:Name="NewClipsViewAllButton" Grid.Column="2" Classes="primaryButton" Content="View All Clips" MinWidth="180" Height="40"
-                      HorizontalContentAlignment="Center" Click="NewClipsViewAllButton_OnClick" />
+                      HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Click="NewClipsViewAllButton_OnClick" />
             </Grid>
           </Border>
 

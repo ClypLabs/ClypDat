@@ -2218,7 +2218,14 @@ public sealed partial class MainWindow : Window
             card.Margin = new Thickness(0, 0, cardSpacing, cardSpacing);
             NewClipsCardsPanel.Children.Add(card);
         }
-        NewClipsDialogCard.Width = 3 * (cardWidth + cardSpacing) + 44;
+        // +20 for the vertical scrollbar the ScrollViewer reserves once there
+        // are enough clips to actually need one (see UpdateCardLayout for the
+        // same allowance in the library grid) - dropped when this width moved
+        // from the old Window to this embedded Border's own Width, which
+        // reintroduced the exact "third card wraps to its own row with a
+        // card-sized gap of dead space" bug fixed earlier.
+        const int scrollbarAllowance = 20;
+        NewClipsDialogCard.Width = 3 * (cardWidth + cardSpacing) + 44 + scrollbarAllowance;
 
         // Embedded in the main window now rather than its own OS Window (see
         // the XAML comment above NewClipsOverlay), so unlike the old
