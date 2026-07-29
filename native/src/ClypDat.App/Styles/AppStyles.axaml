@@ -193,6 +193,16 @@
   <Style Selector="Button.transportButton.flatControl, Button.playButton.flatControl">
     <Setter Property="Background" Value="Transparent" />
   </Style>
+  <!--
+    Play matches the other transport buttons here rather than being the larger
+    tile it is in the docked/fullscreen bars. Without a filled box behind it
+    the size difference no longer reads as emphasis, it just sets the bar's
+    minimum height - and it was the only thing keeping the bar tall.
+  -->
+  <Style Selector="Button.playButton.flatControl">
+    <Setter Property="Width" Value="34" />
+    <Setter Property="Height" Value="34" />
+  </Style>
   <Style Selector="Button.transportButton.flatControl:pointerover, Button.playButton.flatControl:pointerover">
     <Setter Property="Background" Value="#26FFFFFF" />
   </Style>

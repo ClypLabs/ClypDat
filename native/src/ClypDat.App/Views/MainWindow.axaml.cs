@@ -5708,10 +5708,11 @@ public sealed partial class MainWindow : Window
         if (EditorVideoHost.Bounds.Width <= 0 || EditorVideoHost.Bounds.Height <= 0) return;
         var topLeft = EditorVideoHost.PointToScreen(new Point(0, 0));
         var width = Math.Max(1, EditorVideoHost.Bounds.Width);
-        // 46 for the controls row plus the 14px scrub strip above it. The row
-        // only has to clear the 38px play button, so the old 64 was padding
-        // the bar out with scrim that covered picture for nothing.
-        const double barHeight = 60;
+        // 38 for the controls row plus the 14px scrub strip above it. The row
+        // clears the 34px buttons with a little to spare; the strip keeps its
+        // height because it is the seek hit target, and thinning that makes
+        // the bar harder to use rather than just slimmer.
+        const double barHeight = 52;
         var bottomOnScreen = EditorVideoHost.PointToScreen(new Point(0, EditorVideoHost.Bounds.Height));
         // The OWNER's scaling, not the bar's. Position is in physical pixels
         // while Height is in DIPs, so converting between them needs the real
