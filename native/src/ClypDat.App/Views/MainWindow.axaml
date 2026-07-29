@@ -2340,7 +2340,8 @@
                       Background="#141D24"
                       BorderBrush="#232F3A"
                       BorderThickness="1"
-                      CornerRadius="6">
+                      CornerRadius="6"
+                      IsVisible="{Binding !EditorHoverBarEnabled}">
                 <StackPanel Orientation="Horizontal">
                   <TextBlock Text="{Binding CurrentTimeLabel}"
                              Foreground="#EDF4FB"
