@@ -80,12 +80,12 @@ public sealed partial class MainWindow : Window
     private Window? _editorHoverControlsWindow;
     private DispatcherTimer? _hoverControlsHideTimer;
     // Grace between the pointer leaving the video (and the bar) and the bar
-    // going away. Zero: leaving the picture takes the bar down on the very
-    // next poll tick, no lingering. The seam between the video rect and the
-    // bar rect that this used to cover is a non-issue because the bar hangs
-    // inside the video's own bottom edge, so crossing between them never
-    // leaves both.
-    private static readonly TimeSpan HoverControlsGrace = TimeSpan.Zero;
+    // going away. Short enough to still read as "leaves as soon as you do",
+    // long enough to absorb a single stray poll tick. Zero was a mistake: the
+    // poll runs at frame rate, and one tick that momentarily read as outside
+    // started the slide-down under the pointer, so a click landed on a
+    // control that had just moved and the bar looked like it flashed.
+    private static readonly TimeSpan HoverControlsGrace = TimeSpan.FromMilliseconds(180);
     private DateTime _hoverControlsActiveUntilUtc = DateTime.MinValue;
     // While the window is being resized the bar is taken down entirely and
     // held down until this long after the last SizeChanged - long enough that
@@ -267,22 +267,12 @@ public sealed partial class MainWindow : Window
         // either side of a focus transition so the next poll tick (which
         // reads IsVisible honestly false now) re-shows the bar correctly
         // instead of trusting state the OS already invalidated behind us.
-        Deactivated += (_, _) =>
-        {
-            // Focus moving to one of our own overlays is not "the user left" -
-            // taking the bar down there would swallow the click that caused
-            // it. WS_EX_NOACTIVATE (MakeWindowNonActivating) should stop that
-            // ever happening; this covers the first show, before the style is
-            // on the window.
-            if (IsOverlayWindowForeground()) return;
-            HideEditorHoverControls(immediate: true);
-            _recordingPausedOverlay?.Hide();
-        };
-        Activated += (_, _) =>
-        {
-            HideEditorHoverControls(immediate: true);
-            _recordingPausedOverlay?.Hide();
-        };
+        // No Activated/Deactivated hiding here on purpose. Resyncing the
+        // overlays on focus changes was an attempt at the stale-IsVisible bug
+        // that PollEditorHoverControls' IsWindowVisible check now handles
+        // properly and directly. Keeping both meant any focus change - including
+        // one caused by clicking the bar itself - yanked the bar out from under
+        // the pointer mid-click.
         Closing += (_, e) =>
         {
             SaveWindowBounds();
@@ -5537,18 +5527,18 @@ public sealed partial class MainWindow : Window
         // The bar is its own top-level window hanging at the video's bottom
         // edge, and can extend a pixel past the pane it belongs to, so it's
         // checked separately rather than assumed to be inside the zone.
-        var overBar = false;
-        if (_editorHoverControlsWindow is { IsVisible: true } existingBar)
-        {
-            // Owner's scaling for the same reason as RepositionEditorHoverControls:
-            // Position is physical, Width/Height are DIPs.
-            var barScaling = RenderScaling > 0 ? RenderScaling : 1;
-            var barPos = existingBar.Position;
-            var barWidthPx = (int)(existingBar.Width * barScaling);
-            var barHeightPx = (int)(existingBar.Height * barScaling);
-            overBar = cursor.X >= barPos.X && cursor.X < barPos.X + barWidthPx
-                      && cursor.Y >= barPos.Y && cursor.Y < barPos.Y + barHeightPx;
-        }
+        //
+        // Asked of Windows rather than worked out from Position/Width/scaling.
+        // Whatever window is under the cursor is the authority on whether the
+        // pointer is on the bar - the arithmetic version could disagree with
+        // what the user is actually pointing at (it read Avalonia's cached
+        // geometry and re-derived DIP/physical scaling), and disagreeing for a
+        // single tick while someone is clicking a control is what made the bar
+        // drop out from under the click.
+        var barHandle = NativeHandleOf(_editorHoverControlsWindow);
+        var overBar = barHandle != IntPtr.Zero
+                      && _editorHoverControlsWindow is { IsVisible: true }
+                      && GetAncestor(WindowFromPoint(cursor), GaRoot) == barHandle;
 
         if (overVideo || overBar)
         {
@@ -5781,7 +5771,7 @@ public sealed partial class MainWindow : Window
 
         Button TransportButton(string data, EventHandler<RoutedEventArgs> onClick, string? tip = null)
         {
-            var button = new Button { Classes = { "transportButton" }, Content = Icon(data) };
+            var button = new Button { Classes = { "transportButton", "flatControl" }, Content = Icon(data) };
             button.Click += onClick;
             if (tip is not null) ToolTip.SetTip(button, tip);
             return button;
@@ -5793,7 +5783,7 @@ public sealed partial class MainWindow : Window
         var pauseIcon = Icon("M6 19h4V5H6v14zm8-14v14h4V5h-4z", 16);
         pauseIcon.Foreground = new SolidColorBrush(Color.Parse("#DDE8F6"));
         pauseIcon.Bind(IsVisibleProperty, new Binding("IsPlaying"));
-        var playPauseButton = new Button { Classes = { "playButton" }, Content = new Grid { Children = { playIcon, pauseIcon } } };
+        var playPauseButton = new Button { Classes = { "playButton", "flatControl" }, Content = new Grid { Children = { playIcon, pauseIcon } } };
         playPauseButton.Click += PlayPauseButton_OnClick;
 
         var muteIcon = new PathIcon { Width = 15, Height = 15, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
@@ -5801,7 +5791,7 @@ public sealed partial class MainWindow : Window
         muteIcon.Bind(PathIcon.DataProperty, new Binding("EffectiveMasterVolumePercent") { Converter = VolumeLevelToIconConverter.Instance });
         var muteToggle = new Border
         {
-            Classes = { "muteToggle" },
+            Classes = { "muteToggle", "flatControl" },
             Width = 26,
             Height = 26,
             HorizontalAlignment = HorizontalAlignment.Center,
@@ -5831,11 +5821,15 @@ public sealed partial class MainWindow : Window
         var durationText = new TextBlock { Foreground = new SolidColorBrush(Color.Parse("#8C98A7")), FontSize = 13, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
         durationText.Bind(TextBlock.TextProperty, new Binding("DurationLabel"));
 
-        var centerGroup = new StackPanel
+        // Transport, then the time readout, then volume - one left-aligned run
+        // with only Fullscreen pushed to the far right, the way every player
+        // over a picture lays this out. The old split (volume left, transport
+        // centred, fullscreen right) left the row's weight in three places and
+        // moved the play button horizontally whenever the pane resized.
+        var transportGroup = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 7,
-            HorizontalAlignment = HorizontalAlignment.Center,
+            Spacing = 4,
             VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
@@ -5844,8 +5838,13 @@ public sealed partial class MainWindow : Window
                 playPauseButton,
                 TransportButton("M8 5v14l11-7z", StepForwardButton_OnClick, "Step forward"),
                 TransportButton("M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z", EndButton_OnClick, "End"),
-                new Border { Width = 1, Height = 20, Background = new SolidColorBrush(Color.Parse("#26FFFFFF")), Margin = new Thickness(4, 0) },
-                new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Children = { timeText, slashText, durationText } },
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(8, 0, 0, 0),
+                    Children = { timeText, slashText, durationText },
+                },
             },
         };
 
@@ -5876,13 +5875,21 @@ public sealed partial class MainWindow : Window
         volumeResetButton.Click += MasterVolumeReset_OnClick;
         ToolTip.SetTip(volumeResetButton, "Reset to 100%");
 
-        var leftGroup = new StackPanel
+        var volumeGroup = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 8,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(14, 0, 0, 0),
+            Children = { muteToggle, volumeSlider, volumePercentText, volumeResetButton },
+        };
+
+        var leftGroup = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center,
-            Children = { muteToggle, volumeSlider, volumePercentText, volumeResetButton },
+            Children = { transportGroup, volumeGroup },
         };
 
         var fullscreenButton = TransportButton("M7,14H5v5h5v-2H7V14z M5,10h2V7h3V5H5V10z M17,17h-3v2h5v-5h-2V17z M14,5v2h3v3h2V5H14z", FullscreenButton_OnClick, "Fullscreen");
@@ -5924,14 +5931,12 @@ public sealed partial class MainWindow : Window
 
         var layout = new Grid
         {
-            ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
+            ColumnDefinitions = new ColumnDefinitions("*,Auto"),
             Margin = new Thickness(14, 0),
         };
         Grid.SetColumn(leftGroup, 0);
-        Grid.SetColumn(centerGroup, 1);
-        Grid.SetColumn(fullscreenButton, 2);
+        Grid.SetColumn(fullscreenButton, 1);
         layout.Children.Add(leftGroup);
-        layout.Children.Add(centerGroup);
         layout.Children.Add(fullscreenButton);
 
         var barContent = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
@@ -6020,7 +6025,12 @@ public sealed partial class MainWindow : Window
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern IntPtr GetForegroundWindow();
+    private static extern IntPtr WindowFromPoint(CursorPoint point);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
+
+    private const uint GaRoot = 2;
 
     [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
@@ -6053,13 +6063,6 @@ public sealed partial class MainWindow : Window
         SetWindowLongPtr(handle, GwlExStyle, (IntPtr)(exStyle | WsExNoActivate));
     }
 
-    private bool IsOverlayWindowForeground()
-    {
-        var foreground = GetForegroundWindow();
-        if (foreground == IntPtr.Zero) return false;
-        return foreground == NativeHandleOf(_editorHoverControlsWindow)
-               || foreground == NativeHandleOf(_recordingPausedOverlay);
-    }
 
     // Recomputes the "Playback Paused" badge for the CURRENT position. Must
     // run on every path that moves/settles the playhead - it used to live
