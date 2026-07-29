@@ -23,18 +23,26 @@ public static class ClipMetadataTagger
 
     // Legacy clips (recorded before the EVE -> ClypDat rebrand) have "EVE Native"
     // baked into their file's metadata verbatim - stripping a leading app-name
-    // prefix here at display time normalizes those to just "Native" (matching
-    // what newly-recorded clips already get tagged as) without needing to
-    // rewrite/re-mux every existing clip's file.
+    // prefix here at display time normalizes those down to the bare "Native"/
+    // "Native Full Session" tag every clip (old or new) actually carries,
+    // without needing to rewrite/re-mux every existing clip's file. That bare
+    // tag then gets its own display swap below: "Native" is ClypDat's own
+    // built-in capture backend (as opposed to OBS/Windows Capture, which
+    // display as themselves), so it reads as "Captured with: ClypDat" rather
+    // than exposing the internal backend name.
     public static string NormalizeBackendLabel(string backendLabel)
     {
         foreach (var prefix in new[] { "EVE ", "ClypDat " })
         {
             if (backendLabel.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             {
-                return backendLabel[prefix.Length..];
+                backendLabel = backendLabel[prefix.Length..];
+                break;
             }
         }
+
+        if (string.Equals(backendLabel, "Native", StringComparison.OrdinalIgnoreCase)) return "ClypDat";
+        if (string.Equals(backendLabel, "Native Full Session", StringComparison.OrdinalIgnoreCase)) return "ClypDat Full Session";
 
         return backendLabel;
     }
