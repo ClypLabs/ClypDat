@@ -5894,6 +5894,20 @@ public sealed partial class MainWindow : Window
             overlay.Position = topLeft;
             overlay.Width = Math.Max(1, (bottomRight.X - topLeft.X) / overlay.RenderScaling);
             overlay.Height = Math.Max(1, (bottomRight.Y - topLeft.Y) / overlay.RenderScaling);
+
+            // Re-assert the top of the owner's z-band, exactly as the hover bar
+            // does (see RepositionEditorHoverControls). Showing an owned window
+            // once is not enough: the video renderer's own native child hwnd
+            // keeps repainting over it while a clip PLAYS, which hid this badge
+            // for precisely the case it exists to report and made it look like
+            // it only appeared when playback was paused - pausing just stops
+            // the repaints that were covering it. NOACTIVATE so it never takes
+            // focus off the editor.
+            var handle = NativeHandleOf(overlay);
+            if (handle != IntPtr.Zero)
+            {
+                SetWindowPos(handle, HwndTop, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
+            }
         }
         catch (Exception error)
         {
