@@ -486,7 +486,15 @@ public sealed partial class MainWindow : Window
         {
             Header = new TextBlock
             {
-                Text = $"Don't detect \"{detection.DisplayName}\" ({detectionKey}) as a game",
+                // detectionKey is what actually gets ignored (it's how Steam/Epic/
+                // BattleNet/Riot matches get grouped - see ForegroundGameDetector's
+                // GroupBy), but it is an internal id, not something to show a user:
+                // "steam-548430", "epic-somenormalizedname", "battlenet-...",
+                // "riot-..." depending on source. ExeName is what a player actually
+                // recognises the game by, so that's what the menu item shows -
+                // detectionKey itself is unchanged below, so the ignore still
+                // groups correctly regardless of which name is on screen.
+                Text = $"Don't detect \"{detection.DisplayName}\" ({detection.ExeName}) as a game",
                 TextWrapping = TextWrapping.Wrap,
                 MaxWidth = 320
             }

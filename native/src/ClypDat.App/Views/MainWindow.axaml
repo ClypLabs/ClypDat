@@ -1255,14 +1255,6 @@
                     <TextBlock Text="Restart ClypDat for the backend change to take effect." Foreground="#E5A00D" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
                     <Button Content="Restart Now" Click="RestartAppButton_OnClick" />
                   </StackPanel>
-                  <Border Height="1" Background="#1B242D" Margin="0,6" />
-                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Adaptive frame rate}">
-                    <StackPanel Spacing="2" VerticalAlignment="Center">
-                      <TextBlock Text="Adaptive frame rate" Foreground="#B8C7D8" FontWeight="Bold" FontSize="13" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                      <TextBlock Text="ClypDat backend only. Skips re-encoding a duplicate frame when nothing on screen changed - smaller files during idle stretches (menus, loading screens, paused games), but the clip's reported average frame rate drops below your target for as long as the screen stays still." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                    </StackPanel>
-                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding NativeAdaptiveFrameRate}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-                  </Grid>
                 </StackPanel>
               </Border>
 
