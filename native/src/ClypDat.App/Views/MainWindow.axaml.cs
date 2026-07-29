@@ -31,6 +31,13 @@ public sealed partial class MainWindow : Window
     private CancellationTokenSource? _playbackStartCts;
     private CancellationTokenSource? _editorSeekCts;
     private TimelineDragMode _timelineDragMode = TimelineDragMode.None;
+    // Distance between where the pointer went down and the trim boundary it
+    // grabbed. The handle's grab area is far wider than the line drawn in it,
+    // so without carrying this offset through the drag, pressing anywhere but
+    // dead-centre would snap the boundary to the pointer - moving the trim by
+    // up to half the grab area before the drag even started, which is exactly
+    // the precision the wider target is meant to provide.
+    private double _trimDragGrabOffsetMs;
     private bool _endedAtTrimBoundary;
     // Armed whenever a play session starts at/before TrimEnd, so playback
     // naturally running into it still auto-stops there (trim preview);
@@ -4403,6 +4410,8 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
         _timelineDragMode = TimelineDragMode.Playhead;
+        // Scrubbing the surface genuinely does mean "go where I clicked".
+        _trimDragGrabOffsetMs = 0;
         _timelineWasPlayingBeforeDrag = ViewModel.IsPlaying;
         _endedAtTrimBoundary = false;
         if (_timelineWasPlayingBeforeDrag)
@@ -4421,6 +4430,7 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
         _timelineDragMode = TimelineDragMode.TrimStart;
+        _trimDragGrabOffsetMs = TrimGrabOffsetMs(e, ViewModel.TrimStart);
         _timelineWasPlayingBeforeDrag = ViewModel.IsPlaying;
         _endedAtTrimBoundary = false;
         if (_timelineWasPlayingBeforeDrag)
@@ -4439,6 +4449,7 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
         _timelineDragMode = TimelineDragMode.TrimEnd;
+        _trimDragGrabOffsetMs = TrimGrabOffsetMs(e, ViewModel.TrimEnd);
         _timelineWasPlayingBeforeDrag = ViewModel.IsPlaying;
         _endedAtTrimBoundary = false;
         if (_timelineWasPlayingBeforeDrag)
@@ -6788,21 +6799,38 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // Where along the clip the pointer currently is, ignoring any grab offset.
+    private double PointerMilliseconds(PointerEventArgs e)
+    {
+        if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return 0;
+        var width = Math.Max(1, TimelineSurface.Bounds.Width);
+        return ViewModel.Duration.TotalMilliseconds * Math.Clamp(e.GetPosition(TimelineSurface).X / width, 0, 1);
+    }
+
+    // Captured when a trim handle is grabbed, so the boundary moves WITH the
+    // pointer rather than jumping to it - see _trimDragGrabOffsetMs.
+    private double TrimGrabOffsetMs(PointerEventArgs e, TimeSpan boundary) =>
+        boundary.TotalMilliseconds - PointerMilliseconds(e);
+
     private void UpdateTimelineFromPointer(PointerEventArgs e, TimelineDragMode mode)
     {
         if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
         var point = e.GetPosition(TimelineSurface);
         var width = Math.Max(1, TimelineSurface.Bounds.Width);
         var time = TimeSpan.FromMilliseconds(ViewModel.Duration.TotalMilliseconds * Math.Clamp(point.X / width, 0, 1));
+        // Trim drags carry the grab offset; the playhead does not (clicking the
+        // surface means "seek here", so it is always zero for that mode).
+        var trimTime = TimeSpan.FromMilliseconds(Math.Clamp(
+            PointerMilliseconds(e) + _trimDragGrabOffsetMs, 0, ViewModel.Duration.TotalMilliseconds));
         switch (mode)
         {
             case TimelineDragMode.TrimStart:
-                ViewModel.TrimStart = time;
+                ViewModel.TrimStart = trimTime;
                 ViewModel.CurrentTime = ViewModel.TrimStart;
                 ResetPlayheadClockAfterSeek(ViewModel.CurrentTime);
                 break;
             case TimelineDragMode.TrimEnd:
-                ViewModel.TrimEnd = time;
+                ViewModel.TrimEnd = trimTime;
                 ViewModel.CurrentTime = ViewModel.TrimEnd;
                 ResetPlayheadClockAfterSeek(ViewModel.CurrentTime);
                 break;
@@ -6873,24 +6901,32 @@ public sealed partial class MainWindow : Window
         // been measured yet on the very first call.
         const double capWidth = 10;
 
+        // Width of the visible line, which is NOT the handle Border's own width -
+        // that is deliberately wider and transparent to make the handle easier to
+        // grab (see the XAML). All the placement below works in terms of the line,
+        // then shifts the Border by the padding either side of it so the line still
+        // lands exactly on the trim boundary.
+        const double barWidth = 4;
+        var hitPadding = Math.Max(0, (TrimEndHandle.Width - barWidth) / 2);
+
         // Sits entirely on the excluded side of the boundary (flush against
         // it, not centered on it) - "thicker" toward the left for the start
         // handle and toward the right for the end handle, like a bracket
         // hugging the selected range from outside instead of overlapping it.
-        var startMaxLeft = Math.Max(0, width - TrimStartHandle.Width);
-        var startLeft = Math.Clamp(start - TrimStartHandle.Width, 0, startMaxLeft);
-        Canvas.SetLeft(TrimStartHandle, startLeft);
+        var startMaxLeft = Math.Max(0, width - barWidth);
+        var startLeft = Math.Clamp(start - barWidth, 0, startMaxLeft);
+        Canvas.SetLeft(TrimStartHandle, startLeft - hitPadding);
         Canvas.SetTop(TrimStartHandle, 0);
         TrimStartHandle.Height = videoLaneHeight;
-        Canvas.SetLeft(TrimStartCap, startLeft - (capWidth - TrimStartHandle.Width) / 2);
+        Canvas.SetLeft(TrimStartCap, startLeft - (capWidth - barWidth) / 2);
         Canvas.SetTop(TrimStartCap, -7);
 
-        var endMaxLeft = Math.Max(0, width - TrimEndHandle.Width);
+        var endMaxLeft = Math.Max(0, width - barWidth);
         var endLeft = Math.Clamp(end, 0, endMaxLeft);
-        Canvas.SetLeft(TrimEndHandle, endLeft);
+        Canvas.SetLeft(TrimEndHandle, endLeft - hitPadding);
         Canvas.SetTop(TrimEndHandle, 0);
         TrimEndHandle.Height = videoLaneHeight;
-        Canvas.SetLeft(TrimEndCap, endLeft - (capWidth - TrimEndHandle.Width) / 2);
+        Canvas.SetLeft(TrimEndCap, endLeft - (capWidth - barWidth) / 2);
         Canvas.SetTop(TrimEndCap, -7);
 
         // Clamped the same way the handles are - uncentered, it could
