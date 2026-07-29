@@ -5844,6 +5844,8 @@ public sealed partial class MainWindow : Window
             Spacing = 4,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
+            // Steps in 2s - centred content shifts by half the margin.
+            Margin = new Thickness(0, -4, 0, 0),
             Children =
             {
                 TransportButton("M6 6h2v12H6zm3.5 6l8.5 6V6z", RestartButton_OnClick, "Restart"),
