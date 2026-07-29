@@ -80,11 +80,12 @@ public sealed partial class MainWindow : Window
     private Window? _editorHoverControlsWindow;
     private DispatcherTimer? _hoverControlsHideTimer;
     // Grace between the pointer leaving the video (and the bar) and the bar
-    // going away. Deliberately short: it exists to cover the seam between the
-    // two rects and a stray poll tick, not to keep the bar alive after you've
-    // moved on. Nothing else dismisses it - a resting pointer over the video
-    // holds it up indefinitely, which is the whole point.
-    private static readonly TimeSpan HoverControlsGrace = TimeSpan.FromMilliseconds(300);
+    // going away. Zero: leaving the picture takes the bar down on the very
+    // next poll tick, no lingering. The seam between the video rect and the
+    // bar rect that this used to cover is a non-issue because the bar hangs
+    // inside the video's own bottom edge, so crossing between them never
+    // leaves both.
+    private static readonly TimeSpan HoverControlsGrace = TimeSpan.Zero;
     private DateTime _hoverControlsActiveUntilUtc = DateTime.MinValue;
     // While the window is being resized the bar is taken down entirely and
     // held down until this long after the last SizeChanged - long enough that
@@ -5411,7 +5412,13 @@ public sealed partial class MainWindow : Window
     // position against the video's on-screen rect sidesteps that entirely.
     private void SetupEditorHoverControls()
     {
-        _hoverControlsHideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
+        // 120ms was a visible beat of lag either way - the bar took that long
+        // to start coming up after the pointer reached the picture, and that
+        // long to go away after it left. This is a cursor-rect test and a
+        // couple of bounds calls, cheap enough to run at roughly frame rate so
+        // both edges feel immediate. The slide-in animation itself is
+        // unchanged; it just starts without the wait.
+        _hoverControlsHideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         // Guarded: an exception escaping a DispatcherTimer tick kills the
         // subscription, and this touches things that can legitimately throw
         // mid-transition - PointToScreen on a visual that's momentarily
@@ -5544,11 +5551,14 @@ public sealed partial class MainWindow : Window
         }
         else if (DateTime.UtcNow >= _hoverControlsActiveUntilUtc)
         {
-            if (_editorHoverControlsWindow is { IsVisible: true } && !_hoverControlsSlidingOut)
+            if (_editorHoverControlsWindow is { IsVisible: true })
             {
-                LogHoverControlsState($"sliding out (cursor={cursor.X},{cursor.Y} video={videoTopLeft.X},{videoTopLeft.Y}-{videoBottomRight.X},{videoBottomRight.Y})");
+                LogHoverControlsState($"hidden (cursor={cursor.X},{cursor.Y} video={videoTopLeft.X},{videoTopLeft.Y}-{videoBottomRight.X},{videoBottomRight.Y})");
             }
-            HideEditorHoverControls(immediate: false);
+            // Instant on the way out - only the entrance is animated. Sliding
+            // out meant the bar hung around over the picture for the whole
+            // exit animation after the pointer had already left.
+            HideEditorHoverControls(immediate: true);
         }
     }
 
@@ -5923,12 +5933,16 @@ public sealed partial class MainWindow : Window
 
         var backdrop = new Border
         {
-            // No backplate - the controls sit straight on the picture. The
-            // Border stays because it's what carries the slide transform; it
-            // just doesn't paint anything of its own any more. Each control
-            // brings its own fill (the transport buttons, the play button, the
-            // mute tile), so they still read against bright frames.
-            Background = Brushes.Transparent,
+            // Grey backplate behind the whole row. Sitting the controls
+            // straight on the picture left them fighting whatever frame was
+            // underneath - fine on a dark scene, unreadable on a bright one,
+            // and the row never read as one unit. Near-opaque rather than a
+            // wash so the icons and the time readout have a consistent
+            // surface at any brightness, with a hairline along the top edge
+            // separating it from the video instead of a hard seam.
+            Background = new SolidColorBrush(Color.Parse("#F0151D25")),
+            BorderBrush = new SolidColorBrush(Color.Parse("#2A3742")),
+            BorderThickness = new Thickness(0, 1, 0, 0),
             Child = BuildPlaybackBarLayout(),
             RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse($"translateY({HoverControlsSlideDistance}px)"),
             Transitions =
