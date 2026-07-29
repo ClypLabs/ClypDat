@@ -59,4 +59,11 @@ public interface IReplayBuffer : IDisposable
     // kill events) to name the clip after what just happened.
     Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null);
     void SetCapturePaused(bool paused) { }
+    // Set by the most recent SaveReplayAsync when no genuinely new video frame
+    // landed anywhere inside the saved window - i.e. the clip is one frozen
+    // frame padded out to its full length. A capture source can stop delivering
+    // frames while everything downstream keeps working, so without this the
+    // first sign of it is opening the clip later and finding it black.
+    // Backends that can't tell the difference simply never report it.
+    bool LastSaveVideoWasFrozen => false;
 }

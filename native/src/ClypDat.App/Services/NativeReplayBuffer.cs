@@ -93,6 +93,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private byte[]? _extraData;
     private int _outputWidth;
     private int _outputHeight;
+    // Ticks of the last moment genuinely new captured content was scaled into
+    // the encoder's frame - the ring buffer alone can't answer "was this clip
+    // real?", because a stalled source still produces a full ring of packets,
+    // all of them the same padded frame. Written from CaptureLoop, read from
+    // SaveReplayAsync on a different thread, so it goes through Volatile.
+    private long _lastRealContentTicks;
+    private volatile bool _lastSaveVideoWasFrozen;
+
+    public bool LastSaveVideoWasFrozen => _lastSaveVideoWasFrozen;
     // Encode-thread diagnostics (see EncodeLoop) - written with Interlocked from
     // that thread, read/reset from CaptureLoop's own periodic diag line. Plain
     // instance fields are safe here since only one capture session (and so only
@@ -284,6 +293,20 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         var gameFolder = Path.Combine(outputFolder, ClipFileNaming.BuildBaseName(config.GameDisplayName));
         Directory.CreateDirectory(gameFolder);
         var outputPath = ClipFileNaming.BuildUniquePath(gameFolder, ClipFileNaming.BuildFileName(clipName, DateTime.Now, "mp4", config.ClipFileNameScheme, config.CustomClipFileNameTemplate, config.GameDisplayName));
+
+        // A capture source can go silent while every stage after it keeps
+        // working: the pacing gate pads the last frame, the ring fills with
+        // packets, the save succeeds, and the clip is one frozen frame stretched
+        // over its full length. The packets can't reveal that - they look
+        // completely normal - so compare the window against the last moment new
+        // content actually reached the encoder. Not fatal: the audio tracks are
+        // still worth keeping, so this only warns.
+        var lastRealContentUtc = new DateTime(Volatile.Read(ref _lastRealContentTicks), DateTimeKind.Utc);
+        _lastSaveVideoWasFrozen = lastRealContentUtc < window[0].WallClockUtc;
+        if (_lastSaveVideoWasFrozen)
+        {
+            AppLog.Info($"Native replay: saved window contains no new video frames - the clip's video is frozen. Last new frame {(MonotonicClock.UtcNow - lastRealContentUtc).TotalSeconds:0}s ago, path={outputPath}.");
+        }
 
         var tempVideoPath = Path.Combine(Path.GetTempPath(), $"clypdat-native-video-{Guid.NewGuid():N}.mp4");
         var snapshots = new List<string>();
@@ -721,6 +744,37 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var frameStalenessMaxMs = 0.0;
             var frameStalenessCount = 0;
 
+            // Watchdog state for a duplication that stops delivering frames
+            // without ever reporting AccessLost. Only AccessLost triggered a
+            // recreate, so any other persistent AcquireNextFrame failure just
+            // hit the 50ms backoff below and retried forever, silently - the
+            // HRESULT wasn't even logged. One session sat like that for 105
+            // minutes: framesSeen stuck at 1, the pacing gate happily padding
+            // that single frame out at 60fps, and the clip saved from it was
+            // 61 seconds of one black frame. Recreating the duplication is the
+            // first move; if that doesn't take, the D3D device itself is
+            // rebuilt, since a device lost underneath us can't produce a
+            // working duplication no matter how many times we ask.
+            var consecutiveAcquireFailures = 0;
+            // An hour back rather than TimeSpan.MinValue: these are only ever
+            // used as `stopwatch.Elapsed - x`, and subtracting MinValue
+            // overflows TimeSpan outright.
+            var lastAcquireFailureLog = TimeSpan.FromHours(-1);
+            var lastRealFrameElapsed = TimeSpan.Zero;
+            var lastRecoveryAttempt = TimeSpan.FromHours(-1);
+            var recoveryAttempts = 0;
+            var isStalled = false;
+            // ~1s of solid failures at the 50ms transient backoff. Long enough
+            // that a genuine desktop-switch blip rides it out untouched.
+            const int acquireFailureRecreateThreshold = 20;
+            // A game legitimately presenting nothing for this long (paused on a
+            // static menu) is possible, so this path only ever recreates the
+            // duplication - cheap, and invisible if it wasn't needed.
+            var stallRecreateAfter = TimeSpan.FromSeconds(10);
+            var recoveryRetryInterval = TimeSpan.FromSeconds(2);
+            // Three failed recreates means the problem isn't the duplication.
+            const int recoveryAttemptsBeforeDeviceRebuild = 3;
+
             while (!token.IsCancellationRequested)
             {
                 if (stopwatch.Elapsed - lastDiagLog >= TimeSpan.FromSeconds(2))
@@ -934,6 +988,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
                 if (acquireResult.Success)
                 {
+                    consecutiveAcquireFailures = 0;
                     // LastPresentTime is 0 when the desktop IMAGE itself hasn't
                     // actually changed since the last delivered frame (e.g. only
                     // the OS cursor moved) - AcquireNextFrame still "succeeds" for
@@ -964,6 +1019,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         {
                             framesSeen++;
                             framesSeenSinceLog++;
+                            // The watchdog's heartbeat: the duplication just
+                            // handed us genuinely new desktop content, which is
+                            // the one thing a stalled capture never does.
+                            if (isStalled)
+                            {
+                                isStalled = false;
+                                AppLog.Info($"Native capture: frames resumed after a {(stopwatch.Elapsed - lastRealFrameElapsed).TotalSeconds:0.#}s stall.");
+                            }
+                            lastRealFrameElapsed = stopwatch.Elapsed;
+                            recoveryAttempts = 0;
 
                             stageStopwatch.Restart();
                             int cropLeft = 0, cropTop = 0, cropWidth = captureWidth, cropHeight = captureHeight;
@@ -1137,6 +1202,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 // every output frame being unique and perfectly PTS-spaced.
                                 lastFrameContentCapturedUtc = MonotonicClock.UtcNow;
                                 lastFrameContentCapturedElapsed = stopwatch.Elapsed;
+                                Volatile.Write(ref _lastRealContentTicks, lastFrameContentCapturedUtc.Ticks);
                                 framesProcessedSinceLog++;
                             }
                             // else: occluded - frame->data still holds the last successfully
@@ -1170,6 +1236,17 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     else if (acquireResult.Code != ResultCode.WaitTimeout.Code)
                     {
                         // Transient failure (e.g. desktop switch) - brief backoff, retry.
+                        // Counted and logged, because "transient" turned out to be
+                        // an assumption: the same non-AccessLost code can repeat
+                        // forever, and this branch used to swallow it silently
+                        // while the watchdog below had nothing to go on. Rate-limited
+                        // so a permanent failure doesn't write 20 lines a second.
+                        consecutiveAcquireFailures++;
+                        if (stopwatch.Elapsed - lastAcquireFailureLog >= TimeSpan.FromSeconds(5))
+                        {
+                            lastAcquireFailureLog = stopwatch.Elapsed;
+                            AppLog.Info($"Native capture: AcquireNextFrame failed with 0x{acquireResult.Code:X8} ({consecutiveAcquireFailures} in a row).");
+                        }
                         Thread.Sleep(50);
                     }
                     // WaitTimeout: genuinely nothing new from the source yet this
@@ -1177,6 +1254,121 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // successful-but-occluded frame would, so frame->data's last
                     // real content still gets duplicate-encoded on schedule instead
                     // of the encoded frame rate just falling behind.
+                }
+
+                // Stall watchdog. Two ways in: AcquireNextFrame erroring solidly
+                // (unambiguous - something is broken), or simply no new desktop
+                // content for a long time while the game window IS foreground.
+                // The second is a soft signal, since a genuinely static screen
+                // looks identical from here, so it only ever costs a duplication
+                // recreate - a few milliseconds, and harmless if it wasn't needed.
+                if (hasCapturedRealFrame && !occluded &&
+                    (consecutiveAcquireFailures >= acquireFailureRecreateThreshold ||
+                     stopwatch.Elapsed - lastRealFrameElapsed >= stallRecreateAfter) &&
+                    stopwatch.Elapsed - lastRecoveryAttempt >= recoveryRetryInterval)
+                {
+                    var stalledSeconds = (stopwatch.Elapsed - lastRealFrameElapsed).TotalSeconds;
+                    if (!isStalled)
+                    {
+                        isStalled = true;
+                        AppLog.Info($"Native capture: no new frames for {stalledSeconds:0.#}s (acquire failures={consecutiveAcquireFailures}) - recovering.");
+                    }
+
+                    lastRecoveryAttempt = stopwatch.Elapsed;
+                    recoveryAttempts++;
+
+                    // Past a few failed recreates the duplication isn't the
+                    // problem - the device under it is. Rebuild that too, along
+                    // with everything bound to it. The encoder, ring buffer and
+                    // Full Session writer are deliberately left alone: they hold
+                    // the recording's history, and none of them depend on D3D.
+                    var rebuildDevice = recoveryAttempts > recoveryAttemptsBeforeDeviceRebuild;
+                    try
+                    {
+                        if (rebuildDevice)
+                        {
+                            var newDevice = CreateD3D11Device();
+                            IDXGIOutputDuplication? newDuplication = null;
+                            ID3D11Texture2D? newStaging = null;
+                            try
+                            {
+                                newDuplication = CreateDuplicationFor(newDevice, targetHandle, out desktopBounds);
+                                newStaging = CreateStagingTexture(newDevice, captureWidth, captureHeight);
+                            }
+                            catch
+                            {
+                                newStaging?.Dispose();
+                                newDuplication?.Dispose();
+                                newDevice.Dispose();
+                                throw;
+                            }
+
+                            duplication?.Dispose();
+                            staging?.Dispose();
+                            inputView?.Dispose();
+                            croppedTexture?.Dispose();
+                            outputView?.Dispose();
+                            if (nv12StagingRing is not null) foreach (var t in nv12StagingRing) t.Dispose();
+                            nv12Output?.Dispose();
+                            videoProcessor?.Dispose();
+                            vpEnumerator?.Dispose();
+                            videoContext?.Dispose();
+                            videoDevice?.Dispose();
+                            device.Dispose();
+
+                            inputView = null;
+                            croppedTexture = null;
+                            outputView = null;
+                            nv12StagingRing = null;
+                            nv12Output = null;
+                            videoProcessor = null;
+                            vpEnumerator = null;
+                            videoContext = null;
+                            videoDevice = null;
+
+                            device = newDevice;
+                            duplication = newDuplication;
+                            staging = newStaging;
+
+                            // Same best-effort as the initial setup: if the GPU
+                            // path can't be rebuilt, the CPU sws_scale fallback
+                            // below still works off `staging` alone.
+                            try
+                            {
+                                (videoDevice, videoContext, vpEnumerator, videoProcessor, nv12Output, nv12StagingRing, outputView) =
+                                    CreateGpuScaler(device, captureWidth, captureHeight, outputWidth, outputHeight, config.FrameRate);
+                                (croppedTexture, inputView) = CreateGpuCropInputView(device, videoDevice, vpEnumerator, captureWidth, captureHeight);
+                                useGpuScale = true;
+                            }
+                            catch (Exception error)
+                            {
+                                AppLog.Info($"Native capture: GPU downscale unavailable after device rebuild, falling back to CPU scale: {error.Message}");
+                                useGpuScale = false;
+                            }
+                            nv12StagingIndex = 0;
+                            nv12RingPrimed = false;
+
+                            AppLog.Info("Native capture: D3D device rebuilt after a stalled duplication.");
+                        }
+                        else
+                        {
+                            duplication?.Dispose();
+                            duplication = null;
+                            duplication = CreateDuplicationFor(device, targetHandle, out desktopBounds);
+                            AppLog.Info($"Native capture: DXGI duplication recreated after a stall (attempt {recoveryAttempts}).");
+                        }
+
+                        consecutiveAcquireFailures = 0;
+                    }
+                    catch (Exception error)
+                    {
+                        AppLog.Error($"Native capture: stall recovery failed (attempt {recoveryAttempts}, rebuildDevice={rebuildDevice}).", error);
+                    }
+
+                    // The recreate above can leave `duplication` null on failure;
+                    // the null-guard at the top of the loop retries it, and
+                    // dereferencing it below would crash the whole session.
+                    if (duplication is null) continue;
                 }
 
                 if (occluded != isPaused)
@@ -1189,6 +1381,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 if (!occluded && !hasCapturedRealFrame)
                 {
                     hasCapturedRealFrame = true;
+                    // Start the stall watchdog's clock here, not at loop start -
+                    // this flips the moment the window first has focus, which can
+                    // be well before the first real frame lands, and the watchdog
+                    // would otherwise read that whole wait as a stall.
+                    lastRealFrameElapsed = stopwatch.Elapsed;
                     // lastEncodedAt is still its initial/stale value from however
                     // long the buffer sat waiting for focus - reset it to now so
                     // the catch-up gate below doesn't treat that entire wait as a

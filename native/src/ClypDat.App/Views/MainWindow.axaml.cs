@@ -1957,7 +1957,17 @@ public sealed partial class MainWindow : Window
 
                 var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder, titleOverride: autoClipLabel, clipWindow: clipWindow));
                 AppLog.Info($"Replay clip saved: {outputPath}");
-                ShowClipSavedNotification();
+                // The save itself succeeded, but if the capture source had
+                // stopped delivering frames the video is a single frozen frame -
+                // say so now rather than let it be discovered on playback later.
+                if (_replayBuffer.LastSaveVideoWasFrozen)
+                {
+                    ShowClipNotification("Clip saved - video was frozen", playSound: true);
+                }
+                else
+                {
+                    ShowClipSavedNotification();
+                }
                 // "3K - Mirage" -> event type "3K", map dropped - the game name
                 // (not the map) is what belongs next to it as the game label.
                 var autoClipEventType = autoClipLabel?.Split(" - ", 2)[0];

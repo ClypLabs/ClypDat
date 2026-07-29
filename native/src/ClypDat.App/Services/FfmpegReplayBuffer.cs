@@ -960,18 +960,23 @@ internal sealed class AudioCaptureSession : IDisposable
                 // reports a later start - by exactly the amount trimmed.
                 // Trimming the front would have been wrong; trimming the back
                 // would break the anchor.
+                const double MarginSeconds = 10;
                 var keepBytes = long.MaxValue;
                 if (earliestNeededUtc is DateTime earliest)
                 {
                     // WAV is CBR, so seconds convert to bytes exactly. The
                     // margin covers clock jitter and the pipeline's own
                     // AudioSyncOffsetMs shifting its window earlier.
-                    const double MarginSeconds = 10;
                     var neededSeconds = (lastSampleUtc - earliest).TotalSeconds + MarginSeconds;
-                    if (neededSeconds > 0 && neededSeconds < long.MaxValue / Math.Max(1, AverageBytesPerSecond))
-                    {
-                        keepBytes = (long)(neededSeconds * AverageBytesPerSecond);
-                    }
+                    keepBytes = neededSeconds > 0 && neededSeconds < long.MaxValue / Math.Max(1, AverageBytesPerSecond)
+                        ? (long)(neededSeconds * AverageBytesPerSecond)
+                        // Nonsense input (a negative span, or one big enough to
+                        // overflow) must not fall back to copying everything -
+                        // that is the multi-GB disk storm this whole method
+                        // exists to avoid. Keep the margin's worth instead: the
+                        // save may come up short of audio, which the pipeline
+                        // already pads, rather than freezing the machine.
+                        : (long)(MarginSeconds * AverageBytesPerSecond);
                 }
 
                 if (_stream is FileStream fileStream)
@@ -983,7 +988,18 @@ internal sealed class AudioCaptureSession : IDisposable
                     // everything past the header is data, and _bytesWritten is
                     // exactly how much of it there is.
                     var dataStart = _stream.Position - _bytesWritten;
+                    // Block-align DOWN, like every other byte offset in this
+                    // file. keepBytes comes from a fractional second count, so
+                    // an unaligned skip lands mid-sample and the tail gets
+                    // reinterpreted as 32-bit floats one to three bytes out of
+                    // phase: exponent bytes end up in mantissa positions, the
+                    // samples come back enormous or NaN, and the channels swap.
+                    // That does not sound like a small glitch, it sounds like
+                    // full-scale static, and it only bites once a capture is old
+                    // enough for the trim to engage at all.
+                    var blockAlign = Math.Max(1, _capture.WaveFormat.BlockAlign);
                     var skipBytes = Math.Max(0, _bytesWritten - keepBytes);
+                    skipBytes -= skipBytes % blockAlign;
                     using var source = new FileStream(fileStream.Name, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
                     source.Seek(dataStart + skipBytes, SeekOrigin.Begin);
                     WriteTailWav(path, source, _bytesWritten - skipBytes);
