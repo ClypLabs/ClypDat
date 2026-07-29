@@ -76,6 +76,8 @@ public sealed class HybridReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
     public void SetCapturePaused(bool paused) => _inner?.SetCapturePaused(paused);
 
+    public bool LastSaveVideoWasFrozen => _inner?.LastSaveVideoWasFrozen == true;
+
     public ReplayCaptureHealth GetHealthSnapshot() => _inner is IReplayCaptureDiagnostics diagnostics
         ? ApplyFallbackReason(diagnostics.GetHealthSnapshot() with { Backend = "Hybrid" })
         : _health;
