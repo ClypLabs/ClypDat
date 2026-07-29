@@ -511,6 +511,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
             var targetHandle = ResolveTargetWindow(config);
             var isMonitorMode = targetHandle == 0;
+            // Which output the duplication below is actually bound to - see the
+            // once-a-second target recheck in the loop for why the window handle
+            // alone is the wrong thing to compare against.
+            var targetMonitor = ResolveTargetMonitor(targetHandle);
             duplication = CreateDuplicationFor(device, targetHandle, out var desktopBounds);
 
             var (captureWidth, captureHeight) = isMonitorMode
@@ -836,6 +840,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // "capture overload" even though nothing is actually wrong.
                     var overloaded = droppedSinceLog > 0 || encodeQueue.Count * 4 >= encodeQueueCapacity * 3 ||
                                      (!config.NativeAdaptiveFrameRate && hasCapturedRealFrame && outputFrameRate < config.FrameRate * 0.9);
+                    // A stall is worse than an overload and reads nothing like one:
+                    // no frames arrive at all, so nothing gets dropped and the queue
+                    // stays empty - every overload signal above says "healthy" right
+                    // up until the clip comes out frozen. Report it while it is
+                    // happening instead, so the UI can say so live rather than the
+                    // save-time warning being the first anyone hears of it.
+                    if (isStalled) _lastDegradedUtc = DateTime.UtcNow;
                     if (overloaded)
                     {
                         _lastDegradedUtc = DateTime.UtcNow;
@@ -847,10 +858,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         AppLog.Info($"Native capture: overload - dropped {droppedSinceLog} frame(s) in the last {diagElapsed:0.0}s, queue {encodeQueue.Count}/{encodeQueueCapacity}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.0}, avgScaleMs={scaleMs / n:0.0}. If this is frequent, try a faster Encoder preset in Settings.");
                     }
                     SetHealth(new ReplayCaptureHealth("Native", "Desktop Duplication",
-                        overloaded ? ReplayCaptureState.Degraded : ReplayCaptureState.Healthy,
+                        overloaded || isStalled ? ReplayCaptureState.Degraded : ReplayCaptureState.Healthy,
                         config.FrameRate, framesSeenSinceLog / diagElapsed, framesProcessedSinceLog / diagElapsed,
                         outputFrameRate, Math.Max(0, framesEncodedSinceLog - framesProcessedSinceLog), droppedSinceLog, encodeQueue.Count,
                         encoderName, "Default adapter",
+                        isStalled ? "Capture stalled - no new frames from the display. Recovering." :
                         overloaded ? "Capture overload. Output may fall below target FPS." : string.Empty,
                         DateTime.UtcNow)
                     {
@@ -892,19 +904,37 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     {
                         targetHandle = freshHandle;
                         isMonitorMode = targetHandle == 0;
-                        duplication!.Dispose();
-                        // Null out before the recreate attempt - if it throws, `duplication`
-                        // must not be left pointing at the just-disposed object, or the next
-                        // AcquireNextFrame call below crashes the whole loop with an NRE
-                        // instead of just retrying (see the null-guard above the acquire call).
-                        duplication = null;
-                        try
+
+                        // Duplication is per-OUTPUT, not per-window: the window is
+                        // followed by cropping each frame, so a new target on the
+                        // same monitor needs nothing rebuilt here. This used to tear
+                        // down and recreate on every target change regardless, and a
+                        // recreate is precisely where things go wrong - DuplicateOutput
+                        // returns E_ACCESSDENIED whenever the secure desktop is up or
+                        // another process holds the output (one session logged 460 of
+                        // those in 45 seconds), and every rebuild is another chance to
+                        // land in a duplication that never delivers again. Game
+                        // detection flapping between a launcher and the game, or the
+                        // game closing and falling back to monitor mode, all resolve
+                        // to the same monitor and are now free.
+                        var freshMonitor = ResolveTargetMonitor(targetHandle);
+                        if (freshMonitor != targetMonitor || duplication is null)
                         {
-                            duplication = CreateDuplicationFor(device, targetHandle, out desktopBounds);
-                        }
-                        catch (Exception error)
-                        {
-                            AppLog.Error("Native capture: failed to switch DXGI duplication target.", error);
+                            targetMonitor = freshMonitor;
+                            duplication?.Dispose();
+                            // Null out before the recreate attempt - if it throws, `duplication`
+                            // must not be left pointing at the just-disposed object, or the next
+                            // AcquireNextFrame call below crashes the whole loop with an NRE
+                            // instead of just retrying (see the null-guard above the acquire call).
+                            duplication = null;
+                            try
+                            {
+                                duplication = CreateDuplicationFor(device, targetHandle, out desktopBounds);
+                            }
+                            catch (Exception error)
+                            {
+                                AppLog.Error("Native capture: failed to switch DXGI duplication target.", error);
+                            }
                         }
 
                         if (isPaused)
@@ -2026,11 +2056,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // primary monitor, in monitor-capture mode) is on and duplicates it.
     // DesktopCoordinates comes back out so the caller can convert the window's
     // screen-space rect into texture-local crop coordinates every frame.
+    // The output a given target resolves to. Kept separate from
+    // CreateDuplicationFor so the capture loop can ask "would this target need a
+    // different duplication?" without building one to find out.
+    private static nint ResolveTargetMonitor(nint targetHandle) => targetHandle != 0
+        ? MonitorFromWindow(targetHandle, MONITOR_DEFAULTTONEAREST)
+        : GetPrimaryMonitorHandle();
+
     private static IDXGIOutputDuplication CreateDuplicationFor(ID3D11Device device, nint targetHandle, out Vortice.RawRect desktopBounds)
     {
-        var monitorHandle = targetHandle != 0
-            ? MonitorFromWindow(targetHandle, MONITOR_DEFAULTTONEAREST)
-            : GetPrimaryMonitorHandle();
+        var monitorHandle = ResolveTargetMonitor(targetHandle);
 
         using var dxgiDevice = device.QueryInterface<IDXGIDevice>();
         using var adapter = dxgiDevice.GetParent<IDXGIAdapter>();
