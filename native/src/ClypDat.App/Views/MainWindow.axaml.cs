@@ -111,6 +111,11 @@ public sealed partial class MainWindow : Window
     private const double HoverControlsSlideDistance = 92;
     private static readonly TimeSpan HoverControlsSlideDuration = TimeSpan.FromMilliseconds(190);
     private Border? _hoverControlsBackdrop;
+    // Whether the compositor actually granted the hover bar's transparency
+    // request. Assumed true until the first Show can report otherwise, since the
+    // slide it gates looks right on every machine that does honour it.
+    private bool _hoverControlsTransparencyOk = true;
+    private bool _hoverControlsTransparencyChecked;
     private DispatcherTimer? _hoverControlsSlideOutTimer;
     private bool _hoverControlsSlidingOut;
     private string? _libraryResizeAnchorPath;
@@ -6375,6 +6380,9 @@ public sealed partial class MainWindow : Window
                 _editorHoverControlsWindow = null;
                 _hoverControlsBackdrop = null;
                 _hoverControlsLastState = string.Empty;
+                // Fresh window means a fresh transparency negotiation.
+                _hoverControlsTransparencyChecked = false;
+                _hoverControlsTransparencyOk = true;
                 _hoverControlsSuppressedUntilUtc = DateTime.UtcNow + TimeSpan.FromSeconds(1);
                 return;
             }
@@ -6386,6 +6394,29 @@ public sealed partial class MainWindow : Window
             // user is actively using, and excluding it made the whole bar
             // vanish from screen shares/recordings of the app too, not just
             // from whatever the setting was meant to hide.
+
+            // ActualTransparencyLevel only means anything once the window has been
+            // shown and the platform has decided what it can actually give us -
+            // TransparencyLevelHint is a request, and it silently degrades to None
+            // on setups whose compositor/driver will not do per-pixel alpha. Read
+            // it once here so the slide can be turned off in exactly that case
+            // (see SetHoverControlsOffset), and log it, since "grey slab over the
+            // controls" is otherwise indistinguishable from a styling bug.
+            if (!_hoverControlsTransparencyChecked)
+            {
+                _hoverControlsTransparencyChecked = true;
+                _hoverControlsTransparencyOk = window.ActualTransparencyLevel == WindowTransparencyLevel.Transparent;
+                AppLog.Info($"Editor hover bar transparency: requested=Transparent, actual={window.ActualTransparencyLevel}, " +
+                            $"slide={(_hoverControlsTransparencyOk ? "enabled" : "disabled (opaque compositor)")}");
+                if (!_hoverControlsTransparencyOk)
+                {
+                    // Nothing shows through anyway, so paint the window itself the
+                    // backdrop's own colour rather than leaving it the default the
+                    // grey was coming from.
+                    window.Background = new SolidColorBrush(Color.Parse("#0B1016"));
+                    SetHoverControlsOffset(0);
+                }
+            }
 
             // Everything RepositionEditorHoverControls assigned above went to
             // a window that had no native hwnd yet. Re-apply now that Show has
@@ -6430,6 +6461,10 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        // Sliding out uncovers part of the window, which is only invisible when
+        // the compositor honours transparency - see SetHoverControlsOffset.
+        if (!_hoverControlsTransparencyOk) immediate = true;
+
         if (immediate)
         {
             _hoverControlsSlideOutTimer?.Stop();
@@ -6459,9 +6494,18 @@ public sealed partial class MainWindow : Window
         LogHoverControlsState("hidden");
     }
 
+    // The slide is a RenderTransform on the backdrop INSIDE a fixed-size window,
+    // so wherever the backdrop has moved away from, the window's own (transparent)
+    // background is what shows. That is invisible only while the compositor
+    // actually honours per-pixel transparency; where it does not - reported on an
+    // AMD setup - the uncovered strip renders as a grey slab that sits above the
+    // controls and stays put through the slide-out. No transparency means no
+    // slide: keep the backdrop filling the window at all times and let show/hide
+    // be instant, which looks plainer but is never wrong.
     private void SetHoverControlsOffset(double offset)
     {
         if (_hoverControlsBackdrop is null) return;
+        if (!_hoverControlsTransparencyOk) offset = 0;
         _hoverControlsBackdrop.RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse(
             offset == 0 ? "translateY(0px)" : $"translateY({offset.ToString(System.Globalization.CultureInfo.InvariantCulture)}px)");
     }
