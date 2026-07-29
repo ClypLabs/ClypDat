@@ -1201,15 +1201,10 @@ public sealed class AudioCapturePipeline : IDisposable
     }
 
     // Every ffmpeg spawn inside a save goes through here so FfmpegGate bounds
-    // how many run at once. NativeReplayBuffer's final mux used to call
-    // RunProcessAsync directly instead, on the reasoning that it is a single
-    // process running after all of this has finished, so gating it would only
-    // add a wait - true for a single isolated save, but the mux is still an
-    // ffmpeg process competing for the same CPU/GPU as the game, and ungated
-    // it could stack on top of a Full Session finalize's own mux or a second
-    // save's segment work running at the same moment. Internal, not private,
-    // so NativeReplayBuffer's own final mux calls can share this same bound.
-    internal static async Task<(int ExitCode, string Output, string Error)> RunGatedProcessAsync(string fileName, IEnumerable<string> args, CancellationToken cancellationToken)
+    // how many run at once. The final mux in NativeReplayBuffer deliberately
+    // calls RunProcessAsync directly - it is a single process that runs after
+    // all of this has finished, so gating it would only add a wait.
+    private static async Task<(int ExitCode, string Output, string Error)> RunGatedProcessAsync(string fileName, IEnumerable<string> args, CancellationToken cancellationToken)
     {
         await FfmpegGate.WaitAsync(cancellationToken);
         try
