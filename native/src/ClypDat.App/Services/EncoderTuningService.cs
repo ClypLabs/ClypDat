@@ -50,6 +50,8 @@ public sealed class EncoderTuningService
     private int _queueDepthSinceClean;
     private string _proposedPreset = string.Empty;
     private string _ceilingPreset = string.Empty;
+    private int _samplesSeen;
+    private int _overloadedSamplesSeen;
 
     // Called on every buffer start. The burned-preset set deliberately survives
     // within a run of the app but the streak state does not - a fresh buffer is
@@ -60,6 +62,8 @@ public sealed class EncoderTuningService
         _lastDecisionUtc = DateTime.MinValue;
         _cleanSinceUtc = null;
         _queueDepthSinceClean = 0;
+        _samplesSeen = 0;
+        _overloadedSamplesSeen = 0;
         _recentOverloads.Clear();
         _ceilingPreset = Normalize(userPreset);
         _proposedPreset = _ceilingPreset;
@@ -69,10 +73,16 @@ public sealed class EncoderTuningService
     public void EndSession()
     {
         if (_sessionStartUtc == DateTime.MinValue) return;
-        if (!string.Equals(_proposedPreset, _ceilingPreset, StringComparison.OrdinalIgnoreCase))
-        {
-            AppLog.Info($"Encoder tuning: session ended - would have run {_proposedPreset} instead of the configured {_ceilingPreset}.");
-        }
+        // Always report the sample count, not just the verdict. A tuner that
+        // saw nothing and a tuner that saw a healthy session both say nothing
+        // otherwise, and the first time this ran every event was being
+        // discarded before it was counted - which read exactly like "no
+        // problems found" in the log.
+        AppLog.Info($"Encoder tuning: session ended after {_samplesSeen} usable sample(s), " +
+                    $"{_overloadedSamplesSeen} overloaded. " +
+                    (string.Equals(_proposedPreset, _ceilingPreset, StringComparison.OrdinalIgnoreCase)
+                        ? $"No change proposed to the configured {_ceilingPreset}."
+                        : $"Would have run {_proposedPreset} instead of the configured {_ceilingPreset}."));
 
         _sessionStartUtc = DateTime.MinValue;
     }
@@ -80,8 +90,15 @@ public sealed class EncoderTuningService
     public void OnHealth(ReplayCaptureHealth health)
     {
         if (_sessionStartUtc == DateTime.MinValue) return;
-        // Other backends don't report drops/queue depth in these terms.
-        if (!string.Equals(health.Backend, "Native", StringComparison.OrdinalIgnoreCase)) return;
+        // Capability check, NOT a check on Backend's name. Under the default
+        // Auto backend the buffer is a HybridReplayBuffer wrapping the native
+        // engine, and it relabels every record it forwards as "Hybrid" - so
+        // matching on "Native" silently discarded every event and the tuner sat
+        // mute through sessions that dropped a hundred frames a window. These
+        // two fields are only ever populated by the native engine, so asking
+        // whether the telemetry this needs is actually present survives any
+        // wrapper renaming the record on its way here.
+        if (health.EncodeQueueCapacity <= 0 || string.IsNullOrEmpty(health.EncoderPreset)) return;
         if (health.State is not (ReplayCaptureState.Healthy or ReplayCaptureState.Degraded)) return;
         // A stall is the display refusing to hand over frames - the encoder is
         // idle and blameless, and demoting for it would ratchet a machine down
@@ -92,6 +109,8 @@ public sealed class EncoderTuningService
         if (now - _sessionStartUtc < Warmup) return;
 
         var overloaded = health.DegradeReason == ReplayDegradeReason.EncoderOverload;
+        _samplesSeen++;
+        if (overloaded) _overloadedSamplesSeen++;
 
         _recentOverloads.Add(overloaded);
         if (_recentOverloads.Count > WindowSize) _recentOverloads.RemoveAt(0);
