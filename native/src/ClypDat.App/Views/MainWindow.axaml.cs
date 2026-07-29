@@ -5822,7 +5822,7 @@ public sealed partial class MainWindow : Window
             //
             // Centred content moves by HALF the margin, so these values step
             // in 2s.
-            Margin = new Thickness(0, 1, 0, 0),
+            Margin = new Thickness(0, -1, 0, 0),
         };
         volumeSlider.Bind(Slider.ValueProperty, new Binding("MasterVolumePercent", BindingMode.TwoWay));
         volumeSlider.Bind(OpacityProperty, new Binding("IsMasterMuted") { Converter = BoolToOpacityConverter.Instance });
