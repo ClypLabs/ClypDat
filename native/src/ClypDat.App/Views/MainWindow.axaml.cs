@@ -216,7 +216,7 @@ public sealed partial class MainWindow : Window
                             if (ViewModel is { IsReplayRecording: true, ReplayQualityRestartRequired: true })
                             {
                                 await StopReplayBufferAsync();
-                                await StartReplayBufferAsync(showErrors: true);
+                                await StartReplayBufferAsync(showErrors: true, isQualityRestart: true);
                             }
                         };
                         _replayRestartDebounceTimer.Start();
@@ -412,7 +412,24 @@ public sealed partial class MainWindow : Window
             // buffer has actually stopped - not before, or a clip saved in the
             // last seconds could still be mid-write.
             _ = StopReplayBufferAsync().ContinueWith(
-                _ => ShowNewClipsDialog(),
+                _ =>
+                {
+                    ShowNewClipsDialog();
+                    // The ring buffer (the single biggest deliberate
+                    // allocation in the app - real duration x bitrate, always
+                    // live in RAM while armed, see NativeReplayBuffer) was just
+                    // freed by the stop above and nothing is capturing right
+                    // now to make a GC pause costly. Left to its own
+                    // heuristics the CLR is content to hold that freed memory
+                    // in reserve rather than return it to the OS, which is
+                    // exactly the "still shows a lot of RAM after I stopped
+                    // recording" complaint. A background, non-blocking
+                    // collection here asks for it back at the one moment
+                    // that's actually free - NOT done on every quality
+                    // restart's Stop+Start, which frees the same memory only
+                    // to immediately reallocate it.
+                    Task.Run(() => GC.Collect(2, GCCollectionMode.Optimized, blocking: false, compacting: true));
+                },
                 CancellationToken.None,
                 TaskContinuationOptions.OnlyOnRanToCompletion,
                 TaskScheduler.FromCurrentSynchronizationContext());
@@ -1877,7 +1894,18 @@ public sealed partial class MainWindow : Window
         await SaveReplayClipAsync();
     }
 
-    private async Task StartReplayBufferAsync(bool showErrors)
+    // isQualityRestart: true for the debounced restart that fires when a
+    // resolution/frame rate/encoder setting changes mid-session (see
+    // ReplayQualityRestartRequired's PropertyChanged handler) - the SAME game
+    // session is continuing, just with a fresh buffer underneath it, so the
+    // clips already saved this session must not be forgotten. Getting this
+    // wrong silently emptied _sessionNewClipPaths on every such restart: any
+    // clip taken before the setting change vanished from the eventual
+    // "New Clips!" popup, and if none were taken after it, the popup didn't
+    // appear at all despite the session having real clips in the library the
+    // whole time - exactly the "finished playing, got a few clips, no popup"
+    // report this was chasing down.
+    private async Task StartReplayBufferAsync(bool showErrors, bool isQualityRestart = false)
     {
         if (ViewModel is null) return;
         InitializeReplayServices();
@@ -1899,10 +1927,12 @@ public sealed partial class MainWindow : Window
             await Task.Run(() => _replayBuffer.StartAsync());
             AppLog.Info("Replay started.");
             _encoderTuning.BeginSession(ViewModel.Settings.ReplayEncoderPreset);
-            // Fresh session, fresh list. Left open (not cleared on stop) so a
-            // Full Session VOD that finalizes minutes after the game closed
-            // still has somewhere to land - see ViewModel_OnClipAdded.
-            _sessionNewClipPaths.Clear();
+            // Fresh session, fresh list - but only for a GENUINELY new session
+            // (a game was just detected). A quality restart is left open (not
+            // cleared here either) so a Full Session VOD that finalizes minutes
+            // after the game closed still has somewhere to land - see
+            // ViewModel_OnClipAdded.
+            if (!isQualityRestart) _sessionNewClipPaths.Clear();
             _sessionCollectingClips = true;
             ViewModel.IsReplayRecording = _replayBuffer.IsRecording;
             if (ViewModel.IsReplayRecording) ShowGameDetectedNotification(ViewModel.ActiveGameDetection.DisplayName);

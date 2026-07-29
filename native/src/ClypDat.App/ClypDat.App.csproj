@@ -40,7 +40,30 @@
          published build came from; AppUpdateService's update check still
          reads the plain numeric AssemblyVersion, unaffected either way. -->
     <IncludeSourceRevisionInInformationalVersion>true</IncludeSourceRevisionInInformationalVersion>
+    <!-- Explicit, not just relying on the desktop-app default: Server GC
+         allocates one heap PER CORE and favours throughput over footprint,
+         which is backwards for an app whose whole complaint is memory usage.
+         Concurrent (background) GC still runs alongside it so a collection
+         doesn't stall the UI thread mid-frame. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
   </PropertyGroup>
+
+  <!-- System.GC.ConserveMemory (0-9): how hard the GC works to hand freed
+       memory back to the OS rather than holding it in reserve for future
+       allocations - the actual knob behind "why does Task Manager still show
+       a lot of RAM after I stopped recording", since .NET's default (0)
+       favours reuse and is content to let a process's working set sit high
+       long after the allocations that grew it are gone. 5 is the balanced
+       setting Microsoft recommends: real memory given back promptly without
+       tuning for the aggressive end (9), which spends noticeably more CPU on
+       compaction - not something to trade away on the same box that's also
+       running NVENC and a game. See ClypDat.App.csproj's ServerGarbageCollection
+       comment for the complementary half of this (don't multiply heaps by
+       core count in the first place). -->
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.13" />
