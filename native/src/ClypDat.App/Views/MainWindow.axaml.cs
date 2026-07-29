@@ -2642,7 +2642,12 @@ public sealed partial class MainWindow : Window
         if (showHint) BuildOverlayHint(hotkey!, hotkeyHint);
         if (_overlayHintRow is not null) _overlayHintRow.IsVisible = showHint;
 
-        _overlayAccent.CornerRadius = isLeft ? new CornerRadius(4, 0, 0, 4) : new CornerRadius(0, 4, 4, 0);
+        // Square on the side touching the screen edge, rounded on the side
+        // facing in - a fully rounded badge sitting flush reads as a gap, since
+        // the curve pulls the fill away from the edge at the corners. The
+        // accent stripe stays square and is shaped by the badge's ClipToBounds.
+        _overlayBadge.CornerRadius = isLeft ? new CornerRadius(0, 8, 8, 0) : new CornerRadius(8, 0, 0, 8);
+        _overlayAccent.CornerRadius = new CornerRadius(0);
         DockPanel.SetDock(_overlayAccent, isLeft ? Dock.Left : Dock.Right);
 
         _overlayBadge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
@@ -2651,34 +2656,39 @@ public sealed partial class MainWindow : Window
         var screen = ScreenForOverlay();
         var area = screen?.WorkingArea ?? new PixelRect(0, 0, 1920, 1080);
         var scaling = screen?.Scaling ?? 1.0;
-        const double MarginDips = 24;
+        // Flush to the side it is pinned to - no horizontal gap. Vertically it
+        // still sits down from the top edge so it clears a game's own HUD.
+        const double TopMarginDips = 24;
 
-        // The window spans from the badge's resting spot all the way to the
-        // screen edge, rather than hugging the badge. That strip is the runway:
-        // translating the badge by the window's full width carries it past the
+        // Window is exactly the badge's width and sits against the screen edge,
+        // so translating the badge by that full width carries it past the
         // window's own bounds, where it is clipped - which is what actually
-        // reads as sliding off the screen. A badge-sized window could only ever
-        // nudge the badge around inside itself.
-        var travel = desiredWidth + MarginDips;
+        // reads as sliding off the screen. A window any wider than the badge
+        // would leave the very gap this is meant not to have.
+        var travel = desiredWidth;
         _activeClipOverlay.Width = travel;
 
         var travelDevicePixels = (int)Math.Round(travel * scaling);
-        var marginDevicePixels = (int)Math.Round(MarginDips * scaling);
+        var topMarginDevicePixels = (int)Math.Round(TopMarginDips * scaling);
         var x = isLeft ? area.X : area.X + area.Width - travelDevicePixels;
-        _activeClipOverlay.Position = new PixelPoint(x, area.Y + marginDevicePixels);
+        _activeClipOverlay.Position = new PixelPoint(x, area.Y + topMarginDevicePixels);
 
-        // Badge sits against the window's INNER side so its resting position is
-        // unchanged - MarginDips from the screen edge, exactly where it has
-        // always been. The runway is the space on the outer side.
-        _overlayBadge.HorizontalAlignment = isLeft ? HorizontalAlignment.Right : HorizontalAlignment.Left;
+        _overlayBadge.HorizontalAlignment = HorizontalAlignment.Stretch;
 
         // Slides in FROM the edge it's pinned to, toward its resting position -
         // left-pinned slides in moving right, right-pinned slides in moving left
-        // (the "reverse"). Set before Show() (the window isn't visible yet, so
-        // this is the instant starting state rather than an animated jump), then
-        // flipped to the resting value one frame later so the transition has a
-        // "from" state to animate away from instead of both values landing in
-        // the same layout pass with nothing visibly in between.
+        // (the "reverse"). Flipped to the resting value one frame later so the
+        // transition has a "from" state to animate away from, instead of both
+        // values landing in the same layout pass with nothing in between.
+        //
+        // Transitions detached while the start state is assigned. X sits at 0
+        // the very first time this runs, so with them attached the assignment
+        // below was itself animated: the badge slid OUT to the start position
+        // in full view before sliding back in. Only visible on the session's
+        // first overlay, because every later one already ends at ±travel and
+        // re-assigning it is a no-op.
+        var transitions = _overlayTranslate.Transitions;
+        _overlayTranslate.Transitions = null;
         _overlayTranslate.X = isLeft ? -travel : travel;
 
         _activeClipOverlay.Show();
@@ -2704,6 +2714,7 @@ public sealed partial class MainWindow : Window
         Dispatcher.UIThread.Post(() =>
         {
             if (_overlayTranslate is null) return;
+            _overlayTranslate.Transitions = transitions;
             _overlayTranslate.X = 0;
             // Sound used to fire the instant this method was called - well
             // before the slide transition below even started, so it landed a
