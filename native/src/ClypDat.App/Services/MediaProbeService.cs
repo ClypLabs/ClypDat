@@ -961,27 +961,32 @@ public sealed class MediaProbeService
             CreateNoWindow = true
         };
 
-        // Thread caps in front of the caller's own arguments. A thumbnail grab
-        // decodes a handful of frames but, uncapped, ffmpeg still spins up one
-        // decode thread per logical core to do it - see HelperProcessTuning.
-        foreach (var argument in HelperProcessTuning.WithThreadLimits(fileName, arguments))
+        foreach (var argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
         }
 
         using var process = Process.Start(startInfo);
         if (process is null) return new ProcessResult(-1, string.Empty, "Failed to start process.");
-        // Thumbnail/filmstrip/waveform generation runs in the background
-        // (library hydration, or right after a save) and has nowhere near the
-        // urgency of the editor's OWN ffmpeg calls (audio chunk extraction,
-        // LibVLC decode) - at equal/Normal priority the two compete directly
-        // for CPU, which is what made opening a freshly-saved clip (its
-        // thumbnail/filmstrip not cached yet, full generation running right as
-        // the editor tries to start playback) visibly stutter. BelowNormal
-        // still runs at full speed whenever a core is actually free, it only
-        // yields under real contention - same approach AudioCapturePipeline
-        // already uses for its own background mux/concat processes.
-        HelperProcessTuning.ApplyBackgroundShaping(process);
+        try
+        {
+            // Thumbnail/filmstrip/waveform generation runs in the background
+            // (library hydration, or right after a save) and has nowhere
+            // near the urgency of the editor's OWN ffmpeg calls (audio chunk
+            // extraction, LibVLC decode) - at equal/Normal priority the two
+            // compete directly for CPU, which is what made opening a
+            // freshly-saved clip (its thumbnail/filmstrip not cached yet,
+            // full generation running right as the editor tries to start
+            // playback) visibly stutter. BelowNormal still runs at full
+            // speed whenever a core is actually free, it only yields under
+            // real contention - same approach AudioCapturePipeline already
+            // uses for its own background mux/concat processes.
+            process.PriorityClass = ProcessPriorityClass.BelowNormal;
+        }
+        catch
+        {
+            // Priority is a nice-to-have; never let it block the probe.
+        }
 
         var outputTask = process.StandardOutput.ReadToEndAsync();
         var errorTask = process.StandardError.ReadToEndAsync();
