@@ -34,11 +34,22 @@ public sealed class EncoderTuningService
     // dropped frames, which is content the user can never get back.
     private static readonly TimeSpan PromoteAfterClean = TimeSpan.FromMinutes(10);
 
-    // Health arrives every ~2s, so this is a 10s window. One bad window is an
-    // alt-tab or a loading screen; six seconds out of ten is the machine
-    // actually failing to keep up.
-    private const int WindowSize = 5;
-    private const int DemoteThreshold = 3;
+    // Health arrives every ~2s, so this is a 30s window needing more than half
+    // of it bad. It started at 3-of-5 (10s) and that was far too twitchy: a
+    // 5.5-minute session that was healthy for 94% of its samples still got
+    // ratcheted to the preset floor, because two short bursts each tripped
+    // three consecutive windows. Bursts that brief are loading screens and
+    // scene changes, not a machine that cannot sustain the preset.
+    private const int WindowSize = 15;
+    private const int DemoteThreshold = 8;
+
+    // A window only counts toward demotion if capture actually lost meaningful
+    // content in it. The upstream overload flag trips on a SINGLE dropped
+    // frame, which does not distinguish a blip from a collapse - measured on
+    // the same machine, a genuinely failing session held outputFps at 9.9/60
+    // (16% of target) while merely bursty ones sat at 48-52/60 (80-86%), and
+    // only the first is worth spending picture quality to fix.
+    private const double SeverityOutputFrameRateFraction = 0.7;
 
     private readonly List<bool> _recentOverloads = new();
     private readonly HashSet<string> _burnedPresets = new(StringComparer.OrdinalIgnoreCase);
@@ -52,6 +63,7 @@ public sealed class EncoderTuningService
     private string _ceilingPreset = string.Empty;
     private int _samplesSeen;
     private int _overloadedSamplesSeen;
+    private int _severeSamplesSeen;
 
     // Called on every buffer start. The burned-preset set deliberately survives
     // within a run of the app but the streak state does not - a fresh buffer is
@@ -64,6 +76,7 @@ public sealed class EncoderTuningService
         _queueDepthSinceClean = 0;
         _samplesSeen = 0;
         _overloadedSamplesSeen = 0;
+        _severeSamplesSeen = 0;
         _recentOverloads.Clear();
         _ceilingPreset = Normalize(userPreset);
         _proposedPreset = _ceilingPreset;
@@ -79,7 +92,7 @@ public sealed class EncoderTuningService
         // discarded before it was counted - which read exactly like "no
         // problems found" in the log.
         AppLog.Info($"Encoder tuning: session ended after {_samplesSeen} usable sample(s), " +
-                    $"{_overloadedSamplesSeen} overloaded. " +
+                    $"{_overloadedSamplesSeen} overloaded ({_severeSamplesSeen} severe). " +
                     (string.Equals(_proposedPreset, _ceilingPreset, StringComparison.OrdinalIgnoreCase)
                         ? $"No change proposed to the configured {_ceilingPreset}."
                         : $"Would have run {_proposedPreset} instead of the configured {_ceilingPreset}."));
@@ -108,10 +121,18 @@ public sealed class EncoderTuningService
         var now = health.UpdatedUtc;
         if (now - _sessionStartUtc < Warmup) return;
 
-        var overloaded = health.DegradeReason == ReplayDegradeReason.EncoderOverload;
+        // Severity rides on top of the upstream flag rather than replacing it:
+        // that flag already knows not to cry overload when adaptive frame rate
+        // is legitimately encoding below target on an idle screen, which a
+        // bare output-vs-target ratio here would get wrong on its own.
+        var flagged = health.DegradeReason == ReplayDegradeReason.EncoderOverload;
+        var severe = flagged && health.TargetFrameRate > 0 &&
+                     health.OutputFrameRate < health.TargetFrameRate * SeverityOutputFrameRateFraction;
         _samplesSeen++;
-        if (overloaded) _overloadedSamplesSeen++;
+        if (flagged) _overloadedSamplesSeen++;
+        if (severe) _severeSamplesSeen++;
 
+        var overloaded = severe;
         _recentOverloads.Add(overloaded);
         if (_recentOverloads.Count > WindowSize) _recentOverloads.RemoveAt(0);
 
@@ -144,7 +165,7 @@ public sealed class EncoderTuningService
         if (next is null)
         {
             AppLog.Info($"Encoder tuning: sustained overload at {_proposedPreset}, already at the fastest preset - " +
-                        $"{overloadCount}/{WindowSize} windows overloaded, dropped={health.DroppedFrames}, " +
+                        $"{overloadCount}/{WindowSize} windows severely overloaded, dropped={health.DroppedFrames}, " +
                         $"queue={health.QueueDepth}/{health.EncodeQueueCapacity}, outputFps={health.OutputFrameRate:0.0}/{health.TargetFrameRate}. " +
                         "Resolution or frame rate is the remaining lever, not the preset.");
             _lastDecisionUtc = now;
@@ -161,7 +182,7 @@ public sealed class EncoderTuningService
         }
 
         AppLog.Info($"Encoder tuning: WOULD DEMOTE {_proposedPreset} -> {next} - " +
-                    $"{overloadCount}/{WindowSize} windows overloaded, dropped={health.DroppedFrames}, " +
+                    $"{overloadCount}/{WindowSize} windows severely overloaded, dropped={health.DroppedFrames}, " +
                     $"queue={health.QueueDepth}/{health.EncodeQueueCapacity}, " +
                     $"outputFps={health.OutputFrameRate:0.0}/{health.TargetFrameRate}, adapter={health.AdapterDescription}.");
 
