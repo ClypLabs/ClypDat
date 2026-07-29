@@ -1935,7 +1935,22 @@ public sealed partial class MainWindow : Window
             if (!isQualityRestart) _sessionNewClipPaths.Clear();
             _sessionCollectingClips = true;
             ViewModel.IsReplayRecording = _replayBuffer.IsRecording;
-            if (ViewModel.IsReplayRecording) ShowGameDetectedNotification(ViewModel.ActiveGameDetection.DisplayName);
+            if (ViewModel.IsReplayRecording)
+            {
+                ShowGameDetectedNotification(ViewModel.ActiveGameDetection.DisplayName);
+                // Test hook: fire the New Clips popup on every buffer arm, using
+                // whatever's already in the library, so its layout/grid/sizing
+                // can be checked on demand instead of waiting on a full session -
+                // seeded through the same optional-list path ShowNewClipsDialog
+                // takes, not through _sessionNewClipPaths (that stays exactly
+                // what the real end-of-session summary is built from).
+                var previewClips = ViewModel.AllClips
+                    .OrderByDescending(clip => clip.CreatedAt)
+                    .Take(5)
+                    .Select(clip => clip.Path)
+                    .ToList();
+                if (previewClips.Count > 0) ShowNewClipsDialog(previewClips);
+            }
         }
         catch (Exception error)
         {
@@ -2132,13 +2147,18 @@ public sealed partial class MainWindow : Window
     // Re-entrant on purpose: a Full Session VOD landing later calls straight
     // back in, which rebuilds the open popup around the larger set rather than
     // stacking a second window on top of the first.
-    private void ShowNewClipsDialog()
+    // clipPaths defaults to the real session list; the buffer-arm test hook
+    // (see StartReplayBufferAsync) passes its own preview list instead, so
+    // testing the popup's layout never touches _sessionNewClipPaths or
+    // interferes with the real end-of-session summary it drives.
+    private void ShowNewClipsDialog(IReadOnlyList<string>? clipPaths = null)
     {
         if (ViewModel is null || !ViewModel.Settings.ShowNewClipsOnGameClose) return;
+        clipPaths ??= _sessionNewClipPaths;
 
         // Resolve paths to live cards each time - anything deleted (from here or
         // from the library behind it) simply stops resolving and drops out.
-        var entries = _sessionNewClipPaths
+        var entries = clipPaths
             .Select(path => ViewModel.AllClips.FirstOrDefault(clip => string.Equals(clip.Path, path, StringComparison.OrdinalIgnoreCase)))
             .Where(clip => clip is not null)
             .Select(clip => new NewClipEntryViewModel(clip!))
@@ -2646,6 +2666,21 @@ public sealed partial class MainWindow : Window
                 Easing = new Avalonia.Animation.Easings.CubicEaseOut()
             }
         ];
+
+        // Warm-up realize: show and immediately hide, fully off-screen, so this
+        // window/control tree is attached to a real compositor context (actual
+        // font metrics, actual DPI scaling) before it is ever measured for real.
+        // ShowActivated=false above means this steals no focus. Without it, the
+        // very FIRST "Saving clip..." of a session measured _overlayBadge
+        // against a NEVER-SHOWN window - Avalonia's Measure falls back to
+        // different (observed: wider) text metrics before a control has ever
+        // been attached to a TopLevel - so only that first toast came out
+        // visibly elongated; every one after it measured correctly because by
+        // then the window had already been shown once. This makes that "once"
+        // happen here, invisibly, instead of live in front of the user.
+        _activeClipOverlay.Position = new PixelPoint(-32000, -32000);
+        _activeClipOverlay.Show();
+        _activeClipOverlay.Hide();
     }
 
     // The monitor the GAME is on, not the one the main window happens to be on.
@@ -4736,6 +4771,22 @@ public sealed partial class MainWindow : Window
             }
             File.SetCreationTimeUtc(sourcePath, createdUtc);
             AudioCapturePipeline.TryDelete(backupPath);
+
+            // The ".paused.json" sidecar records pause ranges as offsets into
+            // the ORIGINAL recording. A trim just replaced that file with a
+            // shorter one starting at a different point on that original
+            // timeline, so every stored offset now points at the wrong moment
+            // (or a moment that got trimmed away entirely) - the "Playback
+            // Paused" badge showing over content that plainly isn't paused is
+            // exactly that stale offset landing in the new, shorter file.
+            // Deriving the correct shifted offsets would need to know the
+            // pre-trim TrimStart at export time, and this only runs after the
+            // file has already been replaced - simplest correct fix is to drop
+            // the sidecar: a trimmed clip is user-authored content the badge
+            // was never meant to second-guess anyway.
+            AudioCapturePipeline.TryDelete(LibraryLayout.SidecarPath(ViewModel.Settings.LibraryFolder, sourcePath, ".paused.json"));
+            _pausedRanges.Clear();
+            RefreshPausedBadge();
 
             await ViewModel.FinalizeSavedTrimAsync(sourcePath);
             QueueEditorPlayback();
