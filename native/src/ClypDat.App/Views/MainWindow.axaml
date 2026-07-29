@@ -1335,10 +1335,10 @@
 
                   <Border Height="1" Background="#1B242D" />
 
-                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show new clips when a game closes}">
+                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show new clips after a session|new clips popup|game closes}">
                     <StackPanel Spacing="2" VerticalAlignment="Center">
-                      <TextBlock Text="Show new clips when a game closes" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                      <TextBlock Text="Lists everything the session captured, so you can open or delete it without going to the library." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                      <TextBlock Text="Show new clips after a session" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                      <TextBlock Text="Lists everything the session captured, so you can open or delete it without going to the library. Appears when the game closes, and again if a Full Session VOD finishes later." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding ShowNewClipsOnGameClose}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>

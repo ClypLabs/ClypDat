@@ -1940,22 +1940,7 @@ public sealed partial class MainWindow : Window
             }
             _sessionCollectingClips = true;
             ViewModel.IsReplayRecording = _replayBuffer.IsRecording;
-            if (ViewModel.IsReplayRecording)
-            {
-                ShowGameDetectedNotification(ViewModel.ActiveGameDetection.DisplayName);
-                // Test hook: fire the New Clips popup on every buffer arm, using
-                // whatever's already in the library, so its layout/grid/sizing
-                // can be checked on demand instead of waiting on a full session -
-                // seeded through the same optional-list path ShowNewClipsDialog
-                // takes, not through _sessionNewClipPaths (that stays exactly
-                // what the real end-of-session summary is built from).
-                var previewClips = ViewModel.AllClips
-                    .OrderByDescending(clip => clip.CreatedAt)
-                    .Take(5)
-                    .Select(clip => clip.Path)
-                    .ToList();
-                if (previewClips.Count > 0) ShowNewClipsDialog(previewClips);
-            }
+            if (ViewModel.IsReplayRecording) ShowGameDetectedNotification(ViewModel.ActiveGameDetection.DisplayName);
         }
         catch (Exception error)
         {
@@ -2163,12 +2148,16 @@ public sealed partial class MainWindow : Window
     private List<NewClipEntryViewModel> _currentNewClipsEntries = new();
     // Clips the user has already been shown and dismissed (closed the popup, or
     // clicked one to open it). Without this the popup came straight back for the
-    // same clips - ViewModel_OnClipAdded and the buffer-arm hook both re-show it
-    // - so dismissing it did not stick. Only a clip that is NOT in here can
-    // bring it up again, which is what makes "don't reappear until there are
-    // more clips" true. Cleared when a genuinely new session starts.
+    // same clips - a late Full Session VOD landing re-shows it via
+    // ViewModel_OnClipAdded - so dismissing it did not stick. Only a clip that is
+    // NOT in here can bring it up again, which is what makes "don't reappear
+    // until there are more clips" true. Cleared when a new session starts.
     private readonly HashSet<string> _dismissedNewClipPaths = new(StringComparer.OrdinalIgnoreCase);
 
+    // clipPaths defaults to the real session list. The delete handler passes the
+    // set that was on show instead, so rebuilding after deleting some of them
+    // re-resolves exactly those - survivors stay, deleted ones stop resolving and
+    // drop out - rather than whatever the session list has since become.
     private void ShowNewClipsDialog(IReadOnlyList<string>? clipPaths = null)
     {
         if (ViewModel is null || !ViewModel.Settings.ShowNewClipsOnGameClose) return;
@@ -2262,13 +2251,7 @@ public sealed partial class MainWindow : Window
         // showing - bring it forward rather than silently dropping the popup.
         if (!IsVisible) Show();
         NewClipsOverlay.IsVisible = true;
-        // How much of the window the popup card actually takes up. The scrim
-        // behind it can only be seen wherever the card ISN'T, so a card nearly
-        // as wide as the window leaves a few px of visible dimming and reads as
-        // "the darkening isn't working" even though it is.
-        AppLog.Info($"New Clips popup shown: {entries.Count} clip(s), cardWidth={NewClipsDialogCard.Width}, " +
-                    $"window={Bounds.Width:0}x{Bounds.Height:0} DIP, scaling={RenderScaling:0.00}, " +
-                    $"overlayVisible={NewClipsOverlay.IsVisible}, scrimPerSide={(Bounds.Width - NewClipsDialogCard.Width) / 2:0}.");
+        AppLog.Info($"New Clips popup shown: {entries.Count} clip(s).");
     }
 
     // Which clips Delete will actually act on: whatever is ticked, or - with
