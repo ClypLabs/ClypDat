@@ -2261,6 +2261,7 @@ public sealed partial class MainWindow : Window
         // a window over a fullscreen game is what makes the game minimise, and
         // an overlay that costs you the game is worse than no overlay.
         MakeWindowNonActivating(_activeClipOverlay);
+        ApplyCaptureExclusion(_activeClipOverlay, ViewModel?.Settings.ExcludeOverlaysFromCapture ?? true);
         var overlayHandle = NativeHandleOf(_activeClipOverlay);
         if (overlayHandle != IntPtr.Zero)
         {
@@ -5367,6 +5368,7 @@ public sealed partial class MainWindow : Window
         var overlay = EnsureRecordingPausedOverlay();
         RepositionPausedOverlay(overlay);
         if (!overlay.IsVisible) overlay.Show(this);
+        ApplyCaptureExclusion(overlay, ViewModel.Settings.ExcludeOverlaysFromCapture);
     }
 
     private void RepositionPausedOverlay(Window overlay)
@@ -5660,6 +5662,8 @@ public sealed partial class MainWindow : Window
                 _hoverControlsSuppressedUntilUtc = DateTime.UtcNow + TimeSpan.FromSeconds(1);
                 return;
             }
+
+            ApplyCaptureExclusion(window, ViewModel?.Settings.ExcludeOverlaysFromCapture ?? true);
 
             // Everything RepositionEditorHoverControls assigned above went to
             // a window that had no native hwnd yet. Re-apply now that Show has
@@ -6128,6 +6132,33 @@ public sealed partial class MainWindow : Window
     private const uint SwpNoActivate = 0x0010;
     private const int GwlExStyle = -20;
     private const long WsExNoActivate = 0x08000000L;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint affinity);
+
+    private const uint WdaNone = 0x00000000;
+    // Excluded from capture entirely - the window still renders on the physical
+    // display, it just isn't composited into anything that asks DWM for the
+    // screen. Deliberately NOT the older WDA_MONITOR (0x01), which goes back to
+    // Windows 7 but paints the window as a black rectangle in captures instead
+    // of omitting it: a black box in the middle of a clip is worse than the
+    // overlay simply being there.
+    private const uint WdaExcludeFromCapture = 0x00000011;
+
+    // Same call KeePassXC uses to keep its window out of screenshots. Requires
+    // Windows 10 2004 (build 19041) - SupportedOSPlatformVersion here is 17763,
+    // so on anything older this fails and the overlay captures as it always
+    // did. Applied on every show rather than once at construction: the setting
+    // is live, and the flag has to be cleared again when it's turned off.
+    private static void ApplyCaptureExclusion(Window? window, bool exclude)
+    {
+        var handle = NativeHandleOf(window);
+        if (handle == IntPtr.Zero) return;
+        if (!SetWindowDisplayAffinity(handle, exclude ? WdaExcludeFromCapture : WdaNone) && exclude)
+        {
+            AppLog.Debug($"Overlay capture exclusion unavailable (needs Windows 10 build 19041): error={System.Runtime.InteropServices.Marshal.GetLastWin32Error()}.");
+        }
+    }
 
     private static IntPtr NativeHandleOf(Window? window) =>
         window?.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;

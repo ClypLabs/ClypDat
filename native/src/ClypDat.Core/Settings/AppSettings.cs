@@ -156,6 +156,18 @@ public sealed class AppSettings
     public Dictionary<string, ClipEditSettings> ClipEdits { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public bool EnableClipOverlay { get; set; } = true;
     public bool EnableClipOverlaySound { get; set; } = true;
+    // Keeps the overlays on the physical screen but out of anything that
+    // captures it - ClypDat's own clips, Discord screenshare, OBS. Same
+    // mechanism KeePassXC uses to keep its window out of screenshots
+    // (SetWindowDisplayAffinity/WDA_EXCLUDEFROMCAPTURE). On by default: a
+    // "Clip saved" badge belongs to the person at the desk, not baked into
+    // the clip they are saving. Needs Windows 10 2004 (build 19041); below
+    // that the call fails and the overlays simply capture as before.
+    //
+    // Convenience, not a security boundary - it only stops capture that goes
+    // through DWM. A capture card, a second PC, or a phone pointed at the
+    // monitor all still see it.
+    public bool ExcludeOverlaysFromCapture { get; set; } = true;
     // Separate from EnableClipOverlay - "clipping started" is a distinct
     // notification kind (fires when the buffer actually starts recording a
     // detected game) from the clip-saved family, and a user may want one

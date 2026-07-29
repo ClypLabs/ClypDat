@@ -1332,6 +1332,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public bool ExcludeOverlaysFromCapture
+    {
+        get => Settings.ExcludeOverlaysFromCapture;
+        set
+        {
+            if (Settings.ExcludeOverlaysFromCapture == value) return;
+            Settings.ExcludeOverlaysFromCapture = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
     public bool EnableClipOverlaySound
     {
         get => Settings.EnableClipOverlaySound;
