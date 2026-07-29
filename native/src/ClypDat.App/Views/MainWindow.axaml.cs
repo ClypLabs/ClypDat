@@ -138,7 +138,24 @@ public sealed partial class MainWindow : Window
         // Window_OnSizeChanged.
         LibraryScrollViewer.LayoutUpdated += (_, _) => QueueDateScrubberRebuild();
         _playbackTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
-        _playbackTimer.Tick += (_, _) => SyncPlaybackPosition();
+        // Guarded like the hover-bar poll timer below (see SetupEditorHoverControls) -
+        // SyncPlaybackPosition repositions the "Playback Paused" badge via
+        // EditorVideoView.PointToScreen, which can throw while the view is
+        // momentarily detached (the fullscreen reparent). An unguarded throw here
+        // kills this tick subscription for the rest of the session at 60fps odds
+        // of hitting that window, which is what made the badge (and everything
+        // else this timer drives) vanish permanently instead of just skipping a beat.
+        _playbackTimer.Tick += (_, _) =>
+        {
+            try
+            {
+                SyncPlaybackPosition();
+            }
+            catch (Exception error)
+            {
+                AppLog.Error("Playback position sync failed (recovered)", error);
+            }
+        };
         _gameDetectionTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _gameDetectionTimer.Tick += (_, _) => UpdateDetectedGame();
         Opened += (_, _) =>
@@ -3062,6 +3079,12 @@ public sealed partial class MainWindow : Window
         WindowState = WindowState.FullScreen;
         ViewModel?.SetVideoFullscreen(true);
         HideEditorHoverControls(immediate: true);
+        // Same reparent hazard as the hover bar above - hide the badge before
+        // the Remove/Add below instead of leaving it to reposition itself
+        // against a momentarily-detached EditorVideoView. It's re-evaluated
+        // (and re-shown if still applicable) by the next timer tick or layout
+        // event once the view has settled into FullscreenVideoHost.
+        _recordingPausedOverlay?.Hide();
 
         // Move the SAME EditorVideoView (already playing) into the
         // fullscreen host instead of hot-swapping MediaPlayer onto a second
@@ -5247,33 +5270,71 @@ public sealed partial class MainWindow : Window
 
     private void RepositionPausedOverlay(Window overlay)
     {
-        var topLeft = EditorVideoView.PointToScreen(new Point(0, 0));
-        var bottomRight = EditorVideoView.PointToScreen(new Point(EditorVideoView.Bounds.Width, EditorVideoView.Bounds.Height));
-        overlay.Position = topLeft;
-        overlay.Width = Math.Max(1, (bottomRight.X - topLeft.X) / overlay.RenderScaling);
-        overlay.Height = Math.Max(1, (bottomRight.Y - topLeft.Y) / overlay.RenderScaling);
+        // Guarded - PointToScreen can throw while EditorVideoView is
+        // momentarily detached from the visual tree (the fullscreen reparent),
+        // and this runs from plain event handlers with no timer-level recovery
+        // of their own (see the callers in TrackPausedOverlayToWindow).
+        try
+        {
+            var topLeft = EditorVideoView.PointToScreen(new Point(0, 0));
+            var bottomRight = EditorVideoView.PointToScreen(new Point(EditorVideoView.Bounds.Width, EditorVideoView.Bounds.Height));
+            overlay.Position = topLeft;
+            overlay.Width = Math.Max(1, (bottomRight.X - topLeft.X) / overlay.RenderScaling);
+            overlay.Height = Math.Max(1, (bottomRight.Y - topLeft.Y) / overlay.RenderScaling);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Paused overlay reposition failed (recovered)", error);
+        }
     }
 
     // Keeps the badge glued to the video area during window drags/resizes -
     // without this its position only updated on playback-timer ticks (and
     // not at all while paused), so it visibly lagged/snapped behind the
     // window instead of moving with it.
+    //
+    // Each of the three calls below is independently guarded: they run back
+    // to back in one plain event handler (not a DispatcherTimer tick, so
+    // nothing recovers it for us), and one throwing used to skip the rest for
+    // that event - e.g. the paused-overlay reposition failing mid-reparent
+    // meant the hover bar's own reposition and the zoom/pan transform update
+    // silently never ran for that layout pass either.
     private void TrackPausedOverlayToWindow()
     {
         PositionChanged += (_, _) =>
         {
             if (_recordingPausedOverlay is { IsVisible: true } overlay) RepositionPausedOverlay(overlay);
-            if (_editorHoverControlsWindow is { IsVisible: true } hoverBar) RepositionEditorHoverControls(hoverBar);
+            RepositionEditorHoverControlsSafe();
         };
         EditorVideoView.LayoutUpdated += (_, _) =>
         {
             if (_recordingPausedOverlay is { IsVisible: true } overlay) RepositionPausedOverlay(overlay);
-            if (_editorHoverControlsWindow is { IsVisible: true } hoverBar) RepositionEditorHoverControls(hoverBar);
+            RepositionEditorHoverControlsSafe();
             // Covers window resize AND the fullscreen reparent (both change
             // EditorVideoView's rendered height, which the pan-range math
             // depends on) without needing separate handlers for each.
-            UpdateVideoTransform();
+            try
+            {
+                UpdateVideoTransform();
+            }
+            catch (Exception error)
+            {
+                AppLog.Error("Video transform update failed (recovered)", error);
+            }
         };
+    }
+
+    private void RepositionEditorHoverControlsSafe()
+    {
+        if (_editorHoverControlsWindow is not { IsVisible: true } hoverBar) return;
+        try
+        {
+            RepositionEditorHoverControls(hoverBar);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Hover bar reposition failed (recovered)", error);
+        }
     }
 
     // The video hover bar mirrors the "Recording Paused" badge's owned-window
