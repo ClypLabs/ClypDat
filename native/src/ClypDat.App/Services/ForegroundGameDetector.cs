@@ -79,13 +79,46 @@ public sealed class ForegroundGameDetector
 
         if (_lastGame.IsDetected && IsStillUsable(_lastGame) && !IsIgnored(_lastGame.ExeName) && !IsIgnored(_lastGame.DetectionKey))
         {
-            _lastGame = _lastGame with { IsForeground = false };
+            _lastGame = PreferRealGameWindow(_lastGame, all) with { IsForeground = false };
             return _lastGame;
         }
 
         _lastGame = all.OrderByDescending(game => WindowArea(game.WindowHandle)).FirstOrDefault() ?? GameDetection.None;
         return _lastGame;
     }
+
+    // Anti-cheat and platform launchers put a window up before the game's real
+    // one exists, and catalog entries deliberately match them (see the bundled
+    // Fortnite and Rainbow Six entries) so the replay buffer can start before
+    // the match does. The cost is that _lastGame can latch onto that stub: it
+    // stays "usable" for the whole session, it never comes to the foreground,
+    // so the sticky branch above keeps handing it back and capture stays bound
+    // to a window that is paused for as long as the game runs. Observed with
+    // Rainbow Six Siege, where the BattlEye launcher's 704x299 window won and
+    // the 2560x1440 game window was never captured.
+    //
+    // So: whenever a window for the SAME game is comfortably bigger than the
+    // one currently held, that is the real game window - take it. Ratio rather
+    // than an absolute floor, because a legitimately small windowed-mode game
+    // must keep working; this only fires when the two differ by more than a
+    // title bar's worth.
+    private GameDetection PreferRealGameWindow(GameDetection current, IReadOnlyList<GameDetection> all)
+    {
+        var biggest = all
+            .Where(game => IsSameGame(game, current))
+            .OrderByDescending(game => WindowArea(game.WindowHandle))
+            .FirstOrDefault();
+        if (biggest is null || biggest.WindowHandle == current.WindowHandle) return current;
+        return WindowArea(biggest.WindowHandle) > WindowArea(current.WindowHandle) * 2 ? biggest : current;
+    }
+
+    // DetectionKey groups a game's windows across however they matched (the
+    // launcher can match on a different rule to the game itself). ExeName is
+    // the fallback for a detection that never got a key.
+    private static bool IsSameGame(GameDetection left, GameDetection right) =>
+        !string.IsNullOrWhiteSpace(left.DetectionKey) && !string.IsNullOrWhiteSpace(right.DetectionKey)
+            ? string.Equals(left.DetectionKey, right.DetectionKey, StringComparison.OrdinalIgnoreCase)
+            : string.Equals(left.ExeName, right.ExeName, StringComparison.OrdinalIgnoreCase);
 
     public string DetectDisplayName() => Detect().DisplayName;
 
