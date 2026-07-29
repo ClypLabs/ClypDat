@@ -1242,21 +1242,14 @@ public sealed class AudioCapturePipeline : IDisposable
             StandardErrorEncoding = Encoding.UTF8,
             StandardOutputEncoding = Encoding.UTF8
         };
-        foreach (var arg in args) info.ArgumentList.Add(arg);
+        // Thread caps go in front of the caller's own arguments - see
+        // HelperProcessTuning for why an uncapped ffmpeg is a problem even at
+        // BelowNormal priority.
+        foreach (var arg in HelperProcessTuning.WithThreadLimits(fileName, args)) info.ArgumentList.Add(arg);
         var process = Process.Start(info) ?? throw new InvalidOperationException($"Could not start {fileName}.");
-        try
-        {
-            // Concat/mux ffmpeg runs at full CPU priority by default, competing
-            // directly with whatever game is running - BelowNormal still gets
-            // scheduled whenever a core is actually free, it just yields under
-            // contention.
-            process.PriorityClass = ProcessPriorityClass.BelowNormal;
-        }
-        catch
-        {
-            // Priority is a nice-to-have; never let it block starting the process.
-        }
-
+        // Concat/mux ffmpeg runs at full CPU priority across every core by
+        // default, competing directly with whatever game is running.
+        HelperProcessTuning.ApplyBackgroundShaping(process);
         return process;
     }
 
