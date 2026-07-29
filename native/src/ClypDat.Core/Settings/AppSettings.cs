@@ -103,11 +103,18 @@ public sealed class AppSettings
     public double MicrophoneNoiseSuppressionStrength { get; set; } = 12.0;
     public List<string> GameAudioExcludedProcesses { get; set; } = new();
     public bool EnableEditorKeyboardShortcuts { get; set; } = true;
-    // Off: the editor's playback controls are docked under the video, always
-    // there. On: they're the floating bar that follows the pointer over the
-    // picture. Docked is the default - it never covers a frame and never
-    // moves, which is what most people want out of a trimming view.
-    public bool EditorHoverBarEnabled { get; set; }
+    // On: the editor's playback controls are the floating bar that follows the
+    // pointer over the picture. Off: they're docked under the video, always
+    // there. The floating bar is the default - it keeps the picture clear
+    // whenever the pointer isn't on it, and it is what players expect from a
+    // video view. Docked stays available for anyone who would rather the
+    // controls never cover a frame and never move.
+    public bool EditorHoverBarEnabled { get; set; } = true;
+    // Existing installs already have EditorHoverBarEnabled written to their
+    // settings.json as false, so flipping the default above reaches new
+    // installs only. See AppSettingsStore for the one-time switch-on; this
+    // guards it from fighting anyone who turns the bar back off afterward.
+    public bool HoverBarDefaultOnApplied { get; set; }
     // Off: exactly one sidebar filter is ever active - picking a game drops
     // the section you were in and vice versa. On: one of each can be held at
     // the same time ("Fortnite" + "Auto-Clips"). Either way the rail stays
