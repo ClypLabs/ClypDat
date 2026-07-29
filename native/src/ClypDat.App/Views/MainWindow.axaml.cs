@@ -5883,6 +5883,20 @@ public sealed partial class MainWindow : Window
         volumeResetButton.Click += MasterVolumeReset_OnClick;
         ToolTip.SetTip(volumeResetButton, "Reset to 100%");
 
+        // The volume run is lifted as a unit rather than element by element, so
+        // the mute tile, rail and percentage keep the alignment they already
+        // have relative to each other (their own margins still apply on top of
+        // this). The time readout beside it is deliberately left where it is.
+        // Half-margin rule as elsewhere in this bar: -8 raises it 4px.
+        var volumeControls = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, -8, 0, 0),
+            Children = { muteToggle, volumeSlider, volumePercentText, volumeResetButton },
+        };
+
         var volumeGroup = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -5898,10 +5912,7 @@ public sealed partial class MainWindow : Window
                     Margin = new Thickness(0, 0, 6, 0),
                     Children = { timeText, slashText, durationText },
                 },
-                muteToggle,
-                volumeSlider,
-                volumePercentText,
-                volumeResetButton,
+                volumeControls,
             },
         };
 
