@@ -5708,8 +5708,10 @@ public sealed partial class MainWindow : Window
         if (EditorVideoHost.Bounds.Width <= 0 || EditorVideoHost.Bounds.Height <= 0) return;
         var topLeft = EditorVideoHost.PointToScreen(new Point(0, 0));
         var width = Math.Max(1, EditorVideoHost.Bounds.Width);
-        // 64 for the controls row plus the 14px scrub strip above it.
-        const double barHeight = 78;
+        // 46 for the controls row plus the 14px scrub strip above it. The row
+        // only has to clear the 38px play button, so the old 64 was padding
+        // the bar out with scrim that covered picture for nothing.
+        const double barHeight = 60;
         var bottomOnScreen = EditorVideoHost.PointToScreen(new Point(0, EditorVideoHost.Bounds.Height));
         // The OWNER's scaling, not the bar's. Position is in physical pixels
         // while Height is in DIPs, so converting between them needs the real
@@ -5940,12 +5942,13 @@ public sealed partial class MainWindow : Window
         // the lone fullscreen button. Overlapping them in a single cell centres
         // the transport on the bar itself; at any width the video pane actually
         // gets there is far more room than the three groups need.
-        // 4px off the bottom, not a negative top offset: the row centres its
-        // content in whatever height it's given, so trimming the bottom raises
-        // everything by half that - 2px - without pushing anything out of the
-        // row. The controls sit in the band below the progress strip, which
-        // put them a touch low against the scrim as a whole.
-        var layout = new Grid { Margin = new Thickness(14, 0, 14, 4) };
+        // Trimmed off the bottom, not a negative top offset: the row centres
+        // its content in whatever height it's given, so taking it off the
+        // bottom raises everything by half that without pushing anything out
+        // of the row. The controls sit in the band below the progress strip,
+        // which puts them slightly low against the scrim as a whole - less so
+        // now the bar is slimmer, hence 2 rather than the previous 4.
+        var layout = new Grid { Margin = new Thickness(14, 0, 14, 2) };
         layout.Children.Add(volumeGroup);
         layout.Children.Add(transportGroup);
         layout.Children.Add(fullscreenButton);
