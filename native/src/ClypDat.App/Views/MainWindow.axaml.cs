@@ -2108,7 +2108,6 @@ public sealed partial class MainWindow : Window
     // identity without holding a card alive.
     private readonly List<string> _sessionNewClipPaths = new();
     private bool _sessionCollectingClips;
-    private Window? _newClipsDialog;
 
     private void ShowClipSavedNotification()
     {
@@ -2151,6 +2150,13 @@ public sealed partial class MainWindow : Window
     // (see StartReplayBufferAsync) passes its own preview list instead, so
     // testing the popup's layout never touches _sessionNewClipPaths or
     // interferes with the real end-of-session summary it drives.
+    // Backs the fixed Delete/View All Clips buttons (NewClipsDeleteButton_OnClick
+    // /NewClipsViewAllButton_OnClick below) - those are named, persistent XAML
+    // elements now rather than rebuilt per show, so their Click handlers are
+    // wired once in XAML and read whatever's current from here instead of each
+    // getting a fresh closure-captured delegate stacked on top of the last one.
+    private List<NewClipEntryViewModel> _currentNewClipsEntries = new();
+
     private void ShowNewClipsDialog(IReadOnlyList<string>? clipPaths = null)
     {
         if (ViewModel is null || !ViewModel.Settings.ShowNewClipsOnGameClose) return;
@@ -2166,169 +2172,86 @@ public sealed partial class MainWindow : Window
 
         if (entries.Count == 0)
         {
-            _newClipsDialog?.Close();
+            NewClipsOverlay.IsVisible = false;
+            _currentNewClipsEntries = new();
             return;
         }
 
-        _newClipsDialog?.Close();
+        _currentNewClipsEntries = entries;
 
         var clipCount = entries.Count(entry => !entry.IsVod);
         var vodCount = entries.Count - clipCount;
         var title = (clipCount, vodCount) switch
         {
-            (0, 1) => "New VOD!",
-            (0, _) => "New VODs!",
-            (1, 0) => "New Clip!",
-            (_, 0) => "New Clips!",
-            (1, _) => "New Clip and VOD!",
-            _ => "New Clips and VOD!"
+            (0, 1) => "NEW VOD",
+            (0, _) => $"{vodCount} NEW VODS",
+            (1, 0) => "NEW CLIP",
+            (_, 0) => $"{clipCount} NEW CLIPS",
+            (1, _) => "NEW CLIP AND VOD",
+            _ => $"{entries.Count} NEW CLIPS AND VODS"
         };
+        NewClipsTitleText.Text = $"{title} ({FormatFileSize(entries.Sum(entry => entry.Clip.SizeBytes))})";
 
-        title += $" ({FormatFileSize(entries.Sum(entry => entry.Clip.SizeBytes))})";
+        NewClipsDeleteButton.Content = entries.Count == 1 ? "Delete clip" : $"Delete {entries.Count} clips";
 
-        // Wide enough for a 3-across grid of cards (see BuildNewClipCard).
-        // A WrapPanel with ItemWidth set gives every slot - including the
-        // last one in a row - that full width, so the available content
-        // width has to fit three WHOLE slots (cardWidth + cardSpacing each),
-        // not three cards plus spacing only between them; short by even one
-        // slot's spacing wrapped the third card to its own row with a
-        // card-sized gap of dead space beside the first two. The extra 20
-        // covers the vertical scrollbar ScrollViewer reserves once there are
-        // enough clips to actually need one - same allowance the library
-        // grid uses for the same reason (see UpdateCardLayout).
-        const int cardWidth = 300;
-        const int cardSpacing = 16;
-        const int scrollbarAllowance = 20;
-
-        var (window, body) = CreateChromelessDialog(title, centerTitle: true);
-        window.Width = 3 * (cardWidth + cardSpacing) + 44 + scrollbarAllowance;
-        window.MaxHeight = 720;
-        _newClipsDialog = window;
-        // Deliberately no SetPreviewVisible(false) here: these are the library's
-        // own cards, and dropping their bitmaps would blank whichever of them
-        // are currently scrolled into view behind this window.
-        window.Closed += (_, _) =>
-        {
-            if (ReferenceEquals(_newClipsDialog, window)) _newClipsDialog = null;
-        };
-
-        var heading = new TextBlock
-        {
-            Text = entries.Count == 1 ? "Your clip is ready." : $"{entries.Count} new recordings from this session.",
-            Foreground = Avalonia.Media.Brush.Parse("#D2DEEC"),
-            FontSize = 15,
-            FontWeight = Avalonia.Media.FontWeight.Bold
-        };
-
-        // Checkboxes only earn their place when there is a choice to make.
-        var multiple = entries.Count > 1;
         foreach (var entry in entries)
         {
-            entry.ShowCheckBox = multiple;
             // The library only decodes a card's thumbnail while it is actually
             // scrolled into view, so a card that has never been on screen has a
             // null PreviewImage until asked.
             entry.Clip.SetPreviewVisible(true);
         }
 
-        var list = new WrapPanel { ItemWidth = cardWidth + cardSpacing };
+        // ItemWidth gives every slot - including the last one in a row - the
+        // full cardWidth + cardSpacing, so all three columns need that much
+        // room; short by even one slot's spacing wraps the third card to its
+        // own row with a card-sized gap of dead space beside the first two
+        // (see BuildNewClipCard for the matching card.Width/Margin).
+        const int cardWidth = 300;
+        const int cardSpacing = 16;
+        NewClipsCardsPanel.ItemWidth = cardWidth + cardSpacing;
+        NewClipsCardsPanel.Children.Clear();
         foreach (var entry in entries)
         {
             var card = BuildNewClipCard(entry);
             card.Width = cardWidth;
             card.Margin = new Thickness(0, 0, cardSpacing, cardSpacing);
-            list.Children.Add(card);
+            NewClipsCardsPanel.Children.Add(card);
         }
+        NewClipsDialogCard.Width = 3 * (cardWidth + cardSpacing) + 44;
 
-        var scroller = new ScrollViewer
-        {
-            Content = list,
-            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
-            VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
-            MaxHeight = 430
-        };
+        // Embedded in the main window now rather than its own OS Window (see
+        // the XAML comment above NewClipsOverlay), so unlike the old
+        // standalone-vs-owned split this needed for "ClypDat hidden to tray"
+        // there is nowhere for it to render without the main window itself
+        // showing - bring it forward rather than silently dropping the popup.
+        if (!IsVisible) Show();
+        NewClipsOverlay.IsVisible = true;
+    }
 
-        var deleteButton = new Button
-        {
-            Classes = { "deleteButton" },
-            Content = "Delete",
-            MinWidth = 108,
-            HorizontalContentAlignment = HorizontalAlignment.Center,
-            VerticalContentAlignment = VerticalAlignment.Center
-        };
-        var openButton = new Button
-        {
-            Classes = { "primaryButton" },
-            Content = "Open",
-            MinWidth = 108,
-            HorizontalContentAlignment = HorizontalAlignment.Center,
-            VerticalContentAlignment = VerticalAlignment.Center
-        };
+    private void NewClipsCloseButton_OnClick(object? sender, RoutedEventArgs e) => NewClipsOverlay.IsVisible = false;
 
-        // A single entry needs no ticking: it IS the selection.
-        NewClipEntryViewModel[] Chosen() => multiple
-            ? entries.Where(entry => entry.IsSelected).ToArray()
-            : entries.ToArray();
-
-        void SyncButtons()
+    private async void NewClipsDeleteButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null || _currentNewClipsEntries.Count == 0) return;
+        foreach (var entry in _currentNewClipsEntries.ToArray())
         {
-            var chosen = Chosen();
-            deleteButton.IsEnabled = chosen.Length > 0;
-            // The editor opens one clip. Several ticked is a delete-many
-            // gesture, so Open steps aside rather than guessing which one.
-            openButton.IsEnabled = chosen.Length == 1;
+            _sessionNewClipPaths.RemoveAll(path => string.Equals(path, entry.Path, StringComparison.OrdinalIgnoreCase));
+            await ViewModel.DeleteClipAsync(entry.Clip);
         }
+        // Rebuild around whatever survived - or close, when nothing did.
+        ShowNewClipsDialog(_currentNewClipsEntries.Select(entry => entry.Path).ToList());
+    }
 
-        foreach (var entry in entries) entry.SelectionChanged += (_, _) => SyncButtons();
-        SyncButtons();
-
-        deleteButton.Click += async (_, _) =>
-        {
-            var chosen = Chosen();
-            if (chosen.Length == 0) return;
-            foreach (var entry in chosen)
-            {
-                _sessionNewClipPaths.RemoveAll(path => string.Equals(path, entry.Path, StringComparison.OrdinalIgnoreCase));
-                await ViewModel.DeleteClipAsync(entry.Clip);
-            }
-            // Rebuild around whatever survived - or close, when nothing did.
-            ShowNewClipsDialog();
-        };
-
-        openButton.Click += async (_, _) =>
-        {
-            var chosen = Chosen();
-            if (chosen.Length != 1) return;
-            window.Close();
-            await OpenClipCardAsync(chosen[0].Clip);
-        };
-
-        var footer = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
-        Grid.SetColumn(deleteButton, 0);
-        Grid.SetColumn(openButton, 2);
-        footer.Children.Add(deleteButton);
-        footer.Children.Add(openButton);
-
-        body.Children.Add(heading);
-        body.Children.Add(scroller);
-        body.Children.Add(footer);
-
-        // Closing ClypDat hides it to the tray rather than exiting, and gaming
-        // with it there is the normal case for this popup - Avalonia refuses
-        // outright to show a window with a non-visible owner ("Cannot show
-        // window with non-visible owner"), so an owned Show would throw exactly
-        // when this is most likely to fire. Stand alone and centre on screen
-        // instead when there is no usable owner.
-        if (IsVisible)
-        {
-            window.Show(this);
-        }
-        else
-        {
-            window.WindowStartupLocation = WindowStartupLocation.CenterScreen;
-            window.Topmost = true;
-            window.Show();
-        }
+    private void NewClipsViewAllButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        NewClipsOverlay.IsVisible = false;
+        if (ViewModel is null) return;
+        // Land on the library regardless of which view was open underneath -
+        // same "close whatever's open first" approach ApplyViewHistoryEntryAsync
+        // uses for its own Settings case.
+        CloseEditorForNavigation();
+        if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings();
     }
 
     private static string FormatFileSize(long bytes)
@@ -2339,13 +2262,24 @@ public sealed partial class MainWindow : Window
         return $"{bytes} B";
     }
 
+    private static string FormatTimeAgo(DateTimeOffset createdAt)
+    {
+        var elapsed = DateTimeOffset.UtcNow - createdAt.ToUniversalTime();
+        if (elapsed < TimeSpan.FromSeconds(60)) return "A FEW SECONDS AGO";
+        if (elapsed < TimeSpan.FromMinutes(2)) return "A MINUTE AGO";
+        if (elapsed < TimeSpan.FromHours(1)) return $"{(int)elapsed.TotalMinutes} MINUTES AGO";
+        if (elapsed < TimeSpan.FromHours(2)) return "AN HOUR AGO";
+        if (elapsed < TimeSpan.FromDays(1)) return $"{(int)elapsed.TotalHours} HOURS AGO";
+        return $"{(int)elapsed.TotalDays} DAYS AGO";
+    }
+
     private Border BuildNewClipCard(NewClipEntryViewModel entry)
     {
         var thumbnail = new Image
         {
             Source = entry.Clip.PreviewImage,
             Stretch = Avalonia.Media.Stretch.UniformToFill,
-            Height = 132
+            Height = 169
         };
         // The decode is asynchronous, so a card built before it finishes has to
         // pick the bitmap up when it lands.
@@ -2361,7 +2295,7 @@ public sealed partial class MainWindow : Window
             Padding = new Thickness(8, 3, 8, 4),
             Margin = new Thickness(10),
             HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Bottom,
+            VerticalAlignment = VerticalAlignment.Top,
             Child = new TextBlock
             {
                 Text = entry.Clip.DurationLabel,
@@ -2371,36 +2305,44 @@ public sealed partial class MainWindow : Window
             }
         };
 
-        var check = new CheckBox
-        {
-            Margin = new Thickness(10),
-            HorizontalAlignment = HorizontalAlignment.Left,
-            VerticalAlignment = VerticalAlignment.Top,
-            IsChecked = entry.IsSelected,
-            IsVisible = entry.IsCheckVisible
-        };
-        check.Click += (_, _) => entry.IsSelected = check.IsChecked == true;
-        // The card itself also toggles selection (below). Without this, a click
-        // that actually lands on the box toggles twice and lands back where it
-        // started. Handlers added with += don't see handled events, so marking
-        // it here is enough to keep the card's own handler out of it.
-        check.PointerPressed += (_, args) => args.Handled = true;
-
         var picture = new Panel
         {
             Background = Avalonia.Media.Brush.Parse("#0B1116"),
-            Children = { thumbnail, duration, check }
+            Children = { thumbnail, duration }
+        };
+
+        var timeRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            Children =
+            {
+                new PathIcon
+                {
+                    Data = Geometry.Parse("M12,20c-4.41,0-8-3.59-8-8s3.59-8,8-8s8,3.59,8,8S16.41,20,12,20z M12,2C6.48,2,2,6.48,2,12s4.48,10,10,10s10-4.48,10-10S17.52,2,12,2z M12.5,7H11v6l5.25,3.15l0.75-1.23l-4.5-2.67V7z"),
+                    Foreground = Avalonia.Media.Brush.Parse("#6B7C8C"),
+                    Width = 12,
+                    Height = 12
+                },
+                new TextBlock
+                {
+                    Text = FormatTimeAgo(entry.Clip.CreatedAt),
+                    Foreground = Avalonia.Media.Brush.Parse("#6B7C8C"),
+                    FontSize = 11,
+                    FontWeight = Avalonia.Media.FontWeight.Bold
+                }
+            }
         };
 
         var info = new StackPanel
         {
-            Spacing = 4,
+            Spacing = 5,
             Margin = new Thickness(14, 11, 14, 13),
             Children =
             {
                 new TextBlock
                 {
-                    Text = entry.Clip.TileTopLabel,
+                    Text = entry.Clip.TileTopLabel.ToUpperInvariant(),
                     Foreground = Avalonia.Media.Brush.Parse("#8C98A7"),
                     FontSize = 12,
                     FontWeight = Avalonia.Media.FontWeight.Bold,
@@ -2413,7 +2355,8 @@ public sealed partial class MainWindow : Window
                     FontSize = 14,
                     FontWeight = Avalonia.Media.FontWeight.Bold,
                     TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis
-                }
+                },
+                timeRow
             }
         };
 
@@ -2425,33 +2368,18 @@ public sealed partial class MainWindow : Window
 
         var card = new Border
         {
-            Background = Avalonia.Media.Brush.Parse("#1E2A35"),
-            CornerRadius = new CornerRadius(10),
+            Background = Avalonia.Media.Brush.Parse("#161D25"),
+            CornerRadius = new CornerRadius(12),
             ClipToBounds = true,
-            BorderThickness = new Thickness(2),
-            BorderBrush = Avalonia.Media.Brush.Parse("#24303A"),
+            BorderThickness = new Thickness(1),
+            BorderBrush = Avalonia.Media.Brush.Parse("#232F3A"),
             Child = layout
         };
 
-        void SyncCardState()
-        {
-            check.IsChecked = entry.IsSelected;
-            check.IsVisible = entry.IsCheckVisible;
-            card.BorderBrush = entry.IsSelected
-                ? Avalonia.Media.Brush.Parse("#5864E8")
-                : entry.IsHovered ? Avalonia.Media.Brush.Parse("#5C6D7E") : Avalonia.Media.Brush.Parse("#24303A");
-        }
-
-        entry.PropertyChanged += (_, _) => SyncCardState();
-        card.PointerEntered += (_, _) => entry.IsHovered = true;
-        card.PointerExited += (_, _) => entry.IsHovered = false;
-        // Whole card is a hit target for ticking, same as the library tile -
-        // aiming for the checkbox itself is fussy at this size. Only when there
-        // is something to tick; with one clip the Open button is the action.
-        card.PointerPressed += (_, _) =>
-        {
-            if (entry.ShowCheckBox) entry.IsSelected = !entry.IsSelected;
-        };
+        // Hover only now - no selection concept left to compete with it (see
+        // ShowNewClipsDialog/the delete-all-shown-clips button).
+        card.PointerEntered += (_, _) => card.BorderBrush = Avalonia.Media.Brush.Parse("#3A4856");
+        card.PointerExited += (_, _) => card.BorderBrush = Avalonia.Media.Brush.Parse("#232F3A");
 
         return card;
     }
@@ -2473,7 +2401,7 @@ public sealed partial class MainWindow : Window
         if (!_sessionCollectingClips || ViewModel is null) return;
         if (!clip.IsVod) return;
         RememberSessionClip(clip.Path);
-        if (_newClipsDialog is not null) ShowNewClipsDialog();
+        if (NewClipsOverlay.IsVisible) ShowNewClipsDialog();
         else if (!ViewModel.IsReplayRecording) ShowNewClipsDialog();
     }
 

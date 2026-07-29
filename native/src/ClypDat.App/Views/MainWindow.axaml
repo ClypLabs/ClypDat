@@ -2699,6 +2699,44 @@
       </Border>
     </Border>
 
+    <!-- New Clips popup - embedded in the main window rather than its own OS
+         Window (which is what this used to be, built entirely in code-behind
+         via CreateChromelessDialog). A separate Window has its own title bar
+         drag, so it could be dragged off wherever and left behind; as part of
+         this Border it can't be moved at all, and the same #000000AA scrim the
+         onboarding overlay above uses darkens the whole app behind it instead
+         of leaving it in full view. IsVisible is toggled directly on the named
+         element from code-behind (ShowNewClipsDialog) rather than bound to a
+         ViewModel property - the title text and card grid are still built in
+         code-behind too (into NewClipsTitleText/NewClipsCardsPanel below),
+         same as before, just targeting this embedded tree instead of a
+         Window's own body. -->
+    <Border x:Name="NewClipsOverlay" Grid.RowSpan="2" Background="#000000AA" IsVisible="False">
+      <Border x:Name="NewClipsDialogCard" MaxHeight="720" CornerRadius="12" Background="#111920" BorderBrush="#232F3A" BorderThickness="1"
+              ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <DockPanel LastChildFill="True">
+          <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto" Height="56" Background="#0C1319">
+            <TextBlock x:Name="NewClipsTitleText" Grid.Column="1" Foreground="#D8E4F2" FontSize="17" FontWeight="Bold"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+            <Button Grid.Column="2" Classes="dialogClose" Content="?" Width="52" Height="56" Click="NewClipsCloseButton_OnClick" />
+          </Grid>
+
+          <Border DockPanel.Dock="Bottom" Background="#141B23" BorderBrush="#232F3A" BorderThickness="0,1,0,0">
+            <Grid ColumnDefinitions="Auto,*,Auto" Margin="24,16,24,16">
+              <Button x:Name="NewClipsDeleteButton" Classes="deleteButton" MinWidth="150" Height="40"
+                      HorizontalContentAlignment="Center" Click="NewClipsDeleteButton_OnClick" />
+              <Button x:Name="NewClipsViewAllButton" Grid.Column="2" Classes="primaryButton" Content="View All Clips" MinWidth="180" Height="40"
+                      HorizontalContentAlignment="Center" Click="NewClipsViewAllButton_OnClick" />
+            </Grid>
+          </Border>
+
+          <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="480">
+            <WrapPanel x:Name="NewClipsCardsPanel" Margin="24,20,24,4" />
+          </ScrollViewer>
+        </DockPanel>
+      </Border>
+    </Border>
+
     <!-- Video-only fullscreen overlay. Grid.RowSpan="2" + last child of the
          root Grid, same pattern as the onboarding overlay above, so this
          covers the header row too despite its fixed 48px height. -->
