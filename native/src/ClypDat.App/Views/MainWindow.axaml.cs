@@ -2213,7 +2213,14 @@ public sealed partial class MainWindow : Window
         };
         NewClipsTitleText.Text = $"{title} ({FormatFileSize(entries.Sum(entry => entry.Clip.SizeBytes))})";
 
-        NewClipsDeleteButton.Content = entries.Count == 1 ? "Delete clip" : $"Delete {entries.Count} clips";
+        // Checkboxes only earn their place when there is a choice to make.
+        var multiple = entries.Count > 1;
+        foreach (var entry in entries)
+        {
+            entry.ShowCheckBox = multiple;
+            entry.SelectionChanged += (_, _) => SyncNewClipsDeleteButton();
+        }
+        SyncNewClipsDeleteButton();
 
         foreach (var entry in entries)
         {
@@ -2264,6 +2271,22 @@ public sealed partial class MainWindow : Window
                     $"overlayVisible={NewClipsOverlay.IsVisible}, scrimPerSide={(Bounds.Width - NewClipsDialogCard.Width) / 2:0}.");
     }
 
+    // Which clips Delete will actually act on: whatever is ticked, or - with
+    // nothing ticked - every clip on show, matching the reference's bulk
+    // "Delete N clips". Kept in one place so the button's label can never
+    // disagree with what pressing it does.
+    private NewClipEntryViewModel[] ChosenNewClips()
+    {
+        var ticked = _currentNewClipsEntries.Where(entry => entry.IsSelected).ToArray();
+        return ticked.Length > 0 ? ticked : _currentNewClipsEntries.ToArray();
+    }
+
+    private void SyncNewClipsDeleteButton()
+    {
+        var count = ChosenNewClips().Length;
+        NewClipsDeleteButton.Content = count == 1 ? "Delete clip" : $"Delete {count} clips";
+    }
+
     // Hides the popup AND records what was on show, so the same clips can't
     // bring it straight back (ViewModel_OnClipAdded and the buffer-arm hook both
     // re-show it otherwise). Only a clip that has never been dismissed will.
@@ -2278,7 +2301,7 @@ public sealed partial class MainWindow : Window
     private async void NewClipsDeleteButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || _currentNewClipsEntries.Count == 0) return;
-        foreach (var entry in _currentNewClipsEntries.ToArray())
+        foreach (var entry in ChosenNewClips())
         {
             _sessionNewClipPaths.RemoveAll(path => string.Equals(path, entry.Path, StringComparison.OrdinalIgnoreCase));
             await ViewModel.DeleteClipAsync(entry.Clip);
@@ -2349,10 +2372,24 @@ public sealed partial class MainWindow : Window
             }
         };
 
+        var check = new CheckBox
+        {
+            Margin = new Thickness(10),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            IsChecked = entry.IsSelected,
+            IsVisible = entry.IsCheckVisible
+        };
+        check.Click += (_, _) => entry.IsSelected = check.IsChecked == true;
+        // Clicking the card body opens the clip (below), so the checkbox has to
+        // stop its own click reaching that handler - otherwise ticking a box
+        // would also fling the user into the editor.
+        check.PointerPressed += (_, args) => args.Handled = true;
+
         var picture = new Panel
         {
             Background = Avalonia.Media.Brush.Parse("#0B1116"),
-            Children = { thumbnail, duration }
+            Children = { thumbnail, duration, check }
         };
 
         var timeRow = new StackPanel
@@ -2420,12 +2457,21 @@ public sealed partial class MainWindow : Window
             Child = layout
         };
 
-        // Hover only now - no selection concept left to compete with it (see
-        // ShowNewClipsDialog/the delete-all-shown-clips button), so the whole
-        // card is free to be the "open this clip" target instead.
+        void SyncCardState()
+        {
+            check.IsChecked = entry.IsSelected;
+            check.IsVisible = entry.IsCheckVisible;
+            card.BorderBrush = entry.IsSelected
+                ? Avalonia.Media.Brush.Parse("#5864E8")
+                : entry.IsHovered ? Avalonia.Media.Brush.Parse("#3A4856") : Avalonia.Media.Brush.Parse("#232F3A");
+        }
+
+        entry.PropertyChanged += (_, _) => SyncCardState();
         card.Cursor = new Cursor(StandardCursorType.Hand);
-        card.PointerEntered += (_, _) => card.BorderBrush = Avalonia.Media.Brush.Parse("#3A4856");
-        card.PointerExited += (_, _) => card.BorderBrush = Avalonia.Media.Brush.Parse("#232F3A");
+        card.PointerEntered += (_, _) => entry.IsHovered = true;
+        card.PointerExited += (_, _) => entry.IsHovered = false;
+        // Card body opens the clip; the checkbox above marks it for the Delete
+        // button instead, and swallows its own click so the two don't collide.
         card.PointerPressed += async (_, _) =>
         {
             // Dismiss before opening: the editor is what the user asked for, and
@@ -4766,7 +4812,14 @@ public sealed partial class MainWindow : Window
             // file has already been replaced - simplest correct fix is to drop
             // the sidecar: a trimmed clip is user-authored content the badge
             // was never meant to second-guess anyway.
+            // ALL THREE locations LoadPausedRanges falls back through, not just
+            // the current one - a clip whose sidecar lives at either legacy path
+            // (the "Clip Info" subfolder, or plain adjacent to the video) kept
+            // its stale ranges and went on showing the badge after a trim,
+            // because deleting only the primary path left the fallback to find.
             AudioCapturePipeline.TryDelete(LibraryLayout.SidecarPath(ViewModel.Settings.LibraryFolder, sourcePath, ".paused.json"));
+            AudioCapturePipeline.TryDelete(LibraryLayout.LegacySidecarPath(sourcePath, ".paused.json"));
+            AudioCapturePipeline.TryDelete(LibraryLayout.LegacyAdjacentPausedPath(sourcePath));
             _pausedRanges.Clear();
             RefreshPausedBadge();
 
