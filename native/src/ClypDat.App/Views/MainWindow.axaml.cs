@@ -5821,8 +5821,8 @@ public sealed partial class MainWindow : Window
             // itself is offset by, since it corrects the template, not the row.
             //
             // Centred content moves by HALF the margin, so these values step
-            // in 2s: -1 sits the rail half a pixel above where a 0 would.
-            Margin = new Thickness(0, -1, 0, 0),
+            // in 2s.
+            Margin = new Thickness(0, 1, 0, 0),
         };
         volumeSlider.Bind(Slider.ValueProperty, new Binding("MasterVolumePercent", BindingMode.TwoWay));
         volumeSlider.Bind(OpacityProperty, new Binding("IsMasterMuted") { Converter = BoolToOpacityConverter.Instance });
@@ -5866,7 +5866,7 @@ public sealed partial class MainWindow : Window
             Width = 30,
             // Steps in 2s for the same reason as volumeSlider's margin above -
             // centred content shifts by half the margin.
-            Margin = new Thickness(0, 0, 0, 0),
+            Margin = new Thickness(0, 2, 0, 0),
             VerticalAlignment = VerticalAlignment.Center,
         };
         volumePercentText.Bind(TextBlock.TextProperty, new Binding("MasterVolumePercent") { StringFormat = "{0:0}%" });
@@ -5877,6 +5877,8 @@ public sealed partial class MainWindow : Window
             Content = "Reset",
             FontSize = 10,
             Padding = new Thickness(6, 1),
+            // Steps in 2s, same half-margin rule as the rail and percentage.
+            Margin = new Thickness(0, 2, 0, 0),
             VerticalAlignment = VerticalAlignment.Center,
         };
         volumeResetButton.Bind(IsEnabledProperty, new Binding("IsMasterVolumeNonDefault"));
