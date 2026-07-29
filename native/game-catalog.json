@@ -11,6 +11,17 @@
         { "executable": "FortniteClient-Win64-Shipping_EAC.exe" },
         { "executable": "FortniteClient-Win64-Shipping_EAC_EOS.exe" }
       ]
+    },
+    {
+      "id": "RainbowSix.exe",
+      "displayName": "Tom Clancy's Rainbow Six Siege",
+      "steamAppIds": [ 359550 ],
+      "matchers": [
+        { "executable": "RainbowSix.exe" },
+        { "executable": "RainbowSix_Vulkan.exe" },
+        { "executable": "RainbowSix_DX11.exe" },
+        { "executable": "RainbowSix_BE.exe" }
+      ]
     }
   ]
 }
