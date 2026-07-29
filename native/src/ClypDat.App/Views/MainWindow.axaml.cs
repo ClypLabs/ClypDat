@@ -5940,7 +5940,12 @@ public sealed partial class MainWindow : Window
         // the lone fullscreen button. Overlapping them in a single cell centres
         // the transport on the bar itself; at any width the video pane actually
         // gets there is far more room than the three groups need.
-        var layout = new Grid { Margin = new Thickness(14, 0) };
+        // 4px off the bottom, not a negative top offset: the row centres its
+        // content in whatever height it's given, so trimming the bottom raises
+        // everything by half that - 2px - without pushing anything out of the
+        // row. The controls sit in the band below the progress strip, which
+        // put them a touch low against the scrim as a whole.
+        var layout = new Grid { Margin = new Thickness(14, 0, 14, 4) };
         layout.Children.Add(volumeGroup);
         layout.Children.Add(transportGroup);
         layout.Children.Add(fullscreenButton);
