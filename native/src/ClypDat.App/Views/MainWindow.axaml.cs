@@ -5817,8 +5817,9 @@ public sealed partial class MainWindow : Window
             // The Slider template's track isn't vertically centred within the
             // control's own bounds, so VerticalAlignment.Center still leaves
             // the rail sitting low against the icons beside it. Nudged up to
-            // line the rail up with them.
-            Margin = new Thickness(0, -2, 0, 0),
+            // line the rail up with them - this is on top of whatever the row
+            // itself is offset by, since it corrects the template, not the row.
+            Margin = new Thickness(0, -6, 0, 0),
         };
         volumeSlider.Bind(Slider.ValueProperty, new Binding("MasterVolumePercent", BindingMode.TwoWay));
         volumeSlider.Bind(OpacityProperty, new Binding("IsMasterMuted") { Converter = BoolToOpacityConverter.Instance });
@@ -5943,13 +5944,14 @@ public sealed partial class MainWindow : Window
         // the lone fullscreen button. Overlapping them in a single cell centres
         // the transport on the bar itself; at any width the video pane actually
         // gets there is far more room than the three groups need.
-        // Trimmed off the bottom, not a negative top offset: the row centres
-        // its content in whatever height it's given, so taking it off the
-        // bottom raises everything by half that without pushing anything out
-        // of the row. The controls sit in the band below the progress strip,
-        // which puts them slightly low against the scrim as a whole - less so
-        // now the bar is slimmer, hence 2 rather than the previous 4.
-        var layout = new Grid { Margin = new Thickness(14, 0, 14, 2) };
+        // Negative top rather than trimming the bottom, now the bar is slim
+        // enough that the controls row has little spare height: taking it off
+        // the bottom would shrink the space the 34px buttons have to fit in
+        // and start squeezing them, where a negative top gives the row MORE
+        // room and still moves the centre up by half the offset. The controls
+        // otherwise centre in the band below the progress strip, which leaves
+        // them sitting low against the scrim as a whole.
+        var layout = new Grid { Margin = new Thickness(14, -6, 14, 0) };
         layout.Children.Add(volumeGroup);
         layout.Children.Add(transportGroup);
         layout.Children.Add(fullscreenButton);
