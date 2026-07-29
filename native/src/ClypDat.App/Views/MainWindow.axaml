@@ -2559,7 +2559,12 @@
       </Border>
     </Grid>
 
-    <Border Grid.RowSpan="2" Background="#000000AA" IsVisible="{Binding IsOnboardingVisible}">
+    <!-- #AA000000, NOT #000000AA - Avalonia hex is #AARRGGBB, alpha FIRST (same
+         as every other translucent brush in this app: #CC0B1116, #26FFFFFF,
+         #F5141D24). Written the wrong way round this parsed as alpha 00 with AA
+         landing in the BLUE channel, i.e. fully transparent, so the scrim behind
+         this dialog was never actually drawn. -->
+    <Border Grid.RowSpan="2" Background="#AA000000" IsVisible="{Binding IsOnboardingVisible}">
       <Border Width="560" MaxHeight="640" CornerRadius="12" Background="#111920" BorderBrush="#232F3A" BorderThickness="1"
               HorizontalAlignment="Center" VerticalAlignment="Center">
         <DockPanel>
@@ -2704,7 +2709,7 @@
          Window (which is what this used to be, built entirely in code-behind
          via CreateChromelessDialog). A separate Window has its own title bar
          drag, so it could be dragged off wherever and left behind; as part of
-         this Border it can't be moved at all, and the same #000000AA scrim the
+         this Border it can't be moved at all, and the same #AA000000 scrim the
          onboarding overlay above uses darkens the whole app behind it instead
          of leaving it in full view. IsVisible is toggled directly on the named
          element from code-behind (ShowNewClipsDialog) rather than bound to a
@@ -2712,7 +2717,7 @@
          code-behind too (into NewClipsTitleText/NewClipsCardsPanel below),
          same as before, just targeting this embedded tree instead of a
          Window's own body. -->
-    <Border x:Name="NewClipsOverlay" Grid.RowSpan="2" Background="#000000AA" IsVisible="False">
+    <Border x:Name="NewClipsOverlay" Grid.RowSpan="2" Background="#AA000000" IsVisible="False">
       <Border x:Name="NewClipsDialogCard" MaxHeight="860" CornerRadius="12" Background="#111920" BorderBrush="#232F3A" BorderThickness="1"
               ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center">
         <DockPanel LastChildFill="True">
