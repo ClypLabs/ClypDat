@@ -5811,6 +5811,11 @@ public sealed partial class MainWindow : Window
             IsSnapToTickEnabled = true,
             Width = 80,
             VerticalAlignment = VerticalAlignment.Center,
+            // The Slider template's track isn't vertically centred within the
+            // control's own bounds, so VerticalAlignment.Center still leaves
+            // the rail sitting low against the icons beside it. Nudged up to
+            // line the rail up with them.
+            Margin = new Thickness(0, -2, 0, 0),
         };
         volumeSlider.Bind(Slider.ValueProperty, new Binding("MasterVolumePercent", BindingMode.TwoWay));
         volumeSlider.Bind(OpacityProperty, new Binding("IsMasterMuted") { Converter = BoolToOpacityConverter.Instance });
@@ -5821,15 +5826,13 @@ public sealed partial class MainWindow : Window
         var durationText = new TextBlock { Foreground = new SolidColorBrush(Color.Parse("#8C98A7")), FontSize = 13, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
         durationText.Bind(TextBlock.TextProperty, new Binding("DurationLabel"));
 
-        // Transport, then the time readout, then volume - one left-aligned run
-        // with only Fullscreen pushed to the far right, the way every player
-        // over a picture lays this out. The old split (volume left, transport
-        // centred, fullscreen right) left the row's weight in three places and
-        // moved the play button horizontally whenever the pane resized.
+        // Transport (plus the time readout) centred in the row, volume left,
+        // Fullscreen right.
         var transportGroup = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 4,
+            HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
@@ -5879,17 +5882,9 @@ public sealed partial class MainWindow : Window
         {
             Orientation = Orientation.Horizontal,
             Spacing = 8,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(14, 0, 0, 0),
-            Children = { muteToggle, volumeSlider, volumePercentText, volumeResetButton },
-        };
-
-        var leftGroup = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center,
-            Children = { transportGroup, volumeGroup },
+            Children = { muteToggle, volumeSlider, volumePercentText, volumeResetButton },
         };
 
         var fullscreenButton = TransportButton("M7,14H5v5h5v-2H7V14z M5,10h2V7h3V5H5V10z M17,17h-3v2h5v-5h-2V17z M14,5v2h3v3h2V5H14z", FullscreenButton_OnClick, "Fullscreen");
@@ -5929,14 +5924,16 @@ public sealed partial class MainWindow : Window
         };
         progressStrip.PointerPressed += FullscreenProgressBar_OnPointerPressed;
 
-        var layout = new Grid
-        {
-            ColumnDefinitions = new ColumnDefinitions("*,Auto"),
-            Margin = new Thickness(14, 0),
-        };
-        Grid.SetColumn(leftGroup, 0);
-        Grid.SetColumn(fullscreenButton, 1);
-        layout.Children.Add(leftGroup);
+        // One cell with all three groups stacked in it, each aligned to its own
+        // edge, rather than three columns. In a three-column split the centre
+        // column is only centred between the other two, so the transport row
+        // sat visibly off-centre by however much the volume group outweighs
+        // the lone fullscreen button. Overlapping them in a single cell centres
+        // the transport on the bar itself; at any width the video pane actually
+        // gets there is far more room than the three groups need.
+        var layout = new Grid { Margin = new Thickness(14, 0) };
+        layout.Children.Add(volumeGroup);
+        layout.Children.Add(transportGroup);
         layout.Children.Add(fullscreenButton);
 
         var barContent = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
