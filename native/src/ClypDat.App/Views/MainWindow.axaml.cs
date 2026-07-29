@@ -2108,19 +2108,24 @@ public sealed partial class MainWindow : Window
             _ => "New Clips and VOD!"
         };
 
-        // Size only when there is one thing to size - a total across a mixed
-        // set (a 60s clip plus a two-hour VOD) says nothing useful.
-        if (entries.Count == 1) title += $" ({FormatFileSize(entries[0].Clip.SizeBytes)})";
+        title += $" ({FormatFileSize(entries.Sum(entry => entry.Clip.SizeBytes))})";
 
-        // Wide enough for a 3-across grid of cards (see BuildNewClipCard)
-        // plus the WrapPanel's inter-card spacing and CreateChromelessDialog's
-        // own 22px-a-side body margin, rather than the single narrow column
-        // this used to stack every card into.
+        // Wide enough for a 3-across grid of cards (see BuildNewClipCard).
+        // A WrapPanel with ItemWidth set gives every slot - including the
+        // last one in a row - that full width, so the available content
+        // width has to fit three WHOLE slots (cardWidth + cardSpacing each),
+        // not three cards plus spacing only between them; short by even one
+        // slot's spacing wrapped the third card to its own row with a
+        // card-sized gap of dead space beside the first two. The extra 20
+        // covers the vertical scrollbar ScrollViewer reserves once there are
+        // enough clips to actually need one - same allowance the library
+        // grid uses for the same reason (see UpdateCardLayout).
         const int cardWidth = 300;
         const int cardSpacing = 16;
+        const int scrollbarAllowance = 20;
 
-        var (window, body) = CreateChromelessDialog(title);
-        window.Width = 3 * cardWidth + 2 * cardSpacing + 44;
+        var (window, body) = CreateChromelessDialog(title, centerTitle: true);
+        window.Width = 3 * (cardWidth + cardSpacing) + 44 + scrollbarAllowance;
         window.MaxHeight = 720;
         _newClipsDialog = window;
         // Deliberately no SetPreviewVisible(false) here: these are the library's
@@ -7075,7 +7080,7 @@ public sealed partial class MainWindow : Window
     // of the app's own dark, chromeless windows (see CreateUpdateDialog). This
     // gives every popup that same slim custom title bar instead: just an icon,
     // a label, and a single close button - no minimize/maximize at all.
-    private static (Window Window, Panel Body) CreateChromelessDialog(string titleBarLabel)
+    private static (Window Window, Panel Body) CreateChromelessDialog(string titleBarLabel, bool centerTitle = false)
     {
         var window = new Window
         {
@@ -7101,26 +7106,48 @@ public sealed partial class MainWindow : Window
         {
             if (e.GetCurrentPoint(titleBar).Properties.IsLeftButtonPressed) window.BeginMoveDrag(e);
         };
-        var titleIcon = new Image
+        if (centerTitle)
         {
-            Source = new Avalonia.Media.Imaging.Bitmap(Avalonia.Platform.AssetLoader.Open(new Uri("avares://ClypDat/Assets/clypdat-icon-24.png"))),
-            Width = 16,
-            Height = 16,
-            Margin = new Avalonia.Thickness(14, 0, 0, 0),
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        var titleText = new TextBlock
+            // No icon, just the label spanning the middle column - matches
+            // dialogs (e.g. the new-clips popup) whose title is itself the
+            // headline rather than a small caption beside the app icon.
+            var centeredTitleText = new TextBlock
+            {
+                Text = titleBarLabel,
+                Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"),
+                FontSize = 14,
+                FontWeight = Avalonia.Media.FontWeight.Bold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(centeredTitleText, 1);
+            titleBar.Children.Add(centeredTitleText);
+        }
+        else
         {
-            Text = titleBarLabel,
-            Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"),
-            FontSize = 12,
-            FontWeight = Avalonia.Media.FontWeight.SemiBold,
-            // 2px down to sit on the icon's optical center - see CreateUpdateDialog.
-            Margin = new Avalonia.Thickness(8, 2, 0, 0),
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        var titleLeft = new StackPanel { Orientation = Orientation.Horizontal, Children = { titleIcon, titleText } };
-        Grid.SetColumn(titleLeft, 0);
+            var titleIcon = new Image
+            {
+                Source = new Avalonia.Media.Imaging.Bitmap(Avalonia.Platform.AssetLoader.Open(new Uri("avares://ClypDat/Assets/clypdat-icon-24.png"))),
+                Width = 16,
+                Height = 16,
+                Margin = new Avalonia.Thickness(14, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var titleText = new TextBlock
+            {
+                Text = titleBarLabel,
+                Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"),
+                FontSize = 12,
+                FontWeight = Avalonia.Media.FontWeight.SemiBold,
+                // 2px down to sit on the icon's optical center - see CreateUpdateDialog.
+                Margin = new Avalonia.Thickness(8, 2, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var titleLeft = new StackPanel { Orientation = Orientation.Horizontal, Children = { titleIcon, titleText } };
+            Grid.SetColumn(titleLeft, 0);
+            titleBar.Children.Add(titleLeft);
+        }
+
         var closeButton = new Button
         {
             Classes = { "windowChromeButton", "windowCloseButton" },
@@ -7134,7 +7161,6 @@ public sealed partial class MainWindow : Window
         };
         closeButton.Click += (_, _) => window.Close();
         Grid.SetColumn(closeButton, 2);
-        titleBar.Children.Add(titleLeft);
         titleBar.Children.Add(closeButton);
 
         var body = new StackPanel { Margin = new Avalonia.Thickness(22, 20, 22, 22), Spacing = 16 };
