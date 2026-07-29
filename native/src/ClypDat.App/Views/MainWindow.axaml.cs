@@ -5819,7 +5819,7 @@ public sealed partial class MainWindow : Window
             // the rail sitting low against the icons beside it. Nudged up to
             // line the rail up with them - this is on top of whatever the row
             // itself is offset by, since it corrects the template, not the row.
-            Margin = new Thickness(0, -6, 0, 0),
+            Margin = new Thickness(0, -5, 0, 0),
         };
         volumeSlider.Bind(Slider.ValueProperty, new Binding("MasterVolumePercent", BindingMode.TwoWay));
         volumeSlider.Bind(OpacityProperty, new Binding("IsMasterMuted") { Converter = BoolToOpacityConverter.Instance });
