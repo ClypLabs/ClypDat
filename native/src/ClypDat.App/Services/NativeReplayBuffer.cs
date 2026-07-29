@@ -401,11 +401,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             muxArgs.AddRange(new[] { "-c:v", "copy", "-c:a", "aac", "-b:a", "192k" });
             for (var i = 0; i < tracks.Count; i++) muxArgs.AddRange(new[] { $"-metadata:s:a:{i}", $"title={tracks[i].Label}" });
             muxArgs.AddRange(new[] { "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("Native")}", outputPath });
-            // Gated like every other ffmpeg spawn in a save - this mux is a real
-            // CPU/GPU competitor for the game, not a free action just because
-            // it's the last step, and ungated it could stack on top of a
-            // concurrent Full Session finalize or a second save's own work.
-            var result = await AudioCapturePipeline.RunGatedProcessAsync("ffmpeg", muxArgs, cancellationToken);
+            var result = await AudioCapturePipeline.RunProcessAsync("ffmpeg", muxArgs, cancellationToken);
             if (result.ExitCode != 0)
             {
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg mux failed." : result.Error);
@@ -1480,16 +1476,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 // since the fixed-rate and adaptive-rate branches only differ in
                 // WHEN/how they decide to call this, not in what encoding a
                 // scheduled frame actually does.
-                // Returns whether the frame was actually handed to the encoder -
-                // both callers below use this to decide whether the ideal
-                // timeline's frame index gets to advance. A dropped frame that
-                // still advanced the index left a permanent hole: the ideal PTS
-                // grid (index * interval) is exactly the target rate by
-                // construction, so a hole is invisible in the file's own
-                // reported frame rate, but the player holds the previous frame
-                // an extra interval for every drop. Not advancing means the
-                // NEXT attempt reuses the same slot instead of skipping it.
-                unsafe bool EncodeScheduledFrame()
+                unsafe void EncodeScheduledFrame()
                 {
                     // Force a keyframe periodically so the ring buffer always has a nearby
                     // point to start a save-window at without waiting on the encoder's own
@@ -1527,13 +1514,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
                     stageStopwatch.Restart();
                     var clonedFrame = ffmpeg.av_frame_clone(frame);
-                    bool enqueued;
                     if (clonedFrame is null)
                     {
                         AppLog.Error("Native capture: av_frame_clone failed, dropping a frame.");
                         Interlocked.Increment(ref _encodeDroppedCount);
                         Interlocked.Increment(ref _totalDroppedFrames);
-                        enqueued = false;
                     }
                     else if (!encodeQueue.TryAdd(new EncodeJob((nint)clonedFrame, MonotonicClock.UtcNow)))
                     {
@@ -1544,7 +1529,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         ffmpeg.av_frame_free(&droppedFrame);
                         Interlocked.Increment(ref _encodeDroppedCount);
                         Interlocked.Increment(ref _totalDroppedFrames);
-                        enqueued = false;
                     }
                     else
                     {
@@ -1553,10 +1537,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // frame's duration and turns a 60 FPS clip into ~30 FPS.
                         framesEncoded++;
                         framesEncodedSinceLog++;
-                        enqueued = true;
                     }
                     encodeMs += stageStopwatch.Elapsed.TotalMilliseconds;
-                    return enqueued;
                 }
 
                 if (hasCapturedRealFrame)
@@ -1603,6 +1585,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var keepAliveDue = stopwatch.Elapsed - lastEncodedAt >= AdaptiveKeepAliveInterval;
                     if (newContentDue || keepAliveDue)
                     {
+                        lastEncodedContentCapturedUtc = lastFrameContentCapturedUtc;
                         // Advance along the ideal grid rather than snapping to
                         // "now". This gate is only evaluated once per loop
                         // iteration (~7ms apart, paced by AcquireNextFrame's own
@@ -1643,18 +1626,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // monotonic whichever branch produced it.
                         var ptsElapsed = newContentDue ? lastFrameContentCapturedElapsed : stopwatch.Elapsed;
                         if (ptsElapsed <= lastEncodedPtsElapsed) ptsElapsed = lastEncodedPtsElapsed + TimeSpan.FromMilliseconds(1);
+                        lastEncodedPtsElapsed = ptsElapsed;
                         frame->pts = (long)Math.Round(ptsElapsed.TotalMicroseconds);
-                        // Both "this content has been encoded" markers only commit on
-                        // an actual enqueue. Marking them unconditionally meant a
-                        // dropped frame's content was treated as consumed anyway -
-                        // contentIsNew would then stay false until the NEXT genuinely
-                        // new present, silently discarding whatever was in this one
-                        // instead of retrying it on the next scheduled tick.
-                        if (EncodeScheduledFrame())
-                        {
-                            lastEncodedPtsElapsed = ptsElapsed;
-                            lastEncodedContentCapturedUtc = lastFrameContentCapturedUtc;
-                        }
+                        EncodeScheduledFrame();
                     }
                 }
                 else
@@ -1683,17 +1657,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // idealizing video's timeline can't reintroduce the audio-sync
                     // bug that was just fixed.
                     frame->pts = (long)Math.Round(encodedFrameIndex * idealFrameIntervalMicroseconds);
-                    // Only claims this grid slot on success. Advancing regardless
-                    // (the old behavior) left a permanent hole under any real
-                    // encode-queue pressure: the ideal PTS grid is exactly the
-                    // target rate by construction, so a hole is invisible in the
-                    // file's own reported frame rate, but the player holds the
-                    // previous frame an extra interval for every drop - measured
-                    // directly against this session's own log (droppedFrames=49
-                    // in one 2s window at avgEncodeMs=19.7). A failed attempt now
-                    // simply retries the same slot next time this loop is due,
-                    // instead of skipping past it.
-                    if (EncodeScheduledFrame()) encodedFrameIndex++;
+                    encodedFrameIndex++;
+                    EncodeScheduledFrame();
                 }
                 }
                 }
@@ -2469,18 +2434,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 "AV1" => new[] { "-c:v", "av1_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "32", "-b:v", "0" },
                 _ => new[] { "-c:v", "copy" }
             };
-            // Gated for the same reason as the per-clip mux (NativeReplayBuffer's
-            // SaveReplayAsync, above) - this can run at the same time as a manual
-            // clip's own save, and an unbounded second ffmpeg process here is
-            // exactly the kind of stacked contention this whole save path has
-            // been trying to bound. This runs on its own background thread
-            // (FinalizeFullSessionRecording), so blocking on the async wait here
-            // is fine - nothing UI-thread-affine is involved.
-            var result = AudioCapturePipeline.RunGatedProcessAsync("ffmpeg", BuildMuxArgs(codecArgs), CancellationToken.None).GetAwaiter().GetResult();
+            var result = AudioCapturePipeline.RunProcessAsync("ffmpeg", BuildMuxArgs(codecArgs), CancellationToken.None).GetAwaiter().GetResult();
             if (result.ExitCode != 0 && codecArgs[1] != "copy")
             {
                 AppLog.Error($"Full session {config.FullSessionVideoCodec} re-encode failed, retrying as stream copy: {result.Error}");
-                result = AudioCapturePipeline.RunGatedProcessAsync("ffmpeg", BuildMuxArgs(new[] { "-c:v", "copy" }), CancellationToken.None).GetAwaiter().GetResult();
+                result = AudioCapturePipeline.RunProcessAsync("ffmpeg", BuildMuxArgs(new[] { "-c:v", "copy" }), CancellationToken.None).GetAwaiter().GetResult();
             }
             if (result.ExitCode != 0)
             {
