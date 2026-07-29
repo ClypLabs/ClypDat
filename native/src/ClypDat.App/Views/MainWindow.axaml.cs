@@ -104,20 +104,10 @@ public sealed partial class MainWindow : Window
     private static readonly TimeSpan LibraryResizeAnchorSettle = TimeSpan.FromMilliseconds(220);
     private const double LibraryScrollOffsetTolerance = 0.01;
     private DateTime _hoverControlsSuppressedUntilUtc = DateTime.MinValue;
-    // Slides the bar in from under the video's bottom edge on first show. The
-    // window itself stays put - only its content moves - because animating an
-    // owned window's native position is visibly steppy next to a composited
-    // transform.
-    private const double HoverControlsSlideDistance = 92;
-    private static readonly TimeSpan HoverControlsSlideDuration = TimeSpan.FromMilliseconds(190);
+    // The bar's own surface. Used to slide in/out via a RenderTransform on this
+    // while the window stayed put, which is gone with the window's transparency -
+    // see EnsureEditorHoverControlsWindow.
     private Border? _hoverControlsBackdrop;
-    // Whether the compositor actually granted the hover bar's transparency
-    // request. Assumed true until the first Show can report otherwise, since the
-    // slide it gates looks right on every machine that does honour it.
-    private bool _hoverControlsTransparencyOk = true;
-    private bool _hoverControlsTransparencyChecked;
-    private DispatcherTimer? _hoverControlsSlideOutTimer;
-    private bool _hoverControlsSlidingOut;
     private string? _libraryResizeAnchorPath;
     private bool _libraryResizeAnchorRestoreQueued;
     private DispatcherTimer? _libraryResizeAnchorSettleTimer;
@@ -6265,8 +6255,6 @@ public sealed partial class MainWindow : Window
             if (trackedHandle != IntPtr.Zero && !IsWindowVisible(trackedHandle))
             {
                 AppLog.Debug("Editor hover bar: native window was hidden by the OS - resyncing so it can be reshown.");
-                _hoverControlsSlideOutTimer?.Stop();
-                _hoverControlsSlidingOut = false;
                 trackedBar.Hide();
                 _hoverControlsLastState = string.Empty;
             }
@@ -6316,13 +6304,10 @@ public sealed partial class MainWindow : Window
         }
         else if (DateTime.UtcNow >= _hoverControlsActiveUntilUtc)
         {
-            if (_editorHoverControlsWindow is { IsVisible: true } && !_hoverControlsSlidingOut)
+            if (_editorHoverControlsWindow is { IsVisible: true })
             {
-                LogHoverControlsState($"sliding out (cursor={cursor.X},{cursor.Y} video={videoTopLeft.X},{videoTopLeft.Y}-{videoBottomRight.X},{videoBottomRight.Y})");
+                LogHoverControlsState($"hiding (cursor={cursor.X},{cursor.Y} video={videoTopLeft.X},{videoTopLeft.Y}-{videoBottomRight.X},{videoBottomRight.Y})");
             }
-            // Animated both ways. "Instant" here is about it starting to go
-            // the moment the pointer leaves (HoverControlsGrace is zero), not
-            // about skipping the slide - the slide down is the exit.
             HideEditorHoverControls(immediate: false);
         }
     }
@@ -6342,12 +6327,6 @@ public sealed partial class MainWindow : Window
 
     private void ShowEditorHoverControls()
     {
-        // Cancels an in-flight slide-out: moving back over the video during
-        // the 190ms exit brings the bar straight back rather than letting it
-        // finish leaving and then reappear.
-        _hoverControlsSlideOutTimer?.Stop();
-        _hoverControlsSlidingOut = false;
-
         var window = EnsureEditorHoverControlsWindow();
         // Every tick, not just on the hidden->shown transition - see
         // RepositionEditorHoverControls, which no-ops unless the video pane
@@ -6356,11 +6335,6 @@ public sealed partial class MainWindow : Window
         RepositionEditorHoverControls(window);
         if (!window.IsVisible)
         {
-            // Parked below the window's own bounds so the first frame after
-            // Show is already off-screen; flipping it back one frame later
-            // gives the transition a "from" state to animate out of, rather
-            // than both values landing in the same layout pass.
-            SetHoverControlsOffset(HoverControlsSlideDistance);
             try
             {
                 window.Show(this);
@@ -6380,9 +6354,6 @@ public sealed partial class MainWindow : Window
                 _editorHoverControlsWindow = null;
                 _hoverControlsBackdrop = null;
                 _hoverControlsLastState = string.Empty;
-                // Fresh window means a fresh transparency negotiation.
-                _hoverControlsTransparencyChecked = false;
-                _hoverControlsTransparencyOk = true;
                 _hoverControlsSuppressedUntilUtc = DateTime.UtcNow + TimeSpan.FromSeconds(1);
                 return;
             }
@@ -6395,29 +6366,6 @@ public sealed partial class MainWindow : Window
             // vanish from screen shares/recordings of the app too, not just
             // from whatever the setting was meant to hide.
 
-            // ActualTransparencyLevel only means anything once the window has been
-            // shown and the platform has decided what it can actually give us -
-            // TransparencyLevelHint is a request, and it silently degrades to None
-            // on setups whose compositor/driver will not do per-pixel alpha. Read
-            // it once here so the slide can be turned off in exactly that case
-            // (see SetHoverControlsOffset), and log it, since "grey slab over the
-            // controls" is otherwise indistinguishable from a styling bug.
-            if (!_hoverControlsTransparencyChecked)
-            {
-                _hoverControlsTransparencyChecked = true;
-                _hoverControlsTransparencyOk = window.ActualTransparencyLevel == WindowTransparencyLevel.Transparent;
-                AppLog.Info($"Editor hover bar transparency: requested=Transparent, actual={window.ActualTransparencyLevel}, " +
-                            $"slide={(_hoverControlsTransparencyOk ? "enabled" : "disabled (opaque compositor)")}");
-                if (!_hoverControlsTransparencyOk)
-                {
-                    // Nothing shows through anyway, so paint the window itself the
-                    // backdrop's own colour rather than leaving it the default the
-                    // grey was coming from.
-                    window.Background = new SolidColorBrush(Color.Parse("#0B1016"));
-                    SetHoverControlsOffset(0);
-                }
-            }
-
             // Everything RepositionEditorHoverControls assigned above went to
             // a window that had no native hwnd yet. Re-apply now that Show has
             // made one, bypassing the skip-if-unchanged check (which would
@@ -6428,12 +6376,7 @@ public sealed partial class MainWindow : Window
             // before it - keeps clicking a control from stealing activation
             // and taking the bar down out from under the click.
             MakeWindowNonActivating(window);
-            LogHoverControlsState($"sliding in ({DescribeNativeWindow(window)})");
-            Dispatcher.UIThread.Post(() => SetHoverControlsOffset(0), DispatcherPriority.Loaded);
-        }
-        else
-        {
-            SetHoverControlsOffset(0);
+            LogHoverControlsState($"shown ({DescribeNativeWindow(window)})");
         }
     }
 
@@ -6450,64 +6393,15 @@ public sealed partial class MainWindow : Window
             : $"native={visible}, rect=unavailable";
     }
 
-    // immediate: true for leaving the editor or entering fullscreen (the bar
-    // has no business animating out of a view that's already gone); false for
-    // the pointer moving off the video, which slides it away.
+    // The `immediate` distinction is gone along with the slide - every hide is
+    // immediate now - but the parameter stays because the call sites still read
+    // meaningfully ("leaving the editor" vs "pointer left the video") and would
+    // all have to change to say the same thing.
     private void HideEditorHoverControls(bool immediate)
     {
-        if (_editorHoverControlsWindow is not { IsVisible: true } window)
-        {
-            _hoverControlsSlidingOut = false;
-            return;
-        }
-
-        // Sliding out uncovers part of the window, which is only invisible when
-        // the compositor honours transparency - see SetHoverControlsOffset.
-        if (!_hoverControlsTransparencyOk) immediate = true;
-
-        if (immediate)
-        {
-            _hoverControlsSlideOutTimer?.Stop();
-            _hoverControlsSlidingOut = false;
-            window.Hide();
-            return;
-        }
-
-        if (_hoverControlsSlidingOut) return;
-        _hoverControlsSlidingOut = true;
-        SetHoverControlsOffset(HoverControlsSlideDistance);
-
-        _hoverControlsSlideOutTimer ??= new DispatcherTimer();
-        _hoverControlsSlideOutTimer.Interval = HoverControlsSlideDuration;
-        _hoverControlsSlideOutTimer.Stop();
-        _hoverControlsSlideOutTimer.Tick -= HoverControlsSlideOut_OnTick;
-        _hoverControlsSlideOutTimer.Tick += HoverControlsSlideOut_OnTick;
-        _hoverControlsSlideOutTimer.Start();
-    }
-
-    private void HoverControlsSlideOut_OnTick(object? sender, EventArgs e)
-    {
-        _hoverControlsSlideOutTimer?.Stop();
-        if (!_hoverControlsSlidingOut) return;
-        _hoverControlsSlidingOut = false;
-        _editorHoverControlsWindow?.Hide();
+        if (_editorHoverControlsWindow is not { IsVisible: true } window) return;
+        window.Hide();
         LogHoverControlsState("hidden");
-    }
-
-    // The slide is a RenderTransform on the backdrop INSIDE a fixed-size window,
-    // so wherever the backdrop has moved away from, the window's own (transparent)
-    // background is what shows. That is invisible only while the compositor
-    // actually honours per-pixel transparency; where it does not - reported on an
-    // AMD setup - the uncovered strip renders as a grey slab that sits above the
-    // controls and stays put through the slide-out. No transparency means no
-    // slide: keep the backdrop filling the window at all times and let show/hide
-    // be instant, which looks plainer but is never wrong.
-    private void SetHoverControlsOffset(double offset)
-    {
-        if (_hoverControlsBackdrop is null) return;
-        if (!_hoverControlsTransparencyOk) offset = 0;
-        _hoverControlsBackdrop.RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse(
-            offset == 0 ? "translateY(0px)" : $"translateY({offset.ToString(System.Globalization.CultureInfo.InvariantCulture)}px)");
     }
 
     // Sizes and places the bar against the video pane as it currently is.
@@ -6809,24 +6703,23 @@ public sealed partial class MainWindow : Window
 
         var backdrop = new Border
         {
-            // Translucent scrim behind the whole row, not an opaque plate -
-            // the picture still reads through it, it just gets knocked back
-            // far enough that the controls sit on a consistent surface
-            // instead of fighting whatever frame is underneath. The progress
-            // strip along the top edge is what separates it from the video,
-            // so there's no border line here.
-            Background = new SolidColorBrush(Color.Parse("#8C0B1016")),
+            // Opaque, not the translucent #8C0B1016 scrim this used to be, and
+            // the window below is opaque with it. A see-through bar needs real
+            // per-pixel window alpha, and this codebase already established that
+            // Avalonia transparent windows are not dependable here: see
+            // ClickableVideoView, which exists because the editor's old
+            // transparent click-catcher window went click-through or "painted
+            // grey on some GPUs". The hover bar was the last window still built
+            // that way, and on AMD it hit exactly that - the 55%-alpha scrim
+            // composited over a grey window background instead of over the
+            // video, turning the whole bar grey, and the slide below then left
+            // that grey behind on the way out. Unlike the click-catcher this has
+            // to actually draw, so it cannot drop its surface; being opaque is
+            // the part it can give up. Costs the picture reading through the
+            // bar, on every machine rather than just the broken ones, which is a
+            // fair trade for a bar that is never wrong.
+            Background = new SolidColorBrush(Color.Parse("#131A22")),
             Child = BuildPlaybackBarLayout(),
-            RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse($"translateY({HoverControlsSlideDistance}px)"),
-            Transitions =
-            [
-                new Avalonia.Animation.TransformOperationsTransition
-                {
-                    Property = Visual.RenderTransformProperty,
-                    Duration = HoverControlsSlideDuration,
-                    Easing = new Avalonia.Animation.Easings.CubicEaseOut()
-                }
-            ],
         };
         _hoverControlsBackdrop = backdrop;
 
@@ -6837,8 +6730,10 @@ public sealed partial class MainWindow : Window
             CanResize = false,
             ShowActivated = false,
             Topmost = false,
-            Background = Brushes.Transparent,
-            TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
+            // Matches the backdrop so the two can never disagree - with no
+            // transparency requested there is nothing to negotiate and nothing
+            // for a compositor to get wrong.
+            Background = new SolidColorBrush(Color.Parse("#131A22")),
             DataContext = DataContext,
             Content = backdrop,
         };
