@@ -926,7 +926,17 @@ internal sealed class AudioCaptureSession : IDisposable
     // multi-GB session WAV takes 1-2s, and end-anchoring against a "now"
     // taken after the copy shifted every track's anchor late by its own copy
     // duration - game audio lagged ~2s in clips saved late in long sessions.
-    public bool SnapshotTo(string path, out DateTime lastSampleUtc)
+    // earliestNeededUtc trims the copy to just the tail the caller will
+    // actually read. Captures are disk-backed and unbounded now (RAM-backed
+    // was reverted, so TrimTo never runs - see AudioCapturePipeline's
+    // StartSession), which means the session WAV grows until the 4GiB roll.
+    // Copying all of it to produce a 60s clip meant several GB of read+write
+    // per save, per track, and that disk storm is what froze the game and the
+    // mouse mid-match. Only the audio from the requested window onward is ever
+    // used - SnapshotAudioFileAsync immediately -ss seeks past everything
+    // before it - so the rest is pure waste. Pass null to copy the whole
+    // capture, which is what a Full Session finalize legitimately needs.
+    public bool SnapshotTo(string path, DateTime? earliestNeededUtc, out DateTime lastSampleUtc)
     {
         lock (_lock)
         {
@@ -943,12 +953,40 @@ internal sealed class AudioCaptureSession : IDisposable
                 WriteSilenceForDeliveryGapLocked(lastSampleUtc, minGapMs: 30);
                 _writer.Flush();
 
+                // Keeping the TAIL is what makes this safe for alignment.
+                // lastSampleUtc still describes the final byte, and the
+                // pipeline derives the snapshot's start as
+                // lastSampleUtc - reader.TotalTime, so a shorter file simply
+                // reports a later start - by exactly the amount trimmed.
+                // Trimming the front would have been wrong; trimming the back
+                // would break the anchor.
+                var keepBytes = long.MaxValue;
+                if (earliestNeededUtc is DateTime earliest)
+                {
+                    // WAV is CBR, so seconds convert to bytes exactly. The
+                    // margin covers clock jitter and the pipeline's own
+                    // AudioSyncOffsetMs shifting its window earlier.
+                    const double MarginSeconds = 10;
+                    var neededSeconds = (lastSampleUtc - earliest).TotalSeconds + MarginSeconds;
+                    if (neededSeconds > 0 && neededSeconds < long.MaxValue / Math.Max(1, AverageBytesPerSecond))
+                    {
+                        keepBytes = (long)(neededSeconds * AverageBytesPerSecond);
+                    }
+                }
+
                 if (_stream is FileStream fileStream)
                 {
                     fileStream.Flush(true);
+                    // The live file's own RIFF sizes are stale while it is
+                    // being written, so the data chunk is located from what
+                    // this session knows rather than by parsing the header:
+                    // everything past the header is data, and _bytesWritten is
+                    // exactly how much of it there is.
+                    var dataStart = _stream.Position - _bytesWritten;
+                    var skipBytes = Math.Max(0, _bytesWritten - keepBytes);
                     using var source = new FileStream(fileStream.Name, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                    using var destination = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
-                    source.CopyTo(destination);
+                    source.Seek(dataStart + skipBytes, SeekOrigin.Begin);
+                    WriteTailWav(path, source, _bytesWritten - skipBytes);
                 }
                 else
                 {
@@ -969,6 +1007,47 @@ internal sealed class AudioCaptureSession : IDisposable
             }
         }
     }
+
+    // Written through a WaveFileWriter with the capture's own WaveFormat so
+    // the header carries the right format tag (these captures are 32-bit IEEE
+    // float, not PCM) and NAudio finalises the chunk sizes on dispose - a
+    // hand-rolled 44-byte header would get both wrong.
+    //
+    // Background mode, not just a low thread priority: ProcessPriorityClass
+    // and ThreadPriority govern CPU only, and this is bound by disk. Windows
+    // background mode is the one knob that also drops the thread's I/O
+    // priority, which is what keeps this off the queue the game is using.
+    private void WriteTailWav(string path, Stream source, long dataBytes)
+    {
+        var background = SetThreadPriority(GetCurrentThread(), ThreadModeBackgroundBegin);
+        try
+        {
+            using var destination = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+            using var writer = new WaveFileWriter(destination, _capture.WaveFormat);
+            var buffer = new byte[256 * 1024];
+            var remaining = dataBytes;
+            while (remaining > 0)
+            {
+                var read = source.Read(buffer, 0, (int)Math.Min(buffer.Length, remaining));
+                if (read <= 0) break;
+                writer.Write(buffer, 0, read);
+                remaining -= read;
+            }
+        }
+        finally
+        {
+            if (background) SetThreadPriority(GetCurrentThread(), ThreadModeBackgroundEnd);
+        }
+    }
+
+    private const int ThreadModeBackgroundBegin = 0x00010000;
+    private const int ThreadModeBackgroundEnd = 0x00020000;
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentThread();
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern bool SetThreadPriority(IntPtr thread, int priority);
 
     // Discards audio older than `retention` from a RAM-backed capture's
     // buffer by compacting into a fresh, smaller MemoryStream+WaveFileWriter
