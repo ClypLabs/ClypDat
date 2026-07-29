@@ -168,6 +168,10 @@ public sealed class AppSettings
     // through DWM. A capture card, a second PC, or a phone pointed at the
     // monitor all still see it.
     public bool ExcludeOverlaysFromCapture { get; set; } = true;
+    // Summary popup when a game closes, listing what that session actually
+    // captured. Without it the only way to find out is to go and look in the
+    // library afterwards, which is easy to forget doing.
+    public bool ShowNewClipsOnGameClose { get; set; } = true;
     // Separate from EnableClipOverlay - "clipping started" is a distinct
     // notification kind (fires when the buffer actually starts recording a
     // detected game) from the clip-saved family, and a user may want one

@@ -1344,6 +1344,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public bool ShowNewClipsOnGameClose
+    {
+        get => Settings.ShowNewClipsOnGameClose;
+        set
+        {
+            if (Settings.ShowNewClipsOnGameClose == value) return;
+            Settings.ShowNewClipsOnGameClose = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
     public bool EnableClipOverlaySound
     {
         get => Settings.EnableClipOverlaySound;
@@ -3193,6 +3205,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             clip = new ClipCardViewModel(media, Settings.LibraryFolder);
             InsertClipSorted(clip);
+            // Every new library file passes through here, including the ones the
+            // folder watcher notices on its own - which is the only way a Full
+            // Session VOD is ever seen, since its background finalize lands well
+            // after the buffer has stopped. See MainWindow's session collector.
+            ClipAdded?.Invoke(this, clip);
         }
 
         NotifyLibraryChrome();
@@ -3836,6 +3853,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public event EventHandler? GameCatalogChanged;
+
+    // Raised for a clip that is genuinely NEW to the library, not for the
+    // re-adds AddOrUpdateLibraryClipAsync also handles (an edit saved over an
+    // existing file, the refresh after the editor closes).
+    public event EventHandler<ClipCardViewModel>? ClipAdded;
 
     // Settings > Game Detection's "excluded from detection" list - mirrors
     // Settings.IgnoredGameExecutables so removals from the settings page and

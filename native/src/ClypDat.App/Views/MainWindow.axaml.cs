@@ -186,6 +186,7 @@ public sealed partial class MainWindow : Window
                     _gameDetector.ApplyCustomGameNames(ViewModel.Settings.GameCaptureOverrides);
                     _gameDetector.ApplyUserIgnoredExecutables(ViewModel.Settings.IgnoredGameExecutables);
                 };
+                ViewModel.ClipAdded += ViewModel_OnClipAdded;
                 ViewModel.PropertyChanged += (_, e) =>
                 {
                     if (e.PropertyName == nameof(MainWindowViewModel.AutoClippingEnabled)) UpdateAutoClipStates();
@@ -379,7 +380,14 @@ public sealed partial class MainWindow : Window
         }
         else if (_replayBuffer is { IsRecording: true } && !detection.IsDetected && !_replayTransitioning)
         {
-            _ = StopReplayBufferAsync();
+            // The game just closed. Show what the session captured once the
+            // buffer has actually stopped - not before, or a clip saved in the
+            // last seconds could still be mid-write.
+            _ = StopReplayBufferAsync().ContinueWith(
+                _ => ShowNewClipsDialog(),
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnRanToCompletion,
+                TaskScheduler.FromCurrentSynchronizationContext());
         }
 
         UpdateCapturePauseState(detection);
@@ -1852,6 +1860,11 @@ public sealed partial class MainWindow : Window
             ApplyPrimaryCaptureBounds();
             await Task.Run(() => _replayBuffer.StartAsync());
             AppLog.Info("Replay started.");
+            // Fresh session, fresh list. Left open (not cleared on stop) so a
+            // Full Session VOD that finalizes minutes after the game closed
+            // still has somewhere to land - see ViewModel_OnClipAdded.
+            _sessionNewClipPaths.Clear();
+            _sessionCollectingClips = true;
             ViewModel.IsReplayRecording = _replayBuffer.IsRecording;
             if (ViewModel.IsReplayRecording) ShowGameDetectedNotification(ViewModel.ActiveGameDetection.DisplayName);
         }
@@ -1957,6 +1970,7 @@ public sealed partial class MainWindow : Window
 
                 var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder, titleOverride: autoClipLabel, clipWindow: clipWindow));
                 AppLog.Info($"Replay clip saved: {outputPath}");
+                RememberSessionClip(outputPath);
                 // The save itself succeeded, but if the capture source had
                 // stopped delivering frames the video is a single frozen frame -
                 // say so now rather than let it be discovered on playback later.
@@ -2004,6 +2018,14 @@ public sealed partial class MainWindow : Window
     private Window? _activeClipOverlay;
     private DispatcherTimer? _activeClipOverlayCloseTimer;
 
+    // Everything the current (or most recent) session put in the library, in
+    // the order it arrived, for the "New Clips!" popup shown when the game
+    // closes. Paths rather than cards so a deleted clip can be dropped by
+    // identity without holding a card alive.
+    private readonly List<string> _sessionNewClipPaths = new();
+    private bool _sessionCollectingClips;
+    private Window? _newClipsDialog;
+
     private void ShowClipSavedNotification()
     {
         ShowClipNotification("Clip saved", playSound: true);
@@ -2037,6 +2059,317 @@ public sealed partial class MainWindow : Window
     // clip-saved family. No sound: this fires the instant a game launches,
     // and an audible cue for that (as opposed to a deliberate clip save) felt
     // like noise rather than useful feedback.
+    // Shown when a game closes, listing what that session actually captured.
+    // Re-entrant on purpose: a Full Session VOD landing later calls straight
+    // back in, which rebuilds the open popup around the larger set rather than
+    // stacking a second window on top of the first.
+    private void ShowNewClipsDialog()
+    {
+        if (ViewModel is null || !ViewModel.Settings.ShowNewClipsOnGameClose) return;
+
+        // Resolve paths to live cards each time - anything deleted (from here or
+        // from the library behind it) simply stops resolving and drops out.
+        var entries = _sessionNewClipPaths
+            .Select(path => ViewModel.AllClips.FirstOrDefault(clip => string.Equals(clip.Path, path, StringComparison.OrdinalIgnoreCase)))
+            .Where(clip => clip is not null)
+            .Select(clip => new NewClipEntryViewModel(clip!))
+            .ToList();
+
+        if (entries.Count == 0)
+        {
+            _newClipsDialog?.Close();
+            return;
+        }
+
+        _newClipsDialog?.Close();
+
+        var clipCount = entries.Count(entry => !entry.IsVod);
+        var vodCount = entries.Count - clipCount;
+        var title = (clipCount, vodCount) switch
+        {
+            (0, 1) => "New VOD!",
+            (0, _) => "New VODs!",
+            (1, 0) => "New Clip!",
+            (_, 0) => "New Clips!",
+            (1, _) => "New Clip and VOD!",
+            _ => "New Clips and VOD!"
+        };
+
+        // Size only when there is one thing to size - a total across a mixed
+        // set (a 60s clip plus a two-hour VOD) says nothing useful.
+        if (entries.Count == 1) title += $" ({FormatFileSize(entries[0].Clip.SizeBytes)})";
+
+        var (window, body) = CreateChromelessDialog(title);
+        window.Width = 520;
+        window.MaxHeight = 720;
+        _newClipsDialog = window;
+        // Deliberately no SetPreviewVisible(false) here: these are the library's
+        // own cards, and dropping their bitmaps would blank whichever of them
+        // are currently scrolled into view behind this window.
+        window.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_newClipsDialog, window)) _newClipsDialog = null;
+        };
+
+        var heading = new TextBlock
+        {
+            Text = entries.Count == 1 ? "Your clip is ready." : $"{entries.Count} new recordings from this session.",
+            Foreground = Avalonia.Media.Brush.Parse("#D2DEEC"),
+            FontSize = 15,
+            FontWeight = Avalonia.Media.FontWeight.Bold
+        };
+
+        // Checkboxes only earn their place when there is a choice to make.
+        var multiple = entries.Count > 1;
+        foreach (var entry in entries)
+        {
+            entry.ShowCheckBox = multiple;
+            // The library only decodes a card's thumbnail while it is actually
+            // scrolled into view, so a card that has never been on screen has a
+            // null PreviewImage until asked.
+            entry.Clip.SetPreviewVisible(true);
+        }
+
+        var list = new StackPanel { Spacing = 10 };
+        foreach (var entry in entries) list.Children.Add(BuildNewClipCard(entry));
+
+        var scroller = new ScrollViewer
+        {
+            Content = list,
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+            MaxHeight = 430
+        };
+
+        var deleteButton = new Button
+        {
+            Classes = { "deleteButton" },
+            Content = "Delete",
+            MinWidth = 108,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center
+        };
+        var openButton = new Button
+        {
+            Classes = { "primaryButton" },
+            Content = "Open",
+            MinWidth = 108,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center
+        };
+
+        // A single entry needs no ticking: it IS the selection.
+        NewClipEntryViewModel[] Chosen() => multiple
+            ? entries.Where(entry => entry.IsSelected).ToArray()
+            : entries.ToArray();
+
+        void SyncButtons()
+        {
+            var chosen = Chosen();
+            deleteButton.IsEnabled = chosen.Length > 0;
+            // The editor opens one clip. Several ticked is a delete-many
+            // gesture, so Open steps aside rather than guessing which one.
+            openButton.IsEnabled = chosen.Length == 1;
+        }
+
+        foreach (var entry in entries) entry.SelectionChanged += (_, _) => SyncButtons();
+        SyncButtons();
+
+        deleteButton.Click += async (_, _) =>
+        {
+            var chosen = Chosen();
+            if (chosen.Length == 0) return;
+            foreach (var entry in chosen)
+            {
+                _sessionNewClipPaths.RemoveAll(path => string.Equals(path, entry.Path, StringComparison.OrdinalIgnoreCase));
+                await ViewModel.DeleteClipAsync(entry.Clip);
+            }
+            // Rebuild around whatever survived - or close, when nothing did.
+            ShowNewClipsDialog();
+        };
+
+        openButton.Click += async (_, _) =>
+        {
+            var chosen = Chosen();
+            if (chosen.Length != 1) return;
+            window.Close();
+            await OpenClipCardAsync(chosen[0].Clip);
+        };
+
+        var footer = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
+        Grid.SetColumn(deleteButton, 0);
+        Grid.SetColumn(openButton, 2);
+        footer.Children.Add(deleteButton);
+        footer.Children.Add(openButton);
+
+        body.Children.Add(heading);
+        body.Children.Add(scroller);
+        body.Children.Add(footer);
+
+        // Closing ClypDat hides it to the tray rather than exiting, and gaming
+        // with it there is the normal case for this popup - Avalonia refuses
+        // outright to show a window with a non-visible owner ("Cannot show
+        // window with non-visible owner"), so an owned Show would throw exactly
+        // when this is most likely to fire. Stand alone and centre on screen
+        // instead when there is no usable owner.
+        if (IsVisible)
+        {
+            window.Show(this);
+        }
+        else
+        {
+            window.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            window.Topmost = true;
+            window.Show();
+        }
+    }
+
+    private static string FormatFileSize(long bytes)
+    {
+        if (bytes >= 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024 * 1024):0.##} GB";
+        if (bytes >= 1024 * 1024) return $"{bytes / (1024.0 * 1024):0.##} MB";
+        if (bytes >= 1024) return $"{bytes / 1024.0:0.##} KB";
+        return $"{bytes} B";
+    }
+
+    private Border BuildNewClipCard(NewClipEntryViewModel entry)
+    {
+        var thumbnail = new Image
+        {
+            Source = entry.Clip.PreviewImage,
+            Stretch = Avalonia.Media.Stretch.UniformToFill,
+            Height = 132
+        };
+        // The decode is asynchronous, so a card built before it finishes has to
+        // pick the bitmap up when it lands.
+        entry.Clip.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(ClipCardViewModel.PreviewImage)) thumbnail.Source = entry.Clip.PreviewImage;
+        };
+
+        var duration = new Border
+        {
+            Background = Avalonia.Media.Brush.Parse("#CC0B1116"),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(8, 3, 8, 4),
+            Margin = new Thickness(10),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Child = new TextBlock
+            {
+                Text = entry.Clip.DurationLabel,
+                Foreground = Avalonia.Media.Brush.Parse("#D8E2EE"),
+                FontSize = 12,
+                FontWeight = Avalonia.Media.FontWeight.Bold
+            }
+        };
+
+        var check = new CheckBox
+        {
+            Margin = new Thickness(10),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            IsChecked = entry.IsSelected,
+            IsVisible = entry.IsCheckVisible
+        };
+        check.Click += (_, _) => entry.IsSelected = check.IsChecked == true;
+        // The card itself also toggles selection (below). Without this, a click
+        // that actually lands on the box toggles twice and lands back where it
+        // started. Handlers added with += don't see handled events, so marking
+        // it here is enough to keep the card's own handler out of it.
+        check.PointerPressed += (_, args) => args.Handled = true;
+
+        var picture = new Panel
+        {
+            Background = Avalonia.Media.Brush.Parse("#0B1116"),
+            Children = { thumbnail, duration, check }
+        };
+
+        var info = new StackPanel
+        {
+            Spacing = 4,
+            Margin = new Thickness(14, 11, 14, 13),
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = entry.Clip.TileTopLabel,
+                    Foreground = Avalonia.Media.Brush.Parse("#8C98A7"),
+                    FontSize = 12,
+                    FontWeight = Avalonia.Media.FontWeight.Bold,
+                    TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis
+                },
+                new TextBlock
+                {
+                    Text = entry.Clip.TileMainLabel,
+                    Foreground = Avalonia.Media.Brush.Parse("#D8E4F2"),
+                    FontSize = 14,
+                    FontWeight = Avalonia.Media.FontWeight.Bold,
+                    TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis
+                }
+            }
+        };
+
+        var layout = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto") };
+        Grid.SetRow(picture, 0);
+        Grid.SetRow(info, 1);
+        layout.Children.Add(picture);
+        layout.Children.Add(info);
+
+        var card = new Border
+        {
+            Background = Avalonia.Media.Brush.Parse("#1E2A35"),
+            CornerRadius = new CornerRadius(10),
+            ClipToBounds = true,
+            BorderThickness = new Thickness(2),
+            BorderBrush = Avalonia.Media.Brush.Parse("#24303A"),
+            Child = layout
+        };
+
+        void SyncCardState()
+        {
+            check.IsChecked = entry.IsSelected;
+            check.IsVisible = entry.IsCheckVisible;
+            card.BorderBrush = entry.IsSelected
+                ? Avalonia.Media.Brush.Parse("#5864E8")
+                : entry.IsHovered ? Avalonia.Media.Brush.Parse("#5C6D7E") : Avalonia.Media.Brush.Parse("#24303A");
+        }
+
+        entry.PropertyChanged += (_, _) => SyncCardState();
+        card.PointerEntered += (_, _) => entry.IsHovered = true;
+        card.PointerExited += (_, _) => entry.IsHovered = false;
+        // Whole card is a hit target for ticking, same as the library tile -
+        // aiming for the checkbox itself is fussy at this size. Only when there
+        // is something to tick; with one clip the Open button is the action.
+        card.PointerPressed += (_, _) =>
+        {
+            if (entry.ShowCheckBox) entry.IsSelected = !entry.IsSelected;
+        };
+
+        return card;
+    }
+
+    private void RememberSessionClip(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return;
+        if (_sessionNewClipPaths.Any(existing => string.Equals(existing, path, StringComparison.OrdinalIgnoreCase))) return;
+        _sessionNewClipPaths.Add(path);
+    }
+
+    // A Full Session VOD is muxed on a background thread and can land minutes
+    // after the game closed, so it is never available at the moment the popup
+    // would first be shown. Collecting it here instead means it either joins a
+    // popup that is still open, or brings up its own - both correct, and
+    // neither makes the clips wait on the mux.
+    private void ViewModel_OnClipAdded(object? sender, ClipCardViewModel clip)
+    {
+        if (!_sessionCollectingClips || ViewModel is null) return;
+        if (!clip.IsVod) return;
+        RememberSessionClip(clip.Path);
+        if (_newClipsDialog is not null) ShowNewClipsDialog();
+        else if (!ViewModel.IsReplayRecording) ShowNewClipsDialog();
+    }
+
     private void ShowGameDetectedNotification(string gameName)
     {
         if (ViewModel is null || !ViewModel.Settings.EnableGameDetectedOverlay) return;
@@ -2097,7 +2430,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private const double OverlaySlideDistance = 28;
     private Border? _overlayBadge;
     private Border? _overlayAccent;
     private TextBlock? _overlayLabel;
@@ -2181,7 +2513,6 @@ public sealed partial class MainWindow : Window
             CornerRadius = new CornerRadius(8),
             BoxShadow = Avalonia.Media.BoxShadows.Parse("0 10 28 0 #70000000"),
             RenderTransform = _overlayTranslate,
-            Opacity = 0,
             ClipToBounds = true,
             Child = new DockPanel { Children = { _overlayAccent, content } }
         };
@@ -2195,22 +2526,22 @@ public sealed partial class MainWindow : Window
             Topmost = true,
             Background = Avalonia.Media.Brushes.Transparent,
             TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
-            SizeToContent = SizeToContent.WidthAndHeight,
+            // Height only - Width is assigned per show, since it has to reach
+            // from the badge's resting position out to the screen edge to give
+            // the slide somewhere to go. See ShowClipSavedOverlay.
+            SizeToContent = SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.Manual,
             Content = _overlayBadge
         };
 
-        // Transitions are attached once. They're only ever driven by assigning
-        // Opacity/X below, and the enter state is set without them in effect by
-        // assigning before the window is shown.
-        _overlayBadge.Transitions =
-        [
-            new Avalonia.Animation.DoubleTransition
-            {
-                Property = Visual.OpacityProperty,
-                Duration = TimeSpan.FromMilliseconds(200)
-            }
-        ];
+        // Movement only, deliberately no opacity transition: the badge slides
+        // in and out from off screen and never fades. A cross-fade on top of
+        // the slide is what made the old 28px nudge read as "appears and
+        // disappears" rather than as something arriving from the edge.
+        //
+        // Attached once. Only ever driven by assigning X below, and the enter
+        // state is set without the transition in effect by assigning before the
+        // window is shown.
         _overlayTranslate.Transitions =
         [
             new Avalonia.Animation.DoubleTransition
@@ -2320,22 +2651,35 @@ public sealed partial class MainWindow : Window
         var screen = ScreenForOverlay();
         var area = screen?.WorkingArea ?? new PixelRect(0, 0, 1920, 1080);
         var scaling = screen?.Scaling ?? 1.0;
-        var marginDevicePixels = (int)Math.Round(24 * scaling);
-        var widthDevicePixels = (int)Math.Round(desiredWidth * scaling);
-        var x = isLeft
-            ? area.X + marginDevicePixels
-            : area.X + area.Width - widthDevicePixels - marginDevicePixels;
+        const double MarginDips = 24;
+
+        // The window spans from the badge's resting spot all the way to the
+        // screen edge, rather than hugging the badge. That strip is the runway:
+        // translating the badge by the window's full width carries it past the
+        // window's own bounds, where it is clipped - which is what actually
+        // reads as sliding off the screen. A badge-sized window could only ever
+        // nudge the badge around inside itself.
+        var travel = desiredWidth + MarginDips;
+        _activeClipOverlay.Width = travel;
+
+        var travelDevicePixels = (int)Math.Round(travel * scaling);
+        var marginDevicePixels = (int)Math.Round(MarginDips * scaling);
+        var x = isLeft ? area.X : area.X + area.Width - travelDevicePixels;
         _activeClipOverlay.Position = new PixelPoint(x, area.Y + marginDevicePixels);
+
+        // Badge sits against the window's INNER side so its resting position is
+        // unchanged - MarginDips from the screen edge, exactly where it has
+        // always been. The runway is the space on the outer side.
+        _overlayBadge.HorizontalAlignment = isLeft ? HorizontalAlignment.Right : HorizontalAlignment.Left;
 
         // Slides in FROM the edge it's pinned to, toward its resting position -
         // left-pinned slides in moving right, right-pinned slides in moving left
         // (the "reverse"). Set before Show() (the window isn't visible yet, so
         // this is the instant starting state rather than an animated jump), then
-        // flipped to identity/opaque one frame later so the transitions have a
+        // flipped to the resting value one frame later so the transition has a
         // "from" state to animate away from instead of both values landing in
         // the same layout pass with nothing visibly in between.
-        _overlayBadge.Opacity = 0;
-        _overlayTranslate.X = isLeft ? -OverlaySlideDistance : OverlaySlideDistance;
+        _overlayTranslate.X = isLeft ? -travel : travel;
 
         _activeClipOverlay.Show();
 
@@ -2349,6 +2693,7 @@ public sealed partial class MainWindow : Window
         // a window over a fullscreen game is what makes the game minimise, and
         // an overlay that costs you the game is worse than no overlay.
         MakeWindowNonActivating(_activeClipOverlay);
+        MakeWindowClickThrough(_activeClipOverlay);
         ApplyCaptureExclusion(_activeClipOverlay, ViewModel?.Settings.ExcludeOverlaysFromCapture ?? true);
         var overlayHandle = NativeHandleOf(_activeClipOverlay);
         if (overlayHandle != IntPtr.Zero)
@@ -2358,14 +2703,13 @@ public sealed partial class MainWindow : Window
 
         Dispatcher.UIThread.Post(() =>
         {
-            if (_overlayBadge is null || _overlayTranslate is null) return;
-            _overlayBadge.Opacity = 1;
+            if (_overlayTranslate is null) return;
             _overlayTranslate.X = 0;
             // Sound used to fire the instant this method was called - well
-            // before the slide/fade-in transition below even started, so it
-            // landed a couple hundred ms ahead of anything visibly happening.
-            // Playing it here instead, right as the "pop in" begins, actually
-            // lines the two up.
+            // before the slide transition below even started, so it landed a
+            // couple hundred ms ahead of anything visibly happening. Playing it
+            // here instead, right as the slide-in begins, actually lines the
+            // two up.
             if (playSound) PlayClipNotificationSound();
         }, DispatcherPriority.Loaded);
 
@@ -2374,10 +2718,9 @@ public sealed partial class MainWindow : Window
         {
             closeTimer.Stop();
             _activeClipOverlayCloseTimer = null;
-            // Slide back out the same way it came in, then hide once that
-            // transition has actually had time to finish playing.
-            if (_overlayBadge is not null) _overlayBadge.Opacity = 0;
-            if (_overlayTranslate is not null) _overlayTranslate.X = isLeft ? -OverlaySlideDistance : OverlaySlideDistance;
+            // Slide back out the same way it came in - no fade, it just leaves -
+            // then hide once that transition has had time to finish playing.
+            if (_overlayTranslate is not null) _overlayTranslate.X = isLeft ? -travel : travel;
             var hideAfterExit = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(260) };
             hideAfterExit.Tick += (_, _) =>
             {
@@ -6230,6 +6573,7 @@ public sealed partial class MainWindow : Window
     private const uint SwpNoActivate = 0x0010;
     private const int GwlExStyle = -20;
     private const long WsExNoActivate = 0x08000000L;
+    private const long WsExTransparent = 0x00000020L;
 
     [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint affinity);
@@ -6275,6 +6619,22 @@ public sealed partial class MainWindow : Window
         var exStyle = (long)GetWindowLongPtr(handle, GwlExStyle);
         if ((exStyle & WsExNoActivate) != 0) return;
         SetWindowLongPtr(handle, GwlExStyle, (IntPtr)(exStyle | WsExNoActivate));
+    }
+
+    // WS_EX_TRANSPARENT on top of the above: the clip overlay's window now
+    // stretches from the badge out to the screen edge to give the slide a
+    // runway, and most of that strip is empty and fully transparent. Without
+    // this it would still hit-test, so for the couple of seconds the overlay is
+    // up, clicks landing in that empty strip would hit nothing instead of
+    // reaching the window underneath. Purely decorative window, no input to
+    // lose by making the whole thing click-through.
+    private static void MakeWindowClickThrough(Window window)
+    {
+        var handle = NativeHandleOf(window);
+        if (handle == IntPtr.Zero) return;
+        var exStyle = (long)GetWindowLongPtr(handle, GwlExStyle);
+        if ((exStyle & WsExTransparent) != 0) return;
+        SetWindowLongPtr(handle, GwlExStyle, (IntPtr)(exStyle | WsExTransparent));
     }
 
 
