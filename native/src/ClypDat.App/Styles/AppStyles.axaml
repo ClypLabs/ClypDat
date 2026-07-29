@@ -142,6 +142,45 @@
     <Setter Property="Padding" Value="0" />
     <Setter Property="BorderThickness" Value="0" />
   </Style>
+  <!--
+    Same root cause (and same fix) as ExportButton further down: Fluent's own
+    Button ControlTemplate paints its pointerover state from a theme resource
+    rather than from Background via TemplateBinding. Over the video these
+    buttons lost their fill the moment the pointer touched them, leaving bare
+    icons floating on the picture - the hover bar's "buttons go transparent
+    and become hard to see on hover". A minimal template puts Background back
+    in charge so the pointerover/pressed setters below actually land.
+  -->
+  <Style Selector="Button.transportButton, Button.playButton">
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="{TemplateBinding CornerRadius}">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                            Padding="{TemplateBinding Padding}"
+                            Foreground="{TemplateBinding Foreground}"
+                            FontSize="{TemplateBinding FontSize}"
+                            FontWeight="{TemplateBinding FontWeight}"
+                            HorizontalContentAlignment="Center"
+                            VerticalContentAlignment="Center" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <Style Selector="Button.transportButton:pointerover">
+    <Setter Property="Background" Value="#334554" />
+  </Style>
+  <Style Selector="Button.transportButton:pressed">
+    <Setter Property="Background" Value="#3E5265" />
+  </Style>
+  <Style Selector="Button.playButton:pointerover">
+    <Setter Property="Background" Value="#3A4857" />
+  </Style>
+  <Style Selector="Button.playButton:pressed">
+    <Setter Property="Background" Value="#45566A" />
+  </Style>
   <Style Selector="Button.primaryButton">
     <Setter Property="Background" Value="{StaticResource AccentBrush}" />
     <Setter Property="Foreground" Value="#FFFFFF" />
