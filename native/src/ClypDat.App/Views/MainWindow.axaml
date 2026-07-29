@@ -695,11 +695,14 @@
             </Grid>
           </Border>
 
-        <!-- Bottom margin dropped (was 18 all around) - a bottom inset here
-             stopped the library short of the window's actual bottom edge,
-             leaving a bare strip of background below the last row instead
-             of just letting a partial row clip against the real edge. -->
-        <Grid Margin="20,18,20,0">
+        <!-- Top and bottom margins both dropped (was 18 all around). A bottom
+             inset stopped the library short of the window's actual bottom edge,
+             leaving a bare strip of background below the last row instead of
+             just letting a partial row clip against the real edge; a top inset
+             did the same thing against the heading/search bar above, holding the
+             cards away from it so they were cut off mid-thumbnail by empty
+             background rather than by the bar itself. -->
+        <Grid Margin="20,0,20,0">
         <DockPanel>
 
           <!-- "Building your library..." banner - HydrateLibraryClipsAsync
@@ -752,7 +755,7 @@
           <Grid ColumnDefinitions="*,Auto">
           <!-- Date scrubber (right column, below) replaces the default
                scrollbar, so hide the ScrollViewer's own. -->
-          <ScrollViewer Grid.Column="0" x:Name="LibraryScrollViewer" Margin="-4,14,-4,0" VerticalScrollBarVisibility="Hidden">
+          <ScrollViewer Grid.Column="0" x:Name="LibraryScrollViewer" Margin="-4,0,-4,0" VerticalScrollBarVisibility="Hidden">
             <ItemsControl ItemsSource="{Binding AllClips}">
               <!-- WrapPanel, not UniformGrid - UniformGrid pre-computes its
                    row/column count from the total child count (including
