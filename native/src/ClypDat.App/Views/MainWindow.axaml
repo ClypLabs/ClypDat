@@ -1281,11 +1281,21 @@
                 <TextBlock Text="Turn the on-screen confirmation and sound on or off, and choose where and how loud it is when a clip saves." Foreground="#93A6B8" TextWrapping="Wrap" />
               </StackPanel>
 
-              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clip saved overlay|Show clipping started overlay|Show auto-clip detected overlay|Show auto-clip failed overlay|Overlay position}">
+              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clip saved overlay|Hide overlays from screen capture|Show clipping started overlay|Show auto-clip detected overlay|Show auto-clip failed overlay|Overlay position}">
                 <StackPanel Spacing="18">
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clip saved overlay}">
                     <TextBlock Text="Show clip saved overlay" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableClipOverlay}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                  </Grid>
+
+                  <Border Height="1" Background="#1B242D" />
+
+                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Hide overlays from screen capture}">
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                      <TextBlock Text="Hide overlays from screen capture" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                      <TextBlock Text="Overlays stay on your screen but are left out of clips, Discord screenshare and OBS. Needs Windows 10 build 19041 or newer." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding ExcludeOverlaysFromCapture}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
 
                   <Border Height="1" Background="#1B242D" />
