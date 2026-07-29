@@ -467,17 +467,20 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         ID3D11VideoProcessor? videoProcessor = null;
         ID3D11Texture2D? croppedTexture = null;
         ID3D11Texture2D? nv12Output = null;
-        // Two staging textures instead of one, alternated each frame: Map()
-        // without DoNotWait blocks until the GPU finishes EVERYTHING queued
-        // before it, and mapping the texture we just issued a CopyResource
-        // into forces exactly that stall (measured 12-14ms, wildly variable
-        // with GPU load - defeating much of the point of GPU scale). Copying
-        // into one slot while mapping the OTHER slot (whose copy had a full
-        // iteration's worth of async time to actually finish) avoids the
-        // stall entirely - standard double-buffered GPU readback.
+        // A ring of staging textures rather than one: Map() without DoNotWait
+        // blocks until the GPU finishes EVERYTHING queued before it, and
+        // mapping the texture we just issued a CopyResource into forces exactly
+        // that stall (measured 12-14ms, wildly variable with GPU load -
+        // defeating much of the point of GPU scale). Writing one slot while
+        // reading an older one whose copy has had time to finish avoids it -
+        // standard multi-buffered GPU readback. See the read logic in
+        // EncodeScheduledFrame for how a slot is chosen.
         ID3D11Texture2D[]? nv12StagingRing = null;
         var nv12StagingIndex = 0;
-        var nv12RingPrimed = false;
+        // How many slots hold a copy that was actually issued. Only matters
+        // while the ring fills for the first time; after that every slot has
+        // been written at least once and this pins at the ring's length.
+        var nv12RingWritten = 0;
         ID3D11VideoProcessorOutputView? outputView = null;
         ID3D11VideoProcessorInputView? inputView = null;
         var useGpuScale = false;
@@ -1390,7 +1393,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 useGpuScale = false;
                             }
                             nv12StagingIndex = 0;
-                            nv12RingPrimed = false;
+                            nv12RingWritten = 0;
                             // Every texture the pending crop referred to belongs to the
                             // old device and has just been replaced.
                             croppedDirty = false;
@@ -1501,49 +1504,60 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // encode means frame->data still holds the right content and this is
                     // a deliberate duplicate, exactly like the occlusion freeze.
                     //
-                    // Still copies into one ring slot while mapping the OTHER: mapping the
-                    // slot just written stalls until the GPU drains everything queued
-                    // ahead of it (measured 12-14ms - see nv12StagingRing's declaration),
-                    // which would cost far more than the per-present conversion this is
-                    // replacing. Pairing across encode ticks rather than across presents
-                    // means frame->data trails by one encode interval instead of one
-                    // present interval; for a replay buffer that is immaterial, and it
-                    // makes staleness track the encode cadence rather than free-running
-                    // present timing, which is steadier than what it replaced.
+                    // Reads back with DoNotWait, newest ready slot first, and never
+                    // blocks. A fixed "map the slot from N ticks ago" pairing has to
+                    // pick one number for two things it cannot satisfy at once: small
+                    // enough that frame->data isn't needlessly stale, large enough that
+                    // the copy has finished even when the GPU is running late. Two slots
+                    // gave the copy exactly one encode interval, and a 4K game spiking
+                    // blew straight through that - the Map then blocked, which is what
+                    // turned a brief GPU spike into avgScaleMs of 25-92ms, a full encode
+                    // queue and ~100 dropped frames per 2s window.
+                    //
+                    // Asking instead means staleness stays at one interval whenever the
+                    // GPU is keeping up, and degrades to two or three only while it
+                    // isn't, rather than the whole pipeline stalling. If nothing is
+                    // ready at all, frame->data keeps its previous content and this tick
+                    // encodes a duplicate - the same graceful outcome as the occlusion
+                    // freeze, and far cheaper than waiting.
                     if (useGpuScale && croppedDirty)
                     {
-                        ffmpeg.av_frame_make_writable(frame);
                         stageStopwatch.Restart();
                         var stream = new VideoProcessorStream { Enable = true, InputSurface = inputView };
                         videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, new[] { stream });
+                        var ringLength = nv12StagingRing!.Length;
                         var currentRingIndex = nv12StagingIndex;
-                        device.ImmediateContext.CopyResource(nv12StagingRing![currentRingIndex], nv12Output);
+                        device.ImmediateContext.CopyResource(nv12StagingRing[currentRingIndex], nv12Output);
+                        if (nv12RingWritten < ringLength) nv12RingWritten++;
                         copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
 
-                        // First conversion has no previous slot ready yet, so it is
-                        // skipped (frame->data keeps its FillFrameBlack content for that
-                        // one frame - same as any other single-frame freeze).
-                        if (nv12RingPrimed)
+                        stageStopwatch.Restart();
+                        // k=1 is the slot written on the previous tick (freshest of the
+                        // finished ones), counting back to the oldest still held.
+                        for (var k = 1; k < nv12RingWritten; k++)
                         {
-                            var previousRingIndex = 1 - currentRingIndex;
-                            stageStopwatch.Restart();
-                            var mapped = device.ImmediateContext.Map(nv12StagingRing[previousRingIndex], 0, MapMode.Read, MapFlags.None);
+                            var candidate = ((currentRingIndex - k) % ringLength + ringLength) % ringLength;
+                            var mapResult = device.ImmediateContext.Map(
+                                nv12StagingRing[candidate], 0u, MapMode.Read, MapFlags.DoNotWait, out var mapped);
+                            // DXGI_ERROR_WAS_STILL_DRAWING - this slot's copy has not
+                            // landed yet, so try an older one rather than wait on it.
+                            if (mapResult.Failure) continue;
+
                             try
                             {
+                                ffmpeg.av_frame_make_writable(frame);
                                 CopyNv12PlanesToFrame(mapped, outputWidth, outputHeight, frame);
                             }
                             finally
                             {
-                                device.ImmediateContext.Unmap(nv12StagingRing[previousRingIndex], 0);
+                                device.ImmediateContext.Unmap(nv12StagingRing[candidate], 0);
                             }
-                            scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
-                        }
-                        else
-                        {
-                            nv12RingPrimed = true;
-                        }
 
-                        nv12StagingIndex = 1 - currentRingIndex;
+                            break;
+                        }
+                        scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
+
+                        nv12StagingIndex = (currentRingIndex + 1) % ringLength;
                         croppedDirty = false;
                     }
 
@@ -2042,8 +2056,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             throw new InvalidOperationException($"CreateVideoProcessorOutputView failed: {error.Message}", error);
         }
 
+        // Four slots, not two. Depth here buys tolerance for the GPU running
+        // late: the readback of a slot can only be picked up once its copy has
+        // actually finished, and under real contention (a 4K game spiking) that
+        // took longer than the single encode interval two slots allow, which
+        // showed up as the readback blocking and cascading into dropped frames.
+        // Costs three extra NV12 surfaces - a few MB at 1080p.
         var nv12StagingRing = new[]
         {
+            CreateNv12StagingTexture(device, outputWidth, outputHeight),
+            CreateNv12StagingTexture(device, outputWidth, outputHeight),
             CreateNv12StagingTexture(device, outputWidth, outputHeight),
             CreateNv12StagingTexture(device, outputWidth, outputHeight)
         };
