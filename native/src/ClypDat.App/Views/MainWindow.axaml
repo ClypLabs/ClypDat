@@ -2717,7 +2717,8 @@
          code-behind too (into NewClipsTitleText/NewClipsCardsPanel below),
          same as before, just targeting this embedded tree instead of a
          Window's own body. -->
-    <Border x:Name="NewClipsOverlay" Grid.RowSpan="2" Background="#AA000000" IsVisible="False">
+    <Border x:Name="NewClipsOverlay" Grid.RowSpan="2" Background="#AA000000" IsVisible="False"
+            PointerPressed="NewClipsOverlay_OnPointerPressed">
       <Border x:Name="NewClipsDialogCard" MaxHeight="860" CornerRadius="12" Background="#111920" BorderBrush="#232F3A" BorderThickness="1"
               ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center">
         <DockPanel LastChildFill="True">

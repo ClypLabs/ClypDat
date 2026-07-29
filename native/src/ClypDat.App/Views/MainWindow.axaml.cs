@@ -2298,6 +2298,21 @@ public sealed partial class MainWindow : Window
 
     private void NewClipsCloseButton_OnClick(object? sender, RoutedEventArgs e) => DismissNewClipsDialog();
 
+    // The scrim spans both root rows so it darkens the title bar too, which also
+    // means it swallows the title bar's own drag - leaving the whole app stuck in
+    // place for as long as the popup was up. Dragging the scrim where it covers
+    // the title bar moves the WINDOW instead, so the app stays movable while the
+    // popup itself (being part of that window rather than its own) still cannot
+    // be moved independently. Presses on the dialog card never reach here - it
+    // handles its own - so only the surrounding scrim is draggable.
+    private void NewClipsOverlay_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(NewClipsOverlay).Properties.IsLeftButtonPressed) return;
+        // Row 0's height in RootLayout - matches the header the drag belongs to.
+        if (e.GetPosition(NewClipsOverlay).Y > 48) return;
+        BeginMoveDrag(e);
+    }
+
     private async void NewClipsDeleteButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || _currentNewClipsEntries.Count == 0) return;
@@ -5948,7 +5963,25 @@ public sealed partial class MainWindow : Window
         try
         {
             var entries = System.Text.Json.JsonSerializer.Deserialize<List<PausedRangeEntry>>(File.ReadAllText(sidecarPath));
-            return entries?.Select(e => (e.start, e.end)).ToList() ?? new();
+            var ranges = entries?.Select(e => (StartSeconds: e.start, EndSeconds: e.end)).ToList() ?? new();
+
+            // Catches clips trimmed BEFORE ClipInfo.IsTrimmed existed, which have
+            // no flag to go on. Pause offsets belong to the original recording,
+            // so a sidecar describing a timeline longer than the file itself can
+            // only be left over from before a trim - the ranges cannot be mapped
+            // back and the badge they produce is wrong wherever it lands. One
+            // second of slack so ordinary rounding between the sidecar's own
+            // window and the muxed file's duration is not mistaken for staleness.
+            var duration = ViewModel?.Duration ?? TimeSpan.Zero;
+            if (duration > TimeSpan.Zero && ranges.Count > 0 &&
+                ranges.Max(range => range.EndSeconds) > duration.TotalSeconds + 1)
+            {
+                AppLog.Info($"Ignoring recording-paused sidecar for {Path.GetFileName(videoPath)}: ranges run to " +
+                            $"{ranges.Max(range => range.EndSeconds):0.0}s but the clip is only {duration.TotalSeconds:0.0}s - stale after a trim.");
+                return new();
+            }
+
+            return ranges;
         }
         catch (Exception error)
         {
@@ -6022,18 +6055,23 @@ public sealed partial class MainWindow : Window
         }
 
         var overlay = EnsureRecordingPausedOverlay();
-        RepositionPausedOverlay(overlay);
-        if (!overlay.IsVisible) overlay.Show(this);
-        // RepositionPausedOverlay just claimed the top of the owner's z-band, and
-        // this runs on every playback tick via RefreshPausedBadge - so without
-        // putting the hover bar back above it, the badge's dark scrim sits over
-        // the playback controls and dims them. force: the bar has not moved, so
-        // the skip-if-unchanged check would return before re-asserting z-order.
-        RepositionEditorHoverControlsSafe(force: true);
+        var wasHidden = !overlay.IsVisible;
+        var raised = RepositionPausedOverlay(overlay);
+        if (wasHidden) overlay.Show(this);
+        // Only when the badge actually claimed the top of the z-band does the
+        // hover bar need putting back above it. Doing this unconditionally
+        // re-ordered two owned windows on EVERY playback tick (RefreshPausedBadge
+        // runs from the playback timer), and that constant reshuffling is what
+        // made the bar flicker over the badge. force: the bar itself has not
+        // moved, so the skip-if-unchanged check would otherwise return before
+        // re-asserting z-order.
+        if (raised || wasHidden) RepositionEditorHoverControlsSafe(force: true);
         ApplyCaptureExclusion(overlay, ViewModel.Settings.ExcludeOverlaysFromCapture);
     }
 
-    private void RepositionPausedOverlay(Window overlay)
+    // Returns true when it actually re-asserted the window's z-order, so the
+    // caller knows whether anything else needs putting back on top of it.
+    private bool RepositionPausedOverlay(Window overlay)
     {
         // Guarded - PointToScreen can throw while EditorVideoView is
         // momentarily detached from the visual tree (the fullscreen reparent),
@@ -6043,9 +6081,26 @@ public sealed partial class MainWindow : Window
         {
             var topLeft = EditorVideoView.PointToScreen(new Point(0, 0));
             var bottomRight = EditorVideoView.PointToScreen(new Point(EditorVideoView.Bounds.Width, EditorVideoView.Bounds.Height));
+            var width = Math.Max(1, (bottomRight.X - topLeft.X) / overlay.RenderScaling);
+            var height = Math.Max(1, (bottomRight.Y - topLeft.Y) / overlay.RenderScaling);
+            var handle = NativeHandleOf(overlay);
+
+            // Skip entirely when nothing has actually moved - same
+            // skip-if-unchanged guard the hover bar uses, and read from the REAL
+            // window rect rather than Avalonia's Position (which just echoes back
+            // whatever was last assigned). This runs on every playback timer tick,
+            // and re-asserting z-order that often is what made the hover bar
+            // above it flicker.
+            if (handle != IntPtr.Zero && GetWindowRect(handle, out var nativeRect) &&
+                nativeRect.Left == topLeft.X && nativeRect.Top == topLeft.Y &&
+                Math.Abs(overlay.Width - width) < 0.5 && Math.Abs(overlay.Height - height) < 0.5)
+            {
+                return false;
+            }
+
             overlay.Position = topLeft;
-            overlay.Width = Math.Max(1, (bottomRight.X - topLeft.X) / overlay.RenderScaling);
-            overlay.Height = Math.Max(1, (bottomRight.Y - topLeft.Y) / overlay.RenderScaling);
+            overlay.Width = width;
+            overlay.Height = height;
 
             // Re-assert the top of the owner's z-band, exactly as the hover bar
             // does (see RepositionEditorHoverControls). Showing an owned window
@@ -6055,16 +6110,18 @@ public sealed partial class MainWindow : Window
             // it only appeared when playback was paused - pausing just stops
             // the repaints that were covering it. NOACTIVATE so it never takes
             // focus off the editor.
-            var handle = NativeHandleOf(overlay);
             if (handle != IntPtr.Zero)
             {
                 SetWindowPos(handle, HwndTop, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
+                return true;
             }
         }
         catch (Exception error)
         {
             AppLog.Error("Paused overlay reposition failed (recovered)", error);
         }
+
+        return false;
     }
 
     // Keeps the badge glued to the video area during window drags/resizes -
