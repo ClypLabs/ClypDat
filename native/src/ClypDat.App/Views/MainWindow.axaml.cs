@@ -3363,6 +3363,16 @@ public sealed partial class MainWindow : Window
     }
 
 
+    private void ClearSettingsSearchButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is not null) ViewModel.SettingsSearchText = string.Empty;
+    }
+
+    private void ClearLibrarySearchButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is not null) ViewModel.LibrarySearchText = string.Empty;
+    }
+
     private void SettingsNavButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: string section } && ViewModel is not null)

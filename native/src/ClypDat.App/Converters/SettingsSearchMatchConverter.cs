@@ -27,42 +27,51 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
     // exactly one match, so the user lands there without an extra click.
     private static readonly Dictionary<string, string[]> SectionKeywords = new(StringComparer.OrdinalIgnoreCase)
     {
+        // Card headers (Startup, Layout, Recording, Encoding, ...) are listed
+        // alongside the individual setting names: the headers are what a user
+        // scanning the page actually remembers, so they have to be searchable
+        // too, and a card whose header matches still needs its section to
+        // survive the nav filter or the page it lives on never appears.
         ["General"] = new[]
         {
-            "Startup", "Launch ClypDat on Windows boot", "Start minimized on boot", "Layout", "Show status panel",
+            "Startup", "Launch ClypDat on Windows boot", "Start minimized on boot", "Process priority",
+            "Layout", "Show status panel",
             "Playback Paused indicator", "Scale clips with window size", "Hoverbar",
             "Combine sidebar filters", "Clip Filenames", "Template", "Rename all"
         },
         ["Game Detection"] = new[]
         {
-            "Add a running game", "browse for an executable", "Game icons", "Refresh game icons",
-            "Excluded from detection", "capture backend override"
+            "Add games", "Add a running game", "browse for an executable", "Game icons", "Refresh game icons",
+            "Excluded games", "Excluded from detection", "capture backend override"
         },
         ["Import from Medal"] = new[]
         {
-            "Strip emoji from titles", "Copy instead of move", "Scan for Medal clips"
+            "Import options", "Strip emoji from titles", "Copy instead of move", "Scan", "Scan for Medal clips"
         },
         ["Replay Buffer"] = new[]
         {
-            "Save hotkey", "Replay length", "Resolution", "Frame rate", "Capture backend",
+            "Hotkey", "Save hotkey", "Recording", "Replay length", "Resolution", "Frame rate",
+            "Encoding", "Encoder preset", "Rate control", "Quality", "Bitrate", "Capture backend",
             "Full session recording", "Destination folder", "Session codec",
             "Finalize in background", "Storage limit", "Custom limit"
         },
         ["Overlays and Notifications"] = new[]
         {
-            "clip saved overlay", "Overlay position", "clip saved sound", "Sound volume"
+            "Overlays", "clip saved overlay", "Hide overlays from screen capture",
+            "clipping started overlay", "auto-clip detected overlay", "auto-clip failed overlay",
+            "Overlay position", "Sound", "clip saved sound", "Sound volume"
         },
         // Plus every individual game's own name (Counter-Strike 2, Dota 2,
         // etc.) via AutoClipGameNames below - a per-game name never appears
         // in the section's own static keyword list, since the catalog is
         // the actual source of truth for what games exist.
-        ["Auto-Clip"] = new[] { "Auto Capture Events" }.Concat(AutoClipGameNames).ToArray(),
+        ["Auto-Clip"] = new[] { "Auto Capture", "Auto Capture Events" }.Concat(AutoClipGameNames).ToArray(),
         ["Audio"] = new[]
         {
-            "Chat Audio App", "Multiple apps", "Microphone", "Multiple mics",
-            "noise suppression", "Strength", "Audio sync offset"
+            "Audio sources", "Chat Audio App", "Multiple apps", "Microphone", "Multiple mics",
+            "Noise suppression", "Strength", "Audio sync", "Audio sync offset"
         },
-        ["Game Audio Exclusions"] = new[] { "Excluded", "exclusions" },
+        ["Game Audio Exclusions"] = new[] { "Excluded apps", "Excluded", "exclusions" },
         ["About"] = new[]
         {
             "Updates", "Check for updates", "Source and Licenses", "View on GitHub", "Diagnostics",
