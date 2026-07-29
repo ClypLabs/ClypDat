@@ -2042,7 +2042,12 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null || !ViewModel.Settings.EnableGameDetectedOverlay) return;
         try
         {
-            ShowClipSavedOverlay(ViewModel.Settings.ClipOverlayPosition, $"Clipping started - {gameName}", playSound: false);
+            // The one notification with something to teach: it fires as the
+            // buffer arms, which is exactly the moment the save hotkey becomes
+            // worth knowing. Every other overlay in this family reports
+            // something that already happened and stays a single line.
+            ShowClipSavedOverlay(ViewModel.Settings.ClipOverlayPosition, $"Clipping started - {gameName}", playSound: false,
+                hotkey: ViewModel.Settings.SaveReplayHotkey, hotkeyHint: "to save a clip");
         }
         catch (Exception error)
         {
@@ -2096,6 +2101,7 @@ public sealed partial class MainWindow : Window
     private Border? _overlayBadge;
     private Border? _overlayAccent;
     private TextBlock? _overlayLabel;
+    private StackPanel? _overlayHintRow;
     private TranslateTransform? _overlayTranslate;
     private DispatcherTimer? _overlayHideTimer;
 
@@ -2121,7 +2127,7 @@ public sealed partial class MainWindow : Window
         var accentBrush = (Application.Current?.Resources["AccentBrush"] as IBrush) ?? Avalonia.Media.Brush.Parse("#13C8B5");
         _overlayAccent = new Border
         {
-            Width = 7,
+            Width = 5,
             Background = accentBrush,
             VerticalAlignment = VerticalAlignment.Stretch
         };
@@ -2129,15 +2135,42 @@ public sealed partial class MainWindow : Window
         {
             Foreground = Avalonia.Media.Brush.Parse("#F5F9FF"),
             FontWeight = Avalonia.Media.FontWeight.Bold,
-            FontSize = 19,
+            FontSize = 17,
             VerticalAlignment = VerticalAlignment.Center
         };
+        // Second line, only populated when a message has a hotkey to teach -
+        // collapsed otherwise so every other notification stays the single
+        // centred line it has always been rather than growing a blank row.
+        _overlayHintRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsVisible = false
+        };
+        var textColumn = new StackPanel
+        {
+            Orientation = Orientation.Vertical,
+            Spacing = 7,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children = { _overlayLabel, _overlayHintRow }
+        };
+
+        var icon = new Image
+        {
+            Width = 26,
+            Height = 26,
+            VerticalAlignment = VerticalAlignment.Center,
+            Source = new Avalonia.Media.Imaging.Bitmap(
+                Avalonia.Platform.AssetLoader.Open(new Uri("avares://ClypDat/Assets/clypdat-icon-48.png")))
+        };
+
         var content = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 14,
-            Margin = new Thickness(22, 20, 26, 20),
-            Children = { _overlayLabel }
+            Margin = new Thickness(18, 16, 24, 16),
+            Children = { icon, textColumn }
         };
         _overlayTranslate = new TranslateTransform();
         _overlayBadge = new Border
@@ -2209,7 +2242,57 @@ public sealed partial class MainWindow : Window
         return Screens.ScreenFromWindow(this) ?? Screens.Primary ?? Screens.All.FirstOrDefault();
     }
 
-    private void ShowClipSavedOverlay(string position, string text, bool playSound)
+    // "Ctrl+Shift+F9" -> [Ctrl] + [Shift] + [F9] as keycap chips, followed by
+    // whatever the hint says the keys do. Built from the live setting rather
+    // than hardcoded, so a rebound hotkey teaches the right keys.
+    private void BuildOverlayHint(string hotkey, string trailingText)
+    {
+        if (_overlayHintRow is null) return;
+        _overlayHintRow.Children.Clear();
+
+        var keys = hotkey.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        for (var i = 0; i < keys.Length; i++)
+        {
+            if (i > 0)
+            {
+                _overlayHintRow.Children.Add(new TextBlock
+                {
+                    Text = "+",
+                    Foreground = Avalonia.Media.Brush.Parse("#8DA0B4"),
+                    FontSize = 13,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+            }
+
+            _overlayHintRow.Children.Add(new Border
+            {
+                Background = Avalonia.Media.Brush.Parse("#2A323C"),
+                BorderBrush = Avalonia.Media.Brush.Parse("#49525E"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(7, 2, 7, 3),
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = new TextBlock
+                {
+                    Text = keys[i],
+                    Foreground = Avalonia.Media.Brush.Parse("#E8EEF6"),
+                    FontWeight = Avalonia.Media.FontWeight.Bold,
+                    FontSize = 13
+                }
+            });
+        }
+
+        _overlayHintRow.Children.Add(new TextBlock
+        {
+            Text = trailingText,
+            Foreground = Avalonia.Media.Brush.Parse("#A8B8C8"),
+            FontSize = 13,
+            Margin = new Thickness(2, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        });
+    }
+
+    private void ShowClipSavedOverlay(string position, string text, bool playSound, string? hotkey = null, string hotkeyHint = "")
     {
         _activeClipOverlayCloseTimer?.Stop();
         _activeClipOverlayCloseTimer = null;
@@ -2223,6 +2306,11 @@ public sealed partial class MainWindow : Window
         // show rather than baked in at construction.
         var isLeft = string.Equals(position, "Top Left", StringComparison.OrdinalIgnoreCase);
         _overlayLabel.Text = text;
+
+        var showHint = !string.IsNullOrWhiteSpace(hotkey);
+        if (showHint) BuildOverlayHint(hotkey!, hotkeyHint);
+        if (_overlayHintRow is not null) _overlayHintRow.IsVisible = showHint;
+
         _overlayAccent.CornerRadius = isLeft ? new CornerRadius(4, 0, 0, 4) : new CornerRadius(0, 4, 4, 0);
         DockPanel.SetDock(_overlayAccent, isLeft ? Dock.Left : Dock.Right);
 
