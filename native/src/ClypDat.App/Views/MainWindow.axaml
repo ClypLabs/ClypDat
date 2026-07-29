@@ -2568,7 +2568,8 @@
               <Image Source="/Assets/clypdat-icon-24.png" Width="16" Height="16" />
               <TextBlock Text="Welcome to ClypDat" Foreground="#B9C6D4" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
             </StackPanel>
-            <Button Grid.Column="2" Classes="dialogClose" Content="?" Width="40" Height="40" Click="OnboardingSkipButton_OnClick" />
+            <Button Grid.Column="2" Classes="dialogClose" Content="✕" FontSize="14" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                    Width="40" Height="40" Click="OnboardingSkipButton_OnClick" />
           </Grid>
 
           <StackPanel DockPanel.Dock="Bottom" Margin="22,0,22,20" Spacing="14">
@@ -2712,13 +2713,16 @@
          same as before, just targeting this embedded tree instead of a
          Window's own body. -->
     <Border x:Name="NewClipsOverlay" Grid.RowSpan="2" Background="#000000AA" IsVisible="False">
-      <Border x:Name="NewClipsDialogCard" MaxHeight="720" CornerRadius="12" Background="#111920" BorderBrush="#232F3A" BorderThickness="1"
+      <Border x:Name="NewClipsDialogCard" MaxHeight="860" CornerRadius="12" Background="#111920" BorderBrush="#232F3A" BorderThickness="1"
               ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center">
         <DockPanel LastChildFill="True">
           <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto" Height="56" Background="#0C1319">
             <TextBlock x:Name="NewClipsTitleText" Grid.Column="1" Foreground="#D8E4F2" FontSize="17" FontWeight="Bold"
                        HorizontalAlignment="Center" VerticalAlignment="Center" />
-            <Button Grid.Column="2" Classes="dialogClose" Content="?" Width="52" Height="56" Click="NewClipsCloseButton_OnClick" />
+            <Button Grid.Column="2" Classes="dialogClose" FontSize="14" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                    Width="52" Height="56" Click="NewClipsCloseButton_OnClick">
+              <TextBlock Text="✕" Margin="0,-3,0,0" />
+            </Button>
           </Grid>
 
           <Border DockPanel.Dock="Bottom" Background="#141B23" BorderBrush="#232F3A" BorderThickness="0,1,0,0">
@@ -2730,7 +2734,7 @@
             </Grid>
           </Border>
 
-          <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="480">
+          <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="620">
             <WrapPanel x:Name="NewClipsCardsPanel" Margin="24,20,24,4" />
           </ScrollViewer>
         </DockPanel>
