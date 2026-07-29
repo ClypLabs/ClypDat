@@ -181,6 +181,30 @@
   <Style Selector="Button.playButton:pressed">
     <Setter Property="Background" Value="#45566A" />
   </Style>
+  <!--
+    Floating hover bar only (.flatControl is applied in code, see
+    BuildPlaybackBarLayout) - the docked playbar and the fullscreen bar keep
+    the filled-box look above. Over the picture those boxes read as a row of
+    grey tiles; bare icons on the scrim read as controls on the video, which
+    is what every player does here. Hover/press are a translucent white wash
+    rather than a solid fill so the button still visibly responds without
+    reintroducing the tile.
+  -->
+  <Style Selector="Button.transportButton.flatControl, Button.playButton.flatControl">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.transportButton.flatControl:pointerover, Button.playButton.flatControl:pointerover">
+    <Setter Property="Background" Value="#26FFFFFF" />
+  </Style>
+  <Style Selector="Button.transportButton.flatControl:pressed, Button.playButton.flatControl:pressed">
+    <Setter Property="Background" Value="#3DFFFFFF" />
+  </Style>
+  <Style Selector="Border.muteToggle.flatControl">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Border.muteToggle.flatControl:pointerover">
+    <Setter Property="Background" Value="#26FFFFFF" />
+  </Style>
   <Style Selector="Button.primaryButton">
     <Setter Property="Background" Value="{StaticResource AccentBrush}" />
     <Setter Property="Foreground" Value="#FFFFFF" />
