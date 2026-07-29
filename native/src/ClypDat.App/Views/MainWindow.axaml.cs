@@ -1932,7 +1932,12 @@ public sealed partial class MainWindow : Window
             // cleared here either) so a Full Session VOD that finalizes minutes
             // after the game closed still has somewhere to land - see
             // ViewModel_OnClipAdded.
-            if (!isQualityRestart) _sessionNewClipPaths.Clear();
+            if (!isQualityRestart)
+            {
+                _sessionNewClipPaths.Clear();
+                // New session, so nothing has been "already seen" for it yet.
+                _dismissedNewClipPaths.Clear();
+            }
             _sessionCollectingClips = true;
             ViewModel.IsReplayRecording = _replayBuffer.IsRecording;
             if (ViewModel.IsReplayRecording)
@@ -2156,6 +2161,13 @@ public sealed partial class MainWindow : Window
     // wired once in XAML and read whatever's current from here instead of each
     // getting a fresh closure-captured delegate stacked on top of the last one.
     private List<NewClipEntryViewModel> _currentNewClipsEntries = new();
+    // Clips the user has already been shown and dismissed (closed the popup, or
+    // clicked one to open it). Without this the popup came straight back for the
+    // same clips - ViewModel_OnClipAdded and the buffer-arm hook both re-show it
+    // - so dismissing it did not stick. Only a clip that is NOT in here can
+    // bring it up again, which is what makes "don't reappear until there are
+    // more clips" true. Cleared when a genuinely new session starts.
+    private readonly HashSet<string> _dismissedNewClipPaths = new(StringComparer.OrdinalIgnoreCase);
 
     private void ShowNewClipsDialog(IReadOnlyList<string>? clipPaths = null)
     {
@@ -2174,6 +2186,15 @@ public sealed partial class MainWindow : Window
         {
             NewClipsOverlay.IsVisible = false;
             _currentNewClipsEntries = new();
+            return;
+        }
+
+        // Nothing here the user hasn't already seen and dismissed - stay down.
+        // A single genuinely new clip is enough to bring it back, showing the
+        // whole set again for context rather than that one clip alone.
+        if (entries.All(entry => _dismissedNewClipPaths.Contains(entry.Path)))
+        {
+            NewClipsOverlay.IsVisible = false;
             return;
         }
 
@@ -2234,9 +2255,25 @@ public sealed partial class MainWindow : Window
         // showing - bring it forward rather than silently dropping the popup.
         if (!IsVisible) Show();
         NewClipsOverlay.IsVisible = true;
+        // How much of the window the popup card actually takes up. The scrim
+        // behind it can only be seen wherever the card ISN'T, so a card nearly
+        // as wide as the window leaves a few px of visible dimming and reads as
+        // "the darkening isn't working" even though it is.
+        AppLog.Info($"New Clips popup shown: {entries.Count} clip(s), cardWidth={NewClipsDialogCard.Width}, " +
+                    $"window={Bounds.Width:0}x{Bounds.Height:0} DIP, scaling={RenderScaling:0.00}, " +
+                    $"overlayVisible={NewClipsOverlay.IsVisible}, scrimPerSide={(Bounds.Width - NewClipsDialogCard.Width) / 2:0}.");
     }
 
-    private void NewClipsCloseButton_OnClick(object? sender, RoutedEventArgs e) => NewClipsOverlay.IsVisible = false;
+    // Hides the popup AND records what was on show, so the same clips can't
+    // bring it straight back (ViewModel_OnClipAdded and the buffer-arm hook both
+    // re-show it otherwise). Only a clip that has never been dismissed will.
+    private void DismissNewClipsDialog()
+    {
+        foreach (var entry in _currentNewClipsEntries) _dismissedNewClipPaths.Add(entry.Path);
+        NewClipsOverlay.IsVisible = false;
+    }
+
+    private void NewClipsCloseButton_OnClick(object? sender, RoutedEventArgs e) => DismissNewClipsDialog();
 
     private async void NewClipsDeleteButton_OnClick(object? sender, RoutedEventArgs e)
     {
@@ -2252,7 +2289,7 @@ public sealed partial class MainWindow : Window
 
     private void NewClipsViewAllButton_OnClick(object? sender, RoutedEventArgs e)
     {
-        NewClipsOverlay.IsVisible = false;
+        DismissNewClipsDialog();
         if (ViewModel is null) return;
         // Land on the library regardless of which view was open underneath -
         // same "close whatever's open first" approach ApplyViewHistoryEntryAsync
@@ -2384,9 +2421,19 @@ public sealed partial class MainWindow : Window
         };
 
         // Hover only now - no selection concept left to compete with it (see
-        // ShowNewClipsDialog/the delete-all-shown-clips button).
+        // ShowNewClipsDialog/the delete-all-shown-clips button), so the whole
+        // card is free to be the "open this clip" target instead.
+        card.Cursor = new Cursor(StandardCursorType.Hand);
         card.PointerEntered += (_, _) => card.BorderBrush = Avalonia.Media.Brush.Parse("#3A4856");
         card.PointerExited += (_, _) => card.BorderBrush = Avalonia.Media.Brush.Parse("#232F3A");
+        card.PointerPressed += async (_, _) =>
+        {
+            // Dismiss before opening: the editor is what the user asked for, and
+            // leaving the popup up over it (or letting it come back) would bury
+            // the very clip they just chose.
+            DismissNewClipsDialog();
+            await OpenClipCardAsync(entry.Clip);
+        };
 
         return card;
     }
