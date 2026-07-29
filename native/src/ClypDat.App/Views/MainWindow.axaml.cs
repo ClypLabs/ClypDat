@@ -4284,7 +4284,20 @@ public sealed partial class MainWindow : Window
     private async Task ShowMessageAsync(string title, string message)
     {
         var dialog = CreateDialog(title, message, false);
-        await dialog.ShowDialog<bool>(this);
+        try
+        {
+            await dialog.ShowDialog<bool>(this);
+        }
+        catch (Exception error)
+        {
+            // ShowDialog throws "Cannot show window with non-visible owner"
+            // if the owner isn't in a state Avalonia considers valid at this
+            // exact moment (e.g. mid cold-boot transition) - same failure mode
+            // ShowEditorHoverControls already guards against. Losing the
+            // dialog is better than an unhandled/unobserved exception escaping
+            // from here with a half-created native window behind it.
+            AppLog.Error($"Failed to show message dialog: {title}", error);
+        }
     }
 
     private async Task<string?> PromptRenameAsync(string currentTitle, string heading = "Rename clip", string watermark = "Clip title")
@@ -5039,6 +5052,17 @@ public sealed partial class MainWindow : Window
                 ViewModel.SetDuration(playback.Duration);
             }
             UpdateTimelineChrome();
+        }
+        catch (OperationCanceledException)
+        {
+            // Every other cancellation point above is a cooperative
+            // "if (cancellationToken.IsCancellationRequested) return;" - this
+            // is the one spot (Task.Delay) that throws instead. Being
+            // superseded by a newer QueueEditorPlayback (the user opening
+            // another clip, or the same one again, before this load settled -
+            // routine right after cold boot while the library is still
+            // hydrating) is not a failure and must not surface an error
+            // dialog for it.
         }
         catch (Exception error)
         {
