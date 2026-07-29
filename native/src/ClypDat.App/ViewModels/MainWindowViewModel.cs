@@ -298,7 +298,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
         _libraryCacheWriteTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _libraryCacheWriteTimer.Tick += (_, _) => WriteLibraryCacheIfDirty();
-        StartInitialLibraryLoad();
+        _ = StartInitialLibraryLoadAsync();
     }
 
     public AppSettings Settings { get; }
@@ -2581,11 +2581,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // A cache hit must not wait for the SMB directory walk. Restore enough
     // cards for several rows immediately, then let the UI breathe between
     // bounded batches while the remaining cached cards arrive.
-    private void StartInitialLibraryLoad()
+    private async Task StartInitialLibraryLoadAsync()
     {
         var root = Settings.LibraryFolder;
         var clock = System.Diagnostics.Stopwatch.StartNew();
-        var cached = _libraryCache.Load(root);
+        // Load is a synchronous SQLite read + per-row JSON deserialize; offload
+        // it so a large cached library doesn't block the window from showing.
+        var cached = await Task.Run(() => _libraryCache.Load(root));
+        if (!string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase))
+        {
+            // Library folder changed again while this load was in flight.
+            return;
+        }
         if (cached.Count == 0)
         {
             _ = RefreshLibraryAsync();
@@ -2695,7 +2702,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(CanRenameAllClips));
         foreach (var clip in AllClips) DetachClip(clip);
         AllClips.Clear();
-        StartInitialLibraryLoad();
+        _ = StartInitialLibraryLoadAsync();
         IsEditorVisible = false;
         SelectedCaptureBackend = string.Empty;
         return Task.CompletedTask;
@@ -6108,16 +6115,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private static Avalonia.Media.Imaging.Bitmap? LoadBitmap(string path)
     {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        if (BitmapCache.TryGet(path, out var cached)) return cached;
+
+        Avalonia.Media.Imaging.Bitmap? bitmap;
         try
         {
-            return !string.IsNullOrWhiteSpace(path) && File.Exists(path)
-                ? new Avalonia.Media.Imaging.Bitmap(path)
-                : null;
+            bitmap = File.Exists(path) ? new Avalonia.Media.Imaging.Bitmap(path) : null;
         }
         catch
         {
-            return null;
+            bitmap = null;
         }
+
+        BitmapCache.Store(path, bitmap);
+        return bitmap;
     }
 
     private static string FormatBytes(long bytes)
