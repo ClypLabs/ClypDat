@@ -58,6 +58,7 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         ["Overlays and Notifications"] = new[]
         {
             "Overlays", "clip saved overlay", "Hide overlays from screen capture",
+            "Show new clips when a game closes",
             "clipping started overlay", "auto-clip detected overlay", "auto-clip failed overlay",
             "Overlay position", "Sound", "clip saved sound", "Sound volume"
         },
