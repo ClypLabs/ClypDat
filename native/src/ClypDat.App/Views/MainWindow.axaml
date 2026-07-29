@@ -151,16 +151,13 @@
                     <Button Content="{Binding HotkeyDisplay}" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
                   </StackPanel>
 
-                  <!-- Frame rate only takes effect on a fresh buffer, so the
-                       restart is offered right where it was changed rather
-                       than leaving the new value silently inactive. -->
+                  <!-- Frame rate only takes effect on a fresh buffer, so a
+                       change here triggers an automatic restart shortly
+                       after - this just reflects that it's in progress. -->
                   <Border Background="#1B2430" BorderBrush="#2C3B48" BorderThickness="1" CornerRadius="7"
                           Padding="10,8" Margin="0,0,0,12" IsVisible="{Binding ReplayQualityRestartRequired}">
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-                      <TextBlock Grid.Column="0" Text="Restart the buffer to apply the new quality." Foreground="#E5A00D"
-                                 FontSize="11.5" FontWeight="Bold" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      <Button Grid.Column="1" Content="Restart" Click="RestartReplayBufferButton_OnClick" VerticalAlignment="Center" />
-                    </Grid>
+                    <TextBlock Text="Restarting the buffer to apply the new quality..." Foreground="#E5A00D"
+                               FontSize="11.5" FontWeight="Bold" TextWrapping="Wrap" VerticalAlignment="Center" />
                   </Border>
 
                   <Border Height="1" Background="#22303A" Margin="0,0,0,10" />
@@ -1132,8 +1129,7 @@
                        was changed, so scoping it to a single section's search
                        filter would hide it exactly when it's relevant. -->
                   <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding ReplayQualityRestartRequired}">
-                    <TextBlock Text="Restart the replay buffer for the capture quality change to take effect." Foreground="#E5A00D" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" TextWrapping="Wrap" />
-                    <Button Content="Restart Buffer" Click="RestartReplayBufferButton_OnClick" />
+                    <TextBlock Text="Restarting the replay buffer to apply the new capture quality..." Foreground="#E5A00D" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" TextWrapping="Wrap" />
                   </StackPanel>
                 </StackPanel>
               </Border>

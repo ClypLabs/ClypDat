@@ -67,6 +67,7 @@ public sealed partial class MainWindow : Window
     private TopLevel? _hotkeyCaptureTopLevel;
     private DispatcherTimer? _hotkeyCaptureTimeout;
     private bool _replayTransitioning;
+    private DispatcherTimer? _replayRestartDebounceTimer;
     private readonly SemaphoreSlim _clipSaveLock = new(1, 1);
     private bool _updateDialogOpen;
     // Closing the window (the X button) hides to the tray instead of quitting,
@@ -193,6 +194,25 @@ public sealed partial class MainWindow : Window
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayBufferEnabled)) _ = ApplyReplayBufferEnabledAsync();
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
+                    if (e.PropertyName == nameof(MainWindowViewModel.ReplayQualityRestartRequired) && ViewModel.ReplayQualityRestartRequired)
+                    {
+                        // Debounced rather than restarting on every keystroke/click -
+                        // a user dragging through resolutions or typing a bitrate
+                        // digit by digit shouldn't tear the buffer down each time.
+                        _replayRestartDebounceTimer?.Stop();
+                        _replayRestartDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };
+                        _replayRestartDebounceTimer.Tick += async (_, _) =>
+                        {
+                            _replayRestartDebounceTimer?.Stop();
+                            _replayRestartDebounceTimer = null;
+                            if (ViewModel is { IsReplayRecording: true, ReplayQualityRestartRequired: true })
+                            {
+                                await StopReplayBufferAsync();
+                                await StartReplayBufferAsync(showErrors: true);
+                            }
+                        };
+                        _replayRestartDebounceTimer.Start();
+                    }
                     if (e.PropertyName == nameof(MainWindowViewModel.IsEditorVisible) && ViewModel.IsLibraryVisible && _libraryReturnAnchorDirty)
                     {
                         _libraryReturnAnchorDirty = false;
@@ -1827,13 +1847,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void RestartReplayBufferButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        if (ViewModel is null || !ViewModel.IsReplayRecording) return;
-        await StopReplayBufferAsync();
-        await StartReplayBufferAsync(showErrors: true);
-    }
-
     private async void ClipButton_OnClick(object? sender, RoutedEventArgs e)
     {
         await SaveReplayClipAsync();
@@ -2099,8 +2112,15 @@ public sealed partial class MainWindow : Window
         // set (a 60s clip plus a two-hour VOD) says nothing useful.
         if (entries.Count == 1) title += $" ({FormatFileSize(entries[0].Clip.SizeBytes)})";
 
+        // Wide enough for a 3-across grid of cards (see BuildNewClipCard)
+        // plus the WrapPanel's inter-card spacing and CreateChromelessDialog's
+        // own 22px-a-side body margin, rather than the single narrow column
+        // this used to stack every card into.
+        const int cardWidth = 300;
+        const int cardSpacing = 16;
+
         var (window, body) = CreateChromelessDialog(title);
-        window.Width = 520;
+        window.Width = 3 * cardWidth + 2 * cardSpacing + 44;
         window.MaxHeight = 720;
         _newClipsDialog = window;
         // Deliberately no SetPreviewVisible(false) here: these are the library's
@@ -2130,8 +2150,14 @@ public sealed partial class MainWindow : Window
             entry.Clip.SetPreviewVisible(true);
         }
 
-        var list = new StackPanel { Spacing = 10 };
-        foreach (var entry in entries) list.Children.Add(BuildNewClipCard(entry));
+        var list = new WrapPanel { ItemWidth = cardWidth + cardSpacing };
+        foreach (var entry in entries)
+        {
+            var card = BuildNewClipCard(entry);
+            card.Width = cardWidth;
+            card.Margin = new Thickness(0, 0, cardSpacing, cardSpacing);
+            list.Children.Add(card);
+        }
 
         var scroller = new ScrollViewer
         {
@@ -2468,7 +2494,15 @@ public sealed partial class MainWindow : Window
             Foreground = Avalonia.Media.Brush.Parse("#F5F9FF"),
             FontWeight = Avalonia.Media.FontWeight.Bold,
             FontSize = 17,
-            VerticalAlignment = VerticalAlignment.Center
+            VerticalAlignment = VerticalAlignment.Center,
+            // An auto-clip's label (e.g. a long kill-streak/event name) has no
+            // length cap of its own, and this badge sizes itself to whatever
+            // the label measures at - unwrapped, a long one stretched the
+            // badge most of the way across the screen instead of staying the
+            // same compact size every other notification is. Wrapping plus a
+            // width cap keeps it bounded like the rest of them.
+            MaxWidth = 340,
+            TextWrapping = Avalonia.Media.TextWrapping.Wrap
         };
         // Second line, only populated when a message has a hotkey to teach -
         // collapsed otherwise so every other notification stays the single
@@ -6115,7 +6149,13 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            ApplyCaptureExclusion(window, ViewModel?.Settings.ExcludeOverlaysFromCapture ?? true);
+            // Deliberately no ApplyCaptureExclusion here: "exclude overlays
+            // from capture" is meant for the HUD-style notifications (clip
+            // saved, recording paused, etc.) that float over a game, not for
+            // this bar's own playback controls - those are editor UI the
+            // user is actively using, and excluding it made the whole bar
+            // vanish from screen shares/recordings of the app too, not just
+            // from whatever the setting was meant to hide.
 
             // Everything RepositionEditorHoverControls assigned above went to
             // a window that had no native hwnd yet. Re-apply now that Show has
@@ -6329,10 +6369,13 @@ public sealed partial class MainWindow : Window
         volumeSlider.Bind(Slider.ValueProperty, new Binding("MasterVolumePercent", BindingMode.TwoWay));
         volumeSlider.Bind(OpacityProperty, new Binding("IsMasterMuted") { Converter = BoolToOpacityConverter.Instance });
 
-        var timeText = new TextBlock { Foreground = new SolidColorBrush(Color.Parse("#EDF4FB")), FontSize = 13, FontWeight = FontWeight.Bold, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
+        // Bumped a point and lightened from the original #5C6D7E/#8C98A7 -
+        // both read as too dim/small against the bar's dark scrim, especially
+        // over a bright part of the video underneath.
+        var timeText = new TextBlock { Foreground = new SolidColorBrush(Color.Parse("#EDF4FB")), FontSize = 14, FontWeight = FontWeight.Bold, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
         timeText.Bind(TextBlock.TextProperty, new Binding("CurrentTimeLabel"));
-        var slashText = new TextBlock { Text = " / ", Foreground = new SolidColorBrush(Color.Parse("#5C6D7E")), FontSize = 13, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
-        var durationText = new TextBlock { Foreground = new SolidColorBrush(Color.Parse("#8C98A7")), FontSize = 13, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
+        var slashText = new TextBlock { Text = " / ", Foreground = new SolidColorBrush(Color.Parse("#8C98A7")), FontSize = 14, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
+        var durationText = new TextBlock { Foreground = new SolidColorBrush(Color.Parse("#B7C4D2")), FontSize = 14, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
         durationText.Bind(TextBlock.TextProperty, new Binding("DurationLabel"));
 
         // Nothing but the five transport buttons, so the row is symmetric about
@@ -6366,7 +6409,7 @@ public sealed partial class MainWindow : Window
         var volumePercentText = new TextBlock
         {
             Foreground = new SolidColorBrush(Color.Parse("#C8D6E6")),
-            FontSize = 11,
+            FontSize = 12,
             Width = 30,
             // Steps in 2s for the same reason as volumeSlider's margin above -
             // centred content shifts by half the margin.
@@ -6379,7 +6422,7 @@ public sealed partial class MainWindow : Window
         {
             Classes = { "linkButton" },
             Content = "Reset",
-            FontSize = 10,
+            FontSize = 11,
             Padding = new Thickness(6, 1),
             // Steps in 2s, same half-margin rule as the rail and percentage.
             Margin = new Thickness(0, 2, 0, 0),
