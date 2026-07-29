@@ -253,6 +253,29 @@ public sealed partial class MainWindow : Window
         TrackPausedOverlayToWindow();
         SetupEditorHoverControls();
         AddHandler(KeyUpEvent, MainWindow_OnKeyUp, RoutingStrategies.Tunnel);
+        // Owned windows (the hover bar, the paused badge) can get hidden by
+        // Windows itself - owner minimized (alt-tab into an exclusive-
+        // fullscreen game), owner loses foreground (alt-tab away, clicking
+        // another window), even a transient focus blip mid interactive-resize
+        // - none of which goes through our own Hide() calls, so Avalonia's
+        // window.IsVisible for them goes stale (still true) while the native
+        // window is actually gone. ShowEditorHoverControls only calls Show()
+        // again when IsVisible reads false, so a stale true meant the bar
+        // never came back - "vanishes, never returns" on exactly resize/
+        // alt-tab/unfocus. Force both back to a known-good hidden state on
+        // either side of a focus transition so the next poll tick (which
+        // reads IsVisible honestly false now) re-shows the bar correctly
+        // instead of trusting state the OS already invalidated behind us.
+        Deactivated += (_, _) =>
+        {
+            HideEditorHoverControls(immediate: true);
+            _recordingPausedOverlay?.Hide();
+        };
+        Activated += (_, _) =>
+        {
+            HideEditorHoverControls(immediate: true);
+            _recordingPausedOverlay?.Hide();
+        };
         Closing += (_, e) =>
         {
             SaveWindowBounds();
@@ -2919,6 +2942,17 @@ public sealed partial class MainWindow : Window
         if (change.Property == OffScreenMarginProperty && RootLayout is not null)
         {
             RootLayout.Margin = OffScreenMargin;
+        }
+
+        if (change.Property == WindowStateProperty && change.GetOldValue<WindowState>() == WindowState.Minimized && WindowState != WindowState.Minimized)
+        {
+            // Restoring from minimized (e.g. alt-tabbing back out of an
+            // exclusive-fullscreen game that forced this window down) is the
+            // same owned-window desync as Activated/Deactivated above - reset
+            // both so the next poll tick re-shows them correctly instead of
+            // trusting IsVisible state the OS invalidated while minimized.
+            HideEditorHoverControls(immediate: true);
+            _recordingPausedOverlay?.Hide();
         }
 
         if (change.Property == WindowStateProperty && MaximizeRestoreButton?.Content is PathIcon icon)
