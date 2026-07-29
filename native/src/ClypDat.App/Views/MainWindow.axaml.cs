@@ -2189,6 +2189,26 @@ public sealed partial class MainWindow : Window
         ];
     }
 
+    // The monitor the GAME is on, not the one the main window happens to be on.
+    // While playing, the main window is usually minimised to the tray or parked
+    // on a second display, and ScreenFromWindow(this) then puts the overlay on a
+    // monitor the player isn't looking at - indistinguishable, from the chair,
+    // from the overlay never appearing at all.
+    private Avalonia.Platform.Screen? ScreenForOverlay()
+    {
+        var gameHandle = ViewModel?.ActiveGameDetection.WindowHandle ?? IntPtr.Zero;
+        if (gameHandle != IntPtr.Zero && IsWindowVisible(gameHandle) && GetWindowRect(gameHandle, out var gameRect))
+        {
+            var centre = new PixelPoint(
+                gameRect.Left + (gameRect.Right - gameRect.Left) / 2,
+                gameRect.Top + (gameRect.Bottom - gameRect.Top) / 2);
+            var gameScreen = Screens.ScreenFromPoint(centre);
+            if (gameScreen is not null) return gameScreen;
+        }
+
+        return Screens.ScreenFromWindow(this) ?? Screens.Primary ?? Screens.All.FirstOrDefault();
+    }
+
     private void ShowClipSavedOverlay(string position, string text, bool playSound)
     {
         _activeClipOverlayCloseTimer?.Stop();
@@ -2209,7 +2229,7 @@ public sealed partial class MainWindow : Window
         _overlayBadge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         var desiredWidth = _overlayBadge.DesiredSize.Width;
 
-        var screen = Screens.ScreenFromWindow(this) ?? Screens.Primary ?? Screens.All.FirstOrDefault();
+        var screen = ScreenForOverlay();
         var area = screen?.WorkingArea ?? new PixelRect(0, 0, 1920, 1080);
         var scaling = screen?.Scaling ?? 1.0;
         var marginDevicePixels = (int)Math.Round(24 * scaling);
@@ -2230,6 +2250,22 @@ public sealed partial class MainWindow : Window
         _overlayTranslate.X = isLeft ? -OverlaySlideDistance : OverlaySlideDistance;
 
         _activeClipOverlay.Show();
+
+        // Topmost at construction only puts the window in the topmost band once.
+        // A game that goes fullscreen afterwards enters that same band and sits
+        // ABOVE it, and Show() on an already-created window doesn't re-assert
+        // anything - so the second and every later overlay of a session came up
+        // behind the game. Push it back to the front of the band on every show.
+        //
+        // Without activating, and NOACTIVATE on top of that: moving focus onto
+        // a window over a fullscreen game is what makes the game minimise, and
+        // an overlay that costs you the game is worse than no overlay.
+        MakeWindowNonActivating(_activeClipOverlay);
+        var overlayHandle = NativeHandleOf(_activeClipOverlay);
+        if (overlayHandle != IntPtr.Zero)
+        {
+            SetWindowPos(overlayHandle, HwndTopmost, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
+        }
 
         Dispatcher.UIThread.Post(() =>
         {
@@ -6086,7 +6122,9 @@ public sealed partial class MainWindow : Window
     private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
 
     private static readonly IntPtr HwndTop = IntPtr.Zero;
+    private static readonly IntPtr HwndTopmost = new(-1);
     private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoMove = 0x0002;
     private const uint SwpNoActivate = 0x0010;
     private const int GwlExStyle = -20;
     private const long WsExNoActivate = 0x08000000L;
