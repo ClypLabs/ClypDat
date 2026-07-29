@@ -5826,8 +5826,11 @@ public sealed partial class MainWindow : Window
         var durationText = new TextBlock { Foreground = new SolidColorBrush(Color.Parse("#8C98A7")), FontSize = 13, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
         durationText.Bind(TextBlock.TextProperty, new Binding("DurationLabel"));
 
-        // Transport (plus the time readout) centred in the row, volume left,
-        // Fullscreen right.
+        // Nothing but the five transport buttons, so the row is symmetric about
+        // Play/Pause and centring the group centres that button. The time
+        // readout used to live on the end here, which made the run right-heavy
+        // and left Play sitting off to the left of centre - it sits with the
+        // volume group now instead.
         var transportGroup = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -5841,13 +5844,6 @@ public sealed partial class MainWindow : Window
                 playPauseButton,
                 TransportButton("M8 5v14l11-7z", StepForwardButton_OnClick, "Step forward"),
                 TransportButton("M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z", EndButton_OnClick, "End"),
-                new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(8, 0, 0, 0),
-                    Children = { timeText, slashText, durationText },
-                },
             },
         };
 
@@ -5884,7 +5880,20 @@ public sealed partial class MainWindow : Window
             Spacing = 8,
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center,
-            Children = { muteToggle, volumeSlider, volumePercentText, volumeResetButton },
+            Children =
+            {
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 6, 0),
+                    Children = { timeText, slashText, durationText },
+                },
+                muteToggle,
+                volumeSlider,
+                volumePercentText,
+                volumeResetButton,
+            },
         };
 
         var fullscreenButton = TransportButton("M7,14H5v5h5v-2H7V14z M5,10h2V7h3V5H5V10z M17,17h-3v2h5v-5h-2V17z M14,5v2h3v3h2V5H14z", FullscreenButton_OnClick, "Fullscreen");
