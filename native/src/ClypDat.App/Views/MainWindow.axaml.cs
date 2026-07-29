@@ -68,6 +68,7 @@ public sealed partial class MainWindow : Window
     private DispatcherTimer? _hotkeyCaptureTimeout;
     private bool _replayTransitioning;
     private DispatcherTimer? _replayRestartDebounceTimer;
+    private readonly EncoderTuningService _encoderTuning = new();
     private readonly SemaphoreSlim _clipSaveLock = new(1, 1);
     private bool _updateDialogOpen;
     // Closing the window (the X button) hides to the tray instead of quitting,
@@ -491,12 +492,26 @@ public sealed partial class MainWindow : Window
         _replayBuffer.SetCapturePaused(shouldPause);
     }
 
+    // Observe-only for now: EncoderTuningService logs the preset change it WOULD
+    // make and never touches a setting. See its own notes for why it is being
+    // run against real sessions before it is allowed to act on anything.
+    private void AttachEncoderTuning(IReplayBuffer buffer)
+    {
+        if (buffer is IReplayCaptureDiagnostics diagnostics)
+        {
+            diagnostics.HealthChanged += EncoderTuning_OnHealthChanged;
+        }
+    }
+
+    private void EncoderTuning_OnHealthChanged(object? sender, ReplayCaptureHealth health) => _encoderTuning.OnHealth(health);
+
     private void InitializeReplayServices()
     {
         if (ViewModel is null || _replayBuffer is not null) return;
 
         _replayBuffer = ReplayBufferFactory.Create(ViewModel.CreateReplayConfig);
         _replayBuffer.RecordingStopped += ReplayBuffer_OnRecordingStopped;
+        AttachEncoderTuning(_replayBuffer);
         _activeReplayBackend = ReplayBufferFactory.ResolveEffectiveBackend(ViewModel.CreateReplayConfig());
         _globalHotkey = new GlobalHotkeyService();
         _globalHotkey.SetHotkey(ViewModel.Settings.SaveReplayHotkey);
@@ -544,9 +559,11 @@ public sealed partial class MainWindow : Window
 
         AppLog.Info($"Replay backend switching: {_activeReplayBackend} -> {desired} for game={config.GameExecutableName}.");
         _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
+        if (_replayBuffer is IReplayCaptureDiagnostics oldDiagnostics) oldDiagnostics.HealthChanged -= EncoderTuning_OnHealthChanged;
         _replayBuffer.Dispose();
         _replayBuffer = ReplayBufferFactory.Create(ViewModel.CreateReplayConfig);
         _replayBuffer.RecordingStopped += ReplayBuffer_OnRecordingStopped;
+        AttachEncoderTuning(_replayBuffer);
         _activeReplayBackend = desired;
     }
 
@@ -1838,6 +1855,7 @@ public sealed partial class MainWindow : Window
         try
         {
             if (_replayBuffer.IsRecording) await _replayBuffer.StopAsync();
+            _encoderTuning.EndSession();
             ViewModel.IsReplayRecording = false;
             ViewModel.RecorderStatus = ReplayIdleStatus;
         }
@@ -1873,6 +1891,7 @@ public sealed partial class MainWindow : Window
             ApplyPrimaryCaptureBounds();
             await Task.Run(() => _replayBuffer.StartAsync());
             AppLog.Info("Replay started.");
+            _encoderTuning.BeginSession(ViewModel.Settings.ReplayEncoderPreset);
             // Fresh session, fresh list. Left open (not cleared on stop) so a
             // Full Session VOD that finalizes minutes after the game closed
             // still has somewhere to land - see ViewModel_OnClipAdded.
