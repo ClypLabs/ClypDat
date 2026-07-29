@@ -358,11 +358,14 @@
                                    cell sitting blank/grey whenever a folder
                                    held fewer than 4 games, which read as a
                                    broken placeholder rather than "the icons
-                                   are just small". 1 game fills the whole
-                                   tile, 2 sit side by side, 3 are
-                                   two-over-one, and only 4+ uses the real
-                                   2x2 (see HasSlot4Cell below) - the 4th
-                                   cell is the 4th game's own icon only at
+                                   are just small". Every count lays its icons
+                                   out on the SAME 2x2 cell geometry and just
+                                   fills fewer of the cells, so an icon is the
+                                   same size in every folder regardless of how
+                                   many games are in it: 1 sits top-left alone,
+                                   2 fill the top row, 3 are two-over-one, 4+
+                                   fill all four (see HasSlot4Cell below) - the
+                                   4th cell is the 4th game's own icon only at
                                    exactly 4, becoming a "+N" count past that
                                    (same convention Discord uses for a big
                                    folder). -->
@@ -381,17 +384,27 @@
                                   </Panel>
                                 </Border>
 
-                                <Grid ColumnDefinitions="*,*" IsVisible="{Binding IsTwoGames}">
-                                  <Border Grid.Column="0" Width="30" Height="30" Margin="0,0,1,0" CornerRadius="6" ClipToBounds="True" Background="#26323D">
+                                <!-- Same 2x2 grid the 3- and 4-game layouts use,
+                                     with only the top row filled - identical
+                                     cell size, margins and corner radius, so a
+                                     folder's icons stay exactly the same size
+                                     whether it holds 2, 3 or 4 games. These
+                                     cells were previously pinned to 30x30 (the
+                                     whole tile's size) inside a 15px-wide
+                                     column, so each icon blew straight past its
+                                     own cell and the tile rendered as one giant
+                                     clipped icon instead of two small ones. -->
+                                <Grid ColumnDefinitions="*,*" RowDefinitions="*,*" IsVisible="{Binding IsTwoGames}">
+                                  <Border Grid.Row="0" Grid.Column="0" Margin="0,0,1,1" CornerRadius="4" ClipToBounds="True" Background="#26323D">
                                     <Panel>
                                       <Image Source="{Binding Slot1Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot1Icon}" />
-                                      <TextBlock Text="{Binding Slot1Initial}" FontWeight="Bold" FontSize="11" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot1Icon}" />
+                                      <TextBlock Text="{Binding Slot1Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot1Icon}" />
                                     </Panel>
                                   </Border>
-                                  <Border Grid.Column="1" Width="30" Height="30" Margin="1,0,0,0" CornerRadius="6" ClipToBounds="True" Background="#26323D">
+                                  <Border Grid.Row="0" Grid.Column="1" Margin="1,0,0,1" CornerRadius="4" ClipToBounds="True" Background="#26323D">
                                     <Panel>
                                       <Image Source="{Binding Slot2Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot2Icon}" />
-                                      <TextBlock Text="{Binding Slot2Initial}" FontWeight="Bold" FontSize="11" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot2Icon}" />
+                                      <TextBlock Text="{Binding Slot2Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot2Icon}" />
                                     </Panel>
                                   </Border>
                                 </Grid>
