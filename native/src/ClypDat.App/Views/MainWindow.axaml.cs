@@ -5819,7 +5819,7 @@ public sealed partial class MainWindow : Window
             // the rail sitting low against the icons beside it. Nudged up to
             // line the rail up with them - this is on top of whatever the row
             // itself is offset by, since it corrects the template, not the row.
-            Margin = new Thickness(0, -4, 0, 0),
+            Margin = new Thickness(0, -3, 0, 0),
         };
         volumeSlider.Bind(Slider.ValueProperty, new Binding("MasterVolumePercent", BindingMode.TwoWay));
         volumeSlider.Bind(OpacityProperty, new Binding("IsMasterMuted") { Converter = BoolToOpacityConverter.Instance });
@@ -5861,7 +5861,8 @@ public sealed partial class MainWindow : Window
             Foreground = new SolidColorBrush(Color.Parse("#C8D6E6")),
             FontSize = 11,
             Width = 30,
-            Margin = new Thickness(0, 2, 0, 0),
+            // Was +2, which centred the glyphs a pixel low next to the rail.
+            Margin = new Thickness(0, -2, 0, 0),
             VerticalAlignment = VerticalAlignment.Center,
         };
         volumePercentText.Bind(TextBlock.TextProperty, new Binding("MasterVolumePercent") { StringFormat = "{0:0}%" });
