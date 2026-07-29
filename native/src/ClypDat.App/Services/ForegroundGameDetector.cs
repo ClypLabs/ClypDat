@@ -52,6 +52,7 @@ public sealed class ForegroundGameDetector
         _catalog = BuildCatalog(local.Concat(entries));
         Interlocked.Increment(ref _catalogGeneration);
         _windowCache.Clear();
+        _loggedUnmatched.Clear();
     }
 
     public void ApplyCustomGameNames(IEnumerable<ClypDat.Core.Settings.GameCaptureOverride> overrides)
@@ -64,6 +65,7 @@ public sealed class ForegroundGameDetector
             .ToDictionary(group => group.Key, group => group.Last().DisplayName, StringComparer.OrdinalIgnoreCase);
         Interlocked.Increment(ref _catalogGeneration);
         _windowCache.Clear();
+        _loggedUnmatched.Clear();
     }
 
     public GameDetection Detect()
@@ -164,7 +166,16 @@ public sealed class ForegroundGameDetector
         try
         {
             var executablePath = ResolveExecutablePath((int)processId);
-            if (string.IsNullOrWhiteSpace(executablePath)) return GameDetection.None;
+            if (string.IsNullOrWhiteSpace(executablePath))
+            {
+                // OpenProcess/QueryFullProcessImageName failing is how a
+                // protected (anti-cheat) or higher-integrity process presents,
+                // and it used to be indistinguishable from "this window is not
+                // a game" because neither logged anything. Keyed by PID since
+                // there is no name to key by - that is the whole problem.
+                LogUnmatchedOnce($"pid:{processId}", $"Game detection: could not read the executable path for pid {processId} - it is likely protected or running at a higher integrity level than ClypDat.");
+                return GameDetection.None;
+            }
             var exeName = Path.GetFileName(executablePath);
             if (string.Equals(exeName, "ApplicationFrameHost.exe", StringComparison.OrdinalIgnoreCase))
             {
@@ -214,7 +225,19 @@ public sealed class ForegroundGameDetector
             {
                 detection = Create(riotGame.DisplayName, exeName, title, className, handle, (int)processId, GameMatchSource.Riot, $"riot-{Normalize(riotGame.DisplayName)}");
             }
-            else detection = GameDetection.None;
+            // Last resort: the executable is not under any library folder, but
+            // a game does own that filename. Reported exactly as a path match
+            // would be - same source, same steam-{AppId} key - so a game found
+            // this way cannot produce a second Game Detection row for itself.
+            else if (_steamGames.FindByExecutableName(exeName) is { } steamGameByName)
+            {
+                detection = Create(steamGameByName.DisplayName, exeName, title, className, handle, (int)processId, GameMatchSource.Steam, $"steam-{steamGameByName.AppId}");
+            }
+            else
+            {
+                detection = GameDetection.None;
+                LogUnmatchedOnce(exeName, $"Game detection: no match for {exeName} (path={executablePath}, title='{title}', class={className}).");
+            }
 
             if (detection.IsDetected && IsIgnored(detection.DetectionKey)) detection = GameDetection.None;
 
@@ -252,6 +275,19 @@ public sealed class ForegroundGameDetector
 
     private static string Normalize(string name) =>
         new(name.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    // This poll runs over every visible window every 1-3s, so an un-deduped
+    // line here would bury the debug log within a minute (the same trap the
+    // editor hover bar's own logging calls out). One line per distinct subject
+    // per catalog generation is enough to answer "why was my game not picked
+    // up" without drowning everything else.
+    private readonly ConcurrentDictionary<string, byte> _loggedUnmatched = new();
+
+    private void LogUnmatchedOnce(string key, string message)
+    {
+        if (!_loggedUnmatched.TryAdd(key, 0)) return;
+        AppLog.Debug(message);
+    }
 
     private bool IsIgnored(string executable) => _userIgnoredExecutables.Contains(executable);
     private static bool IsStillUsable(GameDetection detection) => detection.WindowHandle != 0 && IsWindow(detection.WindowHandle) && IsWindowVisible(detection.WindowHandle) && !IsIconic(detection.WindowHandle);

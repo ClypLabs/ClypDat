@@ -33,11 +33,18 @@ public static class InstalledGameLocator
     // Epic's manifest for Fortnite points at FortniteBootstrapper.exe, which
     // yields the Epic Games logo. Where the named executable is one of those,
     // look for the real game binary beside it instead.
-    private static readonly string[] StubExecutableMarkers =
+    //
+    // Shared with SteamGameLibrary's executable-name index, which needs the
+    // same "this binary is a shim, not the game" judgement when deciding which
+    // names are safe to match a running process against.
+    internal static readonly string[] StubExecutableMarkers =
     {
         "bootstrapper", "launcher", "unins", "setup", "helper", "crashreport",
         "epicgames", "eac", "easyanticheat", "battleye", "eos"
     };
+
+    internal static bool LooksLikeStubExecutable(string executableName) =>
+        StubExecutableMarkers.Any(marker => Normalize(executableName).Contains(marker, StringComparison.Ordinal));
 
     private static string PreferGameExecutable(string executablePath, string gameName)
     {
