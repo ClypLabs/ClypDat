@@ -5551,14 +5551,14 @@ public sealed partial class MainWindow : Window
         }
         else if (DateTime.UtcNow >= _hoverControlsActiveUntilUtc)
         {
-            if (_editorHoverControlsWindow is { IsVisible: true })
+            if (_editorHoverControlsWindow is { IsVisible: true } && !_hoverControlsSlidingOut)
             {
-                LogHoverControlsState($"hidden (cursor={cursor.X},{cursor.Y} video={videoTopLeft.X},{videoTopLeft.Y}-{videoBottomRight.X},{videoBottomRight.Y})");
+                LogHoverControlsState($"sliding out (cursor={cursor.X},{cursor.Y} video={videoTopLeft.X},{videoTopLeft.Y}-{videoBottomRight.X},{videoBottomRight.Y})");
             }
-            // Instant on the way out - only the entrance is animated. Sliding
-            // out meant the bar hung around over the picture for the whole
-            // exit animation after the pointer had already left.
-            HideEditorHoverControls(immediate: true);
+            // Animated both ways. "Instant" here is about it starting to go
+            // the moment the pointer leaves (HoverControlsGrace is zero), not
+            // about skipping the slide - the slide down is the exit.
+            HideEditorHoverControls(immediate: false);
         }
     }
 
@@ -5933,16 +5933,13 @@ public sealed partial class MainWindow : Window
 
         var backdrop = new Border
         {
-            // Grey backplate behind the whole row. Sitting the controls
-            // straight on the picture left them fighting whatever frame was
-            // underneath - fine on a dark scene, unreadable on a bright one,
-            // and the row never read as one unit. Near-opaque rather than a
-            // wash so the icons and the time readout have a consistent
-            // surface at any brightness, with a hairline along the top edge
-            // separating it from the video instead of a hard seam.
-            Background = new SolidColorBrush(Color.Parse("#F0151D25")),
-            BorderBrush = new SolidColorBrush(Color.Parse("#2A3742")),
-            BorderThickness = new Thickness(0, 1, 0, 0),
+            // Translucent scrim behind the whole row, not an opaque plate -
+            // the picture still reads through it, it just gets knocked back
+            // far enough that the controls sit on a consistent surface
+            // instead of fighting whatever frame is underneath. The progress
+            // strip along the top edge is what separates it from the video,
+            // so there's no border line here.
+            Background = new SolidColorBrush(Color.Parse("#8C0B1016")),
             Child = BuildPlaybackBarLayout(),
             RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse($"translateY({HoverControlsSlideDistance}px)"),
             Transitions =
