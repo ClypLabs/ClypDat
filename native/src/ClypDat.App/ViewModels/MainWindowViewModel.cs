@@ -3347,6 +3347,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return Task.FromResult(true);
     }
 
+    // Share does not need an editor session, but it uses the selected-media
+    // metadata for trimming, thumbnail, naming, and encode settings. Prepare
+    // that state without making the Library disappear behind the editor.
+    public bool PrepareClipForShare(ClipCardViewModel clip)
+    {
+        if (!clip.IsHydrated)
+        {
+            ClipNotReadyMessage = "Still loading this clip's info - try again in a moment.";
+            _clipNotReadyMessageTimer.Stop();
+            _clipNotReadyMessageTimer.Start();
+            return false;
+        }
+
+        OpenMedia(clip.Media, showEditor: false);
+        return true;
+    }
+
     private double _lastCardLayoutWidth;
 
     // Target card width for ScaleClipsWithWindow - picked so a maximized
@@ -4592,7 +4609,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
     }
 
-    private void OpenMedia(MediaFileInfo media, bool preserveEditorText = false)
+    private void OpenMedia(MediaFileInfo media, bool preserveEditorText = false, bool showEditor = true)
     {
         ResetVideoZoom();
         SelectedVideoName = media.Name;
@@ -4688,7 +4705,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         ApplyClipEditState(media.Path);
-        IsEditorVisible = true;
+        IsEditorVisible = showEditor;
         StartFilmstripLoad(media);
         StartWaveformLoad(media);
     }

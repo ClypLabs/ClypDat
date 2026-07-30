@@ -506,6 +506,9 @@
     <Setter Property="Padding" Value="5" />
     <Setter Property="MinWidth" Value="160" />
   </Style>
+  <Style Selector="ContextMenu.clipContextMenu">
+    <Setter Property="MinWidth" Value="0" />
+  </Style>
   <!-- Small-caps field labels inside the Replay Buffer flyout - reads as a
        settings panel rather than a stack of sentence-case captions. -->
   <Style Selector="TextBlock.flyoutLabel">
