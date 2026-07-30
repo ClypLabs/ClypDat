@@ -7,10 +7,6 @@ name: Release
 # zip asset named ClypDat-win-x64.zip, so that name must not change without
 # also updating ExpectedAssetName there.
 #
-# native/vendor/obs-runtime is committed directly to the repo (trimmed to
-# only the plugins ClypDatObsBridge.cpp loads), so checkout has it already -
-# no separate download/extract step needed here.
-
 on:
   push:
     tags:
@@ -46,65 +42,12 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
-
-      - name: Build native ObsBridge (C++)
-        run: msbuild native\src\ClypDat.ObsBridge\ClypDat.ObsBridge.vcxproj /p:Configuration=Release /p:Platform=x64 /nologo /v:minimal
-
-      - name: Stage ObsBridge.dll where ClypDat.App.csproj expects it
-        shell: pwsh
-        run: |
-          $dll = Get-ChildItem -Recurse -Filter ClypDat.ObsBridge.dll native\src\ClypDat.ObsBridge |
-            Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if (-not $dll) { throw "ClypDat.ObsBridge.dll not found after build." }
-          New-Item -ItemType Directory -Force -Path native\src\ClypDat.ObsBridge\bin\x64\Release | Out-Null
-          Copy-Item $dll.FullName native\src\ClypDat.ObsBridge\bin\x64\Release\ClypDat.ObsBridge.dll -Force
-
       - name: Publish ClypDat.App
         run: >
           dotnet publish native\src\ClypDat.App\ClypDat.App.csproj
           -c Release -r win-x64 --self-contained true -p:Platform=x64
           -p:Version=${{ steps.version.outputs.version }}
           -o native\publish\win-x64-folder --nologo
-
-      - name: Verify fresh ObsBridge.dll made it into publish output
-        # ObsRuntimeLocator.cs loads the bridge from {publish}\obs\ClypDat.ObsBridge.dll,
-        # not the publish root - that's where ClypDat.App.csproj's own
-        # CopyObsRuntimeToPublish target places it.
-        shell: pwsh
-        run: |
-          $built = Get-FileHash native\src\ClypDat.ObsBridge\bin\x64\Release\ClypDat.ObsBridge.dll
-          $published = Get-FileHash native\publish\win-x64-folder\obs\ClypDat.ObsBridge.dll
-          if ($built.Hash -ne $published.Hash) {
-            Copy-Item native\src\ClypDat.ObsBridge\bin\x64\Release\ClypDat.ObsBridge.dll native\publish\win-x64-folder\obs\ClypDat.ObsBridge.dll -Force
-          }
-
-      - name: Verify OBS capture runtime
-        shell: pwsh
-        run: |
-          $required = @(
-            "obs\bin\64bit\obs.dll",
-            "obs\bin\64bit\libobs-d3d11.dll",
-            "obs\bin\64bit\obs-ffmpeg-mux.exe",
-            "obs\bin\64bit\avfilter-10.dll",
-            "obs\bin\64bit\obs-nvenc-test.exe",
-            "obs\bin\64bit\obs-qsv-test.exe",
-            "obs\bin\64bit\obs-amf-test.exe",
-            "obs\obs-plugins\64bit\win-capture.dll",
-            "obs\obs-plugins\64bit\win-wasapi.dll",
-            "obs\obs-plugins\64bit\obs-ffmpeg.dll",
-            "obs\obs-plugins\64bit\obs-nvenc.dll",
-            "obs\data\obs-plugins\win-capture\graphics-hook64.dll",
-            "obs\data\obs-plugins\win-capture\inject-helper64.exe",
-            "obs-nvenc-test.exe",
-            "obs-qsv-test.exe",
-            "obs-amf-test.exe"
-          )
-          foreach ($relativePath in $required) {
-            $path = Join-Path "native\publish\win-x64-folder" $relativePath
-            if (-not (Test-Path -LiteralPath $path)) { throw "Missing OBS runtime file: $path" }
-          }
 
       - name: Trim non-Windows runtime assets
         shell: pwsh
