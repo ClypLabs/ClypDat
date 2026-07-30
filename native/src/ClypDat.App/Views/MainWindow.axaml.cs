@@ -511,7 +511,8 @@ public sealed partial class MainWindow : Window
 
     private void RemoveIgnoredGameButton_OnClick(object? sender, RoutedEventArgs e)
     {
-        if (sender is not Button { DataContext: string executableName } || ViewModel is null) return;
+        if (sender is not Button { DataContext: IgnoredGameRowViewModel row } || ViewModel is null) return;
+        var executableName = row.Key;
         ViewModel.RemoveIgnoredGameExecutable(executableName);
         _gameDetector.ApplyUserIgnoredExecutables(ViewModel.Settings.IgnoredGameExecutables);
         UpdateDetectedGame();

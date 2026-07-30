@@ -3852,14 +3852,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // Settings > Game Detection's "excluded from detection" list - mirrors
     // Settings.IgnoredGameExecutables so removals from the settings page and
     // additions from the header's detected-game flyout stay in sync.
-    public ObservableCollection<string> IgnoredGameExecutableRows { get; } = new();
+    public ObservableCollection<IgnoredGameRowViewModel> IgnoredGameExecutableRows { get; } = new();
 
     public void SyncIgnoredGameExecutableRows()
     {
         IgnoredGameExecutableRows.Clear();
-        foreach (var exe in Settings.IgnoredGameExecutables.OrderBy(name => name, StringComparer.OrdinalIgnoreCase))
+        // Excluding a game never deletes its GameCaptureOverride (RemoveGame
+        // only appends to the ignore list), so the friendly name/exe are still
+        // there to look up - the key itself must stay on screen nowhere.
+        var rows = Settings.IgnoredGameExecutables.Select(key =>
         {
-            IgnoredGameExecutableRows.Add(exe);
+            var overrideEntry = Settings.GameCaptureOverrides.FirstOrDefault(g => string.Equals(g.ExecutableName, key, StringComparison.OrdinalIgnoreCase));
+            var displayName = string.IsNullOrWhiteSpace(overrideEntry?.DisplayName) ? key : overrideEntry.DisplayName;
+            var processName = string.IsNullOrWhiteSpace(overrideEntry?.ProcessName) || string.Equals(overrideEntry.ProcessName, key, StringComparison.OrdinalIgnoreCase)
+                ? string.Empty
+                : overrideEntry.ProcessName;
+            return new IgnoredGameRowViewModel(key, displayName, processName);
+        });
+        foreach (var row in rows.OrderBy(row => row.DisplayName, StringComparer.OrdinalIgnoreCase))
+        {
+            IgnoredGameExecutableRows.Add(row);
         }
         OnPropertyChanged(nameof(HasIgnoredGameExecutables));
     }
