@@ -244,7 +244,7 @@ public partial class ShareDialog : Window
 
     private long _lastTargetBytes;
 
-    private void HevcToggle_OnChanged(object? sender, RoutedEventArgs e)
+    private void Av1Toggle_OnChanged(object? sender, RoutedEventArgs e)
     {
         // Codec change invalidates whatever is already encoded, so redo it at
         // the size that is currently selected.
@@ -303,12 +303,60 @@ public partial class ShareDialog : Window
                 }
             });
 
-            var useHevc = ShareHevcToggle.IsChecked == true;
-            var useHardware = true;
+            var useAv1 = ShareAv1Toggle.IsChecked == true;
+            var tier = MainWindowViewModel.ShareEncoderTier.Nvenc;
             var useAdvancedNvenc = true;
             var bitrateScale = 1.0;
             long actualBytes = 0;
             MainWindow.ProcessResult result;
+
+            async Task<MainWindow.ProcessResult> TryTierAsync() =>
+                await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, tier, useAv1, bitrateScale, useAdvancedNvenc), exportDuration, progress, cts.Token, background: true);
+
+            // Walks NVENC -> AMD AMF -> Intel QSV -> CPU from wherever `tier`
+            // currently sits, same "try, fall through if this vendor doesn't
+            // answer" shape as the native capture engine's EncoderCandidates
+            // (NativeReplayBuffer.cs). Only ever moves forward - a tier that
+            // failed once is assumed unusable for the rest of this dialog's
+            // session, so a later size/codec retry doesn't re-probe hardware
+            // that already said no.
+            async Task<MainWindow.ProcessResult> WalkEncoderLadderAsync()
+            {
+                var r = await TryTierAsync();
+
+                // Pre-Turing cards reject temporal-aq/b_ref_mode outright, so
+                // drop just those before writing NVENC off entirely.
+                if (r.ExitCode != 0 && tier == MainWindowViewModel.ShareEncoderTier.Nvenc && useAdvancedNvenc && !cts.IsCancellationRequested)
+                {
+                    AppLog.Info($"Share: NVENC rejected the advanced quality options, retrying without them. ffmpeg said: {r.Error}");
+                    useAdvancedNvenc = false;
+                    encodeClock.Restart();
+                    r = await TryTierAsync();
+                }
+
+                while (r.ExitCode != 0 && tier != MainWindowViewModel.ShareEncoderTier.Cpu && !cts.IsCancellationRequested)
+                {
+                    var previousTier = tier;
+                    tier = tier switch
+                    {
+                        MainWindowViewModel.ShareEncoderTier.Nvenc => MainWindowViewModel.ShareEncoderTier.Amf,
+                        MainWindowViewModel.ShareEncoderTier.Amf => MainWindowViewModel.ShareEncoderTier.Qsv,
+                        _ => MainWindowViewModel.ShareEncoderTier.Cpu
+                    };
+                    AppLog.Info($"Share: {previousTier} encode failed, trying {tier}. ffmpeg said: {r.Error}");
+                    if (tier == MainWindowViewModel.ShareEncoderTier.Cpu)
+                    {
+                        ShareProgressBar.IsIndeterminate = true;
+                        ShareProgressPercentText.Text = string.Empty;
+                        ShareStatusText.Text = "Encoding (CPU encoder)...";
+                        ShareProgressEtaText.IsVisible = false;
+                    }
+                    encodeClock.Restart();
+                    r = await TryTierAsync();
+                }
+
+                return r;
+            }
 
             // A size cap that is only usually honoured is worthless - a file
             // one byte over Discord's free-tier limit simply will not send.
@@ -318,30 +366,21 @@ public partial class ShareDialog : Window
             // overshoots by a few percent, not by multiples.
             for (var attempt = 0; ; attempt++)
             {
-                result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, useHardware, useHevc, bitrateScale, useAdvancedNvenc), exportDuration, progress, cts.Token, background: true);
+                result = await WalkEncoderLadderAsync();
 
-                // Pre-Turing cards reject temporal-aq/b_ref_mode outright, so
-                // drop just those before writing the GPU off entirely - the
-                // CPU path is minutes rather than seconds and is a last
-                // resort, not the next thing to try.
-                if (result.ExitCode != 0 && useHardware && useAdvancedNvenc && !cts.IsCancellationRequested)
+                // AV1 needs an RTX 40-series+ card (or an AV1-capable
+                // AMD/Intel encoder); nothing in the ladder above could open
+                // it. Falling back to H.264 hardware, rather than a software
+                // AV1 encoder, keeps this on the fast path the rest of the
+                // ladder assumes - libaom-av1/libsvtav1 are minutes rather
+                // than seconds for a clip this size.
+                if (result.ExitCode != 0 && useAv1 && !cts.IsCancellationRequested)
                 {
-                    AppLog.Info($"Share: NVENC rejected the advanced quality options, retrying without them. ffmpeg said: {result.Error}");
-                    useAdvancedNvenc = false;
-                    encodeClock.Restart();
-                    result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, useHardware, useHevc, bitrateScale, useAdvancedNvenc), exportDuration, progress, cts.Token, background: true);
-                }
-
-                if (result.ExitCode != 0 && useHardware && !cts.IsCancellationRequested)
-                {
-                    AppLog.Info($"Share: NVENC encode failed, retrying with CPU encoder. ffmpeg said: {result.Error}");
-                    ShareProgressBar.IsIndeterminate = true;
-                    ShareProgressPercentText.Text = string.Empty;
-                    ShareStatusText.Text = "Encoding (CPU encoder)...";
-                    ShareProgressEtaText.IsVisible = false;
-                    useHardware = false;
-                    encodeClock.Restart();
-                    result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, useHardware, useHevc, bitrateScale, useAdvancedNvenc), exportDuration, progress, cts.Token, background: true);
+                    AppLog.Info("Share: AV1 unavailable on every encoder tried, falling back to H.264.");
+                    useAv1 = false;
+                    tier = MainWindowViewModel.ShareEncoderTier.Nvenc;
+                    useAdvancedNvenc = true;
+                    result = await WalkEncoderLadderAsync();
                 }
 
                 if (cts.IsCancellationRequested) return; // Superseded by a later pill click - that call owns cleanup/UI now.
@@ -371,7 +410,7 @@ public partial class ShareDialog : Window
                 return;
             }
 
-            var spec = _viewModel.ComputeShareEncodeSpec(exportDuration.TotalSeconds, _viewModel.SelectedSourceWidth, _viewModel.SelectedSourceHeight, _viewModel.SelectedSourceFps, targetBytes, useHevc);
+            var spec = _viewModel.ComputeShareEncodeSpec(exportDuration.TotalSeconds, _viewModel.SelectedSourceWidth, _viewModel.SelectedSourceHeight, _viewModel.SelectedSourceFps, targetBytes, useAv1);
             var actualMb = actualBytes / 1_000_000.0;
 
             ShareProgressPanel.IsVisible = false;
@@ -379,7 +418,7 @@ public partial class ShareDialog : Window
             // Resolution/fps is always shown, not just when downscaled - what
             // you are about to send is worth knowing either way, and it makes
             // the trade-off a bigger size buys immediately obvious.
-            var quality = $"{spec.Height}p{spec.Fps:0}{(useHevc ? " · H.265" : string.Empty)}";
+            var quality = $"{spec.Height}p{spec.Fps:0}{(useAv1 ? " · AV1" : string.Empty)}";
             ShareResultSizeText.Text = $"{actualMb:0.#} MB · {quality}";
             ShareShowInFolderButton.IsEnabled = true;
 

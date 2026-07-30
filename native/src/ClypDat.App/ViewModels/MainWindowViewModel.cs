@@ -4298,20 +4298,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return args;
     }
 
-    // Share defaults to H.264/AAC/mp4 regardless of SelectedExportCodec -
-    // Discord's inline chat preview only reliably plays H.264-in-mp4; H.265
-    // often shows as a bare download instead of a scrubbable preview, which
-    // is why the better codec is opt-in rather than automatic.
+    // Share defaults to AV1/AAC/mp4, independent of SelectedExportCodec - AV1
+    // buys real size at equal quality over H.264, and the caller (ShareDialog)
+    // falls back to H.264 automatically when no encoder on the machine can
+    // actually open AV1 (pre-RTX-40 NVIDIA, older AMD/Intel). Discord's inline
+    // chat preview is less consistent with AV1 than H.264, which is why the
+    // toggle to force H.264 stays available rather than removing it outright.
     //
     // bitrateScale exists for the "must not exceed the cap" retry: if an
     // encode lands over target, the caller re-runs with a proportionally
     // smaller budget rather than hoping a fixed safety margin was enough.
-    public IReadOnlyList<string> BuildShareArguments(string outputPath, long targetBytes, bool useHardwareEncoder = true, bool useHevc = false, double bitrateScale = 1.0, bool useAdvancedNvenc = true)
+    public IReadOnlyList<string> BuildShareArguments(string outputPath, long targetBytes, ShareEncoderTier tier = ShareEncoderTier.Nvenc, bool useAv1 = true, double bitrateScale = 1.0, bool useAdvancedNvenc = true)
     {
         var startSeconds = Math.Max(0, TrimStart.TotalSeconds);
         var end = TrimEnd > TrimStart ? TrimEnd : Duration;
         var durationSeconds = Math.Max(0.1, (end - TrimStart).TotalSeconds);
-        var spec = ComputeShareEncodeSpec(durationSeconds, SelectedSourceWidth, SelectedSourceHeight, SelectedSourceFps, targetBytes, useHevc);
+        var spec = ComputeShareEncodeSpec(durationSeconds, SelectedSourceWidth, SelectedSourceHeight, SelectedSourceFps, targetBytes, useAv1);
         if (bitrateScale < 1.0)
         {
             spec = spec with { VideoBitrateKbps = Math.Max(80, (int)(spec.VideoBitrateKbps * bitrateScale)) };
@@ -4365,68 +4367,97 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // for speed nobody asked for - a Share encode runs once, on a clip
         // that is usually seconds long, so it can afford to work harder. This
         // is worth roughly a full ladder tier on its own.
-        if (useHardwareEncoder)
+        //
+        // Walks the same NVENC -> AMD AMF -> Intel QSV -> CPU ladder as the
+        // native capture engine's EncoderCandidates (NativeReplayBuffer.cs) -
+        // ShareDialog picks the tier by trying each in turn and falling
+        // through on a nonzero ffmpeg exit code, since there's no cheap way
+        // to ask ffmpeg's CLI "is this encoder actually usable" up front.
+        switch (tier)
         {
-            args.AddRange(new[]
-            {
-                "-c:v", useHevc ? "hevc_nvenc" : "h264_nvenc",
-                // p6 rather than p7, and a quarter-resolution rather than
-                // full-resolution first pass. Both of the heavier settings
-                // roughly double the encoder's work for low single-digit
-                // percentage gains, and this runs on the same NVENC block the
-                // replay buffer uses to record gameplay - pinning the encoder
-                // at 100% to shave a fraction off a file size is a bad trade
-                // when it can cost the user frames in the game they are
-                // actually playing.
-                "-preset", "p6",
-                "-tune", "hq",
-                "-rc", "vbr",
-                // NVENC's own two-pass: better bit allocation without paying
-                // for a second ffmpeg run, so the size target is hit more
-                // accurately AND the bits land where they matter.
-                "-multipass", "qres",
-                "-spatial-aq", "1",
-                "-rc-lookahead", "32",
-                "-bf", "3"
-            });
+            case ShareEncoderTier.Nvenc:
+                args.AddRange(new[]
+                {
+                    "-c:v", useAv1 ? "av1_nvenc" : "h264_nvenc",
+                    // p6 rather than p7, and a quarter-resolution rather than
+                    // full-resolution first pass. Both of the heavier settings
+                    // roughly double the encoder's work for low single-digit
+                    // percentage gains, and this runs on the same NVENC block the
+                    // replay buffer uses to record gameplay - pinning the encoder
+                    // at 100% to shave a fraction off a file size is a bad trade
+                    // when it can cost the user frames in the game they are
+                    // actually playing.
+                    "-preset", "p6",
+                    "-tune", "hq",
+                    "-rc", "vbr",
+                    // NVENC's own two-pass: better bit allocation without paying
+                    // for a second ffmpeg run, so the size target is hit more
+                    // accurately AND the bits land where they matter.
+                    "-multipass", "qres",
+                    "-spatial-aq", "1",
+                    "-rc-lookahead", "32",
+                    "-bf", "3"
+                });
 
-            // Temporal AQ and B-frames-as-reference are both worth real
-            // percentage points at a fixed bitrate, but they need Turing or
-            // newer - an older card fails the encode outright rather than
-            // ignoring them. Callers retry without these before giving up on
-            // the GPU entirely, so old hardware loses the gain and nothing
-            // else.
-            if (useAdvancedNvenc)
-            {
-                args.AddRange(new[] { "-temporal-aq", "1", "-b_ref_mode", "middle" });
-            }
-        }
-        else
-        {
-            // x265 at "slow" is dramatically slower than x264 at "slow" for a
-            // similar gain, so the CPU fallback settles at medium there.
-            args.AddRange(useHevc
-                ? new[] { "-c:v", "libx265", "-preset", "medium" }
-                : new[] { "-c:v", "libx264", "-preset", "slow", "-bf", "3" });
+                // Temporal AQ and B-frames-as-reference are both worth real
+                // percentage points at a fixed bitrate, but they need Turing or
+                // newer - an older card fails the encode outright rather than
+                // ignoring them. Callers retry without these before giving up on
+                // the GPU entirely, so old hardware loses the gain and nothing
+                // else.
+                if (useAdvancedNvenc)
+                {
+                    args.AddRange(new[] { "-temporal-aq", "1", "-b_ref_mode", "middle" });
+                }
+                break;
+
+            case ShareEncoderTier.Amf:
+                args.AddRange(new[] { "-c:v", useAv1 ? "av1_amf" : "h264_amf", "-usage", "transcoding", "-quality", "quality" });
+                break;
+
+            case ShareEncoderTier.Qsv:
+                args.AddRange(new[] { "-c:v", useAv1 ? "av1_qsv" : "h264_qsv", "-preset", "veryslow", "-look_ahead", "1" });
+                break;
+
+            default:
+                // x265/AV1 CPU encoders are minutes rather than seconds for a
+                // clip this size, so the CPU tier always lands on H.264 -
+                // callers drop useAv1 before ever reaching here (see the
+                // fallback chain in ShareDialog).
+                args.AddRange(new[] { "-c:v", "libx264", "-preset", "slow", "-bf", "3" });
+                break;
         }
 
-        args.AddRange(useHevc
-            // hvc1 rather than ffmpeg's default hev1 tag: players (and
-            // Discord/Apple stacks especially) routinely refuse to play
-            // hev1-tagged HEVC in mp4 while handling hvc1 fine.
-            ? new[] { "-profile:v", "main", "-tag:v", "hvc1", "-pix_fmt", "yuv420p" }
+        args.AddRange(useAv1
+            ? new[] { "-pix_fmt", "yuv420p" }
             : new[] { "-profile:v", "high", "-pix_fmt", "yuv420p" });
 
         if (spec.IsOriginalQuality)
         {
             // No size cap asked for - quality target instead of a bitrate
-            // ceiling, same shape as a normal Export.
-            args.AddRange(useHardwareEncoder
-                ? new[] { "-cq", "20", "-b:v", "0" }
-                : new[] { "-crf", "20" });
+            // ceiling, same shape as a normal Export. Each tier's constant-
+            // quality knob is spelled differently: NVENC is cq (with b:v 0 so
+            // the ceiling doesn't fight it), AMF needs rc switched to cqp
+            // before qp_i/qp_p mean anything, QSV's ICQ mode is just
+            // global_quality on its own, and libx264 is the familiar crf.
+            args.AddRange(tier switch
+            {
+                ShareEncoderTier.Nvenc => new[] { "-cq", "20", "-b:v", "0" },
+                ShareEncoderTier.Amf => new[] { "-rc", "cqp", "-qp_i", "20", "-qp_p", "20" },
+                ShareEncoderTier.Qsv => new[] { "-global_quality", "20" },
+                _ => new[] { "-crf", "20" }
+            });
         }
         else
         {
+            // AMF's bitrate-capped path needs rc explicitly switched to
+            // vbr_peak first - left on its default (cqp) the b:v/maxrate/
+            // bufsize below would be silently ignored and the file would
+            // land at whatever size the quality setting happens to produce.
+            if (tier == ShareEncoderTier.Amf)
+            {
+                args.AddRange(new[] { "-rc", "vbr_peak" });
+            }
             var maxRateKbps = (int)(spec.VideoBitrateKbps * 1.45);
             var bufSizeKbps = spec.VideoBitrateKbps * 2;
             args.AddRange(new[] { "-b:v", $"{spec.VideoBitrateKbps}k", "-maxrate", $"{maxRateKbps}k", "-bufsize", $"{bufSizeKbps}k" });
@@ -4451,6 +4482,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public readonly record struct ShareEncodeSpec(int Width, int Height, double Fps, int VideoBitrateKbps, bool Downscaled, bool IsOriginalQuality);
+
+    // Same ladder order NativeReplayBuffer's EncoderCandidates uses for the
+    // live capture path: NVIDIA first (this app already targets NVENC for
+    // capture), then AMD AMF, then Intel QSV, then software as the last
+    // resort that always works.
+    public enum ShareEncoderTier { Nvenc, Amf, Qsv, Cpu }
 
     // 96k stereo AAC is transparent enough for game audio and buys back a
     // noticeable slice of a 10MB budget: on a one-minute clip 128k was eating
@@ -4490,15 +4527,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // the quality floor for the requested target size. If nothing clears it
     // even at the bottom tier, accepts reduced quality rather than an
     // unusably low (or negative) bitrate. targetBytes <= 0 means "no cap".
-    public ShareEncodeSpec ComputeShareEncodeSpec(double durationSeconds, int sourceWidth, int sourceHeight, double sourceFps, long targetBytes, bool useHevc = false)
+    public ShareEncodeSpec ComputeShareEncodeSpec(double durationSeconds, int sourceWidth, int sourceHeight, double sourceFps, long targetBytes, bool useAv1 = true)
     {
         // Container overhead plus whatever the rate control misses by. The
         // caller verifies the finished file and re-encodes smaller if it
         // still lands over, so this only has to be close, not a guarantee.
         const double OverheadMargin = 0.93;
-        // H.265 buys roughly 45% at equal quality, so the same picture holds
+        // AV1 buys roughly 45% at equal quality, so the same picture holds
         // together at a correspondingly lower bits-per-pixel.
-        var floor = useHevc ? ShareBitsPerPixelFrameFloor * 0.55 : ShareBitsPerPixelFrameFloor;
+        var floor = useAv1 ? ShareBitsPerPixelFrameFloor * 0.55 : ShareBitsPerPixelFrameFloor;
 
         var effectiveWidth = sourceWidth > 0 ? sourceWidth : ShareLadder[0].Width;
         var effectiveHeight = sourceHeight > 0 ? sourceHeight : ShareLadder[0].Height;
