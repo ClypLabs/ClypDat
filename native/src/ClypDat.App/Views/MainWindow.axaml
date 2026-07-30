@@ -887,7 +887,8 @@
                             </Border>
 
                             <Border Grid.Row="1" Background="#1E2A35">
-                                <StackPanel Spacing="6" Margin="16,13,16,13">
+                                <Grid ColumnDefinitions="*,Auto" Margin="16,13,16,13">
+                                <StackPanel Grid.Column="0" Spacing="6">
                                 <TextBlock Text="{Binding TileTopLabel}"
                                            Foreground="#8C98A7"
                                            FontSize="12"
@@ -912,39 +913,45 @@
                                              Foreground="#EDF4FB"
                                              FontSize="15"
                                              FontWeight="Bold"
-                                             MaxWidth="{Binding $parent[Window].DataContext.CardWidth, Converter={x:Static opconv:SubtractDoubleConverter.Instance}, ConverterParameter=32}"
+                                             MaxWidth="{Binding $parent[Window].DataContext.CardWidth, Converter={x:Static opconv:SubtractDoubleConverter.Instance}, ConverterParameter=104}"
                                              TextTrimming="CharacterEllipsis"
                                              Cursor="Hand"
                                              HorizontalAlignment="Left"
                                              ToolTip.Tip="Click to rename"
                                              PointerPressed="ClipTitle_OnPointerPressed" />
                                 </Panel>
-                                <Grid ColumnDefinitions="*,Auto">
-                                  <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
-                                    <Path Data="M11.99,2C6.47,2,2,6.48,2,12s4.47,10,9.99,10C17.52,22,22,17.52,22,12S17.52,2,11.99,2z M12.5,7H11v6l5.25,3.15l0.75-1.23l-4.5-2.67V7z"
-                                          Fill="#8C98A7" Width="12" Height="12" Stretch="Uniform" VerticalAlignment="Center" />
-                                    <TextBlock Text="{Binding RelativeDateLabel}"
-                                               Foreground="#8C98A7"
-                                               FontSize="12"
-                                               FontWeight="SemiBold"
-                                               VerticalAlignment="Center" />
-                                    <TextBlock Text="{Binding CaptureBackendLabel}"
-                                               Foreground="#5C6D7E"
-                                               FontSize="11"
-                                               IsVisible="{Binding HasCaptureBackendLabel}"
-                                               TextTrimming="CharacterEllipsis"
-                                               VerticalAlignment="Center" />
-                                  </StackPanel>
-                                  <Button Grid.Column="1"
-                                          Classes="clipShareIconButton"
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                  <Path Data="M11.99,2C6.47,2,2,6.48,2,12s4.47,10,9.99,10C17.52,22,22,17.52,22,12S17.52,2,11.99,2z M12.5,7H11v6l5.25,3.15l0.75-1.23l-4.5-2.67V7z"
+                                        Fill="#8C98A7" Width="12" Height="12" Stretch="Uniform" VerticalAlignment="Center" />
+                                  <TextBlock Text="{Binding RelativeDateLabel}"
+                                             Foreground="#8C98A7"
+                                             FontSize="12"
+                                             FontWeight="SemiBold"
+                                             VerticalAlignment="Center" />
+                                  <TextBlock Text="{Binding CaptureBackendLabel}"
+                                             Foreground="#5C6D7E"
+                                             FontSize="11"
+                                             IsVisible="{Binding HasCaptureBackendLabel}"
+                                             TextTrimming="CharacterEllipsis"
+                                             VerticalAlignment="Center" />
+                                </StackPanel>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                  <Button Classes="clipShareIconButton"
                                           IsEnabled="{Binding IsHydrated}"
                                           ToolTip.Tip="Share this clip"
                                           Click="ClipCardShare_OnClick">
                                     <PathIcon Data="M18,16.08C17.24,16.08 16.56,16.38 16.04,16.85L8.91,12.7C8.96,12.47 9,12.24 9,12C9,11.76 8.96,11.53 8.91,11.3L15.96,7.19C16.5,7.69 17.21,8 18,8A3,3 0 0,0 21,5A3,3 0 0,0 18,2A3,3 0 0,0 15,5C15,5.24 15.04,5.47 15.09,5.7L8.04,9.81C7.5,9.31 6.79,9 6,9A3,3 0 0,0 3,12A3,3 0 0,0 6,15C6.79,15 7.5,14.69 8.04,14.19L15.16,18.34C15.11,18.55 15.08,18.77 15.08,19C15.08,20.61 16.39,21.91 18,21.91C19.61,21.91 20.92,20.61 20.92,19A2.92,2.92 0 0,0 18,16.08Z"
-                                              Width="14" Height="14" Foreground="#C8D9E9" />
+                                              Width="17" Height="17" Foreground="#C8D9E9" />
                                   </Button>
-                                </Grid>
+                                  <Button Classes="clipShareIconButton"
+                                          ToolTip.Tip="More options"
+                                          Click="ClipCardMenu_OnClick">
+                                    <PathIcon Data="M12,16A2,2 0 0,1 14,18A2,2 0 0,1 12,20A2,2 0 0,1 10,18A2,2 0 0,1 12,16M12,10A2,2 0 0,1 14,12A2,2 0 0,1 12,14A2,2 0 0,1 10,12A2,2 0 0,1 12,10M12,4A2,2 0 0,1 14,6A2,2 0 0,1 12,8A2,2 0 0,1 10,6A2,2 0 0,1 12,4Z"
+                                              Width="17" Height="17" Foreground="#C8D9E9" />
+                                  </Button>
                                 </StackPanel>
+                                </Grid>
                             </Border>
                           </Grid>
                           </Border>
