@@ -46,9 +46,12 @@
         <StackPanel Margin="28,24,28,28" Spacing="18">
           <StackPanel Spacing="10">
             <TextBlock Text="Choose a file size" Foreground="#93A6B8" FontSize="13" FontWeight="Bold" />
+            <!-- 10 MB is Discord's free-tier cap, 50 MB Nitro Basic, 100 MB
+                 covers Nitro and most other upload targets. -->
             <StackPanel Orientation="Horizontal" Spacing="1">
-              <RadioButton x:Name="ShareSize10" Classes="sizePill" GroupName="ShareSize" Content="10 MB" Tag="10" CornerRadius="7,0,0,7" Click="SizePreset_OnClick" />
-              <RadioButton x:Name="ShareSize25" Classes="sizePill" GroupName="ShareSize" Content="25 MB" Tag="25" CornerRadius="0" Click="SizePreset_OnClick" />
+              <RadioButton x:Name="ShareSizeOriginal" Classes="sizePill" GroupName="ShareSize" Content="Original" Tag="0" CornerRadius="7,0,0,7" Click="SizePreset_OnClick" />
+              <RadioButton x:Name="ShareSize10" Classes="sizePill" GroupName="ShareSize" Content="10 MB" Tag="10" CornerRadius="0" Click="SizePreset_OnClick" />
+              <RadioButton x:Name="ShareSize50" Classes="sizePill" GroupName="ShareSize" Content="50 MB" Tag="50" CornerRadius="0" Click="SizePreset_OnClick" />
               <RadioButton x:Name="ShareSize100" Classes="sizePill" GroupName="ShareSize" Content="100 MB" Tag="100" CornerRadius="0" Click="SizePreset_OnClick" />
               <RadioButton x:Name="ShareSizeCustom" Classes="sizePill" GroupName="ShareSize" Content="Custom" CornerRadius="0,7,7,0" Click="SizePreset_OnClick" />
             </StackPanel>
