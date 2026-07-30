@@ -22,10 +22,15 @@
   <Grid Background="#DD000000" PointerPressed="Scrim_OnPointerPressed">
     <Border x:Name="ShareDialogCard" Width="480" CornerRadius="12" Background="#111920" BorderBrush="#232F3A" BorderThickness="1"
             ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center">
+      <Grid>
       <DockPanel LastChildFill="True">
         <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto" Height="56" Background="#0C1319">
-          <TextBlock Grid.Column="1" Text="SHARE CLIP" Foreground="#D8E4F2" FontSize="17" FontWeight="Bold"
-                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+          <!-- Spans all 3 columns and centers over the FULL header width,
+               rather than sitting in column 1 alone - with nothing in
+               column 0 to balance the close button's column 2, centering
+               within just column 1 read as shifted left of true center. -->
+          <TextBlock Grid.Column="0" Grid.ColumnSpan="3" Text="SHARE CLIP" Foreground="#D8E4F2" FontSize="17" FontWeight="Bold"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False" />
           <Button Grid.Column="2" Classes="dialogClose" FontSize="14" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                   Width="52" Height="56" Click="CloseButton_OnClick">
             <TextBlock Text="✕" Margin="0,-3,0,0" />
@@ -35,11 +40,11 @@
         <StackPanel Margin="28,24,28,28" Spacing="18">
           <StackPanel Spacing="10">
             <TextBlock Text="Choose a file size" Foreground="#93A6B8" FontSize="13" FontWeight="Bold" />
-            <StackPanel Orientation="Horizontal" Spacing="2">
-              <RadioButton x:Name="ShareSize10" Classes="sizePill" GroupName="ShareSize" Content="10 MB" Tag="10" Click="SizePreset_OnClick" />
-              <RadioButton x:Name="ShareSize25" Classes="sizePill" GroupName="ShareSize" Content="25 MB" Tag="25" Click="SizePreset_OnClick" />
-              <RadioButton x:Name="ShareSize100" Classes="sizePill" GroupName="ShareSize" Content="100 MB" Tag="100" Click="SizePreset_OnClick" />
-              <RadioButton x:Name="ShareSizeCustom" Classes="sizePill" GroupName="ShareSize" Content="Custom" Click="SizePreset_OnClick" />
+            <StackPanel Orientation="Horizontal" Spacing="1">
+              <RadioButton x:Name="ShareSize10" Classes="sizePill" GroupName="ShareSize" Content="10 MB" Tag="10" CornerRadius="7,0,0,7" Click="SizePreset_OnClick" />
+              <RadioButton x:Name="ShareSize25" Classes="sizePill" GroupName="ShareSize" Content="25 MB" Tag="25" CornerRadius="0" Click="SizePreset_OnClick" />
+              <RadioButton x:Name="ShareSize100" Classes="sizePill" GroupName="ShareSize" Content="100 MB" Tag="100" CornerRadius="0" Click="SizePreset_OnClick" />
+              <RadioButton x:Name="ShareSizeCustom" Classes="sizePill" GroupName="ShareSize" Content="Custom" CornerRadius="0,7,7,0" Click="SizePreset_OnClick" />
             </StackPanel>
             <TextBox x:Name="ShareCustomSizeBox" Watermark="Size in MB" IsVisible="False" Width="140"
                      HorizontalAlignment="Left" KeyDown="CustomSizeBox_OnKeyDown" />
@@ -52,9 +57,11 @@
                        TextWrapping="Wrap" TextAlignment="Center" />
           </StackPanel>
 
-          <Grid Height="180">
+          <Grid Height="238">
             <Rectangle RadiusX="10" RadiusY="10" Stroke="#4C6FFF" StrokeThickness="2" StrokeDashArray="6,4" Fill="Transparent" />
-            <Image x:Name="ShareThumbnail" Stretch="UniformToFill" Margin="3" IsVisible="False" Cursor="Hand"
+            <!-- Uniform, not UniformToFill - a clip's real 16:9 frame shown
+                 whole, not cropped square/round to fill the box. -->
+            <Image x:Name="ShareThumbnail" Stretch="Uniform" Margin="3" IsVisible="False" Cursor="Hand"
                    PointerPressed="Thumbnail_OnPointerPressed"
                    PointerMoved="Thumbnail_OnPointerMoved"
                    PointerReleased="Thumbnail_OnPointerReleased" />
@@ -72,6 +79,23 @@
           </Grid>
         </StackPanel>
       </DockPanel>
+
+      <!-- Shown for the duration of the OS drag gesture (DoDragDrop blocks
+           until the drop/cancel, so this covers exactly "while dragging") -
+           the picker underneath is still there, just hidden, so a cancelled
+           drag lands back on it unchanged. -->
+      <Border x:Name="ShareDragActiveOverlay" Background="#111920" CornerRadius="12" IsVisible="False">
+        <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="32">
+          <Border Width="72" Height="56" CornerRadius="10" BorderBrush="#4C6FFF" BorderThickness="2"
+                  HorizontalAlignment="Center" Margin="0,0,0,8" />
+          <TextBlock Text="Drag &amp; drop magic, activated!" FontWeight="Bold" FontSize="16"
+                     Foreground="#EDF4FB" HorizontalAlignment="Center" />
+          <TextBlock Text="Drop the clip onto a chat channel, DM, or upload box"
+                     FontSize="12" Foreground="#8EA1B6" HorizontalAlignment="Center"
+                     TextWrapping="Wrap" TextAlignment="Center" />
+        </StackPanel>
+      </Border>
+      </Grid>
     </Border>
   </Grid>
 </Window>

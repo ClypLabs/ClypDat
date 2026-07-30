@@ -4994,7 +4994,15 @@ public sealed partial class MainWindow : Window
     private async void ShareButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
-        await new ShareDialog(this, ViewModel).ShowDialog(this);
+        var dialog = new ShareDialog(this, ViewModel);
+        var closedTask = dialog.ShowDialog(this);
+        // ShowDialog has shown the window by the time it returns the awaitable
+        // (the task only completes on close) - re-pin the hover bar's own
+        // top-level window above it right here, so playback stays reachable
+        // with Share up instead of the two racing for whichever happened to
+        // paint last.
+        RepositionEditorHoverControlsSafe(force: true);
+        await closedTask;
     }
 
     private static string ResolveExportGame(string sourcePath, ClipInfo? sourceInfo)
