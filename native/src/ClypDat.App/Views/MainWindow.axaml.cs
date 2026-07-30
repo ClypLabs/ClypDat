@@ -5000,6 +5000,8 @@ public sealed partial class MainWindow : Window
     private async void ShareButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
+        _playback?.Pause();
+        ViewModel.IsPlaying = false;
         _shareDialogOpen = true;
         HideEditorHoverControls(immediate: true);
         try
