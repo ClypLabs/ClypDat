@@ -6,10 +6,6 @@ namespace ClypDat.App.Services;
 // that's what the Settings description for "Auto (recommended)" has always
 // promised ("Uses ClypDat's own capture engine for every game"), and it's
 // the backend that's actually been proven reliable across every session.
-// OBS is only a fallback if Native itself fails to start, and even then its
-// replay_buffer output creation is currently disabled outright (crashes -
-// see ClypDatObsBridge.cpp's create_replay_output comment), so this fallback
-// exists for when that gets fixed, not for regular day-to-day use.
 public sealed class HybridReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics
 {
     private readonly Func<ReplayBufferConfig> _configProvider;
@@ -40,29 +36,12 @@ public sealed class HybridReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
         catch (Exception error)
         {
-            AppLog.Error("Hybrid capture: Native capture failed to start, falling back to OBS.", error);
-        }
-
-        await StartObsAsync("Native capture unavailable. Using OBS.", cancellationToken);
-    }
-
-    private async Task StartObsAsync(string reason, CancellationToken cancellationToken)
-    {
-        var config = _configProvider();
-        if (!ObsRuntimeLocator.IsAvailable(out _, out var obsReason))
-        {
-            AppLog.Info($"Hybrid capture: OBS unavailable too. {obsReason}");
-            _fallbackReason = reason;
+            AppLog.Error("Hybrid capture: Native capture failed to start.", error);
+            _fallbackReason = "Native capture unavailable.";
             SetHealth(new ReplayCaptureHealth("Hybrid", "Unavailable", ReplayCaptureState.Failed,
-                config.FrameRate, 0, 0, 0, 0, 0, 0, string.Empty, string.Empty, reason, DateTime.UtcNow));
-            throw new InvalidOperationException(reason);
+                config.FrameRate, 0, 0, 0, 0, 0, 0, string.Empty, string.Empty, _fallbackReason, DateTime.UtcNow));
+            throw;
         }
-
-        _fallbackReason = reason;
-        var obs = new ObsReplayBuffer(_configProvider);
-        await StartInnerAsync(obs, cancellationToken);
-        SetHealth(new ReplayCaptureHealth("Hybrid", "Game hook", ReplayCaptureState.Starting,
-            config.FrameRate, 0, 0, 0, 0, 0, 0, "OBS", string.Empty, reason, DateTime.UtcNow));
     }
 
     public Task StopAsync(CancellationToken cancellationToken = default) =>

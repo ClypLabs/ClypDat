@@ -25,20 +25,7 @@ public static class CaptureDiagnosticBundle
             processorCount = Environment.ProcessorCount,
             utc = DateTime.UtcNow
         });
-        var obs = ObsRuntimeLocator.Locate();
-        WriteJson(archive, "obs-runtime.json", new
-        {
-            root = Scrub(obs.RootFolder),
-            bridgePresent = File.Exists(obs.BridgePath),
-            files = ObsRuntimeLocator.RequiredFiles.Select(relativePath => new
-            {
-                relativePath,
-                present = File.Exists(Path.Combine(obs.RootFolder, relativePath))
-            })
-        });
-
-        var logs = Directory.EnumerateFiles(AppLog.LogFolder, "clypdat*.log")
-            .Concat(Directory.EnumerateFiles(AppLog.LogFolder, "obs-bridge.log"));
+        var logs = Directory.EnumerateFiles(AppLog.LogFolder, "clypdat*.log");
         foreach (var log in logs.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             var entry = archive.CreateEntry($"logs/{Path.GetFileName(log)}", CompressionLevel.Optimal);

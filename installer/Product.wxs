@@ -5,7 +5,7 @@
   -dClypDatSourceDir=<published win-x64-folder> to candle.exe, and separately
   runs heat.exe to harvest that same source directory into AppFiles.wxs
   (the ComponentGroup "AppFiles" referenced below) since it's hundreds of
-  files (obs/libvlc runtimes) that shouldn't be hand-maintained here.
+  files (LibVLC runtime) that shouldn't be hand-maintained here.
 
   UpgradeCode is fixed forever - never change it across releases, or
   upgrades will install side-by-side instead of replacing the old version.

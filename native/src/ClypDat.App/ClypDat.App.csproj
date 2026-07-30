@@ -129,30 +129,6 @@
           SkipUnchangedFiles="true" />
   </Target>
 
-  <Target Name="CopyObsRuntimeToPublish" AfterTargets="Publish" Condition="Exists('..\..\vendor\obs-runtime')">
-    <ItemGroup>
-      <ObsRuntimeFiles Include="..\..\vendor\obs-runtime\**\*" />
-    </ItemGroup>
-    <Copy SourceFiles="@(ObsRuntimeFiles)"
-          DestinationFiles="@(ObsRuntimeFiles->'$(PublishDir)obs\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
-    <Copy SourceFiles="..\ClypDat.ObsBridge\bin\x64\$(Configuration)\ClypDat.ObsBridge.dll"
-          DestinationFolder="$(PublishDir)obs"
-          SkipUnchangedFiles="true"
-          Condition="Exists('..\ClypDat.ObsBridge\bin\x64\$(Configuration)\ClypDat.ObsBridge.dll')" />
-    <ItemGroup>
-      <ObsProcessHelpers Include="..\..\vendor\obs-runtime\bin\64bit\obs-nvenc-test.exe"
-                         Condition="Exists('..\..\vendor\obs-runtime\bin\64bit\obs-nvenc-test.exe')" />
-      <ObsProcessHelpers Include="..\..\vendor\obs-runtime\bin\64bit\obs-qsv-test.exe"
-                         Condition="Exists('..\..\vendor\obs-runtime\bin\64bit\obs-qsv-test.exe')" />
-      <ObsProcessHelpers Include="..\..\vendor\obs-runtime\bin\64bit\obs-amf-test.exe"
-                         Condition="Exists('..\..\vendor\obs-runtime\bin\64bit\obs-amf-test.exe')" />
-    </ItemGroup>
-    <Copy SourceFiles="@(ObsProcessHelpers)"
-          DestinationFolder="$(PublishDir)"
-          SkipUnchangedFiles="true" />
-  </Target>
-
   <Target Name="CopyFfmpegToPublish" AfterTargets="Publish" Condition="Exists('..\..\vendor\ffmpeg')">
     <ItemGroup>
       <FfmpegFiles Include="..\..\vendor\ffmpeg\**\*" />
@@ -180,7 +156,7 @@
           SkipUnchangedFiles="true" />
   </Target>
 
-  <!-- OBS (GPLv2) and LibVLC (LGPL-2.1) are bundled in every distributed
+  <!-- LibVLC (LGPL-2.1) is bundled in every distributed
        build; their licenses require these notices/texts to ship alongside
        the binaries. See THIRD-PARTY-LICENSES.md at the repo root. -->
   <Target Name="CopyThirdPartyLicensesToPublish" AfterTargets="Publish">

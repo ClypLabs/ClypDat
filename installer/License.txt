@@ -8,6 +8,6 @@ This software ("EVE") is provided free of charge for personal, non-commercial us
 
 3. Limitation of Liability. In no event shall the authors be liable for any claim, damages, or other liability arising from the use of this software.
 
-4. Third-Party Components. EVE bundles third-party open-source components (including OBS Studio and LibVLC) under their respective licenses, included with this installation.
+4. Third-Party Components. EVE bundles third-party open-source components (including LibVLC) under their respective licenses, included with this installation.
 
 By clicking "I Agree", you accept the terms of this agreement.

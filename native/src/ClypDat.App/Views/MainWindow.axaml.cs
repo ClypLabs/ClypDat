@@ -6071,7 +6071,7 @@ public sealed partial class MainWindow : Window
     // Reads the ".paused.json" sidecar NativeReplayBuffer writes next to a
     // clip when it recorded via DXGI Desktop Duplication and the game window
     // wasn't foreground for part of the recording (see class summary there).
-    // Missing sidecar (Legacy/OBS backend clips, or no pauses occurred) just
+    // Missing sidecar (Legacy backend clips, or no pauses occurred) just
     // means no badge ever shows - not an error.
     private List<(double StartSeconds, double EndSeconds)> LoadPausedRanges(string videoPath)
     {

@@ -27,19 +27,12 @@ public static class ReplayBufferFactory
             return new NativeReplayBuffer(configProvider);
         }
 
-        if (ObsRuntimeLocator.IsAvailable(out _, out _))
-        {
-            AppLog.Info("Replay backend selected: OBS.");
-            return new ObsReplayBuffer(configProvider);
-        }
-
-        ObsRuntimeLocator.IsAvailable(out _, out var reason);
-        AppLog.Info($"Replay backend selected: Legacy Windows. OBS unavailable: {reason}");
+        AppLog.Info("Replay backend selected: Legacy Windows.");
         return new WindowsReplayBuffer(configProvider);
     }
 
     // Auto is intentionally preserved here. Create chooses HybridAuto so explicit
-    // OBS/Native/Legacy selections remain deterministic and visible in settings.
+    // Native/Legacy selections remain deterministic and visible in settings.
     public static ReplayBackendOption ResolveEffectiveBackend(ReplayBufferConfig config)
     {
         return ParseBackend(config.Backend);

@@ -5,30 +5,6 @@ ClypDat bundles the following third-party components in its distributed builds
 license terms, particularly the source-availability and notice requirements
 of the GPL/LGPL-licensed components below.
 
-## OBS Studio runtime (GPLv2)
-
-ClypDat's OBS capture backend bundles a trimmed copy of the OBS Studio runtime
-(version **32.1.2**) as pre-built binaries: `obs.dll` and the plugins ClypDat
-actually loads (`win-capture`, `win-wasapi`, `image-source`, `obs-ffmpeg`,
-`obs-nvenc`, `text-freetype2`). ClypDat talks to these binaries entirely through
-OBS's public runtime API, loaded dynamically at runtime (`LoadLibrary` /
-`GetProcAddress`). It does not statically link against or modify OBS's
-source.
-
-OBS Studio is licensed under the **GNU General Public License v2.0**
-(GPLv2). Per that license:
-
-- The full GPLv2 text is included below.
-- Corresponding source code for the exact version bundled is available at
-  the upstream project: https://github.com/obsproject/obs-studio/releases/tag/32.1.2
-- Copyright and license notices are preserved in the bundled binaries as
-  shipped by the OBS Project; nothing has been stripped or modified.
-
-ClypDat's own source code is not itself GPL-licensed by virtue of this bundling.
-OBS is invoked as a separate, independently-distributed program via a
-stable dynamic-loading interface, not compiled or linked into ClypDat's own
-binaries.
-
 ## LibVLC / LibVLCSharp (LGPL-2.1-or-later)
 
 ClypDat's editor playback uses LibVLC (via the `VideoLAN.LibVLC.Windows` and
@@ -42,7 +18,7 @@ ClypDat's editor playback uses LibVLC (via the `VideoLAN.LibVLC.Windows` and
 
 ## ScreenRecorderLib (MIT)
 
-ClypDat's "Windows Capture" backend uses `ScreenRecorderLib` by Sverre
+ClypDat's legacy Windows Capture backend uses `ScreenRecorderLib` by Sverre
 Kristoffer Skodje, licensed under the **MIT License**.
 
 - Project: https://github.com/sskodje/ScreenRecorderLib

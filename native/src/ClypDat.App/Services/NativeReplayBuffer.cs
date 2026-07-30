@@ -38,8 +38,8 @@ namespace ClypDat.App.Services;
 // bottleneck was specifically WGC's internal frame pacing, invisible to and
 // unfixable from application code - ten targeted fixes to buffer depth,
 // threading, timer resolution, and consumption model all measured zero effect).
-// Desktop Duplication is the same lower-level API OBS and this app's own Legacy/
-// ScreenRecorderLib backend already use, both proven to hit full target fps on
+// Desktop Duplication is same lower-level API used by this app's Legacy/
+// ScreenRecorderLib backend, proven to hit full target fps on
 // this same machine.
 //
 // The tradeoff: Desktop Duplication captures the composited desktop, not a
@@ -66,7 +66,7 @@ namespace ClypDat.App.Services;
 //
 // Falls back to capturing the primary monitor (no crop, no occlusion pausing)
 // when no game window is detected. NVENC only for now (no software fallback -
-// machines without NVENC should stay on Legacy/OBS). Audio reuses
+// machines without NVENC should stay on Legacy). Audio reuses
 // AudioCapturePipeline - the same Game/Chat/Microphone routing, WASAPI capture, and mux
 // logic WindowsReplayBuffer uses, via its own independent instance.
 [SupportedOSPlatform("windows10.0.17763.0")]
@@ -994,7 +994,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 // never actually behind the source) while encoded fps still
                 // measured well under target, meaning frames were being
                 // skipped rather than duplicated to fill those gaps, unlike
-                // every other capture tool (OBS, ScreenRecorderLib), which
+                // every other capture tool (such as ScreenRecorderLib), which
                 // pads with the last frame instead. A short timeout keeps
                 // this loop returning often enough for the pacing gate below
                 // (now unconditional, not gated on a successful acquire) to
@@ -2806,8 +2806,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 TrySet("preset", NvencPreset(config));
                 // Main is NVENC's default profile and disables the 8x8
                 // transform - a free efficiency loss on precisely the detailed
-                // content that was coming out soft. (This app's own OBS engine
-                // already sets high; the native path just never did.)
+                // content that was coming out soft.
                 TrySet("profile", "high");
                 // Spend bits by local complexity rather than uniformly, so flat
                 // regions stop stealing budget from detailed ones.
