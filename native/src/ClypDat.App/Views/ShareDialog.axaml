@@ -57,9 +57,9 @@
             </StackPanel>
             <TextBox x:Name="ShareCustomSizeBox" Watermark="Size in MB" IsVisible="False" Width="140"
                      HorizontalAlignment="Left" KeyDown="CustomSizeBox_OnKeyDown" />
-            <CheckBox x:Name="ShareHevcToggle" Content="Better quality (H.265)" Foreground="#93A6B8" FontSize="12"
-                      IsCheckedChanged="HevcToggle_OnChanged"
-                      ToolTip.Tip="Fits roughly 45% more detail in the same size. Discord may show it as a download instead of playing it inline, so leave this off if the clip is going into a Discord chat." />
+            <CheckBox x:Name="ShareAv1Toggle" Content="Smaller file (AV1)" Foreground="#93A6B8" FontSize="12" IsChecked="True"
+                      IsCheckedChanged="Av1Toggle_OnChanged"
+                      ToolTip.Tip="Fits roughly 45% more detail in the same size. Falls back to H.264 automatically if your GPU can't encode AV1. Discord may show it as a download instead of playing it inline, so turn this off if the clip is going into a Discord chat." />
           </StackPanel>
 
           <StackPanel Spacing="4" HorizontalAlignment="Center">
