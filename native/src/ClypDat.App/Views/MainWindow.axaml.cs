@@ -3625,7 +3625,7 @@ public sealed partial class MainWindow : Window
     {
         if (sender is not Control { DataContext: ClipCardViewModel clip }) return;
         clip.IsHovered = false;
-        _clipHoverPreview.StopIfActive(clip, "pointer exited");
+        _clipHoverPreview.PointerLeft(clip);
     }
 
     // Fires as each card's own row scrolls in/out of the library

@@ -1,4 +1,5 @@
 using ClypDat.App.Services;
+using Xunit;
 
 namespace ClypDat.GameDetection.Tests;
 
@@ -34,5 +35,6 @@ public sealed class ClipHoverPreviewControllerTests
         Assert.Equal(1920, ClipHoverPreviewController.Width);
         Assert.Equal(1080, ClipHoverPreviewController.Height);
         Assert.Equal(TimeSpan.FromMilliseconds(75), ClipHoverPreviewController.HoverDelay);
+        Assert.Equal(TimeSpan.FromMilliseconds(150), ClipHoverPreviewController.WarmExitGrace);
     }
 }
