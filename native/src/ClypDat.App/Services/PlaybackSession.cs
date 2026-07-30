@@ -234,11 +234,6 @@ public sealed class PlaybackSession : IDisposable
         var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
         var wasStoppedOrEnded = IsEnded || VideoPlayer.State == VLCState.Stopped;
         AppLog.Debug($"Editor play from requested={time.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}, ended={IsEnded}.");
-        if (wasStoppedOrEnded)
-        {
-            VideoPlayer.Stop();
-            RebuildAudioOutput();
-        }
 
         _ended = false;
         _shouldPlay = true;
