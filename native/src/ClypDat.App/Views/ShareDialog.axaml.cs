@@ -35,7 +35,8 @@ public partial class ShareDialog : Window
         {
             SweepStaleShareTempFiles();
             ShareSize10.IsChecked = true;
-            _ = StartShareEncodeAsync(10L * 1024 * 1024);
+            _lastTargetBytes = MegabytesToTargetBytes(10);
+            _ = StartShareEncodeAsync(_lastTargetBytes);
         };
     }
 
@@ -223,7 +224,8 @@ public partial class ShareDialog : Window
         }
         if (radio.Tag is string tagText && double.TryParse(tagText, out var mb))
         {
-            _ = StartShareEncodeAsync((long)(mb * 1024 * 1024));
+            _lastTargetBytes = MegabytesToTargetBytes(mb);
+            _ = StartShareEncodeAsync(_lastTargetBytes);
         }
     }
 
@@ -232,8 +234,25 @@ public partial class ShareDialog : Window
         if (e.Key != Key.Enter) return;
         if (double.TryParse(ShareCustomSizeBox.Text, out var mb) && mb > 0)
         {
-            _ = StartShareEncodeAsync((long)(mb * 1024 * 1024));
+            _lastTargetBytes = MegabytesToTargetBytes(mb);
+            _ = StartShareEncodeAsync(_lastTargetBytes);
         }
+    }
+
+    // Decimal MB, not MiB. "10 MB" has to come out under Discord's free-tier
+    // cap whichever way Discord counts it, and 10,000,000 bytes is under
+    // both 10 MB and 10 MiB. Erring 5% small here is invisible; erring large
+    // makes the file unsendable, which is the entire point of the preset.
+    private static long MegabytesToTargetBytes(double megabytes) => (long)(megabytes * 1_000_000);
+
+    private long _lastTargetBytes;
+
+    private void HevcToggle_OnChanged(object? sender, RoutedEventArgs e)
+    {
+        // Codec change invalidates whatever is already encoded, so redo it at
+        // the size that is currently selected.
+        if (!IsLoaded || _lastTargetBytes <= 0) return;
+        _ = StartShareEncodeAsync(_lastTargetBytes);
     }
 
     // Picking a size re-encodes immediately (no separate "Share" button to
@@ -274,17 +293,46 @@ public partial class ShareDialog : Window
                 ShareProgressPercentText.Text = $"{ShareProgressBar.Value:0}%";
             });
 
-            var result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes), exportDuration, progress, cts.Token);
-            if (result.ExitCode != 0 && !cts.IsCancellationRequested)
-            {
-                AppLog.Info($"Share: NVENC encode failed, retrying with CPU encoder. ffmpeg said: {result.Error}");
-                ShareProgressBar.IsIndeterminate = true;
-                ShareProgressPercentText.Text = string.Empty;
-                ShareStatusText.Text = "Encoding for Discord (CPU encoder)...";
-                result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, useHardwareEncoder: false), exportDuration, progress, cts.Token);
-            }
+            var useHevc = ShareHevcToggle.IsChecked == true;
+            var useHardware = true;
+            var bitrateScale = 1.0;
+            long actualBytes = 0;
+            MainWindow.ProcessResult result;
 
-            if (cts.IsCancellationRequested) return; // Superseded by a later pill click - that call owns cleanup/UI now.
+            // A size cap that is only usually honoured is worthless - a file
+            // one byte over Discord's free-tier limit simply will not send.
+            // So the finished file is measured, and if it came out over, the
+            // encode is repeated with the budget scaled down by however much
+            // it missed by. Two retries is enough in practice; rate control
+            // overshoots by a few percent, not by multiples.
+            for (var attempt = 0; ; attempt++)
+            {
+                result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, useHardware, useHevc, bitrateScale), exportDuration, progress, cts.Token);
+                if (result.ExitCode != 0 && useHardware && !cts.IsCancellationRequested)
+                {
+                    AppLog.Info($"Share: NVENC encode failed, retrying with CPU encoder. ffmpeg said: {result.Error}");
+                    ShareProgressBar.IsIndeterminate = true;
+                    ShareProgressPercentText.Text = string.Empty;
+                    ShareStatusText.Text = "Encoding (CPU encoder)...";
+                    useHardware = false;
+                    result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, useHardware, useHevc, bitrateScale), exportDuration, progress, cts.Token);
+                }
+
+                if (cts.IsCancellationRequested) return; // Superseded by a later pill click - that call owns cleanup/UI now.
+                if (result.ExitCode != 0) break;
+
+                try { actualBytes = new FileInfo(tempPath).Length; } catch { actualBytes = 0; }
+                if (targetBytes <= 0 || actualBytes <= targetBytes || attempt >= 2) break;
+
+                // Aim for 95% of the cap rather than exactly the cap, so the
+                // next attempt has somewhere to land instead of grazing it
+                // again.
+                bitrateScale *= targetBytes * 0.95 / actualBytes;
+                AppLog.Info($"Share: {actualBytes / 1024.0 / 1024.0:0.##} MB overshot the {targetBytes / 1024.0 / 1024.0:0.##} MB cap - re-encoding at {bitrateScale:P0} of the original bitrate.");
+                ShareProgressBar.Value = 0;
+                ShareProgressPercentText.Text = "0%";
+                ShareStatusText.Text = "Tightening to fit the size limit...";
+            }
 
             if (result.ExitCode != 0)
             {
@@ -295,21 +343,16 @@ public partial class ShareDialog : Window
                 return;
             }
 
-            var spec = _viewModel.ComputeShareEncodeSpec(exportDuration.TotalSeconds, _viewModel.SelectedSourceWidth, _viewModel.SelectedSourceHeight, _viewModel.SelectedSourceFps, targetBytes);
-            long actualBytes;
-            try { actualBytes = new FileInfo(tempPath).Length; } catch { actualBytes = 0; }
-            var actualMb = actualBytes / 1024.0 / 1024.0;
-            var targetMb = targetBytes / 1024.0 / 1024.0;
+            var spec = _viewModel.ComputeShareEncodeSpec(exportDuration.TotalSeconds, _viewModel.SelectedSourceWidth, _viewModel.SelectedSourceHeight, _viewModel.SelectedSourceFps, targetBytes, useHevc);
+            var actualMb = actualBytes / 1_000_000.0;
 
             ShareProgressPanel.IsVisible = false;
             ShareStatusText.Text = "Drag this clip into any Discord chat to upload it";
             // Resolution/fps is always shown, not just when downscaled - what
             // you are about to send is worth knowing either way, and it makes
             // the trade-off a bigger size buys immediately obvious.
-            var quality = $"{spec.Height}p{spec.Fps:0}";
-            ShareResultSizeText.Text = targetBytes > 0 && actualMb > targetMb * 1.02
-                ? $"{actualMb:0.#} MB · {quality} (just over the {targetMb:0.#} MB target)"
-                : $"{actualMb:0.#} MB · {quality}";
+            var quality = $"{spec.Height}p{spec.Fps:0}{(useHevc ? " · H.265" : string.Empty)}";
+            ShareResultSizeText.Text = $"{actualMb:0.#} MB · {quality}";
             ShareShowInFolderButton.IsEnabled = true;
 
             ShareThumbnail.Source = _viewModel.SelectedThumbnail;

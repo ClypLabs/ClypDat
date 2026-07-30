@@ -4298,15 +4298,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return args;
     }
 
-    // Share always encodes H.264/AAC/mp4 regardless of SelectedExportCodec -
-    // Discord's inline chat preview only reliably plays H.264-in-mp4; H.265/
-    // AV1 show up as a bare download instead of a scrubbable preview.
-    public IReadOnlyList<string> BuildShareArguments(string outputPath, long targetBytes, bool useHardwareEncoder = true)
+    // Share defaults to H.264/AAC/mp4 regardless of SelectedExportCodec -
+    // Discord's inline chat preview only reliably plays H.264-in-mp4; H.265
+    // often shows as a bare download instead of a scrubbable preview, which
+    // is why the better codec is opt-in rather than automatic.
+    //
+    // bitrateScale exists for the "must not exceed the cap" retry: if an
+    // encode lands over target, the caller re-runs with a proportionally
+    // smaller budget rather than hoping a fixed safety margin was enough.
+    public IReadOnlyList<string> BuildShareArguments(string outputPath, long targetBytes, bool useHardwareEncoder = true, bool useHevc = false, double bitrateScale = 1.0)
     {
         var startSeconds = Math.Max(0, TrimStart.TotalSeconds);
         var end = TrimEnd > TrimStart ? TrimEnd : Duration;
         var durationSeconds = Math.Max(0.1, (end - TrimStart).TotalSeconds);
-        var spec = ComputeShareEncodeSpec(durationSeconds, SelectedSourceWidth, SelectedSourceHeight, SelectedSourceFps, targetBytes);
+        var spec = ComputeShareEncodeSpec(durationSeconds, SelectedSourceWidth, SelectedSourceHeight, SelectedSourceFps, targetBytes, useHevc);
+        if (bitrateScale < 1.0)
+        {
+            spec = spec with { VideoBitrateKbps = Math.Max(80, (int)(spec.VideoBitrateKbps * bitrateScale)) };
+        }
 
         var args = new List<string>
         {
@@ -4360,8 +4369,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             args.AddRange(new[]
             {
-                "-c:v", "h264_nvenc",
-                "-preset", "p6",
+                "-c:v", useHevc ? "hevc_nvenc" : "h264_nvenc",
+                // p7 is NVENC's slowest/highest-quality preset. A Share
+                // encode runs once on a clip that is usually under a minute,
+                // so there is no reason to leave quality on the table for
+                // speed nobody is waiting on.
+                "-preset", "p7",
                 "-tune", "hq",
                 "-rc", "vbr",
                 // NVENC's own two-pass: better bit allocation without paying
@@ -4375,10 +4388,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         else
         {
-            args.AddRange(new[] { "-c:v", "libx264", "-preset", "slow", "-bf", "3" });
+            // x265 at "slow" is dramatically slower than x264 at "slow" for a
+            // similar gain, so the CPU fallback settles at medium there.
+            args.AddRange(useHevc
+                ? new[] { "-c:v", "libx265", "-preset", "medium" }
+                : new[] { "-c:v", "libx264", "-preset", "slow", "-bf", "3" });
         }
 
-        args.AddRange(new[] { "-profile:v", "high", "-pix_fmt", "yuv420p" });
+        args.AddRange(useHevc
+            // hvc1 rather than ffmpeg's default hev1 tag: players (and
+            // Discord/Apple stacks especially) routinely refuse to play
+            // hev1-tagged HEVC in mp4 while handling hvc1 fine.
+            ? new[] { "-profile:v", "main", "-tag:v", "hvc1", "-pix_fmt", "yuv420p" }
+            : new[] { "-profile:v", "high", "-pix_fmt", "yuv420p" });
 
         if (spec.IsOriginalQuality)
         {
@@ -4400,9 +4422,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             args.Add("-vf");
             // lanczos rather than ffmpeg's default bilinear - a downscale is
             // exactly where a good resampler shows, and it costs nothing here.
-            args.Add($"scale={spec.Width}:{spec.Height}:flags=lanczos");
-            args.Add("-r");
-            args.Add(spec.Fps.ToString("0.###"));
+            // fps as a filter rather than "-r": the filter drops frames on a
+            // proper timeline, where -r as an output option can duplicate
+            // them and hand the encoder repeated frames to pay for.
+            args.Add($"scale={spec.Width}:{spec.Height}:flags=lanczos,fps={spec.Fps.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}");
         }
         args.AddRange(new[] { "-c:a", "aac", "-b:a", $"{ShareAudioBps / 1000}k" });
 
@@ -4452,12 +4475,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // the quality floor for the requested target size. If nothing clears it
     // even at the bottom tier, accepts reduced quality rather than an
     // unusably low (or negative) bitrate. targetBytes <= 0 means "no cap".
-    public ShareEncodeSpec ComputeShareEncodeSpec(double durationSeconds, int sourceWidth, int sourceHeight, double sourceFps, long targetBytes)
+    public ShareEncodeSpec ComputeShareEncodeSpec(double durationSeconds, int sourceWidth, int sourceHeight, double sourceFps, long targetBytes, bool useHevc = false)
     {
-        // Multipass/VBV hits the target far more accurately than the old
-        // single-pass VBR did, so less of the budget has to be held back
-        // against overshoot - that headroom goes straight into picture.
-        const double OverheadMargin = 0.94;
+        // Container overhead plus whatever the rate control misses by. The
+        // caller verifies the finished file and re-encodes smaller if it
+        // still lands over, so this only has to be close, not a guarantee.
+        const double OverheadMargin = 0.93;
+        // H.265 buys roughly 45% at equal quality, so the same picture holds
+        // together at a correspondingly lower bits-per-pixel.
+        var floor = useHevc ? ShareBitsPerPixelFrameFloor * 0.55 : ShareBitsPerPixelFrameFloor;
 
         var effectiveWidth = sourceWidth > 0 ? sourceWidth : ShareLadder[0].Width;
         var effectiveHeight = sourceHeight > 0 ? sourceHeight : ShareLadder[0].Height;
@@ -4474,15 +4500,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             // 0.5 of slack on fps so a 59.94 source still counts as 60.
             if (tier.Width > effectiveWidth || tier.Height > effectiveHeight || tier.Fps > effectiveFps + 0.5) continue;
-            if (videoBps < ShareBitsPerPixelFrameFloor * tier.Width * tier.Height * tier.Fps) continue;
+            if (videoBps < floor * tier.Width * tier.Height * tier.Fps) continue;
 
             var downscaled = tier.Width != effectiveWidth || tier.Height != effectiveHeight || Math.Abs(tier.Fps - effectiveFps) > 0.5;
             return new ShareEncodeSpec(tier.Width, tier.Height, tier.Fps, Math.Max(100, (int)(videoBps / 1000)), downscaled, IsOriginalQuality: false);
         }
 
         var last = ShareLadder[^1];
-        var floor = ShareBitsPerPixelFrameFloor * last.Width * last.Height * last.Fps;
-        var clamped = Math.Max(floor * 0.6, videoBps);
+        var clamped = Math.Max(floor * last.Width * last.Height * last.Fps * 0.6, videoBps);
         return new ShareEncodeSpec(last.Width, last.Height, last.Fps, Math.Max(100, (int)(clamped / 1000)), Downscaled: true, IsOriginalQuality: false);
     }
 
