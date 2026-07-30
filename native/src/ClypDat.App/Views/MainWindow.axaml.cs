@@ -3132,6 +3132,13 @@ public sealed partial class MainWindow : Window
         await ShareCurrentClipAsync();
     }
 
+    private async void ClipCardShare_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
+        if (!ViewModel.PrepareClipForShare(clip)) return;
+        await ShareCurrentClipAsync();
+    }
+
     private async void ClipContextRename_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
