@@ -19,7 +19,7 @@
        the same way the floating hover bar already does, while
        TransparencyLevelHint lets this Grid's semi-transparent scrim still
        blend with - and dim - everything behind it, video included. -->
-  <Grid Background="#DD000000" PointerPressed="Scrim_OnPointerPressed">
+  <Grid x:Name="ShareScrim" Background="#DD000000" PointerPressed="Scrim_OnPointerPressed">
     <Border x:Name="ShareDialogCard" Width="480" CornerRadius="12" Background="#111920" BorderBrush="#232F3A" BorderThickness="1"
             ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center">
       <DockPanel LastChildFill="True">
