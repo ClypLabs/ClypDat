@@ -204,6 +204,7 @@ public sealed partial class MainWindow : Window
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayBufferEnabled)) _ = ApplyReplayBufferEnabledAsync();
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
+                    if (e.PropertyName == nameof(MainWindowViewModel.IsSettingsVisible) && ViewModel.IsSettingsVisible) PauseEditorPlayback();
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayQualityRestartRequired) && ViewModel.ReplayQualityRestartRequired)
                     {
                         // Debounced rather than restarting on every keystroke/click -
@@ -4554,12 +4555,7 @@ public sealed partial class MainWindow : Window
             // behind wherever the video actually freezes. Resuming from that stale,
             // earlier snapshot was rewinding to a spot already played and replaying
             // it forward - visible as a brief "rewind and repeat" on every unpause.
-            _playback.Pause();
-            var pauseTime = _playback.Position;
-            ViewModel.CurrentTime = pauseTime;
-            SetPlayheadBase(pauseTime);
-            ViewModel.IsPlaying = false;
-            _playbackTimer.Stop();
+            PauseEditorPlayback();
             return;
         }
 
@@ -4576,6 +4572,17 @@ public sealed partial class MainWindow : Window
         StartPlayheadClock(startTime);
         ViewModel.IsPlaying = true;
         _playbackTimer.Start();
+    }
+
+    private void PauseEditorPlayback()
+    {
+        if (ViewModel is null || !ViewModel.IsPlaying || _playback is null) return;
+        _playback.Pause();
+        var pauseTime = _playback.Position;
+        ViewModel.CurrentTime = pauseTime;
+        SetPlayheadBase(pauseTime);
+        ViewModel.IsPlaying = false;
+        _playbackTimer.Stop();
     }
 
     private void RestartButton_OnClick(object? sender, RoutedEventArgs e)
