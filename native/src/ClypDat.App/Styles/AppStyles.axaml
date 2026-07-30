@@ -131,6 +131,38 @@
     <Setter Property="CornerRadius" Value="7" />
     <Setter Property="Padding" Value="20,10" />
   </Style>
+
+  <!-- Segmented "choose a size" row on the Share dialog - a RadioButton for
+       the exclusive-choice behaviour, retemplated to a filled pill instead
+       of a dot-and-label so a row of them reads as one connected control. -->
+  <Style Selector="RadioButton.sizePill">
+    <Setter Property="Background" Value="#1D2A36" />
+    <Setter Property="Foreground" Value="#93A6B8" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Padding" Value="16,10" />
+    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}" CornerRadius="{TemplateBinding CornerRadius}">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                             Foreground="{TemplateBinding Foreground}"
+                             FontWeight="{TemplateBinding FontWeight}"
+                             FontSize="{TemplateBinding FontSize}"
+                             Padding="{TemplateBinding Padding}"
+                             HorizontalAlignment="Center"
+                             VerticalAlignment="Center" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <Style Selector="RadioButton.sizePill:checked">
+    <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+  </Style>
+  <Style Selector="RadioButton.sizePill:pointerover:not(:checked)">
+    <Setter Property="Background" Value="#26333F" />
+  </Style>
   <Style Selector="Button:not(ToggleSwitch)">
     <Setter Property="Background" Value="#1D2A36" />
     <Setter Property="Foreground" Value="#D8E4F2" />

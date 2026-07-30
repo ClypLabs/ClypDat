@@ -4982,249 +4982,212 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void ShareButton_OnClick(object? sender, RoutedEventArgs e) => await ShareCurrentClipAsync();
+    // Share is an embedded overlay (like NewClipsOverlay), not a separate OS
+    // Window - a Window can't dim the app behind it, and the drag-out needs
+    // the app's own content to stay part of the same visual tree the whole
+    // time. State lives in these fields rather than locals because the
+    // encode is kicked off from a pill click and needs to be cancellable by
+    // the NEXT pill click (picking a different size mid-encode).
+    private CancellationTokenSource? _shareCts;
+    private string? _shareTempPath;
 
-    // Discord's no-Nitro upload cap is 10MB - the whole point of Share is
-    // getting a clip under a size cap and out of the app fast, so the size
-    // picker is a handful of presets (plus one free-entry option) rather than
-    // a general export dialog.
-    private async Task<long?> ShowShareSizePickerAsync()
+    private void ShareButton_OnClick(object? sender, RoutedEventArgs e)
     {
-        var (window, body) = CreateChromelessDialog("Share to Discord");
-
-        var options = new (string Label, long? Bytes)[]
-        {
-            ("10 MB (no Nitro)", 10L * 1024 * 1024),
-            ("25 MB", 25L * 1024 * 1024),
-            ("100 MB", 100L * 1024 * 1024),
-            ("Custom", null)
-        };
-
-        const string groupName = "ShareSizeOption";
-        RadioButton? selected = null;
-        var customBox = new TextBox { Watermark = "Size in MB", IsEnabled = false, Width = 120 };
-
-        var radios = new List<RadioButton>();
-        foreach (var option in options)
-        {
-            var radio = new RadioButton { Content = option.Label, GroupName = groupName, Tag = option.Bytes };
-            radio.IsCheckedChanged += (_, _) =>
-            {
-                if (radio.IsChecked != true) return;
-                selected = radio;
-                customBox.IsEnabled = option.Bytes is null;
-                if (option.Bytes is null) customBox.Focus();
-            };
-            radios.Add(radio);
-            body.Children.Add(radio);
-        }
-        radios[0].IsChecked = true;
-
-        body.Children.Add(customBox);
-
-        var share = new Button { Content = "Share", Width = 100, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, Classes = { "primaryButton" } };
-        var cancel = new Button { Content = "Cancel", Width = 100, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
-        var errorText = new TextBlock { Foreground = Avalonia.Media.Brush.Parse("#E07070"), FontSize = 12, IsVisible = false };
-
-        share.Click += (_, _) =>
-        {
-            var tag = selected?.Tag as long?;
-            if (tag is { } fixedBytes)
-            {
-                window.Close(fixedBytes);
-                return;
-            }
-            if (!double.TryParse(customBox.Text, out var megabytes) || megabytes <= 0)
-            {
-                errorText.Text = "Enter a size in MB greater than 0.";
-                errorText.IsVisible = true;
-                return;
-            }
-            window.Close((long)(megabytes * 1024 * 1024));
-        };
-        cancel.Click += (_, _) => window.Close(null);
-
-        body.Children.Insert(0, new TextBlock
-        {
-            Text = "Share to Discord",
-            Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
-            FontWeight = Avalonia.Media.FontWeight.Bold,
-            FontSize = 18
-        });
-        body.Children.Add(errorText);
-        body.Children.Add(new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 10,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Children = { cancel, share }
-        });
-
-        return await window.ShowDialog<long?>(this);
+        if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
+        ResetShareOverlay();
+        ShareOverlay.IsVisible = true;
     }
 
-    private async Task ShareCurrentClipAsync()
+    private void ResetShareOverlay()
+    {
+        _shareCts?.Cancel();
+        _shareCts = null;
+        if (_shareTempPath is { } stale) AudioCapturePipeline.TryDelete(stale);
+        _shareTempPath = null;
+
+        ShareSize10.IsChecked = false;
+        ShareSize25.IsChecked = false;
+        ShareSize100.IsChecked = false;
+        ShareSizeCustom.IsChecked = false;
+        ShareCustomSizeBox.IsVisible = false;
+        ShareCustomSizeBox.Text = string.Empty;
+        ShareThumbnail.IsVisible = false;
+        ShareDurationBadge.IsVisible = false;
+        ShareProgressBar.IsVisible = false;
+        ShareStatusText.Text = "Pick a size to prepare the clip";
+        ShareResultSizeText.Text = string.Empty;
+        ShareShowInFolderButton.IsEnabled = false;
+    }
+
+    private void ShareCloseButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ShareOverlay.IsVisible = false;
+        _shareCts?.Cancel();
+        if (_shareTempPath is { } path) AudioCapturePipeline.TryDelete(path);
+        _shareTempPath = null;
+    }
+
+    // Header-only drag-move, same convention as NewClipsOverlay_OnPointerPressed -
+    // presses on the card itself are consumed by its own controls before they
+    // bubble here, so this only ever sees clicks on the surrounding scrim/header.
+    private void ShareOverlay_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(ShareOverlay).Properties.IsLeftButtonPressed) return;
+        if (e.GetPosition(ShareOverlay).Y > 56) return;
+        BeginMoveDrag(e);
+    }
+
+    private void ShareSizePreset_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton radio) return;
+        var isCustom = ReferenceEquals(radio, ShareSizeCustom);
+        ShareCustomSizeBox.IsVisible = isCustom;
+        if (isCustom)
+        {
+            ShareCustomSizeBox.Focus();
+            return; // Wait for Enter - free-entry MB value, nothing to encode yet.
+        }
+        if (radio.Tag is string tagText && double.TryParse(tagText, out var mb))
+        {
+            _ = StartShareEncodeAsync((long)(mb * 1024 * 1024));
+        }
+    }
+
+    private void ShareCustomSizeBox_OnKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter) return;
+        if (double.TryParse(ShareCustomSizeBox.Text, out var mb) && mb > 0)
+        {
+            _ = StartShareEncodeAsync((long)(mb * 1024 * 1024));
+        }
+    }
+
+    // Picking a size re-encodes immediately (no separate "Share" button to
+    // press) - the drop zone itself carries the progress/result state so the
+    // whole flow stays on one screen instead of a picker step then a result
+    // step.
+    private async Task StartShareEncodeAsync(long targetBytes)
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
 
-        var targetBytes = await ShowShareSizePickerAsync();
-        if (targetBytes is not { } bytes) return;
+        _shareCts?.Cancel();
+        if (_shareTempPath is { } previous) AudioCapturePipeline.TryDelete(previous);
 
+        var cts = new CancellationTokenSource();
+        _shareCts = cts;
         var tempPath = Path.Combine(Path.GetTempPath(), $"clypdat-share-{Guid.NewGuid():N}.mp4");
-        ViewModel.IsExporting = true;
-        var progressCts = new CancellationTokenSource();
-        var (progressWindow, progressBar, statusText, percentText, etaText) = CreateProgressDialog("Preparing share clip", "Encoding for Discord...", () => progressCts.Cancel());
-        var progressDialogTask = progressWindow.ShowDialog(this);
+        _shareTempPath = tempPath;
+
+        ShareThumbnail.IsVisible = false;
+        ShareDurationBadge.IsVisible = false;
+        ShareShowInFolderButton.IsEnabled = false;
+        ShareResultSizeText.Text = string.Empty;
+        ShareProgressBar.IsVisible = true;
+        ShareProgressBar.IsIndeterminate = false;
+        ShareProgressBar.Value = 0;
+        ShareStatusText.Text = "Encoding for Discord...";
+
         try
         {
-            _playback?.Pause();
-            ViewModel.IsPlaying = false;
             var exportDuration = ViewModel.ExportDuration;
-            var encodeClock = System.Diagnostics.Stopwatch.StartNew();
             var progress = new Progress<double>(fraction =>
             {
-                progressBar.IsIndeterminate = false;
-                progressBar.Value = Math.Clamp(fraction * 100, 0, 100);
-                percentText.Text = $"{progressBar.Value:0}%";
-                if (fraction > 0.03)
-                {
-                    var remaining = TimeSpan.FromMilliseconds(encodeClock.ElapsedMilliseconds * (1 - fraction) / fraction);
-                    etaText.Text = $"Estimated: {FormatEta(remaining)}";
-                    etaText.IsVisible = true;
-                }
+                if (cts.IsCancellationRequested) return;
+                ShareProgressBar.Value = Math.Clamp(fraction * 100, 0, 100);
             });
-            var result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildShareArguments(tempPath, bytes), exportDuration, progress, progressCts.Token);
-            if (result.ExitCode != 0 && !progressCts.IsCancellationRequested)
+
+            var result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildShareArguments(tempPath, targetBytes), exportDuration, progress, cts.Token);
+            if (result.ExitCode != 0 && !cts.IsCancellationRequested)
             {
                 AppLog.Info($"Share: NVENC encode failed, retrying with CPU encoder. ffmpeg said: {result.Error}");
-                progressBar.IsIndeterminate = true;
-                statusText.Text = "Encoding for Discord (CPU encoder)...";
-                percentText.Text = string.Empty;
-                etaText.IsVisible = false;
-                encodeClock.Restart();
-                result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildShareArguments(tempPath, bytes, useHardwareEncoder: false), exportDuration, progress, progressCts.Token);
+                ShareProgressBar.IsIndeterminate = true;
+                ShareStatusText.Text = "Encoding for Discord (CPU encoder)...";
+                result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildShareArguments(tempPath, targetBytes, useHardwareEncoder: false), exportDuration, progress, cts.Token);
             }
-            progressWindow.Close();
-            if (progressCts.IsCancellationRequested)
+
+            if (cts.IsCancellationRequested) return; // Superseded by a later pill click - that call owns cleanup/UI now.
+
+            if (result.ExitCode != 0)
             {
                 AudioCapturePipeline.TryDelete(tempPath);
+                _shareTempPath = null;
+                ShareProgressBar.IsVisible = false;
+                ShareStatusText.Text = string.IsNullOrWhiteSpace(result.Error) ? "Encode failed." : result.Error;
+                return;
             }
-            else if (result.ExitCode != 0)
-            {
-                AudioCapturePipeline.TryDelete(tempPath);
-                await ShowMessageAsync("Share failed", string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg failed." : result.Error);
-            }
-            else
-            {
-                var spec = ViewModel.ComputeShareEncodeSpec(exportDuration.TotalSeconds, ViewModel.SelectedSourceWidth, ViewModel.SelectedSourceHeight, ViewModel.SelectedSourceFps, bytes);
-                await ShowShareResultDialogAsync(tempPath, bytes, spec);
-            }
+
+            var spec = ViewModel.ComputeShareEncodeSpec(exportDuration.TotalSeconds, ViewModel.SelectedSourceWidth, ViewModel.SelectedSourceHeight, ViewModel.SelectedSourceFps, targetBytes);
+            long actualBytes;
+            try { actualBytes = new FileInfo(tempPath).Length; } catch { actualBytes = 0; }
+            var actualMb = actualBytes / 1024.0 / 1024.0;
+            var targetMb = targetBytes / 1024.0 / 1024.0;
+
+            ShareProgressBar.IsVisible = false;
+            ShareStatusText.Text = spec.Downscaled
+                ? $"Downscaled to {spec.Height}p{spec.Fps:0} to fit the target size."
+                : "Drag this clip into any Discord chat to upload it.";
+            ShareResultSizeText.Text = actualMb > targetMb * 1.02
+                ? $"{actualMb:0.#} MB (slightly over the {targetMb:0.#} MB target)"
+                : $"{actualMb:0.#} MB";
+            ShareShowInFolderButton.IsEnabled = true;
+
+            ShareThumbnail.Source = ViewModel.SelectedThumbnail;
+            ShareThumbnail.IsVisible = ViewModel.SelectedThumbnail is not null;
+            ShareDurationText.Text = FormatShareDuration(exportDuration);
+            ShareDurationBadge.IsVisible = true;
         }
-        finally
+        catch (Exception error)
         {
-            if (progressWindow.IsVisible) progressWindow.Close();
-            await progressDialogTask;
-            progressCts.Dispose();
-            ViewModel.IsExporting = false;
+            if (cts.IsCancellationRequested) return;
+            AppLog.Error("Share: encode failed", error);
+            ShareProgressBar.IsVisible = false;
+            ShareStatusText.Text = "Encode failed.";
         }
     }
 
-    // Result dialog's thumbnail is what actually gets dragged out - the file
-    // only needs to survive long enough for the OS to read it during that
-    // drag, so it's deleted the moment this dialog closes rather than left
-    // for a temp-folder sweep that might not run for a long time.
-    private async Task ShowShareResultDialogAsync(string tempPath, long targetBytes, MainWindowViewModel.ShareEncodeSpec spec)
+    private static string FormatShareDuration(TimeSpan duration) =>
+        duration.TotalHours >= 1 ? duration.ToString(@"h\:mm\:ss") : duration.ToString(@"m\:ss");
+
+    private void ShareShowInFolderButton_OnClick(object? sender, RoutedEventArgs e)
     {
-        var (window, body) = CreateChromelessDialog("Ready to share");
-
-        long actualBytes = 0;
-        try { actualBytes = new FileInfo(tempPath).Length; } catch { /* file may be gone if something raced the dialog open */ }
-        var actualMb = actualBytes / 1024.0 / 1024.0;
-        var targetMb = targetBytes / 1024.0 / 1024.0;
-        var sizeLabel = actualMb > targetMb * 1.02
-            ? $"{actualMb:0.#} MB (slightly over the {targetMb:0.#} MB target)"
-            : $"{actualMb:0.#} MB";
-
-        body.Children.Add(new TextBlock
-        {
-            Text = "Ready to share",
-            Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
-            FontWeight = Avalonia.Media.FontWeight.Bold,
-            FontSize = 18
-        });
-        body.Children.Add(new TextBlock { Text = sizeLabel, Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"), FontSize = 13 });
-        if (spec.Downscaled)
-        {
-            body.Children.Add(new TextBlock
-            {
-                Text = $"Downscaled to {spec.Height}p{spec.Fps:0} to fit the target size.",
-                Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"),
-                FontSize = 12,
-                TextWrapping = TextWrapping.Wrap
-            });
-        }
-
-        var dragChip = new Border
-        {
-            Background = Avalonia.Media.Brush.Parse("#1D2A36"),
-            BorderBrush = Avalonia.Media.Brush.Parse("#2C3B48"),
-            BorderThickness = new Avalonia.Thickness(1),
-            CornerRadius = new Avalonia.CornerRadius(7),
-            Padding = new Avalonia.Thickness(14, 10),
-            Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
-            Child = new TextBlock { Text = "Drag this into Discord", Foreground = Avalonia.Media.Brush.Parse("#D8E4F2"), FontSize = 13, HorizontalAlignment = HorizontalAlignment.Center }
-        };
-
-        Avalonia.Point? pressPoint = null;
-        dragChip.PointerPressed += (_, pointerArgs) => pressPoint = pointerArgs.GetPosition(dragChip);
-        dragChip.PointerMoved += async (_, pointerArgs) =>
-        {
-            if (pressPoint is not { } start || pointerArgs.GetCurrentPoint(dragChip).Properties.IsLeftButtonPressed != true) return;
-            var current = pointerArgs.GetPosition(dragChip);
-            if (Math.Abs(current.X - start.X) < 4 && Math.Abs(current.Y - start.Y) < 4) return;
-            pressPoint = null;
-
-            // Avalonia 11.3 added DataTransfer/DoDragDropAsync as the
-            // replacement for DataObject/DoDragDrop, but its write-side API
-            // (constructing a file-backed IDataTransferItem) isn't
-            // documented anywhere reachable, while this older overload is
-            // still shipped, still functional, and is what every Avalonia
-            // drag-out sample still shows - suppressed rather than swapped
-            // to a barely-verifiable newer path for the same result.
-#pragma warning disable CS0618
-            var data = new DataObject();
-            data.Set(DataFormats.Files, new[] { tempPath });
-            try
-            {
-                await DragDrop.DoDragDrop(pointerArgs, data, DragDropEffects.Copy);
-            }
-            catch (Exception error)
-            {
-                AppLog.Error("Share: drag-out failed", error);
-            }
-#pragma warning restore CS0618
-        };
-        dragChip.PointerReleased += (_, _) => pressPoint = null;
-
-        body.Children.Add(dragChip);
-
-        var openFolder = new Button { Content = "Show in folder", Width = 130, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
-        openFolder.Click += (_, _) => ExplorerService.Open(tempPath, selectFile: true);
-        var done = new Button { Content = "Done", Width = 100, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, Classes = { "primaryButton" } };
-        done.Click += (_, _) => window.Close();
-
-        body.Children.Add(new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 10,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Children = { openFolder, done }
-        });
-
-        window.Closed += (_, _) => AudioCapturePipeline.TryDelete(tempPath);
-
-        await window.ShowDialog(this);
+        if (_shareTempPath is { } path) ExplorerService.Open(path, selectFile: true);
     }
+
+    private Avalonia.Point? _shareDragPressPoint;
+
+    private void ShareThumbnail_OnPointerPressed(object? sender, PointerPressedEventArgs e) =>
+        _shareDragPressPoint = e.GetPosition(ShareThumbnail);
+
+    private async void ShareThumbnail_OnPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_shareDragPressPoint is not { } start || e.GetCurrentPoint(ShareThumbnail).Properties.IsLeftButtonPressed != true) return;
+        if (_shareTempPath is not { } tempPath) return;
+        var current = e.GetPosition(ShareThumbnail);
+        if (Math.Abs(current.X - start.X) < 4 && Math.Abs(current.Y - start.Y) < 4) return;
+        _shareDragPressPoint = null;
+
+        // Avalonia 11.3 added DataTransfer/DoDragDropAsync as the
+        // replacement for DataObject/DoDragDrop, but its write-side API
+        // (constructing a file-backed IDataTransferItem) isn't documented
+        // anywhere reachable, while this older overload is still shipped,
+        // still functional, and is what every Avalonia drag-out sample still
+        // shows - suppressed rather than swapped to a barely-verifiable
+        // newer path for the same result.
+#pragma warning disable CS0618
+        var data = new DataObject();
+        data.Set(DataFormats.Files, new[] { tempPath });
+        try
+        {
+            await DragDrop.DoDragDrop(e, data, DragDropEffects.Copy);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Share: drag-out failed", error);
+        }
+#pragma warning restore CS0618
+    }
+
+    private void ShareThumbnail_OnPointerReleased(object? sender, PointerReleasedEventArgs e) => _shareDragPressPoint = null;
 
     private static string ResolveExportGame(string sourcePath, ClipInfo? sourceInfo)
     {
