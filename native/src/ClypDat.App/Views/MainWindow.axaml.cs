@@ -3613,9 +3613,12 @@ public sealed partial class MainWindow : Window
 
     private void ClipCard_OnPointerEntered(object? sender, PointerEventArgs e)
     {
-        if (sender is not Control { DataContext: ClipCardViewModel clip }) return;
+        if (sender is not Control { DataContext: ClipCardViewModel clip } control) return;
         clip.IsHovered = true;
-        _clipHoverPreview.Request(clip, ViewModel?.EnableClipHoverPreview == true && ViewModel.IsLibraryVisible);
+        var previewImage = control.GetVisualDescendants().OfType<Image>()
+            .FirstOrDefault(image => image.Classes.Contains("clipPreviewImage"));
+        _clipHoverPreview.Request(clip, ViewModel?.EnableClipHoverPreview == true && ViewModel.IsLibraryVisible,
+            previewImage is null ? null : () => previewImage.InvalidateVisual());
     }
 
     private void ClipCard_OnPointerExited(object? sender, PointerEventArgs e)
