@@ -237,7 +237,6 @@ public sealed class PlaybackSession : IDisposable
         if (wasStoppedOrEnded)
         {
             VideoPlayer.Stop();
-            RebuildAudioOutput();
         }
 
         _ended = false;
@@ -375,7 +374,6 @@ public sealed class PlaybackSession : IDisposable
         }
         var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
         var requested = TimeSpan.FromMilliseconds(milliseconds);
-        _ended = false;
         _isSeeking = true;
         _shouldPlay = resumePlayback;
         _lastRequestedPosition = requested;
@@ -386,6 +384,18 @@ public sealed class PlaybackSession : IDisposable
             {
                 _audioOutput?.Stop();
                 ForceVideoSilent();
+                // VLC accepts a Time assignment after EndReached without
+                // restarting its decoder, but leaves the transport state at
+                // Ended. Reset it before issuing the seek so settling lands
+                // in a usable paused/playing state. Keep the existing audio
+                // output and readers: they are repositioned after video
+                // settles below, avoiding a slow WASAPI/mixer rebuild.
+                var resetTransport = IsEnded || VideoPlayer.State == VLCState.Stopped;
+                if (resetTransport)
+                {
+                    VideoPlayer.Stop();
+                    _ended = false;
+                }
                 if (!VideoPlayer.IsPlaying) VideoPlayer.Play();
                 VideoPlayer.SetPause(false);
             }

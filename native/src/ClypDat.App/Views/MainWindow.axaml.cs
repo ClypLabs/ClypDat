@@ -4568,6 +4568,14 @@ public sealed partial class MainWindow : Window
         }
 
         _endedAtTrimBoundary = false;
+        if (_playback.IsSeeking)
+        {
+            // A seek owns VLC transport until it settles. Replace its paused
+            // request with a serialized resume seek rather than letting
+            // PlayFrom race it with a separate Stop/Play sequence.
+            _ = ApplyTimelineSeekAsync(startTime, resumePlayback: true);
+            return;
+        }
         _playback.PlayFrom(startTime);
         StartPlayheadClock(startTime);
         ViewModel.IsPlaying = true;
