@@ -194,6 +194,17 @@ public sealed class ForegroundGameDetector
             }
 
             if (IsIgnored(exeName)) return GameDetection.None;
+
+            // Machine-wide anti-cheat services (Vanguard, BEService) identify
+            // no single game - resolving one would mean guessing, so it is
+            // rejected outright rather than fed into the ladder below.
+            var isAntiCheat = InstalledGameLocator.IsAntiCheatExecutable(exeName);
+            if (isAntiCheat && IsMachineWideAntiCheat(executablePath))
+            {
+                LogUnmatchedOnce($"anticheat-machinewide:{exeName}", $"Game detection: {exeName} is a machine-wide anti-cheat service, not tied to one game - skipped.");
+                return GameDetection.None;
+            }
+
             var title = GetWindowTitle(handle);
             var className = GetWindowClass(handle);
             if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(className)) return GameDetection.None;
@@ -209,34 +220,39 @@ public sealed class ForegroundGameDetector
             {
                 detection = Create(rule.DisplayName, exeName, title, className, handle, (int)processId, GameMatchSource.Catalog, rule.Id);
             }
-            else if (_steamGames.FindByExecutablePath(executablePath) is { } steamGame)
+            // Covers an anti-cheat shim that happens to live inside the
+            // game's own install folder - the ordinary path match already
+            // resolves those without any special-casing.
+            else if (TryResolveGameByPath(executablePath, out var libDisplayName, out var libDetectionKey, out var libSource))
             {
-                detection = Create(steamGame.DisplayName, exeName, title, className, handle, (int)processId, GameMatchSource.Steam, $"steam-{steamGame.AppId}");
+                detection = Create(libDisplayName, exeName, title, className, handle, (int)processId, libSource, libDetectionKey);
             }
-            else if (_epicGames.FindByExecutablePath(executablePath) is { } epicGame)
+            // A shim outside the install folder (its own Program Files entry,
+            // a subfolder the path match missed) gets one more shot: the
+            // largest non-stub binary beside it, then up to three hops of
+            // parent process. Anti-cheat launchers are typically spawned by
+            // (or spawn) the real game, so the chain usually terminates fast.
+            else if (isAntiCheat && TryResolveAntiCheatSibling(executablePath, out var siblingDisplayName, out var siblingDetectionKey, out var siblingSource))
             {
-                detection = Create(epicGame.DisplayName, exeName, title, className, handle, (int)processId, GameMatchSource.Epic, $"epic-{Normalize(epicGame.DisplayName)}");
+                detection = Create(siblingDisplayName, exeName, title, className, handle, (int)processId, siblingSource, siblingDetectionKey);
+                LogUnmatchedOnce($"anticheat-resolved:{exeName}", $"Game detection: resolved anti-cheat {exeName} to {siblingDisplayName} via a sibling binary.");
             }
-            else if (_battleNetGames.FindByExecutablePath(executablePath) is { } battleNetGame)
+            else if (isAntiCheat && TryResolveAntiCheatParentChain((int)processId, out var parentDisplayName, out var parentDetectionKey, out var parentSource))
             {
-                detection = Create(battleNetGame.DisplayName, exeName, title, className, handle, (int)processId, GameMatchSource.BattleNet, $"battlenet-{Normalize(battleNetGame.DisplayName)}");
-            }
-            else if (_riotGames.FindByExecutablePath(executablePath) is { } riotGame)
-            {
-                detection = Create(riotGame.DisplayName, exeName, title, className, handle, (int)processId, GameMatchSource.Riot, $"riot-{Normalize(riotGame.DisplayName)}");
-            }
-            // Last resort: the executable is not under any library folder, but
-            // a game does own that filename. Reported exactly as a path match
-            // would be - same source, same steam-{AppId} key - so a game found
-            // this way cannot produce a second Game Detection row for itself.
-            else if (_steamGames.FindByExecutableName(exeName) is { } steamGameByName)
-            {
-                detection = Create(steamGameByName.DisplayName, exeName, title, className, handle, (int)processId, GameMatchSource.Steam, $"steam-{steamGameByName.AppId}");
+                detection = Create(parentDisplayName, exeName, title, className, handle, (int)processId, parentSource, parentDetectionKey);
+                LogUnmatchedOnce($"anticheat-resolved:{exeName}", $"Game detection: resolved anti-cheat {exeName} to {parentDisplayName} via its parent process.");
             }
             else
             {
                 detection = GameDetection.None;
-                LogUnmatchedOnce(exeName, $"Game detection: no match for {exeName} (path={executablePath}, title='{title}', class={className}).");
+                if (isAntiCheat)
+                {
+                    LogUnmatchedOnce($"anticheat:{exeName}", $"Game detection: could not resolve anti-cheat process {exeName} to a game.");
+                }
+                else
+                {
+                    LogUnmatchedOnce(exeName, $"Game detection: no match for {exeName} (path={executablePath}, title='{title}', class={className}).");
+                }
             }
 
             if (detection.IsDetected && IsIgnored(detection.DetectionKey)) detection = GameDetection.None;
@@ -275,6 +291,204 @@ public sealed class ForegroundGameDetector
 
     private static string Normalize(string name) =>
         new(name.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    // The same library lookups BuildDetection runs inline, pulled out so the
+    // anti-cheat ladder below can re-run them against a candidate path (a
+    // sibling binary, an ancestor process) instead of only the window's own
+    // executable.
+    private bool TryResolveGameByPath(string executablePath, out string displayName, out string detectionKey, out GameMatchSource source)
+    {
+        if (_steamGames.FindByExecutablePath(executablePath) is { } steamGame)
+        {
+            displayName = steamGame.DisplayName;
+            detectionKey = $"steam-{steamGame.AppId}";
+            source = GameMatchSource.Steam;
+            return true;
+        }
+        if (_epicGames.FindByExecutablePath(executablePath) is { } epicGame)
+        {
+            displayName = epicGame.DisplayName;
+            detectionKey = $"epic-{Normalize(epicGame.DisplayName)}";
+            source = GameMatchSource.Epic;
+            return true;
+        }
+        if (_battleNetGames.FindByExecutablePath(executablePath) is { } battleNetGame)
+        {
+            displayName = battleNetGame.DisplayName;
+            detectionKey = $"battlenet-{Normalize(battleNetGame.DisplayName)}";
+            source = GameMatchSource.BattleNet;
+            return true;
+        }
+        if (_riotGames.FindByExecutablePath(executablePath) is { } riotGame)
+        {
+            displayName = riotGame.DisplayName;
+            detectionKey = $"riot-{Normalize(riotGame.DisplayName)}";
+            source = GameMatchSource.Riot;
+            return true;
+        }
+        // Last resort: the executable is not under any library folder, but a
+        // game does own that filename. Reported exactly as a path match
+        // would be - same source, same steam-{AppId} key - so a game found
+        // this way cannot produce a second Game Detection row for itself.
+        if (_steamGames.FindByExecutableName(Path.GetFileName(executablePath)) is { } steamGameByName)
+        {
+            displayName = steamGameByName.DisplayName;
+            detectionKey = $"steam-{steamGameByName.AppId}";
+            source = GameMatchSource.Steam;
+            return true;
+        }
+        displayName = string.Empty;
+        detectionKey = string.Empty;
+        source = GameMatchSource.None;
+        return false;
+    }
+
+    // Riot Vanguard and BattlEye's own service run system-wide, tied to no
+    // single game - resolving one to "whatever game happens to be running"
+    // would be a guess, not a detection, so these are rejected before the
+    // ladder even starts.
+    private static bool IsMachineWideAntiCheat(string executablePath)
+    {
+        try
+        {
+            var normalized = Path.GetFullPath(executablePath);
+            string[] roots =
+            {
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles),
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFilesX86),
+                Environment.GetFolderPath(Environment.SpecialFolder.System),
+                Environment.GetFolderPath(Environment.SpecialFolder.SystemX86),
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Riot Vanguard"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Riot Vanguard")
+            };
+            return roots.Any(root => !string.IsNullOrWhiteSpace(root) &&
+                normalized.StartsWith(Path.TrimEndingDirectorySeparator(root) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    // A launcher/bootstrapper stub carries the LAUNCHER's icon, not the
+    // game's, and the same is true of anti-cheat shims - the real game
+    // binary is typically the largest non-stub, non-anti-cheat .exe sitting
+    // right beside it (…\Game\EasyAntiCheat\EasyAntiCheat.exe next to
+    // …\Game\Game.exe).
+    private bool TryResolveAntiCheatSibling(string executablePath, out string displayName, out string detectionKey, out GameMatchSource source)
+    {
+        displayName = string.Empty;
+        detectionKey = string.Empty;
+        source = GameMatchSource.None;
+
+        var folder = Path.GetDirectoryName(executablePath);
+        if (folder is null || !Directory.Exists(folder)) return false;
+
+        string? sibling;
+        try
+        {
+            sibling = Directory.EnumerateFiles(folder, "*.exe")
+                .Where(path => !InstalledGameLocator.LooksLikeStubExecutable(Path.GetFileNameWithoutExtension(path)) &&
+                               !InstalledGameLocator.IsAntiCheatExecutable(Path.GetFileName(path)))
+                .OrderByDescending(path => { try { return new FileInfo(path).Length; } catch { return 0L; } })
+                .FirstOrDefault();
+        }
+        catch
+        {
+            return false;
+        }
+
+        return sibling is not null && TryResolveGameByPath(sibling, out displayName, out detectionKey, out source);
+    }
+
+    // Anti-cheat launchers are typically spawned by (or spawn) the real game
+    // process, so walking a few hops of parentage usually finds it. Capped
+    // at 3 hops and stops at known launchers/shell so a shim running under
+    // an unrelated ancestor (Steam itself, explorer.exe) doesn't get walked
+    // indefinitely. See ResolveExecutablePath's own notes on why this uses
+    // NtQueryInformationProcess on a QUERY_LIMITED handle rather than
+    // Process.GetProcessById/CreateToolhelp32Snapshot - a full process-table
+    // walk on this path is the exact mistake that once locked the machine up
+    // at logon.
+    private bool TryResolveAntiCheatParentChain(int processId, out string displayName, out string detectionKey, out GameMatchSource source)
+    {
+        displayName = string.Empty;
+        detectionKey = string.Empty;
+        source = GameMatchSource.None;
+
+        var currentPid = processId;
+        var currentCreationTicks = _processPathCache.TryGetValue(processId, out var cached) ? cached.CreationTimeTicks : 0;
+
+        for (var hop = 0; hop < 3; hop++)
+        {
+            var parentPid = GetParentProcessId(currentPid, currentCreationTicks, out var parentCreationTicks);
+            if (parentPid is not { } parent) break;
+
+            var parentPath = ResolveExecutablePath(parent);
+            if (string.IsNullOrWhiteSpace(parentPath)) break;
+
+            if (TryResolveGameByPath(parentPath, out displayName, out detectionKey, out source)) return true;
+
+            if (ProcessChainStops.Contains(Path.GetFileName(parentPath))) break;
+            currentPid = parent;
+            currentCreationTicks = parentCreationTicks;
+        }
+
+        return false;
+    }
+
+    private static readonly HashSet<string> ProcessChainStops = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "steam.exe", "epicgameslauncher.exe", "battle.net.exe", "riotclientservices.exe",
+        "explorer.exe", "services.exe", "svchost.exe"
+    };
+
+    // Returns the reported parent PID only if that PID's own creation time
+    // precedes childCreationTicks - without this guard, a reused PID (the
+    // real parent long exited, Windows handed its number to something else)
+    // would be silently walked as if it were the actual ancestor.
+    private static int? GetParentProcessId(int pid, long childCreationTicks, out long parentCreationTicks)
+    {
+        parentCreationTicks = 0;
+        const uint processQueryLimitedInformation = 0x1000;
+
+        int parentPid;
+        var handle = OpenProcess(processQueryLimitedInformation, false, pid);
+        if (handle == IntPtr.Zero) return null;
+        try
+        {
+            var info = new ProcessBasicInformation();
+            var status = NtQueryInformationProcess(handle, 0, ref info, Marshal.SizeOf<ProcessBasicInformation>(), out _);
+            if (status != 0) return null;
+            parentPid = info.InheritedFromUniqueProcessId.ToInt32();
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            CloseHandle(handle);
+        }
+
+        if (parentPid <= 0) return null;
+
+        var parentHandle = OpenProcess(processQueryLimitedInformation, false, parentPid);
+        if (parentHandle == IntPtr.Zero) return null;
+        try
+        {
+            if (!GetProcessTimes(parentHandle, out var creation, out _, out _, out _)) return null;
+            parentCreationTicks = ((long)creation.dwHighDateTime << 32) | (uint)creation.dwLowDateTime;
+        }
+        finally
+        {
+            CloseHandle(parentHandle);
+        }
+
+        if (childCreationTicks != 0 && parentCreationTicks >= childCreationTicks) return null;
+        return parentPid;
+    }
 
     // This poll runs over every visible window every 1-3s, so an un-deduped
     // line here would bury the debug log within a minute (the same trap the
@@ -345,6 +559,17 @@ public sealed class ForegroundGameDetector
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
     [StructLayout(LayoutKind.Sequential)] private readonly struct Rect { public readonly int Left; public readonly int Top; public readonly int Right; public readonly int Bottom; }
     [StructLayout(LayoutKind.Sequential)] private struct FileTime { public uint dwLowDateTime; public uint dwHighDateTime; }
+    // Only the field the anti-cheat parent-process walk needs (InheritedFromUniqueProcessId) is used; the rest exists to keep the struct's layout correct.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ProcessBasicInformation
+    {
+        public IntPtr Reserved1;
+        public IntPtr PebBaseAddress;
+        public IntPtr Reserved2_0;
+        public IntPtr Reserved2_1;
+        public IntPtr UniqueProcessId;
+        public IntPtr InheritedFromUniqueProcessId;
+    }
 
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
@@ -361,4 +586,5 @@ public sealed class ForegroundGameDetector
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern bool QueryFullProcessImageName(IntPtr process, uint flags, StringBuilder text, ref int size);
     [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
     [DllImport("kernel32.dll")] private static extern bool GetProcessTimes(IntPtr process, out FileTime creationTime, out FileTime exitTime, out FileTime kernelTime, out FileTime userTime);
+    [DllImport("ntdll.dll")] private static extern int NtQueryInformationProcess(IntPtr processHandle, int processInformationClass, ref ProcessBasicInformation processInformation, int processInformationLength, out int returnLength);
 }

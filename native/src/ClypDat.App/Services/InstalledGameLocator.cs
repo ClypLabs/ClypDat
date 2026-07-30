@@ -46,6 +46,24 @@ public static class InstalledGameLocator
     internal static bool LooksLikeStubExecutable(string executableName) =>
         StubExecutableMarkers.Any(marker => Normalize(executableName).Contains(marker, StringComparison.Ordinal));
 
+    // Anti-cheat processes a running game's window can belong to instead of
+    // the game's own binary - EasyAntiCheat/BattlEye/Vanguard all put up a
+    // window before the game exists. Separate from StubExecutableMarkers on
+    // purpose: that list exists to REJECT these names when picking a game's
+    // real binary or building the Steam exe-name index, whereas this one is
+    // used by ForegroundGameDetector to recognise a shim window worth
+    // resolving back to the game it belongs to. Exact filenames, not
+    // substrings - a game binary that happens to contain "eac" as a
+    // substring must not be misidentified as anti-cheat.
+    internal static readonly HashSet<string> AntiCheatExecutables = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "easyanticheat.exe", "easyanticheat_eos.exe", "start_protected_game.exe",
+        "beservice.exe", "belauncher.exe", "beclient.exe",
+        "vgc.exe", "vgtray.exe", "vanguard.exe"
+    };
+
+    internal static bool IsAntiCheatExecutable(string executableName) => AntiCheatExecutables.Contains(executableName);
+
     private static string PreferGameExecutable(string executablePath, string gameName)
     {
         try

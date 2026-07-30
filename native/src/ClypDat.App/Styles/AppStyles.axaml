@@ -61,6 +61,32 @@
   <Style Selector="ScrollViewer.settingsScroll ScrollBar:vertical">
     <Setter Property="Margin" Value="0,6,5,6" />
   </Style>
+  <!--
+    Bordered pane + internal scroll for settings lists that can grow large
+    (detected games, excluded games, excluded apps) - keeps the page itself
+    from turning into one giant scroll once there are 30+ rows.
+  -->
+  <Style Selector="Border.listPane">
+    <Setter Property="Background" Value="#10171D" />
+    <Setter Property="BorderBrush" Value="#232F3A" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+  </Style>
+  <Style Selector="ScrollViewer.listScroll">
+    <Setter Property="MaxHeight" Value="288" />
+    <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+    <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+    <Setter Property="Padding" Value="6,4" />
+  </Style>
+  <Style Selector="ScrollViewer.listScrollCompact">
+    <Setter Property="MaxHeight" Value="216" />
+    <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+    <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+    <Setter Property="Padding" Value="6,4" />
+  </Style>
+  <Style Selector="ScrollViewer.listScroll ScrollBar:vertical, ScrollViewer.listScrollCompact ScrollBar:vertical">
+    <Setter Property="Margin" Value="0,4,3,4" />
+  </Style>
   <Style Selector="Thumb.scrollThumb">
     <Setter Property="Background" Value="#1E2A35" />
     <Setter Property="Template">
