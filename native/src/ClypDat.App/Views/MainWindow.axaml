@@ -1248,9 +1248,6 @@
                     </ListBox.ItemTemplate>
                   </ListBox>
                   <TextBlock Text="{Binding SelectedReplayBackend.Description}" Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
-                  <TextBlock Text="Games with anti-cheat (EAC, BattlEye, Ricochet, etc.) often block OBS's game hook, causing a black or frozen capture. If a game doesn't record properly on OBS, switch to Auto (recommended)."
-                             Foreground="#E5A00D" FontSize="12" FontWeight="Bold" TextWrapping="Wrap"
-                             IsVisible="{Binding ReplayBackendIsObs}" />
                   <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding ReplayBackendRestartRequired}">
                     <TextBlock Text="Restart ClypDat for the backend change to take effect." Foreground="#E5A00D" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
                     <Button Content="Restart Now" Click="RestartAppButton_OnClick" />
@@ -1343,7 +1340,7 @@
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Hide overlays from screen capture}">
                     <StackPanel Spacing="2" VerticalAlignment="Center">
                       <TextBlock Text="Hide overlays from screen capture" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                      <TextBlock Text="Overlays stay on your screen but are left out of clips, Discord screenshare and OBS. Needs Windows 10 build 19041 or newer." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                      <TextBlock Text="Overlays stay on your screen but are left out of clips and Discord screenshare. Needs Windows 10 build 19041 or newer." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding ExcludeOverlaysFromCapture}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
@@ -2914,4 +2911,3 @@
     </Border>
   </Grid>
 </Window>
-

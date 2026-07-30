@@ -10,7 +10,7 @@ The codebase is `native/` (C#/.NET 10, Avalonia UI).
 
 ## Capture
 
-Three capture backends, switchable in Settings (default is Auto):
+Two capture backends, switchable in Settings (default is Auto):
 
 - **ClypDat (Native)**: ClypDat's own capture engine, built directly on DXGI Desktop
   Duplication with GPU-side downscaling (`native/src/ClypDat.App/Services/NativeReplayBuffer.cs`).
@@ -19,9 +19,6 @@ Three capture backends, switchable in Settings (default is Auto):
   gap between rolling-buffer segments. Encodes with NVENC, falling back to
   AMD AMF, then software libx264, so it isn't NVIDIA-only. Selected
   automatically on Auto.
-- **OBS**: a trimmed OBS Studio runtime (32.1.2) loaded through a custom
-  C++ bridge (`native/src/ClypDat.ObsBridge`) via `LoadLibrary`/`GetProcAddress`,
-  not static linking. Uses NVENC for encoding.
 - **Windows Capture (Legacy)**: `ScreenRecorderLib`, backed by Windows
   Graphics Capture / DXGI desktop duplication. Doesn't inject into the
   target process either, kept around as a fallback alongside ClypDat's own engine.
@@ -101,20 +98,13 @@ running install via a PowerShell helper that waits for the process to exit.
 - Windows 10 or 11, x64
 - .NET SDK 10+ to build from source
 - The ClypDat (Native) backend works on NVIDIA, AMD, and (as a last-resort
-  software fallback) any GPU-less machine. The OBS backend's encoder is
-  still NVENC-only, with no AMD/software fallback.
+  software fallback) any GPU-less machine.
 
 ## Building
 
 ```powershell
 dotnet restore native\ClypDat.Native.sln
 dotnet build native\ClypDat.Native.sln
-```
-
-`ClypDat.ObsBridge` is a C++ project and needs MSBuild, not `dotnet build`:
-
-```powershell
-msbuild native\src\ClypDat.ObsBridge\ClypDat.ObsBridge.vcxproj /p:Configuration=Release /p:Platform=x64
 ```
 
 To produce a runnable, self-contained build:
@@ -130,22 +120,18 @@ portable exe, an NSIS installer, and an MSI.
 
 ## Future Updates
 
-- AMD/software fallback for the OBS backend too (Native already has it)
 - Seamless replay buffer rotation for the Legacy Windows Capture backend
   (no stop/restart gap between segments - ClypDat's own backend already has this)
 - I'll update this when I get more ideas lol
 
 ## Third-party licenses
 
-ClypDat bundles OBS Studio (GPLv2) and LibVLC (LGPL-2.1-or-later) binaries.
-`THIRD-PARTY-LICENSES.md` lists what's bundled, under which license, and
-where to get matching source. `native/vendor/obs-runtime` is not a full OBS
-Studio install; it's trimmed to the six plugins the bridge actually loads
-(`win-capture`, `win-wasapi`, `image-source`, `obs-ffmpeg`, `obs-nvenc`,
-`text-freetype2`).
+ClypDat bundles LibVLC (LGPL-2.1-or-later) and ffmpeg (GPL) binaries.
+`THIRD-PARTY-LICENSES.md` lists bundled components, licenses, and matching
+source locations.
 
 ## License
 
 GPLv3. See `LICENSE`. Third-party components bundled in distributed builds
-(OBS, LibVLC, ffmpeg) carry their own licenses; see
+(LibVLC, ffmpeg) carry their own licenses; see
 `THIRD-PARTY-LICENSES.md`.

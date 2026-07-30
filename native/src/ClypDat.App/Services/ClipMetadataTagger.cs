@@ -27,8 +27,7 @@ public static class ClipMetadataTagger
     // "Native Full Session" tag every clip (old or new) actually carries,
     // without needing to rewrite/re-mux every existing clip's file. That bare
     // tag then gets its own display swap below: "Native" is ClypDat's own
-    // built-in capture backend (as opposed to OBS/Windows Capture, which
-    // display as themselves), so it reads as "Captured with: ClypDat" rather
+    // built-in capture backend (unlike Windows Capture), so it reads as "Captured with: ClypDat" rather
     // than exposing the internal backend name.
     public static string NormalizeBackendLabel(string backendLabel)
     {

@@ -201,7 +201,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             new("Auto (recommended)", "Auto", "Uses ClypDat's own capture engine for every game - no process hook, so it's safe for anti-cheat-protected games too, with no stop/start gaps between segments."),
             new("ClypDat", "Native", "ClypDat's own capture engine - a true rolling buffer with no stop/start gaps between segments, and true per-window capture that keeps recording the game through alt-tabs and overlays. Used automatically on Auto."),
-            new("OBS", "Obs", "Highest quality and lowest overhead, but some anti-cheat games (e.g. CS2) need a launch option or may show a black/frozen capture."),
             new("Windows Capture", "Legacy", "Captures the screen directly with no process hook, so games with anti-cheat can get captured properly, at the cost of slightly higher overhead.")
         };
         ClipOverlayPositions = new ObservableCollection<string> { "Top Left", "Top Right" };
@@ -334,7 +333,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ObservableCollection<ThirdPartyLicenseEntry> ThirdPartyLicenseEntries { get; } = new()
     {
-        new("OBS Studio", "https://github.com/obsproject/obs-studio", "GPLv2", "https://www.gnu.org/licenses/old-licenses/gpl-2.0.html"),
         new("VideoLAN", "https://code.videolan.org/videolan/vlc", "LGPLv2.1", "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html"),
         new("FFmpeg", "https://ffmpeg.org", "GPLv2", "https://www.gnu.org/licenses/old-licenses/gpl-2.0.html"),
         new("ScreenRecorderLib", "https://github.com/sskodje/ScreenRecorderLib", "MIT License", "https://opensource.org/license/mit"),
@@ -1225,11 +1223,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Settings.ReplayBackend = value.Value;
             SaveSettings();
             ReplayBackendRestartRequired = !string.Equals(value.Value, _initialReplayBackend, StringComparison.OrdinalIgnoreCase);
-            OnPropertyChanged(nameof(ReplayBackendIsObs));
         }
     }
-
-    public bool ReplayBackendIsObs => string.Equals(SelectedReplayBackend?.Value, "Obs", StringComparison.OrdinalIgnoreCase);
 
     public bool ReplayBackendRestartRequired
     {

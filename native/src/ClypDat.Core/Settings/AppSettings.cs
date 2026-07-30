@@ -66,8 +66,7 @@ public sealed class AppSettings
     // Positive shifts audio EARLIER relative to video (fixes audio sounding
     // delayed/late); negative shifts audio LATER (fixes audio sounding
     // ahead). Exact WASAPI/hardware-encoder latency varies too much by
-    // machine to hardcode a correction - OBS exposes the same kind of
-    // manual per-source sync offset for this exact reason.
+    // machine to hardcode a correction.
     public int AudioSyncOffsetMs { get; set; }
     public string IgnoredUpdateVersion { get; set; } = string.Empty;
     public string ChatAudioDeviceId { get; set; } = string.Empty;
@@ -143,7 +142,7 @@ public sealed class AppSettings
     public bool EnableClipOverlay { get; set; } = true;
     public bool EnableClipOverlaySound { get; set; } = true;
     // Keeps the overlays on the physical screen but out of anything that
-    // captures it - ClypDat's own clips, Discord screenshare, OBS. Same
+    // captures it - ClypDat's own clips, Discord screenshare. Same
     // mechanism KeePassXC uses to keep its window out of screenshots
     // (SetWindowDisplayAffinity/WDA_EXCLUDEFROMCAPTURE). On by default: a
     // "Clip saved" badge belongs to the person at the desk, not baked into
@@ -201,7 +200,7 @@ public sealed class AppSettings
     // Off by default and requires an explicit destination folder - the ClypDat (Native)
     // backend's continuous encoder can also write the whole session to disk
     // alongside the rolling replay buffer, separate from clip saves. Native only
-    // for now; Legacy/OBS would need their own, larger wiring.
+    // for now; Legacy would need its own, larger wiring.
     public bool FullSessionRecordingEnabled { get; set; }
     public string FullSessionRecordingFolder { get; set; } = string.Empty;
     // H.264 = mux the already-encoded stream as-is (fast, bigger file);
