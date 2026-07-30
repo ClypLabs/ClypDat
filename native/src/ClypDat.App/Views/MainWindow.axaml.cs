@@ -1,10 +1,12 @@
 using Avalonia.Animation;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Avalonia;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
@@ -659,6 +661,7 @@ public sealed partial class MainWindow : Window
     private Control? _gameDragSourceControl;
     private Control? _gameDragTargetControl;
     private GameDropZone _gameDragTargetZone;
+    private Image? _gameDragGhost;
     private const double GameDragThreshold = 6;
 
     // Registered at the window level (Tunnel - see the constructor) rather
@@ -684,7 +687,9 @@ public sealed partial class MainWindow : Window
             // matter what the cursor is actually over now - that's what makes
             // hit-testing against the live cursor position necessary here,
             // rather than trusting where the event says it originated.
-            UpdateGameDragTarget(e.GetPosition(this));
+            var point = e.GetPosition(this);
+            UpdateGameDragTarget(point);
+            PositionGameDragGhost(point);
             return;
         }
 
@@ -713,6 +718,11 @@ public sealed partial class MainWindow : Window
         _gameDragCandidate = null;
         _gameDragStartPoint = null;
 
+        // Snapshotted BEFORE dimming, so the floating ghost that follows the
+        // cursor shows the tile at full brightness rather than doubly-faded
+        // (once from this snapshot, again from the ghost's own opacity).
+        _gameDragGhost = CreateGameDragGhost(_gameDragSourceControl);
+
         // Dimmed noticeably (not just hidden), so there's clear confirmation
         // something is actually being picked up - the previous 0.45 read as
         // barely different from resting.
@@ -721,7 +731,51 @@ public sealed partial class MainWindow : Window
         e.Pointer.Capture(_gameDragSourceControl);
         e.Handled = true;
 
-        UpdateGameDragTarget(e.GetPosition(this));
+        var startPoint = e.GetPosition(this);
+        UpdateGameDragTarget(startPoint);
+        PositionGameDragGhost(startPoint);
+    }
+
+    // A live VisualBrush of the source tile would keep reflecting its
+    // Opacity as the drag proceeds (dimmed to 0.3 right after this runs),
+    // so the ghost is a static bitmap snapshot taken now, while the tile is
+    // still at full brightness.
+    private static Image? CreateGameDragGhost(Control source)
+    {
+        var bounds = source.Bounds;
+        var width = Math.Max(1, (int)Math.Ceiling(bounds.Width));
+        var height = Math.Max(1, (int)Math.Ceiling(bounds.Height));
+        var snapshot = new RenderTargetBitmap(new PixelSize(width, height));
+        snapshot.Render(source);
+
+        var overlay = OverlayLayer.GetOverlayLayer(source);
+        if (overlay is null) return null;
+
+        var ghost = new Image
+        {
+            Source = snapshot,
+            Width = bounds.Width,
+            Height = bounds.Height,
+            Opacity = 0.9,
+            IsHitTestVisible = false,
+        };
+        overlay.Children.Add(ghost);
+        return ghost;
+    }
+
+    private void PositionGameDragGhost(Point windowPoint)
+    {
+        if (_gameDragGhost is null) return;
+        Canvas.SetLeft(_gameDragGhost, windowPoint.X - _gameDragGhost.Width / 2);
+        Canvas.SetTop(_gameDragGhost, windowPoint.Y - _gameDragGhost.Height / 2);
+    }
+
+    private void RemoveGameDragGhost()
+    {
+        if (_gameDragGhost is null) return;
+        var overlay = OverlayLayer.GetOverlayLayer(this);
+        overlay?.Children.Remove(_gameDragGhost);
+        _gameDragGhost = null;
     }
 
     private void GameRailItem_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
@@ -737,10 +791,11 @@ public sealed partial class MainWindow : Window
         _gameDragStartPoint = null;
     }
 
-    // The only visible sign of where a drag will land - there's no ghost icon
-    // following the cursor, so the target tile itself has to say it: a bar on
-    // its top or bottom edge for a reorder, a ring around the whole tile for
-    // a merge/file-into. Only touches styling when the target or zone has
+    // The reorder/merge target the drag will land on - a bar on the target
+    // tile's top or bottom edge for a reorder, a ring around the whole tile
+    // for a merge/file-into (the floating ghost, see CreateGameDragGhost,
+    // only shows what's being carried - this highlight is still what says
+    // where it'll land). Only touches styling when the target or zone has
     // actually changed, so this can run on every pointer move without
     // constantly rewriting the same values.
     private void UpdateGameDragTarget(Point windowPoint)
@@ -749,6 +804,21 @@ public sealed partial class MainWindow : Window
         var target = FindRailTileAncestor(hit);
         if (target is not null && ReferenceEquals(target, _gameDragSourceControl)) target = null;
 
+        // A direct hit-test only resolves when the cursor is literally over
+        // another tile's bounds - the gap between tiles, or past the top/
+        // bottom of the rail, used to leave the target unresolved and the
+        // drag looking like it wasn't doing anything. Falling back to the
+        // nearest tile by vertical distance (the rail is a single column,
+        // so Y alone identifies the right neighbor) makes a reorder register
+        // anywhere near the rail. Bounded to the rail's own horizontal
+        // extent so a drag that's left the sidebar entirely (over the main
+        // content pane, say) still correctly resolves to "no target" instead
+        // of always snapping to whichever rail tile is nearest vertically.
+        if (target is null && IsWithinGameRailBounds(windowPoint))
+        {
+            target = FindNearestGameRailTile(windowPoint);
+        }
+
         var zone = target is null ? GameDropZone.Before : ComputeDropZone(target, windowPoint);
         if (ReferenceEquals(target, _gameDragTargetControl) && zone == _gameDragTargetZone) return;
 
@@ -756,6 +826,44 @@ public sealed partial class MainWindow : Window
         _gameDragTargetControl = target;
         _gameDragTargetZone = zone;
         if (target is not null) ApplyGameDragHighlight(target, zone);
+    }
+
+    // Horizontal containment only, deliberately - the nearest-tile fallback
+    // below already handles a cursor above the top tile or below the bottom
+    // one by distance, so the only thing worth gating here is a drag that's
+    // left the rail's COLUMN entirely (e.g. drifted over the main content
+    // pane), which shouldn't snap to whatever rail tile happens to be
+    // nearest vertically.
+    private bool IsWithinGameRailBounds(Point windowPoint)
+    {
+        var topLeft = GameRailContainer.TranslatePoint(new Point(0, 0), this);
+        if (topLeft is null) return false;
+        return windowPoint.X >= topLeft.Value.X && windowPoint.X <= topLeft.Value.X + GameRailContainer.Bounds.Width;
+    }
+
+    private Control? FindNearestGameRailTile(Point windowPoint)
+    {
+        Control? nearest = null;
+        var nearestDistance = double.MaxValue;
+        foreach (var candidate in this.GetVisualDescendants().OfType<Button>())
+        {
+            if (candidate.DataContext is not (FilterOptionViewModel or GameRailFolderViewModel)) continue;
+            if (ReferenceEquals(candidate, _gameDragSourceControl)) continue;
+
+            var topLeft = candidate.TranslatePoint(new Point(0, 0), this);
+            if (topLeft is null) continue;
+            var bounds = new Rect(topLeft.Value, candidate.Bounds.Size);
+
+            var distance = windowPoint.Y < bounds.Top ? bounds.Top - windowPoint.Y
+                : windowPoint.Y > bounds.Bottom ? windowPoint.Y - bounds.Bottom
+                : 0;
+            if (distance < nearestDistance)
+            {
+                nearestDistance = distance;
+                nearest = candidate;
+            }
+        }
+        return nearest;
     }
 
     private static IBrush GameDragAccentBrush => Application.Current?.Resources["AccentBrush"] as IBrush ?? Brushes.CornflowerBlue;
@@ -791,6 +899,7 @@ public sealed partial class MainWindow : Window
 
         ClearGameDragHighlight(targetControl);
         Cursor = Cursor.Default;
+        RemoveGameDragGhost();
 
         _gameDragActive = false;
         _gameDragToken = null;

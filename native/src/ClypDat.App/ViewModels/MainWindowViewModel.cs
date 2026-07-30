@@ -4314,7 +4314,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var end = TrimEnd > TrimStart ? TrimEnd : Duration;
         var durationSeconds = Math.Max(0.1, (end - TrimStart).TotalSeconds);
         var spec = ComputeShareEncodeSpec(durationSeconds, SelectedSourceWidth, SelectedSourceHeight, SelectedSourceFps, targetBytes, useAv1);
-        if (bitrateScale < 1.0)
+        // Scales both directions now - down when a previous attempt overshot
+        // the cap, up when it undershot with headroom to spare (easy-to-
+        // compress content can legitimately land well under the VBR target).
+        // IsOriginalQuality has no bitrate cap to scale (VideoBitrateKbps is
+        // 0, meaningless to multiply), so it's excluded either way.
+        if (!spec.IsOriginalQuality && bitrateScale != 1.0)
         {
             spec = spec with { VideoBitrateKbps = Math.Max(80, (int)(spec.VideoBitrateKbps * bitrateScale)) };
         }
