@@ -1517,7 +1517,7 @@
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Video preview|hovering over a clip|Layout'}">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Play a video preview when hovering over a clip" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                      <TextBlock Text="Shows a muted low-resolution preview after a short hover delay." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                      <TextBlock Text="Shows a muted full-quality preview after a short hover delay." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableClipHoverPreview}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>

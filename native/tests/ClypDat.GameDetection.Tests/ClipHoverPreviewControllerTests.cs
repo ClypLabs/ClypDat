@@ -27,6 +27,9 @@ public sealed class ClipHoverPreviewControllerTests
         var arguments = ClipHoverPreviewController.BuildDecoderArguments("clip.mp4", (TimeSpan.Zero, TimeSpan.FromSeconds(5)), 29.97);
 
         Assert.Contains("fps=29.97,scale=w=1920:h=1080:flags=lanczos:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2", arguments);
+        Assert.DoesNotContain("-re", arguments);
+        Assert.Contains("-an", arguments);
+        Assert.Contains("bgra", arguments);
     }
 
     [Fact]
@@ -36,5 +39,34 @@ public sealed class ClipHoverPreviewControllerTests
         Assert.Equal(1080, ClipHoverPreviewController.Height);
         Assert.Equal(TimeSpan.FromMilliseconds(75), ClipHoverPreviewController.HoverDelay);
         Assert.Equal(TimeSpan.FromMilliseconds(150), ClipHoverPreviewController.WarmExitGrace);
+    }
+
+    [Fact]
+    public void FramePacer_PresentsFirstFrameImmediatelyThenUsesRecordedInterval()
+    {
+        var pacer = new HoverPreviewFramePacer(60);
+
+        Assert.Equal(TimeSpan.Zero, pacer.NextDelay(TimeSpan.FromMilliseconds(100)));
+        Assert.InRange(pacer.NextDelay(TimeSpan.FromMilliseconds(100)).TotalMilliseconds, 16.65, 16.68);
+    }
+
+    [Fact]
+    public void FramePacer_ReanchorsAfterLateFrameInsteadOfBursting()
+    {
+        var pacer = new HoverPreviewFramePacer(60);
+        pacer.NextDelay(TimeSpan.Zero);
+
+        Assert.Equal(TimeSpan.Zero, pacer.NextDelay(TimeSpan.FromMilliseconds(40)));
+        Assert.InRange(pacer.NextDelay(TimeSpan.FromMilliseconds(40)).TotalMilliseconds, 16.65, 16.68);
+    }
+
+    [Fact]
+    public void FramePacer_ResetPresentsReattachedFrameImmediately()
+    {
+        var pacer = new HoverPreviewFramePacer(60);
+        pacer.NextDelay(TimeSpan.Zero);
+        pacer.Reset();
+
+        Assert.Equal(TimeSpan.Zero, pacer.NextDelay(TimeSpan.FromSeconds(1)));
     }
 }
