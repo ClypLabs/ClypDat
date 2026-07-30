@@ -15,6 +15,14 @@ public partial class ShareDialog : Window
     private string? _shareTempPath;
     private Point? _dragPressPoint;
 
+    // Below 90% of the cap is worth spending a retry to close, above it the
+    // gain isn't worth another full encode.
+    private const double ShareUndershootRetryThreshold = 0.9;
+    // Upper bound on how far a single undershoot retry can scale the bitrate
+    // up, so a near-static/black clip can't demand an absurd bitrate off one
+    // lucky undershoot.
+    private const double ShareBitrateScaleCeiling = 3.0;
+
     // Parameterless constructor exists only so Avalonia's XAML loader can see
     // this as a valid top-level control (AVLN3001) - never actually used to
     // show a real dialog, the one below always is.
@@ -198,15 +206,15 @@ public partial class ShareDialog : Window
         if (e.Key == Key.Escape) Close();
     }
 
-    // Header-only drag-move, matching NewClipsOverlay_OnPointerPressed's
-    // convention - presses on the card itself are consumed by its own
-    // controls before they bubble here, so this only ever sees clicks on the
-    // surrounding scrim/header.
+    // Unlike NewClipsOverlay_OnPointerPressed (which lives INSIDE MainWindow,
+    // so BeginMoveDrag there deliberately keeps the real app window draggable
+    // through its scrim), ShareDialog is its own separate top-level Window -
+    // calling BeginMoveDrag here would drag the popup itself off of its
+    // owner instead. Presses on the card are consumed by its own controls
+    // before they bubble here, so this only ever sees clicks on the
+    // surrounding scrim, which should just do nothing.
     private void Scrim_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
-        if (e.GetPosition(this).Y > 56) return;
-        BeginMoveDrag(e);
     }
 
     private void SizePreset_OnClick(object? sender, RoutedEventArgs e)
@@ -278,7 +286,7 @@ public partial class ShareDialog : Window
         ShareProgressBar.Value = 0;
         ShareProgressPercentText.Text = "0%";
         ShareProgressEtaText.IsVisible = false;
-        ShareStatusText.Text = targetBytes > 0 ? "Encoding for Discord..." : "Encoding at original quality...";
+        ShareStatusText.Text = targetBytes > 0 ? "Encoding..." : "Encoding at original quality...";
 
         try
         {
@@ -387,18 +395,40 @@ public partial class ShareDialog : Window
                 if (result.ExitCode != 0) break;
 
                 try { actualBytes = new FileInfo(tempPath).Length; } catch { actualBytes = 0; }
-                if (targetBytes <= 0 || actualBytes <= targetBytes || attempt >= 2) break;
+                if (targetBytes <= 0 || attempt >= 2) break;
 
-                // Aim for 95% of the cap rather than exactly the cap, so the
-                // next attempt has somewhere to land instead of grazing it
-                // again.
-                bitrateScale *= targetBytes * 0.95 / (double)actualBytes;
-                AppLog.Info($"Share: {actualBytes / 1024.0 / 1024.0:0.##} MB overshot the {targetBytes / 1024.0 / 1024.0:0.##} MB cap - re-encoding at {bitrateScale:P0} of the original bitrate.");
+                string statusText;
+                if (actualBytes > targetBytes)
+                {
+                    // Aim for 95% of the cap rather than exactly the cap, so
+                    // the next attempt has somewhere to land instead of
+                    // grazing it again.
+                    bitrateScale *= targetBytes * 0.95 / (double)actualBytes;
+                    AppLog.Info($"Share: {actualBytes / 1024.0 / 1024.0:0.##} MB overshot the {targetBytes / 1024.0 / 1024.0:0.##} MB cap - re-encoding at {bitrateScale:P0} of the original bitrate.");
+                    statusText = "Tightening to fit the size limit...";
+                }
+                else if (actualBytes < targetBytes * ShareUndershootRetryThreshold)
+                {
+                    // VBR rate control is a target, not a floor - easy-to-
+                    // compress content can legitimately land well under the
+                    // cap. Rather than leaving that headroom unused, scale
+                    // back UP toward the cap the same way the overshoot case
+                    // scales down. Clamped so a near-static/black clip can't
+                    // demand an absurd bitrate off one lucky undershoot.
+                    bitrateScale = Math.Min(bitrateScale * targetBytes * 0.95 / (double)actualBytes, ShareBitrateScaleCeiling);
+                    AppLog.Info($"Share: {actualBytes / 1024.0 / 1024.0:0.##} MB undershot the {targetBytes / 1024.0 / 1024.0:0.##} MB cap - re-encoding at {bitrateScale:P0} of the original bitrate to use the headroom.");
+                    statusText = "Using the extra headroom for higher quality...";
+                }
+                else
+                {
+                    break;
+                }
+
                 ShareProgressBar.Value = 0;
                 ShareProgressPercentText.Text = "0%";
                 ShareProgressEtaText.IsVisible = false;
                 encodeClock.Restart();
-                ShareStatusText.Text = "Tightening to fit the size limit...";
+                ShareStatusText.Text = statusText;
             }
 
             if (result.ExitCode != 0)
@@ -414,7 +444,7 @@ public partial class ShareDialog : Window
             var actualMb = actualBytes / 1_000_000.0;
 
             ShareProgressPanel.IsVisible = false;
-            ShareStatusText.Text = "Drag this clip into any Discord chat to upload it";
+            ShareStatusText.Text = "Drag this clip into any chat to upload it";
             // Resolution/fps is always shown, not just when downscaled - what
             // you are about to send is worth knowing either way, and it makes
             // the trade-off a bigger size buys immediately obvious.

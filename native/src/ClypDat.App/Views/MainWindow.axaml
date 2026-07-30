@@ -278,7 +278,7 @@
                    constructor instead, same fix already used here for
                    KeyDown/KeyUp. See the code-behind's own "Sidebar game
                    rail" region. -->
-              <StackPanel Spacing="2">
+              <StackPanel x:Name="GameRailContainer" Spacing="2">
                 <ItemsControl ItemsSource="{Binding GameRailEntries}">
                   <ItemsControl.DataTemplates>
                     <DataTemplate DataType="vm:FilterOptionViewModel">
