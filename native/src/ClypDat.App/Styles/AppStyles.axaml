@@ -565,20 +565,18 @@
     <Setter Property="Background" Value="#263544" />
   </Style>
   <Style Selector="Button.clipShareButton">
-    <Setter Property="Background" Value="Transparent" />
-    <Setter Property="BorderBrush" Value="#456B88" />
+    <Setter Property="Background" Value="#263544" />
+    <Setter Property="BorderBrush" Value="#3B5368" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="7" />
-    <Setter Property="Foreground" Value="#D2E1F0" />
-    <Setter Property="FontSize" Value="13" />
+    <Setter Property="CornerRadius" Value="5" />
+    <Setter Property="Foreground" Value="#C8D9E9" />
+    <Setter Property="FontSize" Value="11" />
     <Setter Property="FontWeight" Value="SemiBold" />
-    <Setter Property="Width" Value="78" />
-    <Setter Property="Height" Value="36" />
-    <Setter Property="Padding" Value="0" />
+    <Setter Property="Padding" Value="9,4" />
   </Style>
   <Style Selector="Button.clipShareButton:pointerover">
-    <Setter Property="Background" Value="#263B4D" />
-    <Setter Property="BorderBrush" Value="#6F9ABB" />
+    <Setter Property="Background" Value="#31485B" />
+    <Setter Property="BorderBrush" Value="#5D84A2" />
   </Style>
   <!-- Change Game opens a separately hosted Flyout, which takes pointer
        capture from its trigger row. Keep the trigger's hover treatment while
