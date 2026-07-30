@@ -4982,212 +4982,20 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    // Share is an embedded overlay (like NewClipsOverlay), not a separate OS
-    // Window - a Window can't dim the app behind it, and the drag-out needs
-    // the app's own content to stay part of the same visual tree the whole
-    // time. State lives in these fields rather than locals because the
-    // encode is kicked off from a pill click and needs to be cancellable by
-    // the NEXT pill click (picking a different size mid-encode).
-    private CancellationTokenSource? _shareCts;
-    private string? _shareTempPath;
-
-    private void ShareButton_OnClick(object? sender, RoutedEventArgs e)
+    // ShareDialog is a genuinely separate top-level Window, not an in-window
+    // overlay - the Editor's video is a native VLC child window that always
+    // paints over Avalonia-rendered siblings regardless of z-order
+    // ("airspace", see EditorHoverControls' own comments on this), so an
+    // embedded overlay Border rendered behind it while a clip is open,
+    // dimming everything except the one thing it was supposed to sit on top
+    // of. A separate window sized/positioned to exactly cover this one
+    // (done in ShareDialog itself) sits above that airspace the same way the
+    // floating hover bar already does.
+    private async void ShareButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
-        ResetShareOverlay();
-        ShareOverlay.IsVisible = true;
+        await new ShareDialog(this, ViewModel).ShowDialog(this);
     }
-
-    private void ResetShareOverlay()
-    {
-        _shareCts?.Cancel();
-        _shareCts = null;
-        if (_shareTempPath is { } stale) AudioCapturePipeline.TryDelete(stale);
-        _shareTempPath = null;
-
-        ShareSize10.IsChecked = false;
-        ShareSize25.IsChecked = false;
-        ShareSize100.IsChecked = false;
-        ShareSizeCustom.IsChecked = false;
-        ShareCustomSizeBox.IsVisible = false;
-        ShareCustomSizeBox.Text = string.Empty;
-        ShareThumbnail.IsVisible = false;
-        ShareDurationBadge.IsVisible = false;
-        ShareProgressBar.IsVisible = false;
-        ShareStatusText.Text = "Pick a size to prepare the clip";
-        ShareResultSizeText.Text = string.Empty;
-        ShareShowInFolderButton.IsEnabled = false;
-    }
-
-    private void ShareCloseButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        ShareOverlay.IsVisible = false;
-        _shareCts?.Cancel();
-        if (_shareTempPath is { } path) AudioCapturePipeline.TryDelete(path);
-        _shareTempPath = null;
-    }
-
-    // Header-only drag-move, same convention as NewClipsOverlay_OnPointerPressed -
-    // presses on the card itself are consumed by its own controls before they
-    // bubble here, so this only ever sees clicks on the surrounding scrim/header.
-    private void ShareOverlay_OnPointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        if (!e.GetCurrentPoint(ShareOverlay).Properties.IsLeftButtonPressed) return;
-        if (e.GetPosition(ShareOverlay).Y > 56) return;
-        BeginMoveDrag(e);
-    }
-
-    private void ShareSizePreset_OnClick(object? sender, RoutedEventArgs e)
-    {
-        if (sender is not RadioButton radio) return;
-        var isCustom = ReferenceEquals(radio, ShareSizeCustom);
-        ShareCustomSizeBox.IsVisible = isCustom;
-        if (isCustom)
-        {
-            ShareCustomSizeBox.Focus();
-            return; // Wait for Enter - free-entry MB value, nothing to encode yet.
-        }
-        if (radio.Tag is string tagText && double.TryParse(tagText, out var mb))
-        {
-            _ = StartShareEncodeAsync((long)(mb * 1024 * 1024));
-        }
-    }
-
-    private void ShareCustomSizeBox_OnKeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Enter) return;
-        if (double.TryParse(ShareCustomSizeBox.Text, out var mb) && mb > 0)
-        {
-            _ = StartShareEncodeAsync((long)(mb * 1024 * 1024));
-        }
-    }
-
-    // Picking a size re-encodes immediately (no separate "Share" button to
-    // press) - the drop zone itself carries the progress/result state so the
-    // whole flow stays on one screen instead of a picker step then a result
-    // step.
-    private async Task StartShareEncodeAsync(long targetBytes)
-    {
-        if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
-
-        _shareCts?.Cancel();
-        if (_shareTempPath is { } previous) AudioCapturePipeline.TryDelete(previous);
-
-        var cts = new CancellationTokenSource();
-        _shareCts = cts;
-        var tempPath = Path.Combine(Path.GetTempPath(), $"clypdat-share-{Guid.NewGuid():N}.mp4");
-        _shareTempPath = tempPath;
-
-        ShareThumbnail.IsVisible = false;
-        ShareDurationBadge.IsVisible = false;
-        ShareShowInFolderButton.IsEnabled = false;
-        ShareResultSizeText.Text = string.Empty;
-        ShareProgressBar.IsVisible = true;
-        ShareProgressBar.IsIndeterminate = false;
-        ShareProgressBar.Value = 0;
-        ShareStatusText.Text = "Encoding for Discord...";
-
-        try
-        {
-            var exportDuration = ViewModel.ExportDuration;
-            var progress = new Progress<double>(fraction =>
-            {
-                if (cts.IsCancellationRequested) return;
-                ShareProgressBar.Value = Math.Clamp(fraction * 100, 0, 100);
-            });
-
-            var result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildShareArguments(tempPath, targetBytes), exportDuration, progress, cts.Token);
-            if (result.ExitCode != 0 && !cts.IsCancellationRequested)
-            {
-                AppLog.Info($"Share: NVENC encode failed, retrying with CPU encoder. ffmpeg said: {result.Error}");
-                ShareProgressBar.IsIndeterminate = true;
-                ShareStatusText.Text = "Encoding for Discord (CPU encoder)...";
-                result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildShareArguments(tempPath, targetBytes, useHardwareEncoder: false), exportDuration, progress, cts.Token);
-            }
-
-            if (cts.IsCancellationRequested) return; // Superseded by a later pill click - that call owns cleanup/UI now.
-
-            if (result.ExitCode != 0)
-            {
-                AudioCapturePipeline.TryDelete(tempPath);
-                _shareTempPath = null;
-                ShareProgressBar.IsVisible = false;
-                ShareStatusText.Text = string.IsNullOrWhiteSpace(result.Error) ? "Encode failed." : result.Error;
-                return;
-            }
-
-            var spec = ViewModel.ComputeShareEncodeSpec(exportDuration.TotalSeconds, ViewModel.SelectedSourceWidth, ViewModel.SelectedSourceHeight, ViewModel.SelectedSourceFps, targetBytes);
-            long actualBytes;
-            try { actualBytes = new FileInfo(tempPath).Length; } catch { actualBytes = 0; }
-            var actualMb = actualBytes / 1024.0 / 1024.0;
-            var targetMb = targetBytes / 1024.0 / 1024.0;
-
-            ShareProgressBar.IsVisible = false;
-            ShareStatusText.Text = spec.Downscaled
-                ? $"Downscaled to {spec.Height}p{spec.Fps:0} to fit the target size."
-                : "Drag this clip into any Discord chat to upload it.";
-            ShareResultSizeText.Text = actualMb > targetMb * 1.02
-                ? $"{actualMb:0.#} MB (slightly over the {targetMb:0.#} MB target)"
-                : $"{actualMb:0.#} MB";
-            ShareShowInFolderButton.IsEnabled = true;
-
-            ShareThumbnail.Source = ViewModel.SelectedThumbnail;
-            ShareThumbnail.IsVisible = ViewModel.SelectedThumbnail is not null;
-            ShareDurationText.Text = FormatShareDuration(exportDuration);
-            ShareDurationBadge.IsVisible = true;
-        }
-        catch (Exception error)
-        {
-            if (cts.IsCancellationRequested) return;
-            AppLog.Error("Share: encode failed", error);
-            ShareProgressBar.IsVisible = false;
-            ShareStatusText.Text = "Encode failed.";
-        }
-    }
-
-    private static string FormatShareDuration(TimeSpan duration) =>
-        duration.TotalHours >= 1 ? duration.ToString(@"h\:mm\:ss") : duration.ToString(@"m\:ss");
-
-    private void ShareShowInFolderButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        if (_shareTempPath is { } path) ExplorerService.Open(path, selectFile: true);
-    }
-
-    private Avalonia.Point? _shareDragPressPoint;
-
-    private void ShareThumbnail_OnPointerPressed(object? sender, PointerPressedEventArgs e) =>
-        _shareDragPressPoint = e.GetPosition(ShareThumbnail);
-
-    private async void ShareThumbnail_OnPointerMoved(object? sender, PointerEventArgs e)
-    {
-        if (_shareDragPressPoint is not { } start || e.GetCurrentPoint(ShareThumbnail).Properties.IsLeftButtonPressed != true) return;
-        if (_shareTempPath is not { } tempPath) return;
-        var current = e.GetPosition(ShareThumbnail);
-        if (Math.Abs(current.X - start.X) < 4 && Math.Abs(current.Y - start.Y) < 4) return;
-        _shareDragPressPoint = null;
-
-        // Avalonia 11.3 added DataTransfer/DoDragDropAsync as the
-        // replacement for DataObject/DoDragDrop, but its write-side API
-        // (constructing a file-backed IDataTransferItem) isn't documented
-        // anywhere reachable, while this older overload is still shipped,
-        // still functional, and is what every Avalonia drag-out sample still
-        // shows - suppressed rather than swapped to a barely-verifiable
-        // newer path for the same result.
-#pragma warning disable CS0618
-        var data = new DataObject();
-        data.Set(DataFormats.Files, new[] { tempPath });
-        try
-        {
-            await DragDrop.DoDragDrop(e, data, DragDropEffects.Copy);
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Share: drag-out failed", error);
-        }
-#pragma warning restore CS0618
-    }
-
-    private void ShareThumbnail_OnPointerReleased(object? sender, PointerReleasedEventArgs e) => _shareDragPressPoint = null;
 
     private static string ResolveExportGame(string sourcePath, ClipInfo? sourceInfo)
     {
@@ -7433,7 +7241,7 @@ public sealed partial class MainWindow : Window
     // pipe:1" key=value lines BuildExportArguments already asks ffmpeg to emit
     // (one "out_time_us=<microseconds>" per encoded chunk) to report real
     // percentage progress back to the caller instead of an indefinite spinner.
-    private static async Task<ProcessResult> RunProcessWithProgressAsync(
+    internal static async Task<ProcessResult> RunProcessWithProgressAsync(
         string fileName,
         IReadOnlyList<string> arguments,
         TimeSpan totalDuration,
@@ -7728,5 +7536,5 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private sealed record ProcessResult(int ExitCode, string Output, string Error);
+    internal sealed record ProcessResult(int ExitCode, string Output, string Error);
 }

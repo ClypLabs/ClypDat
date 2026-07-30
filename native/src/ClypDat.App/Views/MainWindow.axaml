@@ -2254,10 +2254,10 @@
                         Width="180"
                         HorizontalAlignment="Left" />
               <Border Height="1" Background="#22303A" Margin="0,10,0,0" />
-              <StackPanel Orientation="Horizontal" Spacing="8">
+              <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
                 <Button Name="SaveTrimButton"
                         Content="Save Trim"
-                        Width="110"
+                        HorizontalAlignment="Stretch"
                         Height="34"
                         Padding="0"
                         HorizontalContentAlignment="Center"
@@ -2265,17 +2265,18 @@
                         IsEnabled="{Binding !IsExporting}"
                         ToolTip.Tip="Replace the original clip with just the trimmed range"
                         Click="SaveTrimButton_OnClick" />
-                <Button Name="ExportButton"
+                <Button Grid.Column="1"
+                        Name="ExportButton"
                         Content="{Binding ExportButtonText}"
                         Classes="primaryButton"
-                        Width="150"
+                        HorizontalAlignment="Stretch"
                         Height="34"
                         Padding="0"
                         HorizontalContentAlignment="Center"
                         VerticalContentAlignment="Center"
                         IsEnabled="{Binding !IsExporting}"
                         Click="ExportButton_OnClick" />
-              </StackPanel>
+              </Grid>
               <Button Name="ShareButton"
                       Content="Share"
                       HorizontalAlignment="Stretch"
@@ -2787,67 +2788,6 @@
           <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="620">
             <WrapPanel x:Name="NewClipsCardsPanel" Margin="24,20,24,4" />
           </ScrollViewer>
-        </DockPanel>
-      </Border>
-    </Border>
-
-    <!-- Share dialog - same embedded-Border-over-a-scrim pattern as
-         NewClipsOverlay right above (a real OS Window can't dim the app
-         behind it the way this can, and Share's drag-out needs the app's
-         own content still visible/interactive underneath while it's up). -->
-    <Border x:Name="ShareOverlay" Grid.RowSpan="2" Background="#DD000000" IsVisible="False"
-            PointerPressed="ShareOverlay_OnPointerPressed">
-      <Border x:Name="ShareDialogCard" Width="480" CornerRadius="12" Background="#111920" BorderBrush="#232F3A" BorderThickness="1"
-              ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center">
-        <DockPanel LastChildFill="True">
-          <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto" Height="56" Background="#0C1319">
-            <TextBlock Grid.Column="1" Text="SHARE CLIP" Foreground="#D8E4F2" FontSize="17" FontWeight="Bold"
-                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-            <Button Grid.Column="2" Classes="dialogClose" FontSize="14" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                    Width="52" Height="56" Click="ShareCloseButton_OnClick">
-              <TextBlock Text="✕" Margin="0,-3,0,0" />
-            </Button>
-          </Grid>
-
-          <StackPanel Margin="28,24,28,28" Spacing="18">
-            <StackPanel Spacing="10">
-              <TextBlock Text="Choose a file size" Foreground="#93A6B8" FontSize="13" FontWeight="Bold" />
-              <StackPanel Orientation="Horizontal" Spacing="2">
-                <RadioButton x:Name="ShareSize10" Classes="sizePill" GroupName="ShareSize" Content="10 MB" Tag="10" Click="ShareSizePreset_OnClick" />
-                <RadioButton x:Name="ShareSize25" Classes="sizePill" GroupName="ShareSize" Content="25 MB" Tag="25" Click="ShareSizePreset_OnClick" />
-                <RadioButton x:Name="ShareSize100" Classes="sizePill" GroupName="ShareSize" Content="100 MB" Tag="100" Click="ShareSizePreset_OnClick" />
-                <RadioButton x:Name="ShareSizeCustom" Classes="sizePill" GroupName="ShareSize" Content="Custom" Click="ShareSizePreset_OnClick" />
-              </StackPanel>
-              <TextBox x:Name="ShareCustomSizeBox" Watermark="Size in MB" IsVisible="False" Width="140"
-                       HorizontalAlignment="Left" KeyDown="ShareCustomSizeBox_OnKeyDown" />
-            </StackPanel>
-
-            <StackPanel Spacing="4" HorizontalAlignment="Center">
-              <TextBlock Text="Drag &amp; Drop" Foreground="#EDF4FB" FontWeight="Bold" FontSize="16" HorizontalAlignment="Center" />
-              <TextBlock x:Name="ShareStatusText" Text="Pick a size to prepare the clip"
-                         Foreground="#8EA1B6" FontSize="12" HorizontalAlignment="Center"
-                         TextWrapping="Wrap" TextAlignment="Center" />
-            </StackPanel>
-
-            <Grid x:Name="ShareDropZone" Height="180">
-              <Rectangle RadiusX="10" RadiusY="10" Stroke="#4C6FFF" StrokeThickness="2" StrokeDashArray="6,4" Fill="Transparent" />
-              <Image x:Name="ShareThumbnail" Stretch="UniformToFill" Margin="3" IsVisible="False" Cursor="Hand"
-                     PointerPressed="ShareThumbnail_OnPointerPressed"
-                     PointerMoved="ShareThumbnail_OnPointerMoved"
-                     PointerReleased="ShareThumbnail_OnPointerReleased" />
-              <Border x:Name="ShareDurationBadge" Background="#CC0C1319" CornerRadius="12" Padding="9,4"
-                      HorizontalAlignment="Right" VerticalAlignment="Top" Margin="10" IsVisible="False" IsHitTestVisible="False">
-                <TextBlock x:Name="ShareDurationText" Foreground="White" FontSize="11" FontWeight="Bold" />
-              </Border>
-              <ProgressBar x:Name="ShareProgressBar" Minimum="0" Maximum="100" Width="160" Height="6"
-                           CornerRadius="3" IsIndeterminate="True" IsVisible="False" />
-            </Grid>
-
-            <Grid ColumnDefinitions="*,Auto">
-              <TextBlock x:Name="ShareResultSizeText" Foreground="#8EA1B6" FontSize="12" VerticalAlignment="Center" />
-              <Button Grid.Column="1" Content="Show in folder" IsEnabled="False" x:Name="ShareShowInFolderButton" Click="ShareShowInFolderButton_OnClick" />
-            </Grid>
-          </StackPanel>
         </DockPanel>
       </Border>
     </Border>
