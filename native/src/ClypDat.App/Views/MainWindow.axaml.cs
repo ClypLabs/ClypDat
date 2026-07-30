@@ -5012,7 +5012,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private static string ResolveExportGame(string sourcePath, ClipInfo? sourceInfo)
+    internal static string ResolveExportGame(string sourcePath, ClipInfo? sourceInfo)
     {
         if (!string.IsNullOrWhiteSpace(sourceInfo?.GameDisplayName) && !MedalImportService.IsStructuralFolderName(sourceInfo.GameDisplayName))
         {

@@ -47,9 +47,14 @@ public partial class ShareDialog : Window
     {
         try
         {
-            foreach (var stale in Directory.EnumerateFiles(Path.GetTempPath(), "clypdat-share-*.mp4"))
+            foreach (var stale in Directory.EnumerateDirectories(Path.GetTempPath(), $"{ShareTempFolderPrefix}*"))
             {
-                try { File.Delete(stale); } catch { /* still in use by this or another instance */ }
+                try { Directory.Delete(stale, recursive: true); } catch { /* still in use by this or another instance */ }
+            }
+            // Flat files from before shares moved into their own folders.
+            foreach (var stale in Directory.EnumerateFiles(Path.GetTempPath(), $"{ShareTempFolderPrefix}*.mp4"))
+            {
+                try { File.Delete(stale); } catch { /* still in use */ }
             }
         }
         catch (Exception error)
@@ -106,6 +111,46 @@ public partial class ShareDialog : Window
         public int Y;
     }
 
+    // The file the user drags out keeps a real, readable name ("ClypDat -
+    // Fortnite - Jul-30-2026.mp4") because that name is what lands in the
+    // Discord message, so a GUID in it would be user-visible. The GUID moves
+    // to a wrapping folder instead: it still guarantees uniqueness (two
+    // shares of the same clip on the same day would otherwise collide) and
+    // still gives the temp sweep a single unmistakable thing to delete.
+    private string BuildShareTempPath()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), $"{ShareTempFolderPrefix}{Guid.NewGuid():N}");
+        Directory.CreateDirectory(folder);
+        return Path.Combine(folder, BuildShareFileName());
+    }
+
+    private const string ShareTempFolderPrefix = "clypdat-share-";
+
+    private string BuildShareFileName()
+    {
+        var libraryRoot = string.IsNullOrWhiteSpace(_viewModel.Settings.LibraryFolder)
+            ? null
+            : _viewModel.Settings.LibraryFolder;
+        ClipInfo? sidecar = null;
+        try
+        {
+            if (libraryRoot is not null) sidecar = ClipInfoSidecar.Load(libraryRoot, _viewModel.SelectedVideoPath);
+        }
+        catch
+        {
+            // A missing/unreadable sidecar just means falling back to the
+            // folder name, which ResolveExportGame already handles.
+        }
+
+        var game = ClipFileNaming.SanitizeSegment(MainWindow.ResolveExportGame(_viewModel.SelectedVideoPath, sidecar));
+        // Same date the editor shows as "Created:" - the clip's own recording
+        // date, not whenever Share happened to be clicked.
+        var timestamp = _viewModel.SelectedCreatedAtLocal > default(DateTime) ? _viewModel.SelectedCreatedAtLocal : DateTime.Now;
+        var date = timestamp.ToString("MMM-dd-yyyy", System.Globalization.CultureInfo.InvariantCulture);
+        var stem = string.IsNullOrWhiteSpace(game) ? $"ClypDat - {date}" : $"ClypDat - {game} - {date}";
+        return $"{ClipFileNaming.SanitizeSegment(stem)}.mp4";
+    }
+
     private void CleanUp()
     {
         _shareCts?.Cancel();
@@ -127,8 +172,8 @@ public partial class ShareDialog : Window
         {
             try
             {
-                if (!File.Exists(path)) return;
-                File.Delete(path);
+                if (File.Exists(path)) File.Delete(path);
+                TryDeleteShareFolder(Path.GetDirectoryName(path));
                 return;
             }
             catch
@@ -137,6 +182,15 @@ public partial class ShareDialog : Window
             }
         }
         AppLog.Debug($"Share: could not delete temp file {path} - leaving it for the OS temp sweep.");
+    }
+
+    // Only ever removes the GUID-named wrapper this dialog created, never a
+    // folder the path merely happens to sit in.
+    private static void TryDeleteShareFolder(string? folder)
+    {
+        if (folder is null) return;
+        if (!Path.GetFileName(folder).StartsWith(ShareTempFolderPrefix, StringComparison.Ordinal)) return;
+        try { Directory.Delete(folder, recursive: true); } catch { /* something still holds it */ }
     }
 
     private void CloseButton_OnClick(object? sender, RoutedEventArgs e) => Close();
@@ -191,11 +245,12 @@ public partial class ShareDialog : Window
         if (string.IsNullOrWhiteSpace(_viewModel.SelectedVideoPath)) return;
 
         _shareCts?.Cancel();
-        if (_shareTempPath is { } previous) AudioCapturePipeline.TryDelete(previous);
+        // Superseded by a different size - the old encode's file goes with it.
+        if (_shareTempPath is { } previous) _ = DeleteWithRetryAsync(previous);
 
         var cts = new CancellationTokenSource();
         _shareCts = cts;
-        var tempPath = Path.Combine(Path.GetTempPath(), $"clypdat-share-{Guid.NewGuid():N}.mp4");
+        var tempPath = BuildShareTempPath();
         _shareTempPath = tempPath;
 
         ShareThumbnail.IsVisible = false;
@@ -233,7 +288,7 @@ public partial class ShareDialog : Window
 
             if (result.ExitCode != 0)
             {
-                AudioCapturePipeline.TryDelete(tempPath);
+                _ = DeleteWithRetryAsync(tempPath);
                 _shareTempPath = null;
                 ShareProgressPanel.IsVisible = false;
                 ShareStatusText.Text = string.IsNullOrWhiteSpace(result.Error) ? "Encode failed." : result.Error;
