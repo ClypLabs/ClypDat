@@ -80,6 +80,7 @@ public sealed partial class MainWindow : Window
     private readonly EncoderTuningService _encoderTuning = new();
     private readonly SemaphoreSlim _clipSaveLock = new(1, 1);
     private bool _updateDialogOpen;
+    private readonly ClipHoverPreviewController _clipHoverPreview = new();
     // Closing the window (the X button) hides to the tray instead of quitting,
     // so the replay buffer/Full Session keeps recording - matches the tray
     // icon's own "Open"/"Quit" menu, which otherwise had no way to actually be
@@ -205,6 +206,11 @@ public sealed partial class MainWindow : Window
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
                     if (e.PropertyName == nameof(MainWindowViewModel.IsSettingsVisible) && ViewModel.IsSettingsVisible) PauseEditorPlayback();
+                    if (e.PropertyName == nameof(MainWindowViewModel.EnableClipHoverPreview) && !ViewModel.EnableClipHoverPreview) _clipHoverPreview.Stop("setting disabled");
+                    if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible) or nameof(MainWindowViewModel.IsEditorVisible))
+                    {
+                        if (!ViewModel.IsLibraryVisible) _clipHoverPreview.Stop("navigation");
+                    }
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayQualityRestartRequired) && ViewModel.ReplayQualityRestartRequired)
                     {
                         // Debounced rather than restarting on every keystroke/click -
@@ -327,6 +333,7 @@ public sealed partial class MainWindow : Window
         };
         Closed += (_, _) =>
         {
+            _clipHoverPreview.Dispose();
             _libraryResizeAnchorSettleTimer?.Stop();
             _globalHotkey?.Dispose();
             _cs2GsiListener?.Dispose();
@@ -3097,6 +3104,7 @@ public sealed partial class MainWindow : Window
     private async Task<bool> OpenClipCardAsync(ClipCardViewModel clip)
     {
         if (ViewModel is null) return false;
+        _clipHoverPreview.Stop("clip opened");
         // Snapshot while Library is still visible/laid out - once
         // OpenClipAsync flips IsEditorVisible, LibraryScrollViewer collapses
         // and its containers stop reflecting real layout until it's shown
@@ -3594,6 +3602,7 @@ public sealed partial class MainWindow : Window
 
         try
         {
+            _clipHoverPreview.Stop("clip deleted");
             await ViewModel.DeleteClipAsync(clip);
         }
         catch (Exception error)
@@ -3606,12 +3615,14 @@ public sealed partial class MainWindow : Window
     {
         if (sender is not Control { DataContext: ClipCardViewModel clip }) return;
         clip.IsHovered = true;
+        _clipHoverPreview.Request(clip, ViewModel?.EnableClipHoverPreview == true && ViewModel.IsLibraryVisible);
     }
 
     private void ClipCard_OnPointerExited(object? sender, PointerEventArgs e)
     {
         if (sender is not Control { DataContext: ClipCardViewModel clip }) return;
         clip.IsHovered = false;
+        _clipHoverPreview.StopIfActive(clip, "pointer exited");
     }
 
     // Fires as each card's own row scrolls in/out of the library
@@ -3623,7 +3634,9 @@ public sealed partial class MainWindow : Window
     {
         if (sender is not Control { DataContext: ClipCardViewModel clip }) return;
         var viewport = e.EffectiveViewport;
-        clip.SetPreviewVisible(viewport.Width > 0 && viewport.Height > 0);
+        var visible = viewport.Width > 0 && viewport.Height > 0;
+        if (!visible) _clipHoverPreview.StopIfActive(clip, "card left viewport");
+        clip.SetPreviewVisible(visible);
     }
 
     private void ClipCheckBox_OnClick(object? sender, RoutedEventArgs e)
@@ -3652,6 +3665,7 @@ public sealed partial class MainWindow : Window
 
         try
         {
+            _clipHoverPreview.Stop("selected clips deleted");
             await ViewModel.DeleteSelectedAsync();
         }
         catch (Exception error)

@@ -3347,6 +3347,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return Task.FromResult(true);
     }
 
+    public bool EnableClipHoverPreview
+    {
+        get => Settings.EnableClipHoverPreview;
+        set
+        {
+            if (Settings.EnableClipHoverPreview == value) return;
+            Settings.EnableClipHoverPreview = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
     // Share does not need an editor session, but it uses the selected-media
     // metadata for trimming, thumbnail, naming, and encode settings. Prepare
     // that state without making the Library disappear behind the editor.

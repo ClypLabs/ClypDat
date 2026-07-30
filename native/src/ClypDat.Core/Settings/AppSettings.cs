@@ -95,6 +95,7 @@ public sealed class AppSettings
     // video view. Docked stays available for anyone who would rather the
     // controls never cover a frame and never move.
     public bool EditorHoverBarEnabled { get; set; } = true;
+    public bool EnableClipHoverPreview { get; set; } = true;
     // Existing installs already have EditorHoverBarEnabled written to their
     // settings.json as false, so flipping the default above reaches new
     // installs only. See AppSettingsStore for the one-time switch-on; this

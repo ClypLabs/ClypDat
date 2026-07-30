@@ -848,7 +848,7 @@
                                     ZIndex="10" />
                             <Border Background="#16202A" Height="{Binding $parent[Window].DataContext.CardImageHeight}">
                               <Grid>
-                                <Image Source="{Binding PreviewImage}" Stretch="UniformToFill" />
+                                <Image Source="{Binding DisplayImage}" Stretch="UniformToFill" />
                                 <Border Background="#661A2040" IsVisible="{Binding IsSelected}" IsHitTestVisible="False" />
                                 <TextBlock Text="{Binding SelectionOrder}"
                                            IsVisible="{Binding HasSelectionOrder}"
@@ -1483,7 +1483,7 @@
                 </StackPanel>
               </Border>
 
-              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Show status panel|Show &quot;Playback Paused&quot; indicator|Scale clips with window size|Hoverbar|Combine sidebar filters|Layout'}">
+              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Show status panel|Show &quot;Playback Paused&quot; indicator|Scale clips with window size|Hoverbar|Video preview|Combine sidebar filters|Layout'}">
                 <StackPanel Spacing="18">
                   <TextBlock Text="LAYOUT" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" />
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show status panel|Layout}">
@@ -1513,6 +1513,13 @@
                       <TextBlock Text="Floats the Editor's playback controls over the bottom of the video, appearing while the pointer is in the Editor. Off keeps them docked under the video, always visible." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding EditorHoverBarEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                  </Grid>
+                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Video preview|hovering over a clip|Layout'}">
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="Play a video preview when hovering over a clip" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                      <TextBlock Text="Shows a muted low-resolution preview after a short hover delay." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableClipHoverPreview}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Combine sidebar filters|Layout}">
                     <StackPanel Spacing="2">
