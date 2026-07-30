@@ -4991,18 +4991,25 @@ public sealed partial class MainWindow : Window
     // of. A separate window sized/positioned to exactly cover this one
     // (done in ShareDialog itself) sits above that airspace the same way the
     // floating hover bar already does.
+    // Gates PollEditorHoverControls - the floating bar is a separate always-on-top
+    // window over the video, so with Share up it punched through the dimmed
+    // backdrop and sat on top of the dialog. Down for as long as Share is
+    // open, back on its own the moment the poll sees this clear again.
+    private bool _shareDialogOpen;
+
     private async void ShareButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
-        var dialog = new ShareDialog(this, ViewModel);
-        var closedTask = dialog.ShowDialog(this);
-        // ShowDialog has shown the window by the time it returns the awaitable
-        // (the task only completes on close) - re-pin the hover bar's own
-        // top-level window above it right here, so playback stays reachable
-        // with Share up instead of the two racing for whichever happened to
-        // paint last.
-        RepositionEditorHoverControlsSafe(force: true);
-        await closedTask;
+        _shareDialogOpen = true;
+        HideEditorHoverControls(immediate: true);
+        try
+        {
+            await new ShareDialog(this, ViewModel).ShowDialog(this);
+        }
+        finally
+        {
+            _shareDialogOpen = false;
+        }
     }
 
     private static string ResolveExportGame(string sourcePath, ClipInfo? sourceInfo)
@@ -6260,11 +6267,11 @@ public sealed partial class MainWindow : Window
         // - drop the window, build a fresh one - just produced a new window to
         // fail on, so the bar never came back after a restore.
         if (ViewModel is null || !IsVisible || !ViewModel.IsEditorVisible || ViewModel.IsVideoFullscreen || _playback is null ||
-            !ViewModel.Settings.EditorHoverBarEnabled)
+            !ViewModel.Settings.EditorHoverBarEnabled || _shareDialogOpen)
         {
             if (_editorHoverControlsWindow is { IsVisible: true })
             {
-                LogHoverControlsState($"hidden (window={IsVisible}, editor={ViewModel?.IsEditorVisible}, fullscreen={ViewModel?.IsVideoFullscreen}, playback={_playback is not null}, hoverBar={ViewModel?.Settings.EditorHoverBarEnabled})");
+                LogHoverControlsState($"hidden (window={IsVisible}, editor={ViewModel?.IsEditorVisible}, fullscreen={ViewModel?.IsVideoFullscreen}, playback={_playback is not null}, hoverBar={ViewModel?.Settings.EditorHoverBarEnabled}, share={_shareDialogOpen})");
             }
             HideEditorHoverControls(immediate: true);
             return;

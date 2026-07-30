@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Threading;
 using ClypDat.App.Services;
 using ClypDat.App.ViewModels;
 
@@ -32,9 +33,29 @@ public partial class ShareDialog : Window
         // mattering, not gating the whole dialog on one extra click.
         Opened += (_, _) =>
         {
+            SweepStaleShareTempFiles();
             ShareSize10.IsChecked = true;
             _ = StartShareEncodeAsync(10L * 1024 * 1024);
         };
+    }
+
+    // A hard kill (crash, task manager) never runs the close-time cleanup, so
+    // anything left from a previous run would sit in temp forever. These are
+    // only ever ours and only ever transient, so clearing whatever is no
+    // longer locked costs nothing and keeps them from accumulating.
+    private static void SweepStaleShareTempFiles()
+    {
+        try
+        {
+            foreach (var stale in Directory.EnumerateFiles(Path.GetTempPath(), "clypdat-share-*.mp4"))
+            {
+                try { File.Delete(stale); } catch { /* still in use by this or another instance */ }
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Debug($"Share: temp sweep skipped ({error.Message}).");
+        }
     }
 
     // Owner isn't wired through Avalonia's own Owner property for sizing
@@ -66,6 +87,9 @@ public partial class ShareDialog : Window
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hWnd, out Win32Rect rect);
 
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out Win32Point point);
+
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
     private struct Win32Rect
     {
@@ -75,11 +99,44 @@ public partial class ShareDialog : Window
         public int Bottom;
     }
 
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct Win32Point
+    {
+        public int X;
+        public int Y;
+    }
+
     private void CleanUp()
     {
         _shareCts?.Cancel();
-        if (_shareTempPath is { } path) AudioCapturePipeline.TryDelete(path);
+        _dragCursorWatch?.Stop();
+        _dragCursorWatch = null;
+        // ffmpeg may still be letting go of the handle when a cancelled
+        // encode's process exits, and a drop target (Explorer especially)
+        // can hold the file open for a moment after taking it - a single
+        // immediate delete loses that race and leaves a multi-hundred-MB
+        // temp file behind for good. Retry briefly in the background rather
+        // than blocking the close.
+        if (_shareTempPath is { } path) _ = DeleteWithRetryAsync(path);
         _shareTempPath = null;
+    }
+
+    private static async Task DeleteWithRetryAsync(string path)
+    {
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            try
+            {
+                if (!File.Exists(path)) return;
+                File.Delete(path);
+                return;
+            }
+            catch
+            {
+                await Task.Delay(300);
+            }
+        }
+        AppLog.Debug($"Share: could not delete temp file {path} - leaving it for the OS temp sweep.");
     }
 
     private void CloseButton_OnClick(object? sender, RoutedEventArgs e) => Close();
@@ -242,7 +299,7 @@ public partial class ShareDialog : Window
 #pragma warning disable CS0618
         var data = new DataObject();
         data.Set(DataFormats.FileNames, new[] { tempPath });
-        ShareDragActiveOverlay.IsVisible = true;
+        StartDragCursorWatch();
         try
         {
             await DragDrop.DoDragDrop(e, data, DragDropEffects.Copy);
@@ -253,18 +310,48 @@ public partial class ShareDialog : Window
         }
         finally
         {
-            // DoDragDrop blocks for the whole gesture regardless of where it
-            // ends (dropped on a target, released over empty desktop,
-            // Escape) - once it returns the clip has left the app's hand
-            // either way, so the thumbnail doesn't come back; picking a size
-            // again re-encodes and shows a fresh one.
+            // Everything goes back exactly as it was: the same clip stays
+            // draggable for another go. Dropping it back onto ClypDat, onto
+            // the desktop, or hitting Escape all end up here, and any of
+            // those used to leave the dialog stuck with no thumbnail until
+            // the size was changed or the dialog reopened.
+            StopDragCursorWatch();
             ShareDragActiveOverlay.IsVisible = false;
-            ShareThumbnail.IsVisible = false;
-            ShareDurationBadge.IsVisible = false;
-            ShareStatusText.Text = "Clip shared.";
         }
 #pragma warning restore CS0618
     }
 
     private void Thumbnail_OnPointerReleased(object? sender, PointerReleasedEventArgs e) => _dragPressPoint = null;
+
+    // DoDragDrop blocks this method for the whole gesture, and during a drag
+    // the app gets no pointer events at all (the OS owns the pointer), so
+    // "is the cursor still over ClypDat" can only be answered by polling the
+    // cursor against the window rect.
+    private DispatcherTimer? _dragCursorWatch;
+
+    private void StartDragCursorWatch()
+    {
+        ShareDragActiveOverlay.IsVisible = true;
+        _dragCursorWatch ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(60) };
+        _dragCursorWatch.Tick -= DragCursorWatch_OnTick;
+        _dragCursorWatch.Tick += DragCursorWatch_OnTick;
+        _dragCursorWatch.Start();
+    }
+
+    private void StopDragCursorWatch()
+    {
+        _dragCursorWatch?.Stop();
+        if (_dragCursorWatch is not null) _dragCursorWatch.Tick -= DragCursorWatch_OnTick;
+    }
+
+    private void DragCursorWatch_OnTick(object? sender, EventArgs e)
+    {
+        var handle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        if (handle == IntPtr.Zero || !GetCursorPos(out var cursor) || !GetWindowRect(handle, out var rect)) return;
+        var overApp = cursor.X >= rect.Left && cursor.X < rect.Right && cursor.Y >= rect.Top && cursor.Y < rect.Bottom;
+        // Only meaningful while a drag is actually in flight - the overlay is
+        // shown on drag start and torn down in the finally above, so this
+        // just toggles it as the cursor crosses the app's edge.
+        ShareDragActiveOverlay.IsVisible = overApp;
+    }
 }
