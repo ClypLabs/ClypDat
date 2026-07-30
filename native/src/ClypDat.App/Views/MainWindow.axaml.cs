@@ -7135,6 +7135,10 @@ public sealed partial class MainWindow : Window
         }
         else if (_playback.IsEnded)
         {
+            // LibVLC ends video independently from the WASAPI mixer. Stop the
+            // mixer too before leaving the editor in its ended state; otherwise
+            // its buffered audio can overlap the next seek/play.
+            _playback.Pause();
             ViewModel.IsPlaying = false;
             _playbackTimer.Stop();
             _endedAtTrimBoundary = true;

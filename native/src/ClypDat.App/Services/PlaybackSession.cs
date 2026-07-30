@@ -226,6 +226,10 @@ public sealed class PlaybackSession : IDisposable
 
     public void PlayFrom(TimeSpan time)
     {
+        // A timeline seek can still be waiting for LibVLC to settle when the
+        // user presses Play. Its old completion must not pause/stop the newer
+        // transport state after PlayFrom has already started it.
+        Interlocked.Increment(ref _seekVersion);
         var playVersion = Interlocked.Increment(ref _playVersion);
         var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
         var wasStoppedOrEnded = IsEnded || VideoPlayer.State == VLCState.Stopped;
