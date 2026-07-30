@@ -202,9 +202,10 @@ public partial class ShareDialog : Window
         ShareDurationBadge.IsVisible = false;
         ShareShowInFolderButton.IsEnabled = false;
         ShareResultSizeText.Text = string.Empty;
-        ShareProgressBar.IsVisible = true;
+        ShareProgressPanel.IsVisible = true;
         ShareProgressBar.IsIndeterminate = false;
         ShareProgressBar.Value = 0;
+        ShareProgressPercentText.Text = "0%";
         ShareStatusText.Text = targetBytes > 0 ? "Encoding for Discord..." : "Encoding at original quality...";
 
         try
@@ -213,7 +214,9 @@ public partial class ShareDialog : Window
             var progress = new Progress<double>(fraction =>
             {
                 if (cts.IsCancellationRequested) return;
+                ShareProgressBar.IsIndeterminate = false;
                 ShareProgressBar.Value = Math.Clamp(fraction * 100, 0, 100);
+                ShareProgressPercentText.Text = $"{ShareProgressBar.Value:0}%";
             });
 
             var result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes), exportDuration, progress, cts.Token);
@@ -221,6 +224,7 @@ public partial class ShareDialog : Window
             {
                 AppLog.Info($"Share: NVENC encode failed, retrying with CPU encoder. ffmpeg said: {result.Error}");
                 ShareProgressBar.IsIndeterminate = true;
+                ShareProgressPercentText.Text = string.Empty;
                 ShareStatusText.Text = "Encoding for Discord (CPU encoder)...";
                 result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, useHardwareEncoder: false), exportDuration, progress, cts.Token);
             }
@@ -231,7 +235,7 @@ public partial class ShareDialog : Window
             {
                 AudioCapturePipeline.TryDelete(tempPath);
                 _shareTempPath = null;
-                ShareProgressBar.IsVisible = false;
+                ShareProgressPanel.IsVisible = false;
                 ShareStatusText.Text = string.IsNullOrWhiteSpace(result.Error) ? "Encode failed." : result.Error;
                 return;
             }
@@ -242,7 +246,7 @@ public partial class ShareDialog : Window
             var actualMb = actualBytes / 1024.0 / 1024.0;
             var targetMb = targetBytes / 1024.0 / 1024.0;
 
-            ShareProgressBar.IsVisible = false;
+            ShareProgressPanel.IsVisible = false;
             ShareStatusText.Text = "Drag this clip into any Discord chat to upload it";
             // Resolution/fps is always shown, not just when downscaled - what
             // you are about to send is worth knowing either way, and it makes
@@ -262,7 +266,7 @@ public partial class ShareDialog : Window
         {
             if (cts.IsCancellationRequested) return;
             AppLog.Error("Share: encode failed", error);
-            ShareProgressBar.IsVisible = false;
+            ShareProgressPanel.IsVisible = false;
             ShareStatusText.Text = "Encode failed.";
         }
     }
