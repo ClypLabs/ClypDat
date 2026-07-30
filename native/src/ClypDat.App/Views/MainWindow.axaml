@@ -1620,13 +1620,12 @@
                                      "steam-381210" for a Catalog-origin row), not
                                      a real filename - ProcessName is the actual
                                      exe. Rows saved before ProcessName existed
-                                     have it empty until next detected. Always
-                                     rendered (even blank) rather than collapsed,
-                                     so every row is the same height - collapsing
-                                     it made subtitle-less rows shorter, which
-                                     centered their title lower than rows with a
-                                     subtitle and looked uneven. -->
-                                <TextBlock Text="{Binding ProcessName}" Foreground="#5C6D7E" FontSize="11" />
+                                     have it empty until next detected - collapsed
+                                     rather than shown blank so a name-only row's
+                                     title centers vertically in the row (which is
+                                     as tall as the Capture Backend combo box)
+                                     instead of sitting pinned above empty space. -->
+                                <TextBlock Text="{Binding ProcessName}" Foreground="#5C6D7E" FontSize="11" IsVisible="{Binding ProcessName, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
                               </StackPanel>
                               <ComboBox Grid.Column="1" Classes="settingsInput" Width="210" ItemsSource="{Binding $parent[Window].DataContext.ReplayBackends}" SelectedItem="{Binding SelectedBackend}" VerticalAlignment="Center">
                                 <ComboBox.ItemTemplate>
@@ -1635,7 +1634,7 @@
                                   </DataTemplate>
                                 </ComboBox.ItemTemplate>
                               </ComboBox>
-                              <Button Grid.Column="2" Classes="deleteButton" Content="Remove" Padding="14,7" VerticalAlignment="Center" Click="RemoveGameButton_OnClick"
+                              <Button Grid.Column="2" Content="Remove" Padding="14,7" VerticalAlignment="Center" Click="RemoveGameButton_OnClick"
                                       ToolTip.Tip="Removes it from this list and stops ClypDat detecting it as a game again" />
                             </Grid>
                           </StackPanel>
@@ -1663,7 +1662,7 @@
                                 <Grid ColumnDefinitions="*,Auto">
                                   <StackPanel Spacing="1" VerticalAlignment="Center">
                                     <TextBlock Text="{Binding DisplayName}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" />
-                                    <TextBlock Text="{Binding ProcessName}" Foreground="#5C6D7E" FontSize="11" />
+                                    <TextBlock Text="{Binding ProcessName}" Foreground="#5C6D7E" FontSize="11" IsVisible="{Binding ProcessName, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
                                   </StackPanel>
                                   <Button Grid.Column="1" Content="Remove" Width="80" VerticalAlignment="Center" Click="RemoveIgnoredGameButton_OnClick" />
                                 </Grid>
