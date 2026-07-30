@@ -25,12 +25,13 @@ internal sealed class ClipHoverPreviewController : IDisposable
     private Process? _process;
     private ClipCardViewModel? _clip;
     private WriteableBitmap? _bitmap;
+    private Action? _requestRepaint;
     private int _generation;
     private bool _disposed;
 
-    public void Request(ClipCardViewModel clip, bool enabled)
+    public void Request(ClipCardViewModel clip, bool enabled, Action? requestRepaint)
     {
-        if (!enabled || !File.Exists(clip.Path)) return;
+        if (!enabled || requestRepaint is null || !File.Exists(clip.Path)) return;
         Stop("replaced");
         CancellationToken token;
         int generation;
@@ -38,6 +39,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         {
             if (_disposed) return;
             _clip = clip;
+            _requestRepaint = requestRepaint;
             _cancellation = new CancellationTokenSource();
             token = _cancellation.Token;
             generation = _generation;
@@ -51,6 +53,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         WriteableBitmap? bitmap;
         Process? process;
         CancellationTokenSource? cancellation;
+        var wasActive = false;
         lock (_stateLock)
         {
             _generation++;
@@ -58,10 +61,12 @@ internal sealed class ClipHoverPreviewController : IDisposable
             bitmap = _bitmap;
             process = _process;
             cancellation = _cancellation;
+            wasActive = clip is not null || process is not null || cancellation is not null;
             _clip = null;
             _bitmap = null;
             _process = null;
             _cancellation = null;
+            _requestRepaint = null;
         }
         cancellation?.Cancel();
         Kill(process);
@@ -73,7 +78,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
             bitmap.Dispose();
         }
         cancellation?.Dispose();
-        AppLog.Info($"Clip hover preview cancelled: {reason}.");
+        if (wasActive) AppLog.Info($"Clip hover preview cancelled: {reason}.");
     }
 
     public void StopIfActive(ClipCardViewModel clip, string reason)
@@ -203,6 +208,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
             }
         }
         clip.ShowHoverPreview(bitmap);
+        RequestRepaint(clip, generation);
     }
 
     private void Cleanup(ClipCardViewModel clip, int generation)
@@ -213,13 +219,22 @@ internal sealed class ClipHoverPreviewController : IDisposable
             if (!IsCurrentLocked(clip, generation)) return;
             bitmap = _bitmap;
             _bitmap = null; _process = null; _clip = null;
-            _cancellation?.Dispose(); _cancellation = null;
+            _cancellation?.Dispose(); _cancellation = null; _requestRepaint = null;
         }
         if (bitmap is not null) { clip.HideHoverPreview(bitmap); bitmap.Dispose(); }
         AppLog.Info("Clip hover preview cleanup complete.");
     }
 
     private bool IsCurrent(ClipCardViewModel clip, int generation) { lock (_stateLock) return IsCurrentLocked(clip, generation); }
+    private void RequestRepaint(ClipCardViewModel clip, int generation)
+    {
+        Action? requestRepaint;
+        lock (_stateLock)
+        {
+            requestRepaint = IsCurrentLocked(clip, generation) ? _requestRepaint : null;
+        }
+        requestRepaint?.Invoke();
+    }
     private bool IsCurrentLocked(ClipCardViewModel clip, int generation) => !_disposed && _generation == generation && _clip == clip;
     private static void Kill(Process? process) { try { if (process is { HasExited: false }) process.Kill(true); } catch { } }
     public void Dispose() { if (_disposed) return; _disposed = true; Stop("window closed"); _sessionLock.Dispose(); }
