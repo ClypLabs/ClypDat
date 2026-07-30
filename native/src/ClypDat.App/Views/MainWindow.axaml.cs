@@ -7355,7 +7355,7 @@ public sealed partial class MainWindow : Window
         return (window, progressBar, statusText, percentText, etaText);
     }
 
-    private static string FormatEta(TimeSpan remaining)
+    internal static string FormatEta(TimeSpan remaining)
     {
         if (remaining.TotalSeconds < 1) return "less than a second";
         return remaining.TotalSeconds < 60

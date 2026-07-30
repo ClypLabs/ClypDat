@@ -86,6 +86,8 @@
                          HorizontalAlignment="Center" />
               <ProgressBar x:Name="ShareProgressBar" Minimum="0" Maximum="100" Width="160" Height="6"
                            CornerRadius="3" IsIndeterminate="True" />
+              <TextBlock x:Name="ShareProgressEtaText" Foreground="#8EA1B6" FontSize="12"
+                         HorizontalAlignment="Center" IsVisible="False" />
             </StackPanel>
           </Grid>
 
