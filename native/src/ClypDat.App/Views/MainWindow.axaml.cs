@@ -3139,21 +3139,6 @@ public sealed partial class MainWindow : Window
         await ShareCurrentClipAsync();
     }
 
-    private void ClipCardMenu_OnClick(object? sender, RoutedEventArgs e)
-    {
-        if (sender is not Control control) return;
-        Visual? current = control;
-        while (current is not null)
-        {
-            if (current is Border { ContextMenu: { } menu })
-            {
-                menu.Open(control);
-                return;
-            }
-            current = current.GetVisualParent();
-        }
-    }
-
     private async void ClipContextRename_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
