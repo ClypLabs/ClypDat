@@ -2275,17 +2275,17 @@
                         VerticalContentAlignment="Center"
                         IsEnabled="{Binding !IsExporting}"
                         Click="ExportButton_OnClick" />
-                <Button Name="ShareButton"
-                        Content="Share"
-                        Width="90"
-                        Height="34"
-                        Padding="0"
-                        HorizontalContentAlignment="Center"
-                        VerticalContentAlignment="Center"
-                        IsEnabled="{Binding !IsExporting}"
-                        ToolTip.Tip="Re-encode to a size cap for Discord and drag the result straight into another app"
-                        Click="ShareButton_OnClick" />
               </StackPanel>
+              <Button Name="ShareButton"
+                      Content="Share"
+                      HorizontalAlignment="Stretch"
+                      Height="34"
+                      Padding="0"
+                      HorizontalContentAlignment="Center"
+                      VerticalContentAlignment="Center"
+                      IsEnabled="{Binding !IsExporting}"
+                      ToolTip.Tip="Re-encode to a size cap for Discord and drag the result straight into another app"
+                      Click="ShareButton_OnClick" />
             </StackPanel>
           </Border>
         </Grid>
