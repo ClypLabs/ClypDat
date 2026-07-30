@@ -15,7 +15,8 @@ internal sealed class ClipHoverPreviewController : IDisposable
 {
     internal const int Width = 480;
     internal const int Height = 270;
-    internal const int FramesPerSecond = 8;
+    internal const int MaximumFramesPerSecond = 60;
+    internal const int DefaultFramesPerSecond = 30;
     internal static readonly TimeSpan HoverDelay = TimeSpan.FromMilliseconds(125);
     private const int FrameBytes = Width * Height * 4;
 
@@ -101,15 +102,16 @@ internal sealed class ClipHoverPreviewController : IDisposable
                 if (!IsCurrent(clip, generation)) return;
                 var range = clip.HoverPreviewRange;
                 if (range.Duration <= TimeSpan.Zero) return;
+                var frameRate = ResolveFrameRate(clip.Media.Fps);
                 var bitmap = await Dispatcher.UIThread.InvokeAsync(
                     () => new WriteableBitmap(new PixelSize(Width, Height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Unpremul));
                 SetBitmap(clip, generation, bitmap);
                 if (!IsCurrent(clip, generation)) return;
-                AppLog.Info($"Clip hover preview started: {Path.GetFileName(clip.Path)}.");
+                AppLog.Info($"Clip hover preview started: {Path.GetFileName(clip.Path)}, fps={frameRate:0.###} (recorded={clip.Media.Fps:0.###}).");
 
                 while (!token.IsCancellationRequested && IsCurrent(clip, generation))
                 {
-                    using var process = StartDecoder(clip.Path, range);
+                    using var process = StartDecoder(clip.Path, range, frameRate);
                     SetProcess(clip, generation, process);
                     var stderr = process.StandardError.ReadToEndAsync();
                     var buffer = new byte[FrameBytes];
@@ -137,10 +139,13 @@ internal sealed class ClipHoverPreviewController : IDisposable
         finally { Cleanup(clip, generation); }
     }
 
-    private static Process StartDecoder(string path, (TimeSpan Start, TimeSpan Duration) range)
+    internal static double ResolveFrameRate(double recordedFrameRate) =>
+        double.IsFinite(recordedFrameRate) && recordedFrameRate > 0
+            ? Math.Clamp(recordedFrameRate, 1, MaximumFramesPerSecond)
+            : DefaultFramesPerSecond;
+
+    private static Process StartDecoder(string path, (TimeSpan Start, TimeSpan Duration) range, double frameRate)
     {
-        var start = range.Start.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
-        var duration = range.Duration.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
         var info = new ProcessStartInfo("ffmpeg")
         {
             UseShellExecute = false,
@@ -148,16 +153,22 @@ internal sealed class ClipHoverPreviewController : IDisposable
             RedirectStandardError = true,
             CreateNoWindow = true
         };
-        info.ArgumentList.Add("-hide_banner"); info.ArgumentList.Add("-loglevel"); info.ArgumentList.Add("error");
-        info.ArgumentList.Add("-re"); info.ArgumentList.Add("-ss"); info.ArgumentList.Add(start);
-        info.ArgumentList.Add("-i"); info.ArgumentList.Add(path);
-        info.ArgumentList.Add("-t"); info.ArgumentList.Add(duration);
-        info.ArgumentList.Add("-an"); info.ArgumentList.Add("-vf");
-        info.ArgumentList.Add($"fps={FramesPerSecond},scale={Width}:{Height}:force_original_aspect_ratio=decrease,pad={Width}:{Height}:(ow-iw)/2:(oh-ih)/2");
-        info.ArgumentList.Add("-pix_fmt"); info.ArgumentList.Add("bgra"); info.ArgumentList.Add("-f"); info.ArgumentList.Add("rawvideo"); info.ArgumentList.Add("pipe:1");
+        foreach (var argument in BuildDecoderArguments(path, range, frameRate)) info.ArgumentList.Add(argument);
         var process = Process.Start(info) ?? throw new InvalidOperationException("FFmpeg did not start.");
         try { process.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
         return process;
+    }
+
+    internal static IReadOnlyList<string> BuildDecoderArguments(string path, (TimeSpan Start, TimeSpan Duration) range, double frameRate)
+    {
+        var start = range.Start.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
+        var duration = range.Duration.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
+        var fps = ResolveFrameRate(frameRate).ToString("0.###", CultureInfo.InvariantCulture);
+        return [
+            "-hide_banner", "-loglevel", "error", "-re", "-ss", start, "-i", path, "-t", duration,
+            "-an", "-vf", $"fps={fps},scale={Width}:{Height}:force_original_aspect_ratio=decrease,pad={Width}:{Height}:(ow-iw)/2:(oh-ih)/2",
+            "-pix_fmt", "bgra", "-f", "rawvideo", "pipe:1"
+        ];
     }
 
     private static async Task<bool> ReadFrameAsync(Stream stream, byte[] buffer, CancellationToken token)
