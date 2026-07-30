@@ -280,17 +280,30 @@ public partial class ShareDialog : Window
         ShareProgressBar.IsIndeterminate = false;
         ShareProgressBar.Value = 0;
         ShareProgressPercentText.Text = "0%";
+        ShareProgressEtaText.IsVisible = false;
         ShareStatusText.Text = targetBytes > 0 ? "Encoding for Discord..." : "Encoding at original quality...";
 
         try
         {
             var exportDuration = _viewModel.ExportDuration;
+            // Restarted per attempt (CPU fallback, size retry) - each one is a
+            // fresh encode at a different speed, so carrying the previous
+            // one's elapsed time over would make the estimate nonsense.
+            var encodeClock = System.Diagnostics.Stopwatch.StartNew();
             var progress = new Progress<double>(fraction =>
             {
                 if (cts.IsCancellationRequested) return;
                 ShareProgressBar.IsIndeterminate = false;
                 ShareProgressBar.Value = Math.Clamp(fraction * 100, 0, 100);
                 ShareProgressPercentText.Text = $"{ShareProgressBar.Value:0}%";
+                // Below a few percent one early sample extrapolates wildly,
+                // so hold off rather than show a number that then collapses.
+                if (fraction > 0.03)
+                {
+                    var remaining = TimeSpan.FromMilliseconds(encodeClock.ElapsedMilliseconds * (1 - fraction) / fraction);
+                    ShareProgressEtaText.Text = $"About {MainWindow.FormatEta(remaining)} left";
+                    ShareProgressEtaText.IsVisible = true;
+                }
             });
 
             var useHevc = ShareHevcToggle.IsChecked == true;
@@ -314,7 +327,9 @@ public partial class ShareDialog : Window
                     ShareProgressBar.IsIndeterminate = true;
                     ShareProgressPercentText.Text = string.Empty;
                     ShareStatusText.Text = "Encoding (CPU encoder)...";
+                    ShareProgressEtaText.IsVisible = false;
                     useHardware = false;
+                    encodeClock.Restart();
                     result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, useHardware, useHevc, bitrateScale), exportDuration, progress, cts.Token);
                 }
 
@@ -331,6 +346,8 @@ public partial class ShareDialog : Window
                 AppLog.Info($"Share: {actualBytes / 1024.0 / 1024.0:0.##} MB overshot the {targetBytes / 1024.0 / 1024.0:0.##} MB cap - re-encoding at {bitrateScale:P0} of the original bitrate.");
                 ShareProgressBar.Value = 0;
                 ShareProgressPercentText.Text = "0%";
+                ShareProgressEtaText.IsVisible = false;
+                encodeClock.Restart();
                 ShareStatusText.Text = "Tightening to fit the size limit...";
             }
 
@@ -388,24 +405,31 @@ public partial class ShareDialog : Window
         if (Math.Abs(current.X - start.X) < 4 && Math.Abs(current.Y - start.Y) < 4) return;
         _dragPressPoint = null;
 
-        // Avalonia 11.3 added DataTransfer/DoDragDropAsync as the
-        // replacement for DataObject/DoDragDrop, but its write-side API
-        // (constructing a file-backed IDataTransferItem) isn't documented
-        // anywhere reachable, while this older overload is still shipped,
-        // still functional, and is what every Avalonia drag-out sample still
-        // shows - suppressed rather than swapped to a barely-verifiable
-        // newer path for the same result.
-        // DataFormats.Files (not FileNames) expects IEnumerable<IStorageItem>,
-        // not raw paths - passing strings there compiles fine (Set takes
-        // object) but the native drag backend gets no usable file data out
-        // of it, so every drop target shows a permanent no-drop cursor.
-        // FileNames is the one that actually wants plain path strings.
-#pragma warning disable CS0618
-        var data = new DataObject();
-        data.Set(DataFormats.FileNames, new[] { tempPath });
         StartDragCursorWatch();
         try
         {
+            // Preferred: the shell's own data object for the file, which
+            // carries the translucent thumbnail that follows the cursor the
+            // way dragging out of Explorer does. It blocks for the whole
+            // gesture, same as Avalonia's version, so the bracketing below
+            // still lines up.
+            if (ShellFileDrag.TryDragFile(tempPath)) return;
+
+            // Avalonia 11.3 added DataTransfer/DoDragDropAsync as the
+            // replacement for DataObject/DoDragDrop, but its write-side API
+            // (constructing a file-backed IDataTransferItem) isn't documented
+            // anywhere reachable, while this older overload is still shipped,
+            // still functional, and is what every Avalonia drag-out sample still
+            // shows - suppressed rather than swapped to a barely-verifiable
+            // newer path for the same result.
+            // DataFormats.Files (not FileNames) expects IEnumerable<IStorageItem>,
+            // not raw paths - passing strings there compiles fine (Set takes
+            // object) but the native drag backend gets no usable file data out
+            // of it, so every drop target shows a permanent no-drop cursor.
+            // FileNames is the one that actually wants plain path strings.
+#pragma warning disable CS0618
+            var data = new DataObject();
+            data.Set(DataFormats.FileNames, new[] { tempPath });
             await DragDrop.DoDragDrop(e, data, DragDropEffects.Copy);
         }
         catch (Exception error)
