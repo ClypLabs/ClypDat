@@ -4370,17 +4370,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             args.AddRange(new[]
             {
                 "-c:v", useHevc ? "hevc_nvenc" : "h264_nvenc",
-                // p7 is NVENC's slowest/highest-quality preset. A Share
-                // encode runs once on a clip that is usually under a minute,
-                // so there is no reason to leave quality on the table for
-                // speed nobody is waiting on.
-                "-preset", "p7",
+                // p6 rather than p7, and a quarter-resolution rather than
+                // full-resolution first pass. Both of the heavier settings
+                // roughly double the encoder's work for low single-digit
+                // percentage gains, and this runs on the same NVENC block the
+                // replay buffer uses to record gameplay - pinning the encoder
+                // at 100% to shave a fraction off a file size is a bad trade
+                // when it can cost the user frames in the game they are
+                // actually playing.
+                "-preset", "p6",
                 "-tune", "hq",
                 "-rc", "vbr",
                 // NVENC's own two-pass: better bit allocation without paying
                 // for a second ffmpeg run, so the size target is hit more
                 // accurately AND the bits land where they matter.
-                "-multipass", "fullres",
+                "-multipass", "qres",
                 "-spatial-aq", "1",
                 "-rc-lookahead", "32",
                 "-bf", "3"

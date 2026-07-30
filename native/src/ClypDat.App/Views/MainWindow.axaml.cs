@@ -7261,7 +7261,8 @@ public sealed partial class MainWindow : Window
         IReadOnlyList<string> arguments,
         TimeSpan totalDuration,
         IProgress<double>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool background = false)
     {
         var startInfo = new ProcessStartInfo(fileName)
         {
@@ -7278,6 +7279,16 @@ public sealed partial class MainWindow : Window
 
         using var process = Process.Start(startInfo);
         if (process is null) return new ProcessResult(-1, string.Empty, "Failed to start process.");
+
+        // Share encodes run while the user may well be mid-game with the
+        // replay buffer recording, so they yield rather than compete. Export
+        // and Save Trim are deliberate foreground actions the user is sitting
+        // and waiting on, so they keep normal priority.
+        if (background)
+        {
+            try { process.PriorityClass = ProcessPriorityClass.BelowNormal; }
+            catch { /* already exited, or the OS refused - not worth failing the encode over */ }
+        }
 
         var errorTask = process.StandardError.ReadToEndAsync();
         var outputBuilder = new System.Text.StringBuilder();

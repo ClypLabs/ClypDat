@@ -27,17 +27,13 @@ public partial class ShareDialog : Window
         PositionOverOwner(owner);
         Closed += (_, _) => CleanUp();
 
-        // First pill pre-selected and its encode kicked off immediately, so
-        // the dialog opens already showing progress/a drop zone instead of a
-        // blank "pick a size" placeholder - matches picking a size actually
-        // mattering, not gating the whole dialog on one extra click.
-        Opened += (_, _) =>
-        {
-            SweepStaleShareTempFiles();
-            ShareSize10.IsChecked = true;
-            _lastTargetBytes = MegabytesToTargetBytes(10);
-            _ = StartShareEncodeAsync(_lastTargetBytes);
-        };
+        // Deliberately does NOT start encoding on open. Encoding is expensive
+        // GPU work, and this app is usually running with the replay buffer
+        // live while a game is in the foreground - kicking off a maximum-
+        // effort NVENC job just because a dialog appeared spikes the GPU for
+        // something the user has not asked for yet, and competes with the
+        // capture encoder that is protecting their gameplay.
+        Opened += (_, _) => SweepStaleShareTempFiles();
     }
 
     // A hard kill (crash, task manager) never runs the close-time cleanup, so
@@ -321,7 +317,7 @@ public partial class ShareDialog : Window
             // overshoots by a few percent, not by multiples.
             for (var attempt = 0; ; attempt++)
             {
-                result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, useHardware, useHevc, bitrateScale, useAdvancedNvenc), exportDuration, progress, cts.Token);
+                result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, useHardware, useHevc, bitrateScale, useAdvancedNvenc), exportDuration, progress, cts.Token, background: true);
 
                 // Pre-Turing cards reject temporal-aq/b_ref_mode outright, so
                 // drop just those before writing the GPU off entirely - the
@@ -332,7 +328,7 @@ public partial class ShareDialog : Window
                     AppLog.Info($"Share: NVENC rejected the advanced quality options, retrying without them. ffmpeg said: {result.Error}");
                     useAdvancedNvenc = false;
                     encodeClock.Restart();
-                    result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, useHardware, useHevc, bitrateScale, useAdvancedNvenc), exportDuration, progress, cts.Token);
+                    result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, useHardware, useHevc, bitrateScale, useAdvancedNvenc), exportDuration, progress, cts.Token, background: true);
                 }
 
                 if (result.ExitCode != 0 && useHardware && !cts.IsCancellationRequested)
@@ -344,7 +340,7 @@ public partial class ShareDialog : Window
                     ShareProgressEtaText.IsVisible = false;
                     useHardware = false;
                     encodeClock.Restart();
-                    result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, useHardware, useHevc, bitrateScale, useAdvancedNvenc), exportDuration, progress, cts.Token);
+                    result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, useHardware, useHevc, bitrateScale, useAdvancedNvenc), exportDuration, progress, cts.Token, background: true);
                 }
 
                 if (cts.IsCancellationRequested) return; // Superseded by a later pill click - that call owns cleanup/UI now.
