@@ -826,7 +826,7 @@
                           <MenuItem Header="{Binding RenameActionLabel}" Click="ClipContextRename_OnClick" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
                           <MenuItem Classes="changeGameMenuItem" IsVisible="{Binding CanChangeGame}" PointerEntered="ClipContextSetGame_OnPointerEntered" StaysOpenOnClick="True">
                             <MenuItem.Header>
-                              <Grid ColumnDefinitions="*,Auto" Width="150">
+                              <Grid ColumnDefinitions="*,Auto" Width="150" Margin="16,0,0,0">
                                 <TextBlock Grid.Column="0" Text="{Binding SetGameActionLabel}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                                 <PathIcon Grid.Column="1" Data="M8.59,16.59L10,18l6-6l-6-6L8.59,7.41L13.17,12L8.59,16.59z" Width="11" Height="11" Margin="8,0,0,0" Foreground="#8C98A7" VerticalAlignment="Center" />
                               </Grid>
