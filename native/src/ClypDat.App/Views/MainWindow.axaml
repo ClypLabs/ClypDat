@@ -1611,7 +1611,7 @@
                   <ItemsControl ItemsSource="{Binding GameCaptureRows}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate>
-                        <Border BorderThickness="0,0,0,1" BorderBrush="#1B242D" Background="Transparent" Padding="12,8" VerticalAlignment="Top" IsVisible="{Binding IsVisible}">
+                        <Border BorderThickness="0,0,0,1" BorderBrush="#1B242D" Background="Transparent" Padding="12,6,12,10" VerticalAlignment="Top" IsVisible="{Binding IsVisible}">
                           <StackPanel Spacing="4">
                             <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
                               <StackPanel Spacing="1" VerticalAlignment="Center">
@@ -1658,7 +1658,7 @@
                         <ItemsControl ItemsSource="{Binding IgnoredGameExecutableRows}">
                           <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                              <Border BorderThickness="0,0,0,1" BorderBrush="#1B242D" Background="Transparent" Padding="12,8" VerticalAlignment="Top">
+                              <Border BorderThickness="0,0,0,1" BorderBrush="#1B242D" Background="Transparent" Padding="12,6,12,10" VerticalAlignment="Top">
                                 <Grid ColumnDefinitions="*,Auto">
                                   <StackPanel Spacing="1" VerticalAlignment="Center">
                                     <TextBlock Text="{Binding DisplayName}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" />
@@ -1979,7 +1979,7 @@
                   <ItemsControl ItemsSource="{Binding ExcludedProcesses}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate>
-                        <Border BorderThickness="0,0,0,1" BorderBrush="#1B242D" Background="Transparent" Padding="12,8" VerticalAlignment="Top">
+                        <Border BorderThickness="0,0,0,1" BorderBrush="#1B242D" Background="Transparent" Padding="12,6,12,10" VerticalAlignment="Top">
                           <Grid ColumnDefinitions="*,Auto">
                             <TextBlock Text="{Binding}" Foreground="#D8E4F2" VerticalAlignment="Center" />
                             <Button Grid.Column="1" Content="Remove" VerticalAlignment="Center" Click="RemoveExcludedProcessButton_OnClick" />
