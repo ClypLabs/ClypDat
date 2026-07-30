@@ -4306,7 +4306,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // bitrateScale exists for the "must not exceed the cap" retry: if an
     // encode lands over target, the caller re-runs with a proportionally
     // smaller budget rather than hoping a fixed safety margin was enough.
-    public IReadOnlyList<string> BuildShareArguments(string outputPath, long targetBytes, bool useHardwareEncoder = true, bool useHevc = false, double bitrateScale = 1.0)
+    public IReadOnlyList<string> BuildShareArguments(string outputPath, long targetBytes, bool useHardwareEncoder = true, bool useHevc = false, double bitrateScale = 1.0, bool useAdvancedNvenc = true)
     {
         var startSeconds = Math.Max(0, TrimStart.TotalSeconds);
         var end = TrimEnd > TrimStart ? TrimEnd : Duration;
@@ -4385,6 +4385,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 "-rc-lookahead", "32",
                 "-bf", "3"
             });
+
+            // Temporal AQ and B-frames-as-reference are both worth real
+            // percentage points at a fixed bitrate, but they need Turing or
+            // newer - an older card fails the encode outright rather than
+            // ignoring them. Callers retry without these before giving up on
+            // the GPU entirely, so old hardware loses the gain and nothing
+            // else.
+            if (useAdvancedNvenc)
+            {
+                args.AddRange(new[] { "-temporal-aq", "1", "-b_ref_mode", "middle" });
+            }
         }
         else
         {
