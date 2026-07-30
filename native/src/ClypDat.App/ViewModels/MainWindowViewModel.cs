@@ -807,6 +807,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsSettingsVisible));
             OnPropertyChanged(nameof(ShowLibraryActions));
             OnPropertyChanged(nameof(ShowLibraryStatus));
+            OnPropertyChanged(nameof(HasSelectedCaptureBackend));
         }
     }
 
@@ -2501,7 +2502,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public bool HasSelectedCaptureBackend => !string.IsNullOrWhiteSpace(SelectedCaptureBackend);
+    public bool HasSelectedCaptureBackend => IsEditorVisible && !string.IsNullOrWhiteSpace(SelectedCaptureBackend);
 
     public string EditorTitle
     {
