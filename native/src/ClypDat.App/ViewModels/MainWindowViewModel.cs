@@ -2489,6 +2489,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         private set => SetProperty(ref _selectedSize, value);
     }
 
+    // Not bound to any UI element - only Share's bitrate/downscale ladder
+    // reads these, so a plain get/private-set is enough (no change
+    // notification needed).
+    public int SelectedSourceWidth { get; private set; }
+    public int SelectedSourceHeight { get; private set; }
+    public double SelectedSourceFps { get; private set; }
+
     public string SelectedCaptureBackend
     {
         get => _selectedCaptureBackend;
@@ -4291,6 +4298,121 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return args;
     }
 
+    // Share always encodes H.264/AAC/mp4 regardless of SelectedExportCodec -
+    // Discord's inline chat preview only reliably plays H.264-in-mp4; H.265/
+    // AV1 show up as a bare download instead of a scrubbable preview.
+    public IReadOnlyList<string> BuildShareArguments(string outputPath, long targetBytes, bool useHardwareEncoder = true)
+    {
+        var startSeconds = Math.Max(0, TrimStart.TotalSeconds);
+        var end = TrimEnd > TrimStart ? TrimEnd : Duration;
+        var durationSeconds = Math.Max(0.1, (end - TrimStart).TotalSeconds);
+        var spec = ComputeShareEncodeSpec(durationSeconds, SelectedSourceWidth, SelectedSourceHeight, SelectedSourceFps, targetBytes);
+
+        var args = new List<string>
+        {
+            "-y",
+            "-progress", "pipe:1",
+            "-stats_period", "0.1",
+            "-nostats",
+            "-ss", startSeconds.ToString("0.###"),
+            "-t", durationSeconds.ToString("0.###"),
+            "-i", SelectedVideoPath
+        };
+
+        // Same multi-track-to-one-track audio mixdown as BuildExportArguments -
+        // Discord (like most players) only plays a file's first audio track.
+        var audioTracks = TimelineTracks.Where(track => track.Type == "audio").ToArray();
+        args.Add("-map");
+        args.Add("0:v:0?");
+        args.Add("-sn");
+
+        if (audioTracks.Length == 1)
+        {
+            args.Add("-map");
+            args.Add($"0:{audioTracks[0].StreamIndex}?");
+            args.Add("-af");
+            args.Add($"volume={VolumeMultiplier(audioTracks[0].EffectiveVolumePercent):0.###}");
+        }
+        else if (audioTracks.Length > 1)
+        {
+            var filter = new System.Text.StringBuilder();
+            var labels = new List<string>();
+            foreach (var track in audioTracks)
+            {
+                var label = $"a{track.StreamIndex}";
+                filter.Append($"[0:{track.StreamIndex}]volume={VolumeMultiplier(track.EffectiveVolumePercent):0.###}[{label}];");
+                labels.Add($"[{label}]");
+            }
+
+            filter.Append($"{string.Join(string.Empty, labels)}amix=inputs={audioTracks.Length}:normalize=0[aout]");
+            args.Add("-filter_complex");
+            args.Add(filter.ToString());
+            args.Add("-map");
+            args.Add("[aout]");
+        }
+
+        args.Add("-c:v");
+        args.Add(useHardwareEncoder ? "h264_nvenc" : "libx264");
+        if (!useHardwareEncoder) args.AddRange(new[] { "-preset", "veryfast" });
+        var maxRateKbps = (int)(spec.VideoBitrateKbps * 1.1);
+        var bufSizeKbps = spec.VideoBitrateKbps * 2;
+        args.AddRange(new[] { "-b:v", $"{spec.VideoBitrateKbps}k", "-maxrate", $"{maxRateKbps}k", "-bufsize", $"{bufSizeKbps}k" });
+        if (spec.Downscaled)
+        {
+            args.Add("-vf");
+            args.Add($"scale={spec.Width}:{spec.Height}");
+            args.Add("-r");
+            args.Add(spec.Fps.ToString("0.###"));
+        }
+        args.AddRange(new[] { "-c:a", "aac", "-b:a", "128k" });
+
+        args.Add("-movflags");
+        args.Add("+faststart");
+        args.Add(outputPath);
+        return args;
+    }
+
+    public readonly record struct ShareEncodeSpec(int Width, int Height, double Fps, int VideoBitrateKbps, bool Downscaled);
+
+    // Picks the biggest resolution/fps tier (never above source) whose
+    // bitrate need clears a "won't look like mush" floor for the requested
+    // target size, stepping down the ladder until one does. If nothing
+    // clears the floor even at the bottom tier, accepts reduced quality
+    // rather than an unusably low (or negative) bitrate.
+    public ShareEncodeSpec ComputeShareEncodeSpec(double durationSeconds, int sourceWidth, int sourceHeight, double sourceFps, long targetBytes)
+    {
+        const int AudioBps = 128_000;
+        const double OverheadMargin = 0.92; // 8% headroom for VBV/muxer overshoot
+        const double BitsPerPixelFrameFloor = 0.07;
+
+        (int Width, int Height, double Fps)[] ladder =
+        {
+            (1920, 1080, 60), (1920, 1080, 30), (1280, 720, 60), (1280, 720, 30), (854, 480, 30)
+        };
+
+        var targetTotalBps = targetBytes * 8 / durationSeconds * OverheadMargin;
+        var effectiveWidth = sourceWidth > 0 ? sourceWidth : ladder[0].Width;
+        var effectiveHeight = sourceHeight > 0 ? sourceHeight : ladder[0].Height;
+        var effectiveFps = sourceFps > 0 ? sourceFps : ladder[0].Fps;
+
+        foreach (var tier in ladder)
+        {
+            if (tier.Width > effectiveWidth || tier.Height > effectiveHeight || tier.Fps > effectiveFps) continue;
+            var videoBps = targetTotalBps - AudioBps;
+            var floorBps = BitsPerPixelFrameFloor * tier.Width * tier.Height * tier.Fps;
+            if (videoBps >= floorBps)
+            {
+                var downscaled = tier.Width != effectiveWidth || tier.Height != effectiveHeight || Math.Abs(tier.Fps - effectiveFps) > 0.1;
+                return new ShareEncodeSpec(tier.Width, tier.Height, tier.Fps, Math.Max(100, (int)(videoBps / 1000)), downscaled);
+            }
+        }
+
+        var last = ladder[^1];
+        var floor = BitsPerPixelFrameFloor * last.Width * last.Height * last.Fps;
+        var clamped = Math.Max(floor * 0.6, targetTotalBps - AudioBps);
+        return new ShareEncodeSpec(last.Width, last.Height, last.Fps, Math.Max(100, (int)(clamped / 1000)), true);
+    }
+
     private static double VolumeMultiplier(double percent) => Math.Clamp(percent / 100d, 0, 1.5);
 
     // NVENC first: the CPU encoders here (libx265, and especially libaom-av1)
@@ -4348,6 +4470,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ? "Imported from Medal"
             : (string.IsNullOrWhiteSpace(media.CaptureBackend) ? string.Empty : $"Captured with: {ClipMetadataTagger.NormalizeBackendLabel(media.CaptureBackend)}");
         SelectedMetadata = $"{SelectedQuality} - {SelectedSize}";
+        // Share's bitrate/downscale math needs the source's raw dimensions -
+        // SelectedQuality above only keeps a formatted display string.
+        SelectedSourceWidth = media.Width;
+        SelectedSourceHeight = media.Height;
+        SelectedSourceFps = media.Fps;
         Duration = media.Duration;
         CurrentTime = TimeSpan.Zero;
         TrimStart = TimeSpan.Zero;
