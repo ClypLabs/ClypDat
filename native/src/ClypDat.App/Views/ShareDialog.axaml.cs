@@ -308,6 +308,7 @@ public partial class ShareDialog : Window
 
             var useHevc = ShareHevcToggle.IsChecked == true;
             var useHardware = true;
+            var useAdvancedNvenc = true;
             var bitrateScale = 1.0;
             long actualBytes = 0;
             MainWindow.ProcessResult result;
@@ -320,7 +321,20 @@ public partial class ShareDialog : Window
             // overshoots by a few percent, not by multiples.
             for (var attempt = 0; ; attempt++)
             {
-                result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, useHardware, useHevc, bitrateScale), exportDuration, progress, cts.Token);
+                result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, useHardware, useHevc, bitrateScale, useAdvancedNvenc), exportDuration, progress, cts.Token);
+
+                // Pre-Turing cards reject temporal-aq/b_ref_mode outright, so
+                // drop just those before writing the GPU off entirely - the
+                // CPU path is minutes rather than seconds and is a last
+                // resort, not the next thing to try.
+                if (result.ExitCode != 0 && useHardware && useAdvancedNvenc && !cts.IsCancellationRequested)
+                {
+                    AppLog.Info($"Share: NVENC rejected the advanced quality options, retrying without them. ffmpeg said: {result.Error}");
+                    useAdvancedNvenc = false;
+                    encodeClock.Restart();
+                    result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, useHardware, useHevc, bitrateScale, useAdvancedNvenc), exportDuration, progress, cts.Token);
+                }
+
                 if (result.ExitCode != 0 && useHardware && !cts.IsCancellationRequested)
                 {
                     AppLog.Info($"Share: NVENC encode failed, retrying with CPU encoder. ffmpeg said: {result.Error}");
@@ -330,7 +344,7 @@ public partial class ShareDialog : Window
                     ShareProgressEtaText.IsVisible = false;
                     useHardware = false;
                     encodeClock.Restart();
-                    result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, useHardware, useHevc, bitrateScale), exportDuration, progress, cts.Token);
+                    result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, useHardware, useHevc, bitrateScale, useAdvancedNvenc), exportDuration, progress, cts.Token);
                 }
 
                 if (cts.IsCancellationRequested) return; // Superseded by a later pill click - that call owns cleanup/UI now.
@@ -342,7 +356,7 @@ public partial class ShareDialog : Window
                 // Aim for 95% of the cap rather than exactly the cap, so the
                 // next attempt has somewhere to land instead of grazing it
                 // again.
-                bitrateScale *= targetBytes * 0.95 / actualBytes;
+                bitrateScale *= targetBytes * 0.95 / (double)actualBytes;
                 AppLog.Info($"Share: {actualBytes / 1024.0 / 1024.0:0.##} MB overshot the {targetBytes / 1024.0 / 1024.0:0.##} MB cap - re-encoding at {bitrateScale:P0} of the original bitrate.");
                 ShareProgressBar.Value = 0;
                 ShareProgressPercentText.Text = "0%";
