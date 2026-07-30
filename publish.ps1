@@ -9,8 +9,6 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = $PSScriptRoot
 $nativeRoot = Join-Path $repoRoot 'native'
-$bridgeProject = Join-Path $nativeRoot 'src\ClypDat.ObsBridge\ClypDat.ObsBridge.vcxproj'
-$bridgeDll = Join-Path $nativeRoot 'src\ClypDat.ObsBridge\bin\x64\Release\ClypDat.ObsBridge.dll'
 $appProject = Join-Path $nativeRoot 'src\ClypDat.App\ClypDat.App.csproj'
 $installDirectory = Join-Path $env:LOCALAPPDATA 'Programs\ClypDat'
 
@@ -62,49 +60,6 @@ function Restore-GitPosition {
     }
 }
 
-function Find-MSBuild {
-    $onPath = Get-Command msbuild.exe -ErrorAction SilentlyContinue
-    if ($onPath) {
-        return $onPath.Source
-    }
-
-    $vswherePaths = @(
-        (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'),
-        (Join-Path $env:ProgramFiles 'Microsoft Visual Studio\Installer\vswhere.exe')
-    )
-
-    foreach ($vswhere in $vswherePaths) {
-        if (-not (Test-Path -LiteralPath $vswhere)) {
-            continue
-        }
-
-        $found = & $vswhere -latest -products * -find 'MSBuild\**\Bin\MSBuild.exe' |
-            Select-Object -First 1
-        if ($LASTEXITCODE -eq 0 -and $found -and (Test-Path -LiteralPath $found)) {
-            return $found
-        }
-    }
-
-    $visualStudioRoots = @(
-        (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio'),
-        (Join-Path $env:ProgramFiles 'Microsoft Visual Studio')
-    )
-    foreach ($visualStudioRoot in $visualStudioRoots) {
-        if (-not (Test-Path -LiteralPath $visualStudioRoot)) {
-            continue
-        }
-
-        $found = Get-ChildItem -LiteralPath $visualStudioRoot -Filter MSBuild.exe -File -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match '\\MSBuild\\Current\\Bin\\MSBuild\.exe$' } |
-            Select-Object -First 1
-        if ($found) {
-            return $found.FullName
-        }
-    }
-
-    return $null
-}
-
 Push-Location $repoRoot
 $originalGitPosition = $null
 $restoreGitPosition = $false
@@ -148,26 +103,6 @@ try {
         }
     }
 
-    $msbuild = Find-MSBuild
-    if ($msbuild) {
-        Write-Host "Building OBS bridge with $msbuild"
-        $solutionDirectory = "$($nativeRoot.Replace('\', '/'))/"
-        & $msbuild $bridgeProject "/p:SolutionDir=$solutionDirectory" /p:Configuration=Release /p:Platform=x64 /nologo /v:minimal
-        if ($LASTEXITCODE -ne 0) {
-            throw "MSBuild failed with exit code $LASTEXITCODE."
-        }
-    }
-    elseif (Test-Path -LiteralPath $bridgeDll) {
-        Write-Warning 'MSBuild is unavailable; using the existing local ClypDat.ObsBridge.dll.'
-    }
-    else {
-        throw 'MSBuild is unavailable and no local ClypDat.ObsBridge.dll exists. Install Visual Studio Build Tools with the C++ x64 workload, then rerun this script.'
-    }
-
-    if (-not (Test-Path -LiteralPath $bridgeDll)) {
-        throw 'ClypDat.ObsBridge.dll was not found after the bridge build.'
-    }
-
     New-Item -ItemType Directory -Path $installDirectory -Force | Out-Null
     $installPathPrefix = "$([IO.Path]::GetFullPath($installDirectory).TrimEnd('\'))\"
     $processesToStop = @(Get-CimInstance Win32_Process | Where-Object {
@@ -181,15 +116,6 @@ try {
     & dotnet publish $appProject -c Release -r win-x64 --self-contained true -p:Platform=x64 -o $installDirectory
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish failed with exit code $LASTEXITCODE."
-    }
-
-    $stagedBridgeDirectory = Join-Path $installDirectory 'obs'
-    New-Item -ItemType Directory -Path $stagedBridgeDirectory -Force | Out-Null
-    Copy-Item -LiteralPath $bridgeDll -Destination (Join-Path $stagedBridgeDirectory 'ClypDat.ObsBridge.dll') -Force
-
-    $obsRuntime = Join-Path $nativeRoot 'vendor\obs-runtime'
-    if (-not (Test-Path -LiteralPath $obsRuntime)) {
-        Write-Warning 'OBS runtime is not staged locally; the published app will not have OBS capture support.'
     }
 
     $installedExe = Join-Path $installDirectory 'ClypDat.exe'
