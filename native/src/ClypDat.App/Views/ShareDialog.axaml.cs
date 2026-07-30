@@ -328,9 +328,11 @@ public partial class ShareDialog : Window
     // "is the cursor still over ClypDat" can only be answered by polling the
     // cursor against the window rect.
     private DispatcherTimer? _dragCursorWatch;
+    private bool _dragLeftApp;
 
     private void StartDragCursorWatch()
     {
+        _dragLeftApp = false;
         ShareDragActiveOverlay.IsVisible = true;
         _dragCursorWatch ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(60) };
         _dragCursorWatch.Tick -= DragCursorWatch_OnTick;
@@ -346,12 +348,19 @@ public partial class ShareDialog : Window
 
     private void DragCursorWatch_OnTick(object? sender, EventArgs e)
     {
+        if (_dragLeftApp) return;
         var handle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
         if (handle == IntPtr.Zero || !GetCursorPos(out var cursor) || !GetWindowRect(handle, out var rect)) return;
-        var overApp = cursor.X >= rect.Left && cursor.X < rect.Right && cursor.Y >= rect.Top && cursor.Y < rect.Bottom;
-        // Only meaningful while a drag is actually in flight - the overlay is
-        // shown on drag start and torn down in the finally above, so this
-        // just toggles it as the cursor crosses the app's edge.
-        ShareDragActiveOverlay.IsVisible = overApp;
+        if (cursor.X >= rect.Left && cursor.X < rect.Right && cursor.Y >= rect.Top && cursor.Y < rect.Bottom) return;
+
+        // One-way: the overlay's whole job is getting ClypDat out of the way
+        // while the user aims at another window, and it has done that as soon
+        // as the cursor is off the app. Coming back over ClypDat mid-drag
+        // (crossing it on the way to something else, or dropping the clip
+        // back here) must not slam the panel up again, so the watch latches
+        // off and stays off for the rest of this gesture.
+        _dragLeftApp = true;
+        ShareDragActiveOverlay.IsVisible = false;
+        StopDragCursorWatch();
     }
 }
