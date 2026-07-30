@@ -2683,6 +2683,7 @@ public sealed partial class MainWindow : Window
             WindowStartupLocation = WindowStartupLocation.Manual,
             Content = _overlayBadge
         };
+        _activeClipOverlay.Opened += (_, _) => WindowTransparencyFallback.ApplyIfNeeded(_activeClipOverlay, _overlayBadge.Background, b => _overlayBadge.Background = b);
 
         // Movement only, deliberately no opacity transition: the badge slides
         // in and out from off screen and never fades. A cross-fade on top of
@@ -6031,6 +6032,19 @@ public sealed partial class MainWindow : Window
     {
         if (_recordingPausedOverlay is not null) return _recordingPausedOverlay;
 
+        var scrim = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(0xB3, 0, 0, 0)),
+            Child = new TextBlock
+            {
+                Text = "Playback Paused",
+                Foreground = Brushes.White,
+                FontSize = 28,
+                FontWeight = FontWeight.Bold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            }
+        };
         var overlay = new Window
         {
             SystemDecorations = SystemDecorations.None,
@@ -6040,20 +6054,9 @@ public sealed partial class MainWindow : Window
             Topmost = false,
             Background = Brushes.Transparent,
             TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
-            Content = new Border
-            {
-                Background = new SolidColorBrush(Color.FromArgb(0xB3, 0, 0, 0)),
-                Child = new TextBlock
-                {
-                    Text = "Playback Paused",
-                    Foreground = Brushes.White,
-                    FontSize = 28,
-                    FontWeight = FontWeight.Bold,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center,
-                }
-            }
+            Content = scrim
         };
+        overlay.Opened += (_, _) => WindowTransparencyFallback.ApplyIfNeeded(overlay, scrim.Background, b => scrim.Background = b);
         overlay.AddHandler(PointerPressedEvent, RecordingPausedOverlay_OnPointerPressed, RoutingStrategies.Tunnel);
         _recordingPausedOverlay = overlay;
         return overlay;
@@ -6839,6 +6842,7 @@ public sealed partial class MainWindow : Window
             DataContext = DataContext,
             Content = backdrop,
         };
+        window.Opened += (_, _) => WindowTransparencyFallback.ApplyIfNeeded(window, backdrop.Background, b => backdrop.Background = b);
         _editorHoverControlsWindow = window;
         return window;
     }
