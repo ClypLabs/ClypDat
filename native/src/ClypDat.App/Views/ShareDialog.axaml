@@ -22,7 +22,6 @@
   <Grid Background="#DD000000" PointerPressed="Scrim_OnPointerPressed">
     <Border x:Name="ShareDialogCard" Width="480" CornerRadius="12" Background="#111920" BorderBrush="#232F3A" BorderThickness="1"
             ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center">
-      <Grid>
       <DockPanel LastChildFill="True">
         <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto" Height="56" Background="#0C1319">
           <!-- Spans all 3 columns and centers over the FULL header width,
@@ -79,23 +78,26 @@
           </Grid>
         </StackPanel>
       </DockPanel>
+    </Border>
 
-      <!-- Shown for the duration of the OS drag gesture (DoDragDrop blocks
-           until the drop/cancel, so this covers exactly "while dragging") -
-           the picker underneath is still there, just hidden, so a cancelled
-           drag lands back on it unchanged. -->
-      <Border x:Name="ShareDragActiveOverlay" Background="#111920" CornerRadius="12" IsVisible="False">
-        <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="32">
-          <Border Width="72" Height="56" CornerRadius="10" BorderBrush="#4C6FFF" BorderThickness="2"
-                  HorizontalAlignment="Center" Margin="0,0,0,8" />
-          <TextBlock Text="Drag &amp; drop magic, activated!" FontWeight="Bold" FontSize="16"
-                     Foreground="#EDF4FB" HorizontalAlignment="Center" />
-          <TextBlock Text="Drop the clip onto a chat channel, DM, or upload box"
-                     FontSize="12" Foreground="#8EA1B6" HorizontalAlignment="Center"
-                     TextWrapping="Wrap" TextAlignment="Center" />
-        </StackPanel>
-      </Border>
-      </Grid>
+    <!-- Sibling of the card, not a child of it, so it covers the ENTIRE app
+         window while a drag is in flight rather than just the popup. Shown
+         for exactly the duration of the OS drag gesture (DoDragDrop blocks
+         until drop/cancel) and additionally hidden whenever the cursor
+         leaves the app - the point is to get ClypDat out of the way while
+         the user aims at another window, so it must not keep covering the
+         app once the pointer is over that other window. The card underneath
+         is untouched, so a cancelled drag lands back on it unchanged. -->
+    <Border x:Name="ShareDragActiveOverlay" Background="#0B1016" IsVisible="False" IsHitTestVisible="False">
+      <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="32">
+        <Border Width="72" Height="56" CornerRadius="10" BorderBrush="#4C6FFF" BorderThickness="2"
+                HorizontalAlignment="Center" Margin="0,0,0,8" />
+        <TextBlock Text="Drag &amp; drop magic, activated!" FontWeight="Bold" FontSize="18"
+                   Foreground="#EDF4FB" HorizontalAlignment="Center" />
+        <TextBlock Text="Drop the clip onto a chat channel, DM, or upload box"
+                   FontSize="13" Foreground="#8EA1B6" HorizontalAlignment="Center"
+                   TextWrapping="Wrap" TextAlignment="Center" />
+      </StackPanel>
     </Border>
   </Grid>
 </Window>
