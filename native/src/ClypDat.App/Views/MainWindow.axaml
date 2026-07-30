@@ -821,13 +821,14 @@
                       <Border.ContextMenu>
                         <ContextMenu>
                           <MenuItem Header="Export" Click="ClipContextExport_OnClick" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
+                          <MenuItem Header="Share" Click="ClipContextShare_OnClick" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
                           <MenuItem Header="Open" Click="ClipContextOpen_OnClick" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
                           <MenuItem Header="{Binding RenameActionLabel}" Click="ClipContextRename_OnClick" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
                           <MenuItem Classes="changeGameMenuItem" IsVisible="{Binding CanChangeGame}" PointerEntered="ClipContextSetGame_OnPointerEntered" StaysOpenOnClick="True">
                             <MenuItem.Header>
-                              <Grid ColumnDefinitions="*,Auto" Width="140">
+                              <Grid ColumnDefinitions="*,Auto" Width="112">
                                 <TextBlock Grid.Column="0" Text="{Binding SetGameActionLabel}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                                <PathIcon Grid.Column="1" Data="M8.59,16.59L10,18l6-6l-6-6L8.59,7.41L13.17,12L8.59,16.59z" Width="11" Height="11" Margin="10,0,0,0" Foreground="#8C98A7" VerticalAlignment="Center" />
+                                <PathIcon Grid.Column="1" Data="M8.59,16.59L10,18l6-6l-6-6L8.59,7.41L13.17,12L8.59,16.59z" Width="11" Height="11" Margin="6,0,0,0" Foreground="#8C98A7" VerticalAlignment="Center" />
                               </Grid>
                             </MenuItem.Header>
                           </MenuItem>

@@ -3125,6 +3125,13 @@ public sealed partial class MainWindow : Window
         await OpenClipCardAsync(clip);
     }
 
+    private async void ClipContextShare_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { DataContext: ClipCardViewModel clip }) return;
+        if (!await OpenClipCardAsync(clip)) return;
+        await ShareCurrentClipAsync();
+    }
+
     private async void ClipContextRename_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
@@ -5123,6 +5130,11 @@ public sealed partial class MainWindow : Window
     private bool _shareDialogOpen;
 
     private async void ShareButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        await ShareCurrentClipAsync();
+    }
+
+    private async Task ShareCurrentClipAsync()
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
         _playback?.Pause();
