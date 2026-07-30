@@ -4351,20 +4351,60 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             args.Add("[aout]");
         }
 
-        args.Add("-c:v");
-        args.Add(useHardwareEncoder ? "h264_nvenc" : "libx264");
-        if (!useHardwareEncoder) args.AddRange(new[] { "-preset", "veryfast" });
-        var maxRateKbps = (int)(spec.VideoBitrateKbps * 1.1);
-        var bufSizeKbps = spec.VideoBitrateKbps * 2;
-        args.AddRange(new[] { "-b:v", $"{spec.VideoBitrateKbps}k", "-maxrate", $"{maxRateKbps}k", "-bufsize", $"{bufSizeKbps}k" });
+        // Quality-first encoder settings. The old ones (veryfast, no B-frames,
+        // no AQ, single-pass) threw away a large chunk of the bitrate budget
+        // for speed nobody asked for - a Share encode runs once, on a clip
+        // that is usually seconds long, so it can afford to work harder. This
+        // is worth roughly a full ladder tier on its own.
+        if (useHardwareEncoder)
+        {
+            args.AddRange(new[]
+            {
+                "-c:v", "h264_nvenc",
+                "-preset", "p6",
+                "-tune", "hq",
+                "-rc", "vbr",
+                // NVENC's own two-pass: better bit allocation without paying
+                // for a second ffmpeg run, so the size target is hit more
+                // accurately AND the bits land where they matter.
+                "-multipass", "fullres",
+                "-spatial-aq", "1",
+                "-rc-lookahead", "32",
+                "-bf", "3"
+            });
+        }
+        else
+        {
+            args.AddRange(new[] { "-c:v", "libx264", "-preset", "slow", "-bf", "3" });
+        }
+
+        args.AddRange(new[] { "-profile:v", "high", "-pix_fmt", "yuv420p" });
+
+        if (spec.IsOriginalQuality)
+        {
+            // No size cap asked for - quality target instead of a bitrate
+            // ceiling, same shape as a normal Export.
+            args.AddRange(useHardwareEncoder
+                ? new[] { "-cq", "20", "-b:v", "0" }
+                : new[] { "-crf", "20" });
+        }
+        else
+        {
+            var maxRateKbps = (int)(spec.VideoBitrateKbps * 1.45);
+            var bufSizeKbps = spec.VideoBitrateKbps * 2;
+            args.AddRange(new[] { "-b:v", $"{spec.VideoBitrateKbps}k", "-maxrate", $"{maxRateKbps}k", "-bufsize", $"{bufSizeKbps}k" });
+        }
+
         if (spec.Downscaled)
         {
             args.Add("-vf");
-            args.Add($"scale={spec.Width}:{spec.Height}");
+            // lanczos rather than ffmpeg's default bilinear - a downscale is
+            // exactly where a good resampler shows, and it costs nothing here.
+            args.Add($"scale={spec.Width}:{spec.Height}:flags=lanczos");
             args.Add("-r");
             args.Add(spec.Fps.ToString("0.###"));
         }
-        args.AddRange(new[] { "-c:a", "aac", "-b:a", "128k" });
+        args.AddRange(new[] { "-c:a", "aac", "-b:a", $"{ShareAudioBps / 1000}k" });
 
         args.Add("-movflags");
         args.Add("+faststart");
@@ -4372,45 +4412,78 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return args;
     }
 
-    public readonly record struct ShareEncodeSpec(int Width, int Height, double Fps, int VideoBitrateKbps, bool Downscaled);
+    public readonly record struct ShareEncodeSpec(int Width, int Height, double Fps, int VideoBitrateKbps, bool Downscaled, bool IsOriginalQuality);
 
-    // Picks the biggest resolution/fps tier (never above source) whose
-    // bitrate need clears a "won't look like mush" floor for the requested
-    // target size, stepping down the ladder until one does. If nothing
-    // clears the floor even at the bottom tier, accepts reduced quality
-    // rather than an unusably low (or negative) bitrate.
+    // 96k stereo AAC is transparent enough for game audio and buys back a
+    // noticeable slice of a 10MB budget: on a one-minute clip 128k was eating
+    // ~9% of everything available.
+    private const int ShareAudioBps = 96_000;
+
+    // Bits per pixel per frame below which H.264 stops holding up. 0.036 is
+    // about where real encodes land at the low end of watchable - Twitch's
+    // own 1080p60 at 6Mbps is 0.048, 720p30 at 1.2Mbps is 0.043 - and the
+    // encoder settings above (B-frames, AQ, lookahead, slow/p6 presets) are
+    // what make the bottom of that range hold together. The previous 0.07
+    // was roughly "visually lossless" rather than "acceptable", which is why
+    // a one-minute 1080p60 clip was being shoved all the way to 480p30 to
+    // reach 10MB when 720p30 was comfortably achievable.
+    private const double ShareBitsPerPixelFrameFloor = 0.036;
+
+    // Ordered by pixel rate (width x height x fps) descending, so the first
+    // tier that fits is always the most detailed one the budget allows and
+    // quality steps down gently instead of falling off a cliff. Whether
+    // dropping fps or resolution first is "better" is a matter of taste, so
+    // this deliberately just spends the pixel budget rather than taking a
+    // side: 1080p30 (62M px/s) outranks 720p60 (55M px/s), and both sit
+    // between 900p60 and 900p30.
+    private static readonly (int Width, int Height, double Fps)[] ShareLadder =
+    {
+        (1920, 1080, 60),
+        (1600, 900, 60),
+        (1920, 1080, 30),
+        (1280, 720, 60),
+        (1600, 900, 30),
+        (1280, 720, 30),
+        (960, 540, 30),
+        (854, 480, 30)
+    };
+
+    // Picks the highest tier (never above source) whose bitrate need clears
+    // the quality floor for the requested target size. If nothing clears it
+    // even at the bottom tier, accepts reduced quality rather than an
+    // unusably low (or negative) bitrate. targetBytes <= 0 means "no cap".
     public ShareEncodeSpec ComputeShareEncodeSpec(double durationSeconds, int sourceWidth, int sourceHeight, double sourceFps, long targetBytes)
     {
-        const int AudioBps = 128_000;
-        const double OverheadMargin = 0.92; // 8% headroom for VBV/muxer overshoot
-        const double BitsPerPixelFrameFloor = 0.07;
+        // Multipass/VBV hits the target far more accurately than the old
+        // single-pass VBR did, so less of the budget has to be held back
+        // against overshoot - that headroom goes straight into picture.
+        const double OverheadMargin = 0.94;
 
-        (int Width, int Height, double Fps)[] ladder =
+        var effectiveWidth = sourceWidth > 0 ? sourceWidth : ShareLadder[0].Width;
+        var effectiveHeight = sourceHeight > 0 ? sourceHeight : ShareLadder[0].Height;
+        var effectiveFps = sourceFps > 0 ? sourceFps : ShareLadder[0].Fps;
+
+        if (targetBytes <= 0)
         {
-            (1920, 1080, 60), (1920, 1080, 30), (1280, 720, 60), (1280, 720, 30), (854, 480, 30)
-        };
-
-        var targetTotalBps = targetBytes * 8 / durationSeconds * OverheadMargin;
-        var effectiveWidth = sourceWidth > 0 ? sourceWidth : ladder[0].Width;
-        var effectiveHeight = sourceHeight > 0 ? sourceHeight : ladder[0].Height;
-        var effectiveFps = sourceFps > 0 ? sourceFps : ladder[0].Fps;
-
-        foreach (var tier in ladder)
-        {
-            if (tier.Width > effectiveWidth || tier.Height > effectiveHeight || tier.Fps > effectiveFps) continue;
-            var videoBps = targetTotalBps - AudioBps;
-            var floorBps = BitsPerPixelFrameFloor * tier.Width * tier.Height * tier.Fps;
-            if (videoBps >= floorBps)
-            {
-                var downscaled = tier.Width != effectiveWidth || tier.Height != effectiveHeight || Math.Abs(tier.Fps - effectiveFps) > 0.1;
-                return new ShareEncodeSpec(tier.Width, tier.Height, tier.Fps, Math.Max(100, (int)(videoBps / 1000)), downscaled);
-            }
+            return new ShareEncodeSpec(effectiveWidth, effectiveHeight, effectiveFps, 0, Downscaled: false, IsOriginalQuality: true);
         }
 
-        var last = ladder[^1];
-        var floor = BitsPerPixelFrameFloor * last.Width * last.Height * last.Fps;
-        var clamped = Math.Max(floor * 0.6, targetTotalBps - AudioBps);
-        return new ShareEncodeSpec(last.Width, last.Height, last.Fps, Math.Max(100, (int)(clamped / 1000)), true);
+        var videoBps = targetBytes * 8 / durationSeconds * OverheadMargin - ShareAudioBps;
+
+        foreach (var tier in ShareLadder)
+        {
+            // 0.5 of slack on fps so a 59.94 source still counts as 60.
+            if (tier.Width > effectiveWidth || tier.Height > effectiveHeight || tier.Fps > effectiveFps + 0.5) continue;
+            if (videoBps < ShareBitsPerPixelFrameFloor * tier.Width * tier.Height * tier.Fps) continue;
+
+            var downscaled = tier.Width != effectiveWidth || tier.Height != effectiveHeight || Math.Abs(tier.Fps - effectiveFps) > 0.5;
+            return new ShareEncodeSpec(tier.Width, tier.Height, tier.Fps, Math.Max(100, (int)(videoBps / 1000)), downscaled, IsOriginalQuality: false);
+        }
+
+        var last = ShareLadder[^1];
+        var floor = ShareBitsPerPixelFrameFloor * last.Width * last.Height * last.Fps;
+        var clamped = Math.Max(floor * 0.6, videoBps);
+        return new ShareEncodeSpec(last.Width, last.Height, last.Fps, Math.Max(100, (int)(clamped / 1000)), Downscaled: true, IsOriginalQuality: false);
     }
 
     private static double VolumeMultiplier(double percent) => Math.Clamp(percent / 100d, 0, 1.5);

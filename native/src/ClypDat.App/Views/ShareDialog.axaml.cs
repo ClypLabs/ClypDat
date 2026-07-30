@@ -205,7 +205,7 @@ public partial class ShareDialog : Window
         ShareProgressBar.IsVisible = true;
         ShareProgressBar.IsIndeterminate = false;
         ShareProgressBar.Value = 0;
-        ShareStatusText.Text = "Encoding for Discord...";
+        ShareStatusText.Text = targetBytes > 0 ? "Encoding for Discord..." : "Encoding at original quality...";
 
         try
         {
@@ -243,12 +243,14 @@ public partial class ShareDialog : Window
             var targetMb = targetBytes / 1024.0 / 1024.0;
 
             ShareProgressBar.IsVisible = false;
-            ShareStatusText.Text = spec.Downscaled
-                ? $"Downscaled to {spec.Height}p{spec.Fps:0} to fit the target size."
-                : "Drag this clip into any Discord chat to upload it.";
-            ShareResultSizeText.Text = actualMb > targetMb * 1.02
-                ? $"{actualMb:0.#} MB (slightly over the {targetMb:0.#} MB target)"
-                : $"{actualMb:0.#} MB";
+            ShareStatusText.Text = "Drag this clip into any Discord chat to upload it";
+            // Resolution/fps is always shown, not just when downscaled - what
+            // you are about to send is worth knowing either way, and it makes
+            // the trade-off a bigger size buys immediately obvious.
+            var quality = $"{spec.Height}p{spec.Fps:0}";
+            ShareResultSizeText.Text = targetBytes > 0 && actualMb > targetMb * 1.02
+                ? $"{actualMb:0.#} MB · {quality} (just over the {targetMb:0.#} MB target)"
+                : $"{actualMb:0.#} MB · {quality}";
             ShareShowInFolderButton.IsEnabled = true;
 
             ShareThumbnail.Source = _viewModel.SelectedThumbnail;
