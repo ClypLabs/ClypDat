@@ -23,17 +23,56 @@ public partial class ShareDialog : Window
     {
         _viewModel = viewModel;
         DataContext = viewModel;
+        PositionOverOwner(owner);
+        Closed += (_, _) => CleanUp();
 
-        // Owner isn't wired through Avalonia's own Owner/ShowDialog here (Show,
-        // not ShowDialog - see MainWindow.ShareButton_OnClick's comment on why
-        // this needs to be a plain top-level window) - position/size against
-        // the owner directly instead, once, since a modal-feeling popup like
-        // this can't be resized/moved by the user while it's up anyway.
+        // First pill pre-selected and its encode kicked off immediately, so
+        // the dialog opens already showing progress/a drop zone instead of a
+        // blank "pick a size" placeholder - matches picking a size actually
+        // mattering, not gating the whole dialog on one extra click.
+        Opened += (_, _) =>
+        {
+            ShareSize10.IsChecked = true;
+            _ = StartShareEncodeAsync(10L * 1024 * 1024);
+        };
+    }
+
+    // Owner isn't wired through Avalonia's own Owner property for sizing
+    // purposes - a modal-feeling popup like this can't be resized/moved by
+    // the user while it's up anyway, so position/size are computed once,
+    // directly against the owner's REAL win32 rect rather than trusting
+    // Avalonia's Bounds/PointToScreen alone. RepositionEditorHoverControls
+    // (MainWindow.axaml.cs) documents why: those read fine once a window is
+    // already shown (true here - owner always is), but the same class of
+    // DIP/physical-pixel mismatch this codebase has hit before is cheap to
+    // just avoid by pulling the owner's rect straight from Win32.
+    private void PositionOverOwner(Window owner)
+    {
+        var handle = owner.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        if (handle != IntPtr.Zero && GetWindowRect(handle, out var rect))
+        {
+            var scaling = owner.RenderScaling > 0 ? owner.RenderScaling : 1;
+            Position = new PixelPoint(rect.Left, rect.Top);
+            Width = (rect.Right - rect.Left) / scaling;
+            Height = (rect.Bottom - rect.Top) / scaling;
+            return;
+        }
+
         Position = owner.PointToScreen(new Point(0, 0));
         Width = owner.Bounds.Width;
         Height = owner.Bounds.Height;
+    }
 
-        Closed += (_, _) => CleanUp();
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hWnd, out Win32Rect rect);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct Win32Rect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
     }
 
     private void CleanUp()
@@ -195,9 +234,15 @@ public partial class ShareDialog : Window
         // still functional, and is what every Avalonia drag-out sample still
         // shows - suppressed rather than swapped to a barely-verifiable
         // newer path for the same result.
+        // DataFormats.Files (not FileNames) expects IEnumerable<IStorageItem>,
+        // not raw paths - passing strings there compiles fine (Set takes
+        // object) but the native drag backend gets no usable file data out
+        // of it, so every drop target shows a permanent no-drop cursor.
+        // FileNames is the one that actually wants plain path strings.
 #pragma warning disable CS0618
         var data = new DataObject();
-        data.Set(DataFormats.Files, new[] { tempPath });
+        data.Set(DataFormats.FileNames, new[] { tempPath });
+        ShareDragActiveOverlay.IsVisible = true;
         try
         {
             await DragDrop.DoDragDrop(e, data, DragDropEffects.Copy);
@@ -205,6 +250,18 @@ public partial class ShareDialog : Window
         catch (Exception error)
         {
             AppLog.Error("Share: drag-out failed", error);
+        }
+        finally
+        {
+            // DoDragDrop blocks for the whole gesture regardless of where it
+            // ends (dropped on a target, released over empty desktop,
+            // Escape) - once it returns the clip has left the app's hand
+            // either way, so the thumbnail doesn't come back; picking a size
+            // again re-encodes and shows a fresh one.
+            ShareDragActiveOverlay.IsVisible = false;
+            ShareThumbnail.IsVisible = false;
+            ShareDurationBadge.IsVisible = false;
+            ShareStatusText.Text = "Clip shared.";
         }
 #pragma warning restore CS0618
     }
