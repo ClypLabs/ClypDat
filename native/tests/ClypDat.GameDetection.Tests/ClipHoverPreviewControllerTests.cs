@@ -25,6 +25,14 @@ public sealed class ClipHoverPreviewControllerTests
     {
         var arguments = ClipHoverPreviewController.BuildDecoderArguments("clip.mp4", (TimeSpan.Zero, TimeSpan.FromSeconds(5)), 29.97);
 
-        Assert.Contains("fps=29.97,scale=480:270:force_original_aspect_ratio=decrease,pad=480:270:(ow-iw)/2:(oh-ih)/2", arguments);
+        Assert.Contains("fps=29.97,scale=w=1920:h=1080:flags=lanczos:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2", arguments);
+    }
+
+    [Fact]
+    public void PreviewGeometryAndDelay_MatchHighQualityDefaults()
+    {
+        Assert.Equal(1920, ClipHoverPreviewController.Width);
+        Assert.Equal(1080, ClipHoverPreviewController.Height);
+        Assert.Equal(TimeSpan.FromMilliseconds(75), ClipHoverPreviewController.HoverDelay);
     }
 }

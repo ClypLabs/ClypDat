@@ -13,11 +13,11 @@ namespace ClypDat.App.Services;
 // competing in the background.
 internal sealed class ClipHoverPreviewController : IDisposable
 {
-    internal const int Width = 480;
-    internal const int Height = 270;
+    internal const int Width = 1920;
+    internal const int Height = 1080;
     internal const int MaximumFramesPerSecond = 60;
     internal const int DefaultFramesPerSecond = 30;
-    internal static readonly TimeSpan HoverDelay = TimeSpan.FromMilliseconds(125);
+    internal static readonly TimeSpan HoverDelay = TimeSpan.FromMilliseconds(75);
     private const int FrameBytes = Width * Height * 4;
 
     private readonly object _stateLock = new();
@@ -107,7 +107,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
                     () => new WriteableBitmap(new PixelSize(Width, Height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Unpremul));
                 SetBitmap(clip, generation, bitmap);
                 if (!IsCurrent(clip, generation)) return;
-                AppLog.Info($"Clip hover preview started: {Path.GetFileName(clip.Path)}, fps={frameRate:0.###} (recorded={clip.Media.Fps:0.###}).");
+                AppLog.Info($"Clip hover preview started: {Path.GetFileName(clip.Path)}, {Width}x{Height}, fps={frameRate:0.###} (recorded={clip.Media.Fps:0.###}).");
 
                 while (!token.IsCancellationRequested && IsCurrent(clip, generation))
                 {
@@ -118,8 +118,9 @@ internal sealed class ClipHoverPreviewController : IDisposable
                     var deliveredFrame = false;
                     while (!token.IsCancellationRequested && await ReadFrameAsync(process.StandardOutput.BaseStream, buffer, token))
                     {
-                        var frame = buffer.ToArray();
-                        await Dispatcher.UIThread.InvokeAsync(() => CopyFrame(clip, generation, bitmap, frame));
+                        // InvokeAsync is awaited before the next ReadFrameAsync, so this
+                        // reusable buffer cannot change while CopyFrame is reading it.
+                        await Dispatcher.UIThread.InvokeAsync(() => CopyFrame(clip, generation, bitmap, buffer));
                         deliveredFrame = true;
                     }
                     await process.WaitForExitAsync(CancellationToken.None);
@@ -166,7 +167,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         var fps = ResolveFrameRate(frameRate).ToString("0.###", CultureInfo.InvariantCulture);
         return [
             "-hide_banner", "-loglevel", "error", "-re", "-ss", start, "-i", path, "-t", duration,
-            "-an", "-vf", $"fps={fps},scale={Width}:{Height}:force_original_aspect_ratio=decrease,pad={Width}:{Height}:(ow-iw)/2:(oh-ih)/2",
+            "-an", "-vf", $"fps={fps},scale=w={Width}:h={Height}:flags=lanczos:force_original_aspect_ratio=decrease,pad={Width}:{Height}:(ow-iw)/2:(oh-ih)/2",
             "-pix_fmt", "bgra", "-f", "rawvideo", "pipe:1"
         ];
     }
