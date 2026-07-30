@@ -13,6 +13,8 @@ public sealed class ClipCardViewModel : ViewModelBase
     private readonly string _libraryRoot;
     private string _previewImagePath;
     private Bitmap? _previewImage;
+    private Bitmap? _displayImage;
+    private WriteableBitmap? _hoverPreviewImage;
     private ClipInfo? _clipInfo;
     private ClipEditSettings? _clipEdit;
     private bool _isVod;
@@ -296,7 +298,40 @@ public sealed class ClipCardViewModel : ViewModelBase
     public Bitmap? PreviewImage
     {
         get => _previewImage;
-        private set => SetProperty(ref _previewImage, value);
+        private set
+        {
+            if (!SetProperty(ref _previewImage, value)) return;
+            if (_hoverPreviewImage is null) DisplayImage = value;
+        }
+    }
+
+    // Static thumbnail until FFmpeg delivers first frame. Keeping this separate
+    // from PreviewImage lets viewport eviction keep its existing lazy lifecycle.
+    public Bitmap? DisplayImage
+    {
+        get => _displayImage;
+        private set => SetProperty(ref _displayImage, value);
+    }
+
+    internal (TimeSpan Start, TimeSpan Duration) HoverPreviewRange
+    {
+        get
+        {
+            var total = Duration > TimeSpan.Zero ? Duration : TimeSpan.Zero;
+            var start = TimeSpan.FromSeconds(Math.Clamp(_clipEdit?.TrimStartSeconds ?? 0, 0, total.TotalSeconds));
+            var end = TimeSpan.FromSeconds(Math.Clamp(_clipEdit?.TrimEndSeconds ?? 0, 0, total.TotalSeconds));
+            if (end <= start) end = total;
+            return (start, end - start);
+        }
+    }
+
+    internal void ShowHoverPreview(WriteableBitmap preview) { _hoverPreviewImage = preview; DisplayImage = preview; }
+
+    internal void HideHoverPreview(WriteableBitmap preview)
+    {
+        if (_hoverPreviewImage != preview) return;
+        _hoverPreviewImage = null;
+        DisplayImage = PreviewImage;
     }
 
     // Called by MainWindow's per-card EffectiveViewportChanged handler as
