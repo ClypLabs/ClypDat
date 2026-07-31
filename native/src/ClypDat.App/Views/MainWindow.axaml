@@ -2624,9 +2624,9 @@
            drift during resize, or sit above/below LibVLC unpredictably. -->
       <Border Grid.Column="1" Grid.Row="0" Background="#111920" BorderBrush="#30404D" BorderThickness="1,0,0,0">
         <Grid RowDefinitions="Auto,*,Auto">
-          <Border Background="#101820" BorderBrush="#263743" BorderThickness="0,0,0,1">
+          <Border Height="64" Background="#101820" BorderBrush="#263743" BorderThickness="0,0,0,1">
             <TextBlock Text="CLIP DETAILS" Foreground="#EDF4FB" FontSize="17" FontWeight="SemiBold"
-                       VerticalAlignment="Center" Margin="24,0,16,0" Height="64" />
+                       VerticalAlignment="Center" Margin="24,0,16,0" />
           </Border>
 
           <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">

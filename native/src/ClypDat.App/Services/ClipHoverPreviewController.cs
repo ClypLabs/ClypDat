@@ -10,9 +10,10 @@ using ClypDat.App.ViewModels;
 
 namespace ClypDat.App.Services;
 
-// One FFmpeg session serves one library card at a time. Two bounded raw-frame
-// slots decouple decoder reads from UI upload without letting FFmpeg read ahead
-// through the source file while a preview is detached.
+// One FFmpeg session serves one library card at a time. Raw frames are paced
+// before they leave FFmpeg, while the UI keeps only the newest not-yet-painted
+// frame. This keeps 1080p previews current without letting slow UI paints pile
+// up behind the decoder.
 internal sealed class ClipHoverPreviewController : IDisposable
 {
     internal const int Width = 1920;
@@ -223,7 +224,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
             if (!IsCurrent(clip, generation)) return;
             var sourceMbps = clip.Duration > TimeSpan.Zero ? clip.SizeBytes * 8d / clip.Duration.TotalSeconds / 1_000_000d : 0;
             AppLog.Info($"Clip hover preview started: {Path.GetFileName(clip.Path)}, source={clip.Media.Width}x{clip.Media.Height}, sourceMbps={sourceMbps:0.###}, output={Width}x{Height}, fps={frameRate:0.###} (recorded={clip.Media.Fps:0.###}).");
-            var slots = new[] { new FrameSlot(new byte[FrameBytes]), new FrameSlot(new byte[FrameBytes]) };
+            var slots = new[] { new FrameSlot(new byte[FrameBytes]), new FrameSlot(new byte[FrameBytes]), new FrameSlot(new byte[FrameBytes]) };
 
             while (!token.IsCancellationRequested && IsCurrent(clip, generation))
             {
@@ -256,42 +257,25 @@ internal sealed class ClipHoverPreviewController : IDisposable
     {
         var decodedBefore = metrics.DecodedFrames;
         var displayedBefore = metrics.DisplayedFrames;
-        var frames = Channel.CreateBounded<FrameSlot>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.Wait, SingleWriter = true, SingleReader = true });
-        var freeSlots = Channel.CreateBounded<FrameSlot>(new BoundedChannelOptions(2) { FullMode = BoundedChannelFullMode.Wait, SingleWriter = true, SingleReader = true });
+        var frames = new LatestFrameMailbox<FrameSlot>();
+        var freeSlots = Channel.CreateBounded<FrameSlot>(new BoundedChannelOptions(3) { FullMode = BoundedChannelFullMode.Wait, SingleWriter = true, SingleReader = true });
         foreach (var slot in slots) await freeSlots.Writer.WriteAsync(slot, token);
 
-        var producer = ProduceFramesAsync(stream, freeSlots.Reader, frames.Writer, metrics, token);
-        var consumer = ConsumeFramesAsync(frames.Reader, freeSlots.Writer, clip, generation, bitmap, frameRate, metrics, token);
+        var producer = ProduceFramesAsync(stream, freeSlots, frames, clip, generation, frameRate, metrics, token);
+        var consumer = ConsumeFramesAsync(frames, freeSlots.Writer, clip, generation, bitmap, metrics, token);
         await Task.WhenAll(producer, consumer);
         return (metrics.DecodedFrames - decodedBefore, metrics.DisplayedFrames - displayedBefore);
     }
 
-    private static async Task ProduceFramesAsync(Stream stream, ChannelReader<FrameSlot> freeSlots, ChannelWriter<FrameSlot> frames, PreviewMetrics metrics, CancellationToken token)
-    {
-        try
-        {
-            while (await freeSlots.WaitToReadAsync(token))
-            {
-                while (freeSlots.TryRead(out var slot))
-                {
-                    if (!await ReadFrameAsync(stream, slot.Buffer, token)) return;
-                    metrics.MarkDecoded();
-                    await frames.WriteAsync(slot, token);
-                }
-            }
-        }
-        finally { frames.TryComplete(); }
-    }
-
-    private async Task ConsumeFramesAsync(ChannelReader<FrameSlot> frames, ChannelWriter<FrameSlot> freeSlots, ClipCardViewModel clip, int generation, WriteableBitmap bitmap, double frameRate, PreviewMetrics metrics, CancellationToken token)
+    private async Task ProduceFramesAsync(Stream stream, Channel<FrameSlot> freeSlots, LatestFrameMailbox<FrameSlot> frames, ClipCardViewModel clip, int generation, double frameRate, PreviewMetrics metrics, CancellationToken token)
     {
         var pacer = new HoverPreviewFramePacer(frameRate);
         var attachmentVersion = -1;
         try
         {
-            while (await frames.WaitToReadAsync(token))
+            while (await freeSlots.Reader.WaitToReadAsync(token))
             {
-                while (frames.TryRead(out var slot))
+                while (freeSlots.Reader.TryRead(out var slot))
                 {
                     var version = await WaitUntilAttachedAsync(clip, generation, token);
                     if (version != attachmentVersion)
@@ -301,10 +285,31 @@ internal sealed class ClipHoverPreviewController : IDisposable
                     }
                     var delay = pacer.NextDelay(metrics.Elapsed);
                     if (delay > TimeSpan.Zero) await Task.Delay(delay, token);
-                    var displayed = await Dispatcher.UIThread.InvokeAsync(() => CopyFrame(clip, generation, bitmap, slot.Buffer));
-                    if (displayed) metrics.MarkDisplayed();
-                    await freeSlots.WriteAsync(slot, token);
+                    if (!await ReadFrameAsync(stream, slot.Buffer, token)) return;
+                    metrics.MarkDecoded();
+                    var dropped = frames.Publish(slot);
+                    if (dropped is not null)
+                    {
+                        metrics.MarkDropped();
+                        await freeSlots.Writer.WriteAsync(dropped, token);
+                    }
                 }
+            }
+        }
+        finally { frames.Complete(); }
+    }
+
+    private async Task ConsumeFramesAsync(LatestFrameMailbox<FrameSlot> frames, ChannelWriter<FrameSlot> freeSlots, ClipCardViewModel clip, int generation, WriteableBitmap bitmap, PreviewMetrics metrics, CancellationToken token)
+    {
+        try
+        {
+            while (await frames.ReadAsync(token) is { } slot)
+            {
+                var uploadStarted = Stopwatch.GetTimestamp();
+                var displayed = await Dispatcher.UIThread.InvokeAsync(() => CopyFrame(clip, generation, bitmap, slot.Buffer), DispatcherPriority.Render);
+                metrics.MarkUiUpload(Stopwatch.GetTimestamp() - uploadStarted);
+                if (displayed) metrics.MarkDisplayed();
+                await freeSlots.WriteAsync(slot, token);
             }
         }
         finally { freeSlots.TryComplete(); }
@@ -398,8 +403,11 @@ internal sealed class ClipHoverPreviewController : IDisposable
         {
             fixed (byte* source = frame)
             {
-                for (var row = 0; row < Height; row++)
-                    Buffer.MemoryCopy(source + row * Width * 4, (byte*)locked.Address + row * locked.RowBytes, locked.RowBytes, Width * 4);
+                if (locked.RowBytes == Width * 4)
+                    Buffer.MemoryCopy(source, (byte*)locked.Address, FrameBytes, FrameBytes);
+                else
+                    for (var row = 0; row < Height; row++)
+                        Buffer.MemoryCopy(source + row * Width * 4, (byte*)locked.Address + row * locked.RowBytes, locked.RowBytes, Width * 4);
             }
         }
         clip.ShowHoverPreview(bitmap);
@@ -450,7 +458,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
     private static void Kill(Process? process) { try { if (process is { HasExited: false }) process.Kill(true); } catch { } }
     public void Dispose() { if (_disposed) return; _disposed = true; Stop("window closed"); _sessionLock.Dispose(); }
 
-    private readonly record struct FrameSlot(byte[] Buffer);
+    private sealed class FrameSlot(byte[] buffer) { public byte[] Buffer { get; } = buffer; }
     private readonly record struct SessionState(ClipCardViewModel? Clip, WriteableBitmap? Bitmap, Process? Process, CancellationTokenSource? Cancellation, CancellationTokenSource? WarmExitCancellation)
     { public bool IsActive => Clip is not null || Process is not null || Cancellation is not null; }
 
@@ -500,8 +508,11 @@ internal sealed class PreviewMetrics
     private long _readBytes;
     private long _previousDisplayTicks = -1;
     private long _longestGapTicks;
+    private long _totalUiUploadTicks;
+    private long _longestUiUploadTicks;
     private int _decodedFrames;
     private int _displayedFrames;
+    private int _droppedFrames;
 
     public TimeSpan Elapsed => _clock.Elapsed;
     public int DecodedFrames => Volatile.Read(ref _decodedFrames);
@@ -509,15 +520,22 @@ internal sealed class PreviewMetrics
     public void MarkDecoded()
     {
         Interlocked.Increment(ref _decodedFrames);
-        Interlocked.CompareExchange(ref _firstDecodedTicks, Stopwatch.GetTimestamp(), -1);
+        Interlocked.CompareExchange(ref _firstDecodedTicks, _clock.ElapsedTicks, -1);
     }
     public void MarkDisplayed()
     {
         Interlocked.Increment(ref _displayedFrames);
-        var now = Stopwatch.GetTimestamp();
+        var now = _clock.ElapsedTicks;
         Interlocked.CompareExchange(ref _firstDisplayedTicks, now, -1);
         var previous = Interlocked.Exchange(ref _previousDisplayTicks, now);
         if (previous >= 0) InterlockedExtensions.Max(ref _longestGapTicks, now - previous);
+    }
+    public void MarkDropped() => Interlocked.Increment(ref _droppedFrames);
+    public void MarkUiUpload(long elapsedTicks)
+    {
+        if (elapsedTicks <= 0) return;
+        Interlocked.Add(ref _totalUiUploadTicks, elapsedTicks);
+        InterlockedExtensions.Max(ref _longestUiUploadTicks, elapsedTicks);
     }
     public void AddReadBytes(long bytes) { if (bytes > 0) Interlocked.Add(ref _readBytes, bytes); }
     public void Log(ClipCardViewModel clip, int generation)
@@ -527,10 +545,64 @@ internal sealed class PreviewMetrics
         var firstDecoded = TicksToMilliseconds(Volatile.Read(ref _firstDecodedTicks));
         var firstDisplayed = TicksToMilliseconds(Volatile.Read(ref _firstDisplayedTicks));
         var longestGap = TicksToMilliseconds(Volatile.Read(ref _longestGapTicks));
+        var uiUploads = DisplayedFrames;
+        var averageUiUpload = uiUploads == 0 ? 0 : TicksToMilliseconds(Volatile.Read(ref _totalUiUploadTicks)) / uiUploads;
+        var longestUiUpload = TicksToMilliseconds(Volatile.Read(ref _longestUiUploadTicks));
         var readMb = Volatile.Read(ref _readBytes) / (1024d * 1024d);
-        AppLog.Debug($"Clip hover preview metrics: {Path.GetFileName(clip.Path)}, generation={generation}, firstDecodedMs={firstDecoded:0}, firstDisplayedMs={firstDisplayed:0}, decoded={DecodedFrames}, displayed={DisplayedFrames}, displayedFps={DisplayedFrames / elapsed:0.##}, longestGapMs={longestGap:0}, readMB={readMb:0.##}.");
+        AppLog.Debug($"Clip hover preview metrics: {Path.GetFileName(clip.Path)}, generation={generation}, firstDecodedMs={firstDecoded:0}, firstDisplayedMs={firstDisplayed:0}, decoded={DecodedFrames}, displayed={DisplayedFrames}, dropped={Volatile.Read(ref _droppedFrames)}, displayedFps={DisplayedFrames / elapsed:0.##}, longestGapMs={longestGap:0}, uiUploadAvgMs={averageUiUpload:0.##}, uiUploadMaxMs={longestUiUpload:0.##}, readMB={readMb:0.##}.");
     }
     private static double TicksToMilliseconds(long ticks) => ticks < 0 ? -1 : ticks * 1000d / Stopwatch.Frequency;
+}
+
+internal sealed class LatestFrameMailbox<T> where T : class
+{
+    private readonly object _gate = new();
+    private readonly Channel<bool> _signal = Channel.CreateBounded<bool>(new BoundedChannelOptions(1)
+    {
+        FullMode = BoundedChannelFullMode.DropWrite,
+        SingleWriter = true,
+        SingleReader = true
+    });
+    private T? _ready;
+
+    public T? Publish(T frame)
+    {
+        T? dropped;
+        lock (_gate)
+        {
+            dropped = _ready;
+            _ready = frame;
+        }
+        if (dropped is null) _signal.Writer.TryWrite(true);
+        return dropped;
+    }
+
+    public async ValueTask<T?> ReadAsync(CancellationToken token)
+    {
+        while (await _signal.Reader.WaitToReadAsync(token))
+        {
+            while (_signal.Reader.TryRead(out _))
+            {
+                lock (_gate)
+                {
+                    if (_ready is not null)
+                    {
+                        var frame = _ready;
+                        _ready = null;
+                        return frame;
+                    }
+                }
+            }
+        }
+        lock (_gate)
+        {
+            var frame = _ready;
+            _ready = null;
+            return frame;
+        }
+    }
+
+    public void Complete() => _signal.Writer.TryComplete();
 }
 
 internal static class InterlockedExtensions

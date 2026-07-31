@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using ClypDat.App.Services;
@@ -44,12 +45,16 @@ internal sealed class ClickableVideoView : VideoView
     // Only ever touched on the hook thread.
     private IntPtr _hookHandle;
     private IntPtr _hostHandle;
+    private int _nativeSizeSyncQueued;
+    private int _nativeWidth;
+    private int _nativeHeight;
     private bool _mouseDownInVideo;
     private volatile bool _disposed;
 
     public ClickableVideoView()
     {
         _hookProc = HandleMouseMessage;
+        SizeChanged += (_, _) => RequestNativeSizeSync();
     }
 
     public event EventHandler? VideoClicked;
@@ -70,6 +75,9 @@ internal sealed class ClickableVideoView : VideoView
     {
         var control = base.CreateNativeControlCore(parent);
         Volatile.Write(ref _hostHandle, control.Handle);
+        _nativeWidth = 0;
+        _nativeHeight = 0;
+        RequestNativeSizeSync();
         EnsureHook();
         return control;
     }
@@ -77,12 +85,16 @@ internal sealed class ClickableVideoView : VideoView
     protected override void DestroyNativeControlCore(IPlatformHandle control)
     {
         Volatile.Write(ref _hostHandle, IntPtr.Zero);
+        _nativeWidth = 0;
+        _nativeHeight = 0;
         base.DestroyNativeControlCore(control);
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         Volatile.Write(ref _hostHandle, IntPtr.Zero);
+        _nativeWidth = 0;
+        _nativeHeight = 0;
         RemoveHook();
         base.OnDetachedFromVisualTree(e);
     }
@@ -92,6 +104,35 @@ internal sealed class ClickableVideoView : VideoView
         if (_disposed) return;
         _disposed = true;
         RemoveHook();
+    }
+
+    // Avalonia lays the native host out correctly once the resize settles, but
+    // LibVLC's child HWND can lag a live edge drag by a layout pass. Coalesce
+    // the stream of layout changes and resize the host to the newest physical
+    // pixel bounds on the render queue so the picture follows the window.
+    private void RequestNativeSizeSync()
+    {
+        if (_disposed || Interlocked.Exchange(ref _nativeSizeSyncQueued, 1) != 0) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            Interlocked.Exchange(ref _nativeSizeSyncQueued, 0);
+            SyncNativeSize();
+        }, DispatcherPriority.Render);
+    }
+
+    private void SyncNativeSize()
+    {
+        var host = Volatile.Read(ref _hostHandle);
+        var scaling = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1d;
+        var width = Math.Max(0, (int)Math.Round(Bounds.Width * scaling));
+        var height = Math.Max(0, (int)Math.Round(Bounds.Height * scaling));
+        if (host == IntPtr.Zero || width == 0 || height == 0 || (width == _nativeWidth && height == _nativeHeight)) return;
+
+        if (SetWindowPos(host, IntPtr.Zero, 0, 0, width, height, SwpNoMove | SwpNoZOrder | SwpNoActivate))
+        {
+            _nativeWidth = width;
+            _nativeHeight = height;
+        }
     }
 
     private void EnsureHook()
@@ -253,6 +294,14 @@ internal sealed class ClickableVideoView : VideoView
 
     [DllImport("user32.dll")]
     private static extern bool IsChild(IntPtr parent, IntPtr child);
+
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoActivate = 0x0010;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern int GetMessageW(out NativeMessage message, IntPtr window, uint filterMin, uint filterMax);
