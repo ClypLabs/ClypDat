@@ -2589,30 +2589,36 @@
                          PositionTimelineChrome offsets by the padding so the
                          visible line still lands exactly on the boundary. -->
                     <Border x:Name="TrimStartHandle"
-                            Width="18"
+                            Width="28"
                             Background="Transparent"
                             Cursor="SizeWestEast"
                             PointerPressed="TrimStartHandle_OnPointerPressed"
                             PointerMoved="TimelineSurface_OnPointerMoved"
-                            PointerReleased="TimelineSurface_OnPointerReleased">
+                            PointerReleased="TimelineSurface_OnPointerReleased"
+                            ToolTip.Tip="Drag to set trim start">
                       <Border Width="4" Background="#13C8B5" HorizontalAlignment="Center" />
                     </Border>
                     <Polygon x:Name="TrimStartCap"
-                             Points="0,0 10,0 5,7"
+                             Points="0,0 14,0 7,9"
                              Fill="#13C8B5"
+                             Stroke="#071218"
+                             StrokeThickness="1"
                              IsHitTestVisible="False" />
                     <Border x:Name="TrimEndHandle"
-                            Width="18"
+                            Width="28"
                             Background="Transparent"
                             Cursor="SizeWestEast"
                             PointerPressed="TrimEndHandle_OnPointerPressed"
                             PointerMoved="TimelineSurface_OnPointerMoved"
-                            PointerReleased="TimelineSurface_OnPointerReleased">
+                            PointerReleased="TimelineSurface_OnPointerReleased"
+                            ToolTip.Tip="Drag to set trim end">
                       <Border Width="4" Background="#13C8B5" HorizontalAlignment="Center" />
                     </Border>
                     <Polygon x:Name="TrimEndCap"
-                             Points="0,0 10,0 5,7"
+                             Points="0,0 14,0 7,9"
                              Fill="#13C8B5"
+                             Stroke="#071218"
+                             StrokeThickness="1"
                              IsHitTestVisible="False" />
                   </Canvas>
                 </Grid>

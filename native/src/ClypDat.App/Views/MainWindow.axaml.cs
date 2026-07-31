@@ -7492,16 +7492,15 @@ public sealed partial class MainWindow : Window
         var end = ViewModel.TrimEnd.TotalMilliseconds / ViewModel.Duration.TotalMilliseconds * width;
         var playhead = ViewModel.CurrentTime.TotalMilliseconds / ViewModel.Duration.TotalMilliseconds * width;
 
-        // Thin lines confined to just the video lane (TrackLaneViewModel's
-        // video LaneHeight), not the full track stack - matches
-        // TrimSelection's old scope, just restyled.
-        var videoLaneHeight = ViewModel is { TimelineTrackCount: > 0 }
-            ? Math.Max(0, (TimelineSurface.Bounds.Height / ViewModel.TimelineTrackCount) - 6)
-            : 0;
+        // The lanes now have intentional fixed heights (video 42, audio 56),
+        // not UniformGrid's equal split. Read the actual video lane height so
+        // trim rails stop exactly at the filmstrip instead of bleeding into
+        // the first audio track.
+        var videoLaneHeight = ViewModel.TimelineTracks.FirstOrDefault(track => track.IsVideo)?.LaneHeight ?? 0;
         // Matches TrimStartCap/TrimEndCap's Points width (see XAML) - read as
         // a constant rather than Bounds.Width since the Polygon may not have
         // been measured yet on the very first call.
-        const double capWidth = 10;
+        const double capWidth = 14;
 
         // Width of the visible line, which is NOT the handle Border's own width -
         // that is deliberately wider and transparent to make the handle easier to
