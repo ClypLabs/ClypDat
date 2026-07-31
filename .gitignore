@@ -2,6 +2,7 @@
 node_modules/
 
 # .NET
+.dotnet/
 bin/
 obj/
 publish/

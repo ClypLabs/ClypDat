@@ -15,10 +15,11 @@ Planned backend shape:
 
 ## Build
 
-Install the .NET SDK first. This machine currently has the .NET runtime only.
+From repository root, use `dotnet.ps1`. First run downloads pinned .NET SDK
+into repository-local `.dotnet`; no system-wide install required.
 
 ```powershell
-dotnet restore native\ClypDat.Native.sln
-dotnet build native\ClypDat.Native.sln
-dotnet run --project native\src\ClypDat.App\ClypDat.App.csproj
+.\dotnet.ps1 restore native\ClypDat.Native.sln
+.\dotnet.ps1 build native\ClypDat.Native.sln
+.\dotnet.ps1 run --project native\src\ClypDat.App\ClypDat.App.csproj
 ```

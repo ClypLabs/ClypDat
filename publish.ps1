@@ -11,6 +11,8 @@ $repoRoot = $PSScriptRoot
 $nativeRoot = Join-Path $repoRoot 'native'
 $appProject = Join-Path $nativeRoot 'src\ClypDat.App\ClypDat.App.csproj'
 $installDirectory = Join-Path $env:LOCALAPPDATA 'Programs\ClypDat'
+$dotnetExecutable = & (Join-Path $repoRoot 'eng\Ensure-DotNet.ps1')
+$selfContainedVerifier = Join-Path $repoRoot 'eng\Test-SelfContainedPublish.ps1'
 
 function Invoke-Git {
     param(
@@ -113,10 +115,12 @@ try {
         Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
     }
 
-    & dotnet publish $appProject -c Release -r win-x64 --self-contained true -p:Platform=x64 -o $installDirectory
+    & $dotnetExecutable publish $appProject -c Release -r win-x64 --self-contained true -p:Platform=x64 -o $installDirectory
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish failed with exit code $LASTEXITCODE."
     }
+
+    & $selfContainedVerifier -PublishDirectory $installDirectory
 
     $installedExe = Join-Path $installDirectory 'ClypDat.exe'
     Write-Host "Installed local build to: $installedExe"

@@ -96,24 +96,26 @@ running install via a PowerShell helper that waits for the process to exit.
 ## Requirements
 
 - Windows 10 or 11, x64
-- .NET SDK 10+ to build from source
+- Building from source needs an internet connection once; ClypDat downloads its
+  pinned .NET SDK into `.dotnet` inside the clone. No system-wide .NET install.
 - The ClypDat (Native) backend works on NVIDIA, AMD, and (as a last-resort
   software fallback) any GPU-less machine.
 
 ## Building
 
 ```powershell
-dotnet restore native\ClypDat.Native.sln
-dotnet build native\ClypDat.Native.sln
+.\dotnet.ps1 restore native\ClypDat.Native.sln
+.\dotnet.ps1 build native\ClypDat.Native.sln
 ```
 
 To produce a runnable, self-contained build:
 
 ```powershell
-dotnet publish native\src\ClypDat.App\ClypDat.App.csproj -c Release -r win-x64 --self-contained true -p:Platform=x64 -o native\publish\win-x64-folder
+.\dotnet.ps1 publish native\src\ClypDat.App\ClypDat.App.csproj -c Release -r win-x64 --self-contained true -p:Platform=x64 -o native\publish\win-x64-folder
 ```
 
 `ClypDat.exe` and its dependencies land in `native\publish\win-x64-folder`.
+Those files include .NET runtime; users need only ClypDat installer/portable app.
 Pushing a tag matching `v*` triggers `.github/workflows/release.yml`, which
 builds the same output and packages it four ways: a zip, a self-extracting
 portable exe, an NSIS installer, and an MSI.
