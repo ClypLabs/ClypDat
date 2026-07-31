@@ -69,4 +69,17 @@ public sealed class ClipHoverPreviewControllerTests
 
         Assert.Equal(TimeSpan.Zero, pacer.NextDelay(TimeSpan.FromSeconds(1)));
     }
+
+    [Fact]
+    public async Task LatestFrameMailbox_ReplacesStalePendingFrame()
+    {
+        var mailbox = new LatestFrameMailbox<string>();
+
+        Assert.Null(mailbox.Publish("old"));
+        Assert.Equal("old", mailbox.Publish("new"));
+        Assert.Equal("new", await mailbox.ReadAsync(CancellationToken.None));
+
+        mailbox.Complete();
+        Assert.Null(await mailbox.ReadAsync(CancellationToken.None));
+    }
 }
