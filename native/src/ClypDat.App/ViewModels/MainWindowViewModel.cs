@@ -3454,12 +3454,41 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public void ToggleDaySelection(ClipCardViewModel clip, bool selected)
     {
         var date = clip.CreatedAt.ToLocalTime().Date;
-        foreach (var sibling in AllClips.Where(c => c.CreatedAt.ToLocalTime().Date == date))
+        // A date can include several games. When a game filter is active,
+        // keep this bulk action inside that filtered game instead of silently
+        // selecting hidden clips from other games on the same day.
+        foreach (var sibling in AllClips.Where(c => c.CreatedAt.ToLocalTime().Date == date && c.IsMatchedByGameFilter))
         {
             sibling.IsSelected = selected;
             if (selected) _selectedPaths.Add(sibling.Path);
             else _selectedPaths.Remove(sibling.Path);
             UpdateSelectionOrder(sibling, selected);
+        }
+
+        UpdateDaySelectionStates();
+        NotifySelectionChrome();
+    }
+
+    // Header checkbox selects only cards currently present in the Library
+    // view. This naturally scopes a game-filtered view to that game and also
+    // honours any active clip-type or search filter.
+    public bool IsLibraryHeaderSelected
+    {
+        get
+        {
+            var visible = AllClips.Where(clip => clip.IsVisibleInLibrary).ToArray();
+            return visible.Length > 0 && visible.All(clip => clip.IsSelected);
+        }
+    }
+
+    public void ToggleVisibleLibrarySelection(bool selected)
+    {
+        foreach (var clip in AllClips.Where(clip => clip.IsVisibleInLibrary))
+        {
+            clip.IsSelected = selected;
+            if (selected) _selectedPaths.Add(clip.Path);
+            else _selectedPaths.Remove(clip.Path);
+            UpdateSelectionOrder(clip, selected);
         }
 
         UpdateDaySelectionStates();
@@ -4768,14 +4797,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         NotifySelectionChrome();
     }
 
-    // Recomputes each card's IsDaySelected (true only when every clip
-    // sharing its date is currently selected) - drives the checked state of
-    // the per-card date-header checkbox.
+    // Recomputes each card's IsDaySelected against the active game scope, so
+    // a filtered game's date checkbox never reflects hidden clips from other
+    // games that happen to share that date.
     private void UpdateDaySelectionStates()
     {
         foreach (var dayGroup in AllClips.GroupBy(clip => clip.CreatedAt.ToLocalTime().Date))
         {
-            var allSelected = dayGroup.All(clip => clip.IsSelected);
+            var scoped = dayGroup.Where(clip => clip.IsMatchedByGameFilter).ToArray();
+            var allSelected = scoped.Length > 0 && scoped.All(clip => clip.IsSelected);
             foreach (var clip in dayGroup) clip.IsDaySelected = allSelected;
         }
     }
@@ -5725,6 +5755,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             clip.IsMatchedByGameFilter = _activeGameFilters.Count == 0 || _activeGameFilters.Contains(clip.GameFilterKey);
         }
+        UpdateDaySelectionStates();
+        OnPropertyChanged(nameof(IsLibraryHeaderSelected));
     }
 
     private void ApplyClipTypeFilters()
@@ -5733,6 +5765,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             clip.IsMatchedByClipTypeFilter = _activeClipTypeFilters.Count == 0 || MatchesClipTypeFilter(clip);
         }
+        OnPropertyChanged(nameof(IsLibraryHeaderSelected));
     }
 
     private string _settingsSearchText = string.Empty;
@@ -5818,6 +5851,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             clip.IsMatchedBySearch = query.Length == 0 || MatchesSearch(clip, query);
         }
+        OnPropertyChanged(nameof(IsLibraryHeaderSelected));
     }
 
     private static bool MatchesSearch(ClipCardViewModel clip, string query) =>
@@ -5841,6 +5875,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasNoSelection));
         OnPropertyChanged(nameof(ShowLibraryActions));
         OnPropertyChanged(nameof(SelectionSummary));
+        OnPropertyChanged(nameof(IsLibraryHeaderSelected));
 
         // Each card's own context menu says whether renaming it would hit the
         // whole selection - only the selected cards of a multi-selection do, a
