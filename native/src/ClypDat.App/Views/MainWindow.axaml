@@ -2229,7 +2229,8 @@
         </Border>
       </Grid>
     </Border>
-      <Grid Grid.Column="1" RowDefinitions="*,320" IsVisible="{Binding IsEditorVisible}">
+      <Grid Grid.Column="1" ColumnDefinitions="*,340" IsVisible="{Binding IsEditorVisible}">
+      <Grid Grid.Column="0" RowDefinitions="*,320">
         <Grid Background="#0E141A">
           <Border Background="#05080B">
             <!-- Pan slider lives in its own column, not overlapping
@@ -2616,6 +2617,61 @@
             </Grid>
           </Grid>
         </Border>
+      </Grid>
+
+      <!-- Permanent editor inspector. This deliberately lives in MainWindow's
+           visual tree rather than an owned native window: it cannot be hidden,
+           drift during resize, or sit above/below LibVLC unpredictably. -->
+      <Border Grid.Column="1" Background="#111920" BorderBrush="#30404D" BorderThickness="1,0,0,0">
+        <Grid RowDefinitions="Auto,*,Auto">
+          <Border Background="#101820" BorderBrush="#263743" BorderThickness="0,0,0,1">
+            <TextBlock Text="CLIP DETAILS" Foreground="#EDF4FB" FontSize="17" FontWeight="SemiBold"
+                       VerticalAlignment="Center" Margin="16,0" Height="52" />
+          </Border>
+
+          <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="16" Spacing="12">
+              <Border Background="#151F28" BorderBrush="#293A47" BorderThickness="1" CornerRadius="9" Padding="12">
+                <StackPanel Spacing="8">
+                  <TextBlock Text="DETAILS" Foreground="#9EC6F0" FontSize="11" FontWeight="Bold" />
+                  <TextBlock Text="Title" Foreground="#8EA1B6" FontSize="12" />
+                  <TextBox Text="{Binding EditorTitle, Mode=TwoWay}" Foreground="#EDF4FB" FontSize="14" FontWeight="SemiBold"
+                           Background="#0D151C" BorderBrush="#263743" KeyDown="EditorTitle_OnKeyDown" />
+                  <TextBlock Text="Description" Foreground="#8EA1B6" FontSize="12" Margin="0,2,0,0" />
+                  <TextBox Text="{Binding EditorDescription, Mode=TwoWay}" MinHeight="78" AcceptsReturn="True" TextWrapping="Wrap"
+                           Watermark="Add a description" Background="#0D151C" BorderBrush="#263743" Foreground="#D6E2F0" />
+                </StackPanel>
+              </Border>
+
+              <Border Background="#151F28" BorderBrush="#293A47" BorderThickness="1" CornerRadius="9" Padding="12">
+                <StackPanel Spacing="9">
+                  <Border Height="1" Background="#293A47" Margin="0,2" />
+                  <TextBlock Text="Export codec" Foreground="#8EA1B6" FontSize="12" />
+                  <ComboBox Classes="settingsInput" ItemsSource="{Binding ExportCodecs}" SelectedItem="{Binding SelectedExportCodec}"
+                            HorizontalAlignment="Stretch" />
+                </StackPanel>
+              </Border>
+            </StackPanel>
+          </ScrollViewer>
+
+          <Border Grid.Row="2" Background="#101820" BorderBrush="#263743" BorderThickness="0,1,0,0" Padding="16">
+            <StackPanel Spacing="8">
+              <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                <Button Content="Save Trim" Height="38" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                        IsEnabled="{Binding !IsExporting}" ToolTip.Tip="Replace the original clip with just the trimmed range"
+                        Click="SaveTrimButton_OnClick" />
+                <Button Grid.Column="1" Content="{Binding ExportButtonText}" Classes="primaryButton" Height="38"
+                        HorizontalContentAlignment="Center" VerticalContentAlignment="Center" IsEnabled="{Binding !IsExporting}"
+                        Click="ExportButton_OnClick" />
+              </Grid>
+              <Button Content="Share" Height="38" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                      IsEnabled="{Binding !IsExporting}"
+                      ToolTip.Tip="Re-encode to a size cap for Discord and drag the result straight into another app"
+                      Click="ShareButton_OnClick" />
+            </StackPanel>
+          </Border>
+        </Grid>
+      </Border>
       </Grid>
     </Grid>
 

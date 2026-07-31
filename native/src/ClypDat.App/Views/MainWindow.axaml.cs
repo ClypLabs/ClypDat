@@ -5227,20 +5227,9 @@ public sealed partial class MainWindow : Window
 
     private void SyncEditorToolsPanel()
     {
-        if (ViewModel is null || !ViewModel.IsEditorVisible || ViewModel.IsVideoFullscreen ||
-            ViewModel.ActiveEditorSidebarSection is null || _shareDialogOpen)
-        {
-            HideEditorToolsPanel();
-            return;
-        }
-
-        var panel = EnsureEditorToolsPanelWindow();
-        RepositionEditorToolsPanel(panel, force: true);
-        if (!panel.IsVisible) panel.Show(this);
-        RepositionEditorToolsPanel(panel, force: true);
-        // This is editor UI, not a HUD notification. It must remain visible in
-        // screenshots and screen shares even when HUD overlays are excluded.
-        ApplyCaptureExclusion(panel, exclude: false);
+        // Clip Details is now a permanent child of the editor grid. Keeping it
+        // in-process avoids a separate native window that could be hidden or
+        // detached from the layout during resize.
     }
 
     private void HideEditorToolsPanel()
