@@ -117,6 +117,7 @@ public sealed partial class MainWindow : Window
     private Border? _hoverControlsBackdrop;
     private DispatcherTimer? _hoverControlsSlideOutTimer;
     private bool _hoverControlsSlidingOut;
+    private DispatcherTimer? _editorToolsPanelResizeSettleTimer;
     private string? _libraryResizeAnchorPath;
     private bool _libraryResizeAnchorRestoreQueued;
     private DispatcherTimer? _libraryResizeAnchorSettleTimer;
@@ -137,7 +138,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        EditorVideoView.VideoClicked += (_, _) => PlayPauseButton_OnClick(this, new RoutedEventArgs());
+        EditorVideoView.VideoClicked += EditorVideoView_OnVideoClicked;
         // ApplySavedWindowBounds can restore straight into Maximized, which
         // won't raise an OffScreenMargin change of its own.
         RootLayout.Margin = OffScreenMargin;
@@ -350,6 +351,7 @@ public sealed partial class MainWindow : Window
             _recordingPausedOverlay?.Close();
             _editorHoverControlsWindow?.Close();
             _editorToolsPanelWindow?.Close();
+            _editorToolsPanelResizeSettleTimer?.Stop();
             EditorVideoView.DisposeClickHandling();
             ViewModel?.Dispose();
         };
@@ -1321,6 +1323,7 @@ public sealed partial class MainWindow : Window
         // brings it straight back, correctly placed, once the drag stops and
         // the layout has settled.
         SuspendHoverControlsForResize();
+        SuspendEditorToolsPanelForResize();
         CaptureLibraryResizeAnchor();
         if (ViewModel?.IsLibraryVisible == true && _libraryResizeAnchorPath is not null)
         {
@@ -1337,7 +1340,6 @@ public sealed partial class MainWindow : Window
         }
 
         UpdateTimelineChrome();
-        RepositionEditorToolsPanelSafe(force: true);
     }
 
     // TODO: Replace this with a proper layout-level anchor once the library
@@ -5220,7 +5222,7 @@ public sealed partial class MainWindow : Window
     // open, back on its own the moment the poll sees this clear again.
     private bool _shareDialogOpen;
 
-    private const double EditorToolsPanelWidth = 300;
+    private const double EditorToolsPanelWidth = 340;
 
     private void SyncEditorToolsPanel()
     {
@@ -5245,6 +5247,31 @@ public sealed partial class MainWindow : Window
         if (_editorToolsPanelWindow?.IsVisible == true) _editorToolsPanelWindow.Hide();
     }
 
+    // A native owned window cannot follow a changing Avalonia layout frame by
+    // frame without tearing. Keep the selected drawer section open, hide the
+    // native surface during the drag, then restore it once the video rect has
+    // settled.
+    private void SuspendEditorToolsPanelForResize()
+    {
+        if (_editorToolsPanelWindow?.IsVisible != true) return;
+
+        HideEditorToolsPanel();
+        _editorToolsPanelResizeSettleTimer ??= new DispatcherTimer
+        {
+            Interval = HoverControlsResizeSettle
+        };
+        _editorToolsPanelResizeSettleTimer.Stop();
+        _editorToolsPanelResizeSettleTimer.Tick -= EditorToolsPanelResizeSettleTimer_OnTick;
+        _editorToolsPanelResizeSettleTimer.Tick += EditorToolsPanelResizeSettleTimer_OnTick;
+        _editorToolsPanelResizeSettleTimer.Start();
+    }
+
+    private void EditorToolsPanelResizeSettleTimer_OnTick(object? sender, EventArgs e)
+    {
+        _editorToolsPanelResizeSettleTimer?.Stop();
+        SyncEditorToolsPanel();
+    }
+
     private void RepositionEditorToolsPanelSafe(bool force = false)
     {
         if (_editorToolsPanelWindow is not { IsVisible: true } panel) return;
@@ -5258,19 +5285,21 @@ public sealed partial class MainWindow : Window
         var topLeft = EditorVideoHost.PointToScreen(new Point(0, 0));
         var bottomRight = EditorVideoHost.PointToScreen(new Point(EditorVideoHost.Bounds.Width, EditorVideoHost.Bounds.Height));
         var height = Math.Max(1, bottomRight.Y - topLeft.Y);
+        var scaling = RenderScaling > 0 ? RenderScaling : 1;
+        var nativeWidth = Math.Max(1, (int)Math.Round(EditorToolsPanelWidth * scaling, MidpointRounding.AwayFromZero));
         var handle = NativeHandleOf(panel);
         if (!force && handle != IntPtr.Zero && GetWindowRect(handle, out var rect) &&
             rect.Left == topLeft.X && rect.Top == topLeft.Y &&
-            rect.Right - rect.Left == EditorToolsPanelWidth && rect.Bottom == bottomRight.Y) return;
+            rect.Right - rect.Left == nativeWidth && rect.Bottom == bottomRight.Y) return;
 
         panel.Position = topLeft;
         panel.Width = EditorToolsPanelWidth;
-        panel.Height = Math.Max(1, EditorVideoHost.Bounds.Height);
+        panel.Height = height / scaling;
         // PointToScreen and native bounds are physical pixels. Drive this
         // window with that same coordinate system so its lower edge exactly
         // meets the video/timeline separator at every DPI scale.
         if (handle != IntPtr.Zero)
-            SetWindowPos(handle, HwndTop, topLeft.X, topLeft.Y, (int)EditorToolsPanelWidth, height, SwpNoActivate);
+            SetWindowPos(handle, HwndTop, topLeft.X, topLeft.Y, nativeWidth, height, SwpNoActivate);
     }
 
     private Window EnsureEditorToolsPanelWindow()
@@ -7181,8 +7210,21 @@ public sealed partial class MainWindow : Window
             Content = backdrop,
         };
         window.Opened += (_, _) => WindowTransparencyFallback.ApplyIfNeeded(window, backdrop.Background, b => backdrop.Background = b);
+        window.AddHandler(PointerPressedEvent, EditorHoverControls_OnPointerPressed, RoutingStrategies.Tunnel, true);
         _editorHoverControlsWindow = window;
         return window;
+    }
+
+    private void EditorHoverControls_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (e.GetCurrentPoint((Visual)sender!).Properties.IsLeftButtonPressed)
+            ViewModel?.CloseEditorSidebar();
+    }
+
+    private void EditorVideoView_OnVideoClicked(object? sender, EventArgs e)
+    {
+        ViewModel?.CloseEditorSidebar();
+        PlayPauseButton_OnClick(this, new RoutedEventArgs());
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]

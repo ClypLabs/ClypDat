@@ -13,7 +13,7 @@
           <TextBlock Text="{Binding ActiveEditorSidebarSection, Converter={x:Static opconv:EditorSidebarSectionTitleConverter.Instance}}"
                      Foreground="#EDF4FB" FontSize="17" FontWeight="SemiBold" VerticalAlignment="Center" />
           <Button Grid.Column="1" Classes="editorToolsClose" Click="CloseButton_OnClick" ToolTip.Tip="Close panel">
-            <TextBlock Text="✕" Margin="0,-2,0,0" />
+            <PathIcon Width="13" Height="13" Data="M6.3,5L12,10.7L17.7,5L19,6.3L13.3,12L19,17.7L17.7,19L12,13.3L6.3,19L5,17.7L10.7,12L5,6.3Z" />
           </Button>
         </Grid>
       </Border>
