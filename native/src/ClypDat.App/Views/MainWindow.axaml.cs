@@ -3699,6 +3699,15 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void LibraryHeaderCheckBox_OnClick(object? sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is CheckBox { IsChecked: var isChecked } && ViewModel is not null)
+        {
+            ViewModel.ToggleVisibleLibrarySelection(isChecked == true);
+        }
+    }
+
     private async void DeleteSelectedButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || !ViewModel.HasSelection) return;
