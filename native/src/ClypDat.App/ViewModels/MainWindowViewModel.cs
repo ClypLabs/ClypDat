@@ -2473,8 +2473,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public Avalonia.Media.Imaging.Bitmap? SelectedThumbnail
     {
         get => _selectedThumbnail;
-        private set => SetProperty(ref _selectedThumbnail, value);
+        private set
+        {
+            if (!SetProperty(ref _selectedThumbnail, value)) return;
+            OnPropertyChanged(nameof(HasSelectedThumbnail));
+        }
     }
+
+    public bool HasSelectedThumbnail => SelectedThumbnail is not null;
 
     // Drives a thumbnail placeholder over the editor's VideoView so opening a
     // clip shows its (already-decoded) thumbnail immediately instead of a
