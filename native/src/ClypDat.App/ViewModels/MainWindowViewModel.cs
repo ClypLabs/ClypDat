@@ -5890,6 +5890,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task HydrateMissingFilmstripsAsync(CancellationToken cancellationToken)
     {
+        var wasCancelled = false;
         try
         {
             var clips = AllClips.Where(clip => string.IsNullOrEmpty(clip.Media.FilmstripPath)).ToArray();
@@ -5904,6 +5905,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (OperationCanceledException)
         {
+            wasCancelled = true;
             AppLog.Info("Idle timeline hydration paused for active game.");
         }
         finally
@@ -5912,7 +5914,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 _backgroundFilmstripCts.Dispose();
                 _backgroundFilmstripCts = null;
-                if (!_gameIsActive) StartBackgroundFilmstripHydration();
+                // Resume only when this run was cancelled mid-flight and the
+                // game closed again before its cleanup finished. Restarting a
+                // completed empty queue here would recurse synchronously.
+                if (wasCancelled && !_gameIsActive) StartBackgroundFilmstripHydration();
             }
         }
     }
