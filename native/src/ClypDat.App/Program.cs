@@ -23,6 +23,11 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        // Release packaging calls this after publish. Reaching Main proves the
+        // app host loaded ClypDat with its bundled runtime before any user data,
+        // capture devices, or UI initialization can have side effects.
+        if (args.Contains("--verify-self-contained", StringComparer.Ordinal)) return;
+
         // Must run before anything else touches %LocalAppData%\ClypDat (AppLog,
         // settings, caches) - one-time migration from the pre-rebrand "EVE" name.
         MigrateFromLegacyEveInstall();

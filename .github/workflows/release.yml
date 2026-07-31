@@ -37,17 +37,20 @@ jobs:
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "version=$version" >> $env:GITHUB_OUTPUT
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "10.0.x"
+      - name: Bootstrap repo-local .NET SDK
+        shell: pwsh
+        run: .\dotnet.ps1 --info
 
       - name: Publish ClypDat.App
         run: >
-          dotnet publish native\src\ClypDat.App\ClypDat.App.csproj
+          .\dotnet.ps1 publish native\src\ClypDat.App\ClypDat.App.csproj
           -c Release -r win-x64 --self-contained true -p:Platform=x64
           -p:Version=${{ steps.version.outputs.version }}
           -o native\publish\win-x64-folder --nologo
+
+      - name: Verify self-contained publish
+        shell: pwsh
+        run: .\eng\Test-SelfContainedPublish.ps1 -PublishDirectory native\publish\win-x64-folder
 
       - name: Trim non-Windows runtime assets
         shell: pwsh
