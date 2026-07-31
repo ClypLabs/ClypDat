@@ -1206,11 +1206,10 @@
   <Style Selector="Button.railIconButton.active Border.gameInitialBadge TextBlock">
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
-  <!-- Editor rail is 80px wide and its labelled tools centre at 40px. These
-       footer controls keep their compact 44px hit target, so shift their
-       library-rail offset right only while editing to share that centreline. -->
+  <!-- The editor keeps the library's 64px rail, so its footer controls use
+       the same centred offset as every other rail button. -->
   <Style Selector="Button.railIconButton.editorRailFooter">
-    <Setter Property="Margin" Value="18,0,0,4" />
+    <Setter Property="Margin" Value="9,0,0,4" />
   </Style>
 
   <!-- Editor rail swaps library filters for larger labelled tools. The label
