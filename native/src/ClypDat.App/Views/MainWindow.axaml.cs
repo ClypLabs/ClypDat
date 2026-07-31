@@ -5253,8 +5253,7 @@ public sealed partial class MainWindow : Window
     // settled.
     private void SuspendEditorToolsPanelForResize()
     {
-        if (_editorToolsPanelWindow?.IsVisible != true) return;
-
+        if (ViewModel?.ActiveEditorSidebarSection is null) return;
         HideEditorToolsPanel();
         _editorToolsPanelResizeSettleTimer ??= new DispatcherTimer
         {
