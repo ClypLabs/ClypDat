@@ -2229,9 +2229,9 @@
         </Border>
       </Grid>
     </Border>
-      <Grid Grid.Column="1" ColumnDefinitions="*,340" IsVisible="{Binding IsEditorVisible}">
-      <Grid Grid.Column="0" RowDefinitions="*,320">
-        <Grid Background="#0E141A">
+      <Grid Grid.Column="1" ColumnDefinitions="*,340" RowDefinitions="*,320" IsVisible="{Binding IsEditorVisible}">
+      <Grid Grid.ColumnSpan="2" Grid.RowSpan="2" RowDefinitions="*,320" ColumnDefinitions="*,340">
+        <Grid Grid.Column="0" Background="#0E141A">
           <Border Background="#05080B">
             <!-- Pan slider lives in its own column, not overlapping
                  EditorVideoHost - VideoView is a native child window that
@@ -2307,7 +2307,7 @@
           </Border>
         </Grid>
 
-        <Border Grid.Row="1" Background="#141D24" BorderBrush="#22303A" BorderThickness="0,1,0,0">
+        <Border Grid.Row="1" Grid.ColumnSpan="2" Background="#141D24" BorderBrush="#22303A" BorderThickness="0,1,0,0">
           <Grid RowDefinitions="Auto,*" Margin="8,8,8,8">
             <!-- The docked control row, and the default: exactly the bar that sat
                  here before the hover bar replaced it. Auto row rather than a
@@ -2622,11 +2622,11 @@
       <!-- Permanent editor inspector. This deliberately lives in MainWindow's
            visual tree rather than an owned native window: it cannot be hidden,
            drift during resize, or sit above/below LibVLC unpredictably. -->
-      <Border Grid.Column="1" Background="#111920" BorderBrush="#30404D" BorderThickness="1,0,0,0">
+      <Border Grid.Column="1" Grid.Row="0" Background="#111920" BorderBrush="#30404D" BorderThickness="1,0,0,0">
         <Grid RowDefinitions="Auto,*,Auto">
           <Border Background="#101820" BorderBrush="#263743" BorderThickness="0,0,0,1">
             <TextBlock Text="CLIP DETAILS" Foreground="#EDF4FB" FontSize="17" FontWeight="SemiBold"
-                       VerticalAlignment="Center" Margin="16,0" Height="52" />
+                       VerticalAlignment="Center" Margin="24,0,16,0" Height="64" />
           </Border>
 
           <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
@@ -2657,14 +2657,14 @@
           <Border Grid.Row="2" Background="#101820" BorderBrush="#263743" BorderThickness="0,1,0,0" Padding="16">
             <StackPanel Spacing="8">
               <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
-                <Button Content="Save Trim" Height="38" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                <Button Content="Save Trim" Height="38" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                         IsEnabled="{Binding !IsExporting}" ToolTip.Tip="Replace the original clip with just the trimmed range"
                         Click="SaveTrimButton_OnClick" />
                 <Button Grid.Column="1" Content="{Binding ExportButtonText}" Classes="primaryButton" Height="38"
-                        HorizontalContentAlignment="Center" VerticalContentAlignment="Center" IsEnabled="{Binding !IsExporting}"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" IsEnabled="{Binding !IsExporting}"
                         Click="ExportButton_OnClick" />
               </Grid>
-              <Button Content="Share" Height="38" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+              <Button Content="Share" Height="38" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                       IsEnabled="{Binding !IsExporting}"
                       ToolTip.Tip="Re-encode to a size cap for Discord and drag the result straight into another app"
                       Click="ShareButton_OnClick" />
