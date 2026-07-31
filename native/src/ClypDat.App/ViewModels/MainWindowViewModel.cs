@@ -316,6 +316,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ClipCardViewModel> AllClips { get; }
     public bool IsRestoringLibraryCache => _isRestoringCachedLibrary;
     public ObservableCollection<TrackLaneViewModel> TimelineTracks { get; }
+    public int TimelineTrackCount => Math.Max(1, TimelineTracks.Count);
     public ObservableCollection<AudioDeviceOption> ChatAudioDevices { get; }
     public ObservableCollection<AudioDeviceOption> MicrophoneDevices { get; }
     public ObservableCollection<ProcessOption> OpenProcesses { get; }
@@ -4790,6 +4791,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             TimelineTracks.Insert(0, new TrackLaneViewModel(0, "Video", "video", "#05C7B7", false) { Filmstrip = filmstrip });
         }
+
+        OnPropertyChanged(nameof(TimelineTrackCount));
 
         ApplyClipEditState(media.Path);
         IsEditorVisible = showEditor;

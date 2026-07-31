@@ -636,6 +636,7 @@ public sealed partial class MainWindow : Window
     private void LibraryGameSectionButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
+        if (ViewModel.IsEditorVisible) CloseEditorButton_OnClick(sender, e);
         if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings();
         var key = (sender as Button)?.DataContext as FilterOptionViewModel;
         ViewModel.SelectGameSection(key?.Key);
@@ -7504,7 +7505,9 @@ public sealed partial class MainWindow : Window
         // Thin lines confined to just the video lane (TrackLaneViewModel's
         // video LaneHeight), not the full track stack - matches
         // TrimSelection's old scope, just restyled.
-        const double videoLaneHeight = 42;
+        var videoLaneHeight = ViewModel is { TimelineTrackCount: > 0 }
+            ? Math.Max(0, (TimelineSurface.Bounds.Height / ViewModel.TimelineTrackCount) - 6)
+            : 0;
         // Matches TrimStartCap/TrimEndCap's Points width (see XAML) - read as
         // a constant rather than Bounds.Width since the Polygon may not have
         // been measured yet on the very first call.
