@@ -203,9 +203,12 @@
                      TextTrimming="CharacterEllipsis"
                      Margin="10,0,0,0" />
           <Border Grid.Column="16" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding HasSelectedCaptureBackend}" Margin="10,0,0,0" />
-          <Button Grid.Column="17" Classes="linkButton" Click="EditorPathButton_OnClick" IsVisible="{Binding IsEditorVisible}" Margin="10,0,0,0">
-            <TextBlock Text="{Binding SelectedVideoPath}" TextTrimming="CharacterEllipsis" />
-          </Button>
+          <StackPanel Grid.Column="17" Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsEditorVisible}" Margin="10,0,0,0">
+            <Button Classes="linkButton" Content="Clip Details" Click="EditorInfoSidebarButton_OnClick" ToolTip.Tip="Open Clip Details" />
+            <Button Classes="linkButton" Click="EditorPathButton_OnClick">
+              <TextBlock Text="{Binding SelectedVideoPath}" TextTrimming="CharacterEllipsis" />
+            </Button>
+          </StackPanel>
         </Grid>
 
         <!-- The active-game chip that used to sit here is gone: the Library
@@ -236,7 +239,7 @@
     <Grid Grid.Row="1" ColumnDefinitions="Auto,*">
       <Border x:Name="EditorSidebarRail" Grid.Column="0" Width="{Binding EditorSidebarWidth}" Background="#0D1116" BorderBrush="#1E2A33" BorderThickness="0,0,1,0">
         <Grid RowDefinitions="*,Auto">
-          <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Hidden" IsVisible="{Binding !IsEditorVisible}">
+          <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Hidden">
             <StackPanel Margin="0,16,0,16" Spacing="2">
               <Button Classes="railIconButton" Classes.active="{Binding IsAllClipsActive}" Click="LibraryClipTypeSectionButton_OnClick" ToolTip.Tip="All Clips">
                 <PathIcon Data="M4,4h4v4H4V4z M10,4h4v4h-4V4z M16,4h4v4h-4V4z M4,10h4v4H4v-4z M10,10h4v4h-4v-4z M16,10h4v4h-4v-4z M4,16h4v4H4v-4z M10,16h4v4h-4v-4z M16,16h4v4h-4v-4z" Width="18" Height="18" />
@@ -519,7 +522,7 @@
             </Border.Background>
           </Border>
 
-          <StackPanel Grid.Row="0" Margin="0,16,0,16" Spacing="6" IsVisible="{Binding IsEditorVisible}">
+          <StackPanel Grid.Row="0" Margin="0,16,0,16" Spacing="6" IsVisible="False">
             <Button Classes="editorRailButton" Classes.active="{Binding IsEditorInfoSidebarActive}" Click="EditorInfoSidebarButton_OnClick" ToolTip.Tip="Info">
               <StackPanel Spacing="4">
                 <PathIcon Data="M11,17H13V11H11V17M12,2C6.48,2 2,6.48 2,12C2,17.52 6.48,22 12,22C17.52,22 22,17.52 22,12C22,6.48 17.52,2 12,2M12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4M11,9H13V7H11V9Z" Width="21" Height="21" />
@@ -2423,10 +2426,14 @@
                   </StackPanel>
                 </Border>
                 <ItemsControl Grid.Row="1" ItemsSource="{Binding TimelineTracks}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <UniformGrid Rows="{Binding TimelineTrackCount}" />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                      <Border Height="{Binding LaneHeight}"
-                              Margin="0,0,0,6"
+                      <Border Margin="0,0,0,6"
                               Background="#141D24"
                               BorderBrush="#232F3A"
                               BorderThickness="1"
@@ -2535,10 +2542,14 @@
                       PointerMoved="TimelineSurface_OnPointerMoved"
                       PointerReleased="TimelineSurface_OnPointerReleased">
                   <ItemsControl ItemsSource="{Binding TimelineTracks}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <UniformGrid Rows="{Binding TimelineTrackCount}" />
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                       <DataTemplate>
-                        <controls:TimelineLaneControl Height="{Binding LaneHeight}"
-                                                      Margin="0,0,0,6"
+                        <controls:TimelineLaneControl Margin="0,0,0,6"
                                                       LaneBrush="{Binding Color}"
                                                       IsVideo="{Binding IsVideo}"
                                                       Peaks="{Binding WaveformPeaks}"
