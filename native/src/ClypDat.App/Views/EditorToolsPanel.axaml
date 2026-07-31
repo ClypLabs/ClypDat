@@ -70,10 +70,10 @@
             <StackPanel Spacing="9">
               <TextBlock Text="OUTPUT" Foreground="#9EC6F0" FontSize="11" FontWeight="Bold" />
               <TextBlock Text="Save a trimmed replacement or export a new clip." Foreground="#8EA1B6" FontSize="12" TextWrapping="Wrap" />
-              <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
-                <Button Content="Save Trim" Height="38" IsEnabled="{Binding !IsExporting}"
+              <Grid ColumnDefinitions="*,*" ColumnSpacing="8" HorizontalAlignment="Stretch">
+                <Button Content="Save Trim" Height="38" HorizontalAlignment="Stretch" IsEnabled="{Binding !IsExporting}"
                         ToolTip.Tip="Replace the original clip with just the trimmed range" Click="SaveTrimButton_OnClick" />
-                <Button Grid.Column="1" Name="ExportButton" Content="{Binding ExportButtonText}" Classes="primaryButton" Height="38"
+                <Button Grid.Column="1" Name="ExportButton" Content="{Binding ExportButtonText}" Classes="primaryButton" Height="38" HorizontalAlignment="Stretch"
                         IsEnabled="{Binding !IsExporting}" Click="ExportButton_OnClick" />
               </Grid>
             </StackPanel>
