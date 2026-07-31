@@ -1,0 +1,75 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             xmlns:opconv="using:ClypDat.App.Converters"
+             xmlns:vm="using:ClypDat.App.ViewModels"
+             x:Class="ClypDat.App.Views.EditorToolsPanel"
+             x:DataType="vm:MainWindowViewModel"
+             KeyDown="Panel_OnKeyDown">
+  <Border Background="#111920" BorderBrush="#293742" BorderThickness="0,0,1,0" BoxShadow="8 0 24 0 #66000000">
+    <Grid RowDefinitions="Auto,*">
+      <Border Background="#0C1319" BorderBrush="#23313C" BorderThickness="0,0,0,1">
+        <Grid ColumnDefinitions="*,Auto" Height="56">
+          <TextBlock Text="{Binding ActiveEditorSidebarSection, Converter={x:Static opconv:EditorSidebarSectionTitleConverter.Instance}}"
+                     Foreground="#EDF4FB" FontSize="16" FontWeight="Bold" VerticalAlignment="Center" Margin="20,0" />
+          <Button Grid.Column="1" Classes="editorToolsClose" Click="CloseButton_OnClick" ToolTip.Tip="Close panel">
+            <TextBlock Text="✕" Margin="0,-2,0,0" />
+          </Button>
+        </Grid>
+      </Border>
+
+      <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+        <Grid>
+        <StackPanel Margin="20" Spacing="14" IsVisible="{Binding IsEditorInfoSidebarActive}">
+          <TextBlock Text="CLIP DETAILS" Foreground="#C4D9F2" FontSize="12" FontWeight="Bold" />
+          <TextBlock Text="Title" Foreground="#93A6B8" FontSize="12" />
+          <TextBox Text="{Binding EditorTitle, Mode=TwoWay}"
+                   Foreground="#EDF4FB" FontSize="14" FontWeight="Bold"
+                   Background="#0D151C" BorderBrush="#17232D"
+                   KeyDown="TitleBox_OnKeyDown" />
+          <TextBlock Text="Description" Foreground="#93A6B8" FontSize="12" />
+          <TextBox Text="{Binding EditorDescription, Mode=TwoWay}"
+                   MinHeight="86" AcceptsReturn="True" TextWrapping="Wrap"
+                   Watermark="Type description here"
+                   Background="#0D151C" BorderBrush="#17232D" Foreground="#D6E2F0" />
+          <Border Height="1" Background="#22303A" Margin="0,4" />
+          <TextBlock Text="{Binding SelectedCreated}" Foreground="#B8C7D8" FontSize="12" TextWrapping="Wrap" />
+          <TextBlock Text="{Binding SelectedQuality}" Foreground="#B8C7D8" FontSize="12" TextWrapping="Wrap" />
+          <TextBlock Text="{Binding SelectedSize}" Foreground="#B8C7D8" FontSize="12" TextWrapping="Wrap" />
+          <TextBlock Foreground="#B8C7D8" FontSize="12">
+            <Run Text="Duration: " /><Run Text="{Binding DurationLabel}" />
+          </TextBlock>
+          <TextBlock Text="{Binding SelectedCaptureBackend}" Foreground="#8EA1B6" FontSize="12" TextWrapping="Wrap"
+                     IsVisible="{Binding SelectedCaptureBackend, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+        </StackPanel>
+
+        <StackPanel Margin="20" Spacing="14" IsVisible="{Binding IsEditorEffectsSidebarActive}">
+          <TextBlock Text="EFFECTS" Foreground="#C4D9F2" FontSize="12" FontWeight="Bold" />
+          <Border Background="#0D151C" BorderBrush="#22303A" BorderThickness="1" CornerRadius="9" Padding="16">
+            <StackPanel Spacing="7">
+              <PathIcon Data="M12,2L14.7,9.3L22,12L14.7,14.7L12,22L9.3,14.7L2,12L9.3,9.3L12,2Z"
+                        Width="26" Height="26" Foreground="#8EA1B6" />
+              <TextBlock Text="Effects coming soon" Foreground="#EDF4FB" FontWeight="Bold" FontSize="14" />
+              <TextBlock Text="Crop, blur, text, speed, and freeze-frame tools will live here."
+                         Foreground="#8EA1B6" FontSize="12" TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
+        <StackPanel Margin="20" Spacing="14" IsVisible="{Binding IsEditorExportSidebarActive}">
+          <TextBlock Text="EXPORT" Foreground="#C4D9F2" FontSize="12" FontWeight="Bold" />
+          <TextBlock Text="Export codec" Foreground="#93A6B8" FontSize="12" />
+          <ComboBox Classes="settingsInput" ItemsSource="{Binding ExportCodecs}" SelectedItem="{Binding SelectedExportCodec}"
+                    Width="180" HorizontalAlignment="Left" />
+          <Border Height="1" Background="#22303A" Margin="0,4" />
+          <Button Content="Save Trim" Height="36" IsEnabled="{Binding !IsExporting}"
+                  ToolTip.Tip="Replace the original clip with just the trimmed range"
+                  Click="SaveTrimButton_OnClick" />
+          <Button Name="ExportButton" Content="{Binding ExportButtonText}" Classes="primaryButton" Height="36"
+                  IsEnabled="{Binding !IsExporting}" Click="ExportButton_OnClick" />
+        </StackPanel>
+        </Grid>
+      </ScrollViewer>
+    </Grid>
+  </Border>
+</UserControl>
