@@ -1263,16 +1263,15 @@
     <Setter Property="Background" Value="{StaticResource AccentSelectedHoverBrush}" />
   </Style>
   <Style Selector="Button.editorToolsClose">
-    <Setter Property="Width" Value="48" />
-    <Setter Property="Height" Value="56" />
+    <Setter Property="Width" Value="28" />
+    <Setter Property="Height" Value="28" />
     <Setter Property="Padding" Value="0" />
     <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="Background" Value="#00141D24" />
+    <Setter Property="Background" Value="#00101820" />
     <Setter Property="Foreground" Value="#B8C7D8" />
-    <Setter Property="FontSize" Value="15" />
   </Style>
   <Style Selector="Button.editorToolsClose:pointerover">
-    <Setter Property="Background" Value="#26323D" />
+    <Setter Property="Background" Value="#263C4C" />
     <Setter Property="Foreground" Value="#EDF4FB" />
   </Style>
   <!-- Shared by every volume slider - per-track lanes AND both master

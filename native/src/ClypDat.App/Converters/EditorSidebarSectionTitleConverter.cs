@@ -10,9 +10,9 @@ public sealed class EditorSidebarSectionTitleConverter : IValueConverter
 
     public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture) => value switch
     {
-        EditorSidebarSection.Info => "INFO",
-        EditorSidebarSection.Effects => "EFFECTS",
-        EditorSidebarSection.Export => "EXPORT",
+        EditorSidebarSection.Info => "Info",
+        EditorSidebarSection.Effects => "Effects",
+        EditorSidebarSection.Export => "Export",
         _ => string.Empty
     };
 
