@@ -5311,6 +5311,7 @@ public sealed partial class MainWindow : Window
         tools.TitleSubmitted += async (_, _) => await SubmitEditorTitleAsync();
         tools.SaveTrimRequested += async (_, _) => await SaveTrimToOriginalAsync();
         tools.ExportRequested += async (_, _) => await ExportCurrentClipAsync();
+        tools.ShareRequested += async (_, _) => await ShareCurrentClipAsync();
         var window = new Window
         {
             SystemDecorations = SystemDecorations.None,

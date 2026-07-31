@@ -839,7 +839,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool IsLibraryVisible => !IsEditorVisible && !IsSettingsVisible;
 
-    public double EditorSidebarWidth => IsEditorVisible ? 80 : 64;
+    public double EditorSidebarWidth => 64;
 
     public EditorSidebarSection? ActiveEditorSidebarSection
     {
