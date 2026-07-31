@@ -5235,7 +5235,9 @@ public sealed partial class MainWindow : Window
         RepositionEditorToolsPanel(panel, force: true);
         if (!panel.IsVisible) panel.Show(this);
         RepositionEditorToolsPanel(panel, force: true);
-        ApplyCaptureExclusion(panel, ViewModel.Settings.ExcludeOverlaysFromCapture);
+        // This is editor UI, not a HUD notification. It must remain visible in
+        // screenshots and screen shares even when HUD overlays are excluded.
+        ApplyCaptureExclusion(panel, exclude: false);
     }
 
     private void HideEditorToolsPanel()
@@ -5252,18 +5254,23 @@ public sealed partial class MainWindow : Window
 
     private void RepositionEditorToolsPanel(Window panel, bool force)
     {
-        if (EditorSidebarRail.Bounds.Width <= 0 || EditorSidebarRail.Bounds.Height <= 0) return;
-        var topLeft = EditorSidebarRail.PointToScreen(new Point(EditorSidebarRail.Bounds.Width, 0));
-        var height = Math.Max(1, EditorSidebarRail.Bounds.Height);
+        if (EditorVideoHost.Bounds.Width <= 0 || EditorVideoHost.Bounds.Height <= 0) return;
+        var topLeft = EditorVideoHost.PointToScreen(new Point(0, 0));
+        var bottomRight = EditorVideoHost.PointToScreen(new Point(EditorVideoHost.Bounds.Width, EditorVideoHost.Bounds.Height));
+        var height = Math.Max(1, bottomRight.Y - topLeft.Y);
         var handle = NativeHandleOf(panel);
         if (!force && handle != IntPtr.Zero && GetWindowRect(handle, out var rect) &&
             rect.Left == topLeft.X && rect.Top == topLeft.Y &&
-            Math.Abs(panel.Width - EditorToolsPanelWidth) < 0.5 && Math.Abs(panel.Height - height) < 0.5) return;
+            rect.Right - rect.Left == EditorToolsPanelWidth && rect.Bottom == bottomRight.Y) return;
 
         panel.Position = topLeft;
         panel.Width = EditorToolsPanelWidth;
-        panel.Height = height;
-        if (handle != IntPtr.Zero) SetWindowPos(handle, HwndTop, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
+        panel.Height = Math.Max(1, EditorVideoHost.Bounds.Height);
+        // PointToScreen and native bounds are physical pixels. Drive this
+        // window with that same coordinate system so its lower edge exactly
+        // meets the video/timeline separator at every DPI scale.
+        if (handle != IntPtr.Zero)
+            SetWindowPos(handle, HwndTop, topLeft.X, topLeft.Y, (int)EditorToolsPanelWidth, height, SwpNoActivate);
     }
 
     private Window EnsureEditorToolsPanelWindow()
@@ -5287,7 +5294,11 @@ public sealed partial class MainWindow : Window
             DataContext = DataContext,
             Content = tools
         };
-        window.Opened += (_, _) => RepositionEditorToolsPanel(window, force: true);
+        window.Opened += (_, _) =>
+        {
+            RepositionEditorToolsPanel(window, force: true);
+            ApplyCaptureExclusion(window, exclude: false);
+        };
         _editorToolsPanelWindow = window;
         return window;
     }
@@ -6885,7 +6896,19 @@ public sealed partial class MainWindow : Window
         if (handle != IntPtr.Zero)
         {
             SetWindowPos(handle, HwndTop, position.X, position.Y, 0, 0, SwpNoSize | SwpNoActivate);
+            RaiseEditorToolsPanelAboveHoverBar();
         }
+    }
+
+    // Both are owned windows. The hover bar reasserts its z-order whenever it
+    // shows or moves, so restore the open drawer immediately afterwards while
+    // leaving every uncovered part of the hover bar interactive.
+    private void RaiseEditorToolsPanelAboveHoverBar()
+    {
+        if (_editorToolsPanelWindow is not { IsVisible: true } panel) return;
+        var handle = NativeHandleOf(panel);
+        if (handle != IntPtr.Zero)
+            SetWindowPos(handle, HwndTop, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
     }
 
     // Contents of the floating hover bar. The docked alternative is plain XAML
