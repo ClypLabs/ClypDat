@@ -34,6 +34,7 @@ public sealed class TrackLaneViewModel : ViewModelBase
     // than that so the frames are readable, but not as tall as the audio
     // lanes either (64 read as too dominant next to them).
     public double LaneHeight => IsVideo ? 42 : 56;
+    public Thickness LabelMargin => IsAudio ? new Thickness(0) : new Thickness(0, 3, 0, 0);
     public string VolumeLabel => $"{VolumePercent:0}%";
     public Thickness VolumeBadgeMargin => new(VolumeBadgeX, -8, 0, 0);
     public string HeaderClass => IsAudio ? "audioHeader" : "videoHeader";

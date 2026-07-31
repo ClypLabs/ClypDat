@@ -2443,7 +2443,7 @@
                             <TextBlock Text="{Binding Label}"
                                        Foreground="#D4E0EA"
                                        FontSize="11"
-                                       Margin="0,3,0,0"
+                                       Margin="{Binding LabelMargin}"
                                        VerticalAlignment="Center"
                                        TextTrimming="CharacterEllipsis" />
                             <!-- Only shown once a track has actually been moved off
