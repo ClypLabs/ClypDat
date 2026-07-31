@@ -2426,7 +2426,7 @@
                 <ItemsControl Grid.Row="1" ItemsSource="{Binding TimelineTracks}">
                   <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
-                      <UniformGrid Rows="{Binding TimelineTrackCount}" />
+                      <controls:TimelineTracksPanel />
                     </ItemsPanelTemplate>
                   </ItemsControl.ItemsPanel>
                   <ItemsControl.ItemTemplate>
@@ -2437,7 +2437,7 @@
                               BorderThickness="1"
                               CornerRadius="8"
                               ClipToBounds="False">
-                        <Grid Margin="8,5" RowDefinitions="Auto,36" ColumnDefinitions="18,10,*">
+                        <Grid Margin="8,5" RowDefinitions="Auto,Auto" ColumnDefinitions="18,10,*">
                           <Grid Grid.ColumnSpan="3" ColumnDefinitions="*,Auto">
                             <TextBlock Text="{Binding Label}"
                                        Foreground="#D4E0EA"
@@ -2542,7 +2542,7 @@
                   <ItemsControl ItemsSource="{Binding TimelineTracks}">
                     <ItemsControl.ItemsPanel>
                       <ItemsPanelTemplate>
-                        <UniformGrid Rows="{Binding TimelineTrackCount}" />
+                      <controls:TimelineTracksPanel />
                       </ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
