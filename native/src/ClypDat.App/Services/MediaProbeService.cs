@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text.Json;
 
@@ -626,6 +627,7 @@ public sealed class MediaProbeService
     // distortion despite being cached as a single image.
     public const int FilmstripFrameCount = 10;
     private const int FilmstripFrameHeight = 160;
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> FilmstripLocks = new(StringComparer.OrdinalIgnoreCase);
 
     // Each frame is grabbed with its OWN -ss seek (fast keyframe seek, only
     // decodes a handful of frames around the target) - not a single `fps`
@@ -635,21 +637,28 @@ public sealed class MediaProbeService
     // actually wanted. Same reasoning as EnsureThumbnailAsync's -ss usage.
     // The combine-into-one-strip pass afterward reads only these small
     // already-extracted JPEGs, not the source video, so it's effectively free.
-    public async Task<string> EnsureFilmstripAsync(string filePath, TimeSpan duration)
+    public async Task<string> EnsureFilmstripAsync(string filePath, TimeSpan duration, CancellationToken cancellationToken = default)
     {
         var output = GetFilmstripPath(filePath);
         if (File.Exists(output)) return output;
         if (duration <= TimeSpan.Zero) return string.Empty;
 
-        var tempDir = Path.Combine(Path.GetTempPath(), $"clypdat-filmstrip-{Guid.NewGuid():N}");
+        var generationLock = FilmstripLocks.GetOrAdd(output, _ => new SemaphoreSlim(1, 1));
+        await generationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (File.Exists(output)) return output;
+
+            var tempDir = Path.Combine(Path.GetTempPath(), $"clypdat-filmstrip-{Guid.NewGuid():N}");
+            try
+            {
             Directory.CreateDirectory(tempDir);
 
             for (var i = 0; i < FilmstripFrameCount; i++)
             {
                 var seek = (i + 0.5) / FilmstripFrameCount * duration.TotalSeconds;
                 var framePath = Path.Combine(tempDir, $"f{i:0000}.jpg");
+                cancellationToken.ThrowIfCancellationRequested();
                 var frameResult = await RunProcessAsync("ffmpeg", new[]
                 {
                     "-y",
@@ -659,7 +668,7 @@ public sealed class MediaProbeService
                     "-vf", $"scale=-2:{FilmstripFrameHeight}",
                     "-q:v", "2",
                     framePath
-                });
+                }, cancellationToken);
 
                 if (frameResult.ExitCode != 0 || !File.Exists(framePath))
                 {
@@ -668,6 +677,7 @@ public sealed class MediaProbeService
                 }
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             var combineResult = await RunProcessAsync("ffmpeg", new[]
             {
                 "-y",
@@ -677,7 +687,7 @@ public sealed class MediaProbeService
                 "-update", "1",
                 "-q:v", "2",
                 output
-            });
+            }, cancellationToken);
 
             if (combineResult.ExitCode != 0 || !File.Exists(output))
             {
@@ -687,14 +697,23 @@ public sealed class MediaProbeService
 
             return output;
         }
-        catch (Exception error)
-        {
-            AppLog.Error($"Filmstrip generation failed for {filePath}", error);
-            return string.Empty;
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception error)
+            {
+                AppLog.Error($"Filmstrip generation failed for {filePath}", error);
+                return string.Empty;
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
         }
         finally
         {
-            try { Directory.Delete(tempDir, true); } catch { }
+            generationLock.Release();
         }
     }
 

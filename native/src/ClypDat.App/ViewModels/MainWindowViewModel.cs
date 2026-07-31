@@ -21,6 +21,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private CancellationTokenSource? _waveformCts;
     private CancellationTokenSource? _thumbnailRegenCts;
     private CancellationTokenSource? _filmstripCts;
+    private CancellationTokenSource? _backgroundFilmstripCts;
+    // Start paused until first detector result arrives, so startup cannot
+    // briefly launch ffmpeg before a foreground game is known.
+    private bool _gameIsActive = true;
     private FileSystemWatcher? _libraryWatcher;
     private DispatcherTimer? _libraryFolderRetryTimer;
     private readonly DispatcherTimer _libraryRefreshDebounce;
@@ -3301,6 +3305,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _cachedLibraryRestoreCts?.Dispose();
         _cachedLibraryRestoreCts = null;
         CancelLibraryHydration();
+        _backgroundFilmstripCts?.Cancel();
+        _backgroundFilmstripCts?.Dispose();
+        _backgroundFilmstripCts = null;
         _waveformCts?.Cancel();
         _waveformCts?.Dispose();
         _waveformCts = null;
@@ -5861,6 +5868,55 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _libraryHydrationCts = null;
     }
 
+    public void SetGameActiveForTimelineHydration(bool active)
+    {
+        if (_gameIsActive == active) return;
+        _gameIsActive = active;
+        if (active)
+        {
+            _backgroundFilmstripCts?.Cancel();
+            return;
+        }
+        StartBackgroundFilmstripHydration();
+    }
+
+    private void StartBackgroundFilmstripHydration()
+    {
+        if (_gameIsActive || _backgroundFilmstripCts is not null) return;
+        var cts = new CancellationTokenSource();
+        _backgroundFilmstripCts = cts;
+        _ = HydrateMissingFilmstripsAsync(cts.Token);
+    }
+
+    private async Task HydrateMissingFilmstripsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var clips = AllClips.Where(clip => string.IsNullOrEmpty(clip.Media.FilmstripPath)).ToArray();
+            if (clips.Length > 0) AppLog.Info($"Idle timeline hydration: {clips.Length} filmstrip(s).");
+            foreach (var clip in clips)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var path = await _mediaProbe.EnsureFilmstripAsync(clip.Path, clip.Duration, cancellationToken).ConfigureAwait(false);
+                if (string.IsNullOrEmpty(path)) continue;
+                await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(clip.Media with { FilmstripPath = path }, reloadSidecars: false));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            AppLog.Info("Idle timeline hydration paused for active game.");
+        }
+        finally
+        {
+            if (_backgroundFilmstripCts?.Token == cancellationToken)
+            {
+                _backgroundFilmstripCts.Dispose();
+                _backgroundFilmstripCts = null;
+                if (!_gameIsActive) StartBackgroundFilmstripHydration();
+            }
+        }
+    }
+
     // See RefreshLibraryAsync's early-return - only ever scheduled while the
     // configured library folder can't be found, and self-cancels the
     // instant a refresh succeeds. One in-flight timer at a time (a resize/
@@ -6085,7 +6141,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         try
         {
-            var filmstripPath = await _mediaProbe.EnsureFilmstripAsync(media.Path, media.Duration).ConfigureAwait(false);
+            var filmstripPath = await _mediaProbe.EnsureFilmstripAsync(media.Path, media.Duration, cancellationToken).ConfigureAwait(false);
             if (cancellationToken.IsCancellationRequested || string.IsNullOrEmpty(filmstripPath)) return;
 
             await Dispatcher.UIThread.InvokeAsync(() =>
@@ -6247,7 +6303,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var needFilmstrip = clips.Where(clip => string.IsNullOrEmpty(clip.Media.FilmstripPath)).ToArray();
 
             _hydrationOverallCompleted = 0;
-            _hydrationOverallTotal = needProbe.Length + needThumbnail.Length + needFilmstrip.Length;
+            _hydrationOverallTotal = needProbe.Length + needThumbnail.Length;
             var pending = _hydrationOverallTotal;
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
@@ -6261,7 +6317,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 return;
             }
 
-            AppLog.Info($"Library hydration: {needProbe.Length} to probe, {needThumbnail.Length} thumbnails, {needFilmstrip.Length} filmstrips (of {clips.Count} clips).");
+            AppLog.Info($"Library hydration: {needProbe.Length} to probe, {needThumbnail.Length} thumbnails; filmstrips wait for idle (of {clips.Count} clips).");
 
             await RunHydrationPassAsync(needProbe, "Loading clip info", cancellationToken,
                 async clip =>
@@ -6282,14 +6338,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(clip.Media with { ThumbnailPath = path }, reloadSidecars: false));
                 });
 
-            needFilmstrip = clips.Where(clip => string.IsNullOrEmpty(clip.Media.FilmstripPath)).ToArray();
-            await RunHydrationPassAsync(needFilmstrip, "Loading timelines", cancellationToken,
-                async clip =>
-                {
-                    var path = await _mediaProbe.EnsureFilmstripAsync(clip.Path, clip.Duration);
-                    if (string.IsNullOrEmpty(path)) return;
-                    await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(clip.Media with { FilmstripPath = path }, reloadSidecars: false));
-                });
+            if (!_gameIsActive) StartBackgroundFilmstripHydration();
         }
         catch (OperationCanceledException)
         {

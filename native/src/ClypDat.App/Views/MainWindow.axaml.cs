@@ -403,6 +403,7 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null) return;
         ViewModel.ActiveGameDetection = detection;
         ViewModel.ActiveGame = detection.DisplayName;
+        ViewModel.SetGameActiveForTimelineHydration(detection.IsDetected);
 
         // Cheap per-window resolution now (see ForegroundGameDetector), but no
         // reason to poll as fast while nothing is running - back off to 3s with
@@ -2272,6 +2273,7 @@ public sealed partial class MainWindow : Window
     // wired once in XAML and read whatever's current from here instead of each
     // getting a fresh closure-captured delegate stacked on top of the last one.
     private List<NewClipEntryViewModel> _currentNewClipsEntries = new();
+    private NewClipsDialog? _editorNewClipsDialog;
     // Clips the user has already been shown and dismissed (closed the popup, or
     // clicked one to open it). Without this the popup came straight back for the
     // same clips - a late Full Session VOD landing re-shows it via
@@ -2299,6 +2301,7 @@ public sealed partial class MainWindow : Window
 
         if (entries.Count == 0)
         {
+            CloseEditorNewClipsDialog();
             NewClipsOverlay.IsVisible = false;
             _currentNewClipsEntries = new();
             return;
@@ -2309,6 +2312,7 @@ public sealed partial class MainWindow : Window
         // whole set again for context rather than that one clip alone.
         if (entries.All(entry => _dismissedNewClipPaths.Contains(entry.Path)))
         {
+            CloseEditorNewClipsDialog();
             NewClipsOverlay.IsVisible = false;
             return;
         }
@@ -2326,7 +2330,8 @@ public sealed partial class MainWindow : Window
             (1, _) => "NEW CLIP AND VOD",
             _ => $"{entries.Count} NEW CLIPS AND VODS"
         };
-        NewClipsTitleText.Text = $"{title} ({FormatFileSize(entries.Sum(entry => entry.Clip.SizeBytes))})";
+        var dialogTitle = $"{title} ({FormatFileSize(entries.Sum(entry => entry.Clip.SizeBytes))})";
+        NewClipsTitleText.Text = dialogTitle;
 
         // Checkboxes only earn their place when there is a choice to make.
         var multiple = entries.Count > 1;
@@ -2352,14 +2357,16 @@ public sealed partial class MainWindow : Window
         // (see BuildNewClipCard for the matching card.Width/Margin).
         const int cardWidth = 300;
         const int cardSpacing = 16;
-        NewClipsCardsPanel.ItemWidth = cardWidth + cardSpacing;
-        NewClipsCardsPanel.Children.Clear();
+        var editorDialog = ViewModel.IsEditorVisible;
+        var cardsPanel = editorDialog ? EnsureEditorNewClipsDialog().Cards : NewClipsCardsPanel;
+        cardsPanel.ItemWidth = cardWidth + cardSpacing;
+        cardsPanel.Children.Clear();
         foreach (var entry in entries)
         {
             var card = BuildNewClipCard(entry);
             card.Width = cardWidth;
             card.Margin = new Thickness(0, 0, cardSpacing, cardSpacing);
-            NewClipsCardsPanel.Children.Add(card);
+            cardsPanel.Children.Add(card);
         }
         // +20 for the vertical scrollbar the ScrollViewer reserves once there
         // are enough clips to actually need one (see UpdateCardLayout for the
@@ -2376,7 +2383,18 @@ public sealed partial class MainWindow : Window
         // there is nowhere for it to render without the main window itself
         // showing - bring it forward rather than silently dropping the popup.
         if (!IsVisible) Show();
-        NewClipsOverlay.IsVisible = true;
+        if (editorDialog)
+        {
+            NewClipsOverlay.IsVisible = false;
+            _editorNewClipsDialog!.SetTitle(dialogTitle);
+            _editorNewClipsDialog.Show();
+            HideEditorHoverControls(immediate: true);
+        }
+        else
+        {
+            CloseEditorNewClipsDialog();
+            NewClipsOverlay.IsVisible = true;
+        }
         AppLog.Info($"New Clips popup shown: {entries.Count} clip(s).");
     }
 
@@ -2394,6 +2412,7 @@ public sealed partial class MainWindow : Window
     {
         var count = ChosenNewClips().Length;
         NewClipsDeleteButton.Content = count == 1 ? "Delete clip" : $"Delete {count} clips";
+        if (_editorNewClipsDialog is not null) _editorNewClipsDialog.DeleteButton.Content = NewClipsDeleteButton.Content;
     }
 
     // Hides the popup AND records what was on show, so the same clips can't
@@ -2403,6 +2422,26 @@ public sealed partial class MainWindow : Window
     {
         foreach (var entry in _currentNewClipsEntries) _dismissedNewClipPaths.Add(entry.Path);
         NewClipsOverlay.IsVisible = false;
+        CloseEditorNewClipsDialog();
+    }
+
+    private NewClipsDialog EnsureEditorNewClipsDialog()
+    {
+        if (_editorNewClipsDialog is not null) return _editorNewClipsDialog;
+        _editorNewClipsDialog = new NewClipsDialog(this, NewClipsCloseButton_OnClick, NewClipsDeleteButton_OnClick, NewClipsViewAllButton_OnClick);
+        _editorNewClipsDialog.Closed += (_, _) =>
+        {
+            if (_editorNewClipsDialog is not null) DismissNewClipsDialog();
+            _editorNewClipsDialog = null;
+        };
+        return _editorNewClipsDialog;
+    }
+
+    private void CloseEditorNewClipsDialog()
+    {
+        var dialog = _editorNewClipsDialog;
+        _editorNewClipsDialog = null;
+        dialog?.Close();
     }
 
     private void NewClipsCloseButton_OnClick(object? sender, RoutedEventArgs e) => DismissNewClipsDialog();
