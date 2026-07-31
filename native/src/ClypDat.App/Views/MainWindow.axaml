@@ -2263,14 +2263,34 @@
                     </TransformGroup>
                   </controls:ClickableVideoView.RenderTransform>
                 </controls:ClickableVideoView>
+                <!-- VideoView is hidden while LibVLC decodes its first frame,
+                     allowing this Avalonia image to show instead of native
+                     video's black surface. SelectedThumbnail is swapped
+                     synchronously when a new clip is opened. -->
+                <Image Source="{Binding SelectedThumbnail}"
+                       Stretch="Uniform"
+                       IsHitTestVisible="False">
+                  <Image.IsVisible>
+                    <MultiBinding Converter="{x:Static conv:BoolConverters.And}">
+                      <Binding Path="IsEditorVideoLoading" />
+                      <Binding Path="HasSelectedThumbnail" />
+                    </MultiBinding>
+                  </Image.IsVisible>
+                </Image>
                 <TextBlock Text="Loading"
                            Foreground="#93A6B8"
                            FontSize="16"
                            FontWeight="Bold"
                            HorizontalAlignment="Center"
                            VerticalAlignment="Center"
-                           IsVisible="{Binding IsEditorVideoLoading}"
-                           IsHitTestVisible="False" />
+                           IsHitTestVisible="False">
+                  <TextBlock.IsVisible>
+                    <MultiBinding Converter="{x:Static conv:BoolConverters.And}">
+                      <Binding Path="IsEditorVideoLoading" />
+                      <Binding Path="HasSelectedThumbnail" Converter="{x:Static conv:BoolConverters.Not}" />
+                    </MultiBinding>
+                  </TextBlock.IsVisible>
+                </TextBlock>
               </Grid>
               <!-- Vertical pan, only meaningful once zoomed - see VideoPanY's
                    comment (MainWindowViewModel) for how this maps to an actual
