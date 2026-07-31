@@ -33,14 +33,20 @@
             </StackPanel>
           </Border>
           <Border Background="#151F28" BorderBrush="#293A47" BorderThickness="1" CornerRadius="9" Padding="12">
-            <StackPanel Spacing="7">
-              <TextBlock Text="MEDIA INFORMATION" Foreground="#9EC6F0" FontSize="11" FontWeight="Bold" />
-              <TextBlock Text="{Binding SelectedCreated}" Foreground="#B8C7D8" FontSize="12" TextWrapping="Wrap" />
-              <TextBlock Text="{Binding SelectedQuality}" Foreground="#B8C7D8" FontSize="12" TextWrapping="Wrap" />
-              <TextBlock Text="{Binding SelectedSize}" Foreground="#B8C7D8" FontSize="12" TextWrapping="Wrap" />
-              <TextBlock Foreground="#B8C7D8" FontSize="12"><Run Text="Duration  " /><Run Text="{Binding DurationLabel}" /></TextBlock>
-              <TextBlock Text="{Binding SelectedCaptureBackend}" Foreground="#8EA1B6" FontSize="12" TextWrapping="Wrap"
-                         IsVisible="{Binding SelectedCaptureBackend, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+            <StackPanel Spacing="9">
+              <Border Height="1" Background="#293A47" Margin="0,2" />
+              <TextBlock Text="Export codec" Foreground="#8EA1B6" FontSize="12" />
+              <ComboBox Classes="settingsInput" ItemsSource="{Binding ExportCodecs}" SelectedItem="{Binding SelectedExportCodec}"
+                        HorizontalAlignment="Stretch" />
+              <Border Height="1" Background="#293A47" Margin="0,4" />
+              <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                <Button Content="Save Trim" Height="38" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                        IsEnabled="{Binding !IsExporting}" Click="SaveTrimButton_OnClick" />
+                <Button Grid.Column="1" Name="DetailsExportButton" Content="{Binding ExportButtonText}" Classes="primaryButton" Height="38"
+                        HorizontalContentAlignment="Center" VerticalContentAlignment="Center" IsEnabled="{Binding !IsExporting}" Click="ExportButton_OnClick" />
+              </Grid>
+              <Button Content="Share" Height="38" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                      IsEnabled="{Binding !IsExporting}" Click="ShareButton_OnClick" />
             </StackPanel>
           </Border>
         </StackPanel>

@@ -10,12 +10,14 @@ public sealed partial class EditorToolsPanel : UserControl
     public event EventHandler? TitleSubmitted;
     public event EventHandler? SaveTrimRequested;
     public event EventHandler? ExportRequested;
+    public event EventHandler? ShareRequested;
 
     public EditorToolsPanel() => InitializeComponent();
 
     private void CloseButton_OnClick(object? sender, RoutedEventArgs e) => CloseRequested?.Invoke(this, EventArgs.Empty);
     private void SaveTrimButton_OnClick(object? sender, RoutedEventArgs e) => SaveTrimRequested?.Invoke(this, EventArgs.Empty);
     private void ExportButton_OnClick(object? sender, RoutedEventArgs e) => ExportRequested?.Invoke(this, EventArgs.Empty);
+    private void ShareButton_OnClick(object? sender, RoutedEventArgs e) => ShareRequested?.Invoke(this, EventArgs.Empty);
 
     private void TitleBox_OnKeyDown(object? sender, KeyEventArgs e)
     {
