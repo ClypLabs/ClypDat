@@ -279,7 +279,8 @@ public partial class ShareDialog : Window
 
         ShareThumbnail.IsVisible = false;
         ShareDurationBadge.IsVisible = false;
-        ShareShowInFolderButton.IsEnabled = false;
+        ShareShowInFolderButton.Content = "Cancel";
+        ShareShowInFolderButton.IsEnabled = true;
         ShareResultSizeText.Text = string.Empty;
         ShareProgressPanel.IsVisible = true;
         ShareProgressBar.IsIndeterminate = false;
@@ -436,6 +437,9 @@ public partial class ShareDialog : Window
                 _ = DeleteWithRetryAsync(tempPath);
                 _shareTempPath = null;
                 ShareProgressPanel.IsVisible = false;
+                if (ReferenceEquals(_shareCts, cts)) _shareCts = null;
+                ShareShowInFolderButton.Content = "Show in folder";
+                ShareShowInFolderButton.IsEnabled = false;
                 ShareStatusText.Text = string.IsNullOrWhiteSpace(result.Error) ? "Encode failed." : result.Error;
                 return;
             }
@@ -450,6 +454,8 @@ public partial class ShareDialog : Window
             // the trade-off a bigger size buys immediately obvious.
             var quality = $"{spec.Height}p{spec.Fps:0}{(useAv1 ? " · AV1" : string.Empty)}";
             ShareResultSizeText.Text = $"{actualMb:0.#} MB · {quality}";
+            if (ReferenceEquals(_shareCts, cts)) _shareCts = null;
+            ShareShowInFolderButton.Content = "Show in folder";
             ShareShowInFolderButton.IsEnabled = true;
 
             ShareThumbnail.Source = _viewModel.SelectedThumbnail;
@@ -462,6 +468,9 @@ public partial class ShareDialog : Window
             if (cts.IsCancellationRequested) return;
             AppLog.Error("Share: encode failed", error);
             ShareProgressPanel.IsVisible = false;
+            if (ReferenceEquals(_shareCts, cts)) _shareCts = null;
+            ShareShowInFolderButton.Content = "Show in folder";
+            ShareShowInFolderButton.IsEnabled = false;
             ShareStatusText.Text = "Encode failed.";
         }
     }
@@ -471,6 +480,18 @@ public partial class ShareDialog : Window
 
     private void ShowInFolderButton_OnClick(object? sender, RoutedEventArgs e)
     {
+        if (_shareCts is { IsCancellationRequested: false })
+        {
+            _shareCts.Cancel();
+            if (_shareTempPath is { } tempPath) _ = DeleteWithRetryAsync(tempPath);
+            _shareTempPath = null;
+            ShareProgressPanel.IsVisible = false;
+            ShareShowInFolderButton.Content = "Show in folder";
+            ShareShowInFolderButton.IsEnabled = false;
+            ShareStatusText.Text = "Encoding cancelled.";
+            return;
+        }
+
         if (_shareTempPath is { } path) ExplorerService.Open(path, selectFile: true);
     }
 
