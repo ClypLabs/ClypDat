@@ -4796,7 +4796,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         ApplyClipEditState(media.Path);
         IsEditorVisible = showEditor;
-        if (showEditor) CloseEditorSidebar();
+        if (showEditor) OpenEditorSidebar(EditorSidebarSection.Info);
         StartFilmstripLoad(media);
         StartWaveformLoad(media);
     }
