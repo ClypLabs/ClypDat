@@ -233,10 +233,10 @@
          open, so opening a clip took the sidebar away with it. Sharing one grid
          keeps the sidebar mounted and unmovable across every view, and the three
          column-1 children just gate their own visibility instead. -->
-    <Grid Grid.Row="1" ColumnDefinitions="64,*">
-      <Border Grid.Column="0" Background="#0D1116" BorderBrush="#1E2A33" BorderThickness="0,0,1,0">
+    <Grid Grid.Row="1" ColumnDefinitions="Auto,*">
+      <Border x:Name="EditorSidebarRail" Grid.Column="0" Width="{Binding EditorSidebarWidth}" Background="#0D1116" BorderBrush="#1E2A33" BorderThickness="0,0,1,0">
         <Grid RowDefinitions="*,Auto">
-          <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Hidden">
+          <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Hidden" IsVisible="{Binding !IsEditorVisible}">
             <StackPanel Margin="0,16,0,16" Spacing="2">
               <Button Classes="railIconButton" Classes.active="{Binding IsAllClipsActive}" Click="LibraryClipTypeSectionButton_OnClick" ToolTip.Tip="All Clips">
                 <PathIcon Data="M4,4h4v4H4V4z M10,4h4v4h-4V4z M16,4h4v4h-4V4z M4,10h4v4H4v-4z M10,10h4v4h-4v-4z M16,10h4v4h-4v-4z M4,16h4v4H4v-4z M10,16h4v4h-4v-4z M16,16h4v4h-4v-4z" Width="18" Height="18" />
@@ -519,8 +519,35 @@
             </Border.Background>
           </Border>
 
+          <StackPanel Grid.Row="0" Margin="0,16,0,16" Spacing="6" IsVisible="{Binding IsEditorVisible}">
+            <Button Classes="editorRailButton" Classes.active="{Binding IsEditorInfoSidebarActive}" Click="EditorInfoSidebarButton_OnClick" ToolTip.Tip="Info">
+              <StackPanel Spacing="4">
+                <PathIcon Data="M11,17H13V11H11V17M12,2C6.48,2 2,6.48 2,12C2,17.52 6.48,22 12,22C17.52,22 22,17.52 22,12C22,6.48 17.52,2 12,2M12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4M11,9H13V7H11V9Z" Width="21" Height="21" />
+                <TextBlock Text="Info" />
+              </StackPanel>
+            </Button>
+            <Button Classes="editorRailButton" Classes.active="{Binding IsEditorEffectsSidebarActive}" Click="EditorEffectsSidebarButton_OnClick" ToolTip.Tip="Effects">
+              <StackPanel Spacing="4">
+                <PathIcon Data="M12,2L14.7,9.3L22,12L14.7,14.7L12,22L9.3,14.7L2,12L9.3,9.3L12,2Z" Width="21" Height="21" />
+                <TextBlock Text="Effects" />
+              </StackPanel>
+            </Button>
+            <Button Classes="editorRailButton" Classes.active="{Binding IsEditorExportSidebarActive}" Click="EditorExportSidebarButton_OnClick" ToolTip.Tip="Export">
+              <StackPanel Spacing="4">
+                <PathIcon Data="M5,20H19V18H5V20M19,9H15V3H9V9H5L12,16L19,9Z" Width="21" Height="21" />
+                <TextBlock Text="Export" />
+              </StackPanel>
+            </Button>
+            <Button Classes="editorRailButton" Click="EditorShareSidebarButton_OnClick" ToolTip.Tip="Share" IsEnabled="{Binding !IsExporting}">
+              <StackPanel Spacing="4">
+                <PathIcon Data="M18,16.08C17.24,16.08 16.56,16.38 16.04,16.85L8.91,12.7C8.96,12.47 9,12.24 9,12C9,11.76 8.96,11.53 8.91,11.3L15.96,7.19C16.5,7.69 17.21,8 18,8C19.66,8 21,6.66 21,5C21,3.34 19.66,2 18,2C16.34,2 15,3.34 15,5C15,5.24 15.04,5.47 15.09,5.7L8.04,9.81C7.5,9.31 6.79,9 6,9C4.34,9 3,10.34 3,12C3,13.66 4.34,15 6,15C6.79,15 7.5,14.69 8.04,14.19L15.16,18.35C15.11,18.57 15.08,18.79 15.08,19C15.08,20.61 16.39,21.92 18,21.92C19.61,21.92 20.92,20.61 20.92,19C20.92,17.39 19.61,16.08 18,16.08Z" Width="21" Height="21" />
+                <TextBlock Text="Share" />
+              </StackPanel>
+            </Button>
+          </StackPanel>
+
           <StackPanel Grid.Row="1" Margin="0,10,0,16" Spacing="8">
-            <Button Classes="railIconButton storageRailButton" ToolTip.Tip="Storage">
+            <Button Classes="railIconButton storageRailButton" ToolTip.Tip="Storage" IsVisible="{Binding !IsEditorVisible}">
               <Button.Flyout>
                 <!-- Offset because the flyout anchors to the BUTTON's right
                      edge, not the rail's: the button is 58 wide at a 3px left
@@ -2203,7 +2230,7 @@
       </Grid>
     </Border>
       <Grid Grid.Column="1" RowDefinitions="*,320" IsVisible="{Binding IsEditorVisible}">
-        <Grid Background="#0E141A" ColumnDefinitions="*,300">
+        <Grid Background="#0E141A">
           <Border Background="#05080B">
             <!-- Pan slider lives in its own column, not overlapping
                  EditorVideoHost - VideoView is a native child window that
@@ -2257,69 +2284,6 @@
                       IsVisible="{Binding IsVideoZoomed}" />
             </Grid>
           </Border>
-          <Border Grid.Column="1" Background="#101820" BorderBrush="#1F2B34" BorderThickness="1,0,0,0">
-            <StackPanel Margin="20" Spacing="14">
-              <TextBlock Text="CLIP DETAILS" Foreground="#C4D9F2" FontSize="13" FontWeight="Bold" />
-              <TextBlock Text="Title" Foreground="#93A6B8" FontSize="12" />
-              <TextBox Text="{Binding EditorTitle}"
-                       Foreground="#EDF4FB"
-                       FontSize="14"
-                       FontWeight="Bold"
-                       Background="#0D151C"
-                       BorderBrush="#17232D"
-                       KeyDown="EditorTitle_OnKeyDown" />
-              <TextBlock Text="Description" Foreground="#93A6B8" FontSize="12" />
-              <TextBox Text="{Binding EditorDescription}"
-                       MinHeight="86"
-                       AcceptsReturn="True"
-                       TextWrapping="Wrap"
-                       Watermark="Type description here"
-                       Background="#0D151C"
-                       BorderBrush="#17232D"
-                       Foreground="#D6E2F0" />
-              <Border Height="1" Background="#22303A" Margin="0,10,0,0" />
-              <TextBlock Text="Export codec" Foreground="#93A6B8" FontSize="12" />
-              <ComboBox Classes="settingsInput"
-                        ItemsSource="{Binding ExportCodecs}"
-                        SelectedItem="{Binding SelectedExportCodec}"
-                        Width="180"
-                        HorizontalAlignment="Left" />
-              <Border Height="1" Background="#22303A" Margin="0,10,0,0" />
-              <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
-                <Button Name="SaveTrimButton"
-                        Content="Save Trim"
-                        HorizontalAlignment="Stretch"
-                        Height="34"
-                        Padding="0"
-                        HorizontalContentAlignment="Center"
-                        VerticalContentAlignment="Center"
-                        IsEnabled="{Binding !IsExporting}"
-                        ToolTip.Tip="Replace the original clip with just the trimmed range"
-                        Click="SaveTrimButton_OnClick" />
-                <Button Grid.Column="1"
-                        Name="ExportButton"
-                        Content="{Binding ExportButtonText}"
-                        Classes="primaryButton"
-                        HorizontalAlignment="Stretch"
-                        Height="34"
-                        Padding="0"
-                        HorizontalContentAlignment="Center"
-                        VerticalContentAlignment="Center"
-                        IsEnabled="{Binding !IsExporting}"
-                        Click="ExportButton_OnClick" />
-              </Grid>
-              <Button Name="ShareButton"
-                      Content="Share"
-                      HorizontalAlignment="Stretch"
-                      Height="34"
-                      Padding="0"
-                      HorizontalContentAlignment="Center"
-                      VerticalContentAlignment="Center"
-                      IsEnabled="{Binding !IsExporting}"
-                      ToolTip.Tip="Re-encode to a size cap for Discord and drag the result straight into another app"
-                      Click="ShareButton_OnClick" />
-            </StackPanel>
-          </Border>
         </Grid>
 
         <Border Grid.Row="1" Background="#141D24" BorderBrush="#22303A" BorderThickness="0,1,0,0">
@@ -2328,12 +2292,7 @@
                  here before the hover bar replaced it. Auto row rather than a
                  fixed 44 so it collapses to nothing (not an empty gap) when the
                  Hoverbar setting moves these controls over the video instead. -->
-            <!-- The "*,300" split matters: it mirrors the video pane's own
-                 columns above, so the centred transport group centres on the
-                 VIDEO rather than on the whole panel. Without it the buttons
-                 sat ~150px right of the picture's centre, pushed over by half
-                 of the 300px track panel beside it. -->
-            <Grid ColumnDefinitions="*,300" Height="44" Margin="0,-4,0,4" IsVisible="{Binding !EditorHoverBarEnabled}">
+            <Grid Height="44" Margin="0,-4,0,4" IsVisible="{Binding !EditorHoverBarEnabled}">
               <StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center" Spacing="8" Margin="4,0,0,0">
                 <Border Classes="muteToggle"
                         Width="26"
@@ -2372,10 +2331,7 @@
                         Click="MasterVolumeReset_OnClick"
                         ToolTip.Tip="Reset to 100%" />
               </StackPanel>
-              <!-- Nudged right of true-center (Margin left offset) - centering
-                   on the video column's own width alone still reads as
-                   slightly left of the actual visible video content. -->
-              <StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="7" Margin="41,0,0,0">
+              <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="7">
                 <Button Classes="transportButton" Click="RestartButton_OnClick" ToolTip.Tip="Restart">
                   <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
                 </Button>

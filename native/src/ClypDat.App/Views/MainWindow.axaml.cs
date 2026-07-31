@@ -90,6 +90,7 @@ public sealed partial class MainWindow : Window
     private List<(double StartSeconds, double EndSeconds)> _pausedRanges = new();
     private Window? _recordingPausedOverlay;
     private Window? _editorHoverControlsWindow;
+    private Window? _editorToolsPanelWindow;
     private DispatcherTimer? _hoverControlsHideTimer;
     // Grace between the pointer leaving the video (and the bar) and the bar
     // going away. Short enough to still read as "leaves as soon as you do",
@@ -261,6 +262,8 @@ public sealed partial class MainWindow : Window
                         or nameof(MainWindowViewModel.SelectedVideoPath)
                         or nameof(MainWindowViewModel.IsGameFilterActive)
                         or nameof(MainWindowViewModel.IsClipTypeFilterActive)) OnViewHistoryStateChanged();
+                    if (e.PropertyName is nameof(MainWindowViewModel.IsEditorVisible)
+                        or nameof(MainWindowViewModel.ActiveEditorSidebarSection)) SyncEditorToolsPanel();
                 };
                 foreach (var autoClipGame in ViewModel.AutoClipGames)
                 {
@@ -327,6 +330,7 @@ public sealed partial class MainWindow : Window
                 // in the background. A real quit already covers this via
                 // _playback?.Dispose() in Closed below.
                 StopEditorPlayback(stopMode: PlaybackStopMode.Background);
+                HideEditorToolsPanel();
                 Hide();
                 ShowInTaskbar = false;
             }
@@ -345,6 +349,7 @@ public sealed partial class MainWindow : Window
             _playback?.Dispose();
             _recordingPausedOverlay?.Close();
             _editorHoverControlsWindow?.Close();
+            _editorToolsPanelWindow?.Close();
             EditorVideoView.DisposeClickHandling();
             ViewModel?.Dispose();
         };
@@ -1332,6 +1337,7 @@ public sealed partial class MainWindow : Window
         }
 
         UpdateTimelineChrome();
+        RepositionEditorToolsPanelSafe(force: true);
     }
 
     // TODO: Replace this with a proper layout-level anchor once the library
@@ -3611,6 +3617,12 @@ public sealed partial class MainWindow : Window
     {
         if (e.Key != Key.Enter || ViewModel is null) return;
         e.Handled = true;
+        await SubmitEditorTitleAsync();
+    }
+
+    private async Task SubmitEditorTitleAsync()
+    {
+        if (ViewModel is null) return;
 
         var clip = ViewModel.AllClips.FirstOrDefault(c => string.Equals(c.Path, ViewModel.SelectedVideoPath, StringComparison.OrdinalIgnoreCase));
         if (clip is null) return;
@@ -3794,6 +3806,11 @@ public sealed partial class MainWindow : Window
             // trusting IsVisible state the OS invalidated while minimized.
             HideEditorHoverControls(immediate: true);
             _recordingPausedOverlay?.Hide();
+            SyncEditorToolsPanel();
+        }
+        else if (change.Property == WindowStateProperty && WindowState == WindowState.Minimized)
+        {
+            HideEditorToolsPanel();
         }
 
         if (change.Property == WindowStateProperty && MaximizeRestoreButton?.Content is PathIcon icon)
@@ -3953,6 +3970,7 @@ public sealed partial class MainWindow : Window
         _preFullscreenWindowState = WindowState;
         WindowState = WindowState.FullScreen;
         ViewModel?.SetVideoFullscreen(true);
+        HideEditorToolsPanel();
         HideEditorHoverControls(immediate: true);
         // Same reparent hazard as the hover bar above - hide the badge before
         // the Remove/Add below instead of leaving it to reposition itself
@@ -4020,6 +4038,7 @@ public sealed partial class MainWindow : Window
         FullscreenVideoHost.Children.Remove(EditorVideoView);
         EditorVideoHost.Children.Insert(0, EditorVideoView);
         Dispatcher.UIThread.Post(EditorVideoView.RefreshClickHook, DispatcherPriority.Loaded);
+        Dispatcher.UIThread.Post(SyncEditorToolsPanel, DispatcherPriority.Loaded);
         AppLog.Info("Video fullscreen exited: EditorVideoView reparented back into EditorVideoHost.");
     }
 
@@ -5201,16 +5220,101 @@ public sealed partial class MainWindow : Window
     // open, back on its own the moment the poll sees this clear again.
     private bool _shareDialogOpen;
 
+    private const double EditorToolsPanelWidth = 300;
+
+    private void SyncEditorToolsPanel()
+    {
+        if (ViewModel is null || !ViewModel.IsEditorVisible || ViewModel.IsVideoFullscreen ||
+            ViewModel.ActiveEditorSidebarSection is null || _shareDialogOpen)
+        {
+            HideEditorToolsPanel();
+            return;
+        }
+
+        var panel = EnsureEditorToolsPanelWindow();
+        RepositionEditorToolsPanel(panel, force: true);
+        if (!panel.IsVisible) panel.Show(this);
+        RepositionEditorToolsPanel(panel, force: true);
+        ApplyCaptureExclusion(panel, ViewModel.Settings.ExcludeOverlaysFromCapture);
+    }
+
+    private void HideEditorToolsPanel()
+    {
+        if (_editorToolsPanelWindow?.IsVisible == true) _editorToolsPanelWindow.Hide();
+    }
+
+    private void RepositionEditorToolsPanelSafe(bool force = false)
+    {
+        if (_editorToolsPanelWindow is not { IsVisible: true } panel) return;
+        try { RepositionEditorToolsPanel(panel, force); }
+        catch (Exception error) { AppLog.Error("Editor tools panel reposition failed (recovered)", error); }
+    }
+
+    private void RepositionEditorToolsPanel(Window panel, bool force)
+    {
+        if (EditorSidebarRail.Bounds.Width <= 0 || EditorSidebarRail.Bounds.Height <= 0) return;
+        var topLeft = EditorSidebarRail.PointToScreen(new Point(EditorSidebarRail.Bounds.Width, 0));
+        var height = Math.Max(1, EditorSidebarRail.Bounds.Height);
+        var handle = NativeHandleOf(panel);
+        if (!force && handle != IntPtr.Zero && GetWindowRect(handle, out var rect) &&
+            rect.Left == topLeft.X && rect.Top == topLeft.Y &&
+            Math.Abs(panel.Width - EditorToolsPanelWidth) < 0.5 && Math.Abs(panel.Height - height) < 0.5) return;
+
+        panel.Position = topLeft;
+        panel.Width = EditorToolsPanelWidth;
+        panel.Height = height;
+        if (handle != IntPtr.Zero) SetWindowPos(handle, HwndTop, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
+    }
+
+    private Window EnsureEditorToolsPanelWindow()
+    {
+        if (_editorToolsPanelWindow is not null) return _editorToolsPanelWindow;
+
+        var tools = new EditorToolsPanel { DataContext = DataContext };
+        tools.CloseRequested += (_, _) => ViewModel?.CloseEditorSidebar();
+        tools.TitleSubmitted += async (_, _) => await SubmitEditorTitleAsync();
+        tools.SaveTrimRequested += async (_, _) => await SaveTrimToOriginalAsync();
+        tools.ExportRequested += async (_, _) => await ExportCurrentClipAsync();
+        var window = new Window
+        {
+            SystemDecorations = SystemDecorations.None,
+            ShowInTaskbar = false,
+            CanResize = false,
+            ShowActivated = false,
+            Topmost = false,
+            Background = Brushes.Transparent,
+            TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
+            DataContext = DataContext,
+            Content = tools
+        };
+        window.Opened += (_, _) => RepositionEditorToolsPanel(window, force: true);
+        _editorToolsPanelWindow = window;
+        return window;
+    }
+
     private async void ShareButton_OnClick(object? sender, RoutedEventArgs e)
     {
         await ShareCurrentClipAsync();
     }
+
+    private void EditorInfoSidebarButton_OnClick(object? sender, RoutedEventArgs e) =>
+        ViewModel?.OpenEditorSidebar(EditorSidebarSection.Info);
+
+    private void EditorEffectsSidebarButton_OnClick(object? sender, RoutedEventArgs e) =>
+        ViewModel?.OpenEditorSidebar(EditorSidebarSection.Effects);
+
+    private void EditorExportSidebarButton_OnClick(object? sender, RoutedEventArgs e) =>
+        ViewModel?.OpenEditorSidebar(EditorSidebarSection.Export);
+
+    private async void EditorShareSidebarButton_OnClick(object? sender, RoutedEventArgs e) =>
+        await ShareCurrentClipAsync();
 
     private async Task ShareCurrentClipAsync()
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
         _playback?.Pause();
         ViewModel.IsPlaying = false;
+        HideEditorToolsPanel();
         _shareDialogOpen = true;
         HideEditorHoverControls(immediate: true);
         try
@@ -5220,6 +5324,7 @@ public sealed partial class MainWindow : Window
         finally
         {
             _shareDialogOpen = false;
+            SyncEditorToolsPanel();
         }
     }
 
@@ -6376,11 +6481,13 @@ public sealed partial class MainWindow : Window
         {
             if (_recordingPausedOverlay is { IsVisible: true } overlay) RepositionPausedOverlay(overlay);
             RepositionEditorHoverControlsSafe();
+            RepositionEditorToolsPanelSafe(force: true);
         };
         EditorVideoView.LayoutUpdated += (_, _) =>
         {
             if (_recordingPausedOverlay is { IsVisible: true } overlay) RepositionPausedOverlay(overlay);
             RepositionEditorHoverControlsSafe();
+            RepositionEditorToolsPanelSafe();
             // Covers window resize AND the fullscreen reparent (both change
             // EditorVideoView's rendered height, which the pan-range math
             // depends on) without needing separate handlers for each.

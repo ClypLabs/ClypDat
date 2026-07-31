@@ -1206,6 +1206,75 @@
   <Style Selector="Button.railIconButton.active Border.gameInitialBadge TextBlock">
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
+
+  <!-- Editor rail swaps library filters for larger labelled tools. The label
+       makes the mode readable at a glance while the 64px hit area stays easy
+       to use on touchpads and high-DPI displays. -->
+  <Style Selector="Button.editorRailButton">
+    <Setter Property="Background" Value="#0026323D" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Width" Value="64" />
+    <Setter Property="Height" Value="62" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Margin" Value="8,0,0,0" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Foreground" Value="#AAB8C8" />
+    <Setter Property="FontSize" Value="10.5" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="{TemplateBinding CornerRadius}">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            Padding="{TemplateBinding Padding}"
+                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.13" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Button.editorRailButton PathIcon">
+    <Setter Property="Foreground" Value="#AAB8C8" />
+  </Style>
+  <Style Selector="Button.editorRailButton:pointerover">
+    <Setter Property="Background" Value="{StaticResource AccentHoverBrush}" />
+  </Style>
+  <Style Selector="Button.editorRailButton:pointerover PathIcon">
+    <Setter Property="Foreground" Value="#EDF4FB" />
+  </Style>
+  <Style Selector="Button.editorRailButton.active">
+    <Setter Property="Background" Value="{StaticResource AccentSelectedBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource AccentSelectedIconBrush}" />
+  </Style>
+  <Style Selector="Button.editorRailButton.active PathIcon">
+    <Setter Property="Foreground" Value="{StaticResource AccentSelectedIconBrush}" />
+  </Style>
+  <Style Selector="Button.editorRailButton.active:pointerover">
+    <Setter Property="Background" Value="{StaticResource AccentSelectedHoverBrush}" />
+  </Style>
+  <Style Selector="Button.editorToolsClose">
+    <Setter Property="Width" Value="48" />
+    <Setter Property="Height" Value="56" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Background" Value="#00141D24" />
+    <Setter Property="Foreground" Value="#B8C7D8" />
+    <Setter Property="FontSize" Value="15" />
+  </Style>
+  <Style Selector="Button.editorToolsClose:pointerover">
+    <Setter Property="Background" Value="#26323D" />
+    <Setter Property="Foreground" Value="#EDF4FB" />
+  </Style>
   <!-- Shared by every volume slider - per-track lanes AND both master
        volume controls (regular editor + fullscreen) - so all three look and
        feel identical.

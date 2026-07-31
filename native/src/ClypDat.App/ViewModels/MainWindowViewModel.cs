@@ -12,6 +12,13 @@ using ClypDat.Core.Settings;
 
 namespace ClypDat.App.ViewModels;
 
+public enum EditorSidebarSection
+{
+    Info,
+    Effects,
+    Export
+}
+
 public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
     private readonly MediaProbeService _mediaProbe = new();
@@ -62,6 +69,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly AudioDeviceService _audioDevices = new();
     private bool _isReplayRecording;
     private bool _isEditorVisible;
+    private EditorSidebarSection? _activeEditorSidebarSection;
     private bool _isSettingsVisible;
     private string _selectedSettingsSection = "General";
     private bool _wasEditorVisibleBeforeSettings;
@@ -812,6 +820,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(ShowLibraryActions));
             OnPropertyChanged(nameof(ShowLibraryStatus));
             OnPropertyChanged(nameof(HasSelectedCaptureBackend));
+            OnPropertyChanged(nameof(EditorSidebarWidth));
         }
     }
 
@@ -828,6 +837,29 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public bool IsLibraryVisible => !IsEditorVisible && !IsSettingsVisible;
+
+    public double EditorSidebarWidth => IsEditorVisible ? 80 : 64;
+
+    public EditorSidebarSection? ActiveEditorSidebarSection
+    {
+        get => _activeEditorSidebarSection;
+        private set
+        {
+            if (!SetProperty(ref _activeEditorSidebarSection, value)) return;
+            OnPropertyChanged(nameof(IsEditorSidebarOpen));
+            OnPropertyChanged(nameof(IsEditorInfoSidebarActive));
+            OnPropertyChanged(nameof(IsEditorEffectsSidebarActive));
+            OnPropertyChanged(nameof(IsEditorExportSidebarActive));
+        }
+    }
+
+    public bool IsEditorSidebarOpen => ActiveEditorSidebarSection is not null;
+    public bool IsEditorInfoSidebarActive => ActiveEditorSidebarSection == EditorSidebarSection.Info;
+    public bool IsEditorEffectsSidebarActive => ActiveEditorSidebarSection == EditorSidebarSection.Effects;
+    public bool IsEditorExportSidebarActive => ActiveEditorSidebarSection == EditorSidebarSection.Export;
+
+    public void OpenEditorSidebar(EditorSidebarSection section) => ActiveEditorSidebarSection = section;
+    public void CloseEditorSidebar() => ActiveEditorSidebarSection = null;
 
     private bool _isVideoFullscreen;
 
@@ -3744,6 +3776,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _waveformCts = null;
         IsPlaying = false;
         IsEditorVisible = false;
+        CloseEditorSidebar();
         IsVideoFullscreen = false;
         SelectedCaptureBackend = string.Empty;
 
@@ -4754,6 +4787,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         ApplyClipEditState(media.Path);
         IsEditorVisible = showEditor;
+        if (showEditor) OpenEditorSidebar(EditorSidebarSection.Info);
         StartFilmstripLoad(media);
         StartWaveformLoad(media);
     }
