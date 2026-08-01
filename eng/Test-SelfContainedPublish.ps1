@@ -43,9 +43,13 @@ $originalMultilevelLookup = $env:DOTNET_MULTILEVEL_LOOKUP
 try {
     $env:DOTNET_ROOT = Join-Path ([IO.Path]::GetTempPath()) 'clypdat-no-dotnet'
     $env:DOTNET_MULTILEVEL_LOOKUP = '0'
-    & (Join-Path $publishDirectory 'ClypDat.exe') --verify-self-contained
-    if ($LASTEXITCODE -ne 0) {
-        throw "Bundled ClypDat runtime check failed with exit code $LASTEXITCODE."
+    $process = Start-Process -FilePath (Join-Path $publishDirectory 'ClypDat.exe') `
+        -ArgumentList '--verify-self-contained' `
+        -WorkingDirectory $publishDirectory `
+        -Wait `
+        -PassThru
+    if ($process.ExitCode -ne 0) {
+        throw "Bundled ClypDat runtime check failed with exit code $($process.ExitCode)."
     }
 }
 finally {
