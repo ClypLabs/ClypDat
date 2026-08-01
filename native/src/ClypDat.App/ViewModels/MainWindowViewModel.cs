@@ -315,6 +315,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public AppSettings Settings { get; }
     public ObservableCollection<ClipCardViewModel> AllClips { get; }
     public bool IsRestoringLibraryCache => _isRestoringCachedLibrary;
+    public IReadOnlyList<ClipCardViewModel> GetAudioOnlyClips() => AllClips
+        .Where(clip => !clip.Media.HasVideo && clip.Media.Tracks.Count > 0)
+        .ToArray();
     public ObservableCollection<TrackLaneViewModel> TimelineTracks { get; }
     public int TimelineTrackCount => Math.Max(1, TimelineTracks.Count);
     // Timeline panel has 8px padding above/below, a 34px ruler, then fixed
@@ -2729,7 +2732,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var media = state.Media with
         {
             ThumbnailPath = File.Exists(state.Media.ThumbnailPath) ? state.Media.ThumbnailPath : string.Empty,
-            FilmstripPath = File.Exists(state.Media.FilmstripPath) ? state.Media.FilmstripPath : string.Empty
+            FilmstripPath = File.Exists(state.Media.FilmstripPath) ? state.Media.FilmstripPath : string.Empty,
+            // Old library-cache rows predate HasVideo. Their cached track list
+            // is still enough to identify audio-only files before hydration.
+            HasVideo = state.Media.Tracks.Count == 0 || state.Media.Tracks.Any(track => track.Type == "video")
         };
         var clip = new ClipCardViewModel(state with { Media = media }, Settings.LibraryFolder);
         AttachClip(clip);
@@ -5986,7 +5992,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var wasCancelled = false;
         try
         {
-            var clips = AllClips.Where(clip => string.IsNullOrEmpty(clip.Media.FilmstripPath)).ToArray();
+            var clips = AllClips.Where(clip => clip.Media.HasVideo && string.IsNullOrEmpty(clip.Media.FilmstripPath)).ToArray();
             if (clips.Length > 0) AppLog.Info($"Idle timeline hydration: {clips.Length} filmstrip(s).");
             foreach (var clip in clips)
             {
@@ -6397,8 +6403,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // showing. That walk is what made a cold start crawl and put the
             // "Building your library" banner up on every single launch.
             var needProbe = clips.Where(clip => clip.Duration <= TimeSpan.Zero).ToArray();
-            var needThumbnail = clips.Where(clip => string.IsNullOrEmpty(clip.Media.ThumbnailPath)).ToArray();
-            var needFilmstrip = clips.Where(clip => string.IsNullOrEmpty(clip.Media.FilmstripPath)).ToArray();
+            var needThumbnail = clips.Where(clip => clip.Media.HasVideo && string.IsNullOrEmpty(clip.Media.ThumbnailPath)).ToArray();
+            var needFilmstrip = clips.Where(clip => clip.Media.HasVideo && string.IsNullOrEmpty(clip.Media.FilmstripPath)).ToArray();
 
             _hydrationOverallCompleted = 0;
             _hydrationOverallTotal = needProbe.Length + needThumbnail.Length;
@@ -6427,7 +6433,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // Recomputed rather than reusing the list from above: a clip that
             // had no cached probe a moment ago has a real duration now, and
             // the thumbnail/filmstrip grabs seek by duration.
-            needThumbnail = clips.Where(clip => string.IsNullOrEmpty(clip.Media.ThumbnailPath)).ToArray();
+            needThumbnail = clips.Where(clip => clip.Media.HasVideo && string.IsNullOrEmpty(clip.Media.ThumbnailPath)).ToArray();
             await RunHydrationPassAsync(needThumbnail, "Loading thumbnails", cancellationToken,
                 async clip =>
                 {

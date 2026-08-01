@@ -5564,7 +5564,74 @@ public sealed partial class MainWindow : Window
             ViewModel.StartOnboarding();
         }
 
+        await ShowAudioOnlyClipPromptAsync();
         await CheckForUpdatesAsync();
+    }
+
+    private async Task ShowAudioOnlyClipPromptAsync()
+    {
+        if (ViewModel is null || ViewModel.Settings.IgnoreAudioOnlyClipPrompt) return;
+
+        // Cached cards restore in small UI batches immediately after startup.
+        // Let that finish before taking a snapshot so this one prompt covers
+        // the whole library rather than only its first visible rows.
+        await Task.Delay(TimeSpan.FromSeconds(1.5));
+        if (ViewModel is null || ViewModel.Settings.IgnoreAudioOnlyClipPrompt) return;
+        var clips = ViewModel.GetAudioOnlyClips();
+        if (clips.Count == 0) return;
+
+        var (window, body) = CreateChromelessDialog("Audio-only clips", centerTitle: true);
+        body.Children.Add(new TextBlock
+        {
+            Text = $"Found {clips.Count} audio-only MP4 {(clips.Count == 1 ? "clip" : "clips")}. They cannot have thumbnails or timeline previews.",
+            Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
+            FontSize = 15,
+            FontWeight = Avalonia.Media.FontWeight.SemiBold,
+            TextWrapping = TextWrapping.Wrap
+        });
+        body.Children.Add(new TextBlock
+        {
+            Text = "Delete removes source files permanently. Keeping them skips visual generation forever.",
+            Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"),
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap
+        });
+
+        var delete = new Button { Content = "Delete", Width = 100, Height = 34, Background = Avalonia.Media.Brush.Parse("#D95B62"), Foreground = Brushes.White, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+        var ignore = new Button { Content = "Don't ask again", Width = 130, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+        var later = new Button { Content = "Remind me later", Width = 130, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+        delete.Click += (_, _) => window.Close("delete");
+        ignore.Click += (_, _) => window.Close("ignore");
+        later.Click += (_, _) => window.Close("later");
+        body.Children.Add(new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Children = { delete, ignore, later }
+        });
+
+        var choice = await window.ShowDialog<string?>(this);
+        if (ViewModel is null) return;
+        if (choice == "ignore")
+        {
+            ViewModel.Settings.IgnoreAudioOnlyClipPrompt = true;
+            ViewModel.SaveSettings();
+            return;
+        }
+        if (choice != "delete") return;
+
+        foreach (var clip in clips)
+        {
+            try
+            {
+                await ViewModel.DeleteClipAsync(clip);
+            }
+            catch (Exception error)
+            {
+                AppLog.Error($"Failed to delete audio-only clip: {clip.Path}", error);
+            }
+        }
     }
 
     private void ShowWalkthroughButton_OnClick(object? sender, RoutedEventArgs e)

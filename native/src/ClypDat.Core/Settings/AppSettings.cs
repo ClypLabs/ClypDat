@@ -184,6 +184,10 @@ public sealed class AppSettings
     public Cs2AutoClipSettings Cs2AutoClip { get; set; } = new();
     public bool MedalImportStripEmoji { get; set; } = false;
     public bool MedalImportCopyNotMove { get; set; } = true;
+    // Suppresses the startup prompt for audio-only MP4 sidecars. ClypDat
+    // still keeps them in the library; it only stops asking whether to remove
+    // them.
+    public bool IgnoreAudioOnlyClipPrompt { get; set; }
     // Read only to migrate older settings files. New import history is stored
     // with the library in .clipinfo/medal-imports.json instead of AppData.
     [JsonPropertyName("ImportedMedalClipKeys")]
