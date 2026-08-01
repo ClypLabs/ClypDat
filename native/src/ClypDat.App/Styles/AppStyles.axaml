@@ -129,7 +129,7 @@
     <Setter Property="Foreground" Value="#FFFFFF" />
     <Setter Property="FontWeight" Value="Bold" />
     <Setter Property="CornerRadius" Value="7" />
-    <Setter Property="Padding" Value="20,10" />
+    <Setter Property="Padding" Value="20,4" />
     <Setter Property="Template">
       <ControlTemplate>
         <Border Background="{TemplateBinding Background}"
