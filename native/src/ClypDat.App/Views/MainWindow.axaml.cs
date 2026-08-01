@@ -89,6 +89,40 @@ public sealed partial class MainWindow : Window
     public bool AllowRealClose { get; set; }
     private List<(double StartSeconds, double EndSeconds)> _pausedRanges = new();
     private Window? _recordingPausedOverlay;
+    private TextBlock? _recordingPausedOverlayQuote;
+    private int _recordingPausedOverlayRightClickCount;
+    private bool _recordingPausedOverlayQuotesAlwaysEnabled;
+    private static readonly string[] RecordingPausedQuotes =
+    {
+        "The tape remembers.",
+        "Nothing happened here. Probably.",
+        "A strategic pause has entered the chat.",
+        "Frame by frame, the truth survives.",
+        "Recording took a coffee break.",
+        "The highlight reel is thinking.",
+        "No pixels were harmed during this pause.",
+        "Buffering the plot twist.",
+        "The camera blinked.",
+        "Gameplay temporarily filed under later.",
+        "Silence, but in high definition.",
+        "The replay goblin needed a moment.",
+        "Capture paused. Drama pending.",
+        "Even frame rate needs a breather.",
+        "This scene will return after technical vibes.",
+        "The timeline entered stealth mode.",
+        "A pause worthy of an intermission.",
+        "The clip briefly forgot its lines.",
+        "No signal, just suspense.",
+        "Recording is on a side quest.",
+        "The highlight is behind the curtain.",
+        "Time out, pixels in.",
+        "Hold that thought.",
+        "The moment has been temporarily misplaced.",
+        "Loading dramatic tension.",
+        "A frame escaped into the void.",
+        "The capture card is meditating.",
+        "Intermission. Please admire the silence."
+    };
     private Window? _editorHoverControlsWindow;
     private Window? _editorToolsPanelWindow;
     private DispatcherTimer? _hoverControlsHideTimer;
@@ -4679,6 +4713,7 @@ public sealed partial class MainWindow : Window
         if (_playback is null)
         {
             await StartEditorPlaybackAsync(CancellationToken.None);
+            ReassertHoverBarAbovePausedOverlay();
             return;
         }
 
@@ -4701,6 +4736,7 @@ public sealed partial class MainWindow : Window
             // earlier snapshot was rewinding to a spot already played and replaying
             // it forward - visible as a brief "rewind and repeat" on every unpause.
             PauseEditorPlayback();
+            ReassertHoverBarAbovePausedOverlay();
             return;
         }
 
@@ -4719,12 +4755,27 @@ public sealed partial class MainWindow : Window
             // request with a serialized resume seek rather than letting
             // PlayFrom race it with a separate Stop/Play sequence.
             _ = ApplyTimelineSeekAsync(startTime, resumePlayback: true);
+            ReassertHoverBarAbovePausedOverlay();
             return;
         }
         _playback.PlayFrom(startTime);
         StartPlayheadClock(startTime);
         ViewModel.IsPlaying = true;
         _playbackTimer.Start();
+        ReassertHoverBarAbovePausedOverlay();
+    }
+
+    // A click can put the paused owned window ahead of the hover bar after
+    // the click handler returns. Reassert both the input window and Server's
+    // per-pixel mirror now and after this input/layout turn settles.
+    private void ReassertHoverBarAbovePausedOverlay()
+    {
+        if (_recordingPausedOverlay is not { IsVisible: true }) return;
+        RepositionEditorHoverControlsSafe(force: true);
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_recordingPausedOverlay is { IsVisible: true }) RepositionEditorHoverControlsSafe(force: true);
+        }, DispatcherPriority.Loaded);
     }
 
     private void PauseEditorPlayback()
@@ -6417,17 +6468,37 @@ public sealed partial class MainWindow : Window
     {
         if (_recordingPausedOverlay is not null) return _recordingPausedOverlay;
 
+        var quote = new TextBlock
+        {
+            Foreground = new SolidColorBrush(Color.Parse("#B7C7D8")),
+            FontSize = 14,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 560,
+            IsVisible = false,
+        };
         var scrim = new Border
         {
             Background = new SolidColorBrush(Color.FromArgb(0xB3, 0, 0, 0)),
-            Child = new TextBlock
+            Child = new StackPanel
             {
-                Text = "Playback Paused",
-                Foreground = Brushes.White,
-                FontSize = 28,
-                FontWeight = FontWeight.Bold,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
+                Spacing = 8,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "Recording/Capture Paused",
+                        Foreground = Brushes.White,
+                        FontSize = 28,
+                        FontWeight = FontWeight.Bold,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        TextAlignment = TextAlignment.Center,
+                    },
+                    quote,
+                }
             }
         };
         var overlay = new Window
@@ -6448,12 +6519,43 @@ public sealed partial class MainWindow : Window
         };
         overlay.AddHandler(PointerPressedEvent, RecordingPausedOverlay_OnPointerPressed, RoutingStrategies.Tunnel);
         _recordingPausedOverlay = overlay;
+        _recordingPausedOverlayQuote = quote;
         return overlay;
+    }
+
+    // 67 of 10,000 shows is exactly 0.67%. Roll only on hidden-to-visible so
+    // a timer refresh cannot swap text while the paused layer is on screen.
+    private void UpdateRecordingPausedOverlayQuote(bool force = false)
+    {
+        if (_recordingPausedOverlayQuote is not { } quote) return;
+        if (!force && !_recordingPausedOverlayQuotesAlwaysEnabled && Random.Shared.Next(10_000) >= 67)
+        {
+            quote.Text = string.Empty;
+            quote.IsVisible = false;
+            return;
+        }
+
+        quote.Text = RecordingPausedQuotes[Random.Shared.Next(RecordingPausedQuotes.Length)];
+        quote.IsVisible = true;
     }
 
     private void RecordingPausedOverlay_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (sender is not Window overlay || !e.GetCurrentPoint(overlay).Properties.IsLeftButtonPressed) return;
+        if (sender is not Window overlay) return;
+        var point = e.GetCurrentPoint(overlay).Properties;
+        if (point.IsRightButtonPressed)
+        {
+            e.Handled = true;
+            if (_recordingPausedOverlayQuotesAlwaysEnabled) return;
+            _recordingPausedOverlayRightClickCount++;
+            if (_recordingPausedOverlayRightClickCount < 7) return;
+
+            _recordingPausedOverlayQuotesAlwaysEnabled = true;
+            UpdateRecordingPausedOverlayQuote(force: true);
+            return;
+        }
+
+        if (!point.IsLeftButtonPressed) return;
         e.Handled = true;
         PlayPauseButton_OnClick(this, new RoutedEventArgs());
     }
@@ -6472,6 +6574,7 @@ public sealed partial class MainWindow : Window
 
         var overlay = EnsureRecordingPausedOverlay();
         var wasHidden = !overlay.IsVisible;
+        if (wasHidden) UpdateRecordingPausedOverlayQuote();
         var raised = RepositionPausedOverlay(overlay);
         if (wasHidden) overlay.Show(this);
         // Only when the badge actually claimed the top of the z-band does the
