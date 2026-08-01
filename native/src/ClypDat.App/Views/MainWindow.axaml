@@ -206,6 +206,7 @@
                   Classes="deleteButton"
                   Click="DeleteSelectedButton_OnClick"
                   IsVisible="{Binding HasSelection}"
+                  Height="44"
                   Margin="10,0,0,0" />
           <Border Grid.Column="8" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" Margin="10,0,0,0" />
           <TextBlock Grid.Column="9" Text="{Binding SelectedCreated}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" Margin="10,0,0,0" />
