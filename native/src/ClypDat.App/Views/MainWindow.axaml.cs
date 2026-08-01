@@ -6528,7 +6528,7 @@ public sealed partial class MainWindow : Window
     private void UpdateRecordingPausedOverlayQuote(bool force = false)
     {
         if (_recordingPausedOverlayQuote is not { } quote) return;
-        if (!force && !_recordingPausedOverlayQuotesAlwaysEnabled && Random.Shared.Next(10_000) >= 67)
+        if (!force && !_recordingPausedOverlayQuotesAlwaysEnabled && Random.Shared.Next(10_000) >= 670)
         {
             quote.Text = string.Empty;
             quote.IsVisible = false;
