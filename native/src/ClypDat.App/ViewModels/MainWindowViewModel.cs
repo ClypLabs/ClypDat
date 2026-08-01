@@ -86,12 +86,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private ReplayBackendPreset? _selectedReplayBackend;
     private string _selectedReplayCaptureSource = "Game";
     private DesktopMonitorOption? _selectedDesktopMonitor;
-    private readonly string _initialReplayBackend;
     private string _newCustomGameExecutable = string.Empty;
     private string _gameSearchText = string.Empty;
     private string _autoClipSearchText = string.Empty;
     private string _newCustomGameDisplayName = string.Empty;
-    private bool _replayBackendRestartRequired;
     private int _activeReplayMaxHeight;
     private int _activeReplayFrameRate;
     private string _activeReplayEncoderSignature = string.Empty;
@@ -261,8 +259,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _activeReplayEncoderSignature = EncoderSignature;
         SelectedExportCodec = ExportCodecs.FirstOrDefault(codec => string.Equals(codec.Label, Settings.ExportVideoCodec, StringComparison.OrdinalIgnoreCase)) ??
                               ExportCodecs.First(codec => codec.Label == "H.264");
-        _initialReplayBackend = string.IsNullOrWhiteSpace(Settings.ReplayBackend) ? "Auto" : Settings.ReplayBackend;
-        _selectedReplayBackend = ReplayBackends.FirstOrDefault(preset => string.Equals(preset.Value, _initialReplayBackend, StringComparison.OrdinalIgnoreCase)) ??
+        var initialReplayBackend = string.IsNullOrWhiteSpace(Settings.ReplayBackend) ? "Auto" : Settings.ReplayBackend;
+        _selectedReplayBackend = ReplayBackends.FirstOrDefault(preset => string.Equals(preset.Value, initialReplayBackend, StringComparison.OrdinalIgnoreCase)) ??
                                   ReplayBackends.First(preset => preset.Value == "Auto");
         _selectedReplayCaptureSource = string.Equals(Settings.ReplayCaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase)
             ? "Desktop Capture"
@@ -1395,14 +1393,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (!SetProperty(ref _selectedReplayBackend, value) || value is null) return;
             Settings.ReplayBackend = value.Value;
             SaveSettings();
-            ReplayBackendRestartRequired = !string.Equals(value.Value, _initialReplayBackend, StringComparison.OrdinalIgnoreCase);
         }
-    }
-
-    public bool ReplayBackendRestartRequired
-    {
-        get => _replayBackendRestartRequired;
-        private set => SetProperty(ref _replayBackendRestartRequired, value);
     }
 
     public string SelectedClipOverlayPosition

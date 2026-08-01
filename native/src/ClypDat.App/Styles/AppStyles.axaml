@@ -657,6 +657,25 @@
     <Setter Property="Background" Value="#263544" />
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
+  <!-- Compact controls are scoped to the Replay Buffer flyout. -->
+  <Style Selector="StackPanel.replayFlyout TextBlock.flyoutLabel">
+    <Setter Property="FontSize" Value="10" />
+  </Style>
+  <Style Selector="StackPanel.replayFlyout ComboBox.settingsInput">
+    <Setter Property="MinHeight" Value="35" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Padding" Value="8,4" />
+  </Style>
+  <Style Selector="StackPanel.replayFlyout TextBox.settingsInput">
+    <Setter Property="MinHeight" Value="35" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Padding" Value="8,4" />
+  </Style>
+  <Style Selector="Button.replayFlyoutInput">
+    <Setter Property="MinHeight" Value="35" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Padding" Value="8,4" />
+  </Style>
   <!-- Small setting groups used by first-run setup. The low-contrast card
        separates choices without turning the walkthrough into a settings page. -->
   <Style Selector="Border.onboardingSettingCard">

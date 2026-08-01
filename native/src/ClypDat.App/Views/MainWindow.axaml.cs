@@ -270,7 +270,8 @@ public sealed partial class MainWindow : Window
                     if (e.PropertyName is nameof(MainWindowViewModel.SelectedReplayCaptureSource)
                         or nameof(MainWindowViewModel.SelectedDesktopMonitor)
                         or nameof(MainWindowViewModel.ReplayDesktopCaptureCursor)
-                        or nameof(MainWindowViewModel.ReplayAutoSwitchToGameCapture)) ScheduleReplayRestart();
+                        or nameof(MainWindowViewModel.ReplayAutoSwitchToGameCapture)
+                        or nameof(MainWindowViewModel.SelectedReplayBackend)) ScheduleReplayRestart();
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
                     if (e.PropertyName == nameof(MainWindowViewModel.IsSettingsVisible) && ViewModel.IsSettingsVisible) PauseEditorPlayback();
@@ -654,27 +655,6 @@ public sealed partial class MainWindow : Window
 
         ViewModel.RecorderStatus = ReplayIdleStatus;
         UpdateDetectedGame();
-    }
-
-    private void RestartAppButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        try
-        {
-            var exePath = Environment.ProcessPath;
-            if (!string.IsNullOrWhiteSpace(exePath))
-            {
-                Process.Start(new ProcessStartInfo(exePath, "--restart") { UseShellExecute = true });
-            }
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Restart failed", error);
-        }
-        finally
-        {
-            Close();
-            Environment.Exit(0);
-        }
     }
 
     private void EnsureReplayBufferMatchesGame()
