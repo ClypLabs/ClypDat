@@ -3572,7 +3572,7 @@ public sealed partial class MainWindow : Window
             // actually on the card right now (clip.TileMainLabel, e.g.
             // "Clip from July 23, 2026") so the empty box doesn't look blank
             // for no reason.
-            Watermark = clip.TileMainLabel,
+            PlaceholderText = clip.TileMainLabel,
             Classes = { "inlineTitleEdit" },
             FontSize = 15,
             FontWeight = Avalonia.Media.FontWeight.Bold,
@@ -5508,7 +5508,7 @@ public sealed partial class MainWindow : Window
         var textBox = new TextBox
         {
             Text = currentTitle,
-            Watermark = watermark
+            PlaceholderText = watermark
         };
 
         var rename = new Button
