@@ -86,6 +86,8 @@ public sealed partial class MainWindow : Window
     private readonly EncoderTuningService _encoderTuning = new();
     private readonly SemaphoreSlim _clipSaveLock = new(1, 1);
     private bool _updateDialogOpen;
+    private AppUpdateInfo? _availableUpdate;
+    private readonly DispatcherTimer _updateCheckTimer;
     private readonly ClipHoverPreviewController _clipHoverPreview = new();
     // Closing the window (the X button) hides to the tray instead of quitting,
     // so the replay buffer/Full Session keeps recording - matches the tray
@@ -227,6 +229,8 @@ public sealed partial class MainWindow : Window
         };
         _gameDetectionTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _gameDetectionTimer.Tick += (_, _) => UpdateDetectedGame();
+        _updateCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromHours(4) };
+        _updateCheckTimer.Tick += async (_, _) => await CheckForUpdatesAsync();
         Opened += (_, _) =>
         {
             RevealAfterFirstDarkFrame();
@@ -239,6 +243,7 @@ public sealed partial class MainWindow : Window
             InitializeReplayServices();
             UpdateDetectedGame();
             _gameDetectionTimer.Start();
+            _updateCheckTimer.Start();
             _ = EnsureLibraryFolderAsync();
             // Four independent HTTPS calls used to fire in the same instant here.
             // At logon the network stack is often not up yet, so each one can
@@ -394,6 +399,7 @@ public sealed partial class MainWindow : Window
             _dotaGsiListener?.Dispose();
             _leagueAutoClipListener?.Dispose();
             _gameDetectionTimer.Stop();
+            _updateCheckTimer.Stop();
             if (_replayBuffer is not null) _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
             _replayBuffer?.Dispose();
             _playback?.Dispose();
@@ -4437,12 +4443,14 @@ public sealed partial class MainWindow : Window
 
         if (update is null)
         {
+            SetAvailableUpdate(null);
             var (whatsNew, fixes) = await AppUpdateService.GetCurrentVersionNotesAsync();
             var upToDateDialog = CreateUpToDateDialog(whatsNew, fixes);
             await ShowUpdateDialogAsync(upToDateDialog);
             return;
         }
 
+        SetAvailableUpdate(update);
         _updateDialogOpen = true;
         try
         {
@@ -5769,6 +5777,20 @@ public sealed partial class MainWindow : Window
         ViewModel?.FinishOnboarding();
     }
 
+    private async void AvailableUpdateButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (_availableUpdate is null || _updateDialogOpen) return;
+        _updateDialogOpen = true;
+        try
+        {
+            await ShowUpdateDialogAsync(CreateUpdateDialog(_availableUpdate));
+        }
+        finally
+        {
+            _updateDialogOpen = false;
+        }
+    }
+
     private void OnboardingOverlay_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (!e.GetCurrentPoint(OnboardingOverlay).Properties.IsLeftButtonPressed) return;
@@ -5799,9 +5821,18 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        if (update is null) return;
-        if (string.Equals(ViewModel.Settings.IgnoredUpdateVersion, update.TagName, StringComparison.OrdinalIgnoreCase)) return;
+        if (update is null)
+        {
+            SetAvailableUpdate(null);
+            return;
+        }
+        if (string.Equals(ViewModel.Settings.IgnoredUpdateVersion, update.TagName, StringComparison.OrdinalIgnoreCase))
+        {
+            SetAvailableUpdate(null);
+            return;
+        }
 
+        SetAvailableUpdate(update);
         _updateDialogOpen = true;
         try
         {
@@ -5812,6 +5843,12 @@ public sealed partial class MainWindow : Window
         {
             _updateDialogOpen = false;
         }
+    }
+
+    private void SetAvailableUpdate(AppUpdateInfo? update)
+    {
+        _availableUpdate = update;
+        if (ViewModel is not null) ViewModel.HasAvailableUpdate = update is not null;
     }
 
     // Update windows are owned by a tinted, click-to-dismiss scrim. Showing the
@@ -5928,6 +5965,7 @@ public sealed partial class MainWindow : Window
                 ViewModel.Settings.IgnoredUpdateVersion = update.TagName;
                 ViewModel.SaveSettings();
             }
+            SetAvailableUpdate(null);
             window.Close();
         };
         updateButton.Click += async (_, _) =>
