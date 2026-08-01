@@ -2529,19 +2529,14 @@ public sealed partial class MainWindow : Window
 
     private void NewClipsCloseButton_OnClick(object? sender, RoutedEventArgs e) => DismissNewClipsDialog();
 
-    // The scrim spans both root rows so it darkens the title bar too, which also
-    // means it swallows the title bar's own drag - leaving the whole app stuck in
-    // place for as long as the popup was up. Dragging the scrim where it covers
-    // the title bar moves the WINDOW instead, so the app stays movable while the
-    // popup itself (being part of that window rather than its own) still cannot
-    // be moved independently. Presses on the dialog card never reach here - it
-    // handles its own - so only the surrounding scrim is draggable.
+    // Embedded, non-destructive dialogs light-dismiss through their scrim. A
+    // hit on the card has a different source, so controls inside it keep their
+    // normal pointer handling.
     private void NewClipsOverlay_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (!e.GetCurrentPoint(NewClipsOverlay).Properties.IsLeftButtonPressed) return;
-        // Row 0's height in RootLayout - matches the header the drag belongs to.
-        if (e.GetPosition(NewClipsOverlay).Y > 48) return;
-        BeginMoveDrag(e);
+        if (!ReferenceEquals(e.Source, NewClipsOverlay)) return;
+        DismissNewClipsDialog();
     }
 
     private async void NewClipsDeleteButton_OnClick(object? sender, RoutedEventArgs e)
@@ -5731,6 +5726,13 @@ public sealed partial class MainWindow : Window
         ViewModel?.FinishOnboarding();
     }
 
+    private void OnboardingOverlay_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(OnboardingOverlay).Properties.IsLeftButtonPressed) return;
+        if (!ReferenceEquals(e.Source, OnboardingOverlay)) return;
+        ViewModel?.FinishOnboarding();
+    }
+
     private void AddExcludedProcessOnboardingButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
@@ -8115,11 +8117,11 @@ public sealed partial class MainWindow : Window
             SizeToContent = SizeToContent.Height,
             CanResize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Background = Avalonia.Media.Brush.Parse("#111920"),
+            Background = Avalonia.Media.Brushes.Transparent,
             WindowDecorations = WindowDecorations.None,
             ExtendClientAreaToDecorationsHint = true,
             ExtendClientAreaTitleBarHeightHint = -1,
-            TransparencyLevelHint = new[] { Avalonia.Controls.WindowTransparencyLevel.None }
+            TransparencyLevelHint = new[] { Avalonia.Controls.WindowTransparencyLevel.Transparent }
         };
 
         var titleBar = new Grid
@@ -8191,7 +8193,17 @@ public sealed partial class MainWindow : Window
 
         var body = new StackPanel { Margin = new Avalonia.Thickness(22, 20, 22, 22), Spacing = 16 };
 
-        window.Content = new DockPanel { Children = { titleBar, body } };
+        var layout = new DockPanel { Children = { titleBar, body } };
+        var shell = new Border
+        {
+            Background = Avalonia.Media.Brush.Parse("#111920"),
+            BorderBrush = Avalonia.Media.Brush.Parse("#232F3A"),
+            BorderThickness = new Avalonia.Thickness(1),
+            CornerRadius = new CornerRadius(12),
+            ClipToBounds = true,
+            Child = layout
+        };
+        window.Content = shell;
         DockPanel.SetDock(titleBar, Dock.Top);
 
         window.KeyDown += (_, keyArgs) =>
