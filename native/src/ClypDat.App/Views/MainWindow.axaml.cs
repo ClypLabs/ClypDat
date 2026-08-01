@@ -109,12 +109,12 @@ public sealed partial class MainWindow : Window
     private const double LibraryScrollOffsetTolerance = 0.01;
     private DateTime _hoverControlsSuppressedUntilUtc = DateTime.MinValue;
     // The hover bar moves inside a fixed window, clipped at the video's lower
-    // edge so it slips behind the timeline. On Server, that fixed window uses
-    // a color key for the empty area; see WindowTransparencyFallback.
+    // edge so it slips behind the timeline. On Server, native per-pixel
+    // compositing keeps empty area transparent; see ServerPerPixelOverlay.
     private const double HoverControlsSlideDistance = 52;
-    private static readonly Color HoverControlsColorKey = Color.FromRgb(1, 2, 3);
     private static readonly TimeSpan HoverControlsSlideDuration = TimeSpan.FromMilliseconds(190);
     private Border? _hoverControlsBackdrop;
+    private ServerPerPixelOverlay? _hoverControlsPerPixelOverlay;
     private DispatcherTimer? _hoverControlsAnimationTimer;
     private DateTime _hoverControlsAnimationStartedUtc;
     private double _hoverControlsAnimationStartOffset;
@@ -6830,6 +6830,7 @@ public sealed partial class MainWindow : Window
         {
             StopHoverControlsAnimation();
             _hoverControlsSlidingOut = false;
+            _hoverControlsPerPixelOverlay?.Hide();
             window.Hide();
             return;
         }
@@ -6840,6 +6841,7 @@ public sealed partial class MainWindow : Window
         {
             if (!_hoverControlsSlidingOut) return;
             _hoverControlsSlidingOut = false;
+            _hoverControlsPerPixelOverlay?.Hide();
             _editorHoverControlsWindow?.Hide();
             LogHoverControlsState("hidden");
         });
@@ -6891,6 +6893,7 @@ public sealed partial class MainWindow : Window
         if (_hoverControlsBackdrop is null) return;
         _hoverControlsBackdrop.RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse(
             _hoverControlsOffset == 0 ? "translateY(0px)" : $"translateY({_hoverControlsOffset.ToString(System.Globalization.CultureInfo.InvariantCulture)}px)");
+        _hoverControlsPerPixelOverlay?.Refresh();
     }
 
     // Sizes and places the bar against the video pane as it currently is.
@@ -6955,6 +6958,7 @@ public sealed partial class MainWindow : Window
         {
             SetWindowPos(handle, HwndTop, position.X, position.Y, 0, 0, SwpNoSize | SwpNoActivate);
             RaiseEditorToolsPanelAboveHoverBar();
+            _hoverControlsPerPixelOverlay?.Refresh();
         }
     }
 
@@ -7217,6 +7221,12 @@ public sealed partial class MainWindow : Window
         };
         _hoverControlsBackdrop = backdrop;
 
+        var root = new Border
+        {
+            Background = Brushes.Transparent,
+            ClipToBounds = true,
+            Child = backdrop
+        };
         var window = new Window
         {
             WindowDecorations = WindowDecorations.None,
@@ -7224,20 +7234,30 @@ public sealed partial class MainWindow : Window
             CanResize = false,
             ShowActivated = false,
             Topmost = false,
-            Background = WindowsPlatformProfile.IsServer() ? new SolidColorBrush(HoverControlsColorKey) : Brushes.Transparent,
+            Background = Brushes.Transparent,
             TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
             DataContext = DataContext,
-            Content = backdrop,
+            Content = root,
         };
         window.Opened += (_, _) =>
         {
             OverlayTransparencyDiagnostics.Log(window, "hover-bar");
-            WindowTransparencyFallback.ApplyColorKeyedIfNeeded(
-                window,
-                backdrop.Background,
-                b => backdrop.Background = b,
-                HoverControlsColorKey,
-                b => window.Background = b);
+            if (WindowsPlatformProfile.IsServer())
+            {
+                _hoverControlsPerPixelOverlay?.Dispose();
+                _hoverControlsPerPixelOverlay = new ServerPerPixelOverlay(window, root);
+                _hoverControlsPerPixelOverlay.ShowAndRefresh();
+                WindowTransparencyFallback.ApplyInputSurfaceIfNeeded(window);
+            }
+            else
+            {
+                WindowTransparencyFallback.ApplyIfNeeded(window, backdrop.Background, b => backdrop.Background = b);
+            }
+        };
+        window.Closed += (_, _) =>
+        {
+            _hoverControlsPerPixelOverlay?.Dispose();
+            _hoverControlsPerPixelOverlay = null;
         };
         window.AddHandler(PointerPressedEvent, EditorHoverControls_OnPointerPressed, RoutingStrategies.Tunnel, true);
         _editorHoverControlsWindow = window;

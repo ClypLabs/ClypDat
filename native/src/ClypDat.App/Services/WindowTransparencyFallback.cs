@@ -14,7 +14,6 @@ internal static class WindowTransparencyFallback
 {
     private const int GwlExStyle = -20;
     private const long WsExLayered = 0x00080000L;
-    private const uint LwaColorKey = 0x1;
     private const uint LwaAlpha = 0x2;
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
@@ -34,25 +33,26 @@ internal static class WindowTransparencyFallback
     private static readonly ConditionalWeakTable<Window, WindowAlpha> OriginalAlphas = new();
 
     public static void ApplyIfNeeded(Window window, IBrush? background, Action<IBrush> setBackground)
-        => Apply(window, background, setBackground, colorKey: null, setWindowBackground: null);
+        => Apply(window, background, setBackground);
 
-    // A whole-window alpha fallback cannot leave an empty area transparent.
-    // Color-key that area when a child animates inside an otherwise fixed
-    // HWND, then apply the usual alpha only to its non-keyed pixels.
-    public static void ApplyColorKeyedIfNeeded(
-        Window window,
-        IBrush? background,
-        Action<IBrush> setBackground,
-        Color colorKey,
-        Action<IBrush> setWindowBackground) =>
-        Apply(window, background, setBackground, colorKey, setWindowBackground);
+    // Per-pixel mirror windows need their Avalonia owner only for input. Keep
+    // that owner effectively invisible without changing its visual tree; its
+    // normal render is copied into the native companion before this alpha is
+    // applied to the HWND.
+    public static void ApplyInputSurfaceIfNeeded(Window window)
+    {
+        if (!WindowsPlatformProfile.IsServer()) return;
 
-    private static void Apply(
-        Window window,
-        IBrush? background,
-        Action<IBrush> setBackground,
-        Color? colorKey,
-        Action<IBrush>? setWindowBackground)
+        var handle = window.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        if (handle == IntPtr.Zero) return;
+
+        var exStyle = (long)GetWindowLongPtr(handle, GwlExStyle);
+        SetWindowLongPtr(handle, GwlExStyle, (IntPtr)(exStyle | WsExLayered));
+        if (!SetLayeredWindowAttributes(handle, 0, 1, LwaAlpha))
+            AppLog.Error($"Layered hover input surface failed: error={System.Runtime.InteropServices.Marshal.GetLastWin32Error()}.");
+    }
+
+    private static void Apply(Window window, IBrush? background, Action<IBrush> setBackground)
     {
         if (background is not ISolidColorBrush solid) return;
 
@@ -63,8 +63,6 @@ internal static class WindowTransparencyFallback
         var alpha = OriginalAlphas.GetValue(window, _ => new WindowAlpha { Value = solid.Color.A }).Value;
         var color = solid.Color;
         setBackground(new SolidColorBrush(new Color(255, color.R, color.G, color.B)));
-        if (colorKey is { } key)
-            setWindowBackground?.Invoke(new SolidColorBrush(key));
 
         var handle = window.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
         if (handle == IntPtr.Zero) return;
@@ -79,17 +77,12 @@ internal static class WindowTransparencyFallback
             return;
         }
 
-        var colorRef = colorKey is { } transparentColor ? ToColorRef(transparentColor) : 0;
-        var flags = LwaAlpha | (colorKey is null ? 0 : LwaColorKey);
-        if (!SetLayeredWindowAttributes(handle, colorRef, alpha, flags))
+        if (!SetLayeredWindowAttributes(handle, 0, alpha, LwaAlpha))
         {
             AppLog.Error($"Layered overlay alpha failed: error={System.Runtime.InteropServices.Marshal.GetLastWin32Error()}.");
             return;
         }
 
-        AppLog.Info($"Layered overlay alpha applied: alpha={alpha}; colorKey={(colorKey is null ? "none" : colorKey.Value.ToString())}.");
+        AppLog.Info($"Layered overlay alpha applied: alpha={alpha}.");
     }
-
-    // COLORREF is 0x00BBGGRR, unlike Avalonia Color's ARGB ordering.
-    private static uint ToColorRef(Color color) => (uint)(color.R | color.G << 8 | color.B << 16);
 }
