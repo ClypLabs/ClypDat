@@ -138,10 +138,17 @@ public sealed partial class MainWindow : Window
     // with the new width) again.
     private string? _libraryReturnAnchorPath;
     private bool _libraryReturnAnchorDirty;
+    // Win32 can present a newly-created client area before Avalonia's first
+    // compositor frame. That frame is white on some Server builds despite the
+    // Window's dark XAML background. Keep only this first show invisible for
+    // one render beat, then reveal the already-painted dark surface.
+    private bool _awaitingFirstDarkFrame = true;
     private const double ScrollToTopButtonThreshold = 320;
     private static readonly TimeSpan ScrollToTopDuration = TimeSpan.FromMilliseconds(380);
     public MainWindow()
     {
+        Background = Brushes.Black;
+        Opacity = 0;
         InitializeComponent();
         EditorVideoView.VideoClicked += EditorVideoView_OnVideoClicked;
         // ApplySavedWindowBounds can restore straight into Maximized, which
@@ -180,6 +187,7 @@ public sealed partial class MainWindow : Window
         _gameDetectionTimer.Tick += (_, _) => UpdateDetectedGame();
         Opened += (_, _) =>
         {
+            RevealAfterFirstDarkFrame();
             // Card layout comes from LibraryScrollViewer's own SizeChanged
             // (wired above) - at Opened its width may still be 0.
             ClearLibraryResizeAnchor();
@@ -397,6 +405,14 @@ public sealed partial class MainWindow : Window
     private MainWindowViewModel? ViewModel => DataContext as MainWindowViewModel;
 
     private bool _gameDetectionInFlight;
+
+    private async void RevealAfterFirstDarkFrame()
+    {
+        if (!_awaitingFirstDarkFrame) return;
+        _awaitingFirstDarkFrame = false;
+        await Task.Delay(32);
+        Opacity = 1;
+    }
 
     private async void UpdateDetectedGame()
     {
