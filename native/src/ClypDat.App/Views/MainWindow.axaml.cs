@@ -108,9 +108,9 @@ public sealed partial class MainWindow : Window
     private static readonly TimeSpan LibraryResizeAnchorSettle = TimeSpan.FromMilliseconds(220);
     private const double LibraryScrollOffsetTolerance = 0.01;
     private DateTime _hoverControlsSuppressedUntilUtc = DateTime.MinValue;
-    // The native alpha fallback makes the Window's transparent backing paint
-    // black on Server. Keep the reveal inside the bar's own 52px bounds and
-    // crop that backing to the animated visible part.
+    // Server's native alpha fallback applies to an entire HWND. Animate that
+    // HWND's bounds, rather than an Avalonia child inside it, so the scrim
+    // leaves with its controls.
     private const double HoverControlsSlideDistance = 52;
     private static readonly TimeSpan HoverControlsSlideDuration = TimeSpan.FromMilliseconds(190);
     private Border? _hoverControlsBackdrop;
@@ -6885,27 +6885,9 @@ public sealed partial class MainWindow : Window
 
     private void SetHoverControlsOffset(double offset)
     {
-        if (_hoverControlsBackdrop is null) return;
         _hoverControlsOffset = Math.Clamp(offset, 0, HoverControlsSlideDistance);
-        _hoverControlsBackdrop.RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse(
-            _hoverControlsOffset == 0 ? "translateY(0px)" : $"translateY({_hoverControlsOffset.ToString(System.Globalization.CultureInfo.InvariantCulture)}px)");
-        UpdateHoverControlsWindowRegion();
-    }
-
-    private void UpdateHoverControlsWindowRegion()
-    {
-        var window = _editorHoverControlsWindow;
-        var handle = NativeHandleOf(window);
-        if (handle == IntPtr.Zero) return;
-
-        const double barHeight = 52;
-        var scaling = RenderScaling > 0 ? RenderScaling : 1;
-        var width = Math.Max(1, (int)Math.Ceiling(window!.Width * scaling));
-        var height = Math.Max(1, (int)Math.Ceiling(barHeight * scaling));
-        var top = Math.Clamp((int)Math.Round(_hoverControlsOffset * scaling), 0, height);
-        var region = CreateRectRgn(0, top, width, height);
-        if (region == IntPtr.Zero) return;
-        if (!SetWindowRgn(handle, region, true)) DeleteObject(region);
+        if (_editorHoverControlsWindow is { IsVisible: true } window)
+            RepositionEditorHoverControls(window, force: true);
     }
 
     // Sizes and places the bar against the video pane as it currently is.
@@ -6935,7 +6917,11 @@ public sealed partial class MainWindow : Window
         // display that put the bar half its own height too low on the very
         // first show, hanging past the bottom of the video pane.
         var scaling = RenderScaling > 0 ? RenderScaling : 1;
-        var position = new PixelPoint(topLeft.X, bottomOnScreen.Y - (int)(barHeight * scaling));
+        var fullHeight = Math.Max(1, (int)Math.Round(barHeight * scaling));
+        var hiddenHeight = Math.Clamp((int)Math.Round(_hoverControlsOffset * scaling), 0, fullHeight - 1);
+        var visibleHeight = Math.Max(1, fullHeight - hiddenHeight);
+        var position = new PixelPoint(topLeft.X, bottomOnScreen.Y - visibleHeight);
+        var nativeWidth = Math.Max(1, (int)Math.Round(width * scaling));
         var handle = NativeHandleOf(bar);
 
         // The skip-if-unchanged check reads the REAL window rect, not
@@ -6950,14 +6936,14 @@ public sealed partial class MainWindow : Window
         if (!force && handle != IntPtr.Zero && GetWindowRect(handle, out var nativeRect))
         {
             if (nativeRect.Left == position.X && nativeRect.Top == position.Y &&
-                Math.Abs(bar.Width - width) < 0.5 && Math.Abs(bar.Height - barHeight) < 0.5)
+                nativeRect.Right - nativeRect.Left == nativeWidth && nativeRect.Bottom - nativeRect.Top == visibleHeight)
             {
                 return;
             }
         }
 
         bar.Width = width;
-        bar.Height = barHeight;
+        bar.Height = visibleHeight / scaling;
         bar.Position = position;
 
         // Drive the move through Win32 too, so it lands whether or not
@@ -6967,7 +6953,7 @@ public sealed partial class MainWindow : Window
         // painting over the bar after a resize or alt-tab reorders things.
         if (handle != IntPtr.Zero)
         {
-            SetWindowPos(handle, HwndTop, position.X, position.Y, 0, 0, SwpNoSize | SwpNoActivate);
+            SetWindowPos(handle, HwndTop, position.X, position.Y, nativeWidth, visibleHeight, SwpNoActivate);
             RaiseEditorToolsPanelAboveHoverBar();
         }
     }
@@ -7227,7 +7213,8 @@ public sealed partial class MainWindow : Window
             // so there's no border line here.
             Background = new SolidColorBrush(Color.Parse("#8C0B1016")),
             Child = BuildPlaybackBarLayout(),
-            RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse($"translateY({HoverControlsSlideDistance}px)"),
+            Height = HoverControlsSlideDistance,
+            VerticalAlignment = VerticalAlignment.Top,
         };
         _hoverControlsBackdrop = backdrop;
 
@@ -7247,7 +7234,7 @@ public sealed partial class MainWindow : Window
         {
             OverlayTransparencyDiagnostics.Log(window, "hover-bar");
             WindowTransparencyFallback.ApplyIfNeeded(window, backdrop.Background, b => backdrop.Background = b);
-            UpdateHoverControlsWindowRegion();
+            RepositionEditorHoverControls(window, force: true);
         };
         window.AddHandler(PointerPressedEvent, EditorHoverControls_OnPointerPressed, RoutingStrategies.Tunnel, true);
         _editorHoverControlsWindow = window;
@@ -7290,15 +7277,6 @@ public sealed partial class MainWindow : Window
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
-
-    [System.Runtime.InteropServices.DllImport("gdi32.dll")]
-    private static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
-
-    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool redraw);
-
-    [System.Runtime.InteropServices.DllImport("gdi32.dll")]
-    private static extern bool DeleteObject(IntPtr hObject);
 
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
     private struct Win32Rect
