@@ -72,6 +72,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isEditorVisible;
     private EditorSidebarSection? _activeEditorSidebarSection;
     private bool _isSettingsVisible;
+    private bool _hasAvailableUpdate;
     private string _selectedSettingsSection = "General";
     private bool _wasEditorVisibleBeforeSettings;
     private bool _isCapturingHotkey;
@@ -866,7 +867,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public bool IsLibraryVisible => !IsEditorVisible && !IsSettingsVisible;
-    public bool ShowHeaderUpdateButton => IsLibraryVisible || IsSettingsVisible;
+
+    // Header update control reopens a known update; it never performs a
+    // network check itself.
+    public bool HasAvailableUpdate
+    {
+        get => _hasAvailableUpdate;
+        set
+        {
+            if (!SetProperty(ref _hasAvailableUpdate, value)) return;
+            OnPropertyChanged(nameof(ShowHeaderUpdateButton));
+        }
+    }
+
+    public bool ShowHeaderUpdateButton => HasAvailableUpdate;
 
     public double EditorSidebarWidth => 64;
 

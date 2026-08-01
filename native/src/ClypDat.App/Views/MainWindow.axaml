@@ -236,7 +236,7 @@
           </Button>
         </Grid>
 
-        <Button Grid.Column="2" Classes="windowChromeButton" Click="CheckUpdatesButton_OnClick" ToolTip.Tip="Check for updates" IsVisible="{Binding ShowHeaderUpdateButton}">
+        <Button Grid.Column="2" Classes="windowChromeButton" Click="AvailableUpdateButton_OnClick" ToolTip.Tip="Update available" IsVisible="{Binding ShowHeaderUpdateButton}">
           <PathIcon Data="M5,20H19V22H5V20M12,17L5,10H9V3H15V10H19L12,17Z" Width="18" Height="18" Foreground="#38D996" />
         </Button>
 
