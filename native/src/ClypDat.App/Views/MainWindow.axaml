@@ -1667,7 +1667,7 @@
                         <Border BorderThickness="0" Background="Transparent" Padding="12,6,12,10" VerticalAlignment="Top" IsVisible="{Binding IsVisible}">
                           <Grid RowDefinitions="*,Auto">
                             <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
-                              <StackPanel Spacing="1" Margin="0,3,0,0" VerticalAlignment="Center">
+                              <StackPanel Spacing="1" Margin="0,-2,0,0" VerticalAlignment="Center">
                                 <TextBlock Text="{Binding DisplayName}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" />
                                 <!-- ExecutableName is the detection key (e.g.
                                      "steam-381210" for a Catalog-origin row), not
@@ -1715,7 +1715,7 @@
                               <Border BorderThickness="0" Background="Transparent" Padding="12,6,12,10" VerticalAlignment="Top">
                                 <Grid RowDefinitions="*,Auto">
                                 <Grid ColumnDefinitions="*,Auto">
-                                  <StackPanel Spacing="1" Margin="0,3,0,0" VerticalAlignment="Center">
+                                  <StackPanel Spacing="1" Margin="0,-2,0,0" VerticalAlignment="Center">
                                     <TextBlock Text="{Binding DisplayName}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" />
                                     <TextBlock Text="{Binding ProcessName}" Foreground="#5C6D7E" FontSize="11" IsVisible="{Binding ProcessName, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
                                   </StackPanel>
