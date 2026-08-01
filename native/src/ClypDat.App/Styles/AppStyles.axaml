@@ -615,7 +615,7 @@
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
   <!-- Custom title-bar min/maximize/close buttons - replace Windows' own
-       caption buttons (ExtendClientAreaChromeHints="NoChrome" on
+       caption buttons (WindowDecorations="None" on
        MainWindow removes those), matching Fluent's ~46x32 caption button
        proportions. -->
   <!-- Floating "back to top" button over the Library grid - a rounded

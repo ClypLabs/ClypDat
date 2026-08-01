@@ -14,6 +14,7 @@ public partial class ShareDialog : Window
     private CancellationTokenSource? _shareCts;
     private string? _shareTempPath;
     private Point? _dragPressPoint;
+    private PointerPressedEventArgs? _dragPressEvent;
 
     // Below 90% of the cap is worth spending a retry to close, above it the
     // gain isn't worth another full encode.
@@ -495,16 +496,20 @@ public partial class ShareDialog : Window
         if (_shareTempPath is { } path) ExplorerService.Open(path, selectFile: true);
     }
 
-    private void Thumbnail_OnPointerPressed(object? sender, PointerPressedEventArgs e) =>
+    private void Thumbnail_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
         _dragPressPoint = e.GetPosition(ShareThumbnail);
+        _dragPressEvent = e;
+    }
 
     private async void Thumbnail_OnPointerMoved(object? sender, PointerEventArgs e)
     {
-        if (_dragPressPoint is not { } start || e.GetCurrentPoint(ShareThumbnail).Properties.IsLeftButtonPressed != true) return;
+        if (_dragPressPoint is not { } start || _dragPressEvent is not { } dragStart || e.GetCurrentPoint(ShareThumbnail).Properties.IsLeftButtonPressed != true) return;
         if (_shareTempPath is not { } tempPath) return;
         var current = e.GetPosition(ShareThumbnail);
         if (Math.Abs(current.X - start.X) < 4 && Math.Abs(current.Y - start.Y) < 4) return;
         _dragPressPoint = null;
+        _dragPressEvent = null;
 
         StartDragCursorWatch();
         try
@@ -516,22 +521,16 @@ public partial class ShareDialog : Window
             // still lines up.
             if (ShellFileDrag.TryDragFile(tempPath)) return;
 
-            // Avalonia 11.3 added DataTransfer/DoDragDropAsync as the
-            // replacement for DataObject/DoDragDrop, but its write-side API
-            // (constructing a file-backed IDataTransferItem) isn't documented
-            // anywhere reachable, while this older overload is still shipped,
-            // still functional, and is what every Avalonia drag-out sample still
-            // shows - suppressed rather than swapped to a barely-verifiable
-            // newer path for the same result.
-            // DataFormats.Files (not FileNames) expects IEnumerable<IStorageItem>,
-            // not raw paths - passing strings there compiles fine (Set takes
-            // object) but the native drag backend gets no usable file data out
-            // of it, so every drop target shows a permanent no-drop cursor.
-            // FileNames is the one that actually wants plain path strings.
-#pragma warning disable CS0618
-            var data = new DataObject();
-            data.Set(DataFormats.FileNames, new[] { tempPath });
-            await DragDrop.DoDragDrop(e, data, DragDropEffects.Copy);
+            var file = await StorageProvider.TryGetFileFromPathAsync(new Uri(Path.GetFullPath(tempPath)));
+            if (file is null)
+            {
+                AppLog.Error($"Share: drag-out source disappeared: {tempPath}");
+                return;
+            }
+
+            var data = new DataTransfer();
+            data.Add(DataTransferItem.CreateFile(file));
+            await DragDrop.DoDragDropAsync(dragStart, data, DragDropEffects.Copy);
         }
         catch (Exception error)
         {
@@ -547,10 +546,13 @@ public partial class ShareDialog : Window
             StopDragCursorWatch();
             ShareDragActiveOverlay.IsVisible = false;
         }
-#pragma warning restore CS0618
     }
 
-    private void Thumbnail_OnPointerReleased(object? sender, PointerReleasedEventArgs e) => _dragPressPoint = null;
+    private void Thumbnail_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        _dragPressPoint = null;
+        _dragPressEvent = null;
+    }
 
     // DoDragDrop blocks this method for the whole gesture, and during a drag
     // the app gets no pointer events at all (the OS owns the pointer), so

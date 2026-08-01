@@ -14,10 +14,9 @@
         MinHeight="620"
         Background="#0D1116"
         Icon="/Assets/clypdat-icon.ico"
-        SystemDecorations="Full"
+        WindowDecorations="BorderOnly"
         ExtendClientAreaToDecorationsHint="True"
         ExtendClientAreaTitleBarHeightHint="-1"
-        ExtendClientAreaChromeHints="NoChrome"
         SizeChanged="Window_OnSizeChanged">
   <!-- Margin is kept in sync with Window.OffScreenMargin in code-behind.
        A maximized window is deliberately oversized by Windows by the
