@@ -1,4 +1,5 @@
 name: Release
+run-name: Bump version to ${{ inputs.version || inputs.tag || github.ref_name }}
 
 # Triggered by pushing a tag like v0.1.0. Builds the native win-x64 app and
 # packages it four ways: a raw zip, a self-extracting portable exe, an NSIS
@@ -15,6 +16,9 @@ on:
     inputs:
       tag:
         description: "Tag to build (defaults to the triggering tag)"
+        required: false
+      version:
+        description: "Display version for manually dispatched releases"
         required: false
 
 permissions:
