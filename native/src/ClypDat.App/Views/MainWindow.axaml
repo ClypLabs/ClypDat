@@ -66,7 +66,8 @@
                      (Legacy)", full device names), so those get the full width;
                      only the genuinely short fields share a row. Two ~146px
                      columns truncated almost everything. -->
-                <StackPanel Width="352" Spacing="0" Margin="2,0">
+                <ScrollViewer Width="420" MaxHeight="680" VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="0" Margin="2,0,10,2">
                   <!-- Title and master switch share a row so the switch lands
                        at the top-right corner of the flyout, where a panel's
                        on/off control is looked for. Everything below stays
@@ -86,6 +87,24 @@
                   </Grid>
 
                   <Border Height="1" Background="#22303A" Margin="0,0,0,14" />
+
+                  <StackPanel Spacing="6" Margin="0,0,0,12">
+                    <TextBlock Classes="flyoutLabel" Text="CAPTURE SOURCE" />
+                    <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayCaptureSources}" SelectedItem="{Binding SelectedReplayCaptureSource}" HorizontalAlignment="Stretch" />
+                  </StackPanel>
+
+                  <StackPanel Spacing="6" Margin="0,0,0,12" IsVisible="{Binding IsDesktopCapture}">
+                    <TextBlock Classes="flyoutLabel" Text="MONITOR" />
+                    <ComboBox Classes="settingsInput" ItemsSource="{Binding DesktopMonitors}" SelectedItem="{Binding SelectedDesktopMonitor}" HorizontalAlignment="Stretch">
+                      <ComboBox.ItemTemplate>
+                        <DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate>
+                      </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <Grid ColumnDefinitions="*,Auto" Margin="0,2,0,0">
+                      <TextBlock Text="Capture cursor" Foreground="#B8C7D8" VerticalAlignment="Center" />
+                      <ToggleSwitch Grid.Column="1" IsChecked="{Binding ReplayDesktopCaptureCursor}" OnContent="{x:Null}" OffContent="{x:Null}" />
+                    </Grid>
+                  </StackPanel>
 
                   <StackPanel Spacing="6" Margin="0,0,0,12">
                     <TextBlock Classes="flyoutLabel" Text="CAPTURE BACKEND" />
@@ -163,6 +182,7 @@
 
                   <Button Classes="linkButton" Content="More Replay Buffer settings" Click="OpenReplaySettingsButton_OnClick" HorizontalAlignment="Left" Padding="0" Margin="0,0,0,2" />
                 </StackPanel>
+                </ScrollViewer>
               </Flyout>
             </Button.Flyout>
           </Button>
@@ -206,6 +226,10 @@
             <TextBlock Text="{Binding SelectedVideoPath}" TextTrimming="CharacterEllipsis" />
           </Button>
         </Grid>
+
+        <Button Grid.Column="2" Classes="windowChromeButton" Click="CheckUpdatesButton_OnClick" ToolTip.Tip="Check for updates" IsVisible="{Binding ShowHeaderUpdateButton}">
+          <PathIcon Data="M12,3V14.17L16.59,9.59L18,11L12,17L6,11L7.41,9.59L10,14.17V3H12M5,20H19V22H5V20Z" Width="16" Height="16" Foreground="#38D996" />
+        </Button>
 
         <!-- The active-game chip that used to sit here is gone: the Library
              heading names the filter now, and the sidebar's All Games button
@@ -2857,12 +2881,13 @@
                 </StackPanel>
                 </Border>
                 <Border Background="#102723" BorderBrush="#285A50" BorderThickness="1" CornerRadius="9" Padding="15,13">
-                  <StackPanel Spacing="4">
+              <StackPanel Spacing="4">
                     <TextBlock Text="You're all set" Foreground="#B8F1DC" FontSize="14" FontWeight="Bold" />
                     <TextBlock Text="Thanks for using ClypDat. Capture something great." Foreground="#A1CDBE" FontSize="12" TextWrapping="Wrap" />
                   </StackPanel>
                 </Border>
               </StackPanel>
+
             </StackPanel>
           </ScrollViewer>
         </DockPanel>
