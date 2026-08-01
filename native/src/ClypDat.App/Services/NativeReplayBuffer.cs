@@ -525,8 +525,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // Which output the duplication below is actually bound to - see the
             // once-a-second target recheck in the loop for why the window handle
             // alone is the wrong thing to compare against.
-            var targetMonitor = ResolveTargetMonitor(targetHandle);
-            duplication = CreateDuplicationFor(device, targetHandle, out var desktopBounds);
+            var targetMonitor = ResolveTargetMonitor(targetHandle, config);
+            duplication = CreateDuplicationFor(device, targetHandle, config, out var desktopBounds);
 
             var (captureWidth, captureHeight) = isMonitorMode
                 ? (desktopBounds.Right - desktopBounds.Left, desktopBounds.Bottom - desktopBounds.Top)
@@ -569,6 +569,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // false and the CPU sws_scale path above still works normally.
             try
             {
+                if (config.CaptureCursor) throw new NotSupportedException("Desktop cursor uses CPU composition.");
                 (videoDevice, videoContext, vpEnumerator, videoProcessor, nv12Output, nv12StagingRing, outputView) =
                     CreateGpuScaler(device, captureWidth, captureHeight, outputWidth, outputHeight, config.FrameRate);
                 (croppedTexture, inputView) = CreateGpuCropInputView(device, videoDevice, vpEnumerator, captureWidth, captureHeight);
@@ -929,7 +930,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // detection flapping between a launcher and the game, or the
                         // game closing and falling back to monitor mode, all resolve
                         // to the same monitor and are now free.
-                        var freshMonitor = ResolveTargetMonitor(targetHandle);
+                        var freshMonitor = ResolveTargetMonitor(targetHandle, config);
                         if (freshMonitor != targetMonitor || duplication is null)
                         {
                             targetMonitor = freshMonitor;
@@ -941,7 +942,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             duplication = null;
                             try
                             {
-                                duplication = CreateDuplicationFor(device, targetHandle, out desktopBounds);
+                                duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds);
                             }
                             catch (Exception error)
                             {
@@ -1013,7 +1014,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     Thread.Sleep(50);
                     try
                     {
-                        duplication = CreateDuplicationFor(device, targetHandle, out desktopBounds);
+                        duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds);
                         AppLog.Info("Native capture: DXGI duplication recreated after prior failure.");
                     }
                     catch (Exception error)
@@ -1212,6 +1213,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                     stageStopwatch.Restart();
                                     try
                                     {
+                                        if (config.CaptureCursor && GetCursorPos(out var cursor))
+                                        {
+                                            DrawDesktopCursor((byte*)mapped.DataPointer, (int)mapped.RowPitch, captureWidth, captureHeight,
+                                                cursor.X - desktopBounds.Left - cropLeft,
+                                                cursor.Y - desktopBounds.Top - cropTop);
+                                        }
                                         var srcData = new byte*[1] { (byte*)mapped.DataPointer };
                                         var srcStride = new int[1] { (int)mapped.RowPitch };
                                         ffmpeg.sws_scale(swsContext, srcData, srcStride, 0, captureHeight, frame->data, frame->linesize);
@@ -1255,7 +1262,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         duplication = null;
                         try
                         {
-                            duplication = CreateDuplicationFor(device, targetHandle, out desktopBounds);
+                        duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds);
                         }
                         catch (Exception error)
                         {
@@ -1322,7 +1329,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             ID3D11Texture2D? newStaging = null;
                             try
                             {
-                                newDuplication = CreateDuplicationFor(newDevice, targetHandle, out desktopBounds);
+                                newDuplication = CreateDuplicationFor(newDevice, targetHandle, config, out desktopBounds);
                                 newStaging = CreateStagingTexture(newDevice, captureWidth, captureHeight);
                             }
                             catch
@@ -1365,6 +1372,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             // below still works off `staging` alone.
                             try
                             {
+                                if (config.CaptureCursor) throw new NotSupportedException("Desktop cursor uses CPU composition.");
                                 (videoDevice, videoContext, vpEnumerator, videoProcessor, nv12Output, nv12StagingRing, outputView) =
                                     CreateGpuScaler(device, captureWidth, captureHeight, outputWidth, outputHeight, config.FrameRate);
                                 (croppedTexture, inputView) = CreateGpuCropInputView(device, videoDevice, vpEnumerator, captureWidth, captureHeight);
@@ -1387,7 +1395,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         {
                             duplication?.Dispose();
                             duplication = null;
-                            duplication = CreateDuplicationFor(device, targetHandle, out desktopBounds);
+                            duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds);
                             AppLog.Info($"Native capture: DXGI duplication recreated after a stall (attempt {recoveryAttempts}).");
                         }
 
@@ -1738,7 +1746,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         var immediateGameName = !string.IsNullOrWhiteSpace(gameName) && !string.Equals(gameName, "No game detected", StringComparison.OrdinalIgnoreCase)
                             ? gameName
                             : finalizeConfig.GameDisplayName;
-                        ClipInfoSidecar.Save(finalizeConfig.LibraryFolder, finalPath, new ClipInfo(immediateGameName, null, $"Session - {immediateGameName}", startWallUtc));
+                        ClipInfoSidecar.Save(finalizeConfig.LibraryFolder, finalPath, new ClipInfo(immediateGameName, null, $"Session - {immediateGameName}", startWallUtc, CaptureSource: finalizeConfig.CaptureSource));
                         AppLog.Info($"Full session video available immediately (audio attaching in background): {finalPath}.");
                     }
                     catch (Exception error)
@@ -2042,9 +2050,40 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // The output a given target resolves to. Kept separate from
     // CreateDuplicationFor so the capture loop can ask "would this target need a
     // different duplication?" without building one to find out.
-    private static nint ResolveTargetMonitor(nint targetHandle) => targetHandle != 0
-        ? MonitorFromWindow(targetHandle, MONITOR_DEFAULTTONEAREST)
-        : GetPrimaryMonitorHandle();
+    private static nint ResolveTargetMonitor(nint targetHandle, ReplayBufferConfig config)
+    {
+        if (targetHandle != 0) return MonitorFromWindow(targetHandle, MONITOR_DEFAULTTONEAREST);
+        if (string.Equals(config.CaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase))
+        {
+            var monitor = DesktopMonitorService.Resolve(config.CaptureMonitorDeviceName);
+            return MonitorFromPoint(new PointStruct { X = monitor.X + Math.Max(1, monitor.Width / 2), Y = monitor.Y + Math.Max(1, monitor.Height / 2) }, MONITOR_DEFAULTTONEAREST);
+        }
+        return GetPrimaryMonitorHandle();
+    }
+
+    // Desktop Duplication reports pointer movement separately from pixels. Keep
+    // native desktop captures truthful with a small high-contrast arrow on the
+    // CPU fallback path; game capture intentionally never enters this path.
+    private static unsafe void DrawDesktopCursor(byte* pixels, int stride, int width, int height, int x, int y)
+    {
+        for (var row = 0; row < 15; row++)
+        {
+            for (var column = 0; column < 12; column++)
+            {
+                var inside = column <= row / 2 || (row > 7 && column >= 3 && column <= 6 && row - 7 <= column - 2);
+                if (!inside) continue;
+                var px = x + column;
+                var py = y + row;
+                if (px < 0 || py < 0 || px >= width || py >= height) continue;
+                var edge = column == 0 || column == row / 2 || row == 0;
+                var target = pixels + py * stride + px * 4;
+                target[0] = edge ? (byte)0 : (byte)245;
+                target[1] = edge ? (byte)0 : (byte)245;
+                target[2] = edge ? (byte)0 : (byte)245;
+                target[3] = 255;
+            }
+        }
+    }
 
     // The GPU's own name ("NVIDIA GeForce RTX 4070 Ti"), for diagnostics and for
     // keying any learned per-machine encoder tuning - a learned value has no
@@ -2066,9 +2105,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
     }
 
-    private static IDXGIOutputDuplication CreateDuplicationFor(ID3D11Device device, nint targetHandle, out Vortice.RawRect desktopBounds)
+    private static IDXGIOutputDuplication CreateDuplicationFor(ID3D11Device device, nint targetHandle, ReplayBufferConfig config, out Vortice.RawRect desktopBounds)
     {
-        var monitorHandle = ResolveTargetMonitor(targetHandle);
+        var monitorHandle = ResolveTargetMonitor(targetHandle, config);
 
         using var dxgiDevice = device.QueryInterface<IDXGIDevice>();
         using var adapter = dxgiDevice.GetParent<IDXGIAdapter>();
@@ -2454,7 +2493,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 {
                     File.Move(muxOutputPath, finalOutputPath, overwrite: true);
                 }
-                ClipInfoSidecar.Save(config.LibraryFolder, finalOutputPath, new ClipInfo(gameDisplayName, null, $"Session - {gameDisplayName}", sessionStartWallUtc));
+                ClipInfoSidecar.Save(config.LibraryFolder, finalOutputPath, new ClipInfo(gameDisplayName, null, $"Session - {gameDisplayName}", sessionStartWallUtc, CaptureSource: config.CaptureSource));
                 AppLog.Info($"Native full session recording saved: path={finalOutputPath}, codec={config.FullSessionVideoCodec}.");
                 EnforceFullSessionQuota(config);
             }
@@ -3059,6 +3098,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
     [DllImport("user32.dll")]
     private static extern nint MonitorFromPoint(PointStruct pt, uint dwFlags);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out PointStruct point);
 
     private const uint MONITOR_DEFAULTTONEAREST = 2;
 

@@ -83,6 +83,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _customReplayResolutionSelected;
     private int _selectedReplayFrameRate;
     private ReplayBackendPreset? _selectedReplayBackend;
+    private string _selectedReplayCaptureSource = "Game";
+    private DesktopMonitorOption? _selectedDesktopMonitor;
     private readonly string _initialReplayBackend;
     private string _newCustomGameExecutable = string.Empty;
     private string _gameSearchText = string.Empty;
@@ -216,6 +218,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("ClypDat", "Native", "ClypDat's own capture engine - a true rolling buffer with no stop/start gaps between segments, and true per-window capture that keeps recording the game through alt-tabs and overlays. Used automatically on Auto."),
             new("Windows Capture", "Legacy", "Captures the screen directly with no process hook, so games with anti-cheat can get captured properly, at the cost of slightly higher overhead.")
         };
+        ReplayCaptureSources = new ObservableCollection<string> { "Game Capture", "Desktop Capture" };
+        DesktopMonitors = new ObservableCollection<DesktopMonitorOption>();
         ClipOverlayPositions = new ObservableCollection<string> { "Top Left", "Top Right" };
         ClipOverlayVolumes = new ObservableCollection<string> { "Low", "Medium", "High" };
         ProcessPriorityOptions = new ObservableCollection<ProcessPriorityOption>(ProcessPriorityService.Options);
@@ -259,6 +263,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _initialReplayBackend = string.IsNullOrWhiteSpace(Settings.ReplayBackend) ? "Auto" : Settings.ReplayBackend;
         _selectedReplayBackend = ReplayBackends.FirstOrDefault(preset => string.Equals(preset.Value, _initialReplayBackend, StringComparison.OrdinalIgnoreCase)) ??
                                   ReplayBackends.First(preset => preset.Value == "Auto");
+        _selectedReplayCaptureSource = string.Equals(Settings.ReplayCaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase)
+            ? "Desktop Capture"
+            : "Game Capture";
+        RefreshDesktopMonitors();
         _libraryRefreshDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
         _libraryRefreshDebounce.Tick += async (_, _) =>
         {
@@ -344,6 +352,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<EncoderPresetOption> ReplayEncoderPresets { get; }
     public ObservableCollection<string> ReplayRateControlModes { get; }
     public ObservableCollection<ReplayBackendPreset> ReplayBackends { get; }
+    public ObservableCollection<string> ReplayCaptureSources { get; }
+    public ObservableCollection<DesktopMonitorOption> DesktopMonitors { get; }
     public ObservableCollection<ExportCodecOption> ExportCodecs { get; }
     public ObservableCollection<string> ExcludedProcesses { get; }
     public ObservableCollection<string> ChatAudioApps { get; }
@@ -832,6 +842,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsSettingsVisible));
             OnPropertyChanged(nameof(ShowLibraryActions));
             OnPropertyChanged(nameof(ShowLibraryStatus));
+            OnPropertyChanged(nameof(ShowHeaderUpdateButton));
             OnPropertyChanged(nameof(HasSelectedCaptureBackend));
             OnPropertyChanged(nameof(EditorSidebarWidth));
         }
@@ -846,10 +857,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsLibraryVisible));
             OnPropertyChanged(nameof(ShowLibraryActions));
             OnPropertyChanged(nameof(ShowLibraryStatus));
+            OnPropertyChanged(nameof(ShowHeaderUpdateButton));
         }
     }
 
     public bool IsLibraryVisible => !IsEditorVisible && !IsSettingsVisible;
+    public bool ShowHeaderUpdateButton => IsLibraryVisible || IsSettingsVisible;
 
     public double EditorSidebarWidth => 64;
 
@@ -1057,9 +1070,66 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public bool IsDesktopCapture => string.Equals(Settings.ReplayCaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase);
+
     public string ReplayBufferStateSummary => ReplayBufferEnabled
-        ? "Armed - records in the background the instant a game is detected."
+        ? IsDesktopCapture
+            ? $"Armed - records {SelectedDesktopMonitor?.Label ?? "primary display"} in the background."
+            : "Armed - records in the background the instant a game is detected."
         : "Off - nothing is being recorded, and clips can't be saved.";
+
+    public string SelectedReplayCaptureSource
+    {
+        get => _selectedReplayCaptureSource;
+        set
+        {
+            if (string.IsNullOrWhiteSpace(value) || !SetProperty(ref _selectedReplayCaptureSource, value)) return;
+            Settings.ReplayCaptureSource = string.Equals(value, "Desktop Capture", StringComparison.OrdinalIgnoreCase) ? "Desktop" : "Game";
+            OnPropertyChanged(nameof(IsDesktopCapture));
+            OnPropertyChanged(nameof(ReplayBufferStateSummary));
+            SaveSettings();
+        }
+    }
+
+    public DesktopMonitorOption? SelectedDesktopMonitor
+    {
+        get => _selectedDesktopMonitor;
+        set
+        {
+            if (!SetProperty(ref _selectedDesktopMonitor, value) || value is null) return;
+            Settings.ReplayDesktopMonitorDeviceName = value.DeviceName;
+            OnPropertyChanged(nameof(ReplayBufferStateSummary));
+            SaveSettings();
+        }
+    }
+
+    public bool ReplayDesktopCaptureCursor
+    {
+        get => Settings.ReplayDesktopCaptureCursor;
+        set
+        {
+            if (Settings.ReplayDesktopCaptureCursor == value) return;
+            Settings.ReplayDesktopCaptureCursor = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    public void RefreshDesktopMonitors()
+    {
+        var monitors = DesktopMonitorService.GetMonitors();
+        DesktopMonitors.Clear();
+        foreach (var monitor in monitors) DesktopMonitors.Add(monitor);
+        var selected = DesktopMonitorService.Resolve(Settings.ReplayDesktopMonitorDeviceName, monitors);
+        _selectedDesktopMonitor = selected;
+        if (!string.Equals(Settings.ReplayDesktopMonitorDeviceName, selected.DeviceName, StringComparison.OrdinalIgnoreCase))
+        {
+            Settings.ReplayDesktopMonitorDeviceName = selected.DeviceName;
+            SaveSettings();
+        }
+        OnPropertyChanged(nameof(SelectedDesktopMonitor));
+        OnPropertyChanged(nameof(ReplayBufferStateSummary));
+    }
 
     public ReplayDurationPreset? SelectedReplayDurationPreset
     {
@@ -4232,6 +4302,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ReplayBufferConfig CreateReplayConfig()
     {
+        var desktopCapture = IsDesktopCapture;
+        var desktopMonitor = DesktopMonitorService.Resolve(Settings.ReplayDesktopMonitorDeviceName);
         var detectionKey = string.IsNullOrWhiteSpace(ActiveGameDetection.DetectionKey) ? ActiveGameDetection.ExeName : ActiveGameDetection.DetectionKey;
         var gameOverride = Settings.GameCaptureOverrides
             .FirstOrDefault(g => string.Equals(g.ExecutableName, detectionKey, StringComparison.OrdinalIgnoreCase));
@@ -4266,26 +4338,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SelectedReplayDurationPreset?.Seconds ?? Settings.ReplayDurationSeconds,
             Settings.ReplayMaxHeight,
             Settings.ReplayFrameRate,
-            ReplayCaptureX,
-            ReplayCaptureY,
-            ReplayCaptureWidth,
-            ReplayCaptureHeight,
+            desktopCapture ? desktopMonitor.X : ReplayCaptureX,
+            desktopCapture ? desktopMonitor.Y : ReplayCaptureY,
+            desktopCapture ? desktopMonitor.Width : ReplayCaptureWidth,
+            desktopCapture ? desktopMonitor.Height : ReplayCaptureHeight,
             string.Empty,
             string.Empty,
             chatAudioProcessNames,
             microphoneDeviceIds,
             microphoneDeviceName,
             Settings.GameAudioExcludedProcesses.ToArray(),
-            ActiveGameDetection.DisplayName,
-            ActiveGameDetection.ExeName,
-            ActiveGameDetection.WindowTitle,
-            ActiveGameDetection.WindowClass,
+            desktopCapture ? "Desktop Capture" : ActiveGameDetection.DisplayName,
+            desktopCapture ? string.Empty : ActiveGameDetection.ExeName,
+            desktopCapture ? string.Empty : ActiveGameDetection.WindowTitle,
+            desktopCapture ? string.Empty : ActiveGameDetection.WindowClass,
             effectiveBackend,
-            GameWindowHandle: ActiveGameDetection.WindowHandle,
+            GameWindowHandle: desktopCapture ? IntPtr.Zero : ActiveGameDetection.WindowHandle,
             MicrophoneNoiseSuppressionEnabled: Settings.MicrophoneNoiseSuppressionEnabled,
             MicrophoneNoiseSuppressionStrength: Settings.MicrophoneNoiseSuppressionStrength,
             FullSessionRecordingEnabled: Settings.FullSessionRecordingEnabled,
-            FullSessionRecordingFolder: LibraryLayout.VodDirectory(Settings.LibraryFolder, ActiveGameDetection.DisplayName),
+            FullSessionRecordingFolder: LibraryLayout.VodDirectory(Settings.LibraryFolder, desktopCapture ? "Desktop Capture" : ActiveGameDetection.DisplayName),
             FullSessionVideoCodec: Settings.FullSessionVideoCodec,
             FullSessionQuotaGb: Settings.FullSessionQuotaGb,
             FullSessionBackgroundFinalize: Settings.FullSessionBackgroundFinalize,
@@ -4296,7 +4368,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             EncoderPreset: ReplayEncoderPresetPolicy.Resolve(Settings.ReplayEncoderPreset, Settings.ReplayFrameRate, effectiveBackend),
             RateControlMode: Settings.ReplayRateControlMode,
             ConstantQuality: Settings.ReplayConstantQuality,
-            MaxBitrateMbps: Settings.ReplayMaxBitrateMbps);
+            MaxBitrateMbps: Settings.ReplayMaxBitrateMbps,
+            CaptureSource: desktopCapture ? "Desktop" : "Game",
+            CaptureMonitorDeviceName: desktopCapture ? desktopMonitor.DeviceName : string.Empty,
+            CaptureCursor: desktopCapture && Settings.ReplayDesktopCaptureCursor);
     }
 
     public void SetDuration(TimeSpan duration)

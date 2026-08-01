@@ -21,6 +21,12 @@ public sealed class AppSettings
     // meant to be armed and forgotten); off means no game detection ever
     // starts a capture, so nothing is recorded until it's turned back on.
     public bool ReplayBufferEnabled { get; set; } = true;
+    // "Game" keeps the existing detected-game workflow. "Desktop" keeps a
+    // selected display armed even when no game is running.
+    public string ReplayCaptureSource { get; set; } = "Game";
+    // Win32 display device path, e.g. \\.\DISPLAY1. Empty means primary.
+    public string ReplayDesktopMonitorDeviceName { get; set; } = string.Empty;
+    public bool ReplayDesktopCaptureCursor { get; set; } = true;
     public int ReplayDurationSeconds { get; set; } = 60;
     // Native engine encoder controls, surfaced directly in Settings rather
     // than hidden behind a coarse quality label.

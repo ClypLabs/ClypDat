@@ -789,7 +789,10 @@ public sealed record ReplayBufferConfig(
     string EncoderPreset = "P4",
     string RateControlMode = "Constant quality",
     int ConstantQuality = 20,
-    int MaxBitrateMbps = 40);
+    int MaxBitrateMbps = 40,
+    string CaptureSource = "Game",
+    string CaptureMonitorDeviceName = "",
+    bool CaptureCursor = false);
 
 internal sealed class AudioCaptureSession : IDisposable
 {

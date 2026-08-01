@@ -34,7 +34,10 @@ public sealed record ClipInfo(
     // across three possible locations and does nothing for clips trimmed before
     // that fix existed; this flag is the durable half, and makes the badge
     // impossible for a trimmed clip regardless of what sidecars survive.
-    bool IsTrimmed = false);
+    bool IsTrimmed = false,
+    // Null is legacy game capture. New desktop clips use "Desktop" so editor
+    // behavior does not depend on transient capture sidecars.
+    string? CaptureSource = null);
 
 public static class ClipInfoSidecar
 {

@@ -256,6 +256,9 @@ public sealed partial class MainWindow : Window
                 {
                     if (e.PropertyName == nameof(MainWindowViewModel.AutoClippingEnabled)) UpdateAutoClipStates();
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayBufferEnabled)) _ = ApplyReplayBufferEnabledAsync();
+                    if (e.PropertyName is nameof(MainWindowViewModel.SelectedReplayCaptureSource)
+                        or nameof(MainWindowViewModel.SelectedDesktopMonitor)
+                        or nameof(MainWindowViewModel.ReplayDesktopCaptureCursor)) ScheduleReplayRestart();
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
                     if (e.PropertyName == nameof(MainWindowViewModel.IsSettingsVisible) && ViewModel.IsSettingsVisible) PauseEditorPlayback();
@@ -269,19 +272,7 @@ public sealed partial class MainWindow : Window
                         // Debounced rather than restarting on every keystroke/click -
                         // a user dragging through resolutions or typing a bitrate
                         // digit by digit shouldn't tear the buffer down each time.
-                        _replayRestartDebounceTimer?.Stop();
-                        _replayRestartDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };
-                        _replayRestartDebounceTimer.Tick += async (_, _) =>
-                        {
-                            _replayRestartDebounceTimer?.Stop();
-                            _replayRestartDebounceTimer = null;
-                            if (ViewModel is { IsReplayRecording: true, ReplayQualityRestartRequired: true })
-                            {
-                                await StopReplayBufferAsync();
-                                await StartReplayBufferAsync(showErrors: true, isQualityRestart: true);
-                            }
-                        };
-                        _replayRestartDebounceTimer.Start();
+                        ScheduleReplayRestart();
                     }
                     if (e.PropertyName == nameof(MainWindowViewModel.IsEditorVisible) && ViewModel.IsLibraryVisible && _libraryReturnAnchorDirty)
                     {
@@ -495,11 +486,11 @@ public sealed partial class MainWindow : Window
 
         HarvestGameIcons();
 
-        if (detection.IsDetected && ViewModel.Settings.ReplayBufferEnabled && _replayBuffer is { IsRecording: false } && !_replayTransitioning)
+        if (ShouldRecordReplay(detection) && _replayBuffer is { IsRecording: false } && !_replayTransitioning)
         {
             _ = StartReplayBufferAsync(showErrors: false);
         }
-        else if (_replayBuffer is { IsRecording: true } && !detection.IsDetected && !_replayTransitioning)
+        else if (_replayBuffer is { IsRecording: true } && !ShouldRecordReplay(detection) && !_replayTransitioning)
         {
             // The game just closed. Show what the session captured once the
             // buffer has actually stopped - not before, or a clip saved in the
@@ -613,6 +604,7 @@ public sealed partial class MainWindow : Window
 
     private void UpdateCapturePauseState(GameDetection detection)
     {
+        if (ViewModel?.IsDesktopCapture == true) return;
         if (_replayBuffer is not { IsRecording: true }) return;
         var shouldPause = string.Equals(detection.ExeName, "cs2.exe", StringComparison.OrdinalIgnoreCase) && detection.IsDetected && !detection.IsForeground;
         _replayBuffer.SetCapturePaused(shouldPause);
@@ -2058,6 +2050,24 @@ public sealed partial class MainWindow : Window
     // flat lie about whether anything is being captured.
     private string ReplayIdleStatus => ViewModel?.Settings.ReplayBufferEnabled == false ? "Replay Off" : "Replay Armed";
 
+    private bool ShouldRecordReplay(GameDetection detection) =>
+        ViewModel is { Settings.ReplayBufferEnabled: true } && (ViewModel.IsDesktopCapture || detection.IsDetected);
+
+    private void ScheduleReplayRestart()
+    {
+        _replayRestartDebounceTimer?.Stop();
+        _replayRestartDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };
+        _replayRestartDebounceTimer.Tick += async (_, _) =>
+        {
+            _replayRestartDebounceTimer?.Stop();
+            _replayRestartDebounceTimer = null;
+            if (ViewModel is not { Settings.ReplayBufferEnabled: true }) return;
+            if (ViewModel.IsReplayRecording) await StopReplayBufferAsync();
+            await StartReplayBufferAsync(showErrors: true, isQualityRestart: true);
+        };
+        _replayRestartDebounceTimer.Start();
+    }
+
     // Flipping the master switch takes effect now rather than at the next
     // game-detection tick: on arms (and starts capturing straight away if a
     // game is already up), off tears the capture down.
@@ -2126,7 +2136,7 @@ public sealed partial class MainWindow : Window
         try
         {
             _replayTransitioning = true;
-            if (!ViewModel.Settings.ReplayBufferEnabled || !ViewModel.ActiveGameDetection.IsDetected)
+            if (!ShouldRecordReplay(ViewModel.ActiveGameDetection))
             {
                 ViewModel.RecorderStatus = ReplayIdleStatus;
                 return;
@@ -2134,7 +2144,7 @@ public sealed partial class MainWindow : Window
             EnsureReplayBufferMatchesGame();
             if (_replayBuffer is null) return;
             await EnsureLibraryFolderAsync();
-            ApplyPrimaryCaptureBounds();
+            ApplyCaptureBounds();
             await Task.Run(() => _replayBuffer.StartAsync());
             AppLog.Info("Replay started.");
             _encoderTuning.BeginSession(ViewModel.CreateReplayConfig().EncoderPreset);
@@ -2151,7 +2161,7 @@ public sealed partial class MainWindow : Window
             }
             _sessionCollectingClips = true;
             ViewModel.IsReplayRecording = _replayBuffer.IsRecording;
-            if (ViewModel.IsReplayRecording) ShowGameDetectedNotification(ViewModel.ActiveGameDetection.DisplayName);
+            if (ViewModel.IsReplayRecording && !ViewModel.IsDesktopCapture) ShowGameDetectedNotification(ViewModel.ActiveGameDetection.DisplayName);
         }
         catch (Exception error)
         {
@@ -2270,11 +2280,13 @@ public sealed partial class MainWindow : Window
                 // Emoji display title and stable plain event type are carried
                 // separately, so tile icons/counts never parse presentation text.
                 var libraryFolder = ViewModel.Settings.LibraryFolder;
+                var replayConfig = ViewModel.CreateReplayConfig();
                 var clipInfo = new ClipInfo(
-                    autoClipGameName ?? ViewModel.ActiveGameDetection.DisplayName,
+                    replayConfig.GameDisplayName,
                     autoClipEventType ?? autoClipLabel?.Split(" - ", 2)[0],
-                    autoClipLabel ?? ViewModel.ActiveGameDetection.DisplayName,
-                    File.GetCreationTimeUtc(outputPath));
+                    autoClipLabel ?? replayConfig.GameDisplayName,
+                    File.GetCreationTimeUtc(outputPath),
+                    CaptureSource: replayConfig.CaptureSource);
                 // Another plain file write with no UI affinity.
                 await Task.Run(() => ClipInfoSidecar.Save(libraryFolder, outputPath, clipInfo));
                 await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
@@ -4396,7 +4408,7 @@ public sealed partial class MainWindow : Window
         {
             var (whatsNew, fixes) = await AppUpdateService.GetCurrentVersionNotesAsync();
             var upToDateDialog = CreateUpToDateDialog(whatsNew, fixes);
-            await upToDateDialog.ShowDialog(this);
+            await ShowUpdateDialogAsync(upToDateDialog);
             return;
         }
 
@@ -4404,7 +4416,7 @@ public sealed partial class MainWindow : Window
         try
         {
             var dialog = CreateUpdateDialog(update);
-            await dialog.ShowDialog(this);
+            await ShowUpdateDialogAsync(dialog);
         }
         finally
         {
@@ -5763,7 +5775,7 @@ public sealed partial class MainWindow : Window
         try
         {
             var dialog = CreateUpdateDialog(update);
-            await dialog.ShowDialog(this);
+            await ShowUpdateDialogAsync(dialog);
         }
         finally
         {
@@ -5771,11 +5783,43 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // Update windows are owned by a tinted, click-to-dismiss scrim. Showing the
+    // card normally (rather than ShowDialog) keeps the scrim visible above the
+    // owner while still preventing interaction with it.
+    private async Task ShowUpdateDialogAsync(Window dialog)
+    {
+        var backdrop = new ShareBackdropWindow(this);
+        EventHandler dismiss = (_, _) => dialog.Close();
+        backdrop.DismissRequested += dismiss;
+        backdrop.Show(this);
+        try
+        {
+            var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            EventHandler? closedHandler = null;
+            closedHandler = (_, _) => closed.TrySetResult();
+            dialog.Closed += closedHandler;
+            try
+            {
+                dialog.Show(backdrop);
+                await closed.Task;
+            }
+            finally
+            {
+                dialog.Closed -= closedHandler;
+            }
+        }
+        finally
+        {
+            backdrop.DismissRequested -= dismiss;
+            backdrop.Close();
+        }
+    }
+
     private Window CreateUpdateDialog(AppUpdateInfo update)
     {
         var window = new Window
         {
-            Width = 680,
+            Width = 760,
             SizeToContent = SizeToContent.Height,
             MaxHeight = 720,
             CanResize = false,
@@ -5790,12 +5834,8 @@ public sealed partial class MainWindow : Window
         var titleBar = new Grid
         {
             ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
-            Height = 40,
+            Height = 48,
             Background = Avalonia.Media.Brush.Parse("#0C1319")
-        };
-        titleBar.PointerPressed += (_, e) =>
-        {
-            if (e.GetCurrentPoint(titleBar).Properties.IsLeftButtonPressed) window.BeginMoveDrag(e);
         };
         var titleIcon = new Image { Source = new Avalonia.Media.Imaging.Bitmap(Avalonia.Platform.AssetLoader.Open(new Uri("avares://ClypDat/Assets/clypdat-icon-24.png"))), Width = 16, Height = 16, Margin = new Avalonia.Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         // 2px down: TextBlock's cap height sits visually higher than the icon's
@@ -5824,6 +5864,7 @@ public sealed partial class MainWindow : Window
             downloadCts?.Cancel();
             window.Close();
         };
+        window.Closing += (_, _) => downloadCts?.Cancel();
         Grid.SetColumn(closeButton, 2);
         titleBar.Children.Add(titleLeft);
         titleBar.Children.Add(closeButton);
@@ -5949,7 +5990,7 @@ public sealed partial class MainWindow : Window
                     {
                         new TextBlock
                         {
-                            Text = $"ClypDat {FormatVersion(update.LatestVersion)}",
+                            Text = $"{FormatVersion(update.CurrentVersion)}  →  {FormatVersion(update.LatestVersion)}",
                             Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
                             FontWeight = Avalonia.Media.FontWeight.Bold,
                             FontSize = 20
@@ -5972,7 +6013,7 @@ public sealed partial class MainWindow : Window
                 },
                 new TextBlock
                 {
-                    Text = $"You're on {FormatVersion(update.CurrentVersion)}.",
+                    Text = "Ready to download. Your clips and settings stay in place.",
                     Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"),
                     FontSize = 13
                 }
@@ -6148,7 +6189,7 @@ public sealed partial class MainWindow : Window
     {
         var window = new Window
         {
-            Width = 680,
+            Width = 760,
             SizeToContent = SizeToContent.Height,
             MaxHeight = 720,
             CanResize = false,
@@ -6163,12 +6204,8 @@ public sealed partial class MainWindow : Window
         var titleBar = new Grid
         {
             ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
-            Height = 40,
+            Height = 48,
             Background = Avalonia.Media.Brush.Parse("#0C1319")
-        };
-        titleBar.PointerPressed += (_, e) =>
-        {
-            if (e.GetCurrentPoint(titleBar).Properties.IsLeftButtonPressed) window.BeginMoveDrag(e);
         };
         var titleIcon = new Image { Source = new Avalonia.Media.Imaging.Bitmap(Avalonia.Platform.AssetLoader.Open(new Uri("avares://ClypDat/Assets/clypdat-icon-24.png"))), Width = 16, Height = 16, Margin = new Avalonia.Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         var titleText = new TextBlock { Text = "You're up to date", Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"), FontSize = 12, FontWeight = Avalonia.Media.FontWeight.SemiBold, Margin = new Avalonia.Thickness(8, 2, 0, 0), VerticalAlignment = VerticalAlignment.Center };
@@ -6555,7 +6592,8 @@ public sealed partial class MainWindow : Window
         // "Playback Paused" badge over content that was never paused. See
         // ClipInfo.IsTrimmed for why this is checked here and not left to the
         // best-effort sidecar deletion at trim time.
-        if (ViewModel is not null && ClipInfoSidecar.Load(ViewModel.Settings.LibraryFolder, videoPath)?.IsTrimmed == true)
+        var clipInfo = ViewModel is null ? null : ClipInfoSidecar.Load(ViewModel.Settings.LibraryFolder, videoPath);
+        if (clipInfo?.IsTrimmed == true || string.Equals(clipInfo?.CaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase))
         {
             return new();
         }
@@ -8278,9 +8316,19 @@ public sealed partial class MainWindow : Window
         return source is TextBox;
     }
 
-    private void ApplyPrimaryCaptureBounds()
+    private void ApplyCaptureBounds()
     {
         if (ViewModel is null) return;
+        if (ViewModel.IsDesktopCapture)
+        {
+            var monitor = DesktopMonitorService.Resolve(ViewModel.Settings.ReplayDesktopMonitorDeviceName);
+            ViewModel.ReplayCaptureX = monitor.X;
+            ViewModel.ReplayCaptureY = monitor.Y;
+            ViewModel.ReplayCaptureWidth = monitor.Width;
+            ViewModel.ReplayCaptureHeight = monitor.Height;
+            return;
+        }
+
         var primary = Screens.Primary ?? Screens.All.FirstOrDefault();
         if (primary is null) return;
         ViewModel.ReplayCaptureX = primary.Bounds.X;

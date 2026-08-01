@@ -287,7 +287,21 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     private static RecorderOptions CreateOptions(ReplayBufferConfig config)
     {
         var options = RecorderOptions.DefaultMainMonitor;
-        if (config.GameWindowHandle != 0 && IsWindow(config.GameWindowHandle))
+        if (string.Equals(config.CaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase))
+        {
+            var monitor = DesktopMonitorService.Resolve(config.CaptureMonitorDeviceName);
+            options.SourceOptions.RecordingSources = new List<RecordingSourceBase>
+            {
+                new DisplayRecordingSource(monitor.DeviceName)
+                {
+                    IsCursorCaptureEnabled = config.CaptureCursor,
+                    IsBorderRequired = false,
+                    Stretch = StretchMode.Uniform
+                }
+            };
+            AppLog.Info($"Replay capture source: desktop monitor={monitor.DeviceName}, cursor={config.CaptureCursor}.");
+        }
+        else if (config.GameWindowHandle != 0 && IsWindow(config.GameWindowHandle))
         {
             options.SourceOptions.RecordingSources = new List<RecordingSourceBase>
             {
