@@ -6590,7 +6590,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private static Avalonia.Media.Imaging.Bitmap? LoadBitmap(string path)
     {
         if (string.IsNullOrWhiteSpace(path)) return null;
-        if (BitmapCache.TryGet(path, out var cached)) return cached;
+        if (ClypDat.App.Services.BitmapCache.TryGet(path, out var cached)) return cached;
 
         Avalonia.Media.Imaging.Bitmap? bitmap;
         try
@@ -6602,7 +6602,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             bitmap = null;
         }
 
-        BitmapCache.Store(path, bitmap);
+        ClypDat.App.Services.BitmapCache.Store(path, bitmap);
         return bitmap;
     }
 

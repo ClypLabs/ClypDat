@@ -2834,7 +2834,7 @@ public sealed partial class MainWindow : Window
 
         _activeClipOverlay = new Window
         {
-            SystemDecorations = SystemDecorations.None,
+            WindowDecorations = WindowDecorations.None,
             CanResize = false,
             ShowInTaskbar = false,
             ShowActivated = false,
@@ -3749,7 +3749,7 @@ public sealed partial class MainWindow : Window
     }
 
     // Custom title bar (native caption buttons removed via
-    // ExtendClientAreaChromeHints="NoChrome") - clicking anywhere else in
+    // WindowDecorations="None") - clicking anywhere else in
     // the header bar drags the window, matching native title bar behavior;
     // a second click within Avalonia's double-click window toggles
     // maximize instead, same as double-clicking a native title bar.
@@ -5303,7 +5303,7 @@ public sealed partial class MainWindow : Window
         tools.ShareRequested += async (_, _) => await ShareCurrentClipAsync();
         var window = new Window
         {
-            SystemDecorations = SystemDecorations.None,
+            WindowDecorations = WindowDecorations.None,
             ShowInTaskbar = false,
             CanResize = false,
             ShowActivated = false,
@@ -5539,10 +5539,9 @@ public sealed partial class MainWindow : Window
             CanResize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Background = Avalonia.Media.Brush.Parse("#111920"),
-            SystemDecorations = SystemDecorations.Full,
+            WindowDecorations = WindowDecorations.None,
             ExtendClientAreaToDecorationsHint = true,
             ExtendClientAreaTitleBarHeightHint = -1,
-            ExtendClientAreaChromeHints = Avalonia.Platform.ExtendClientAreaChromeHints.NoChrome,
             TransparencyLevelHint = new[] { Avalonia.Controls.WindowTransparencyLevel.None }
         };
 
@@ -5913,10 +5912,9 @@ public sealed partial class MainWindow : Window
             CanResize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Background = Avalonia.Media.Brush.Parse("#111920"),
-            SystemDecorations = SystemDecorations.Full,
+            WindowDecorations = WindowDecorations.None,
             ExtendClientAreaToDecorationsHint = true,
             ExtendClientAreaTitleBarHeightHint = -1,
-            ExtendClientAreaChromeHints = Avalonia.Platform.ExtendClientAreaChromeHints.NoChrome,
             TransparencyLevelHint = new[] { Avalonia.Controls.WindowTransparencyLevel.None }
         };
 
@@ -6390,7 +6388,7 @@ public sealed partial class MainWindow : Window
         };
         var overlay = new Window
         {
-            SystemDecorations = SystemDecorations.None,
+            WindowDecorations = WindowDecorations.None,
             ShowInTaskbar = false,
             CanResize = false,
             ShowActivated = false,
@@ -6997,7 +6995,7 @@ public sealed partial class MainWindow : Window
             // in 2s.
             Margin = new Thickness(0, -1, 0, 0),
         };
-        volumeSlider.Bind(Slider.ValueProperty, new Binding("MasterVolumePercent", BindingMode.TwoWay));
+        volumeSlider.Bind(Slider.ValueProperty, new Binding("MasterVolumePercent") { Mode = BindingMode.TwoWay });
         volumeSlider.Bind(OpacityProperty, new Binding("IsMasterMuted") { Converter = BoolToOpacityConverter.Instance });
 
         // Bumped a point and lightened from the original #5C6D7E/#8C98A7 -
@@ -7189,7 +7187,7 @@ public sealed partial class MainWindow : Window
 
         var window = new Window
         {
-            SystemDecorations = SystemDecorations.None,
+            WindowDecorations = WindowDecorations.None,
             ShowInTaskbar = false,
             CanResize = false,
             ShowActivated = false,
@@ -7770,10 +7768,9 @@ public sealed partial class MainWindow : Window
             CanResize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Background = Avalonia.Media.Brush.Parse("#111920"),
-            SystemDecorations = SystemDecorations.Full,
+            WindowDecorations = WindowDecorations.None,
             ExtendClientAreaToDecorationsHint = true,
             ExtendClientAreaTitleBarHeightHint = -1,
-            ExtendClientAreaChromeHints = Avalonia.Platform.ExtendClientAreaChromeHints.NoChrome,
             TransparencyLevelHint = new[] { Avalonia.Controls.WindowTransparencyLevel.None }
         };
 

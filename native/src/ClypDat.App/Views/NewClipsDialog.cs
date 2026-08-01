@@ -17,7 +17,7 @@ internal sealed class NewClipsDialog : Window
 
     public NewClipsDialog(Window owner, EventHandler<RoutedEventArgs> close, EventHandler<RoutedEventArgs> delete, EventHandler<RoutedEventArgs> viewAll)
     {
-        SystemDecorations = SystemDecorations.None;
+        WindowDecorations = WindowDecorations.None;
         ShowInTaskbar = false;
         CanResize = false;
         WindowStartupLocation = WindowStartupLocation.Manual;
