@@ -6,6 +6,7 @@ public sealed class GameBackendRowViewModel : ViewModelBase
 {
     private ReplayBackendPreset? _selectedBackend;
     private bool _isVisible = true;
+    private bool _showDivider;
 
     public GameBackendRowViewModel(string executableName, string displayName, string processName, bool isCustom, ReplayBackendPreset selectedBackend)
     {
@@ -37,6 +38,12 @@ public sealed class GameBackendRowViewModel : ViewModelBase
     {
         get => _isVisible;
         set => SetProperty(ref _isVisible, value);
+    }
+
+    public bool ShowDivider
+    {
+        get => _showDivider;
+        set => SetProperty(ref _showDivider, value);
     }
 
     public ReplayBackendPreset? SelectedBackend
