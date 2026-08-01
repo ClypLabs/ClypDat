@@ -149,6 +149,7 @@ internal static class Program
     {
         return AppBuilder.Configure<App>()
             .UsePlatformDetect()
+            .With(GraphicsOptionsResolver.Resolve())
             .WithInterFont()
             .LogToTrace();
     }

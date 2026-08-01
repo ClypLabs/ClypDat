@@ -35,7 +35,7 @@ public partial class ShareDialog : Window
         DataContext = viewModel;
         PositionOverOwner(owner);
         Closed += (_, _) => CleanUp();
-        Opened += (_, _) => WindowTransparencyFallback.ApplyIfNeeded(this, ShareScrim.Background, b => ShareScrim.Background = b);
+        Opened += (_, _) => OverlayTransparencyDiagnostics.Log(this, "share-dialog");
 
         // Deliberately does NOT start encoding on open. Encoding is expensive
         // GPU work, and this app is usually running with the replay buffer
