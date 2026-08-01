@@ -855,7 +855,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // send without needing a full diagnostics export - the
                         // debug log is 1-8MB/day and isn't something to ask for
                         // first when triaging "clips are choppy."
-                        AppLog.Info($"Native capture: overload - dropped {droppedSinceLog} frame(s) in the last {diagElapsed:0.0}s, queue {encodeQueue.Count}/{encodeQueueCapacity}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.0}, avgScaleMs={scaleMs / n:0.0}. If this is frequent, try a faster Encoder preset in Settings.");
+                        var recoveryGuidance = string.Equals(config.EncoderPreset, "P1", StringComparison.OrdinalIgnoreCase)
+                            ? "P1 is already active; reduce capture resolution or frame rate."
+                            : "Try a faster Encoder preset in Settings.";
+                        AppLog.Info($"Native capture: overload - dropped {droppedSinceLog} frame(s) in the last {diagElapsed:0.0}s, queue {encodeQueue.Count}/{encodeQueueCapacity}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.0}, avgScaleMs={scaleMs / n:0.0}. {recoveryGuidance}");
                     }
                     SetHealth(new ReplayCaptureHealth("Native", "Desktop Duplication",
                         overloaded || isStalled ? ReplayCaptureState.Degraded : ReplayCaptureState.Healthy,

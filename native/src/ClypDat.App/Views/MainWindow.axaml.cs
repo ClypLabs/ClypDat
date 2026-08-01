@@ -2137,7 +2137,7 @@ public sealed partial class MainWindow : Window
             ApplyPrimaryCaptureBounds();
             await Task.Run(() => _replayBuffer.StartAsync());
             AppLog.Info("Replay started.");
-            _encoderTuning.BeginSession(ViewModel.Settings.ReplayEncoderPreset);
+            _encoderTuning.BeginSession(ViewModel.CreateReplayConfig().EncoderPreset);
             // Fresh session, fresh list - but only for a GENUINELY new session
             // (a game was just detected). A quality restart is left open (not
             // cleared here either) so a Full Session VOD that finalizes minutes
