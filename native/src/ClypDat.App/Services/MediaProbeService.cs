@@ -131,7 +131,8 @@ public sealed class MediaProbeService
             cached?.Fps ?? 0,
             cached?.CaptureBackend ?? string.Empty,
             File.Exists(filmstripPath) ? filmstripPath : string.Empty,
-            info.LastWriteTimeUtc);
+            info.LastWriteTimeUtc,
+            cached is null || cached.Tracks.Any(track => track.Type == "video"));
     }
 
     public async Task<TimeSpan> GetDurationAsync(string filePath, CancellationToken cancellationToken = default)
@@ -168,6 +169,7 @@ public sealed class MediaProbeService
     public async Task<MediaFileInfo> ProbeAsync(string filePath)
     {
         var media = await ProbeMetadataAsync(filePath);
+        if (!media.HasVideo) return media;
         var thumbnailPath = await EnsureThumbnailAsync(filePath, media.Duration);
         var filmstripPath = await EnsureFilmstripAsync(filePath, media.Duration);
         return media with { ThumbnailPath = thumbnailPath, FilmstripPath = filmstripPath };
@@ -205,7 +207,8 @@ public sealed class MediaProbeService
                 cached.Fps,
                 cached.CaptureBackend,
                 File.Exists(filmstripPath) ? filmstripPath : string.Empty,
-                info.LastWriteTimeUtc);
+                info.LastWriteTimeUtc,
+                cached.Tracks.Any(track => track.Type == "video"));
         }
 
         var result = await RunProcessAsync("ffprobe", new[]
@@ -298,7 +301,8 @@ public sealed class MediaProbeService
             fps,
             captureBackend,
             File.Exists(filmstripPath) ? filmstripPath : string.Empty,
-            info.LastWriteTimeUtc);
+            info.LastWriteTimeUtc,
+            tracks.Any(track => track.Type == "video"));
 
         if (duration > TimeSpan.Zero)
         {
@@ -341,13 +345,25 @@ public sealed class MediaProbeService
                 media.Height,
                 media.Fps,
                 media.CaptureBackend,
-                media.Tracks);
+                media.Tracks,
+                media.HasVideo);
             File.WriteAllText(GetProbeCachePath(filePath), JsonSerializer.Serialize(entry));
         }
         catch
         {
             // Probe cache is a pure speedup - losing an entry just means the next load re-probes.
         }
+    }
+
+    // An audio-only MP4 has a valid duration and audio tracks, but no frame
+    // exists for ffmpeg to write. Probe metadata is already cached before any
+    // visual work begins, so this check prevents a failed thumbnail/filmstrip
+    // job from being retried every launch.
+    private bool HasCachedVideoStream(string filePath)
+    {
+        var info = new FileInfo(filePath);
+        var cached = TryReadProbeCache(filePath, info);
+        return cached is null || cached.Tracks.Any(track => track.Type == "video");
     }
 
     private string GetProbeCachePath(string filePath)
@@ -517,6 +533,7 @@ public sealed class MediaProbeService
         {
             return output;
         }
+        if (!HasCachedVideoStream(filePath)) return string.Empty;
 
         var seek = duration > TimeSpan.FromSeconds(2)
             ? Math.Min(3, duration.TotalSeconds / 3)
@@ -642,6 +659,7 @@ public sealed class MediaProbeService
         var output = GetFilmstripPath(filePath);
         if (File.Exists(output)) return output;
         if (duration <= TimeSpan.Zero) return string.Empty;
+        if (!HasCachedVideoStream(filePath)) return string.Empty;
 
         var generationLock = FilmstripLocks.GetOrAdd(output, _ => new SemaphoreSlim(1, 1));
         await generationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -1071,7 +1089,8 @@ public sealed record MediaFileInfo(
     double Fps,
     string CaptureBackend = "",
     string FilmstripPath = "",
-    DateTime LastWriteTimeUtc = default);
+    DateTime LastWriteTimeUtc = default,
+    bool HasVideo = true);
 
 public sealed record MediaTrackInfo(int Index, string Type, string Codec, string Label, double VolumePercent = 100);
 
@@ -1083,7 +1102,8 @@ internal sealed record ProbeCacheEntry(
     int Height,
     double Fps,
     string CaptureBackend,
-    IReadOnlyList<MediaTrackInfo> Tracks);
+    IReadOnlyList<MediaTrackInfo> Tracks,
+    bool HasVideo = true);
 
 public sealed record MediaDurationProbeResult(TimeSpan Duration, string Error);
 

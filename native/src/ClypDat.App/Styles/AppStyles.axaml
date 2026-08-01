@@ -129,7 +129,23 @@
     <Setter Property="Foreground" Value="#FFFFFF" />
     <Setter Property="FontWeight" Value="Bold" />
     <Setter Property="CornerRadius" Value="7" />
-    <Setter Property="Padding" Value="20,10" />
+    <Setter Property="Padding" Value="20,4" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="{TemplateBinding CornerRadius}">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                            Padding="{TemplateBinding Padding}"
+                            Foreground="{TemplateBinding Foreground}"
+                            FontSize="{TemplateBinding FontSize}"
+                            FontWeight="{TemplateBinding FontWeight}"
+                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
   </Style>
 
   <!-- Segmented "choose a size" row on the Share dialog - a RadioButton for
@@ -332,7 +348,10 @@
     <Setter Property="Background" Value="{StaticResource AccentBrushHover}" />
   </Style>
   <Style Selector="Button.deleteButton:pointerover">
-    <Setter Property="Background" Value="#E16B6D" />
+    <Setter Property="Background" Value="#C64B50" />
+  </Style>
+  <Style Selector="Button.deleteButton:pressed">
+    <Setter Property="Background" Value="#AB3D43" />
   </Style>
   <!--
     linkButton/brandButton/gameFilterBadge all used Padding="0" +
@@ -615,7 +634,7 @@
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
   <!-- Custom title-bar min/maximize/close buttons - replace Windows' own
-       caption buttons (ExtendClientAreaChromeHints="NoChrome" on
+       caption buttons (WindowDecorations="None" on
        MainWindow removes those), matching Fluent's ~46x32 caption button
        proportions. -->
   <!-- Floating "back to top" button over the Library grid - a rounded

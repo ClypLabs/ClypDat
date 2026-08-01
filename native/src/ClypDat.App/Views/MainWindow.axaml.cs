@@ -89,6 +89,40 @@ public sealed partial class MainWindow : Window
     public bool AllowRealClose { get; set; }
     private List<(double StartSeconds, double EndSeconds)> _pausedRanges = new();
     private Window? _recordingPausedOverlay;
+    private TextBlock? _recordingPausedOverlayQuote;
+    private int _recordingPausedOverlayRightClickCount;
+    private bool _recordingPausedOverlayQuotesAlwaysEnabled;
+    private static readonly string[] RecordingPausedQuotes =
+    {
+        "The tape remembers.",
+        "Nothing happened here. Probably.",
+        "A strategic pause has entered the chat.",
+        "Frame by frame, the truth survives.",
+        "Recording took a coffee break.",
+        "The highlight reel is thinking.",
+        "No pixels were harmed during this pause.",
+        "Buffering the plot twist.",
+        "The camera blinked.",
+        "Gameplay temporarily filed under later.",
+        "Silence, but in high definition.",
+        "The replay goblin needed a moment.",
+        "Capture paused. Drama pending.",
+        "Even frame rate needs a breather.",
+        "This scene will return after technical vibes.",
+        "The timeline entered stealth mode.",
+        "A pause worthy of an intermission.",
+        "The clip briefly forgot its lines.",
+        "No signal, just suspense.",
+        "Recording is on a side quest.",
+        "The highlight is behind the curtain.",
+        "Time out, pixels in.",
+        "Hold that thought.",
+        "The moment has been temporarily misplaced.",
+        "Loading dramatic tension.",
+        "A frame escaped into the void.",
+        "The capture card is meditating.",
+        "Intermission. Please admire the silence."
+    };
     private Window? _editorHoverControlsWindow;
     private Window? _editorToolsPanelWindow;
     private DispatcherTimer? _hoverControlsHideTimer;
@@ -108,14 +142,19 @@ public sealed partial class MainWindow : Window
     private static readonly TimeSpan LibraryResizeAnchorSettle = TimeSpan.FromMilliseconds(220);
     private const double LibraryScrollOffsetTolerance = 0.01;
     private DateTime _hoverControlsSuppressedUntilUtc = DateTime.MinValue;
-    // Slides the bar in from under the video's bottom edge on first show. The
-    // window itself stays put - only its content moves - because animating an
-    // owned window's native position is visibly steppy next to a composited
-    // transform.
-    private const double HoverControlsSlideDistance = 92;
+    // The hover bar moves inside a fixed window, clipped at the video's lower
+    // edge so it slips behind the timeline. On Server, native per-pixel
+    // compositing keeps empty area transparent; see ServerPerPixelOverlay.
+    private const double HoverControlsSlideDistance = 52;
     private static readonly TimeSpan HoverControlsSlideDuration = TimeSpan.FromMilliseconds(190);
     private Border? _hoverControlsBackdrop;
-    private DispatcherTimer? _hoverControlsSlideOutTimer;
+    private ServerPerPixelOverlay? _hoverControlsPerPixelOverlay;
+    private DispatcherTimer? _hoverControlsAnimationTimer;
+    private DateTime _hoverControlsAnimationStartedUtc;
+    private double _hoverControlsAnimationStartOffset;
+    private double _hoverControlsAnimationTargetOffset;
+    private double _hoverControlsOffset = HoverControlsSlideDistance;
+    private Action? _hoverControlsAnimationComplete;
     private bool _hoverControlsSlidingOut;
     private DispatcherTimer? _editorToolsPanelResizeSettleTimer;
     private string? _libraryResizeAnchorPath;
@@ -133,11 +172,20 @@ public sealed partial class MainWindow : Window
     // with the new width) again.
     private string? _libraryReturnAnchorPath;
     private bool _libraryReturnAnchorDirty;
+    // Win32 can present a newly-created client area before Avalonia's first
+    // compositor frame. DWM cloaks that first native frame until two Avalonia
+    // frame callbacks have passed, leaving a dark rendered surface to reveal.
+    private bool _awaitingFirstDarkFrame = true;
+    private bool _startupWindowCloaked;
+    private bool _startupInitialized;
     private const double ScrollToTopButtonThreshold = 320;
     private static readonly TimeSpan ScrollToTopDuration = TimeSpan.FromMilliseconds(380);
     public MainWindow()
     {
+        Background = Brushes.Black;
         InitializeComponent();
+        _startupWindowCloaked = StartupWindowPresentation.TryCloak(this);
+        if (!_startupWindowCloaked) Opacity = 0;
         EditorVideoView.VideoClicked += EditorVideoView_OnVideoClicked;
         // ApplySavedWindowBounds can restore straight into Maximized, which
         // won't raise an OffScreenMargin change of its own.
@@ -175,6 +223,9 @@ public sealed partial class MainWindow : Window
         _gameDetectionTimer.Tick += (_, _) => UpdateDetectedGame();
         Opened += (_, _) =>
         {
+            RevealAfterFirstDarkFrame();
+            if (_startupInitialized) return;
+            _startupInitialized = true;
             // Card layout comes from LibraryScrollViewer's own SizeChanged
             // (wired above) - at Opened its width may still be 0.
             ClearLibraryResizeAnchor();
@@ -393,6 +444,30 @@ public sealed partial class MainWindow : Window
 
     private bool _gameDetectionInFlight;
 
+    private void RevealAfterFirstDarkFrame()
+    {
+        if (!_awaitingFirstDarkFrame) return;
+        _awaitingFirstDarkFrame = false;
+
+        DispatcherTimer? fallback = null;
+        var revealed = false;
+        void Reveal()
+        {
+            if (revealed) return;
+            revealed = true;
+            fallback?.Stop();
+            if (_startupWindowCloaked) StartupWindowPresentation.Reveal(this);
+            else Opacity = 1;
+        }
+
+        // First callback belongs to first frame. Reveal on second callback,
+        // when DWM already owns one completed Avalonia surface.
+        RequestAnimationFrame(_ => RequestAnimationFrame(_ => Reveal()));
+        fallback = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        fallback.Tick += (_, _) => Reveal();
+        fallback.Start();
+    }
+
     private async void UpdateDetectedGame()
     {
         if (ViewModel is null || _gameDetectionInFlight) return;
@@ -587,7 +662,7 @@ public sealed partial class MainWindow : Window
             var exePath = Environment.ProcessPath;
             if (!string.IsNullOrWhiteSpace(exePath))
             {
-                Process.Start(new ProcessStartInfo(exePath) { UseShellExecute = true });
+                Process.Start(new ProcessStartInfo(exePath, "--restart") { UseShellExecute = true });
             }
         }
         catch (Exception error)
@@ -2098,7 +2173,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async Task SaveReplayClipAsync(string? autoClipLabel = null, ReplayClipWindow? clipWindow = null, string? autoClipGameName = null)
+    private async Task SaveReplayClipAsync(string? autoClipLabel = null, ReplayClipWindow? clipWindow = null, string? autoClipGameName = null, string? autoClipEventType = null)
     {
         var isAutoClip = autoClipLabel is not null;
         // A replay save (segment hydrate/mux) can take 20-30+ seconds. Manual clip
@@ -2192,13 +2267,12 @@ public sealed partial class MainWindow : Window
                 {
                     ShowClipSavedNotification();
                 }
-                // "3K - Mirage" -> event type "3K", map dropped - the game name
-                // (not the map) is what belongs next to it as the game label.
-                var autoClipEventType = autoClipLabel?.Split(" - ", 2)[0];
+                // Emoji display title and stable plain event type are carried
+                // separately, so tile icons/counts never parse presentation text.
                 var libraryFolder = ViewModel.Settings.LibraryFolder;
                 var clipInfo = new ClipInfo(
                     autoClipGameName ?? ViewModel.ActiveGameDetection.DisplayName,
-                    autoClipEventType,
+                    autoClipEventType ?? autoClipLabel?.Split(" - ", 2)[0],
                     autoClipLabel ?? ViewModel.ActiveGameDetection.DisplayName,
                     File.GetCreationTimeUtc(outputPath));
                 // Another plain file write with no UI affinity.
@@ -2834,7 +2908,7 @@ public sealed partial class MainWindow : Window
 
         _activeClipOverlay = new Window
         {
-            SystemDecorations = SystemDecorations.None,
+            WindowDecorations = WindowDecorations.None,
             CanResize = false,
             ShowInTaskbar = false,
             ShowActivated = false,
@@ -2848,7 +2922,11 @@ public sealed partial class MainWindow : Window
             WindowStartupLocation = WindowStartupLocation.Manual,
             Content = _overlayBadge
         };
-        _activeClipOverlay.Opened += (_, _) => WindowTransparencyFallback.ApplyIfNeeded(_activeClipOverlay, _overlayBadge.Background, b => _overlayBadge.Background = b);
+        _activeClipOverlay.Opened += (_, _) =>
+        {
+            OverlayTransparencyDiagnostics.Log(_activeClipOverlay, "clip-toast");
+            WindowTransparencyFallback.ApplyIfNeeded(_activeClipOverlay, _overlayBadge.Background, b => _overlayBadge.Background = b);
+        };
 
         // Movement only, deliberately no opacity transition: the badge slides
         // in and out from off screen and never fades. A cross-fade on top of
@@ -3749,7 +3827,7 @@ public sealed partial class MainWindow : Window
     }
 
     // Custom title bar (native caption buttons removed via
-    // ExtendClientAreaChromeHints="NoChrome") - clicking anywhere else in
+    // WindowDecorations="None") - clicking anywhere else in
     // the header bar drags the window, matching native title bar behavior;
     // a second click within Avalonia's double-click window toggles
     // maximize instead, same as double-clicking a native title bar.
@@ -4280,14 +4358,14 @@ public sealed partial class MainWindow : Window
 
     private void Cs2GsiListener_OnAutoClipReady(object? sender, Cs2AutoClipRequest request)
     {
-        AutoClip_OnReady(sender, new AutoClipRequest("cs2", "Counter-Strike 2", request.Title, request.Title, request.StartUtc, request.EndUtc));
+        AutoClip_OnReady(sender, new AutoClipRequest("cs2", "Counter-Strike 2", request.EventId, request.EventType, request.Title, request.StartUtc, request.EndUtc));
     }
 
     private void AutoClip_OnPending(object? sender, string message) => Dispatcher.UIThread.Post(() => ShowAutoClipPendingNotification(message));
 
     private void AutoClip_OnReady(object? sender, AutoClipRequest request)
     {
-        Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(request.Title, new ReplayClipWindow(request.StartUtc, request.EndUtc), request.GameName));
+        Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(request.Title, new ReplayClipWindow(request.StartUtc, request.EndUtc), request.GameName, request.EventType));
     }
 
     private void SetupDotaAutoClipButton_OnClick(object? sender, RoutedEventArgs e)
@@ -4635,6 +4713,7 @@ public sealed partial class MainWindow : Window
         if (_playback is null)
         {
             await StartEditorPlaybackAsync(CancellationToken.None);
+            ReassertHoverBarAbovePausedOverlay();
             return;
         }
 
@@ -4657,6 +4736,7 @@ public sealed partial class MainWindow : Window
             // earlier snapshot was rewinding to a spot already played and replaying
             // it forward - visible as a brief "rewind and repeat" on every unpause.
             PauseEditorPlayback();
+            ReassertHoverBarAbovePausedOverlay();
             return;
         }
 
@@ -4675,12 +4755,27 @@ public sealed partial class MainWindow : Window
             // request with a serialized resume seek rather than letting
             // PlayFrom race it with a separate Stop/Play sequence.
             _ = ApplyTimelineSeekAsync(startTime, resumePlayback: true);
+            ReassertHoverBarAbovePausedOverlay();
             return;
         }
         _playback.PlayFrom(startTime);
         StartPlayheadClock(startTime);
         ViewModel.IsPlaying = true;
         _playbackTimer.Start();
+        ReassertHoverBarAbovePausedOverlay();
+    }
+
+    // A click can put the paused owned window ahead of the hover bar after
+    // the click handler returns. Reassert both the input window and Server's
+    // per-pixel mirror now and after this input/layout turn settles.
+    private void ReassertHoverBarAbovePausedOverlay()
+    {
+        if (_recordingPausedOverlay is not { IsVisible: true }) return;
+        RepositionEditorHoverControlsSafe(force: true);
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_recordingPausedOverlay is { IsVisible: true }) RepositionEditorHoverControlsSafe(force: true);
+        }, DispatcherPriority.Loaded);
     }
 
     private void PauseEditorPlayback()
@@ -5303,7 +5398,7 @@ public sealed partial class MainWindow : Window
         tools.ShareRequested += async (_, _) => await ShareCurrentClipAsync();
         var window = new Window
         {
-            SystemDecorations = SystemDecorations.None,
+            WindowDecorations = WindowDecorations.None,
             ShowInTaskbar = false,
             CanResize = false,
             ShowActivated = false,
@@ -5349,7 +5444,7 @@ public sealed partial class MainWindow : Window
         HideEditorHoverControls(immediate: true);
         try
         {
-            await new ShareDialog(this, ViewModel).ShowDialog(this);
+            await new ShareDialog(this, ViewModel).ShowWithBackdropAsync(this);
         }
         finally
         {
@@ -5469,7 +5564,151 @@ public sealed partial class MainWindow : Window
             ViewModel.StartOnboarding();
         }
 
+        await ShowAudioOnlyClipPromptAsync();
         await CheckForUpdatesAsync();
+    }
+
+    private async Task ShowAudioOnlyClipPromptAsync()
+    {
+        if (ViewModel is null || ViewModel.Settings.IgnoreAudioOnlyClipPrompt) return;
+
+        // This task begins in the ViewModel constructor, before MainWindow
+        // opens. Awaiting it avoids race where restore flag has not been set
+        // yet and only first visible cache row gets inspected.
+        await ViewModel.InitialLibraryLoadTask;
+        if (ViewModel is null || ViewModel.Settings.IgnoreAudioOnlyClipPrompt) return;
+        var clips = ViewModel.GetAudioOnlyClips();
+        if (clips.Count == 0) return;
+
+        var window = new Window
+        {
+            Width = 540,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            ShowInTaskbar = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = Avalonia.Media.Brush.Parse("#111920"),
+            WindowDecorations = WindowDecorations.None,
+            ExtendClientAreaToDecorationsHint = true,
+            ExtendClientAreaTitleBarHeightHint = -1,
+            TransparencyLevelHint = new[] { WindowTransparencyLevel.None }
+        };
+        var card = new Border
+        {
+            Background = Avalonia.Media.Brush.Parse("#111920"),
+            BorderBrush = Avalonia.Media.Brush.Parse("#232F3A"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(12),
+            ClipToBounds = true
+        };
+        var layout = new DockPanel { LastChildFill = true };
+        card.Child = layout;
+        var header = new Grid { Height = 56, ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Background = Avalonia.Media.Brush.Parse("#0C1319") };
+        var title = new TextBlock
+        {
+            Text = "AUDIO-ONLY CLIPS",
+            Foreground = Avalonia.Media.Brush.Parse("#D8E4F2"),
+            FontSize = 17,
+            FontWeight = FontWeight.Bold,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsHitTestVisible = false
+        };
+        Grid.SetColumnSpan(title, 3);
+        header.Children.Add(title);
+        var close = new Button { Classes = { "dialogClose" }, Content = "✕", Width = 52, Height = 56, FontSize = 14, CornerRadius = new CornerRadius(0, 11, 0, 0), HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(close, 2);
+        header.Children.Add(close);
+        DockPanel.SetDock(header, Dock.Top);
+        layout.Children.Add(header);
+        var body = new StackPanel { Margin = new Thickness(28, 24, 28, 28), Spacing = 18 };
+        layout.Children.Add(body);
+        window.Content = card;
+
+        body.Children.Add(new TextBlock
+        {
+            Text = $"Found {clips.Count} audio-only MP4 {(clips.Count == 1 ? "clip" : "clips")}",
+            Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
+            FontSize = 16,
+            FontWeight = Avalonia.Media.FontWeight.SemiBold,
+            TextWrapping = TextWrapping.Wrap
+        });
+        body.Children.Add(new TextBlock
+        {
+            Text = "These files have audio but no video, so they cannot have thumbnails or timeline previews. ClypDat will skip visual generation for them.",
+            Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"),
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap
+        });
+        body.Children.Add(new Border
+        {
+            Background = Avalonia.Media.Brush.Parse("#15222D"),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(14, 12),
+            Child = new TextBlock { Text = "Delete permanently removes source files. Don't ask again keeps files and suppresses this notice.", Foreground = Avalonia.Media.Brush.Parse("#93A6B8"), FontSize = 12, TextWrapping = TextWrapping.Wrap }
+        });
+
+        var delete = new Button { Content = "Delete", Width = 100, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, Classes = { "deleteButton" } };
+        var ignore = new Button { Content = "Don't ask again", Width = 140, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+        var later = new Button { Content = "Remind me later", Width = 154, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+        string? choice = null;
+        delete.Click += (_, _) => { choice = "delete"; window.Close(); };
+        ignore.Click += (_, _) => { choice = "ignore"; window.Close(); };
+        later.Click += (_, _) => { choice = "later"; window.Close(); };
+        close.Click += (_, _) => window.Close();
+        body.Children.Add(new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Children = { delete, ignore, later }
+        });
+
+        var backdrop = new ShareBackdropWindow(this);
+        EventHandler dismiss = (_, _) => window.Close();
+        backdrop.DismissRequested += dismiss;
+        backdrop.Show(this);
+        try
+        {
+            var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            EventHandler? closedHandler = null;
+            closedHandler = (_, _) => closed.TrySetResult();
+            window.Closed += closedHandler;
+            try
+            {
+                window.Show(backdrop);
+                await closed.Task;
+            }
+            finally
+            {
+                window.Closed -= closedHandler;
+            }
+        }
+        finally
+        {
+            backdrop.DismissRequested -= dismiss;
+            backdrop.Close();
+        }
+        if (ViewModel is null) return;
+        if (choice == "ignore")
+        {
+            ViewModel.Settings.IgnoreAudioOnlyClipPrompt = true;
+            ViewModel.SaveSettings();
+            return;
+        }
+        if (choice != "delete") return;
+
+        foreach (var clip in clips)
+        {
+            try
+            {
+                await ViewModel.DeleteClipAsync(clip);
+            }
+            catch (Exception error)
+            {
+                AppLog.Error($"Failed to delete audio-only clip: {clip.Path}", error);
+            }
+        }
     }
 
     private void ShowWalkthroughButton_OnClick(object? sender, RoutedEventArgs e)
@@ -5539,10 +5778,9 @@ public sealed partial class MainWindow : Window
             CanResize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Background = Avalonia.Media.Brush.Parse("#111920"),
-            SystemDecorations = SystemDecorations.Full,
+            WindowDecorations = WindowDecorations.None,
             ExtendClientAreaToDecorationsHint = true,
             ExtendClientAreaTitleBarHeightHint = -1,
-            ExtendClientAreaChromeHints = Avalonia.Platform.ExtendClientAreaChromeHints.NoChrome,
             TransparencyLevelHint = new[] { Avalonia.Controls.WindowTransparencyLevel.None }
         };
 
@@ -5913,10 +6151,9 @@ public sealed partial class MainWindow : Window
             CanResize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Background = Avalonia.Media.Brush.Parse("#111920"),
-            SystemDecorations = SystemDecorations.Full,
+            WindowDecorations = WindowDecorations.None,
             ExtendClientAreaToDecorationsHint = true,
             ExtendClientAreaTitleBarHeightHint = -1,
-            ExtendClientAreaChromeHints = Avalonia.Platform.ExtendClientAreaChromeHints.NoChrome,
             TransparencyLevelHint = new[] { Avalonia.Controls.WindowTransparencyLevel.None }
         };
 
@@ -6375,22 +6612,42 @@ public sealed partial class MainWindow : Window
     {
         if (_recordingPausedOverlay is not null) return _recordingPausedOverlay;
 
+        var quote = new TextBlock
+        {
+            Foreground = new SolidColorBrush(Color.Parse("#B7C7D8")),
+            FontSize = 14,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 560,
+            IsVisible = false,
+        };
         var scrim = new Border
         {
             Background = new SolidColorBrush(Color.FromArgb(0xB3, 0, 0, 0)),
-            Child = new TextBlock
+            Child = new StackPanel
             {
-                Text = "Playback Paused",
-                Foreground = Brushes.White,
-                FontSize = 28,
-                FontWeight = FontWeight.Bold,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
+                Spacing = 8,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "Recording/Capture Paused",
+                        Foreground = Brushes.White,
+                        FontSize = 28,
+                        FontWeight = FontWeight.Bold,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        TextAlignment = TextAlignment.Center,
+                    },
+                    quote,
+                }
             }
         };
         var overlay = new Window
         {
-            SystemDecorations = SystemDecorations.None,
+            WindowDecorations = WindowDecorations.None,
             ShowInTaskbar = false,
             CanResize = false,
             ShowActivated = false,
@@ -6399,15 +6656,50 @@ public sealed partial class MainWindow : Window
             TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
             Content = scrim
         };
-        overlay.Opened += (_, _) => WindowTransparencyFallback.ApplyIfNeeded(overlay, scrim.Background, b => scrim.Background = b);
+        overlay.Opened += (_, _) =>
+        {
+            OverlayTransparencyDiagnostics.Log(overlay, "playback-paused");
+            WindowTransparencyFallback.ApplyIfNeeded(overlay, scrim.Background, b => scrim.Background = b);
+        };
         overlay.AddHandler(PointerPressedEvent, RecordingPausedOverlay_OnPointerPressed, RoutingStrategies.Tunnel);
         _recordingPausedOverlay = overlay;
+        _recordingPausedOverlayQuote = quote;
         return overlay;
+    }
+
+    // 67 of 10,000 shows is exactly 0.67%. Roll only on hidden-to-visible so
+    // a timer refresh cannot swap text while the paused layer is on screen.
+    private void UpdateRecordingPausedOverlayQuote(bool force = false)
+    {
+        if (_recordingPausedOverlayQuote is not { } quote) return;
+        if (!force && !_recordingPausedOverlayQuotesAlwaysEnabled && Random.Shared.Next(10_000) >= 670)
+        {
+            quote.Text = string.Empty;
+            quote.IsVisible = false;
+            return;
+        }
+
+        quote.Text = RecordingPausedQuotes[Random.Shared.Next(RecordingPausedQuotes.Length)];
+        quote.IsVisible = true;
     }
 
     private void RecordingPausedOverlay_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (sender is not Window overlay || !e.GetCurrentPoint(overlay).Properties.IsLeftButtonPressed) return;
+        if (sender is not Window overlay) return;
+        var point = e.GetCurrentPoint(overlay).Properties;
+        if (point.IsRightButtonPressed)
+        {
+            e.Handled = true;
+            if (_recordingPausedOverlayQuotesAlwaysEnabled) return;
+            _recordingPausedOverlayRightClickCount++;
+            if (_recordingPausedOverlayRightClickCount < 7) return;
+
+            _recordingPausedOverlayQuotesAlwaysEnabled = true;
+            UpdateRecordingPausedOverlayQuote(force: true);
+            return;
+        }
+
+        if (!point.IsLeftButtonPressed) return;
         e.Handled = true;
         PlayPauseButton_OnClick(this, new RoutedEventArgs());
     }
@@ -6426,6 +6718,7 @@ public sealed partial class MainWindow : Window
 
         var overlay = EnsureRecordingPausedOverlay();
         var wasHidden = !overlay.IsVisible;
+        if (wasHidden) UpdateRecordingPausedOverlayQuote();
         var raised = RepositionPausedOverlay(overlay);
         if (wasHidden) overlay.Show(this);
         // Only when the badge actually claimed the top of the z-band does the
@@ -6436,7 +6729,10 @@ public sealed partial class MainWindow : Window
         // moved, so the skip-if-unchanged check would otherwise return before
         // re-asserting z-order.
         if (raised || wasHidden) RepositionEditorHoverControlsSafe(force: true);
-        ApplyCaptureExclusion(overlay, ViewModel.Settings.ExcludeOverlaysFromCapture);
+        // This is editor UI, not an in-game notification. It must stay in
+        // screenshots, recordings, and app shares, regardless of the
+        // notification-overlay privacy preference.
+        ApplyCaptureExclusion(overlay, exclude: false);
     }
 
     // Returns true when it actually re-asserted the window's z-order, so the
@@ -6509,14 +6805,18 @@ public sealed partial class MainWindow : Window
     {
         PositionChanged += (_, _) =>
         {
-            if (_recordingPausedOverlay is { IsVisible: true } overlay) RepositionPausedOverlay(overlay);
-            RepositionEditorHoverControlsSafe();
+            var pausedRaised = _recordingPausedOverlay is { IsVisible: true } overlay && RepositionPausedOverlay(overlay);
+            // A paused-overlay move claims the top of the owner's z-band.
+            // Re-raise the hover bar even if its geometry did not change, so
+            // its Server per-pixel mirror remains between the input window and
+            // paused overlay instead of being covered by the paused scrim.
+            RepositionEditorHoverControlsSafe(force: pausedRaised);
             RepositionEditorToolsPanelSafe(force: true);
         };
         EditorVideoView.LayoutUpdated += (_, _) =>
         {
-            if (_recordingPausedOverlay is { IsVisible: true } overlay) RepositionPausedOverlay(overlay);
-            RepositionEditorHoverControlsSafe();
+            var pausedRaised = _recordingPausedOverlay is { IsVisible: true } overlay && RepositionPausedOverlay(overlay);
+            RepositionEditorHoverControlsSafe(force: pausedRaised);
             RepositionEditorToolsPanelSafe();
             // Covers window resize AND the fullscreen reparent (both change
             // EditorVideoView's rendered height, which the pan-range math
@@ -6649,7 +6949,7 @@ public sealed partial class MainWindow : Window
             if (trackedHandle != IntPtr.Zero && !IsWindowVisible(trackedHandle))
             {
                 AppLog.Debug("Editor hover bar: native window was hidden by the OS - resyncing so it can be reshown.");
-                _hoverControlsSlideOutTimer?.Stop();
+                StopHoverControlsAnimation();
                 _hoverControlsSlidingOut = false;
                 trackedBar.Hide();
                 _hoverControlsLastState = string.Empty;
@@ -6729,7 +7029,7 @@ public sealed partial class MainWindow : Window
         // Cancels an in-flight slide-out: moving back over the video during
         // the 190ms exit brings the bar straight back rather than letting it
         // finish leaving and then reappear.
-        _hoverControlsSlideOutTimer?.Stop();
+        StopHoverControlsAnimation();
         _hoverControlsSlidingOut = false;
 
         var window = EnsureEditorHoverControlsWindow();
@@ -6740,10 +7040,6 @@ public sealed partial class MainWindow : Window
         RepositionEditorHoverControls(window);
         if (!window.IsVisible)
         {
-            // Parked below the window's own bounds so the first frame after
-            // Show is already off-screen; flipping it back one frame later
-            // gives the transition a "from" state to animate out of, rather
-            // than both values landing in the same layout pass.
             SetHoverControlsOffset(HoverControlsSlideDistance);
             try
             {
@@ -6768,13 +7064,9 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            // Deliberately no ApplyCaptureExclusion here: "exclude overlays
-            // from capture" is meant for the HUD-style notifications (clip
-            // saved, recording paused, etc.) that float over a game, not for
-            // this bar's own playback controls - those are editor UI the
-            // user is actively using, and excluding it made the whole bar
-            // vanish from screen shares/recordings of the app too, not just
-            // from whatever the setting was meant to hide.
+            // Deliberately no ApplyCaptureExclusion here: capture exclusion
+            // is for HUD-style clip notifications, not editor UI. This bar
+            // and the playback-paused layer must remain in app captures.
 
             // Everything RepositionEditorHoverControls assigned above went to
             // a window that had no native hwnd yet. Re-apply now that Show has
@@ -6787,11 +7079,11 @@ public sealed partial class MainWindow : Window
             // and taking the bar down out from under the click.
             MakeWindowNonActivating(window);
             LogHoverControlsState($"sliding in ({DescribeNativeWindow(window)})");
-            Dispatcher.UIThread.Post(() => SetHoverControlsOffset(0), DispatcherPriority.Loaded);
+            Dispatcher.UIThread.Post(() => StartHoverControlsAnimation(0), DispatcherPriority.Loaded);
         }
         else
         {
-            SetHoverControlsOffset(0);
+            StartHoverControlsAnimation(0);
         }
     }
 
@@ -6821,38 +7113,72 @@ public sealed partial class MainWindow : Window
 
         if (immediate)
         {
-            _hoverControlsSlideOutTimer?.Stop();
+            StopHoverControlsAnimation();
             _hoverControlsSlidingOut = false;
+            _hoverControlsPerPixelOverlay?.Hide();
             window.Hide();
             return;
         }
 
         if (_hoverControlsSlidingOut) return;
         _hoverControlsSlidingOut = true;
-        SetHoverControlsOffset(HoverControlsSlideDistance);
-
-        _hoverControlsSlideOutTimer ??= new DispatcherTimer();
-        _hoverControlsSlideOutTimer.Interval = HoverControlsSlideDuration;
-        _hoverControlsSlideOutTimer.Stop();
-        _hoverControlsSlideOutTimer.Tick -= HoverControlsSlideOut_OnTick;
-        _hoverControlsSlideOutTimer.Tick += HoverControlsSlideOut_OnTick;
-        _hoverControlsSlideOutTimer.Start();
+        StartHoverControlsAnimation(HoverControlsSlideDistance, () =>
+        {
+            if (!_hoverControlsSlidingOut) return;
+            _hoverControlsSlidingOut = false;
+            _hoverControlsPerPixelOverlay?.Hide();
+            _editorHoverControlsWindow?.Hide();
+            LogHoverControlsState("hidden");
+        });
     }
 
-    private void HoverControlsSlideOut_OnTick(object? sender, EventArgs e)
+    private void StartHoverControlsAnimation(double targetOffset, Action? completed = null)
     {
-        _hoverControlsSlideOutTimer?.Stop();
-        if (!_hoverControlsSlidingOut) return;
-        _hoverControlsSlidingOut = false;
-        _editorHoverControlsWindow?.Hide();
-        LogHoverControlsState("hidden");
+        StopHoverControlsAnimation();
+        _hoverControlsAnimationStartOffset = _hoverControlsOffset;
+        _hoverControlsAnimationTargetOffset = targetOffset;
+        _hoverControlsAnimationComplete = completed;
+        if (Math.Abs(_hoverControlsAnimationStartOffset - targetOffset) < 0.01)
+        {
+            SetHoverControlsOffset(targetOffset);
+            _hoverControlsAnimationComplete?.Invoke();
+            _hoverControlsAnimationComplete = null;
+            return;
+        }
+
+        _hoverControlsAnimationStartedUtc = DateTime.UtcNow;
+        _hoverControlsAnimationTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        _hoverControlsAnimationTimer.Tick -= HoverControlsAnimation_OnTick;
+        _hoverControlsAnimationTimer.Tick += HoverControlsAnimation_OnTick;
+        _hoverControlsAnimationTimer.Start();
+    }
+
+    private void HoverControlsAnimation_OnTick(object? sender, EventArgs e)
+    {
+        var progress = Math.Clamp((DateTime.UtcNow - _hoverControlsAnimationStartedUtc).TotalMilliseconds / HoverControlsSlideDuration.TotalMilliseconds, 0, 1);
+        var eased = 1 - Math.Pow(1 - progress, 3);
+        SetHoverControlsOffset(_hoverControlsAnimationStartOffset + (_hoverControlsAnimationTargetOffset - _hoverControlsAnimationStartOffset) * eased);
+        if (progress < 1) return;
+
+        var completed = _hoverControlsAnimationComplete;
+        StopHoverControlsAnimation();
+        completed?.Invoke();
+    }
+
+    private void StopHoverControlsAnimation()
+    {
+        _hoverControlsAnimationTimer?.Stop();
+        _hoverControlsAnimationComplete = null;
     }
 
     private void SetHoverControlsOffset(double offset)
     {
+        var scaling = RenderScaling > 0 ? RenderScaling : 1;
+        _hoverControlsOffset = Math.Round(Math.Clamp(offset, 0, HoverControlsSlideDistance) * scaling) / scaling;
         if (_hoverControlsBackdrop is null) return;
         _hoverControlsBackdrop.RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse(
-            offset == 0 ? "translateY(0px)" : $"translateY({offset.ToString(System.Globalization.CultureInfo.InvariantCulture)}px)");
+            _hoverControlsOffset == 0 ? "translateY(0px)" : $"translateY({_hoverControlsOffset.ToString(System.Globalization.CultureInfo.InvariantCulture)}px)");
+        _hoverControlsPerPixelOverlay?.Refresh();
     }
 
     // Sizes and places the bar against the video pane as it currently is.
@@ -6882,7 +7208,8 @@ public sealed partial class MainWindow : Window
         // display that put the bar half its own height too low on the very
         // first show, hanging past the bottom of the video pane.
         var scaling = RenderScaling > 0 ? RenderScaling : 1;
-        var position = new PixelPoint(topLeft.X, bottomOnScreen.Y - (int)(barHeight * scaling));
+        var fullHeight = Math.Max(1, (int)Math.Round(barHeight * scaling));
+        var position = new PixelPoint(topLeft.X, bottomOnScreen.Y - fullHeight);
         var handle = NativeHandleOf(bar);
 
         // The skip-if-unchanged check reads the REAL window rect, not
@@ -6916,6 +7243,7 @@ public sealed partial class MainWindow : Window
         {
             SetWindowPos(handle, HwndTop, position.X, position.Y, 0, 0, SwpNoSize | SwpNoActivate);
             RaiseEditorToolsPanelAboveHoverBar();
+            _hoverControlsPerPixelOverlay?.Refresh();
         }
     }
 
@@ -6997,7 +7325,7 @@ public sealed partial class MainWindow : Window
             // in 2s.
             Margin = new Thickness(0, -1, 0, 0),
         };
-        volumeSlider.Bind(Slider.ValueProperty, new Binding("MasterVolumePercent", BindingMode.TwoWay));
+        volumeSlider.Bind(Slider.ValueProperty, new Binding("MasterVolumePercent") { Mode = BindingMode.TwoWay });
         volumeSlider.Bind(OpacityProperty, new Binding("IsMasterMuted") { Converter = BoolToOpacityConverter.Instance });
 
         // Bumped a point and lightened from the original #5C6D7E/#8C98A7 -
@@ -7175,21 +7503,18 @@ public sealed partial class MainWindow : Window
             Background = new SolidColorBrush(Color.Parse("#8C0B1016")),
             Child = BuildPlaybackBarLayout(),
             RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse($"translateY({HoverControlsSlideDistance}px)"),
-            Transitions =
-            [
-                new Avalonia.Animation.TransformOperationsTransition
-                {
-                    Property = Visual.RenderTransformProperty,
-                    Duration = HoverControlsSlideDuration,
-                    Easing = new Avalonia.Animation.Easings.CubicEaseOut()
-                }
-            ],
         };
         _hoverControlsBackdrop = backdrop;
 
+        var root = new Border
+        {
+            Background = Brushes.Transparent,
+            ClipToBounds = true,
+            Child = backdrop
+        };
         var window = new Window
         {
-            SystemDecorations = SystemDecorations.None,
+            WindowDecorations = WindowDecorations.None,
             ShowInTaskbar = false,
             CanResize = false,
             ShowActivated = false,
@@ -7197,9 +7522,28 @@ public sealed partial class MainWindow : Window
             Background = Brushes.Transparent,
             TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
             DataContext = DataContext,
-            Content = backdrop,
+            Content = root,
         };
-        window.Opened += (_, _) => WindowTransparencyFallback.ApplyIfNeeded(window, backdrop.Background, b => backdrop.Background = b);
+        window.Opened += (_, _) =>
+        {
+            OverlayTransparencyDiagnostics.Log(window, "hover-bar");
+            if (WindowsPlatformProfile.IsServer())
+            {
+                _hoverControlsPerPixelOverlay?.Dispose();
+                _hoverControlsPerPixelOverlay = new ServerPerPixelOverlay(window, root);
+                _hoverControlsPerPixelOverlay.ShowAndRefresh();
+                WindowTransparencyFallback.ApplyInputSurfaceIfNeeded(window);
+            }
+            else
+            {
+                WindowTransparencyFallback.ApplyIfNeeded(window, backdrop.Background, b => backdrop.Background = b);
+            }
+        };
+        window.Closed += (_, _) =>
+        {
+            _hoverControlsPerPixelOverlay?.Dispose();
+            _hoverControlsPerPixelOverlay = null;
+        };
         window.AddHandler(PointerPressedEvent, EditorHoverControls_OnPointerPressed, RoutingStrategies.Tunnel, true);
         _editorHoverControlsWindow = window;
         return window;
@@ -7535,7 +7879,9 @@ public sealed partial class MainWindow : Window
         // CurrentTime=0, visible peeking out from behind TrimStartHandle.
         var playheadMaxLeft = Math.Max(0, width - TimelinePlayhead.Width);
         Canvas.SetLeft(TimelinePlayhead, Math.Clamp(playhead - TimelinePlayhead.Width / 2, 0, playheadMaxLeft));
-        TimelinePlayhead.Height = height;
+        // Extend beyond both edges so fractional layout never leaves the
+        // playhead visibly short of the final audio lane.
+        TimelinePlayhead.Height = height + 16;
         Canvas.SetTop(TimelinePlayhead, -8);
         Canvas.SetLeft(PlayheadCap, playhead - 8);
         Canvas.SetTop(PlayheadCap, -12);
@@ -7770,10 +8116,9 @@ public sealed partial class MainWindow : Window
             CanResize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Background = Avalonia.Media.Brush.Parse("#111920"),
-            SystemDecorations = SystemDecorations.Full,
+            WindowDecorations = WindowDecorations.None,
             ExtendClientAreaToDecorationsHint = true,
             ExtendClientAreaTitleBarHeightHint = -1,
-            ExtendClientAreaChromeHints = Avalonia.Platform.ExtendClientAreaChromeHints.NoChrome,
             TransparencyLevelHint = new[] { Avalonia.Controls.WindowTransparencyLevel.None }
         };
 

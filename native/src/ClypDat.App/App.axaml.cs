@@ -26,6 +26,7 @@ public sealed partial class App : Application
     public override void OnFrameworkInitializationCompleted()
     {
         AppLog.Startup();
+        AppLog.Info($"Graphics: os={Environment.OSVersion.Version}; {GraphicsOptionsResolver.ActiveDescription}");
         InstallGlobalExceptionHandlers();
         // Both of these are heavy disk IO with no user waiting on the result -
         // LibVLC's warmup scans its whole plugin directory just to throw the
