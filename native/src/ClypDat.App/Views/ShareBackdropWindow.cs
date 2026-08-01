@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Media;
 using ClypDat.App.Services;
 
@@ -8,6 +9,8 @@ namespace ClypDat.App.Views;
 // Separate from ShareDialog so its layered alpha never affects the solid card.
 internal sealed class ShareBackdropWindow : Window
 {
+    public event EventHandler? DismissRequested;
+
     public ShareBackdropWindow(Window owner)
     {
         WindowDecorations = WindowDecorations.None;
@@ -19,9 +22,16 @@ internal sealed class ShareBackdropWindow : Window
         TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent };
 
         var scrim = new Border { Background = new SolidColorBrush(Color.Parse("#DD000000")) };
+        scrim.PointerPressed += Scrim_OnPointerPressed;
         Content = scrim;
         PositionOverOwner(owner);
         Opened += (_, _) => WindowTransparencyFallback.ApplyIfNeeded(this, scrim.Background, b => scrim.Background = b);
+    }
+
+    private void Scrim_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (e.GetCurrentPoint((Visual)sender!).Properties.IsLeftButtonPressed)
+            DismissRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void PositionOverOwner(Window owner)

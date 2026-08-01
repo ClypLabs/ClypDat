@@ -108,10 +108,11 @@ public sealed partial class MainWindow : Window
     private static readonly TimeSpan LibraryResizeAnchorSettle = TimeSpan.FromMilliseconds(220);
     private const double LibraryScrollOffsetTolerance = 0.01;
     private DateTime _hoverControlsSuppressedUntilUtc = DateTime.MinValue;
-    // Server's native alpha fallback applies to an entire HWND. Animate that
-    // HWND's bounds, rather than an Avalonia child inside it, so the scrim
-    // leaves with its controls.
+    // The hover bar moves inside a fixed window, clipped at the video's lower
+    // edge so it slips behind the timeline. On Server, that fixed window uses
+    // a color key for the empty area; see WindowTransparencyFallback.
     private const double HoverControlsSlideDistance = 52;
+    private static readonly Color HoverControlsColorKey = Color.FromRgb(1, 2, 3);
     private static readonly TimeSpan HoverControlsSlideDuration = TimeSpan.FromMilliseconds(190);
     private Border? _hoverControlsBackdrop;
     private DispatcherTimer? _hoverControlsAnimationTimer;
@@ -6885,9 +6886,11 @@ public sealed partial class MainWindow : Window
 
     private void SetHoverControlsOffset(double offset)
     {
-        _hoverControlsOffset = Math.Clamp(offset, 0, HoverControlsSlideDistance);
-        if (_editorHoverControlsWindow is { IsVisible: true } window)
-            RepositionEditorHoverControls(window, force: true);
+        var scaling = RenderScaling > 0 ? RenderScaling : 1;
+        _hoverControlsOffset = Math.Round(Math.Clamp(offset, 0, HoverControlsSlideDistance) * scaling) / scaling;
+        if (_hoverControlsBackdrop is null) return;
+        _hoverControlsBackdrop.RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse(
+            _hoverControlsOffset == 0 ? "translateY(0px)" : $"translateY({_hoverControlsOffset.ToString(System.Globalization.CultureInfo.InvariantCulture)}px)");
     }
 
     // Sizes and places the bar against the video pane as it currently is.
@@ -6918,10 +6921,7 @@ public sealed partial class MainWindow : Window
         // first show, hanging past the bottom of the video pane.
         var scaling = RenderScaling > 0 ? RenderScaling : 1;
         var fullHeight = Math.Max(1, (int)Math.Round(barHeight * scaling));
-        var hiddenHeight = Math.Clamp((int)Math.Round(_hoverControlsOffset * scaling), 0, fullHeight - 1);
-        var visibleHeight = Math.Max(1, fullHeight - hiddenHeight);
-        var position = new PixelPoint(topLeft.X, bottomOnScreen.Y - visibleHeight);
-        var nativeWidth = Math.Max(1, (int)Math.Round(width * scaling));
+        var position = new PixelPoint(topLeft.X, bottomOnScreen.Y - fullHeight);
         var handle = NativeHandleOf(bar);
 
         // The skip-if-unchanged check reads the REAL window rect, not
@@ -6936,14 +6936,14 @@ public sealed partial class MainWindow : Window
         if (!force && handle != IntPtr.Zero && GetWindowRect(handle, out var nativeRect))
         {
             if (nativeRect.Left == position.X && nativeRect.Top == position.Y &&
-                nativeRect.Right - nativeRect.Left == nativeWidth && nativeRect.Bottom - nativeRect.Top == visibleHeight)
+                Math.Abs(bar.Width - width) < 0.5 && Math.Abs(bar.Height - barHeight) < 0.5)
             {
                 return;
             }
         }
 
         bar.Width = width;
-        bar.Height = visibleHeight / scaling;
+        bar.Height = barHeight;
         bar.Position = position;
 
         // Drive the move through Win32 too, so it lands whether or not
@@ -6953,7 +6953,7 @@ public sealed partial class MainWindow : Window
         // painting over the bar after a resize or alt-tab reorders things.
         if (handle != IntPtr.Zero)
         {
-            SetWindowPos(handle, HwndTop, position.X, position.Y, nativeWidth, visibleHeight, SwpNoActivate);
+            SetWindowPos(handle, HwndTop, position.X, position.Y, 0, 0, SwpNoSize | SwpNoActivate);
             RaiseEditorToolsPanelAboveHoverBar();
         }
     }
@@ -7213,8 +7213,7 @@ public sealed partial class MainWindow : Window
             // so there's no border line here.
             Background = new SolidColorBrush(Color.Parse("#8C0B1016")),
             Child = BuildPlaybackBarLayout(),
-            Height = HoverControlsSlideDistance,
-            VerticalAlignment = VerticalAlignment.Top,
+            RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse($"translateY({HoverControlsSlideDistance}px)"),
         };
         _hoverControlsBackdrop = backdrop;
 
@@ -7225,7 +7224,7 @@ public sealed partial class MainWindow : Window
             CanResize = false,
             ShowActivated = false,
             Topmost = false,
-            Background = Brushes.Transparent,
+            Background = WindowsPlatformProfile.IsServer() ? new SolidColorBrush(HoverControlsColorKey) : Brushes.Transparent,
             TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
             DataContext = DataContext,
             Content = backdrop,
@@ -7233,8 +7232,12 @@ public sealed partial class MainWindow : Window
         window.Opened += (_, _) =>
         {
             OverlayTransparencyDiagnostics.Log(window, "hover-bar");
-            WindowTransparencyFallback.ApplyIfNeeded(window, backdrop.Background, b => backdrop.Background = b);
-            RepositionEditorHoverControls(window, force: true);
+            WindowTransparencyFallback.ApplyColorKeyedIfNeeded(
+                window,
+                backdrop.Background,
+                b => backdrop.Background = b,
+                HoverControlsColorKey,
+                b => window.Background = b);
         };
         window.AddHandler(PointerPressedEvent, EditorHoverControls_OnPointerPressed, RoutingStrategies.Tunnel, true);
         _editorHoverControlsWindow = window;
