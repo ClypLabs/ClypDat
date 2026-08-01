@@ -327,8 +327,11 @@
                           <!-- Initial badge is the fallback for a game whose
                                executable icon hasn't been captured yet (it can
                                only be read while the game is running). -->
-                          <Border Classes="gameInitialBadge" Width="30" Height="30" CornerRadius="8" IsVisible="{Binding !HasIcon}">
+                          <Border Classes="gameInitialBadge" Width="30" Height="30" CornerRadius="8" IsVisible="{Binding ShowInitialBadge}">
                             <TextBlock Text="{Binding Key, Converter={x:Static opconv:FirstLetterConverter.Instance}}" FontWeight="Bold" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                          </Border>
+                          <Border Classes="gameInitialBadge" Width="30" Height="30" CornerRadius="8" IsVisible="{Binding ShowDesktopCaptureIcon}">
+                            <PathIcon Data="M4,5H20V17H13L15,20H9L11,17H4V5M6,7V15H18V7H6Z" Width="17" Height="17" HorizontalAlignment="Center" VerticalAlignment="Center" />
                           </Border>
                           <!-- Rounded square, not a circle: game icons are square
                                artwork, so a circular mask cut their corners off.
