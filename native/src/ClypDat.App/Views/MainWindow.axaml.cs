@@ -139,17 +139,19 @@ public sealed partial class MainWindow : Window
     private string? _libraryReturnAnchorPath;
     private bool _libraryReturnAnchorDirty;
     // Win32 can present a newly-created client area before Avalonia's first
-    // compositor frame. That frame is white on some Server builds despite the
-    // Window's dark XAML background. Keep only this first show invisible for
-    // one render beat, then reveal the already-painted dark surface.
+    // compositor frame. DWM cloaks that first native frame until two Avalonia
+    // frame callbacks have passed, leaving a dark rendered surface to reveal.
     private bool _awaitingFirstDarkFrame = true;
+    private bool _startupWindowCloaked;
+    private bool _startupInitialized;
     private const double ScrollToTopButtonThreshold = 320;
     private static readonly TimeSpan ScrollToTopDuration = TimeSpan.FromMilliseconds(380);
     public MainWindow()
     {
         Background = Brushes.Black;
-        Opacity = 0;
         InitializeComponent();
+        _startupWindowCloaked = StartupWindowPresentation.TryCloak(this);
+        if (!_startupWindowCloaked) Opacity = 0;
         EditorVideoView.VideoClicked += EditorVideoView_OnVideoClicked;
         // ApplySavedWindowBounds can restore straight into Maximized, which
         // won't raise an OffScreenMargin change of its own.
@@ -188,6 +190,8 @@ public sealed partial class MainWindow : Window
         Opened += (_, _) =>
         {
             RevealAfterFirstDarkFrame();
+            if (_startupInitialized) return;
+            _startupInitialized = true;
             // Card layout comes from LibraryScrollViewer's own SizeChanged
             // (wired above) - at Opened its width may still be 0.
             ClearLibraryResizeAnchor();
@@ -406,12 +410,28 @@ public sealed partial class MainWindow : Window
 
     private bool _gameDetectionInFlight;
 
-    private async void RevealAfterFirstDarkFrame()
+    private void RevealAfterFirstDarkFrame()
     {
         if (!_awaitingFirstDarkFrame) return;
         _awaitingFirstDarkFrame = false;
-        await Task.Delay(32);
-        Opacity = 1;
+
+        DispatcherTimer? fallback = null;
+        var revealed = false;
+        void Reveal()
+        {
+            if (revealed) return;
+            revealed = true;
+            fallback?.Stop();
+            if (_startupWindowCloaked) StartupWindowPresentation.Reveal(this);
+            else Opacity = 1;
+        }
+
+        // First callback belongs to first frame. Reveal on second callback,
+        // when DWM already owns one completed Avalonia surface.
+        RequestAnimationFrame(_ => RequestAnimationFrame(_ => Reveal()));
+        fallback = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        fallback.Tick += (_, _) => Reveal();
+        fallback.Start();
     }
 
     private async void UpdateDetectedGame()
@@ -608,7 +628,7 @@ public sealed partial class MainWindow : Window
             var exePath = Environment.ProcessPath;
             if (!string.IsNullOrWhiteSpace(exePath))
             {
-                Process.Start(new ProcessStartInfo(exePath) { UseShellExecute = true });
+                Process.Start(new ProcessStartInfo(exePath, "--restart") { UseShellExecute = true });
             }
         }
         catch (Exception error)
