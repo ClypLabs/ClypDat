@@ -2427,7 +2427,7 @@
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
                       <Border Height="{Binding LaneHeight}"
-                              Margin="0,0,0,6"
+                              Margin="{Binding LaneMargin}"
                               Background="#141D24"
                               BorderBrush="#232F3A"
                               BorderThickness="1"
@@ -2545,7 +2545,7 @@
                       <DataTemplate>
                         <controls:TimelineLaneControl Height="{Binding LaneHeight}"
                                                       VerticalAlignment="Top"
-                                                      Margin="0,0,0,6"
+                                                      Margin="{Binding LaneMargin}"
                                                       LaneBrush="{Binding Color}"
                                                       IsVideo="{Binding IsVideo}"
                                                       Peaks="{Binding WaveformPeaks}"

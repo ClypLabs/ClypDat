@@ -6558,14 +6558,18 @@ public sealed partial class MainWindow : Window
     {
         PositionChanged += (_, _) =>
         {
-            if (_recordingPausedOverlay is { IsVisible: true } overlay) RepositionPausedOverlay(overlay);
-            RepositionEditorHoverControlsSafe();
+            var pausedRaised = _recordingPausedOverlay is { IsVisible: true } overlay && RepositionPausedOverlay(overlay);
+            // A paused-overlay move claims the top of the owner's z-band.
+            // Re-raise the hover bar even if its geometry did not change, so
+            // its Server per-pixel mirror remains between the input window and
+            // paused overlay instead of being covered by the paused scrim.
+            RepositionEditorHoverControlsSafe(force: pausedRaised);
             RepositionEditorToolsPanelSafe(force: true);
         };
         EditorVideoView.LayoutUpdated += (_, _) =>
         {
-            if (_recordingPausedOverlay is { IsVisible: true } overlay) RepositionPausedOverlay(overlay);
-            RepositionEditorHoverControlsSafe();
+            var pausedRaised = _recordingPausedOverlay is { IsVisible: true } overlay && RepositionPausedOverlay(overlay);
+            RepositionEditorHoverControlsSafe(force: pausedRaised);
             RepositionEditorToolsPanelSafe();
             // Covers window resize AND the fullscreen reparent (both change
             // EditorVideoView's rendered height, which the pan-range math
