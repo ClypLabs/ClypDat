@@ -4792,6 +4792,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             TimelineTracks.Insert(0, new TrackLaneViewModel(0, "Video", "video", "#05C7B7", false) { Filmstrip = filmstrip });
         }
 
+        // Every lane keeps its 6px separator except final audio lane. This
+        // preserves gaps between game/chat/microphone tracks without leaving
+        // an empty strip below the microphone row.
+        var finalAudioTrack = TimelineTracks.LastOrDefault(track => track.IsAudio);
+        if (finalAudioTrack is not null) finalAudioTrack.IsLastAudioTrack = true;
+
         OnPropertyChanged(nameof(TimelineTrackCount));
 
         ApplyClipEditState(media.Path);
