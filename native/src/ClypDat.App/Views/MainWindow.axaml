@@ -2224,8 +2224,8 @@
         </Border>
       </Grid>
     </Border>
-      <Grid Grid.Column="1" ColumnDefinitions="*,340" RowDefinitions="*,320" IsVisible="{Binding IsEditorVisible}">
-      <Grid Grid.ColumnSpan="2" Grid.RowSpan="2" RowDefinitions="*,320" ColumnDefinitions="*,340">
+      <Grid Grid.Column="1" ColumnDefinitions="*,340" RowDefinitions="*,Auto" IsVisible="{Binding IsEditorVisible}">
+      <Grid Grid.ColumnSpan="2" Grid.RowSpan="2" RowDefinitions="*,Auto" ColumnDefinitions="*,340">
         <Grid Grid.Column="0" Background="#0E141A">
           <Border Background="#05080B">
             <!-- Pan slider lives in its own column, not overlapping
