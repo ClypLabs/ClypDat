@@ -35,11 +35,6 @@ public static class AppSettingsStore
             settings.ReplayConstantQuality = settings.ReplayConstantQuality <= 0 ? 20 : Math.Clamp(settings.ReplayConstantQuality, 1, 51);
             settings.ReplayMaxBitrateMbps = settings.ReplayMaxBitrateMbps <= 0 ? 40 : Math.Clamp(settings.ReplayMaxBitrateMbps, 5, 1000);
             if (settings.ReplayFrameRate <= 0) settings.ReplayFrameRate = 60;
-            // At 60 FPS and above ClypDat's native capture must leave GPU
-            // headroom for games that run uncapped with VSync disabled. A
-            // slower NVENC preset can fill the encode queue and turn a 60 FPS
-            // capture into a low-FPS clip even on otherwise fast hardware.
-            if (settings.ReplayFrameRate >= 60) settings.ReplayEncoderPreset = "P1";
             // One-time switch-on: the floating hover bar is the default now,
             // but existing settings.json files already carry an explicit false
             // for it, so the changed property default alone would only reach

@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.IO.Compression;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -22,10 +21,10 @@ public sealed record UpdateDownloadProgress(string Status, double? Percentage, d
 
 public static class AppUpdateService
 {
-    // No CI pipeline publishes releases yet - `gh release create <tag> ClypDat-win-x64.zip`
-    // (a zip of the published win-x64-folder contents) is expected to attach an asset
-    // with exactly this name.
-    private const string ExpectedAssetName = "ClypDat-win-x64.zip";
+    // Updates use the NSIS installer rather than replacing files in place. This
+    // lets Program Files installs request elevation and migrates old per-user
+    // installs through the same path as a manual setup run.
+    private const string ExpectedAssetName = "ClypDat-Setup.exe";
     private const string UpstreamOwner = "ClypDat";
     private const string UpstreamRepository = "ClypDat";
     private const string LatestReleaseUrl = $"https://api.github.com/repos/{UpstreamOwner}/{UpstreamRepository}/releases/latest";
@@ -55,13 +54,9 @@ public static class AppUpdateService
 
     public static async Task DownloadAndRestartAsync(AppUpdateInfo update, IProgress<UpdateDownloadProgress>? progress = null, CancellationToken cancellationToken = default)
     {
-        var currentExe = Environment.ProcessPath ?? throw new InvalidOperationException("Could not locate the running executable.");
-        var installDir = Path.GetDirectoryName(currentExe) ?? throw new InvalidOperationException("Could not locate the install directory.");
         var updateRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClypDat", "updates");
         Directory.CreateDirectory(updateRoot);
-        var zipPath = Path.Combine(updateRoot, $"ClypDat-{update.LatestVersion}.zip");
-        var extractDir = Path.Combine(updateRoot, $"extract-{update.LatestVersion}");
-        if (Directory.Exists(extractDir)) Directory.Delete(extractDir, true);
+        var setupPath = Path.Combine(updateRoot, $"ClypDat-Setup-{update.LatestVersion}.exe");
 
         using var client = CreateClient();
         progress?.Report(new UpdateDownloadProgress("Downloading update...", 0));
@@ -70,7 +65,7 @@ public static class AppUpdateService
             response.EnsureSuccessStatusCode();
             var contentLength = response.Content.Headers.ContentLength;
             await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
-            await using var destination = File.Create(zipPath);
+            await using var destination = File.Create(setupPath);
             var buffer = new byte[81920];
             long downloaded = 0;
             var timer = Stopwatch.StartNew();
@@ -86,45 +81,15 @@ public static class AppUpdateService
             }
         }
 
-        // Verify before anything in the archive is written to disk or run. This
-        // catches a download that was truncated, corrupted in transit, or served
-        // by something that isn't the real asset. Worth being clear about what it
-        // does NOT protect against: the digest comes from the same API response as
-        // the download URL, so whoever can publish a release can publish a matching
-        // digest. Guarding against a malicious publisher needs signed releases, not
-        // a checksum.
-        await VerifyDownloadAsync(zipPath, update.Sha256, cancellationToken);
+        // Verify before running the downloaded installer. The digest comes
+        // from the release API, so it protects transport integrity rather
+        // than a compromised release publisher.
+        await VerifyDownloadAsync(setupPath, update.Sha256, cancellationToken);
 
-        progress?.Report(new UpdateDownloadProgress("Extracting update...", null));
-        ZipFile.ExtractToDirectory(zipPath, extractDir);
-        TryDelete(zipPath);
-
-        // A zip of the publish folder may contain the files directly, or nested one
-        // level under a folder (GitHub-style archives, or a manually zipped folder).
-        // Find whichever directory actually contains ClypDat.exe.
-        var sourceRoot = File.Exists(Path.Combine(extractDir, "ClypDat.exe"))
-            ? extractDir
-            : Directory.GetDirectories(extractDir).FirstOrDefault(dir => File.Exists(Path.Combine(dir, "ClypDat.exe")));
-        if (sourceRoot is null)
-        {
-            Directory.Delete(extractDir, true);
-            throw new InvalidOperationException("Downloaded update did not contain ClypDat.exe.");
-        }
-
-        progress?.Report(new UpdateDownloadProgress("Restarting...", 1));
-        await Task.Delay(100, cancellationToken);
-        var script = $$"""
-            $ErrorActionPreference = 'Stop'
-            Wait-Process -Id {{Environment.ProcessId}} -ErrorAction SilentlyContinue
-            robocopy '{{Escape(sourceRoot)}}' '{{Escape(installDir)}}' /E /IS /IT /R:3 /W:1 /NFL /NDL /NJH /NJS
-            Remove-Item -LiteralPath '{{Escape(extractDir)}}' -Recurse -Force -ErrorAction SilentlyContinue
-            Start-Process -FilePath '{{Escape(currentExe)}}'
-            """;
-        var encoded = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script));
-        Process.Start(new ProcessStartInfo("powershell.exe", $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded}")
+        progress?.Report(new UpdateDownloadProgress("Starting installer...", 1));
+        Process.Start(new ProcessStartInfo(setupPath, $"/S /UPDATEPID={Environment.ProcessId}")
         {
             UseShellExecute = true,
-            WindowStyle = ProcessWindowStyle.Hidden
         });
     }
 
@@ -296,8 +261,6 @@ public static class AppUpdateService
 
         AppLog.Info($"Update package SHA-256 verified ({actual}).");
     }
-
-    private static string Escape(string value) => value.Replace("'", "''");
 
     private sealed record ReleaseResponse(
         [property: JsonPropertyName("tag_name")] string TagName,

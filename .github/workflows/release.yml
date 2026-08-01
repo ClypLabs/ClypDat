@@ -2,10 +2,10 @@ name: Release
 run-name: Bump version to 1.0.0
 
 # Triggered by pushing a tag like v0.1.0. Builds the native win-x64 app and
-# packages it four ways: a raw zip, a self-extracting portable exe, an NSIS
-# setup.exe, and an MSI - then attaches all four to a GitHub Release for
+# packages it five ways: a raw zip, a self-extracting portable exe, an NSIS
+# setup.exe, an MSI bootstrapper, and a raw MSI - then attaches all five to a GitHub Release for
 # that tag. AppUpdateService.cs (in-app updater) specifically looks for the
-# zip asset named ClypDat-win-x64.zip, so that name must not change without
+# NSIS asset named ClypDat-Setup.exe, so that name must not change without
 # also updating ExpectedAssetName there.
 #
 on:
@@ -141,18 +141,23 @@ jobs:
           & "$wixBin\candle.exe" @candleArgs
           if ($LASTEXITCODE -ne 0) { throw "candle.exe failed with exit code $LASTEXITCODE" }
 
-          # ICE38/ICE64: heat.exe's harvested components use a file as their
-          # KeyPath by default, but MSI's per-user (LocalAppDataFolder)
-          # install validation wants a registry KeyPath under HKCU instead.
-          # This is a well-known, commonly-suppressed limitation of default
-          # heat harvesting for per-user installs, not a real defect here.
           $lightArgs = @(
             "-ext", "WixUtilExtension", "-ext", "WixUIExtension",
             "installer\Product.wixobj", "installer\AppFiles.wixobj",
-            "-out", "ClypDat.msi", "-sice:ICE61", "-sice:ICE38", "-sice:ICE64"
+            # heat.exe authors file KeyPaths without Win64 metadata; candle's
+            # x64 package architecture still installs them under Program Files.
+            "-out", "ClypDat.msi", "-sice:ICE61", "-sice:ICE64"
           )
           & "$wixBin\light.exe" @lightArgs
           if ($LASTEXITCODE -ne 0) { throw "light.exe failed with exit code $LASTEXITCODE" }
+
+      - name: Build MSI bootstrapper
+        run: >
+          & "C:\Program Files (x86)\NSIS\makensis.exe"
+          /DCLYPDAT_MSI_FILE=..\ClypDat.msi
+          /DCLYPDAT_OUTPUT_FILE=..\ClypDat-MSI-Setup.exe
+          installer\ClypDat-MsiSetup.nsi
+        shell: pwsh
 
       - name: Create GitHub Release
         env:
@@ -161,6 +166,6 @@ jobs:
         run: |
           $tag = "${{ steps.version.outputs.tag }}"
           gh release create $tag `
-            ClypDat-win-x64.zip ClypDat-Portable.exe ClypDat-Setup.exe ClypDat.msi `
+            ClypDat-win-x64.zip ClypDat-Portable.exe ClypDat-Setup.exe ClypDat-MSI-Setup.exe ClypDat.msi `
             --title "ClypDat $tag" `
             --generate-notes

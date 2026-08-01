@@ -5906,7 +5906,7 @@ public sealed partial class MainWindow : Window
         // closing out of the dialog mid-download still silently installed
         // the update anyway. Cancelling here unwinds the download loop
         // (DownloadAndRestartAsync already threads the token through every
-        // read/write) before it ever reaches the actual file-swap script.
+        // read/write) before it launches the verified installer.
         closeButton.Click += (_, _) =>
         {
             downloadCts?.Cancel();

@@ -6,24 +6,13 @@ namespace ClypDat.GameDetection.Tests;
 public sealed class ReplayEncoderPresetPolicyTests
 {
     [Theory]
-    [InlineData(60)]
-    [InlineData(120)]
-    [InlineData(240)]
-    public void Resolve_UsesP1ForHighFrameRateNativeCapture(int frameRate)
-    {
-        Assert.Equal("P1", ReplayEncoderPresetPolicy.Resolve("P5", frameRate, "Native"));
-        Assert.Equal("P1", ReplayEncoderPresetPolicy.Resolve("P3", frameRate, "Auto"));
-    }
+    [InlineData("P1")]
+    [InlineData("P3")]
+    [InlineData("P5")]
+    public void Resolve_PreservesManualPreset(string preset) =>
+        Assert.Equal(preset, ReplayEncoderPresetPolicy.Resolve(preset));
 
     [Fact]
-    public void Resolve_PreservesManualPresetAtThirtyFps()
-    {
-        Assert.Equal("P5", ReplayEncoderPresetPolicy.Resolve("P5", 30, "Native"));
-    }
-
-    [Fact]
-    public void Resolve_DoesNotOverrideLegacyBackend()
-    {
-        Assert.Equal("P5", ReplayEncoderPresetPolicy.Resolve("P5", 60, "Legacy"));
-    }
+    public void Resolve_NormalizesInvalidPresetToP4() =>
+        Assert.Equal("P4", ReplayEncoderPresetPolicy.Resolve("invalid"));
 }

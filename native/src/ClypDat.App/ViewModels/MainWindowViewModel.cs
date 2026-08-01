@@ -1247,12 +1247,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (!SetProperty(ref _selectedReplayFrameRate, value)) return;
             Settings.ReplayFrameRate = value;
-            if (value >= ReplayEncoderPresetPolicy.ProtectedFrameRate)
-            {
-                Settings.ReplayEncoderPreset = "P1";
-                OnPropertyChanged(nameof(SelectedReplayEncoderPreset));
-            }
-            OnPropertyChanged(nameof(IsReplayEncoderPresetSelectable));
             SaveSettings();
             UpdateReplayQualityRestartRequired();
             OnPropertyChanged(nameof(ReplayQualityAboveDefault));
@@ -3953,8 +3947,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => SetProperty(ref _isOnboardingVisible, value);
     }
 
-    public bool IsReplayEncoderPresetSelectable => Settings.ReplayFrameRate < ReplayEncoderPresetPolicy.ProtectedFrameRate;
-
     public bool IsFirstRunOnboarding
     {
         get => _isFirstRunOnboarding;
@@ -4403,7 +4395,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ClipFileNameScheme: Settings.ClipFileNameScheme,
             CustomClipFileNameTemplate: Settings.CustomClipFileNameTemplate,
             LibraryFolder: Settings.LibraryFolder,
-            EncoderPreset: ReplayEncoderPresetPolicy.Resolve(Settings.ReplayEncoderPreset, Settings.ReplayFrameRate, effectiveBackend),
+            EncoderPreset: ReplayEncoderPresetPolicy.Resolve(Settings.ReplayEncoderPreset),
             RateControlMode: Settings.ReplayRateControlMode,
             ConstantQuality: Settings.ReplayConstantQuality,
             MaxBitrateMbps: Settings.ReplayMaxBitrateMbps,
