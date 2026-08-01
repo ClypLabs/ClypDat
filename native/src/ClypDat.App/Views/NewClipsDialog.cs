@@ -4,6 +4,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using ClypDat.App.Services;
 
 namespace ClypDat.App.Views;
 
@@ -17,7 +18,7 @@ internal sealed class NewClipsDialog : Window
 
     public NewClipsDialog(Window owner, EventHandler<RoutedEventArgs> close, EventHandler<RoutedEventArgs> delete, EventHandler<RoutedEventArgs> viewAll)
     {
-        SystemDecorations = SystemDecorations.None;
+        WindowDecorations = WindowDecorations.None;
         ShowInTaskbar = false;
         CanResize = false;
         WindowStartupLocation = WindowStartupLocation.Manual;
@@ -48,7 +49,13 @@ internal sealed class NewClipsDialog : Window
         DockPanel.SetDock(footer, Dock.Bottom);
         dock.Children.Add(new ScrollViewer { Content = Cards, MaxHeight = 620 });
         var card = new Border { Width = 1012, MaxHeight = 860, CornerRadius = new CornerRadius(12), Background = Brush.Parse("#111920"), BorderBrush = Brush.Parse("#232F3A"), BorderThickness = new Thickness(1), ClipToBounds = true, Child = dock, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        Content = new Border { Background = Brush.Parse("#DD000000"), Child = card };
+        var scrim = new Border { Background = Brush.Parse("#DD000000"), Child = card };
+        Content = scrim;
+        Opened += (_, _) =>
+        {
+            OverlayTransparencyDiagnostics.Log(this, "new-clips-dialog");
+            WindowTransparencyFallback.ApplyIfNeeded(this, scrim.Background, b => scrim.Background = b);
+        };
         KeyDown += (_, e) => { if (e.Key == Key.Escape) close(this, new RoutedEventArgs()); };
     }
 

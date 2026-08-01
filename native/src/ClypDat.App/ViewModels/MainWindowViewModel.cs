@@ -309,14 +309,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
         _libraryCacheWriteTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _libraryCacheWriteTimer.Tick += (_, _) => WriteLibraryCacheIfDirty();
-        _ = StartInitialLibraryLoadAsync();
+        InitialLibraryLoadTask = StartInitialLibraryLoadAsync();
     }
 
     public AppSettings Settings { get; }
+    public Task InitialLibraryLoadTask { get; }
     public ObservableCollection<ClipCardViewModel> AllClips { get; }
     public bool IsRestoringLibraryCache => _isRestoringCachedLibrary;
+    public IReadOnlyList<ClipCardViewModel> GetAudioOnlyClips() => AllClips
+        .Where(clip => !clip.Media.HasVideo && clip.Media.Tracks.Count > 0)
+        .ToArray();
     public ObservableCollection<TrackLaneViewModel> TimelineTracks { get; }
     public int TimelineTrackCount => Math.Max(1, TimelineTracks.Count);
+    // Timeline panel has 8px padding above/below, a 34px ruler, then fixed
+    // lane heights plus separators. The outer editor grid needs this explicit
+    // measured child because the real timeline spans both rows underneath the
+    // clip-details column.
+    public double EditorTimelineHeight => 16 + 34 +
+        (EditorHoverBarEnabled ? 0 : 44) +
+        TimelineTracks.Sum(track => track.LaneHeight + track.LaneMargin.Bottom);
     public ObservableCollection<AudioDeviceOption> ChatAudioDevices { get; }
     public ObservableCollection<AudioDeviceOption> MicrophoneDevices { get; }
     public ObservableCollection<ProcessOption> OpenProcesses { get; }
@@ -2187,6 +2198,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (Settings.EditorHoverBarEnabled == value) return;
             Settings.EditorHoverBarEnabled = value;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(EditorTimelineHeight));
             SaveSettings();
         }
     }
@@ -2655,7 +2667,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         if (cached.Count == 0)
         {
-            _ = RefreshLibraryAsync();
+            await RefreshLibraryAsync();
             return;
         }
 
@@ -2670,7 +2682,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         AppLog.Info($"Library cache: restored {Math.Min(initialCardCount, cached.Count)}/{cached.Count} cards in {clock.ElapsedMilliseconds}ms.");
 
         _cachedLibraryRestoreCts = new CancellationTokenSource();
-        _ = RestoreRemainingCachedClipsAsync(cached.Skip(initialCardCount).ToArray(), root, _cachedLibraryRestoreCts.Token);
+        await RestoreRemainingCachedClipsAsync(cached.Skip(initialCardCount).ToArray(), root, _cachedLibraryRestoreCts.Token);
     }
 
     private async Task RestoreRemainingCachedClipsAsync(IReadOnlyList<CachedClipState> states, string root, CancellationToken cancellationToken)
@@ -2696,7 +2708,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 NotifyLibraryChrome();
                 AppLog.Info($"Library cache: restore complete, {AllClips.Count} cards available before disk reconciliation.");
-                _ = RefreshLibraryAsync();
+                await RefreshLibraryAsync();
             }
         }
         catch (OperationCanceledException)
@@ -2721,7 +2733,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var media = state.Media with
         {
             ThumbnailPath = File.Exists(state.Media.ThumbnailPath) ? state.Media.ThumbnailPath : string.Empty,
-            FilmstripPath = File.Exists(state.Media.FilmstripPath) ? state.Media.FilmstripPath : string.Empty
+            FilmstripPath = File.Exists(state.Media.FilmstripPath) ? state.Media.FilmstripPath : string.Empty,
+            // Old library-cache rows predate HasVideo. Their cached track list
+            // is still enough to identify audio-only files before hydration.
+            HasVideo = state.Media.Tracks.Count == 0 || state.Media.Tracks.Any(track => track.Type == "video")
         };
         var clip = new ClipCardViewModel(state with { Media = media }, Settings.LibraryFolder);
         AttachClip(clip);
@@ -4792,7 +4807,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             TimelineTracks.Insert(0, new TrackLaneViewModel(0, "Video", "video", "#05C7B7", false) { Filmstrip = filmstrip });
         }
 
+        // Every lane keeps its 6px separator except final audio lane. This
+        // preserves gaps between game/chat/microphone tracks without leaving
+        // an empty strip below the microphone row.
+        var finalAudioTrack = TimelineTracks.LastOrDefault(track => track.IsAudio);
+        if (finalAudioTrack is not null) finalAudioTrack.IsLastAudioTrack = true;
+
         OnPropertyChanged(nameof(TimelineTrackCount));
+        OnPropertyChanged(nameof(EditorTimelineHeight));
 
         ApplyClipEditState(media.Path);
         IsEditorVisible = showEditor;
@@ -5971,7 +5993,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var wasCancelled = false;
         try
         {
-            var clips = AllClips.Where(clip => string.IsNullOrEmpty(clip.Media.FilmstripPath)).ToArray();
+            var clips = AllClips.Where(clip => clip.Media.HasVideo && string.IsNullOrEmpty(clip.Media.FilmstripPath)).ToArray();
             if (clips.Length > 0) AppLog.Info($"Idle timeline hydration: {clips.Length} filmstrip(s).");
             foreach (var clip in clips)
             {
@@ -6382,8 +6404,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // showing. That walk is what made a cold start crawl and put the
             // "Building your library" banner up on every single launch.
             var needProbe = clips.Where(clip => clip.Duration <= TimeSpan.Zero).ToArray();
-            var needThumbnail = clips.Where(clip => string.IsNullOrEmpty(clip.Media.ThumbnailPath)).ToArray();
-            var needFilmstrip = clips.Where(clip => string.IsNullOrEmpty(clip.Media.FilmstripPath)).ToArray();
+            var needThumbnail = clips.Where(clip => clip.Media.HasVideo && string.IsNullOrEmpty(clip.Media.ThumbnailPath)).ToArray();
+            var needFilmstrip = clips.Where(clip => clip.Media.HasVideo && string.IsNullOrEmpty(clip.Media.FilmstripPath)).ToArray();
 
             _hydrationOverallCompleted = 0;
             _hydrationOverallTotal = needProbe.Length + needThumbnail.Length;
@@ -6412,7 +6434,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // Recomputed rather than reusing the list from above: a clip that
             // had no cached probe a moment ago has a real duration now, and
             // the thumbnail/filmstrip grabs seek by duration.
-            needThumbnail = clips.Where(clip => string.IsNullOrEmpty(clip.Media.ThumbnailPath)).ToArray();
+            needThumbnail = clips.Where(clip => clip.Media.HasVideo && string.IsNullOrEmpty(clip.Media.ThumbnailPath)).ToArray();
             await RunHydrationPassAsync(needThumbnail, "Loading thumbnails", cancellationToken,
                 async clip =>
                 {
@@ -6590,7 +6612,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private static Avalonia.Media.Imaging.Bitmap? LoadBitmap(string path)
     {
         if (string.IsNullOrWhiteSpace(path)) return null;
-        if (BitmapCache.TryGet(path, out var cached)) return cached;
+        if (ClypDat.App.Services.BitmapCache.TryGet(path, out var cached)) return cached;
 
         Avalonia.Media.Imaging.Bitmap? bitmap;
         try
@@ -6602,7 +6624,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             bitmap = null;
         }
 
-        BitmapCache.Store(path, bitmap);
+        ClypDat.App.Services.BitmapCache.Store(path, bitmap);
         return bitmap;
     }
 

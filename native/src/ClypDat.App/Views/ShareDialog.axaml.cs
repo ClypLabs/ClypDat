@@ -10,10 +10,14 @@ namespace ClypDat.App.Views;
 
 public partial class ShareDialog : Window
 {
+    private ShareBackdropWindow? _backdrop;
+    private ShareDragOverlayWindow? _dragOverlay;
+    private Window? _coveredWindow;
     private MainWindowViewModel _viewModel = null!;
     private CancellationTokenSource? _shareCts;
     private string? _shareTempPath;
     private Point? _dragPressPoint;
+    private PointerPressedEventArgs? _dragPressEvent;
 
     // Below 90% of the cap is worth spending a retry to close, above it the
     // gain isn't worth another full encode.
@@ -31,10 +35,16 @@ public partial class ShareDialog : Window
     public ShareDialog(Window owner, MainWindowViewModel viewModel) : this()
     {
         _viewModel = viewModel;
+        _coveredWindow = owner;
         DataContext = viewModel;
-        PositionOverOwner(owner);
-        Closed += (_, _) => CleanUp();
-        Opened += (_, _) => WindowTransparencyFallback.ApplyIfNeeded(this, ShareScrim.Background, b => ShareScrim.Background = b);
+        Closed += (_, _) =>
+        {
+            CloseDragOverlay();
+            _backdrop?.Close();
+            _backdrop = null;
+            CleanUp();
+        };
+        Opened += (_, _) => OverlayTransparencyDiagnostics.Log(this, "share-dialog");
 
         // Deliberately does NOT start encoding on open. Encoding is expensive
         // GPU work, and this app is usually running with the replay buffer
@@ -43,6 +53,40 @@ public partial class ShareDialog : Window
         // something the user has not asked for yet, and competes with the
         // capture encoder that is protecting their gameplay.
         Opened += (_, _) => SweepStaleShareTempFiles();
+    }
+
+    public async Task ShowWithBackdropAsync(Window owner)
+    {
+        var backdrop = new ShareBackdropWindow(owner);
+        _backdrop = backdrop;
+        EventHandler dismiss = (_, _) => Close();
+        backdrop.DismissRequested += dismiss;
+        backdrop.Show(owner);
+        try
+        {
+            // ShowDialog disables its owner, which blocks the backdrop from
+            // receiving the outside click. Keep the ownership chain for
+            // z-order, then await this owned window's normal close instead.
+            var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            EventHandler? closedHandler = null;
+            closedHandler = (_, _) => closed.TrySetResult();
+            Closed += closedHandler;
+            try
+            {
+                Show(backdrop);
+                await closed.Task;
+            }
+            finally
+            {
+                Closed -= closedHandler;
+            }
+        }
+        finally
+        {
+            backdrop.DismissRequested -= dismiss;
+            backdrop.Close();
+            if (ReferenceEquals(_backdrop, backdrop)) _backdrop = null;
+        }
     }
 
     // A hard kill (crash, task manager) never runs the close-time cleanup, so
@@ -69,34 +113,9 @@ public partial class ShareDialog : Window
         }
     }
 
-    // Owner isn't wired through Avalonia's own Owner property for sizing
-    // purposes - a modal-feeling popup like this can't be resized/moved by
-    // the user while it's up anyway, so position/size are computed once,
-    // directly against the owner's REAL win32 rect rather than trusting
-    // Avalonia's Bounds/PointToScreen alone. RepositionEditorHoverControls
-    // (MainWindow.axaml.cs) documents why: those read fine once a window is
-    // already shown (true here - owner always is), but the same class of
-    // DIP/physical-pixel mismatch this codebase has hit before is cheap to
-    // just avoid by pulling the owner's rect straight from Win32.
-    private void PositionOverOwner(Window owner)
-    {
-        var handle = owner.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
-        if (handle != IntPtr.Zero && GetWindowRect(handle, out var rect))
-        {
-            var scaling = owner.RenderScaling > 0 ? owner.RenderScaling : 1;
-            Position = new PixelPoint(rect.Left, rect.Top);
-            Width = (rect.Right - rect.Left) / scaling;
-            Height = (rect.Bottom - rect.Top) / scaling;
-            return;
-        }
-
-        Position = owner.PointToScreen(new Point(0, 0));
-        Width = owner.Bounds.Width;
-        Height = owner.Bounds.Height;
-    }
-
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hWnd, out Win32Rect rect);
+
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool GetCursorPos(out Win32Point point);
@@ -495,16 +514,20 @@ public partial class ShareDialog : Window
         if (_shareTempPath is { } path) ExplorerService.Open(path, selectFile: true);
     }
 
-    private void Thumbnail_OnPointerPressed(object? sender, PointerPressedEventArgs e) =>
+    private void Thumbnail_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
         _dragPressPoint = e.GetPosition(ShareThumbnail);
+        _dragPressEvent = e;
+    }
 
     private async void Thumbnail_OnPointerMoved(object? sender, PointerEventArgs e)
     {
-        if (_dragPressPoint is not { } start || e.GetCurrentPoint(ShareThumbnail).Properties.IsLeftButtonPressed != true) return;
+        if (_dragPressPoint is not { } start || _dragPressEvent is not { } dragStart || e.GetCurrentPoint(ShareThumbnail).Properties.IsLeftButtonPressed != true) return;
         if (_shareTempPath is not { } tempPath) return;
         var current = e.GetPosition(ShareThumbnail);
         if (Math.Abs(current.X - start.X) < 4 && Math.Abs(current.Y - start.Y) < 4) return;
         _dragPressPoint = null;
+        _dragPressEvent = null;
 
         StartDragCursorWatch();
         try
@@ -516,22 +539,16 @@ public partial class ShareDialog : Window
             // still lines up.
             if (ShellFileDrag.TryDragFile(tempPath)) return;
 
-            // Avalonia 11.3 added DataTransfer/DoDragDropAsync as the
-            // replacement for DataObject/DoDragDrop, but its write-side API
-            // (constructing a file-backed IDataTransferItem) isn't documented
-            // anywhere reachable, while this older overload is still shipped,
-            // still functional, and is what every Avalonia drag-out sample still
-            // shows - suppressed rather than swapped to a barely-verifiable
-            // newer path for the same result.
-            // DataFormats.Files (not FileNames) expects IEnumerable<IStorageItem>,
-            // not raw paths - passing strings there compiles fine (Set takes
-            // object) but the native drag backend gets no usable file data out
-            // of it, so every drop target shows a permanent no-drop cursor.
-            // FileNames is the one that actually wants plain path strings.
-#pragma warning disable CS0618
-            var data = new DataObject();
-            data.Set(DataFormats.FileNames, new[] { tempPath });
-            await DragDrop.DoDragDrop(e, data, DragDropEffects.Copy);
+            var file = await StorageProvider.TryGetFileFromPathAsync(new Uri(Path.GetFullPath(tempPath)));
+            if (file is null)
+            {
+                AppLog.Error($"Share: drag-out source disappeared: {tempPath}");
+                return;
+            }
+
+            var data = new DataTransfer();
+            data.Add(DataTransferItem.CreateFile(file));
+            await DragDrop.DoDragDropAsync(dragStart, data, DragDropEffects.Copy);
         }
         catch (Exception error)
         {
@@ -545,12 +562,15 @@ public partial class ShareDialog : Window
             // those used to leave the dialog stuck with no thumbnail until
             // the size was changed or the dialog reopened.
             StopDragCursorWatch();
-            ShareDragActiveOverlay.IsVisible = false;
+            CloseDragOverlay();
         }
-#pragma warning restore CS0618
     }
 
-    private void Thumbnail_OnPointerReleased(object? sender, PointerReleasedEventArgs e) => _dragPressPoint = null;
+    private void Thumbnail_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        _dragPressPoint = null;
+        _dragPressEvent = null;
+    }
 
     // DoDragDrop blocks this method for the whole gesture, and during a drag
     // the app gets no pointer events at all (the OS owns the pointer), so
@@ -562,7 +582,9 @@ public partial class ShareDialog : Window
     private void StartDragCursorWatch()
     {
         _dragLeftApp = false;
-        ShareDragActiveOverlay.IsVisible = true;
+        CloseDragOverlay();
+        _dragOverlay = new ShareDragOverlayWindow(_coveredWindow ?? this);
+        _dragOverlay.Show(this);
         _dragCursorWatch ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(60) };
         _dragCursorWatch.Tick -= DragCursorWatch_OnTick;
         _dragCursorWatch.Tick += DragCursorWatch_OnTick;
@@ -575,10 +597,16 @@ public partial class ShareDialog : Window
         if (_dragCursorWatch is not null) _dragCursorWatch.Tick -= DragCursorWatch_OnTick;
     }
 
+    private void CloseDragOverlay()
+    {
+        try { _dragOverlay?.Close(); } catch { /* already closing */ }
+        _dragOverlay = null;
+    }
+
     private void DragCursorWatch_OnTick(object? sender, EventArgs e)
     {
         if (_dragLeftApp) return;
-        var handle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        var handle = (_coveredWindow ?? this).TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
         if (handle == IntPtr.Zero || !GetCursorPos(out var cursor) || !GetWindowRect(handle, out var rect)) return;
         if (cursor.X >= rect.Left && cursor.X < rect.Right && cursor.Y >= rect.Top && cursor.Y < rect.Bottom) return;
 
@@ -589,7 +617,7 @@ public partial class ShareDialog : Window
         // back here) must not slam the panel up again, so the watch latches
         // off and stays off for the rest of this gesture.
         _dragLeftApp = true;
-        ShareDragActiveOverlay.IsVisible = false;
+        CloseDragOverlay();
         StopDragCursorWatch();
     }
 }

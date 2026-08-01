@@ -66,10 +66,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="11.3.13" />
-    <PackageReference Include="Avalonia.Desktop" Version="11.3.13" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.13" />
-    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.13" />
+    <PackageReference Include="Avalonia" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.1" />
     <PackageReference Include="LibVLCSharp.Avalonia" Version="3.10.0" />
     <PackageReference Include="NAudio" Version="2.2.1" />
     <!-- .Core (not the full Microsoft.Data.Sqlite) so it doesn't drag in
@@ -84,9 +84,8 @@
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
     <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
     <PackageReference Include="FFmpeg.AutoGen" Version="8.1.0" />
-    <!-- Pinned above Avalonia's transitive 0.21.2 to pick up the CVE-2026-39959
-         backport fix (GHSA-xrw6-gwf8-vvr9); no direct usage otherwise. -->
-    <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
+    <!-- Pinned directly to Avalonia 12.1.1's required version. No direct usage. -->
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.1" />
   </ItemGroup>
 
   <ItemGroup>

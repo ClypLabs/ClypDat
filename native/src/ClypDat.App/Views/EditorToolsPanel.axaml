@@ -34,7 +34,6 @@
           </Border>
           <Border Background="#151F28" BorderBrush="#293A47" BorderThickness="1" CornerRadius="9" Padding="12">
             <StackPanel Spacing="9">
-              <Border Height="1" Background="#293A47" Margin="0,2" />
               <TextBlock Text="Export codec" Foreground="#8EA1B6" FontSize="12" />
               <ComboBox Classes="settingsInput" ItemsSource="{Binding ExportCodecs}" SelectedItem="{Binding SelectedExportCodec}"
                         HorizontalAlignment="Stretch" />

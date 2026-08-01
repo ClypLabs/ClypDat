@@ -142,13 +142,14 @@ public sealed class AppSettings
     public Dictionary<string, ClipEditSettings> ClipEdits { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public bool EnableClipOverlay { get; set; } = true;
     public bool EnableClipOverlaySound { get; set; } = true;
-    // Keeps the overlays on the physical screen but out of anything that
-    // captures it - ClypDat's own clips, Discord screenshare. Same
+    // Keeps clip-notification overlays on the physical screen but out of
+    // anything that captures it - ClypDat's own clips, Discord screenshare. Same
     // mechanism KeePassXC uses to keep its window out of screenshots
     // (SetWindowDisplayAffinity/WDA_EXCLUDEFROMCAPTURE). On by default: a
     // "Clip saved" badge belongs to the person at the desk, not baked into
     // the clip they are saving. Needs Windows 10 2004 (build 19041); below
-    // that the call fails and the overlays simply capture as before.
+    // that the call fails and notifications simply capture as before. Editor
+    // controls and playback-state UI intentionally remain capturable.
     //
     // Convenience, not a security boundary - it only stops capture that goes
     // through DWM. A capture card, a second PC, or a phone pointed at the
@@ -183,6 +184,10 @@ public sealed class AppSettings
     public Cs2AutoClipSettings Cs2AutoClip { get; set; } = new();
     public bool MedalImportStripEmoji { get; set; } = false;
     public bool MedalImportCopyNotMove { get; set; } = true;
+    // Suppresses the startup prompt for audio-only MP4 sidecars. ClypDat
+    // still keeps them in the library; it only stops asking whether to remove
+    // them.
+    public bool IgnoreAudioOnlyClipPrompt { get; set; }
     // Read only to migrate older settings files. New import history is stored
     // with the library in .clipinfo/medal-imports.json instead of AppData.
     [JsonPropertyName("ImportedMedalClipKeys")]

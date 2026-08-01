@@ -1,19 +1,15 @@
 using System;
+using System.Runtime.CompilerServices;
 using Avalonia.Controls;
 using Avalonia.Media;
 
 namespace ClypDat.App.Services;
 
-// Avalonia's window transparency on Windows only works when the OS's WinUI
-// Composition API initializes; on some non-NVIDIA GPU/driver combinations
-// (reported on AMD) that silently fails and Avalonia falls back to
-// WindowTransparencyLevel.None, painting these scrim/dim windows fully
-// opaque instead of blending against whatever is behind them.
-// Window.ActualTransparencyLevel reports what really got applied, so on the
-// rare path where composition failed this swaps the scrim's own brush to
-// fully opaque and instead blends the whole window using the older,
-// GPU/driver-independent WS_EX_LAYERED + SetLayeredWindowAttributes alpha,
-// which Windows has supported unconditionally since Windows 2000.
+// Avalonia's Windows Server transparency path reports Transparent even when
+// DWM paints the window black. Native WS_EX_LAYERED alpha works on the same
+// system, so Server overlays use it instead. This is whole-window alpha:
+// cards and controls fade slightly with their scrim, but retain their layout
+// and remain usable above LibVLC's native child window.
 internal static class WindowTransparencyFallback
 {
     private const int GwlExStyle = -20;
@@ -23,17 +19,48 @@ internal static class WindowTransparencyFallback
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
 
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
 
     [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetLayeredWindowAttributes(IntPtr hWnd, uint crKey, byte bAlpha, uint dwFlags);
 
-    public static void ApplyIfNeeded(Window window, IBrush? background, Action<IBrush> setBackground)
+    private sealed class WindowAlpha
     {
-        if (window.ActualTransparencyLevel == WindowTransparencyLevel.Transparent) return;
+        public required byte Value { get; init; }
+    }
+
+    private static readonly ConditionalWeakTable<Window, WindowAlpha> OriginalAlphas = new();
+
+    public static void ApplyIfNeeded(Window window, IBrush? background, Action<IBrush> setBackground)
+        => Apply(window, background, setBackground);
+
+    // Per-pixel mirror windows need their Avalonia owner only for input. Keep
+    // that owner effectively invisible without changing its visual tree; its
+    // normal render is copied into the native companion before this alpha is
+    // applied to the HWND.
+    public static void ApplyInputSurfaceIfNeeded(Window window)
+    {
+        if (!WindowsPlatformProfile.IsServer()) return;
+
+        var handle = window.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        if (handle == IntPtr.Zero) return;
+
+        var exStyle = (long)GetWindowLongPtr(handle, GwlExStyle);
+        SetWindowLongPtr(handle, GwlExStyle, (IntPtr)(exStyle | WsExLayered));
+        if (!SetLayeredWindowAttributes(handle, 0, 1, LwaAlpha))
+            AppLog.Error($"Layered hover input surface failed: error={System.Runtime.InteropServices.Marshal.GetLastWin32Error()}.");
+    }
+
+    private static void Apply(Window window, IBrush? background, Action<IBrush> setBackground)
+    {
         if (background is not ISolidColorBrush solid) return;
 
+        var mustUseLayeredAlpha = WindowsPlatformProfile.IsServer() ||
+            window.ActualTransparencyLevel != WindowTransparencyLevel.Transparent;
+        if (!mustUseLayeredAlpha) return;
+
+        var alpha = OriginalAlphas.GetValue(window, _ => new WindowAlpha { Value = solid.Color.A }).Value;
         var color = solid.Color;
         setBackground(new SolidColorBrush(new Color(255, color.R, color.G, color.B)));
 
@@ -41,7 +68,21 @@ internal static class WindowTransparencyFallback
         if (handle == IntPtr.Zero) return;
 
         var exStyle = (long)GetWindowLongPtr(handle, GwlExStyle);
+        System.Runtime.InteropServices.Marshal.SetLastPInvokeError(0);
         SetWindowLongPtr(handle, GwlExStyle, (IntPtr)(exStyle | WsExLayered));
-        SetLayeredWindowAttributes(handle, 0, color.A, LwaAlpha);
+        var styleError = System.Runtime.InteropServices.Marshal.GetLastPInvokeError();
+        if (styleError != 0)
+        {
+            AppLog.Error($"Layered overlay style failed: error={styleError}.");
+            return;
+        }
+
+        if (!SetLayeredWindowAttributes(handle, 0, alpha, LwaAlpha))
+        {
+            AppLog.Error($"Layered overlay alpha failed: error={System.Runtime.InteropServices.Marshal.GetLastWin32Error()}.");
+            return;
+        }
+
+        AppLog.Info($"Layered overlay alpha applied: alpha={alpha}.");
     }
 }

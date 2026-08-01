@@ -4,7 +4,7 @@ using ClypDat.Core.Settings;
 
 namespace ClypDat.App.Services;
 
-public sealed record Cs2AutoClipRequest(string Title, DateTime StartUtc, DateTime EndUtc);
+public sealed record Cs2AutoClipRequest(string EventId, string EventType, string Title, DateTime StartUtc, DateTime EndUtc);
 
 // CS2 GSI supplies snapshots rather than discrete events. Keep the round's
 // timeline so a 3K can become a 4K/Ace before one precise clip is exported.
@@ -25,6 +25,7 @@ public sealed class Cs2GsiListener : IDisposable
     private readonly List<DateTime> _roundKillTimes = new();
     private DateTime? _lastRelevantEventUtc;
     private string? _pendingLabel;
+    private readonly List<AutoClipEvent> _roundEvents = new();
 
     public event EventHandler<string>? AutoClipPending;
     public event EventHandler<Cs2AutoClipRequest>? AutoClipReady;
@@ -180,10 +181,17 @@ public sealed class Cs2GsiListener : IDisposable
                     {
                         var changed = !string.Equals(_pendingLabel, label, StringComparison.Ordinal);
                         _pendingLabel = label;
+                        _roundEvents.Add(new AutoClipEvent(EventIdForLabel(label), label, now, KillPriority(label)));
                         if (changed)
                         {
                             AutoClipPending?.Invoke(this, $"Auto clip started — {label} detected, waiting for the round result.");
                         }
+                    }
+                    else if (_pendingLabel is not null && IsEnabled(settings, "kill"))
+                    {
+                        // If only ordinary kills are enabled, retain each one so
+                        // Medal-style "⚔️Kill xN" titles stay truthful.
+                        _roundEvents.Add(new AutoClipEvent("kill", "Kill", now, 10));
                     }
                 }
             }
@@ -195,12 +203,17 @@ public sealed class Cs2GsiListener : IDisposable
                 {
                     FireStandaloneLocked("Headshot", now);
                 }
+                else _roundEvents.Add(new AutoClipEvent("headshot", "Headshot", now, 15));
             }
 
             if (deaths is { } currentDeaths && currentDeaths > _lastMatchDeaths)
             {
                 _lastRelevantEventUtc = now;
-                if (_pendingLabel is not null) FinalizePendingLocked(now);
+                if (_pendingLabel is not null)
+                {
+                    if (IsEnabled(settings, "death")) _roundEvents.Add(new AutoClipEvent("death", "Death", now));
+                    FinalizePendingLocked(now);
+                }
                 else if (IsEnabled(settings, "death")) FireStandaloneLocked("Death", now);
             }
 
@@ -208,6 +221,7 @@ public sealed class Cs2GsiListener : IDisposable
             {
                 _lastRelevantEventUtc = now;
                 if (_pendingLabel is null) FireStandaloneLocked("Assist", now);
+                else _roundEvents.Add(new AutoClipEvent("assist", "Assist", now));
             }
 
             SyncCounters(roundKills, roundKillHs, deaths, assists);
@@ -228,16 +242,18 @@ public sealed class Cs2GsiListener : IDisposable
         if (_pendingLabel is null || _roundKillTimes.Count == 0) return;
         var endUtc = (endOverrideUtc ?? _lastRelevantEventUtc ?? _roundKillTimes[^1]) + EventPadding;
         var startUtc = _roundKillTimes[0] - EventPadding;
-        var title = BuildTitle(_pendingLabel);
+        var eventId = EventIdForLabel(_pendingLabel);
+        var title = BuildTitle(_roundEvents.Count == 0 ? new[] { new AutoClipEvent(eventId, _pendingLabel, startUtc, KillPriority(_pendingLabel)) } : _roundEvents);
         AppLog.Info($"CS2 auto-clip finalized: {title}, window={startUtc:O}..{endUtc:O}.");
-        AutoClipReady?.Invoke(this, new Cs2AutoClipRequest(title, startUtc, endUtc));
+        AutoClipReady?.Invoke(this, new Cs2AutoClipRequest(eventId, _pendingLabel, title, startUtc, endUtc));
         ClearRoundLocked();
     }
 
     private void FireStandaloneLocked(string label, DateTime timestampUtc)
     {
         AutoClipPending?.Invoke(this, $"Auto clip started — {label} detected, finishing the clip.");
-        AutoClipReady?.Invoke(this, new Cs2AutoClipRequest(BuildTitle(label), timestampUtc - EventPadding, timestampUtc + EventPadding));
+        var eventId = EventIdForLabel(label);
+        AutoClipReady?.Invoke(this, new Cs2AutoClipRequest(eventId, label, BuildTitle(new[] { new AutoClipEvent(eventId, label, timestampUtc, KillPriority(label)) }), timestampUtc - EventPadding, timestampUtc + EventPadding));
     }
 
     private void ClearRoundLocked()
@@ -245,6 +261,7 @@ public sealed class Cs2GsiListener : IDisposable
         _roundKillTimes.Clear();
         _lastRelevantEventUtc = null;
         _pendingLabel = null;
+        _roundEvents.Clear();
     }
 
     private static string? LabelForKill(int killNumber, AutoClipGameSettings settings) => killNumber switch
@@ -259,10 +276,13 @@ public sealed class Cs2GsiListener : IDisposable
 
     private static bool IsEnabled(AutoClipGameSettings settings, string id) => settings.Events.TryGetValue(id, out var enabled) && enabled;
 
-    private string BuildTitle(string label)
+    private static string EventIdForLabel(string label) => label switch { "Kill" => "kill", "2K" => "2k", "3K" => "3k", "4K" => "4k", "Ace" => "ace", "Headshot" => "headshot", "Death" => "death", "Assist" => "assist", _ => "kill" };
+    private static int KillPriority(string label) => label switch { "Kill" => 10, "2K" => 20, "3K" => 30, "4K" => 40, "Ace" => 50, "Headshot" => 15, _ => 0 };
+
+    private string BuildTitle(IReadOnlyCollection<AutoClipEvent> events)
     {
         var mapDisplayName = FormatMapName(_lastMapName);
-        return string.IsNullOrEmpty(mapDisplayName) ? label : $"{label} - {mapDisplayName}";
+        return AutoClipTitleFormatter.Format("cs2", events, mapDisplayName);
     }
 
     private static int? GetInt(JsonElement parent, string name) =>
