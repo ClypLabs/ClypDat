@@ -5,15 +5,17 @@ using Avalonia.Media;
 namespace ClypDat.App.Services;
 
 // Avalonia's window transparency on Windows only works when the OS's WinUI
-// Composition API initializes; on some non-NVIDIA GPU/driver combinations
-// (reported on AMD) that silently fails and Avalonia falls back to
+// Composition API initializes; Avalonia then falls back to
 // WindowTransparencyLevel.None, painting these scrim/dim windows fully
 // opaque instead of blending against whatever is behind them.
 // Window.ActualTransparencyLevel reports what really got applied, so on the
-// rare path where composition failed this swaps the scrim's own brush to
+// rare path where composition failed this swaps a scrim's brush to
 // fully opaque and instead blends the whole window using the older,
 // GPU/driver-independent WS_EX_LAYERED + SetLayeredWindowAttributes alpha,
 // which Windows has supported unconditionally since Windows 2000.
+//
+// Only use this for windows whose content is the scrim. Whole-window alpha
+// would also fade controls and cards in the Share dialog and hover bar.
 internal static class WindowTransparencyFallback
 {
     private const int GwlExStyle = -20;

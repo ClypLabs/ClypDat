@@ -4,6 +4,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using ClypDat.App.Services;
 
 namespace ClypDat.App.Views;
 
@@ -23,6 +24,7 @@ internal sealed class NewClipsDialog : Window
         WindowStartupLocation = WindowStartupLocation.Manual;
         Background = Brushes.Transparent;
         TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent };
+        Opened += (_, _) => OverlayTransparencyDiagnostics.Log(this, "new-clips-dialog");
         PositionOverOwner(owner);
 
         _title = new TextBlock { Foreground = Brush.Parse("#D8E4F2"), FontSize = 17, FontWeight = FontWeight.Bold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
