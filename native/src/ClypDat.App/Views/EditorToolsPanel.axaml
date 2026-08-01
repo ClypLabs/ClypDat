@@ -29,7 +29,7 @@
                        Background="#0D151C" BorderBrush="#263743" KeyDown="TitleBox_OnKeyDown" />
               <TextBlock Text="Description" Foreground="#8EA1B6" FontSize="12" Margin="0,2,0,0" />
               <TextBox Text="{Binding EditorDescription, Mode=TwoWay}" MinHeight="78" AcceptsReturn="True" TextWrapping="Wrap"
-                       Watermark="Add a description" Background="#0D151C" BorderBrush="#263743" Foreground="#D6E2F0" />
+                       PlaceholderText="Add a description" Background="#0D151C" BorderBrush="#263743" Foreground="#D6E2F0" />
             </StackPanel>
           </Border>
           <Border Background="#151F28" BorderBrush="#293A47" BorderThickness="1" CornerRadius="9" Padding="12">

@@ -133,7 +133,7 @@ public static class GameIconService
                     Directory.CreateDirectory(CacheFolder);
                     using (installedIcon)
                     {
-                        installedIcon.Save(cachePath);
+                        installedIcon.Save(cachePath, PngBitmapEncoderOptions.Default);
                     }
 
                     AppLog.Info($"Game icon taken from installed game for '{displayName}': {installedExecutable}.");
@@ -163,7 +163,7 @@ public static class GameIconService
             using var bitmap = new Bitmap(stream);
 
             Directory.CreateDirectory(CacheFolder);
-            bitmap.Save(CachePathFor(displayName));
+            bitmap.Save(CachePathFor(displayName), PngBitmapEncoderOptions.Default);
             AppLog.Info($"Game icon fetched for '{displayName}' from {url}.");
             succeeded = true;
             return true;
@@ -276,7 +276,7 @@ public static class GameIconService
 
             using var icon = new Bitmap(iconPath);
             Directory.CreateDirectory(CacheFolder);
-            icon.Save(CachePathFor(displayName));
+            icon.Save(CachePathFor(displayName), PngBitmapEncoderOptions.Default);
             AppLog.Info($"Game icon copied from Steam library cache for '{displayName}'.");
             return true;
         }
@@ -524,7 +524,7 @@ public static class GameIconService
             Directory.CreateDirectory(CacheFolder);
             using (bitmap)
             {
-                bitmap.Save(cachePath);
+                bitmap.Save(cachePath, PngBitmapEncoderOptions.Default);
             }
 
             AppLog.Info($"Game icon cached for '{displayName}' from {exePath}.");

@@ -45,7 +45,7 @@
               <RadioButton x:Name="ShareSize100" Classes="sizePill" GroupName="ShareSize" Content="100 MB" Tag="100" CornerRadius="0" Click="SizePreset_OnClick" />
               <RadioButton x:Name="ShareSizeCustom" Classes="sizePill" GroupName="ShareSize" Content="Custom" CornerRadius="0,7,7,0" Click="SizePreset_OnClick" />
             </StackPanel>
-            <TextBox x:Name="ShareCustomSizeBox" Watermark="Size in MB" IsVisible="False" Width="140"
+            <TextBox x:Name="ShareCustomSizeBox" PlaceholderText="Size in MB" IsVisible="False" Width="140"
                      HorizontalAlignment="Left" KeyDown="CustomSizeBox_OnKeyDown" />
             <CheckBox x:Name="ShareAv1Toggle" Content="Smaller file (AV1)" Foreground="#93A6B8" FontSize="12" IsChecked="True"
                       IsCheckedChanged="Av1Toggle_OnChanged"
