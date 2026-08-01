@@ -8,7 +8,8 @@
         Width="480"
         SizeToContent="Height"
         WindowStartupLocation="CenterOwner"
-        Background="#111920"
+        Background="Transparent"
+        TransparencyLevelHint="Transparent"
         KeyDown="ShareDialog_OnKeyDown">
   <Border x:Name="ShareDialogCard" CornerRadius="12" Background="#111920" BorderBrush="#232F3A" BorderThickness="1"
           ClipToBounds="True">
