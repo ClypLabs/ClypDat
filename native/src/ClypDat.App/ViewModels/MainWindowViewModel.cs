@@ -767,6 +767,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (!SetProperty(ref _activeGameDetection, value)) return;
             if (value.IsDetected) EnsureGameCaptureRow(value);
+            OnPropertyChanged(nameof(IsAutomaticGameCapture));
+            OnPropertyChanged(nameof(IsEffectiveDesktopCapture));
+            OnPropertyChanged(nameof(EffectiveReplayCaptureSource));
+            OnPropertyChanged(nameof(ReplayBufferStateSummary));
         }
     }
 
@@ -1072,8 +1076,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool IsDesktopCapture => string.Equals(Settings.ReplayCaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase);
 
+    public bool IsAutomaticGameCapture => IsDesktopCapture && Settings.ReplayAutoSwitchToGameCapture && ActiveGameDetection.IsDetected;
+
+    public bool IsEffectiveDesktopCapture => IsDesktopCapture && !IsAutomaticGameCapture;
+
+    public string EffectiveReplayCaptureSource => IsAutomaticGameCapture
+        ? $"Game Capture — automatic: {ActiveGameDetection.DisplayName}"
+        : IsDesktopCapture ? "Desktop Capture" : "Game Capture";
+
     public string ReplayBufferStateSummary => ReplayBufferEnabled
-        ? IsDesktopCapture
+        ? IsAutomaticGameCapture
+            ? $"Armed - automatically records {ActiveGameDetection.DisplayName}."
+            : IsDesktopCapture
             ? $"Armed - records {SelectedDesktopMonitor?.Label ?? "primary display"} in the background."
             : "Armed - records in the background the instant a game is detected."
         : "Off - nothing is being recorded, and clips can't be saved.";
@@ -1086,6 +1100,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (string.IsNullOrWhiteSpace(value) || !SetProperty(ref _selectedReplayCaptureSource, value)) return;
             Settings.ReplayCaptureSource = string.Equals(value, "Desktop Capture", StringComparison.OrdinalIgnoreCase) ? "Desktop" : "Game";
             OnPropertyChanged(nameof(IsDesktopCapture));
+            OnPropertyChanged(nameof(IsAutomaticGameCapture));
+            OnPropertyChanged(nameof(IsEffectiveDesktopCapture));
+            OnPropertyChanged(nameof(EffectiveReplayCaptureSource));
             OnPropertyChanged(nameof(ReplayBufferStateSummary));
             SaveSettings();
         }
@@ -1111,6 +1128,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (Settings.ReplayDesktopCaptureCursor == value) return;
             Settings.ReplayDesktopCaptureCursor = value;
             OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    public bool ReplayAutoSwitchToGameCapture
+    {
+        get => Settings.ReplayAutoSwitchToGameCapture;
+        set
+        {
+            if (Settings.ReplayAutoSwitchToGameCapture == value) return;
+            Settings.ReplayAutoSwitchToGameCapture = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsAutomaticGameCapture));
+            OnPropertyChanged(nameof(IsEffectiveDesktopCapture));
+            OnPropertyChanged(nameof(EffectiveReplayCaptureSource));
+            OnPropertyChanged(nameof(ReplayBufferStateSummary));
             SaveSettings();
         }
     }
@@ -4302,7 +4335,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ReplayBufferConfig CreateReplayConfig()
     {
-        var desktopCapture = IsDesktopCapture;
+        var desktopCapture = IsEffectiveDesktopCapture;
         var desktopMonitor = DesktopMonitorService.Resolve(Settings.ReplayDesktopMonitorDeviceName);
         var detectionKey = string.IsNullOrWhiteSpace(ActiveGameDetection.DetectionKey) ? ActiveGameDetection.ExeName : ActiveGameDetection.DetectionKey;
         var gameOverride = Settings.GameCaptureOverrides
