@@ -654,7 +654,7 @@
     <Setter Property="Foreground" Value="#8EA1B6" />
   </Style>
   <Style Selector="Button.dialogClose:pointerover">
-    <Setter Property="Background" Value="#D85E61" />
+    <Setter Property="Background" Value="#263544" />
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
   <!-- Small setting groups used by first-run setup. The low-contrast card
