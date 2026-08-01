@@ -5649,8 +5649,8 @@ public sealed partial class MainWindow : Window
         });
 
         var delete = new Button { Content = "Delete", Width = 100, Height = 34, Background = Avalonia.Media.Brush.Parse("#D95B62"), Foreground = Brushes.White, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
-        var ignore = new Button { Content = "Don't ask again", Width = 130, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
-        var later = new Button { Content = "Remind me later", Width = 130, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+        var ignore = new Button { Content = "Don't ask again", Width = 140, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+        var later = new Button { Content = "Remind me later", Width = 154, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
         string? choice = null;
         delete.Click += (_, _) => { choice = "delete"; window.Close(); };
         ignore.Click += (_, _) => { choice = "ignore"; window.Close(); };
