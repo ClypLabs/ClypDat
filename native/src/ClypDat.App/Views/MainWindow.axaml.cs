@@ -5730,6 +5730,7 @@ public sealed partial class MainWindow : Window
     {
         if (!e.GetCurrentPoint(OnboardingOverlay).Properties.IsLeftButtonPressed) return;
         if (!ReferenceEquals(e.Source, OnboardingOverlay)) return;
+        if (ViewModel?.IsFirstRunOnboarding == true) return;
         ViewModel?.FinishOnboarding();
     }
 

@@ -68,6 +68,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly SemaphoreSlim _libraryRefreshLock = new(1, 1);
     private readonly AudioDeviceService _audioDevices = new();
     private bool _isReplayRecording;
+    private bool _isFirstRunOnboarding;
     private bool _isEditorVisible;
     private EditorSidebarSection? _activeEditorSidebarSection;
     private bool _isSettingsVisible;
@@ -3838,6 +3839,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => SetProperty(ref _isOnboardingVisible, value);
     }
 
+    public bool IsFirstRunOnboarding
+    {
+        get => _isFirstRunOnboarding;
+        private set => SetProperty(ref _isFirstRunOnboarding, value);
+    }
+
     public string OnboardingStep
     {
         get => _onboardingStep;
@@ -3857,6 +3864,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void StartOnboarding()
     {
+        IsFirstRunOnboarding = !Settings.HasSeenOnboarding;
         OnboardingStep = OnboardingStepOrder[0];
         IsOnboardingVisible = true;
 

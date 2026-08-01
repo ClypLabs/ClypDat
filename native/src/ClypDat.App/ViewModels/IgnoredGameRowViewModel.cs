@@ -1,3 +1,5 @@
+using Avalonia;
+
 namespace ClypDat.App.ViewModels;
 
 // Excluded Games' row: Key is the detection key stored in
@@ -16,5 +18,8 @@ public sealed class IgnoredGameRowViewModel
     public string Key { get; }
     public string DisplayName { get; }
     public string ProcessName { get; }
+    public Thickness TitleMargin => string.IsNullOrWhiteSpace(ProcessName)
+        ? new Thickness(0, -2, 0, 0)
+        : new Thickness(0, 2, 0, 0);
     public bool ShowDivider { get; set; }
 }

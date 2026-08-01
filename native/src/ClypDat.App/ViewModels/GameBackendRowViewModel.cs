@@ -1,3 +1,4 @@
+using Avalonia;
 using ClypDat.App.Services;
 
 namespace ClypDat.App.ViewModels;
@@ -25,6 +26,9 @@ public sealed class GameBackendRowViewModel : ViewModelBase
     // The actual exe filename shown as the row's subtitle - empty for rows
     // saved before this field existed, until the game is next detected.
     public string ProcessName { get; }
+    public Thickness TitleMargin => string.IsNullOrWhiteSpace(ProcessName)
+        ? new Thickness(0, -2, 0, 0)
+        : new Thickness(0, 2, 0, 0);
     public bool IsCustom { get; }
 
     // The search box hides non-matching rows by toggling this instead of removing
