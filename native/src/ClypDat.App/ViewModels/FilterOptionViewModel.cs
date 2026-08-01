@@ -41,6 +41,13 @@ public sealed class FilterOptionViewModel : ViewModelBase
 
     public bool HasIcon => _icon is not null;
 
+    // Desktop capture is a built-in library source rather than an executable,
+    // so it will never have an extracted game icon. Give it a monitor glyph
+    // instead of the generic initial-letter fallback.
+    public bool IsDesktopCapture => string.Equals(Key, "Desktop Capture", StringComparison.OrdinalIgnoreCase);
+    public bool ShowInitialBadge => !HasIcon && !IsDesktopCapture;
+    public bool ShowDesktopCaptureIcon => !HasIcon && IsDesktopCapture;
+
     public bool IsChecked
     {
         get => _isChecked;

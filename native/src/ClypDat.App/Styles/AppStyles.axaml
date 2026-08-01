@@ -1251,6 +1251,9 @@
   <Style Selector="Button.railIconButton Border.gameInitialBadge TextBlock">
     <Setter Property="Foreground" Value="#B8C7D8" />
   </Style>
+  <Style Selector="Button.railIconButton Border.gameInitialBadge PathIcon">
+    <Setter Property="Foreground" Value="#B8C7D8" />
+  </Style>
 
   <!-- Change Game's flyout is a plain StackPanel of these instead of
        MenuItems (see MainWindow.axaml.cs ClipContextSetGame_OnClick) - a
@@ -1275,6 +1278,9 @@
     <Setter Property="Background" Value="#26323D" />
   </Style>
   <Style Selector="Button.railIconButton.active Border.gameInitialBadge TextBlock">
+    <Setter Property="Foreground" Value="#FFFFFF" />
+  </Style>
+  <Style Selector="Button.railIconButton.active Border.gameInitialBadge PathIcon">
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
   <!-- The editor keeps the library's 64px rail, so its footer controls use
