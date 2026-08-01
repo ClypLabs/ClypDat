@@ -5648,7 +5648,7 @@ public sealed partial class MainWindow : Window
             Child = new TextBlock { Text = "Delete permanently removes source files. Don't ask again keeps files and suppresses this notice.", Foreground = Avalonia.Media.Brush.Parse("#93A6B8"), FontSize = 12, TextWrapping = TextWrapping.Wrap }
         });
 
-        var delete = new Button { Content = "Delete", Width = 100, Height = 34, Background = Avalonia.Media.Brush.Parse("#D95B62"), Foreground = Brushes.White, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+        var delete = new Button { Content = "Delete", Width = 100, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, Classes = { "deleteButton" } };
         var ignore = new Button { Content = "Don't ask again", Width = 140, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
         var later = new Button { Content = "Remind me later", Width = 154, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
         string? choice = null;
