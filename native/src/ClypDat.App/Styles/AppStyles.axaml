@@ -187,6 +187,27 @@
     <Setter Property="CornerRadius" Value="7" />
     <Setter Property="Padding" Value="12,7" />
     <Setter Property="FontWeight" Value="SemiBold" />
+    <!-- Fluent paints pointer states inside its own square template. Keep every
+         ordinary button's surface in this border so hover/pressed colours obey
+         the button's CornerRadius as well. More-specific button templates below
+         still override this where a control needs custom chrome. -->
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="{TemplateBinding CornerRadius}">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            Padding="{TemplateBinding Padding}"
+                            Foreground="{TemplateBinding Foreground}"
+                            FontSize="{TemplateBinding FontSize}"
+                            FontWeight="{TemplateBinding FontWeight}"
+                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
     <Setter Property="Transitions">
       <Transitions>
         <BrushTransition Property="Background" Duration="0:0:0.12" />
@@ -514,6 +535,7 @@
     <Setter Property="BorderBrush" Value="#2C3B48" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="ClipToBounds" Value="True" />
     <Setter Property="Padding" Value="6" />
     <Setter Property="MinWidth" Value="180" />
   </Style>
@@ -522,6 +544,7 @@
     <Setter Property="BorderBrush" Value="#2C3B48" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="ClipToBounds" Value="True" />
     <Setter Property="Padding" Value="5" />
     <Setter Property="MinWidth" Value="160" />
   </Style>
@@ -566,6 +589,7 @@
     <Setter Property="BorderBrush" Value="#2C3B48" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="ClipToBounds" Value="True" />
     <Setter Property="Padding" Value="6" />
     <Setter Property="MinWidth" Value="160" />
   </Style>
@@ -626,12 +650,21 @@
   <Style Selector="Button.dialogClose">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="CornerRadius" Value="0" />
+    <Setter Property="CornerRadius" Value="0,11,0,0" />
     <Setter Property="Foreground" Value="#8EA1B6" />
   </Style>
   <Style Selector="Button.dialogClose:pointerover">
     <Setter Property="Background" Value="#D85E61" />
     <Setter Property="Foreground" Value="#FFFFFF" />
+  </Style>
+  <!-- Small setting groups used by first-run setup. The low-contrast card
+       separates choices without turning the walkthrough into a settings page. -->
+  <Style Selector="Border.onboardingSettingCard">
+    <Setter Property="Background" Value="#15212B" />
+    <Setter Property="BorderBrush" Value="#2B4050" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="9" />
+    <Setter Property="Padding" Value="15" />
   </Style>
   <!-- Custom title-bar min/maximize/close buttons - replace Windows' own
        caption buttons (WindowDecorations="None" on

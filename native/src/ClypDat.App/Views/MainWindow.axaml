@@ -2688,29 +2688,37 @@
          #F5141D24). Written the wrong way round this parsed as alpha 00 with AA
          landing in the BLUE channel, i.e. fully transparent, so the scrim behind
          this dialog was never actually drawn. -->
-    <Border Grid.RowSpan="2" Background="#AA000000" IsVisible="{Binding IsOnboardingVisible}">
-      <Border Width="560" MaxHeight="640" CornerRadius="12" Background="#111920" BorderBrush="#232F3A" BorderThickness="1"
-              HorizontalAlignment="Center" VerticalAlignment="Center">
+    <Border x:Name="OnboardingOverlay" Grid.RowSpan="2" Background="#AA000000" IsVisible="{Binding IsOnboardingVisible}"
+            PointerPressed="OnboardingOverlay_OnPointerPressed">
+      <Border Width="600" MaxHeight="680" CornerRadius="12" Background="#111920" BorderBrush="#232F3A" BorderThickness="1"
+              ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center">
         <DockPanel>
-          <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto" Height="40" Background="#0C1319">
+          <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto" Height="52" Background="#0C1319">
             <StackPanel Orientation="Horizontal" Spacing="8" Margin="14,0,0,0" VerticalAlignment="Center">
               <Image Source="/Assets/clypdat-icon-24.png" Width="16" Height="16" />
-              <TextBlock Text="Welcome to ClypDat" Foreground="#B9C6D4" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
+              <StackPanel Spacing="1">
+                <TextBlock Text="Welcome to ClypDat" Foreground="#EDF4FB" FontSize="14" FontWeight="Bold" />
+                <TextBlock Text="Quick setup — you can change everything later" Foreground="#718396" FontSize="10.5" />
+              </StackPanel>
             </StackPanel>
             <Button Grid.Column="2" Classes="dialogClose" Content="✕" FontSize="14" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                     Width="40" Height="40" Click="OnboardingSkipButton_OnClick" />
           </Grid>
 
-          <StackPanel DockPanel.Dock="Bottom" Margin="22,0,22,20" Spacing="14">
-            <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
+          <StackPanel DockPanel.Dock="Bottom" Margin="24,0,24,20" Spacing="14">
+            <Grid ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Center">
+              <TextBlock Text="{Binding OnboardingStepNumber, StringFormat='Step {0}'}" Foreground="#A9C9E5" FontSize="11" FontWeight="Bold" />
+              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
               <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Replay Buffer}" />
               <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Capture Backend}" />
               <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Startup}" />
               <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Audio}" />
               <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Game Audio Exclusions}" />
-            </StackPanel>
+              </StackPanel>
+              <TextBlock Grid.Column="2" Text="OF 5" Foreground="#6B7C8C" FontSize="10.5" FontWeight="Bold" />
+            </Grid>
             <Grid ColumnDefinitions="Auto,*,Auto">
-              <Button Content="Skip" Classes="linkButton" VerticalAlignment="Center" Click="OnboardingSkipButton_OnClick" />
+              <Button Content="Skip setup" Classes="linkButton" VerticalAlignment="Center" Click="OnboardingSkipButton_OnClick" />
               <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10">
                 <Button Content="Back" Width="96" HorizontalContentAlignment="Center" IsEnabled="{Binding OnboardingBackEnabled}" Click="OnboardingBackButton_OnClick" />
                 <Button Content="{Binding OnboardingNextLabel}" Width="96" HorizontalContentAlignment="Center" Classes="primaryButton" Click="OnboardingNextButton_OnClick" />
@@ -2718,14 +2726,15 @@
             </Grid>
           </StackPanel>
 
-          <ScrollViewer>
-            <StackPanel Margin="22,20,22,18" Spacing="16">
-              <TextBlock Text="{Binding OnboardingStepNumber, StringFormat='STEP {0} OF 5'}" Foreground="#6B7C8C" FontSize="12" FontWeight="Bold" />
+          <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="24,22,24,20" Spacing="18">
 
               <StackPanel Spacing="16" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Replay Buffer}">
                 <TextBlock Text="Library and replay buffer" Foreground="#EDF4FB" FontWeight="Bold" FontSize="18" />
                 <TextBlock Text="Pick where clips save, your save hotkey, and how long the replay buffer holds." Foreground="#B9C6D4" FontSize="13" TextWrapping="Wrap" />
 
+                <Border Classes="onboardingSettingCard">
+                <StackPanel Spacing="16">
                 <StackPanel Spacing="6">
                   <TextBlock Text="Library folder" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
                   <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
@@ -2750,11 +2759,15 @@
                     </ListBox.ItemTemplate>
                   </ListBox>
                 </StackPanel>
+                </StackPanel>
+                </Border>
               </StackPanel>
 
               <StackPanel Spacing="16" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Capture Backend}">
                 <TextBlock Text="Capture backend" Foreground="#EDF4FB" FontWeight="Bold" FontSize="18" />
-                <TextBlock Text="&quot;Auto&quot; (recommended) uses ClypDat's own capture engine for every game - no process hook, so it's safe for anti-cheat too. Per-game overrides live in Settings &gt; Game Detection if you need one later." Foreground="#B9C6D4" FontSize="13" TextWrapping="Wrap" />
+                <TextBlock Text="Auto is recommended and works with anti-cheat. Change a game later in Settings if needed." Foreground="#B9C6D4" FontSize="13" TextWrapping="Wrap" />
+                <Border Classes="onboardingSettingCard">
+                <StackPanel Spacing="12">
                 <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayBackends}" SelectedItem="{Binding SelectedReplayBackend}">
                   <ListBox.ItemTemplate>
                     <DataTemplate>
@@ -2763,12 +2776,16 @@
                   </ListBox.ItemTemplate>
                 </ListBox>
                 <TextBlock Text="{Binding SelectedReplayBackend.Description}" Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                </StackPanel>
+                </Border>
               </StackPanel>
 
               <StackPanel Spacing="16" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Startup}">
                 <TextBlock Text="Startup behavior" Foreground="#EDF4FB" FontWeight="Bold" FontSize="18" />
                 <TextBlock Text="How ClypDat behaves when it launches." Foreground="#B9C6D4" FontSize="13" TextWrapping="Wrap" />
 
+                <Border Classes="onboardingSettingCard">
+                <StackPanel Spacing="14">
                 <Grid ColumnDefinitions="*,Auto">
                   <TextBlock Text="Launch ClypDat on Windows boot" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" />
                   <ToggleSwitch Grid.Column="1" IsChecked="{Binding LaunchOnWindowsStartup}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
@@ -2777,12 +2794,16 @@
                   <TextBlock Text="Start minimized to tray" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" />
                   <ToggleSwitch Grid.Column="1" IsChecked="{Binding StartMinimizedToTray}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                 </Grid>
+                </StackPanel>
+                </Border>
               </StackPanel>
 
               <StackPanel Spacing="16" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Audio}">
                 <TextBlock Text="Chat Audio and microphone" Foreground="#EDF4FB" FontWeight="Bold" FontSize="18" />
                 <TextBlock Text="Pick the app whose audio should be tagged Chat Audio in clips, and which microphone gets recorded." Foreground="#B9C6D4" FontSize="13" TextWrapping="Wrap" />
 
+                <Border Classes="onboardingSettingCard">
+                <StackPanel Spacing="16">
                 <StackPanel Spacing="6">
                   <TextBlock Text="Chat Audio App" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
                   <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
@@ -2797,12 +2818,16 @@
                   <ComboBox Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" HorizontalAlignment="Stretch" />
                   <TextBlock Text="Multiple microphones? Turn that on later in Settings &gt; Audio." Foreground="#6B7C8C" FontSize="11" />
                 </StackPanel>
+                </StackPanel>
+                </Border>
               </StackPanel>
 
               <StackPanel Spacing="16" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Audio Exclusions}">
                 <TextBlock Text="Game Audio exclusions" Foreground="#EDF4FB" FontWeight="Bold" FontSize="18" />
-                <TextBlock Text="Whatever app is picked as Chat Audio is already removed from Game Audio. Add anything else here (music players, notification sounds) you don't want counted as game audio." Foreground="#B9C6D4" FontSize="13" TextWrapping="Wrap" />
+                <TextBlock Text="Chat Audio is excluded automatically. Add music players or notification apps you do not want in Game Audio." Foreground="#B9C6D4" FontSize="13" TextWrapping="Wrap" />
 
+                <Border Classes="onboardingSettingCard">
+                <StackPanel Spacing="12">
                 <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
                   <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedProcessExclusion}" HorizontalAlignment="Stretch" />
                   <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
@@ -2822,6 +2847,8 @@
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
+                </StackPanel>
+                </Border>
               </StackPanel>
             </StackPanel>
           </ScrollViewer>
