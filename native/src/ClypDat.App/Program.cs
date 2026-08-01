@@ -40,8 +40,8 @@ internal static class Program
 
         var singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out var createdNew);
         var restartRequested = args.Contains("--restart", StringComparer.OrdinalIgnoreCase);
-        // RestartAppButton_OnClick launches with --restart before old process
-        // exits, so only that intentional overlap retries mutex acquisition.
+        // An intentional restart can launch with --restart before old process
+        // exits, so only that overlap retries mutex acquisition.
         // Ordinary shortcut launches must signal hidden existing process now,
         // not pay this two-second restart-race allowance.
         for (var attempt = 0; restartRequested && attempt < 20 && !createdNew; attempt++)
