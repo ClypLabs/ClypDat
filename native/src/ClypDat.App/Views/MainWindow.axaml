@@ -2848,6 +2848,12 @@
                 </ItemsControl>
                 </StackPanel>
                 </Border>
+                <Border Background="#102723" BorderBrush="#285A50" BorderThickness="1" CornerRadius="9" Padding="15,13">
+                  <StackPanel Spacing="4">
+                    <TextBlock Text="You're all set" Foreground="#B8F1DC" FontSize="14" FontWeight="Bold" />
+                    <TextBlock Text="Thanks for using ClypDat. Capture something great." Foreground="#A1CDBE" FontSize="12" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Border>
               </StackPanel>
             </StackPanel>
           </ScrollViewer>
