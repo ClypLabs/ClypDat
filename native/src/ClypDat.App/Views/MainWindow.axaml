@@ -237,7 +237,7 @@
         </Grid>
 
         <Button Grid.Column="2" Classes="windowChromeButton" Click="CheckUpdatesButton_OnClick" ToolTip.Tip="Check for updates" IsVisible="{Binding ShowHeaderUpdateButton}">
-          <PathIcon Data="M12,4V1L8,5L12,9V6C15.31,6 18,8.69 18,12C18,13.01 17.75,13.96 17.3,14.8L18.76,16.26C19.55,14.99 20,13.54 20,12C20,7.58 16.42,4 12,4M6.7,9.2L5.24,7.74C4.45,9.01 4,10.46 4,12C4,16.42 7.58,20 12,20V23L16,19L12,15V18C8.69,18 6,15.31 6,12C6,10.99 6.25,10.04 6.7,9.2Z" Width="16" Height="16" Foreground="#38D996" />
+          <PathIcon Data="M12,3V14.17L16.59,9.59L18,11L12,17L6,11L7.41,9.59L10,14.17V3H12M5,20H19V22H5V20Z" Width="16" Height="16" Foreground="#38D996" />
         </Button>
 
         <!-- The active-game chip that used to sit here is gone: the Library
