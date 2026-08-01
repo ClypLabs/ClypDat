@@ -108,14 +108,18 @@ public sealed partial class MainWindow : Window
     private static readonly TimeSpan LibraryResizeAnchorSettle = TimeSpan.FromMilliseconds(220);
     private const double LibraryScrollOffsetTolerance = 0.01;
     private DateTime _hoverControlsSuppressedUntilUtc = DateTime.MinValue;
-    // Slides the bar in from under the video's bottom edge on first show. The
-    // window itself stays put - only its content moves - because animating an
-    // owned window's native position is visibly steppy next to a composited
-    // transform.
-    private const double HoverControlsSlideDistance = 92;
+    // The native alpha fallback makes the Window's transparent backing paint
+    // black on Server. Keep the reveal inside the bar's own 52px bounds and
+    // crop that backing to the animated visible part.
+    private const double HoverControlsSlideDistance = 52;
     private static readonly TimeSpan HoverControlsSlideDuration = TimeSpan.FromMilliseconds(190);
     private Border? _hoverControlsBackdrop;
-    private DispatcherTimer? _hoverControlsSlideOutTimer;
+    private DispatcherTimer? _hoverControlsAnimationTimer;
+    private DateTime _hoverControlsAnimationStartedUtc;
+    private double _hoverControlsAnimationStartOffset;
+    private double _hoverControlsAnimationTargetOffset;
+    private double _hoverControlsOffset = HoverControlsSlideDistance;
+    private Action? _hoverControlsAnimationComplete;
     private bool _hoverControlsSlidingOut;
     private DispatcherTimer? _editorToolsPanelResizeSettleTimer;
     private string? _libraryResizeAnchorPath;
@@ -5353,7 +5357,7 @@ public sealed partial class MainWindow : Window
         HideEditorHoverControls(immediate: true);
         try
         {
-            await new ShareDialog(this, ViewModel).ShowDialog(this);
+            await new ShareDialog(this, ViewModel).ShowWithBackdropAsync(this);
         }
         finally
         {
@@ -6655,7 +6659,7 @@ public sealed partial class MainWindow : Window
             if (trackedHandle != IntPtr.Zero && !IsWindowVisible(trackedHandle))
             {
                 AppLog.Debug("Editor hover bar: native window was hidden by the OS - resyncing so it can be reshown.");
-                _hoverControlsSlideOutTimer?.Stop();
+                StopHoverControlsAnimation();
                 _hoverControlsSlidingOut = false;
                 trackedBar.Hide();
                 _hoverControlsLastState = string.Empty;
@@ -6735,7 +6739,7 @@ public sealed partial class MainWindow : Window
         // Cancels an in-flight slide-out: moving back over the video during
         // the 190ms exit brings the bar straight back rather than letting it
         // finish leaving and then reappear.
-        _hoverControlsSlideOutTimer?.Stop();
+        StopHoverControlsAnimation();
         _hoverControlsSlidingOut = false;
 
         var window = EnsureEditorHoverControlsWindow();
@@ -6746,10 +6750,6 @@ public sealed partial class MainWindow : Window
         RepositionEditorHoverControls(window);
         if (!window.IsVisible)
         {
-            // Parked below the window's own bounds so the first frame after
-            // Show is already off-screen; flipping it back one frame later
-            // gives the transition a "from" state to animate out of, rather
-            // than both values landing in the same layout pass.
             SetHoverControlsOffset(HoverControlsSlideDistance);
             try
             {
@@ -6793,11 +6793,11 @@ public sealed partial class MainWindow : Window
             // and taking the bar down out from under the click.
             MakeWindowNonActivating(window);
             LogHoverControlsState($"sliding in ({DescribeNativeWindow(window)})");
-            Dispatcher.UIThread.Post(() => SetHoverControlsOffset(0), DispatcherPriority.Loaded);
+            Dispatcher.UIThread.Post(() => StartHoverControlsAnimation(0), DispatcherPriority.Loaded);
         }
         else
         {
-            SetHoverControlsOffset(0);
+            StartHoverControlsAnimation(0);
         }
     }
 
@@ -6827,7 +6827,7 @@ public sealed partial class MainWindow : Window
 
         if (immediate)
         {
-            _hoverControlsSlideOutTimer?.Stop();
+            StopHoverControlsAnimation();
             _hoverControlsSlidingOut = false;
             window.Hide();
             return;
@@ -6835,30 +6835,77 @@ public sealed partial class MainWindow : Window
 
         if (_hoverControlsSlidingOut) return;
         _hoverControlsSlidingOut = true;
-        SetHoverControlsOffset(HoverControlsSlideDistance);
-
-        _hoverControlsSlideOutTimer ??= new DispatcherTimer();
-        _hoverControlsSlideOutTimer.Interval = HoverControlsSlideDuration;
-        _hoverControlsSlideOutTimer.Stop();
-        _hoverControlsSlideOutTimer.Tick -= HoverControlsSlideOut_OnTick;
-        _hoverControlsSlideOutTimer.Tick += HoverControlsSlideOut_OnTick;
-        _hoverControlsSlideOutTimer.Start();
+        StartHoverControlsAnimation(HoverControlsSlideDistance, () =>
+        {
+            if (!_hoverControlsSlidingOut) return;
+            _hoverControlsSlidingOut = false;
+            _editorHoverControlsWindow?.Hide();
+            LogHoverControlsState("hidden");
+        });
     }
 
-    private void HoverControlsSlideOut_OnTick(object? sender, EventArgs e)
+    private void StartHoverControlsAnimation(double targetOffset, Action? completed = null)
     {
-        _hoverControlsSlideOutTimer?.Stop();
-        if (!_hoverControlsSlidingOut) return;
-        _hoverControlsSlidingOut = false;
-        _editorHoverControlsWindow?.Hide();
-        LogHoverControlsState("hidden");
+        StopHoverControlsAnimation();
+        _hoverControlsAnimationStartOffset = _hoverControlsOffset;
+        _hoverControlsAnimationTargetOffset = targetOffset;
+        _hoverControlsAnimationComplete = completed;
+        if (Math.Abs(_hoverControlsAnimationStartOffset - targetOffset) < 0.01)
+        {
+            SetHoverControlsOffset(targetOffset);
+            _hoverControlsAnimationComplete?.Invoke();
+            _hoverControlsAnimationComplete = null;
+            return;
+        }
+
+        _hoverControlsAnimationStartedUtc = DateTime.UtcNow;
+        _hoverControlsAnimationTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        _hoverControlsAnimationTimer.Tick -= HoverControlsAnimation_OnTick;
+        _hoverControlsAnimationTimer.Tick += HoverControlsAnimation_OnTick;
+        _hoverControlsAnimationTimer.Start();
+    }
+
+    private void HoverControlsAnimation_OnTick(object? sender, EventArgs e)
+    {
+        var progress = Math.Clamp((DateTime.UtcNow - _hoverControlsAnimationStartedUtc).TotalMilliseconds / HoverControlsSlideDuration.TotalMilliseconds, 0, 1);
+        var eased = 1 - Math.Pow(1 - progress, 3);
+        SetHoverControlsOffset(_hoverControlsAnimationStartOffset + (_hoverControlsAnimationTargetOffset - _hoverControlsAnimationStartOffset) * eased);
+        if (progress < 1) return;
+
+        var completed = _hoverControlsAnimationComplete;
+        StopHoverControlsAnimation();
+        completed?.Invoke();
+    }
+
+    private void StopHoverControlsAnimation()
+    {
+        _hoverControlsAnimationTimer?.Stop();
+        _hoverControlsAnimationComplete = null;
     }
 
     private void SetHoverControlsOffset(double offset)
     {
         if (_hoverControlsBackdrop is null) return;
+        _hoverControlsOffset = Math.Clamp(offset, 0, HoverControlsSlideDistance);
         _hoverControlsBackdrop.RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse(
-            offset == 0 ? "translateY(0px)" : $"translateY({offset.ToString(System.Globalization.CultureInfo.InvariantCulture)}px)");
+            _hoverControlsOffset == 0 ? "translateY(0px)" : $"translateY({_hoverControlsOffset.ToString(System.Globalization.CultureInfo.InvariantCulture)}px)");
+        UpdateHoverControlsWindowRegion();
+    }
+
+    private void UpdateHoverControlsWindowRegion()
+    {
+        var window = _editorHoverControlsWindow;
+        var handle = NativeHandleOf(window);
+        if (handle == IntPtr.Zero) return;
+
+        const double barHeight = 52;
+        var scaling = RenderScaling > 0 ? RenderScaling : 1;
+        var width = Math.Max(1, (int)Math.Ceiling(window!.Width * scaling));
+        var height = Math.Max(1, (int)Math.Ceiling(barHeight * scaling));
+        var top = Math.Clamp((int)Math.Round(_hoverControlsOffset * scaling), 0, height);
+        var region = CreateRectRgn(0, top, width, height);
+        if (region == IntPtr.Zero) return;
+        if (!SetWindowRgn(handle, region, true)) DeleteObject(region);
     }
 
     // Sizes and places the bar against the video pane as it currently is.
@@ -7181,15 +7228,6 @@ public sealed partial class MainWindow : Window
             Background = new SolidColorBrush(Color.Parse("#8C0B1016")),
             Child = BuildPlaybackBarLayout(),
             RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse($"translateY({HoverControlsSlideDistance}px)"),
-            Transitions =
-            [
-                new Avalonia.Animation.TransformOperationsTransition
-                {
-                    Property = Visual.RenderTransformProperty,
-                    Duration = HoverControlsSlideDuration,
-                    Easing = new Avalonia.Animation.Easings.CubicEaseOut()
-                }
-            ],
         };
         _hoverControlsBackdrop = backdrop;
 
@@ -7205,7 +7243,12 @@ public sealed partial class MainWindow : Window
             DataContext = DataContext,
             Content = backdrop,
         };
-        window.Opened += (_, _) => OverlayTransparencyDiagnostics.Log(window, "hover-bar");
+        window.Opened += (_, _) =>
+        {
+            OverlayTransparencyDiagnostics.Log(window, "hover-bar");
+            WindowTransparencyFallback.ApplyIfNeeded(window, backdrop.Background, b => backdrop.Background = b);
+            UpdateHoverControlsWindowRegion();
+        };
         window.AddHandler(PointerPressedEvent, EditorHoverControls_OnPointerPressed, RoutingStrategies.Tunnel, true);
         _editorHoverControlsWindow = window;
         return window;
@@ -7247,6 +7290,15 @@ public sealed partial class MainWindow : Window
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+
+    [System.Runtime.InteropServices.DllImport("gdi32.dll")]
+    private static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool redraw);
+
+    [System.Runtime.InteropServices.DllImport("gdi32.dll")]
+    private static extern bool DeleteObject(IntPtr hObject);
 
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
     private struct Win32Rect
