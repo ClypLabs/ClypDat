@@ -5573,9 +5573,13 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null || ViewModel.Settings.IgnoreAudioOnlyClipPrompt) return;
 
         // Cached cards restore in small UI batches immediately after startup.
-        // Let that finish before taking a snapshot so this one prompt covers
-        // the whole library rather than only its first visible rows.
-        await Task.Delay(TimeSpan.FromSeconds(1.5));
+        // Wait for that work rather than guessing a delay: larger libraries
+        // can take several seconds, and checking early only sees first row.
+        var restoreDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while (ViewModel is { IsRestoringLibraryCache: true } && DateTime.UtcNow < restoreDeadline)
+        {
+            await Task.Delay(100);
+        }
         if (ViewModel is null || ViewModel.Settings.IgnoreAudioOnlyClipPrompt) return;
         var clips = ViewModel.GetAudioOnlyClips();
         if (clips.Count == 0) return;
