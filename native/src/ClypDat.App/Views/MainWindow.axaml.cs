@@ -2071,7 +2071,7 @@ public sealed partial class MainWindow : Window
         var wasGameCapture = _activeReplayTargetIdentity.StartsWith("Game|", StringComparison.Ordinal);
         _showNewClipsAfterReplayRestart |= wasGameCapture && ViewModel.IsEffectiveDesktopCapture;
         _startNewGameSessionAfterReplayRestart |= !wasGameCapture && !ViewModel.IsEffectiveDesktopCapture;
-        ViewModel.RecorderStatus = $"Switching to {ViewModel.EffectiveReplayCaptureSource}...";
+        ViewModel.RecorderStatus = "Switching capture...";
         ScheduleReplayRestart();
     }
 
@@ -2090,7 +2090,7 @@ public sealed partial class MainWindow : Window
             _startNewGameSessionAfterReplayRestart = false;
             if (ViewModel.IsReplayRecording) await StopReplayBufferAsync();
             if (showNewClips) ShowNewClipsDialog();
-            if (ViewModel is not null) ViewModel.RecorderStatus = $"Switching to {ViewModel.EffectiveReplayCaptureSource}...";
+            if (ViewModel is not null) ViewModel.RecorderStatus = "Switching capture...";
             await StartReplayBufferAsync(showErrors: true, isQualityRestart: !startNewGameSession);
         };
         _replayRestartDebounceTimer.Start();
