@@ -7632,7 +7632,9 @@ public sealed partial class MainWindow : Window
         // CurrentTime=0, visible peeking out from behind TrimStartHandle.
         var playheadMaxLeft = Math.Max(0, width - TimelinePlayhead.Width);
         Canvas.SetLeft(TimelinePlayhead, Math.Clamp(playhead - TimelinePlayhead.Width / 2, 0, playheadMaxLeft));
-        TimelinePlayhead.Height = height;
+        // Extend beyond both edges so fractional layout never leaves the
+        // playhead visibly short of the final audio lane.
+        TimelinePlayhead.Height = height + 16;
         Canvas.SetTop(TimelinePlayhead, -8);
         Canvas.SetLeft(PlayheadCap, playhead - 8);
         Canvas.SetTop(PlayheadCap, -12);
