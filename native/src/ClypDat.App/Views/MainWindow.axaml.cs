@@ -6482,7 +6482,10 @@ public sealed partial class MainWindow : Window
         // moved, so the skip-if-unchanged check would otherwise return before
         // re-asserting z-order.
         if (raised || wasHidden) RepositionEditorHoverControlsSafe(force: true);
-        ApplyCaptureExclusion(overlay, ViewModel.Settings.ExcludeOverlaysFromCapture);
+        // This is editor UI, not an in-game notification. It must stay in
+        // screenshots, recordings, and app shares, regardless of the
+        // notification-overlay privacy preference.
+        ApplyCaptureExclusion(overlay, exclude: false);
     }
 
     // Returns true when it actually re-asserted the window's z-order, so the
@@ -6810,13 +6813,9 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            // Deliberately no ApplyCaptureExclusion here: "exclude overlays
-            // from capture" is meant for the HUD-style notifications (clip
-            // saved, recording paused, etc.) that float over a game, not for
-            // this bar's own playback controls - those are editor UI the
-            // user is actively using, and excluding it made the whole bar
-            // vanish from screen shares/recordings of the app too, not just
-            // from whatever the setting was meant to hide.
+            // Deliberately no ApplyCaptureExclusion here: capture exclusion
+            // is for HUD-style clip notifications, not editor UI. This bar
+            // and the playback-paused layer must remain in app captures.
 
             // Everything RepositionEditorHoverControls assigned above went to
             // a window that had no native hwnd yet. Re-apply now that Show has
