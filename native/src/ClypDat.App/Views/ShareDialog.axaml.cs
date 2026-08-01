@@ -57,18 +57,35 @@ public partial class ShareDialog : Window
 
     public async Task ShowWithBackdropAsync(Window owner)
     {
-        _backdrop = new ShareBackdropWindow(owner);
-        _backdrop.Show(owner);
+        var backdrop = new ShareBackdropWindow(owner);
+        _backdrop = backdrop;
+        EventHandler dismiss = (_, _) => Close();
+        backdrop.DismissRequested += dismiss;
+        backdrop.Show(owner);
         try
         {
-            // Ownership chain keeps clicks on either surface from lifting the
-            // dimmer above the card: main -> backdrop -> card.
-            await ShowDialog(_backdrop);
+            // ShowDialog disables its owner, which blocks the backdrop from
+            // receiving the outside click. Keep the ownership chain for
+            // z-order, then await this owned window's normal close instead.
+            var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            EventHandler? closedHandler = null;
+            closedHandler = (_, _) => closed.TrySetResult();
+            Closed += closedHandler;
+            try
+            {
+                Show(backdrop);
+                await closed.Task;
+            }
+            finally
+            {
+                Closed -= closedHandler;
+            }
         }
         finally
         {
-            _backdrop?.Close();
-            _backdrop = null;
+            backdrop.DismissRequested -= dismiss;
+            backdrop.Close();
+            if (ReferenceEquals(_backdrop, backdrop)) _backdrop = null;
         }
     }
 
