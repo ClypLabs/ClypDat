@@ -2139,7 +2139,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async Task SaveReplayClipAsync(string? autoClipLabel = null, ReplayClipWindow? clipWindow = null, string? autoClipGameName = null)
+    private async Task SaveReplayClipAsync(string? autoClipLabel = null, ReplayClipWindow? clipWindow = null, string? autoClipGameName = null, string? autoClipEventType = null)
     {
         var isAutoClip = autoClipLabel is not null;
         // A replay save (segment hydrate/mux) can take 20-30+ seconds. Manual clip
@@ -2233,13 +2233,12 @@ public sealed partial class MainWindow : Window
                 {
                     ShowClipSavedNotification();
                 }
-                // "3K - Mirage" -> event type "3K", map dropped - the game name
-                // (not the map) is what belongs next to it as the game label.
-                var autoClipEventType = autoClipLabel?.Split(" - ", 2)[0];
+                // Emoji display title and stable plain event type are carried
+                // separately, so tile icons/counts never parse presentation text.
                 var libraryFolder = ViewModel.Settings.LibraryFolder;
                 var clipInfo = new ClipInfo(
                     autoClipGameName ?? ViewModel.ActiveGameDetection.DisplayName,
-                    autoClipEventType,
+                    autoClipEventType ?? autoClipLabel?.Split(" - ", 2)[0],
                     autoClipLabel ?? ViewModel.ActiveGameDetection.DisplayName,
                     File.GetCreationTimeUtc(outputPath));
                 // Another plain file write with no UI affinity.
@@ -4325,14 +4324,14 @@ public sealed partial class MainWindow : Window
 
     private void Cs2GsiListener_OnAutoClipReady(object? sender, Cs2AutoClipRequest request)
     {
-        AutoClip_OnReady(sender, new AutoClipRequest("cs2", "Counter-Strike 2", request.Title, request.Title, request.StartUtc, request.EndUtc));
+        AutoClip_OnReady(sender, new AutoClipRequest("cs2", "Counter-Strike 2", request.EventId, request.EventType, request.Title, request.StartUtc, request.EndUtc));
     }
 
     private void AutoClip_OnPending(object? sender, string message) => Dispatcher.UIThread.Post(() => ShowAutoClipPendingNotification(message));
 
     private void AutoClip_OnReady(object? sender, AutoClipRequest request)
     {
-        Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(request.Title, new ReplayClipWindow(request.StartUtc, request.EndUtc), request.GameName));
+        Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(request.Title, new ReplayClipWindow(request.StartUtc, request.EndUtc), request.GameName, request.EventType));
     }
 
     private void SetupDotaAutoClipButton_OnClick(object? sender, RoutedEventArgs e)
