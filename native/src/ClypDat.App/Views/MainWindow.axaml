@@ -2623,6 +2623,11 @@
         </Border>
       </Grid>
 
+      <!-- The timeline spans both rows so it can sit below clip details. This
+           invisible child supplies Auto's measure for row 1, preventing the
+           clip-details column from expanding over the timeline. -->
+      <Border Grid.Row="1" Height="{Binding EditorTimelineHeight}" IsHitTestVisible="False" Opacity="0" />
+
       <!-- Permanent editor inspector. This deliberately lives in MainWindow's
            visual tree rather than an owned native window: it cannot be hidden,
            drift during resize, or sit above/below LibVLC unpredictably. -->

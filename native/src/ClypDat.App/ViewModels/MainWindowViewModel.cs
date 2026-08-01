@@ -317,6 +317,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsRestoringLibraryCache => _isRestoringCachedLibrary;
     public ObservableCollection<TrackLaneViewModel> TimelineTracks { get; }
     public int TimelineTrackCount => Math.Max(1, TimelineTracks.Count);
+    // Timeline panel has 8px padding above/below, a 34px ruler, then fixed
+    // lane heights plus separators. The outer editor grid needs this explicit
+    // measured child because the real timeline spans both rows underneath the
+    // clip-details column.
+    public double EditorTimelineHeight => 16 + 34 +
+        (EditorHoverBarEnabled ? 0 : 44) +
+        TimelineTracks.Sum(track => track.LaneHeight + track.LaneMargin.Bottom);
     public ObservableCollection<AudioDeviceOption> ChatAudioDevices { get; }
     public ObservableCollection<AudioDeviceOption> MicrophoneDevices { get; }
     public ObservableCollection<ProcessOption> OpenProcesses { get; }
@@ -2187,6 +2194,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (Settings.EditorHoverBarEnabled == value) return;
             Settings.EditorHoverBarEnabled = value;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(EditorTimelineHeight));
             SaveSettings();
         }
     }
@@ -4799,6 +4807,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (finalAudioTrack is not null) finalAudioTrack.IsLastAudioTrack = true;
 
         OnPropertyChanged(nameof(TimelineTrackCount));
+        OnPropertyChanged(nameof(EditorTimelineHeight));
 
         ApplyClipEditState(media.Path);
         IsEditorVisible = showEditor;
