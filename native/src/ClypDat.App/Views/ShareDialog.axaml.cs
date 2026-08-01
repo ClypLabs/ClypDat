@@ -11,6 +11,8 @@ namespace ClypDat.App.Views;
 public partial class ShareDialog : Window
 {
     private ShareBackdropWindow? _backdrop;
+    private ShareDragOverlayWindow? _dragOverlay;
+    private Window? _coveredWindow;
     private MainWindowViewModel _viewModel = null!;
     private CancellationTokenSource? _shareCts;
     private string? _shareTempPath;
@@ -33,19 +35,16 @@ public partial class ShareDialog : Window
     public ShareDialog(Window owner, MainWindowViewModel viewModel) : this()
     {
         _viewModel = viewModel;
+        _coveredWindow = owner;
         DataContext = viewModel;
-        PositionOverOwner(owner);
         Closed += (_, _) =>
         {
+            CloseDragOverlay();
             _backdrop?.Close();
             _backdrop = null;
             CleanUp();
         };
-        Opened += (_, _) =>
-        {
-            OverlayTransparencyDiagnostics.Log(this, "share-dialog");
-            Dispatcher.UIThread.Post(ApplyCardWindowRegion, DispatcherPriority.Render);
-        };
+        Opened += (_, _) => OverlayTransparencyDiagnostics.Log(this, "share-dialog");
 
         // Deliberately does NOT start encoding on open. Encoding is expensive
         // GPU work, and this app is usually running with the replay buffer
@@ -62,37 +61,14 @@ public partial class ShareDialog : Window
         _backdrop.Show(owner);
         try
         {
-            await ShowDialog(owner);
+            // Ownership chain keeps clicks on either surface from lifting the
+            // dimmer above the card: main -> backdrop -> card.
+            await ShowDialog(_backdrop);
         }
         finally
         {
             _backdrop?.Close();
             _backdrop = null;
-        }
-    }
-
-    // Windows Server's DWM path turns a whole Avalonia transparent window
-    // black. Keep the full-owner dialog for its modal/drag behaviour, but
-    // expose only the solid card through its native region. The separately
-    // layered backdrop supplies the dimmed video behind it.
-    private void ApplyCardWindowRegion()
-    {
-        var handle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
-        if (handle == IntPtr.Zero || !GetWindowRect(handle, out var windowRect)) return;
-
-        var cardTopLeft = ShareDialogCard.PointToScreen(new Point(0, 0));
-        var scaling = RenderScaling > 0 ? RenderScaling : 1;
-        var width = Math.Max(1, (int)Math.Ceiling(ShareDialogCard.Bounds.Width * scaling));
-        var height = Math.Max(1, (int)Math.Ceiling(ShareDialogCard.Bounds.Height * scaling));
-        var left = cardTopLeft.X - windowRect.Left;
-        var top = cardTopLeft.Y - windowRect.Top;
-        var radius = Math.Max(1, (int)Math.Round(12 * scaling * 2));
-        var region = CreateRoundRectRgn(left, top, left + width + 1, top + height + 1, radius, radius);
-        if (region == IntPtr.Zero) return;
-        if (!SetWindowRgn(handle, region, true))
-        {
-            DeleteObject(region);
-            AppLog.Debug($"Share: card region failed ({System.Runtime.InteropServices.Marshal.GetLastWin32Error()}).");
         }
     }
 
@@ -120,43 +96,9 @@ public partial class ShareDialog : Window
         }
     }
 
-    // Owner isn't wired through Avalonia's own Owner property for sizing
-    // purposes - a modal-feeling popup like this can't be resized/moved by
-    // the user while it's up anyway, so position/size are computed once,
-    // directly against the owner's REAL win32 rect rather than trusting
-    // Avalonia's Bounds/PointToScreen alone. RepositionEditorHoverControls
-    // (MainWindow.axaml.cs) documents why: those read fine once a window is
-    // already shown (true here - owner always is), but the same class of
-    // DIP/physical-pixel mismatch this codebase has hit before is cheap to
-    // just avoid by pulling the owner's rect straight from Win32.
-    private void PositionOverOwner(Window owner)
-    {
-        var handle = owner.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
-        if (handle != IntPtr.Zero && GetWindowRect(handle, out var rect))
-        {
-            var scaling = owner.RenderScaling > 0 ? owner.RenderScaling : 1;
-            Position = new PixelPoint(rect.Left, rect.Top);
-            Width = (rect.Right - rect.Left) / scaling;
-            Height = (rect.Bottom - rect.Top) / scaling;
-            return;
-        }
-
-        Position = owner.PointToScreen(new Point(0, 0));
-        Width = owner.Bounds.Width;
-        Height = owner.Bounds.Height;
-    }
-
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hWnd, out Win32Rect rect);
 
-    [System.Runtime.InteropServices.DllImport("gdi32.dll")]
-    private static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int widthEllipse, int heightEllipse);
-
-    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool redraw);
-
-    [System.Runtime.InteropServices.DllImport("gdi32.dll")]
-    private static extern bool DeleteObject(IntPtr hObject);
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool GetCursorPos(out Win32Point point);
@@ -603,7 +545,7 @@ public partial class ShareDialog : Window
             // those used to leave the dialog stuck with no thumbnail until
             // the size was changed or the dialog reopened.
             StopDragCursorWatch();
-            ShareDragActiveOverlay.IsVisible = false;
+            CloseDragOverlay();
         }
     }
 
@@ -623,7 +565,9 @@ public partial class ShareDialog : Window
     private void StartDragCursorWatch()
     {
         _dragLeftApp = false;
-        ShareDragActiveOverlay.IsVisible = true;
+        CloseDragOverlay();
+        _dragOverlay = new ShareDragOverlayWindow(_coveredWindow ?? this);
+        _dragOverlay.Show(this);
         _dragCursorWatch ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(60) };
         _dragCursorWatch.Tick -= DragCursorWatch_OnTick;
         _dragCursorWatch.Tick += DragCursorWatch_OnTick;
@@ -636,10 +580,16 @@ public partial class ShareDialog : Window
         if (_dragCursorWatch is not null) _dragCursorWatch.Tick -= DragCursorWatch_OnTick;
     }
 
+    private void CloseDragOverlay()
+    {
+        try { _dragOverlay?.Close(); } catch { /* already closing */ }
+        _dragOverlay = null;
+    }
+
     private void DragCursorWatch_OnTick(object? sender, EventArgs e)
     {
         if (_dragLeftApp) return;
-        var handle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        var handle = (_coveredWindow ?? this).TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
         if (handle == IntPtr.Zero || !GetCursorPos(out var cursor) || !GetWindowRect(handle, out var rect)) return;
         if (cursor.X >= rect.Left && cursor.X < rect.Right && cursor.Y >= rect.Top && cursor.Y < rect.Bottom) return;
 
@@ -650,7 +600,7 @@ public partial class ShareDialog : Window
         // back here) must not slam the panel up again, so the watch latches
         // off and stays off for the rest of this gesture.
         _dragLeftApp = true;
-        ShareDragActiveOverlay.IsVisible = false;
+        CloseDragOverlay();
         StopDragCursorWatch();
     }
 }

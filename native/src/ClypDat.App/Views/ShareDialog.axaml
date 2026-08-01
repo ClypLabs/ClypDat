@@ -5,23 +5,13 @@
         WindowDecorations="None"
         ShowInTaskbar="False"
         CanResize="False"
-        WindowStartupLocation="Manual"
-        Background="Transparent"
-        TransparencyLevelHint="Transparent"
+        Width="480"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        Background="#111920"
         KeyDown="ShareDialog_OnKeyDown">
-  <!-- A genuinely separate top-level Window, not an Avalonia overlay embedded
-       in MainWindow - the Editor's video is a native VLC child window that
-       always paints over Avalonia-rendered siblings regardless of z-order
-       ("airspace", see MainWindow.axaml.cs's EditorHoverControls comments),
-       so an in-window overlay Border rendered behind it while a clip is
-       open. A separate top-level window sized/positioned to exactly cover
-       the owner (set in code-behind before Show) sits above that airspace
-       the same way the floating hover bar already does, while
-       TransparencyLevelHint lets this Grid's semi-transparent scrim still
-       blend with - and dim - everything behind it, video included. -->
-  <Grid x:Name="ShareScrim" Background="#DD000000" PointerPressed="Scrim_OnPointerPressed">
-    <Border x:Name="ShareDialogCard" Width="480" CornerRadius="12" Background="#111920" BorderBrush="#232F3A" BorderThickness="1"
-            ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center">
+  <Border x:Name="ShareDialogCard" CornerRadius="12" Background="#111920" BorderBrush="#232F3A" BorderThickness="1"
+          ClipToBounds="True">
       <DockPanel LastChildFill="True">
         <!-- Rounded on its own top corners rather than relying on the card's
              ClipToBounds: Avalonia clips a Border's children to its bounds
@@ -97,26 +87,5 @@
           </Grid>
         </StackPanel>
       </DockPanel>
-    </Border>
-
-    <!-- Sibling of the card, not a child of it, so it covers the ENTIRE app
-         window while a drag is in flight rather than just the popup. Shown
-         for exactly the duration of the OS drag gesture (DoDragDrop blocks
-         until drop/cancel) and additionally hidden whenever the cursor
-         leaves the app - the point is to get ClypDat out of the way while
-         the user aims at another window, so it must not keep covering the
-         app once the pointer is over that other window. The card underneath
-         is untouched, so a cancelled drag lands back on it unchanged. -->
-    <Border x:Name="ShareDragActiveOverlay" Background="#0B1016" IsVisible="False" IsHitTestVisible="False">
-      <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="32">
-        <Border Width="72" Height="56" CornerRadius="10" BorderBrush="#4C6FFF" BorderThickness="2"
-                HorizontalAlignment="Center" Margin="0,0,0,8" />
-        <TextBlock Text="Drag &amp; drop magic, activated!" FontWeight="Bold" FontSize="18"
-                   Foreground="#EDF4FB" HorizontalAlignment="Center" />
-        <TextBlock Text="Drop the clip onto a chat channel, DM, or upload box"
-                   FontSize="13" Foreground="#8EA1B6" HorizontalAlignment="Center"
-                   TextWrapping="Wrap" TextAlignment="Center" />
-      </StackPanel>
-    </Border>
-  </Grid>
+  </Border>
 </Window>
