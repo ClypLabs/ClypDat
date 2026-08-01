@@ -1,5 +1,5 @@
 name: Release
-run-name: Bump version to 1.0.0
+run-name: Bump version to ${{ inputs.version || github.ref_name }}
 
 # Triggered by pushing a tag like v0.1.0. Builds the native win-x64 app and
 # packages it five ways: a raw zip, a self-extracting portable exe, an NSIS
