@@ -25,8 +25,9 @@ public sealed class AppSettings
     // Native engine encoder controls, surfaced directly in Settings rather
     // than hidden behind a coarse quality label.
     // NVENC speed/quality preset, "P1".."P5" - higher spends more GPU time per
-    // frame for better compression.
-    public string ReplayEncoderPreset { get; set; } = "P4";
+    // frame for better compression. P1 is required by default because the
+    // default 60 FPS capture must survive uncapped, VSync-off gameplay.
+    public string ReplayEncoderPreset { get; set; } = "P1";
     // "Constant quality" | "Constant bitrate" - picks whether ReplayConstantQuality
     // or ReplayMaxBitrateMbps governs the encode.
     public string ReplayRateControlMode { get; set; } = "Constant quality";
