@@ -16,4 +16,5 @@ public sealed class IgnoredGameRowViewModel
     public string Key { get; }
     public string DisplayName { get; }
     public string ProcessName { get; }
+    public bool ShowDivider { get; set; }
 }

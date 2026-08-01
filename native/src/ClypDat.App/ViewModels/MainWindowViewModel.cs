@@ -3992,9 +3992,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 : overrideEntry.ProcessName;
             return new IgnoredGameRowViewModel(key, displayName, processName);
         });
-        foreach (var row in rows.OrderBy(row => row.DisplayName, StringComparer.OrdinalIgnoreCase))
+        var orderedRows = rows.OrderBy(row => row.DisplayName, StringComparer.OrdinalIgnoreCase).ToList();
+        for (var i = 0; i < orderedRows.Count; i++)
         {
-            IgnoredGameExecutableRows.Add(row);
+            orderedRows[i].ShowDivider = i < orderedRows.Count - 1;
+            IgnoredGameExecutableRows.Add(orderedRows[i]);
         }
         OnPropertyChanged(nameof(HasIgnoredGameExecutables));
     }
@@ -4109,6 +4111,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 row.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
                 row.ProcessName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
                 row.ExecutableName.Contains(query, StringComparison.OrdinalIgnoreCase);
+        }
+
+        var visibleRows = GameCaptureRows.Where(row => row.IsVisible).ToList();
+        for (var i = 0; i < visibleRows.Count; i++)
+        {
+            visibleRows[i].ShowDivider = i < visibleRows.Count - 1;
         }
     }
 
