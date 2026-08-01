@@ -31,10 +31,10 @@
       <Directory Id="ProgramFiles64Folder">
         <Directory Id="INSTALLFOLDER" Name="ClypDat" />
       </Directory>
-      <Directory Id="ProgramMenuFolder">
+      <Directory Id="CommonProgramsFolder">
         <Directory Id="ApplicationProgramsFolder" Name="ClypDat" />
       </Directory>
-      <Directory Id="DesktopFolder" />
+      <Directory Id="CommonDesktopFolder" />
     </Directory>
 
     <DirectoryRef Id="ApplicationProgramsFolder">
@@ -52,7 +52,7 @@
       </Component>
     </DirectoryRef>
 
-    <DirectoryRef Id="DesktopFolder">
+    <DirectoryRef Id="CommonDesktopFolder">
       <Component Id="DesktopShortcut" Guid="*" Win64="yes">
         <Shortcut Id="ApplicationDesktopShortcut"
                   Name="ClypDat"
