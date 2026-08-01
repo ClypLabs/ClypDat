@@ -10,6 +10,7 @@ namespace ClypDat.App.Views;
 
 public partial class ShareDialog : Window
 {
+    private ShareBackdropWindow? _backdrop;
     private MainWindowViewModel _viewModel = null!;
     private CancellationTokenSource? _shareCts;
     private string? _shareTempPath;
@@ -34,8 +35,17 @@ public partial class ShareDialog : Window
         _viewModel = viewModel;
         DataContext = viewModel;
         PositionOverOwner(owner);
-        Closed += (_, _) => CleanUp();
-        Opened += (_, _) => OverlayTransparencyDiagnostics.Log(this, "share-dialog");
+        Closed += (_, _) =>
+        {
+            _backdrop?.Close();
+            _backdrop = null;
+            CleanUp();
+        };
+        Opened += (_, _) =>
+        {
+            OverlayTransparencyDiagnostics.Log(this, "share-dialog");
+            Dispatcher.UIThread.Post(ApplyCardWindowRegion, DispatcherPriority.Render);
+        };
 
         // Deliberately does NOT start encoding on open. Encoding is expensive
         // GPU work, and this app is usually running with the replay buffer
@@ -44,6 +54,46 @@ public partial class ShareDialog : Window
         // something the user has not asked for yet, and competes with the
         // capture encoder that is protecting their gameplay.
         Opened += (_, _) => SweepStaleShareTempFiles();
+    }
+
+    public async Task ShowWithBackdropAsync(Window owner)
+    {
+        _backdrop = new ShareBackdropWindow(owner);
+        _backdrop.Show(owner);
+        try
+        {
+            await ShowDialog(owner);
+        }
+        finally
+        {
+            _backdrop?.Close();
+            _backdrop = null;
+        }
+    }
+
+    // Windows Server's DWM path turns a whole Avalonia transparent window
+    // black. Keep the full-owner dialog for its modal/drag behaviour, but
+    // expose only the solid card through its native region. The separately
+    // layered backdrop supplies the dimmed video behind it.
+    private void ApplyCardWindowRegion()
+    {
+        var handle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        if (handle == IntPtr.Zero || !GetWindowRect(handle, out var windowRect)) return;
+
+        var cardTopLeft = ShareDialogCard.PointToScreen(new Point(0, 0));
+        var scaling = RenderScaling > 0 ? RenderScaling : 1;
+        var width = Math.Max(1, (int)Math.Ceiling(ShareDialogCard.Bounds.Width * scaling));
+        var height = Math.Max(1, (int)Math.Ceiling(ShareDialogCard.Bounds.Height * scaling));
+        var left = cardTopLeft.X - windowRect.Left;
+        var top = cardTopLeft.Y - windowRect.Top;
+        var radius = Math.Max(1, (int)Math.Round(12 * scaling * 2));
+        var region = CreateRoundRectRgn(left, top, left + width + 1, top + height + 1, radius, radius);
+        if (region == IntPtr.Zero) return;
+        if (!SetWindowRgn(handle, region, true))
+        {
+            DeleteObject(region);
+            AppLog.Debug($"Share: card region failed ({System.Runtime.InteropServices.Marshal.GetLastWin32Error()}).");
+        }
     }
 
     // A hard kill (crash, task manager) never runs the close-time cleanup, so
@@ -98,6 +148,15 @@ public partial class ShareDialog : Window
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hWnd, out Win32Rect rect);
+
+    [System.Runtime.InteropServices.DllImport("gdi32.dll")]
+    private static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int widthEllipse, int heightEllipse);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool redraw);
+
+    [System.Runtime.InteropServices.DllImport("gdi32.dll")]
+    private static extern bool DeleteObject(IntPtr hObject);
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool GetCursorPos(out Win32Point point);
