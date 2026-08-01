@@ -5604,10 +5604,6 @@ public sealed partial class MainWindow : Window
         var layout = new DockPanel { LastChildFill = true };
         card.Child = layout;
         var header = new Grid { Height = 56, ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Background = Avalonia.Media.Brush.Parse("#0C1319") };
-        header.PointerPressed += (_, e) =>
-        {
-            if (e.GetCurrentPoint(header).Properties.IsLeftButtonPressed) window.BeginMoveDrag(e);
-        };
         var title = new TextBlock
         {
             Text = "AUDIO-ONLY CLIPS",
