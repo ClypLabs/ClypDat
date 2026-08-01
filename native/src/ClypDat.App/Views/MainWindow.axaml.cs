@@ -5580,29 +5580,86 @@ public sealed partial class MainWindow : Window
         var clips = ViewModel.GetAudioOnlyClips();
         if (clips.Count == 0) return;
 
-        var (window, body) = CreateChromelessDialog("Audio-only clips", centerTitle: true);
+        var window = new Window
+        {
+            Width = 540,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            ShowInTaskbar = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = Avalonia.Media.Brush.Parse("#111920"),
+            WindowDecorations = WindowDecorations.None,
+            ExtendClientAreaToDecorationsHint = true,
+            ExtendClientAreaTitleBarHeightHint = -1,
+            TransparencyLevelHint = new[] { WindowTransparencyLevel.None }
+        };
+        var card = new Border
+        {
+            Background = Avalonia.Media.Brush.Parse("#111920"),
+            BorderBrush = Avalonia.Media.Brush.Parse("#232F3A"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(12),
+            ClipToBounds = true
+        };
+        var layout = new DockPanel { LastChildFill = true };
+        card.Child = layout;
+        var header = new Grid { Height = 56, ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Background = Avalonia.Media.Brush.Parse("#0C1319") };
+        header.PointerPressed += (_, e) =>
+        {
+            if (e.GetCurrentPoint(header).Properties.IsLeftButtonPressed) window.BeginMoveDrag(e);
+        };
+        var title = new TextBlock
+        {
+            Text = "AUDIO-ONLY CLIPS",
+            Foreground = Avalonia.Media.Brush.Parse("#D8E4F2"),
+            FontSize = 17,
+            FontWeight = FontWeight.Bold,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsHitTestVisible = false
+        };
+        Grid.SetColumnSpan(title, 3);
+        header.Children.Add(title);
+        var close = new Button { Classes = { "dialogClose" }, Content = "✕", Width = 52, Height = 56, FontSize = 14, CornerRadius = new CornerRadius(0, 11, 0, 0), HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(close, 2);
+        header.Children.Add(close);
+        DockPanel.SetDock(header, Dock.Top);
+        layout.Children.Add(header);
+        var body = new StackPanel { Margin = new Thickness(28, 24, 28, 28), Spacing = 18 };
+        layout.Children.Add(body);
+        window.Content = card;
+
         body.Children.Add(new TextBlock
         {
-            Text = $"Found {clips.Count} audio-only MP4 {(clips.Count == 1 ? "clip" : "clips")}. They cannot have thumbnails or timeline previews.",
+            Text = $"Found {clips.Count} audio-only MP4 {(clips.Count == 1 ? "clip" : "clips")}",
             Foreground = Avalonia.Media.Brush.Parse("#EDF4FB"),
-            FontSize = 15,
+            FontSize = 16,
             FontWeight = Avalonia.Media.FontWeight.SemiBold,
             TextWrapping = TextWrapping.Wrap
         });
         body.Children.Add(new TextBlock
         {
-            Text = "Delete removes source files permanently. Keeping them skips visual generation forever.",
+            Text = "These files have audio but no video, so they cannot have thumbnails or timeline previews. ClypDat will skip visual generation for them.",
             Foreground = Avalonia.Media.Brush.Parse("#8EA1B6"),
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap
+        });
+        body.Children.Add(new Border
+        {
+            Background = Avalonia.Media.Brush.Parse("#15222D"),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(14, 12),
+            Child = new TextBlock { Text = "Delete permanently removes source files. Don't ask again keeps files and suppresses this notice.", Foreground = Avalonia.Media.Brush.Parse("#93A6B8"), FontSize = 12, TextWrapping = TextWrapping.Wrap }
         });
 
         var delete = new Button { Content = "Delete", Width = 100, Height = 34, Background = Avalonia.Media.Brush.Parse("#D95B62"), Foreground = Brushes.White, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
         var ignore = new Button { Content = "Don't ask again", Width = 130, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
         var later = new Button { Content = "Remind me later", Width = 130, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
-        delete.Click += (_, _) => window.Close("delete");
-        ignore.Click += (_, _) => window.Close("ignore");
-        later.Click += (_, _) => window.Close("later");
+        string? choice = null;
+        delete.Click += (_, _) => { choice = "delete"; window.Close(); };
+        ignore.Click += (_, _) => { choice = "ignore"; window.Close(); };
+        later.Click += (_, _) => { choice = "later"; window.Close(); };
+        close.Click += (_, _) => window.Close();
         body.Children.Add(new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -5611,7 +5668,31 @@ public sealed partial class MainWindow : Window
             Children = { delete, ignore, later }
         });
 
-        var choice = await window.ShowDialog<string?>(this);
+        var backdrop = new ShareBackdropWindow(this);
+        EventHandler dismiss = (_, _) => window.Close();
+        backdrop.DismissRequested += dismiss;
+        backdrop.Show(this);
+        try
+        {
+            var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            EventHandler? closedHandler = null;
+            closedHandler = (_, _) => closed.TrySetResult();
+            window.Closed += closedHandler;
+            try
+            {
+                window.Show(backdrop);
+                await closed.Task;
+            }
+            finally
+            {
+                window.Closed -= closedHandler;
+            }
+        }
+        finally
+        {
+            backdrop.DismissRequested -= dismiss;
+            backdrop.Close();
+        }
         if (ViewModel is null) return;
         if (choice == "ignore")
         {
