@@ -309,10 +309,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
         _libraryCacheWriteTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _libraryCacheWriteTimer.Tick += (_, _) => WriteLibraryCacheIfDirty();
-        _ = StartInitialLibraryLoadAsync();
+        InitialLibraryLoadTask = StartInitialLibraryLoadAsync();
     }
 
     public AppSettings Settings { get; }
+    public Task InitialLibraryLoadTask { get; }
     public ObservableCollection<ClipCardViewModel> AllClips { get; }
     public bool IsRestoringLibraryCache => _isRestoringCachedLibrary;
     public IReadOnlyList<ClipCardViewModel> GetAudioOnlyClips() => AllClips
@@ -2666,7 +2667,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         if (cached.Count == 0)
         {
-            _ = RefreshLibraryAsync();
+            await RefreshLibraryAsync();
             return;
         }
 
@@ -2681,7 +2682,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         AppLog.Info($"Library cache: restored {Math.Min(initialCardCount, cached.Count)}/{cached.Count} cards in {clock.ElapsedMilliseconds}ms.");
 
         _cachedLibraryRestoreCts = new CancellationTokenSource();
-        _ = RestoreRemainingCachedClipsAsync(cached.Skip(initialCardCount).ToArray(), root, _cachedLibraryRestoreCts.Token);
+        await RestoreRemainingCachedClipsAsync(cached.Skip(initialCardCount).ToArray(), root, _cachedLibraryRestoreCts.Token);
     }
 
     private async Task RestoreRemainingCachedClipsAsync(IReadOnlyList<CachedClipState> states, string root, CancellationToken cancellationToken)
@@ -2707,7 +2708,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 NotifyLibraryChrome();
                 AppLog.Info($"Library cache: restore complete, {AllClips.Count} cards available before disk reconciliation.");
-                _ = RefreshLibraryAsync();
+                await RefreshLibraryAsync();
             }
         }
         catch (OperationCanceledException)
