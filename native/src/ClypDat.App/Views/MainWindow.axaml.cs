@@ -77,6 +77,12 @@ public sealed partial class MainWindow : Window
     private DispatcherTimer? _hotkeyCaptureTimeout;
     private bool _replayTransitioning;
     private DispatcherTimer? _replayRestartDebounceTimer;
+    private bool _showNewClipsAfterReplayRestart;
+    private bool _startNewGameSessionAfterReplayRestart;
+    // Capture backends bind to either a monitor or one concrete game window.
+    // Keep the target that started the current buffer so detector ticks only
+    // restart when that identity really changes.
+    private string _activeReplayTargetIdentity = string.Empty;
     private readonly EncoderTuningService _encoderTuning = new();
     private readonly SemaphoreSlim _clipSaveLock = new(1, 1);
     private bool _updateDialogOpen;
@@ -258,7 +264,8 @@ public sealed partial class MainWindow : Window
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayBufferEnabled)) _ = ApplyReplayBufferEnabledAsync();
                     if (e.PropertyName is nameof(MainWindowViewModel.SelectedReplayCaptureSource)
                         or nameof(MainWindowViewModel.SelectedDesktopMonitor)
-                        or nameof(MainWindowViewModel.ReplayDesktopCaptureCursor)) ScheduleReplayRestart();
+                        or nameof(MainWindowViewModel.ReplayDesktopCaptureCursor)
+                        or nameof(MainWindowViewModel.ReplayAutoSwitchToGameCapture)) ScheduleReplayRestart();
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
                     if (e.PropertyName == nameof(MainWindowViewModel.IsSettingsVisible) && ViewModel.IsSettingsVisible) PauseEditorPlayback();
@@ -486,37 +493,29 @@ public sealed partial class MainWindow : Window
 
         HarvestGameIcons();
 
-        if (ShouldRecordReplay(detection) && _replayBuffer is { IsRecording: false } && !_replayTransitioning)
+        if (_replayBuffer is { IsRecording: true } && !ShouldRecordReplay(detection) && !_replayTransitioning)
         {
-            _ = StartReplayBufferAsync(showErrors: false);
-        }
-        else if (_replayBuffer is { IsRecording: true } && !ShouldRecordReplay(detection) && !_replayTransitioning)
-        {
-            // The game just closed. Show what the session captured once the
-            // buffer has actually stopped - not before, or a clip saved in the
-            // last seconds could still be mid-write.
+            // Explicit Game Capture ends with its game. Desktop Capture stays
+            // armed, including when it has just returned from automatic game
+            // capture, so the game-session dialog still appears here only for
+            // the manual game workflow.
             _ = StopReplayBufferAsync().ContinueWith(
                 _ =>
                 {
                     ShowNewClipsDialog();
-                    // The ring buffer (the single biggest deliberate
-                    // allocation in the app - real duration x bitrate, always
-                    // live in RAM while armed, see NativeReplayBuffer) was just
-                    // freed by the stop above and nothing is capturing right
-                    // now to make a GC pause costly. Left to its own
-                    // heuristics the CLR is content to hold that freed memory
-                    // in reserve rather than return it to the OS, which is
-                    // exactly the "still shows a lot of RAM after I stopped
-                    // recording" complaint. A background, non-blocking
-                    // collection here asks for it back at the one moment
-                    // that's actually free - NOT done on every quality
-                    // restart's Stop+Start, which frees the same memory only
-                    // to immediately reallocate it.
                     Task.Run(() => GC.Collect(2, GCCollectionMode.Optimized, blocking: false, compacting: true));
                 },
                 CancellationToken.None,
                 TaskContinuationOptions.OnlyOnRanToCompletion,
                 TaskScheduler.FromCurrentSynchronizationContext());
+        }
+        else if (ShouldRecordReplay(detection) && _replayBuffer is { IsRecording: false } && !_replayTransitioning)
+        {
+            _ = StartReplayBufferAsync(showErrors: false);
+        }
+        else if (_replayBuffer is { IsRecording: true } && !_replayTransitioning)
+        {
+            ReconcileReplayTarget();
         }
 
         UpdateCapturePauseState(detection);
@@ -604,7 +603,11 @@ public sealed partial class MainWindow : Window
 
     private void UpdateCapturePauseState(GameDetection detection)
     {
-        if (ViewModel?.IsDesktopCapture == true) return;
+        if (ViewModel?.IsEffectiveDesktopCapture == true)
+        {
+            _replayBuffer?.SetCapturePaused(false);
+            return;
+        }
         if (_replayBuffer is not { IsRecording: true }) return;
         var shouldPause = string.Equals(detection.ExeName, "cs2.exe", StringComparison.OrdinalIgnoreCase) && detection.IsDetected && !detection.IsForeground;
         _replayBuffer.SetCapturePaused(shouldPause);
@@ -2053,6 +2056,25 @@ public sealed partial class MainWindow : Window
     private bool ShouldRecordReplay(GameDetection detection) =>
         ViewModel is { Settings.ReplayBufferEnabled: true } && (ViewModel.IsDesktopCapture || detection.IsDetected);
 
+    private static string ReplayTargetIdentity(ReplayBufferConfig config) => string.Join('|',
+        config.CaptureSource,
+        config.CaptureMonitorDeviceName,
+        config.GameExecutableName,
+        config.GameWindowHandle.ToInt64(),
+        config.Backend);
+
+    private void ReconcileReplayTarget()
+    {
+        if (ViewModel is null || _replayBuffer is not { IsRecording: true }) return;
+        var target = ReplayTargetIdentity(ViewModel.CreateReplayConfig());
+        if (string.Equals(target, _activeReplayTargetIdentity, StringComparison.Ordinal)) return;
+        var wasGameCapture = _activeReplayTargetIdentity.StartsWith("Game|", StringComparison.Ordinal);
+        _showNewClipsAfterReplayRestart |= wasGameCapture && ViewModel.IsEffectiveDesktopCapture;
+        _startNewGameSessionAfterReplayRestart |= !wasGameCapture && !ViewModel.IsEffectiveDesktopCapture;
+        ViewModel.RecorderStatus = $"Switching to {ViewModel.EffectiveReplayCaptureSource}...";
+        ScheduleReplayRestart();
+    }
+
     private void ScheduleReplayRestart()
     {
         _replayRestartDebounceTimer?.Stop();
@@ -2062,8 +2084,14 @@ public sealed partial class MainWindow : Window
             _replayRestartDebounceTimer?.Stop();
             _replayRestartDebounceTimer = null;
             if (ViewModel is not { Settings.ReplayBufferEnabled: true }) return;
+            var showNewClips = _showNewClipsAfterReplayRestart;
+            _showNewClipsAfterReplayRestart = false;
+            var startNewGameSession = _startNewGameSessionAfterReplayRestart;
+            _startNewGameSessionAfterReplayRestart = false;
             if (ViewModel.IsReplayRecording) await StopReplayBufferAsync();
-            await StartReplayBufferAsync(showErrors: true, isQualityRestart: true);
+            if (showNewClips) ShowNewClipsDialog();
+            if (ViewModel is not null) ViewModel.RecorderStatus = $"Switching to {ViewModel.EffectiveReplayCaptureSource}...";
+            await StartReplayBufferAsync(showErrors: true, isQualityRestart: !startNewGameSession);
         };
         _replayRestartDebounceTimer.Start();
     }
@@ -2100,6 +2128,7 @@ public sealed partial class MainWindow : Window
         try
         {
             if (_replayBuffer.IsRecording) await _replayBuffer.StopAsync();
+            _activeReplayTargetIdentity = string.Empty;
             _encoderTuning.EndSession();
             ViewModel.IsReplayRecording = false;
             ViewModel.RecorderStatus = ReplayIdleStatus;
@@ -2147,7 +2176,9 @@ public sealed partial class MainWindow : Window
             ApplyCaptureBounds();
             await Task.Run(() => _replayBuffer.StartAsync());
             AppLog.Info("Replay started.");
-            _encoderTuning.BeginSession(ViewModel.CreateReplayConfig().EncoderPreset);
+            var activeConfig = ViewModel.CreateReplayConfig();
+            _activeReplayTargetIdentity = ReplayTargetIdentity(activeConfig);
+            _encoderTuning.BeginSession(activeConfig.EncoderPreset);
             // Fresh session, fresh list - but only for a GENUINELY new session
             // (a game was just detected). A quality restart is left open (not
             // cleared here either) so a Full Session VOD that finalizes minutes
@@ -2161,7 +2192,7 @@ public sealed partial class MainWindow : Window
             }
             _sessionCollectingClips = true;
             ViewModel.IsReplayRecording = _replayBuffer.IsRecording;
-            if (ViewModel.IsReplayRecording && !ViewModel.IsDesktopCapture) ShowGameDetectedNotification(ViewModel.ActiveGameDetection.DisplayName);
+            if (ViewModel.IsReplayRecording && !ViewModel.IsEffectiveDesktopCapture) ShowGameDetectedNotification(ViewModel.ActiveGameDetection.DisplayName);
         }
         catch (Exception error)
         {

@@ -27,6 +27,10 @@ public sealed class AppSettings
     // Win32 display device path, e.g. \\.\DISPLAY1. Empty means primary.
     public string ReplayDesktopMonitorDeviceName { get; set; } = string.Empty;
     public bool ReplayDesktopCaptureCursor { get; set; } = true;
+    // When Desktop Capture is selected, temporarily capture a detected game
+    // window instead. The desktop monitor remains the user's saved source and
+    // resumes as soon as the game exits.
+    public bool ReplayAutoSwitchToGameCapture { get; set; } = true;
     public int ReplayDurationSeconds { get; set; } = 60;
     // Native engine encoder controls, surfaced directly in Settings rather
     // than hidden behind a coarse quality label.
