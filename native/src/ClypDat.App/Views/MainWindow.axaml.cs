@@ -3285,7 +3285,12 @@ public sealed partial class MainWindow : Window
 
     private async void ClipCard_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (e.Source is CheckBox or Button or PathIcon or TextBox) return;
+        // A title click is an inline rename request, never a card-open. The
+        // editor's open path starts asynchronous timeline hydration, and if
+        // that won the routed-pointer race a clip without a filmstrip looked
+        // like it could not be renamed until its timeline image arrived.
+        if (e.Source is CheckBox or Button or PathIcon or TextBox ||
+            e.Source is TextBlock { Classes: var classes } && classes.Contains("editableTitle")) return;
         if (sender is not Control control || !e.GetCurrentPoint(control).Properties.IsLeftButtonPressed) return;
         if (sender is not Control { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
 
