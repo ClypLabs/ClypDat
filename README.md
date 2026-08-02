@@ -91,8 +91,7 @@ name and original file stay untouched.
 On launch, ClypDat checks the GitHub Releases API for a newer non-draft,
 non-prerelease tag. If found, it shows a dialog with the version and release
 notes; accepting downloads `ClypDat-Setup.exe`, verifies it, then starts the
-installer after ClypDat exits. This preserves Program Files permissions and
-migrates legacy per-user installs without touching user data.
+per-user installer after ClypDat exits.
 
 ## Requirements
 
@@ -118,9 +117,9 @@ To produce a runnable, self-contained build:
 `ClypDat.exe` and its dependencies land in `native\publish\win-x64-folder`.
 Those files include .NET runtime; users need only ClypDat installer/portable app.
 Pushing a tag matching `v*` triggers `.github/workflows/release.yml`, which
-builds the same output and packages it five ways: a zip, a self-extracting
-portable exe, an NSIS installer, an MSI bootstrapper, and a raw MSI. The
-installers default to `C:\Program Files\ClypDat` and request UAC approval.
+builds the same output and packages it four ways: a zip, a self-extracting
+portable exe, an NSIS installer, and a raw MSI. Installers default to
+`%LocalAppData%\Programs\ClypDat` without requiring UAC approval.
 
 ## Future Updates
 
