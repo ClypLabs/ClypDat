@@ -492,6 +492,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // convert or whether it should just re-encode the last content as a
         // duplicate. See the encode-time conversion in EncodeScheduledFrame.
         var croppedDirty = false;
+        // Cursor position for the GPU path, already converted into OUTPUT-resolution
+        // pixels at crop time. The crop block is the only place the crop origin and
+        // capture size are in scope, but the cursor has to be drawn after the scaled
+        // readback (drawing it before would mean the video processor resamples the
+        // arrow along with the frame). int.MinValue means "no cursor this frame".
+        var cursorOutputX = int.MinValue;
+        var cursorOutputY = int.MinValue;
         AVCodecContext* codecContext = null;
         SwsContext* swsContext = null;
         AVFrame* frame = null;
@@ -567,9 +574,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // resolution ever gets read back to the CPU. Best-effort: if
             // this hardware/driver doesn't support it, useGpuScale stays
             // false and the CPU sws_scale path above still works normally.
+            // CaptureCursor used to disable this whole path ("desktop cursor uses CPU
+            // composition"), which quietly cost anyone recording with the cursor on
+            // the entire GPU scaler: a 2560x1440 -> 1920x1080 sws_scale measured
+            // 10-13ms per frame of a 16.7ms budget at 60fps, so capture stuttered on
+            // machines whose GPU was nearly idle. The cursor is a synthetic arrow, not
+            // a sampled cursor image, so it does not need the full-resolution BGRA
+            // buffer at all - it is drawn into the NV12 frame after the scaled
+            // readback instead (see DrawDesktopCursorNv12).
             try
             {
-                if (config.CaptureCursor) throw new NotSupportedException("Desktop cursor uses CPU composition.");
                 (videoDevice, videoContext, vpEnumerator, videoProcessor, nv12Output, nv12StagingRing, outputView) =
                     CreateGpuScaler(device, captureWidth, captureHeight, outputWidth, outputHeight, config.FrameRate);
                 (croppedTexture, inputView) = CreateGpuCropInputView(device, videoDevice, vpEnumerator, captureWidth, captureHeight);
@@ -1195,6 +1209,23 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                         device.ImmediateContext.CopySubresourceRegion(croppedTexture, 0, 0, 0, 0, desktopTexture, 0, box);
                                     }
                                     copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
+
+                                    // Same screen->crop conversion the CPU path does, then scaled
+                                    // into output pixels so the readback side can draw straight
+                                    // into the NV12 frame without needing the crop rect.
+                                    if (config.CaptureCursor && GetCursorPos(out var gpuCursor))
+                                    {
+                                        var cropX = gpuCursor.X - desktopBounds.Left - cropLeft;
+                                        var cropY = gpuCursor.Y - desktopBounds.Top - cropTop;
+                                        cursorOutputX = (int)((long)cropX * outputWidth / captureWidth);
+                                        cursorOutputY = (int)((long)cropY * outputHeight / captureHeight);
+                                    }
+                                    else
+                                    {
+                                        cursorOutputX = int.MinValue;
+                                        cursorOutputY = int.MinValue;
+                                    }
+
                                     croppedDirty = true;
                                 }
                                 else
@@ -1538,6 +1569,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             {
                                 ffmpeg.av_frame_make_writable(frame);
                                 CopyNv12PlanesToFrame(mapped, outputWidth, outputHeight, frame);
+                                if (cursorOutputX != int.MinValue)
+                                {
+                                    DrawDesktopCursorNv12(frame, outputWidth, outputHeight, cursorOutputX, cursorOutputY);
+                                }
                             }
                             finally
                             {
@@ -2081,6 +2116,44 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 target[1] = edge ? (byte)0 : (byte)245;
                 target[2] = edge ? (byte)0 : (byte)245;
                 target[3] = 255;
+            }
+        }
+    }
+
+    // Same arrow as DrawDesktopCursor, drawn straight into the already-scaled NV12
+    // frame so the GPU scaler path can keep the cursor without falling back to a
+    // full-resolution CPU sws_scale. The shape is deliberately kept identical to the
+    // CPU path's so a recording looks the same whichever path a machine takes.
+    //
+    // The arrow is greyscale, so only the Y plane carries it and the chroma pair is
+    // pushed to neutral - no colour conversion is involved. Y uses limited range (16
+    // = black, 235 = white) to match what the video processor writes for the rest of
+    // the frame; using 0/255 here would make the arrow clip against it.
+    private static unsafe void DrawDesktopCursorNv12(AVFrame* frame, int width, int height, int x, int y)
+    {
+        var yPlane = frame->data[0];
+        var yStride = frame->linesize[0];
+        var uvPlane = frame->data[1];
+        var uvStride = frame->linesize[1];
+
+        for (var row = 0; row < 15; row++)
+        {
+            for (var column = 0; column < 12; column++)
+            {
+                var inside = column <= row / 2 || (row > 7 && column >= 3 && column <= 6 && row - 7 <= column - 2);
+                if (!inside) continue;
+                var px = x + column;
+                var py = y + row;
+                if (px < 0 || py < 0 || px >= width || py >= height) continue;
+                var edge = column == 0 || column == row / 2 || row == 0;
+                yPlane[py * yStride + px] = edge ? (byte)16 : (byte)235;
+
+                // One chroma sample covers a 2x2 luma block, so this writes the same
+                // neutral pair repeatedly for interior pixels. Cheaper than tracking
+                // which blocks were already touched, at 180 pixels a frame.
+                var uv = uvPlane + (py / 2) * uvStride + (px / 2) * 2;
+                uv[0] = 128;
+                uv[1] = 128;
             }
         }
     }
