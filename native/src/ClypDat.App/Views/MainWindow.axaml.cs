@@ -140,7 +140,7 @@ public sealed partial class MainWindow : Window
     // poll runs at frame rate, and one tick that momentarily read as outside
     // started the slide-down under the pointer, so a click landed on a
     // control that had just moved and the bar looked like it flashed.
-    private static readonly TimeSpan HoverControlsGrace = TimeSpan.FromMilliseconds(180);
+    private static readonly TimeSpan HoverControlsGrace = TimeSpan.FromMilliseconds(80);
     private DateTime _hoverControlsActiveUntilUtc = DateTime.MinValue;
     // While the window is being resized the bar is taken down entirely and
     // held down until this long after the last SizeChanged - long enough that
@@ -154,7 +154,7 @@ public sealed partial class MainWindow : Window
     // edge so it slips behind the timeline. On Server, native per-pixel
     // compositing keeps empty area transparent; see ServerPerPixelOverlay.
     private const double HoverControlsSlideDistance = 52;
-    private static readonly TimeSpan HoverControlsSlideDuration = TimeSpan.FromMilliseconds(190);
+    private static readonly TimeSpan HoverControlsSlideDuration = TimeSpan.FromMilliseconds(150);
     private TranslateTransform? _hoverControlsTranslate;
     private ServerPerPixelOverlay? _hoverControlsPerPixelOverlay;
     private double _hoverControlsAnimationStartOffset;
@@ -7106,9 +7106,9 @@ public sealed partial class MainWindow : Window
             {
                 LogHoverControlsState($"sliding out (cursor={cursor.X},{cursor.Y} video={videoTopLeft.X},{videoTopLeft.Y}-{videoBottomRight.X},{videoBottomRight.Y})");
             }
-            // Animated both ways. "Instant" here is about it starting to go
-            // the moment the pointer leaves (HoverControlsGrace is zero), not
-            // about skipping the slide - the slide down is the exit.
+            // Animated both ways. The short grace filters stray poll ticks;
+            // once it expires, the exit begins immediately rather than
+            // skipping the slide.
             HideEditorHoverControls(immediate: false);
         }
     }
@@ -7129,9 +7129,10 @@ public sealed partial class MainWindow : Window
     private void ShowEditorHoverControls()
     {
         // Cancels an in-flight slide-out: moving back over the video during
-        // the 190ms exit brings the bar straight back rather than letting it
-        // finish leaving and then reappear.
-        StopHoverControlsAnimation();
+        // the 150ms exit brings the bar straight back rather than letting it
+        // finish leaving and then reappear. StartHoverControlsAnimation owns
+        // that reversal; stopping here first would restart the same slide on
+        // every hover poll and defeat its frame-synced guard.
         _hoverControlsSlidingOut = false;
 
         var window = EnsureEditorHoverControlsWindow();
