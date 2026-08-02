@@ -3,8 +3,8 @@
 ;   /DCLYPDAT_VERSION=<version>        e.g. 0.1.0
 ;   /DCLYPDAT_SOURCE_DIR=<path>        the published win-x64-folder to package
 ;   /DCLYPDAT_OUTPUT_FILE=<path>       output .exe path
-; Per-machine install under %ProgramFiles%\ClypDat. Application data remains
-; per-user under %LocalAppData%\ClypDat.
+; Per-user install under %LocalAppData%\Programs\ClypDat. Application data
+; remains separately under %LocalAppData%\ClypDat.
 
 !ifndef CLYPDAT_VERSION
   !define CLYPDAT_VERSION "0.0.0"
@@ -22,9 +22,9 @@
 
 Name "ClypDat"
 OutFile "${CLYPDAT_OUTPUT_FILE}"
-InstallDir "$PROGRAMFILES64\ClypDat"
-InstallDirRegKey HKLM "Software\ClypDat" "InstallDir"
-RequestExecutionLevel admin
+InstallDir "$LOCALAPPDATA\Programs\ClypDat"
+InstallDirRegKey HKCU "Software\ClypDat" "InstallDir"
+RequestExecutionLevel user
 Unicode true
 
 !define MUI_ABORTWARNING
@@ -46,13 +46,34 @@ Unicode true
 Var UpdateProcessId
 
 Function .onInit
-  SetRegView 64
-  SetShellVarContext all
   ${GetParameters} $R0
   ${GetOptions} "$R0" "/UPDATEPID=" $UpdateProcessId
   ${If} $UpdateProcessId != ""
     nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Wait-Process -Id $UpdateProcessId -ErrorAction SilentlyContinue"'
   ${EndIf}
+FunctionEnd
+
+Function RemoveMachineWideInstall
+  SetRegView 64
+  ReadRegStr $0 HKLM "Software\ClypDat" "InstallDir"
+  ${If} $0 == ""
+    Return
+  ${EndIf}
+
+  StrCpy $1 "$0\Uninstall.exe"
+  IfFileExists "$1" machineUninstallerExists machineUninstallerMissing
+
+machineUninstallerExists:
+  ExecWait '"$1" /S' $2
+  ${If} $2 != "0"
+    MessageBox MB_ICONSTOP "Could not remove the existing Program Files ClypDat installation. Complete that uninstall, then run this installer again."
+    Abort
+  ${EndIf}
+  Return
+
+machineUninstallerMissing:
+  MessageBox MB_ICONSTOP "Could not find the existing Program Files ClypDat uninstaller. Complete that uninstall, then run this installer again."
+  Abort
 FunctionEnd
 
 VIProductVersion "${CLYPDAT_VERSION}.0"
@@ -62,22 +83,15 @@ VIAddVersionKey "ProductVersion" "${CLYPDAT_VERSION}"
 VIAddVersionKey "FileDescription" "ClypDat Setup"
 
 Section "ClypDat" SecMain
-  ; Remove legacy per-user NSIS/MSI installs before registering the new
-  ; machine-wide copy. The helper only examines current-user ClypDat entries
-  ; and deliberately leaves %LocalAppData%\ClypDat data intact.
-  SetOutPath "$PLUGINSDIR"
-  File /oname=MigrateLegacyInstall.ps1 "MigrateLegacyInstall.ps1"
-  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\MigrateLegacyInstall.ps1"'
-  Pop $R0
-  ${If} $R0 != "0"
-    MessageBox MB_ICONSTOP "Could not remove the existing per-user ClypDat installation. Close ClypDat, uninstall the previous copy, then run this installer again."
-    Abort
-  ${EndIf}
+  ; 1.1.0 temporarily installed machine-wide. Its elevated uninstaller is
+  ; launched here so updates return to the per-user install location without
+  ; leaving a duplicate application copy behind.
+  Call RemoveMachineWideInstall
 
   SetOutPath "$INSTDIR"
   File /r "${CLYPDAT_SOURCE_DIR}\*.*"
 
-  WriteRegStr HKLM "Software\ClypDat" "InstallDir" "$INSTDIR"
+  WriteRegStr HKCU "Software\ClypDat" "InstallDir" "$INSTDIR"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
   CreateDirectory "$SMPROGRAMS\ClypDat"
@@ -85,14 +99,14 @@ Section "ClypDat" SecMain
   CreateShortcut "$SMPROGRAMS\ClypDat\Uninstall ClypDat.lnk" "$INSTDIR\Uninstall.exe"
   CreateShortcut "$DESKTOP\ClypDat.lnk" "$INSTDIR\ClypDat.exe"
 
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "DisplayName" "ClypDat"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "DisplayIcon" "$INSTDIR\ClypDat.exe"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "DisplayVersion" "${CLYPDAT_VERSION}"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "Publisher" "Stormanzanii"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "UninstallString" "$INSTDIR\Uninstall.exe"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "InstallLocation" "$INSTDIR"
-  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "NoModify" 1
-  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "NoRepair" 1
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "DisplayName" "ClypDat"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "DisplayIcon" "$INSTDIR\ClypDat.exe"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "DisplayVersion" "${CLYPDAT_VERSION}"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "Publisher" "Stormanzanii"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "UninstallString" "$INSTDIR\Uninstall.exe"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "InstallLocation" "$INSTDIR"
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "NoModify" 1
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "NoRepair" 1
 
   ${If} $UpdateProcessId != ""
     Exec '"$INSTDIR\ClypDat.exe"'
@@ -100,13 +114,11 @@ Section "ClypDat" SecMain
 SectionEnd
 
 Section "Uninstall"
-  SetRegView 64
-  SetShellVarContext all
   RMDir /r "$INSTDIR"
   Delete "$SMPROGRAMS\ClypDat\ClypDat.lnk"
   Delete "$SMPROGRAMS\ClypDat\Uninstall ClypDat.lnk"
   RMDir "$SMPROGRAMS\ClypDat"
   Delete "$DESKTOP\ClypDat.lnk"
-  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat"
-  DeleteRegKey HKLM "Software\ClypDat"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat"
+  DeleteRegKey HKCU "Software\ClypDat"
 SectionEnd
