@@ -23,9 +23,11 @@ public static class DesktopMonitorService
             var width = Math.Max(1, info.Monitor.Right - info.Monitor.Left);
             var height = Math.Max(1, info.Monitor.Bottom - info.Monitor.Top);
             var primary = (info.Flags & MonitorInfoPrimary) != 0;
-            var displayNumber = info.DeviceName.Replace("\\\\.\\DISPLAY", "Display ", StringComparison.OrdinalIgnoreCase);
-            var label = $"{displayNumber} — {width}×{height}" + (primary ? " (Primary)" : string.Empty);
-            monitors.Add(new DesktopMonitorOption(info.DeviceName, label, info.Monitor.Left, info.Monitor.Top, width, height, primary));
+            // Windows' device suffix is an implementation identifier, not its
+            // user-facing display number. It can be DISPLAY22/DISPLAY23 after
+            // driver or dock changes even on a two-monitor desktop. Keep it
+            // for capture resolution, assign friendly numbers after sorting.
+            monitors.Add(new DesktopMonitorOption(info.DeviceName, string.Empty, info.Monitor.Left, info.Monitor.Top, width, height, primary));
             return true;
         }, IntPtr.Zero);
 
@@ -33,6 +35,10 @@ public static class DesktopMonitorService
             .OrderBy(monitor => monitor.IsPrimary ? 0 : 1)
             .ThenBy(monitor => monitor.X)
             .ThenBy(monitor => monitor.Y)
+            .Select((monitor, index) => monitor with
+            {
+                Label = $"Display {index + 1} — {monitor.Width}×{monitor.Height}" + (monitor.IsPrimary ? " (Primary)" : string.Empty)
+            })
             .ToArray();
     }
 

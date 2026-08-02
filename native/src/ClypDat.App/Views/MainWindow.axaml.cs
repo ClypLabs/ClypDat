@@ -5963,8 +5963,7 @@ public sealed partial class MainWindow : Window
         var titleBar = new Grid
         {
             ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
-            Height = 48,
-            Background = Avalonia.Media.Brush.Parse("#0C1319")
+            Height = 48
         };
         var titleIcon = new Image { Source = new Avalonia.Media.Imaging.Bitmap(Avalonia.Platform.AssetLoader.Open(new Uri("avares://ClypDat/Assets/clypdat-icon-24.png"))), Width = 16, Height = 16, Margin = new Avalonia.Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         // 2px down: TextBlock's cap height sits visually higher than the icon's
@@ -5980,7 +5979,7 @@ public sealed partial class MainWindow : Window
         // hover actually paint instead of only flashing on pointer-exit (see
         // AppStyles.axaml). Width/Height stay local: this dialog's 40px
         // titlebar is shorter than the main window's 48px chrome row.
-        var closeButton = new Button { Classes = { "windowChromeButton", "windowCloseButton" }, Content = "✕", Width = 40, Height = 40, Margin = new Avalonia.Thickness(0), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+        var closeButton = new Button { Classes = { "windowChromeButton", "windowCloseButton" }, Content = "✕", Width = 40, Height = 40, Margin = new Avalonia.Thickness(0), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, CornerRadius = new Avalonia.CornerRadius(0, 11, 0, 0) };
         // downloadCts is null until Update Now starts one - X used to just
         // close the window while DownloadAndRestartAsync kept running
         // undisturbed in the background (nothing was ever cancelling it), so
@@ -5997,6 +5996,12 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(closeButton, 2);
         titleBar.Children.Add(titleLeft);
         titleBar.Children.Add(closeButton);
+        var roundedTitleBar = new Border
+        {
+            Background = Avalonia.Media.Brush.Parse("#0C1319"),
+            CornerRadius = new Avalonia.CornerRadius(11, 11, 0, 0),
+            Child = titleBar
+        };
 
         var statusText = new TextBlock
         {
@@ -6194,13 +6199,13 @@ public sealed partial class MainWindow : Window
         {
             Children =
             {
-                titleBar,
+                roundedTitleBar,
                 footer,
                 hero,
                 body
             }
         };
-        DockPanel.SetDock(titleBar, Dock.Top);
+        DockPanel.SetDock(roundedTitleBar, Dock.Top);
         DockPanel.SetDock(footer, Dock.Bottom);
         DockPanel.SetDock(hero, Dock.Top);
         var shell = CreateRoundedDialogShell(content);
@@ -6349,18 +6354,23 @@ public sealed partial class MainWindow : Window
         var titleBar = new Grid
         {
             ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
-            Height = 48,
-            Background = Avalonia.Media.Brush.Parse("#0C1319")
+            Height = 48
         };
         var titleIcon = new Image { Source = new Avalonia.Media.Imaging.Bitmap(Avalonia.Platform.AssetLoader.Open(new Uri("avares://ClypDat/Assets/clypdat-icon-24.png"))), Width = 16, Height = 16, Margin = new Avalonia.Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         var titleText = new TextBlock { Text = "You're up to date", Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"), FontSize = 12, FontWeight = Avalonia.Media.FontWeight.SemiBold, Margin = new Avalonia.Thickness(8, 2, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         var titleLeft = new StackPanel { Orientation = Orientation.Horizontal, Children = { titleIcon, titleText } };
         Grid.SetColumn(titleLeft, 0);
-        var closeButton = new Button { Classes = { "windowChromeButton", "windowCloseButton" }, Content = "✕", Width = 40, Height = 40, Margin = new Avalonia.Thickness(0), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+        var closeButton = new Button { Classes = { "windowChromeButton", "windowCloseButton" }, Content = "✕", Width = 40, Height = 40, Margin = new Avalonia.Thickness(0), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, CornerRadius = new Avalonia.CornerRadius(0, 11, 0, 0) };
         closeButton.Click += (_, _) => window.Close();
         Grid.SetColumn(closeButton, 2);
         titleBar.Children.Add(titleLeft);
         titleBar.Children.Add(closeButton);
+        var roundedTitleBar = new Border
+        {
+            Background = Avalonia.Media.Brush.Parse("#0C1319"),
+            CornerRadius = new Avalonia.CornerRadius(11, 11, 0, 0),
+            Child = titleBar
+        };
 
         var notesGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,14,*") };
         var whatsNewColumn = BuildNotesColumn("What's New", whatsNew, "#13C8B5");
@@ -6442,13 +6452,13 @@ public sealed partial class MainWindow : Window
         {
             Children =
             {
-                titleBar,
+                roundedTitleBar,
                 footer,
                 hero,
                 body
             }
         };
-        DockPanel.SetDock(titleBar, Dock.Top);
+        DockPanel.SetDock(roundedTitleBar, Dock.Top);
         DockPanel.SetDock(footer, Dock.Bottom);
         DockPanel.SetDock(hero, Dock.Top);
         var shell = CreateRoundedDialogShell(content);
