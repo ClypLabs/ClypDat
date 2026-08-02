@@ -5165,8 +5165,8 @@ public sealed partial class MainWindow : Window
             var result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildTrimArguments(tempPath), exportDuration, progress, progressCts.Token);
             if (result.ExitCode != 0 && !progressCts.IsCancellationRequested)
             {
-                // Same NVENC-then-CPU fallback as Export.
-                AppLog.Info($"Save Trim: NVENC encode failed, retrying with CPU encoder. ffmpeg said: {result.Error}");
+                // Same hardware-then-CPU fallback as Export.
+                AppLog.Info($"Save Trim: {ExportEncoderProbe.Family ?? "hardware"} encode failed, retrying with CPU encoder. ffmpeg said: {result.Error}");
                 progressBar.IsIndeterminate = true;
                 statusText.Text = "Saving trim (CPU encoder)...";
                 percentText.Text = string.Empty;
@@ -5331,9 +5331,10 @@ public sealed partial class MainWindow : Window
             var result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildExportArguments(outputPath), exportDuration, progress, progressCts.Token);
             if (result.ExitCode != 0 && !progressCts.IsCancellationRequested)
             {
-                // NVENC encode failed (no NVIDIA GPU, driver too old) - redo
-                // the whole encode on the CPU instead of surfacing an error.
-                AppLog.Info($"Export: NVENC encode failed, retrying with CPU encoder. ffmpeg said: {result.Error}");
+                // The detected hardware encoder still failed on this particular
+                // clip (a codec its silicon does not implement, most likely) -
+                // redo the whole encode on the CPU instead of surfacing an error.
+                AppLog.Info($"Export: {ExportEncoderProbe.Family ?? "hardware"} encode failed, retrying with CPU encoder. ffmpeg said: {result.Error}");
                 progressBar.IsIndeterminate = true;
                 statusText.Text = "Exporting clip (CPU encoder)...";
                 percentText.Text = string.Empty;

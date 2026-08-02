@@ -4815,22 +4815,51 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private static double VolumeMultiplier(double percent) => Math.Clamp(percent / 100d, 0, 1.5);
 
-    // NVENC first: the CPU encoders here (libx265, and especially libaom-av1)
-    // took minutes for clips NVENC finishes in seconds, and this app already
-    // targets NVENC hardware for capture. Callers retry with
-    // useHardwareEncoder: false when ffmpeg fails - which is exactly what
-    // happens on a machine with no NVIDIA GPU - so the CPU path is the
-    // fallback, not a separate user-facing choice.
+    // Hardware first: the CPU encoders here (libx265, and especially libaom-av1)
+    // took minutes for clips a hardware encoder finishes in seconds. Which
+    // hardware encoder is a per-machine question - this used to ask for NVENC
+    // unconditionally, so AMD and Intel machines paid a guaranteed failed attempt
+    // and then encoded everything on libx264 despite having a usable encoder of
+    // their own. ExportEncoderProbe answers that once per run. Callers still
+    // retry with useHardwareEncoder: false when ffmpeg fails, so the CPU path
+    // remains the fallback for a codec the detected vendor cannot do (AV1 on
+    // pre-RDNA3 AMD, say) rather than a separate user-facing choice.
     private IReadOnlyList<string> BuildExportCodecArguments(bool useHardwareEncoder)
     {
         if (useHardwareEncoder)
         {
-            return SelectedExportCodec?.Label switch
+            var codec = SelectedExportCodec?.Label;
+            switch (ExportEncoderProbe.Family)
             {
-                "H.265" => new[] { "-c:v", "hevc_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "24", "-b:v", "0" },
-                "AV1" => new[] { "-c:v", "av1_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "32", "-b:v", "0" },
-                _ => new[] { "-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "20", "-b:v", "0" }
-            };
+                case "nvenc":
+                    return codec switch
+                    {
+                        "H.265" => new[] { "-c:v", "hevc_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "24", "-b:v", "0" },
+                        "AV1" => new[] { "-c:v", "av1_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "32", "-b:v", "0" },
+                        _ => new[] { "-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "20", "-b:v", "0" }
+                    };
+
+                // AMF spells quality control differently from NVENC: no -cq/-preset
+                // pair, so the equivalent is constant-QP rate control with the
+                // I/P quantisers set to the same targets used above.
+                case "amf":
+                    return codec switch
+                    {
+                        "H.265" => new[] { "-c:v", "hevc_amf", "-quality", "balanced", "-rc", "cqp", "-qp_i", "24", "-qp_p", "24" },
+                        "AV1" => new[] { "-c:v", "av1_amf", "-quality", "balanced", "-rc", "cqp", "-qp_i", "32", "-qp_p", "32" },
+                        _ => new[] { "-c:v", "h264_amf", "-quality", "balanced", "-rc", "cqp", "-qp_i", "20", "-qp_p", "20" }
+                    };
+
+                // Quick Sync's single quality knob is -global_quality, on the same
+                // 1-51 quantiser scale the other two use here.
+                case "qsv":
+                    return codec switch
+                    {
+                        "H.265" => new[] { "-c:v", "hevc_qsv", "-preset", "medium", "-global_quality", "24" },
+                        "AV1" => new[] { "-c:v", "av1_qsv", "-preset", "medium", "-global_quality", "32" },
+                        _ => new[] { "-c:v", "h264_qsv", "-preset", "medium", "-global_quality", "20" }
+                    };
+            }
         }
 
         return SelectedExportCodec?.Label switch

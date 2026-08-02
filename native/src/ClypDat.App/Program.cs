@@ -81,6 +81,11 @@ internal static class Program
 
         FfmpegPathResolver.EnsureBundledFfmpegOnPath();
 
+        // Off-thread, and only after the line above has put the bundled ffmpeg on
+        // PATH for it to find. Doing it now means the first export already knows
+        // which vendor's encoder works instead of blocking on the probe.
+        ExportEncoderProbe.Prewarm();
+
         // Hidden validation hook for the Phase 1 native capture engine (see plan) -
         // not part of the normal app UI flow, just a quick way to exercise
         // NativeReplayBuffer end-to-end with the real production class before it's
