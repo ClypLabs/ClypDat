@@ -8369,7 +8369,7 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(closeButton, 2);
         titleBar.Children.Add(closeButton);
 
-        var body = new StackPanel { Margin = new Avalonia.Thickness(28, 24, 28, 28), Spacing = 18 };
+        var body = new StackPanel { Margin = new Avalonia.Thickness(28, 24, 28, 28), Spacing = 24 };
 
         var header = new Border
         {
@@ -8425,6 +8425,7 @@ public sealed partial class MainWindow : Window
         {
             Orientation = Orientation.Horizontal,
             Spacing = 10,
+            Margin = new Avalonia.Thickness(0, 8, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Right
         };
 

@@ -10,9 +10,13 @@ namespace ClypDat.App.Views;
 internal sealed class ShareBackdropWindow : Window
 {
     public event EventHandler? DismissRequested;
+    private readonly Window _owner;
+    private PixelPoint _lockedPosition;
+    private bool _restoringPosition;
 
     public ShareBackdropWindow(Window owner)
     {
+        _owner = owner;
         WindowDecorations = WindowDecorations.None;
         ShowInTaskbar = false;
         CanResize = false;
@@ -21,11 +25,23 @@ internal sealed class ShareBackdropWindow : Window
         Background = Brushes.Transparent;
         TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent };
 
-        var scrim = new Border { Background = new SolidColorBrush(Color.Parse("#DD000000")) };
+        var scrim = new Border
+        {
+            Background = new SolidColorBrush(Color.Parse("#DD000000")),
+            CornerRadius = new CornerRadius(8),
+            ClipToBounds = true
+        };
         scrim.PointerPressed += Scrim_OnPointerPressed;
         Content = scrim;
         PositionOverOwner(owner);
-        Opened += (_, _) => WindowTransparencyFallback.ApplyIfNeeded(this, scrim.Background, b => scrim.Background = b);
+        PositionChanged += (_, _) => RestoreLockedPosition();
+        owner.PositionChanged += Owner_OnPositionChanged;
+        Closed += (_, _) => owner.PositionChanged -= Owner_OnPositionChanged;
+        Opened += (_, _) =>
+        {
+            WindowTransparencyFallback.ApplyIfNeeded(this, scrim.Background, b => scrim.Background = b);
+            RestoreLockedPosition();
+        };
     }
 
     private void Scrim_OnPointerPressed(object? sender, PointerPressedEventArgs e)
@@ -40,15 +56,27 @@ internal sealed class ShareBackdropWindow : Window
         if (handle != IntPtr.Zero && GetWindowRect(handle, out var rect))
         {
             var scaling = owner.RenderScaling > 0 ? owner.RenderScaling : 1;
-            Position = new PixelPoint(rect.Left, rect.Top);
+            _lockedPosition = new PixelPoint(rect.Left, rect.Top);
+            Position = _lockedPosition;
             Width = (rect.Right - rect.Left) / scaling;
             Height = (rect.Bottom - rect.Top) / scaling;
             return;
         }
 
-        Position = owner.PointToScreen(new Point(0, 0));
+        _lockedPosition = owner.PointToScreen(new Point(0, 0));
+        Position = _lockedPosition;
         Width = owner.Bounds.Width;
         Height = owner.Bounds.Height;
+    }
+
+    private void Owner_OnPositionChanged(object? sender, PixelPointEventArgs e) => PositionOverOwner(_owner);
+
+    private void RestoreLockedPosition()
+    {
+        if (_restoringPosition || Position == _lockedPosition) return;
+        _restoringPosition = true;
+        try { Position = _lockedPosition; }
+        finally { _restoringPosition = false; }
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
