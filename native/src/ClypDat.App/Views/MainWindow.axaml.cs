@@ -389,7 +389,12 @@ public sealed partial class MainWindow : Window
                 // (and technically video, decoding for nobody) indefinitely
                 // in the background. A real quit already covers this via
                 // _playback?.Dispose() in Closed below.
+                ViewModel?.SaveSelectedClipEditState();
+                if (ViewModel?.IsVideoFullscreen == true) ExitVideoFullscreen();
                 StopEditorPlayback(stopMode: PlaybackStopMode.Background);
+                // Closing to tray is a navigation reset, not a suspended
+                // editor. Reopening ClypDat must always return to Library.
+                ViewModel?.CloseEditor();
                 HideEditorToolsPanel();
                 Hide();
                 ShowInTaskbar = false;
