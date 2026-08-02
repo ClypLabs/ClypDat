@@ -54,5 +54,8 @@ builder-debug.yml
 builder-effective-config.yaml
 AGENTS.md
 CLAUDE.md
-dotnet.ps1
-global.json
+
+# dotnet.ps1 and global.json are NOT ignored on purpose: .github/workflows/release.yml
+# runs ".\dotnet.ps1 --info" to bootstrap the pinned SDK, and global.json is what pins
+# it. Ignoring them dropped both from the repo and every release build failed at the
+# bootstrap step with "The term '.\dotnet.ps1' is not recognized".
