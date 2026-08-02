@@ -8317,8 +8317,8 @@ public sealed partial class MainWindow : Window
     // a plain Window here used the OS's own title bar (minimize/maximize/close,
     // usually light-themed on Windows), which looked jarring against the rest
     // of the app's own dark, chromeless windows (see CreateUpdateDialog). This
-    // gives every popup that same slim custom title bar instead: just an icon,
-    // a label, and a single close button - no minimize/maximize at all.
+    // gives every popup the same opaque rounded card and centered chrome as
+    // the Share popup - no native title bar, movement, or square corners.
     private static (Window Window, Panel Body) CreateChromelessDialog(string titleBarLabel, bool centerTitle = false)
     {
         var window = new Window
@@ -8337,59 +8337,31 @@ public sealed partial class MainWindow : Window
         var titleBar = new Grid
         {
             ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
-            Height = 40,
-            Background = Avalonia.Media.Brush.Parse("#0C1319")
+            Height = 56
         };
-        if (centerTitle)
+        var centeredTitleText = new TextBlock
         {
-            // No icon, just the label spanning the middle column - matches
-            // dialogs (e.g. the new-clips popup) whose title is itself the
-            // headline rather than a small caption beside the app icon.
-            var centeredTitleText = new TextBlock
-            {
-                Text = titleBarLabel,
-                Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"),
-                FontSize = 14,
-                FontWeight = Avalonia.Media.FontWeight.Bold,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            Grid.SetColumn(centeredTitleText, 1);
-            titleBar.Children.Add(centeredTitleText);
-        }
-        else
-        {
-            var titleIcon = new Image
-            {
-                Source = new Avalonia.Media.Imaging.Bitmap(Avalonia.Platform.AssetLoader.Open(new Uri("avares://ClypDat/Assets/clypdat-icon-24.png"))),
-                Width = 16,
-                Height = 16,
-                Margin = new Avalonia.Thickness(14, 0, 0, 0),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            var titleText = new TextBlock
-            {
-                Text = titleBarLabel,
-                Foreground = Avalonia.Media.Brush.Parse("#B9C6D4"),
-                FontSize = 12,
-                FontWeight = Avalonia.Media.FontWeight.SemiBold,
-                // 2px down to sit on the icon's optical center - see CreateUpdateDialog.
-                Margin = new Avalonia.Thickness(8, 2, 0, 0),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            var titleLeft = new StackPanel { Orientation = Orientation.Horizontal, Children = { titleIcon, titleText } };
-            Grid.SetColumn(titleLeft, 0);
-            titleBar.Children.Add(titleLeft);
-        }
+            Text = titleBarLabel.ToUpperInvariant(),
+            Foreground = Avalonia.Media.Brush.Parse("#D8E4F2"),
+            FontSize = 17,
+            FontWeight = Avalonia.Media.FontWeight.Bold,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Avalonia.Thickness(-2, 0, 0, 0),
+            IsHitTestVisible = false
+        };
+        Grid.SetColumnSpan(centeredTitleText, 3);
+        titleBar.Children.Add(centeredTitleText);
 
         var closeButton = new Button
         {
-            Classes = { "windowChromeButton", "windowCloseButton" },
+            Classes = { "dialogClose" },
             Content = "✕",
-            Width = 40,
-            Height = 40,
+            Width = 52,
+            Height = 56,
             Margin = new Avalonia.Thickness(0),
             FontSize = 12,
+            CornerRadius = new CornerRadius(0, 11, 0, 0),
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center
         };
@@ -8397,12 +8369,18 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(closeButton, 2);
         titleBar.Children.Add(closeButton);
 
-        var body = new StackPanel { Margin = new Avalonia.Thickness(22, 20, 22, 22), Spacing = 16 };
+        var body = new StackPanel { Margin = new Avalonia.Thickness(28, 24, 28, 28), Spacing = 18 };
 
-        var layout = new DockPanel { Children = { titleBar, body } };
+        var header = new Border
+        {
+            Background = Avalonia.Media.Brush.Parse("#0C1319"),
+            CornerRadius = new CornerRadius(11, 11, 0, 0),
+            Child = titleBar
+        };
+        var layout = new DockPanel { LastChildFill = true, Children = { header, body } };
         var shell = new Border
         {
-            Background = Avalonia.Media.Brushes.Transparent,
+            Background = Avalonia.Media.Brush.Parse("#111920"),
             BorderBrush = Avalonia.Media.Brush.Parse("#232F3A"),
             BorderThickness = new Avalonia.Thickness(1),
             CornerRadius = new CornerRadius(12),
@@ -8410,7 +8388,7 @@ public sealed partial class MainWindow : Window
             Child = layout
         };
         window.Content = shell;
-        DockPanel.SetDock(titleBar, Dock.Top);
+        DockPanel.SetDock(header, Dock.Top);
 
         window.KeyDown += (_, keyArgs) =>
         {
