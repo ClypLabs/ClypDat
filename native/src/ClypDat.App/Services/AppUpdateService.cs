@@ -21,9 +21,8 @@ public sealed record UpdateDownloadProgress(string Status, double? Percentage, d
 
 public static class AppUpdateService
 {
-    // Updates use the NSIS installer rather than replacing files in place. This
-    // lets Program Files installs request elevation and migrates old per-user
-    // installs through the same path as a manual setup run.
+    // Updates use the NSIS installer rather than replacing files in place, so
+    // it can safely replace the running app after ClypDat exits.
     private const string ExpectedAssetName = "ClypDat-Setup.exe";
     private const string UpstreamOwner = "ClypDat";
     private const string UpstreamRepository = "ClypDat";
