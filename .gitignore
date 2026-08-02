@@ -54,3 +54,5 @@ builder-debug.yml
 builder-effective-config.yaml
 AGENTS.md
 CLAUDE.md
+dotnet.ps1
+global.json

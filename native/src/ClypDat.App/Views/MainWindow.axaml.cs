@@ -77,6 +77,10 @@ public sealed partial class MainWindow : Window
     private DispatcherTimer? _hotkeyCaptureTimeout;
     private bool _replayTransitioning;
     private DispatcherTimer? _replayRestartDebounceTimer;
+    // The detector runs continuously while a game is active. Remembering the
+    // target already queued for restart stops identical polls from extending
+    // the debounce forever and leaving the UI on "Switching capture...".
+    private string _pendingReplayTargetIdentity = string.Empty;
     private bool _showNewClipsAfterReplayRestart;
     private bool _startNewGameSessionAfterReplayRestart;
     // Capture backends bind to either a monitor or one concrete game window.
@@ -2054,9 +2058,11 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null || _replayBuffer is not { IsRecording: true }) return;
         var target = ReplayTargetIdentity(ViewModel.CreateReplayConfig());
         if (string.Equals(target, _activeReplayTargetIdentity, StringComparison.Ordinal)) return;
+        if (string.Equals(target, _pendingReplayTargetIdentity, StringComparison.Ordinal)) return;
         var wasGameCapture = _activeReplayTargetIdentity.StartsWith("Game|", StringComparison.Ordinal);
         _showNewClipsAfterReplayRestart |= wasGameCapture && ViewModel.IsEffectiveDesktopCapture;
         _startNewGameSessionAfterReplayRestart |= !wasGameCapture && !ViewModel.IsEffectiveDesktopCapture;
+        _pendingReplayTargetIdentity = target;
         ViewModel.RecorderStatus = "Switching capture...";
         ScheduleReplayRestart();
     }
@@ -2064,22 +2070,54 @@ public sealed partial class MainWindow : Window
     private void ScheduleReplayRestart()
     {
         _replayRestartDebounceTimer?.Stop();
-        _replayRestartDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };
-        _replayRestartDebounceTimer.Tick += async (_, _) =>
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };
+        _replayRestartDebounceTimer = timer;
+        timer.Tick += async (_, _) =>
         {
-            _replayRestartDebounceTimer?.Stop();
+            timer.Stop();
+            // A newer setting change owns the current debounce. Its callback
+            // must be the one that restarts capture, not this stale timer.
+            if (!ReferenceEquals(_replayRestartDebounceTimer, timer)) return;
             _replayRestartDebounceTimer = null;
-            if (ViewModel is not { Settings.ReplayBufferEnabled: true }) return;
+            _pendingReplayTargetIdentity = string.Empty;
+            if (ViewModel is not { Settings.ReplayBufferEnabled: true })
+            {
+                UpdateRecorderStatusFromState();
+                return;
+            }
+
+            // A setting/detection update can land while another start or stop
+            // still owns the buffer. Keep the request alive instead of bailing
+            // out and leaving its temporary status behind.
+            if (_replayTransitioning)
+            {
+                ScheduleReplayRestart();
+                return;
+            }
+
             var showNewClips = _showNewClipsAfterReplayRestart;
             _showNewClipsAfterReplayRestart = false;
             var startNewGameSession = _startNewGameSessionAfterReplayRestart;
             _startNewGameSessionAfterReplayRestart = false;
-            if (ViewModel.IsReplayRecording) await StopReplayBufferAsync();
-            if (showNewClips) ShowNewClipsDialog();
-            if (ViewModel is not null) ViewModel.RecorderStatus = "Switching capture...";
-            await StartReplayBufferAsync(showErrors: true, isQualityRestart: !startNewGameSession);
+            try
+            {
+                if (ViewModel.IsReplayRecording) await StopReplayBufferAsync();
+                if (showNewClips) ShowNewClipsDialog();
+                if (ViewModel is not null) ViewModel.RecorderStatus = "Switching capture...";
+                await StartReplayBufferAsync(showErrors: true, isQualityRestart: !startNewGameSession);
+            }
+            finally
+            {
+                UpdateRecorderStatusFromState();
+            }
         };
-        _replayRestartDebounceTimer.Start();
+        timer.Start();
+    }
+
+    private void UpdateRecorderStatusFromState()
+    {
+        if (ViewModel is null) return;
+        ViewModel.RecorderStatus = ViewModel.IsReplayRecording ? "Replay On" : ReplayIdleStatus;
     }
 
     // Flipping the master switch takes effect now rather than at the next
@@ -2178,6 +2216,10 @@ public sealed partial class MainWindow : Window
             }
             _sessionCollectingClips = true;
             ViewModel.IsReplayRecording = _replayBuffer.IsRecording;
+            // The IsReplayRecording setter intentionally does nothing for an
+            // unchanged value. A successful restart can therefore otherwise
+            // retain the temporary switching label from the scheduler.
+            UpdateRecorderStatusFromState();
             if (ViewModel.IsReplayRecording && !ViewModel.IsEffectiveDesktopCapture) ShowGameDetectedNotification(ViewModel.ActiveGameDetection.DisplayName);
         }
         catch (Exception error)
@@ -3846,7 +3888,7 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null || !ViewModel.CanRenameAllClips) return;
         var dialog = CreateDialog("Rename all clips?", "This renames every video in the current library to the selected filename scheme. Existing files are never overwritten.", true, "Rename", destructive: false);
-        if (!await dialog.ShowDialog<bool>(this)) return;
+        if (!await ShowModalDialogAsync<bool>(dialog)) return;
         await ViewModel.RenameAllClipsAsync();
     }
 
@@ -5086,14 +5128,14 @@ public sealed partial class MainWindow : Window
             showCancel: true,
             confirmLabel: "Save Trim",
             destructive: false);
-        if (!await dialog.ShowDialog<bool>(this)) return;
+        if (!await ShowModalDialogAsync<bool>(dialog)) return;
 
         var tempPath = Path.Combine(Path.GetTempPath(), $"clypdat-save-trim-{Guid.NewGuid():N}{Path.GetExtension(sourcePath)}");
 
         ViewModel.IsExporting = true;
         var progressCts = new CancellationTokenSource();
         var (progressWindow, progressBar, statusText, percentText, etaText) = CreateProgressDialog("Saving trim", "Saving trim...", () => progressCts.Cancel());
-        var progressDialogTask = progressWindow.ShowDialog(this);
+        var progressDialogTask = ShowModalDialogAsync<bool>(progressWindow);
         try
         {
             var exportDuration = ViewModel.ExportDuration;
@@ -5255,7 +5297,7 @@ public sealed partial class MainWindow : Window
         ViewModel.IsExporting = true;
         var progressCts = new CancellationTokenSource();
         var (progressWindow, progressBar, statusText, percentText, etaText) = CreateProgressDialog("Exporting clip", "Exporting clip...", () => progressCts.Cancel());
-        var progressDialogTask = progressWindow.ShowDialog(this);
+        var progressDialogTask = ShowModalDialogAsync<bool>(progressWindow);
         try
         {
             _playback?.Pause();
@@ -5504,7 +5546,7 @@ public sealed partial class MainWindow : Window
     private async Task<bool> ConfirmDeleteAsync(string summary)
     {
         var dialog = CreateDialog("Delete clips?", $"{summary}\n\nThis permanently deletes the file(s).", true);
-        var result = await dialog.ShowDialog<bool>(this);
+        var result = await ShowModalDialogAsync<bool>(dialog);
         return result;
     }
 
@@ -5513,7 +5555,7 @@ public sealed partial class MainWindow : Window
         var dialog = CreateDialog(title, message, false);
         try
         {
-            await dialog.ShowDialog<bool>(this);
+            await ShowModalDialogAsync<bool>(dialog);
         }
         catch (Exception error)
         {
@@ -5580,7 +5622,25 @@ public sealed partial class MainWindow : Window
             textBox.SelectAll();
         };
 
-        return await window.ShowDialog<string?>(this);
+        return await ShowModalDialogAsync<string?>(window);
+    }
+
+    // App-owned dialogs are displayed over a separate transparent window so
+    // the whole owner (including native video surfaces) darkens consistently.
+    // ShowDialog uses the backdrop as the owner, making the card modal without
+    // allowing clicks to leak through the scrim.
+    private async Task<T> ShowModalDialogAsync<T>(Window dialog)
+    {
+        var backdrop = new ShareBackdropWindow(this);
+        backdrop.Show(this);
+        try
+        {
+            return await dialog.ShowDialog<T>(backdrop);
+        }
+        finally
+        {
+            backdrop.Close();
+        }
     }
 
     private async Task RunStartupDialogsAsync()
@@ -5613,11 +5673,11 @@ public sealed partial class MainWindow : Window
             CanResize = false,
             ShowInTaskbar = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Background = Avalonia.Media.Brush.Parse("#111920"),
+            Background = Avalonia.Media.Brushes.Transparent,
             WindowDecorations = WindowDecorations.None,
             ExtendClientAreaToDecorationsHint = true,
             ExtendClientAreaTitleBarHeightHint = -1,
-            TransparencyLevelHint = new[] { WindowTransparencyLevel.None }
+            TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent }
         };
         var card = new Border
         {
@@ -5629,6 +5689,7 @@ public sealed partial class MainWindow : Window
         };
         var layout = new DockPanel { LastChildFill = true };
         card.Child = layout;
+        window.Opened += (_, _) => WindowTransparencyFallback.ApplyIfNeeded(window, card.Background, brush => card.Background = brush);
         var header = new Grid { Height = 56, ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Background = Avalonia.Media.Brush.Parse("#0C1319") };
         var title = new TextBlock
         {
@@ -5863,6 +5924,16 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private static Border CreateRoundedDialogShell(Control content) => new()
+    {
+        Background = Avalonia.Media.Brush.Parse("#111920"),
+        BorderBrush = Avalonia.Media.Brush.Parse("#232F3A"),
+        BorderThickness = new Avalonia.Thickness(1),
+        CornerRadius = new Avalonia.CornerRadius(12),
+        ClipToBounds = true,
+        Child = content
+    };
+
     private Window CreateUpdateDialog(AppUpdateInfo update)
     {
         var window = new Window
@@ -5872,11 +5943,11 @@ public sealed partial class MainWindow : Window
             MaxHeight = 720,
             CanResize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Background = Avalonia.Media.Brush.Parse("#111920"),
+            Background = Avalonia.Media.Brushes.Transparent,
             WindowDecorations = WindowDecorations.None,
             ExtendClientAreaToDecorationsHint = true,
             ExtendClientAreaTitleBarHeightHint = -1,
-            TransparencyLevelHint = new[] { Avalonia.Controls.WindowTransparencyLevel.None }
+            TransparencyLevelHint = new[] { Avalonia.Controls.WindowTransparencyLevel.Transparent }
         };
 
         var titleBar = new Grid
@@ -6109,7 +6180,7 @@ public sealed partial class MainWindow : Window
             }
         };
 
-        window.Content = new DockPanel
+        var content = new DockPanel
         {
             Children =
             {
@@ -6122,6 +6193,9 @@ public sealed partial class MainWindow : Window
         DockPanel.SetDock(titleBar, Dock.Top);
         DockPanel.SetDock(footer, Dock.Bottom);
         DockPanel.SetDock(hero, Dock.Top);
+        var shell = CreateRoundedDialogShell(content);
+        window.Content = shell;
+        window.Opened += (_, _) => WindowTransparencyFallback.ApplyIfNeeded(window, shell.Background, brush => shell.Background = brush);
 
         return window;
     }
@@ -6255,11 +6329,11 @@ public sealed partial class MainWindow : Window
             MaxHeight = 720,
             CanResize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Background = Avalonia.Media.Brush.Parse("#111920"),
+            Background = Avalonia.Media.Brushes.Transparent,
             WindowDecorations = WindowDecorations.None,
             ExtendClientAreaToDecorationsHint = true,
             ExtendClientAreaTitleBarHeightHint = -1,
-            TransparencyLevelHint = new[] { Avalonia.Controls.WindowTransparencyLevel.None }
+            TransparencyLevelHint = new[] { Avalonia.Controls.WindowTransparencyLevel.Transparent }
         };
 
         var titleBar = new Grid
@@ -6354,7 +6428,7 @@ public sealed partial class MainWindow : Window
         };
         ((Button)footer.Children[0]).Click += (_, _) => window.Close();
 
-        window.Content = new DockPanel
+        var content = new DockPanel
         {
             Children =
             {
@@ -6367,6 +6441,9 @@ public sealed partial class MainWindow : Window
         DockPanel.SetDock(titleBar, Dock.Top);
         DockPanel.SetDock(footer, Dock.Bottom);
         DockPanel.SetDock(hero, Dock.Top);
+        var shell = CreateRoundedDialogShell(content);
+        window.Content = shell;
+        window.Opened += (_, _) => WindowTransparencyFallback.ApplyIfNeeded(window, shell.Background, brush => shell.Background = brush);
 
         return window;
     }
@@ -8263,10 +8340,6 @@ public sealed partial class MainWindow : Window
             Height = 40,
             Background = Avalonia.Media.Brush.Parse("#0C1319")
         };
-        titleBar.PointerPressed += (_, e) =>
-        {
-            if (e.GetCurrentPoint(titleBar).Properties.IsLeftButtonPressed) window.BeginMoveDrag(e);
-        };
         if (centerTitle)
         {
             // No icon, just the label spanning the middle column - matches
@@ -8329,7 +8402,7 @@ public sealed partial class MainWindow : Window
         var layout = new DockPanel { Children = { titleBar, body } };
         var shell = new Border
         {
-            Background = Avalonia.Media.Brush.Parse("#111920"),
+            Background = Avalonia.Media.Brushes.Transparent,
             BorderBrush = Avalonia.Media.Brush.Parse("#232F3A"),
             BorderThickness = new Avalonia.Thickness(1),
             CornerRadius = new CornerRadius(12),
