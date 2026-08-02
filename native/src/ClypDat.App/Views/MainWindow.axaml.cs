@@ -155,14 +155,14 @@ public sealed partial class MainWindow : Window
     // compositing keeps empty area transparent; see ServerPerPixelOverlay.
     private const double HoverControlsSlideDistance = 52;
     private static readonly TimeSpan HoverControlsSlideDuration = TimeSpan.FromMilliseconds(190);
-    private Border? _hoverControlsBackdrop;
+    private TranslateTransform? _hoverControlsTranslate;
     private ServerPerPixelOverlay? _hoverControlsPerPixelOverlay;
-    private DispatcherTimer? _hoverControlsAnimationTimer;
-    private DateTime _hoverControlsAnimationStartedUtc;
     private double _hoverControlsAnimationStartOffset;
     private double _hoverControlsAnimationTargetOffset;
     private double _hoverControlsOffset = HoverControlsSlideDistance;
     private Action? _hoverControlsAnimationComplete;
+    private int _hoverControlsAnimationId;
+    private bool _hoverControlsAnimationRunning;
     private bool _hoverControlsSlidingOut;
     private DispatcherTimer? _editorToolsPanelResizeSettleTimer;
     private string? _libraryResizeAnchorPath;
@@ -7160,7 +7160,7 @@ public sealed partial class MainWindow : Window
                 // lines. A second between attempts still recovers promptly.
                 AppLog.Error("Editor hover bar show failed; rebuilding it", error);
                 _editorHoverControlsWindow = null;
-                _hoverControlsBackdrop = null;
+                _hoverControlsTranslate = null;
                 _hoverControlsLastState = string.Empty;
                 _hoverControlsSuppressedUntilUtc = DateTime.UtcNow + TimeSpan.FromSeconds(1);
                 return;
@@ -7236,6 +7236,15 @@ public sealed partial class MainWindow : Window
 
     private void StartHoverControlsAnimation(double targetOffset, Action? completed = null)
     {
+        // PollEditorHoverControls runs at roughly frame rate while the cursor
+        // stays on the video. Restarting the same animation on every poll
+        // made the bar repeatedly ease only through its first few pixels,
+        // which looked like low frame rate even on a fast display.
+        if (_hoverControlsAnimationRunning && Math.Abs(_hoverControlsAnimationTargetOffset - targetOffset) < 0.01)
+        {
+            return;
+        }
+
         StopHoverControlsAnimation();
         _hoverControlsAnimationStartOffset = _hoverControlsOffset;
         _hoverControlsAnimationTargetOffset = targetOffset;
@@ -7248,28 +7257,44 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        _hoverControlsAnimationStartedUtc = DateTime.UtcNow;
-        _hoverControlsAnimationTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
-        _hoverControlsAnimationTimer.Tick -= HoverControlsAnimation_OnTick;
-        _hoverControlsAnimationTimer.Tick += HoverControlsAnimation_OnTick;
-        _hoverControlsAnimationTimer.Start();
-    }
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel is null)
+        {
+            SetHoverControlsOffset(targetOffset);
+            _hoverControlsAnimationComplete?.Invoke();
+            _hoverControlsAnimationComplete = null;
+            return;
+        }
 
-    private void HoverControlsAnimation_OnTick(object? sender, EventArgs e)
-    {
-        var progress = Math.Clamp((DateTime.UtcNow - _hoverControlsAnimationStartedUtc).TotalMilliseconds / HoverControlsSlideDuration.TotalMilliseconds, 0, 1);
-        var eased = 1 - Math.Pow(1 - progress, 3);
-        SetHoverControlsOffset(_hoverControlsAnimationStartOffset + (_hoverControlsAnimationTargetOffset - _hoverControlsAnimationStartOffset) * eased);
-        if (progress < 1) return;
+        _hoverControlsAnimationRunning = true;
+        var animationId = ++_hoverControlsAnimationId;
+        TimeSpan? startTime = null;
 
-        var completed = _hoverControlsAnimationComplete;
-        StopHoverControlsAnimation();
-        completed?.Invoke();
+        void Step(TimeSpan frameTime)
+        {
+            if (animationId != _hoverControlsAnimationId) return;
+            startTime ??= frameTime;
+            var progress = Math.Clamp((frameTime - startTime.Value).TotalMilliseconds / HoverControlsSlideDuration.TotalMilliseconds, 0, 1);
+            var eased = 1 - Math.Pow(1 - progress, 3);
+            SetHoverControlsOffset(_hoverControlsAnimationStartOffset + (_hoverControlsAnimationTargetOffset - _hoverControlsAnimationStartOffset) * eased);
+            if (progress < 1)
+            {
+                topLevel.RequestAnimationFrame(Step);
+                return;
+            }
+
+            var completed = _hoverControlsAnimationComplete;
+            StopHoverControlsAnimation();
+            completed?.Invoke();
+        }
+
+        topLevel.RequestAnimationFrame(Step);
     }
 
     private void StopHoverControlsAnimation()
     {
-        _hoverControlsAnimationTimer?.Stop();
+        _hoverControlsAnimationId++;
+        _hoverControlsAnimationRunning = false;
         _hoverControlsAnimationComplete = null;
     }
 
@@ -7277,9 +7302,8 @@ public sealed partial class MainWindow : Window
     {
         var scaling = RenderScaling > 0 ? RenderScaling : 1;
         _hoverControlsOffset = Math.Round(Math.Clamp(offset, 0, HoverControlsSlideDistance) * scaling) / scaling;
-        if (_hoverControlsBackdrop is null) return;
-        _hoverControlsBackdrop.RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse(
-            _hoverControlsOffset == 0 ? "translateY(0px)" : $"translateY({_hoverControlsOffset.ToString(System.Globalization.CultureInfo.InvariantCulture)}px)");
+        if (_hoverControlsTranslate is null) return;
+        _hoverControlsTranslate.Y = _hoverControlsOffset;
         _hoverControlsPerPixelOverlay?.Refresh();
     }
 
@@ -7594,6 +7618,7 @@ public sealed partial class MainWindow : Window
     {
         if (_editorHoverControlsWindow is not null) return _editorHoverControlsWindow;
 
+        var translate = new TranslateTransform { Y = HoverControlsSlideDistance };
         var backdrop = new Border
         {
             // Translucent scrim behind the whole row, not an opaque plate -
@@ -7604,9 +7629,9 @@ public sealed partial class MainWindow : Window
             // so there's no border line here.
             Background = new SolidColorBrush(Color.Parse("#8C0B1016")),
             Child = BuildPlaybackBarLayout(),
-            RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse($"translateY({HoverControlsSlideDistance}px)"),
+            RenderTransform = translate,
         };
-        _hoverControlsBackdrop = backdrop;
+        _hoverControlsTranslate = translate;
 
         var root = new Border
         {
@@ -7645,6 +7670,7 @@ public sealed partial class MainWindow : Window
         {
             _hoverControlsPerPixelOverlay?.Dispose();
             _hoverControlsPerPixelOverlay = null;
+            _hoverControlsTranslate = null;
         };
         window.AddHandler(PointerPressedEvent, EditorHoverControls_OnPointerPressed, RoutingStrategies.Tunnel, true);
         _editorHoverControlsWindow = window;
