@@ -48,7 +48,7 @@ Screenshot *.png
 *.mp4
 *.mov
 
-# Electron builder
+# Packaging metadata
 *.blockmap
 builder-debug.yml
 builder-effective-config.yaml
