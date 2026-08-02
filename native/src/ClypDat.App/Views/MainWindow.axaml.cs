@@ -5964,14 +5964,26 @@ public sealed partial class MainWindow : Window
             {
                 statusText.Text = value.Status;
                 progressBar.IsIndeterminate = value.Percentage is null;
+                var speed = FormatDownloadSpeed(value.BytesPerSecond);
                 if (value.Percentage is not null)
                 {
                     progressBar.Value = value.Percentage.Value * 100;
                     if (value.Percentage.Value > 0.03)
                     {
                         var remaining = TimeSpan.FromMilliseconds(downloadClock.ElapsedMilliseconds * (1 - value.Percentage.Value) / value.Percentage.Value);
-                        etaText.Text = $"Estimated: {FormatEta(remaining)}";
+                        etaText.Text = speed.Length > 0
+                            ? $"Estimated: {FormatEta(remaining)} · {speed}"
+                            : $"Estimated: {FormatEta(remaining)}";
                         etaText.IsVisible = true;
+                    }
+                    else if (speed.Length > 0)
+                    {
+                        etaText.Text = speed;
+                        etaText.IsVisible = true;
+                    }
+                    else
+                    {
+                        etaText.IsVisible = false;
                     }
                 }
                 else
@@ -8189,6 +8201,12 @@ public sealed partial class MainWindow : Window
         return remaining.TotalSeconds < 60
             ? $"{remaining.TotalSeconds:0}s"
             : $"{(int)remaining.TotalMinutes}m {remaining.Seconds:00}s";
+    }
+
+    internal static string FormatDownloadSpeed(double? bytesPerSecond)
+    {
+        if (bytesPerSecond is not { } rate || rate <= 0 || double.IsNaN(rate) || double.IsInfinity(rate)) return string.Empty;
+        return $"{rate / 1024d / 1024d:0.0} MB/s";
     }
 
     // Shared chrome for every small utility popup (confirm/message/rename) -
