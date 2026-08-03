@@ -26,3 +26,10 @@ pnpm build
 ```
 
 Produces a static-friendly Next.js build in `.next/`.
+
+## Deploying
+
+Hosted on Vercel. The repo root is the .NET app, so when importing the
+project in Vercel's dashboard, set **Root Directory** to `web` - framework
+preset and build/install commands then auto-detect. Every push to `master`
+deploys; PRs get preview URLs.
