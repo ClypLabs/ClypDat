@@ -18,14 +18,14 @@ export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: "ClypDat - Instant replay buffer for Windows",
   description:
-    "ClypDat records a rolling buffer of your gameplay and saves the last N seconds when you hit a hotkey. No process hook, built-in editor, CS2 auto-clipping.",
+    "ClypDat is always recording in the background. Press one key and the last few minutes of your gameplay are already saved. No process hook, built-in editor, CS2 auto-clipping.",
   // No explicit icon entry - app/favicon.ico is picked up automatically by
   // Next's file convention, and duplicating it here just risks the two
   // drifting if one gets swapped and not the other.
   openGraph: {
     title: "ClypDat - Instant replay buffer for Windows",
     description:
-      "ClypDat records a rolling buffer of your gameplay and saves the last N seconds when you hit a hotkey.",
+      "ClypDat is always recording in the background. Press one key and the last few minutes of your gameplay are already saved.",
     url: siteUrl,
     siteName: "ClypDat",
     images: ["/icon.png"],
@@ -35,7 +35,7 @@ export const metadata: Metadata = {
     card: "summary",
     title: "ClypDat - Instant replay buffer for Windows",
     description:
-      "ClypDat records a rolling buffer of your gameplay and saves the last N seconds when you hit a hotkey.",
+      "ClypDat is always recording in the background. Press one key and the last few minutes of your gameplay are already saved.",
     images: ["/icon.png"],
   },
 };

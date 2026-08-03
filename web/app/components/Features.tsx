@@ -38,7 +38,10 @@ const features: Feature[] = [
 
 export default function Features() {
   return (
-    <section id="features" className="border-t border-white/10 px-6 py-24">
+    <section
+      id="features"
+      className="relative border-t border-white/10 px-6 py-24"
+    >
       <div className="mx-auto max-w-6xl">
         <div className="max-w-2xl">
           <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -51,9 +54,12 @@ export default function Features() {
           </p>
         </div>
 
-        <div className="mt-14 grid gap-x-8 gap-y-12 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {features.map((feature) => (
-            <div key={feature.title}>
+            <div
+              key={feature.title}
+              className="group rounded-xl border border-white/10 bg-white/[0.02] p-6 transition-colors duration-300 hover:border-emerald-400/30 hover:bg-white/[0.04]"
+            >
               <h3 className="text-base font-semibold text-zinc-100">
                 {feature.title}
               </h3>
