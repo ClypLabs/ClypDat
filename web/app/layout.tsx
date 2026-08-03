@@ -19,9 +19,9 @@ export const metadata: Metadata = {
   title: "ClypDat - Instant replay buffer for Windows",
   description:
     "ClypDat records a rolling buffer of your gameplay and saves the last N seconds when you hit a hotkey. No process hook, built-in editor, CS2 auto-clipping.",
-  icons: {
-    icon: "/favicon.ico",
-  },
+  // No explicit icon entry - app/favicon.ico is picked up automatically by
+  // Next's file convention, and duplicating it here just risks the two
+  // drifting if one gets swapped and not the other.
   openGraph: {
     title: "ClypDat - Instant replay buffer for Windows",
     description:
