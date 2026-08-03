@@ -41,6 +41,24 @@ internal static class BitmapCache
         EvictIfNeeded();
     }
 
+    // Entries are keyed by path alone, and several cache artifacts are
+    // REWRITTEN in place under the same path - RegenerateThumbnailAsync
+    // overwrites {key}-v3.jpg when a trim handle moves, and a trim save wipes
+    // and rebuilds the whole cache entry. Without this the editor kept showing
+    // the pre-trim image for the rest of the session while the library card -
+    // which decodes straight from disk and never consults this cache - showed
+    // the new one, so the two visibly disagreed.
+    //
+    // Deliberately does NOT Dispose the evicted bitmap: an Image control
+    // somewhere may still be bound to it (the editor's own SelectedThumbnail is
+    // the likely one at exactly this moment), and disposing out from under a
+    // live binding blanks it or worse. Dropping the reference is enough - the
+    // bitmap's own finalizer releases the unmanaged buffer.
+    public static void Invalidate(string path)
+    {
+        Entries.TryRemove(path, out _);
+    }
+
     // Linear scan for the least-recently-used entry - the capacity cap keeps
     // this cheap, and it only runs when a new entry actually pushes the
     // resident set over the cap.

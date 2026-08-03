@@ -137,7 +137,7 @@ public sealed class MediaProbeService
 
     public async Task<TimeSpan> GetDurationAsync(string filePath, CancellationToken cancellationToken = default)
     {
-        return (await ProbeDurationAsync(filePath, cancellationToken)).Duration;
+        return (await ProbeDurationAsync(filePath, cancellationToken).ConfigureAwait(false)).Duration;
     }
 
     public async Task<MediaDurationProbeResult> ProbeDurationAsync(string filePath, CancellationToken cancellationToken = default)
@@ -148,7 +148,7 @@ public sealed class MediaProbeService
             "-show_entries", "format=duration",
             "-of", "default=nw=1:nk=1",
             filePath
-        }, cancellationToken);
+        }, cancellationToken).ConfigureAwait(false);
         if (result.ExitCode == 0 && double.TryParse(result.Output.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var seconds) && seconds > 0)
         {
             return new MediaDurationProbeResult(TimeSpan.FromSeconds(seconds), string.Empty);
@@ -168,10 +168,10 @@ public sealed class MediaProbeService
     // info quickly.
     public async Task<MediaFileInfo> ProbeAsync(string filePath)
     {
-        var media = await ProbeMetadataAsync(filePath);
+        var media = await ProbeMetadataAsync(filePath).ConfigureAwait(false);
         if (!media.HasVideo) return media;
-        var thumbnailPath = await EnsureThumbnailAsync(filePath, media.Duration);
-        var filmstripPath = await EnsureFilmstripAsync(filePath, media.Duration);
+        var thumbnailPath = await EnsureThumbnailAsync(filePath, media.Duration).ConfigureAwait(false);
+        var filmstripPath = await EnsureFilmstripAsync(filePath, media.Duration).ConfigureAwait(false);
         return media with { ThumbnailPath = thumbnailPath, FilmstripPath = filmstripPath };
     }
 
@@ -218,7 +218,7 @@ public sealed class MediaProbeService
             "-show_format",
             "-show_streams",
             filePath
-        });
+        }).ConfigureAwait(false);
 
         TimeSpan duration = TimeSpan.Zero;
         var tracks = new List<MediaTrackInfo>();
@@ -386,7 +386,7 @@ public sealed class MediaProbeService
         if (audioTracks.Length == 0) return new Dictionary<int, IReadOnlyList<double>>();
 
         var cachePath = GetWaveformPath(media.Path);
-        var cached = await TryReadWaveformCacheAsync(cachePath, cancellationToken);
+        var cached = await TryReadWaveformCacheAsync(cachePath, cancellationToken).ConfigureAwait(false);
         if (cached.Count > 0) return cached;
 
         // On a network drive, waveform decoding competes with LibVLC's video
@@ -400,7 +400,7 @@ public sealed class MediaProbeService
         // same 4s delay for no reason even on a clip opened many times before.
         if (PlaybackSession.IsNetworkPath(media.Path))
         {
-            await Task.Delay(TimeSpan.FromSeconds(4), cancellationToken);
+            await Task.Delay(TimeSpan.FromSeconds(4), cancellationToken).ConfigureAwait(false);
         }
 
         const int BucketCount = 700;
@@ -415,11 +415,11 @@ public sealed class MediaProbeService
             foreach (var track in audioTracks)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                wholeWaveforms[track.Index] = await ReadWaveformAsync(media.Path, track.Index, null, null, cancellationToken);
+                wholeWaveforms[track.Index] = await ReadWaveformAsync(media.Path, track.Index, null, null, cancellationToken).ConfigureAwait(false);
                 onPartial?.Invoke(track.Index, wholeWaveforms[track.Index]);
             }
 
-            await TryWriteWaveformCacheAsync(cachePath, wholeWaveforms, cancellationToken);
+            await TryWriteWaveformCacheAsync(cachePath, wholeWaveforms, cancellationToken).ConfigureAwait(false);
             return wholeWaveforms;
         }
 
@@ -446,7 +446,7 @@ public sealed class MediaProbeService
             foreach (var track in audioTracks)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var segmentPeaks = await ReadWaveformAsync(media.Path, track.Index, segmentStart, segmentLength, cancellationToken);
+                var segmentPeaks = await ReadWaveformAsync(media.Path, track.Index, segmentStart, segmentLength, cancellationToken).ConfigureAwait(false);
                 var target = peaksByTrack[track.Index];
                 for (var bucket = startBucket; bucket < endBucket; bucket++)
                 {
@@ -468,7 +468,7 @@ public sealed class MediaProbeService
         AppLog.Debug($"Waveform decoded: segments={segmentCount}x{audioTracks.Length}tracks, firstSegmentMs={firstSegmentMs}, totalMs={decodeClock.ElapsedMilliseconds}, path={media.Path}");
 
         var waveforms = peaksByTrack.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<double>)pair.Value);
-        await TryWriteWaveformCacheAsync(cachePath, waveforms, cancellationToken);
+        await TryWriteWaveformCacheAsync(cachePath, waveforms, cancellationToken).ConfigureAwait(false);
         return waveforms;
     }
 
@@ -520,10 +520,15 @@ public sealed class MediaProbeService
             Directory.Delete(frameFolder, true);
         }
 
-        // Filmstrip is a single flat file ({key}-filmstrip-v3.jpg), already
+        // Filmstrip is a single flat file ({key}-filmstrip-v2.jpg), already
         // caught by the {key}*.* glob above - no folder to separately clean up.
 
         TryDelete(GetWaveformPath(filePath));
+        // The disk copy is gone; the in-memory decoded bitmaps keyed by those
+        // same paths are not, and would keep being served for the rest of the
+        // session (a trim-save regenerates the thumbnail at the SAME path).
+        BitmapCache.Invalidate(GetThumbnailPath(filePath));
+        BitmapCache.Invalidate(GetFilmstripPath(filePath));
     }
 
     public async Task<string> EnsureThumbnailAsync(string filePath, TimeSpan duration)
@@ -579,7 +584,7 @@ public sealed class MediaProbeService
                 "-vf", "blackframe=98:32,scale=960:-2",
                 "-q:v", "4",
                 output
-            });
+            }).ConfigureAwait(false);
 
             if (result.ExitCode != 0 || !File.Exists(output)) continue;
 
@@ -621,7 +626,7 @@ public sealed class MediaProbeService
             "-vf", "scale=960:-2",
             "-q:v", "4",
             output
-        });
+        }).ConfigureAwait(false);
 
         if (result.ExitCode != 0 || !File.Exists(output))
         {
@@ -629,6 +634,8 @@ public sealed class MediaProbeService
             return string.Empty;
         }
 
+        // Same path, new content - the decoded copy in memory is now stale.
+        BitmapCache.Invalidate(output);
         return output;
     }
 
@@ -644,100 +651,118 @@ public sealed class MediaProbeService
     // distortion despite being cached as a single image.
     public const int FilmstripFrameCount = 10;
     private const int FilmstripFrameHeight = 160;
-    private static readonly ConcurrentDictionary<string, SemaphoreSlim> FilmstripLocks = new(StringComparer.OrdinalIgnoreCase);
+    // Holds the actual generation job, not a lock: a second request for the
+    // same clip now SHARES the in-flight job instead of queueing behind it and
+    // then finding the file already there. The job itself runs uncancellable
+    // (callers observe it through their own token via WaitAsync below) so one
+    // caller giving up - the common case, a superseded editor open - doesn't
+    // throw away work that every other caller still wants, only to re-run the
+    // whole thing on the next open. The dictionary entry is removed on
+    // completion; the old per-path SemaphoreSlim map was never pruned and
+    // retained one semaphore per clip for the life of the process.
+    private static readonly ConcurrentDictionary<string, Task<string>> FilmstripJobs = new(StringComparer.OrdinalIgnoreCase);
 
-    // Each frame is grabbed with its OWN -ss seek (fast keyframe seek, only
-    // decodes a handful of frames around the target) - not a single `fps`
-    // filter pass across the whole file, which forces ffmpeg to decode
-    // EVERY frame from start to end just to pick out a sparse few, pegging
-    // CPU for the whole clip's duration regardless of how few frames were
-    // actually wanted. Same reasoning as EnsureThumbnailAsync's -ss usage.
-    // The combine-into-one-strip pass afterward reads only these small
-    // already-extracted JPEGs, not the source video, so it's effectively free.
-    public async Task<string> EnsureFilmstripAsync(string filePath, TimeSpan duration, CancellationToken cancellationToken = default)
+    // Every frame still gets its OWN -ss seek (fast keyframe seek, only decodes
+    // a handful of frames around the target) - NOT a single `fps`/`select`
+    // filter pass across the whole file, which would force ffmpeg to decode
+    // EVERY frame start to end just to pick out a sparse few, pegging CPU for
+    // the clip's whole duration. Same reasoning as EnsureThumbnailAsync's -ss.
+    //
+    // The difference from before: those ten seeks are ten seeked INPUTS to one
+    // ffmpeg invocation, hstack'd into the strip in the same pass, instead of
+    // ten separate processes writing temp JPEGs plus an eleventh `tile` process
+    // to combine them. Eleven Process.Start calls became one, and the temp
+    // directory (and its recursive delete) is gone entirely, along with ten
+    // pointless JPEG encode/decode round-trips. Both mattered a lot more than
+    // expected because this used to run on the UI thread - see the Task.Run in
+    // MainWindowViewModel.StartFilmstripLoad.
+    public Task<string> EnsureFilmstripAsync(string filePath, TimeSpan duration, CancellationToken cancellationToken = default)
     {
         var output = GetFilmstripPath(filePath);
-        if (File.Exists(output)) return output;
-        if (duration <= TimeSpan.Zero) return string.Empty;
-        if (!HasCachedVideoStream(filePath)) return string.Empty;
+        if (File.Exists(output)) return Task.FromResult(output);
+        if (duration <= TimeSpan.Zero) return Task.FromResult(string.Empty);
+        if (!HasCachedVideoStream(filePath)) return Task.FromResult(string.Empty);
 
-        var generationLock = FilmstripLocks.GetOrAdd(output, _ => new SemaphoreSlim(1, 1));
-        await generationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var job = FilmstripJobs.GetOrAdd(output, key =>
+        {
+            var started = GenerateFilmstripAsync(filePath, duration, output);
+            // Detach the cleanup from the returned task so a caller cancelling
+            // out never leaves a completed job cached as if still in flight.
+            _ = started.ContinueWith(
+                _ => FilmstripJobs.TryRemove(key, out Task<string>? _),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+            return started;
+        });
+
+        // The shared job keeps running if this particular caller walks away.
+        return job.WaitAsync(cancellationToken);
+    }
+
+    private static async Task<string> GenerateFilmstripAsync(string filePath, TimeSpan duration, string output)
+    {
         try
         {
-            if (File.Exists(output)) return output;
-
-            var tempDir = Path.Combine(Path.GetTempPath(), $"clypdat-filmstrip-{Guid.NewGuid():N}");
-            try
-            {
-            Directory.CreateDirectory(tempDir);
-
+            var arguments = new List<string> { "-y", "-v", "error" };
             for (var i = 0; i < FilmstripFrameCount; i++)
             {
                 var seek = (i + 0.5) / FilmstripFrameCount * duration.TotalSeconds;
-                var framePath = Path.Combine(tempDir, $"f{i:0000}.jpg");
-                cancellationToken.ThrowIfCancellationRequested();
-                var frameResult = await RunProcessAsync("ffmpeg", new[]
-                {
-                    "-y",
-                    "-ss", seek.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
-                    "-i", filePath,
-                    "-frames:v", "1",
-                    "-vf", $"scale=-2:{FilmstripFrameHeight}",
-                    "-q:v", "2",
-                    framePath
-                }, cancellationToken);
-
-                if (frameResult.ExitCode != 0 || !File.Exists(framePath))
-                {
-                    AppLog.Error($"Filmstrip frame grab failed for {filePath} at {seek:0.0}s: {(string.IsNullOrWhiteSpace(frameResult.Error) ? "ffmpeg failed" : frameResult.Error.Trim())}");
-                    return string.Empty;
-                }
+                arguments.Add("-ss");
+                arguments.Add(seek.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+                arguments.Add("-i");
+                arguments.Add(filePath);
             }
 
-            cancellationToken.ThrowIfCancellationRequested();
-            var combineResult = await RunProcessAsync("ffmpeg", new[]
+            // scale=-2 (not -1): preserving aspect exactly can produce an ODD
+            // width, which the JPEG encoder's 4:2:0 output rejects outright -
+            // same trap EnsureThumbnailAsync documents for height.
+            var filter = new System.Text.StringBuilder();
+            for (var i = 0; i < FilmstripFrameCount; i++)
             {
-                "-y",
-                "-i", Path.Combine(tempDir, "f%04d.jpg"),
-                "-vf", $"tile={FilmstripFrameCount}x1",
+                filter.Append($"[{i}:v]scale=-2:{FilmstripFrameHeight}[f{i}];");
+            }
+            for (var i = 0; i < FilmstripFrameCount; i++)
+            {
+                filter.Append($"[f{i}]");
+            }
+            filter.Append($"hstack=inputs={FilmstripFrameCount}[strip]");
+
+            arguments.AddRange(new[]
+            {
+                "-filter_complex", filter.ToString(),
+                "-map", "[strip]",
                 "-frames:v", "1",
                 "-update", "1",
+                "-an",
                 "-q:v", "2",
                 output
-            }, cancellationToken);
+            });
 
-            if (combineResult.ExitCode != 0 || !File.Exists(output))
+            var result = await RunProcessAsync("ffmpeg", arguments.ToArray()).ConfigureAwait(false);
+            if (result.ExitCode != 0 || !File.Exists(output))
             {
-                AppLog.Error($"Filmstrip combine failed for {filePath}: {(string.IsNullOrWhiteSpace(combineResult.Error) ? "ffmpeg failed" : combineResult.Error.Trim())}");
+                AppLog.Error($"Filmstrip generation failed for {filePath}: {(string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg failed" : result.Error.Trim())}");
                 return string.Empty;
             }
 
             return output;
         }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception error)
-            {
-                AppLog.Error($"Filmstrip generation failed for {filePath}", error);
-                return string.Empty;
-            }
-            finally
-            {
-                try { Directory.Delete(tempDir, true); } catch { }
-            }
-        }
-        finally
+        catch (Exception error)
         {
-            generationLock.Release();
+            AppLog.Error($"Filmstrip generation failed for {filePath}", error);
+            return string.Empty;
         }
     }
 
     private string GetFilmstripPath(string filePath)
     {
-        return Path.Combine(_cacheFolder, $"{CacheKey(filePath)}-filmstrip.jpg");
+        // -v2: the strip is now built by one hstack pass instead of ten frame
+        // grabs plus a tile pass. The old key carried no version at all, and
+        // TimelineLaneControl slices the sheet by the CURRENT
+        // FilmstripFrameCount - so without a bump, any change to how the sheet
+        // is laid out would silently mis-slice every already-cached strip.
+        return Path.Combine(_cacheFolder, $"{CacheKey(filePath)}-filmstrip-v2.jpg");
     }
 
     private string GetThumbnailPath(string filePath)
@@ -763,7 +788,7 @@ public sealed class MediaProbeService
         {
             if (!File.Exists(cachePath)) return new Dictionary<int, IReadOnlyList<double>>();
             await using var stream = File.OpenRead(cachePath);
-            var data = await JsonSerializer.DeserializeAsync<Dictionary<int, double[]>>(stream, cancellationToken: cancellationToken);
+            var data = await JsonSerializer.DeserializeAsync<Dictionary<int, double[]>>(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
             return data?.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<double>)pair.Value)
                 ?? new Dictionary<int, IReadOnlyList<double>>();
         }
@@ -782,7 +807,7 @@ public sealed class MediaProbeService
         {
             var serializable = waveforms.ToDictionary(pair => pair.Key, pair => pair.Value.ToArray());
             await using var stream = File.Create(cachePath);
-            await JsonSerializer.SerializeAsync(stream, serializable, cancellationToken: cancellationToken);
+            await JsonSerializer.SerializeAsync(stream, serializable, cancellationToken: cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -820,10 +845,10 @@ public sealed class MediaProbeService
                 "-f", "f32le",
                 tempPath
             });
-            var result = await RunProcessAsync("ffmpeg", args.ToArray(), cancellationToken);
+            var result = await RunProcessAsync("ffmpeg", args.ToArray(), cancellationToken).ConfigureAwait(false);
 
             return result.ExitCode == 0 && File.Exists(tempPath)
-                ? BuildPeaks(await File.ReadAllBytesAsync(tempPath, cancellationToken), 700)
+                ? BuildPeaks(await File.ReadAllBytesAsync(tempPath, cancellationToken).ConfigureAwait(false), 700)
                 : BuildFallbackPeaks(streamIndex, 700);
         }
         catch
@@ -985,10 +1010,35 @@ public sealed class MediaProbeService
         return Convert.ToHexString(bytes)[..24].ToLowerInvariant();
     }
 
+    // Nothing capped the total number of probe processes before: the idle
+    // filmstrip sweep (HydrateMissingFilmstripsAsync) walks the WHOLE library,
+    // and FilmstripLocks only ever deduped two jobs on the same clip, so a big
+    // library could have as many ffmpeg processes in flight as it had clips -
+    // all competing with the editor's own decode. Two at a time, matching what
+    // ChunkedAudioReader.ExtractionGate and AudioCapturePipeline.FfmpegGate
+    // already do for their own ffmpeg work.
+    private static readonly SemaphoreSlim ProbeProcessGate = new(2, 2);
+
     private static async Task<ProcessResult> RunProcessAsync(
         string fileName,
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken = default)
+    {
+        await ProbeProcessGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await RunProcessCoreAsync(fileName, arguments, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            ProbeProcessGate.Release();
+        }
+    }
+
+    private static async Task<ProcessResult> RunProcessCoreAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken)
     {
         var startInfo = new ProcessStartInfo(fileName)
         {
@@ -1029,14 +1079,14 @@ public sealed class MediaProbeService
         var errorTask = process.StandardError.ReadToEndAsync();
         try
         {
-            await process.WaitForExitAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
             TryKill(process);
             throw;
         }
-        return new ProcessResult(process.ExitCode, await outputTask, await errorTask);
+        return new ProcessResult(process.ExitCode, await outputTask.ConfigureAwait(false), await errorTask.ConfigureAwait(false));
     }
 
     private static void TryKill(Process process)

@@ -73,6 +73,24 @@ public sealed class TimelineLaneControl : Control
             TrimEndPercentProperty);
     }
 
+    // Every one of these used to be rebuilt on EVERY render - two or three
+    // Color.Parse calls over a string, fresh SolidColorBrush/Pen objects, and
+    // (worst) a from-scratch StreamGeometry over all 700 waveform peaks. That
+    // is not a once-per-open cost: AffectsRender includes the trim percentages
+    // and every lane binds them, so dragging a trim handle re-renders every
+    // lane on every single pointer-move.
+    private static readonly Pen VideoOutlinePen = new(new SolidColorBrush(Color.Parse("#13C8B5")), 1);
+    private static readonly IBrush ShadeBrush = new SolidColorBrush(Color.FromArgb(120, 10, 15, 19));
+    private static readonly IBrush HatchBrush = CreateHatchBrush();
+
+    private string? _cachedLaneBrushKey;
+    private IBrush? _cachedLaneFill;
+    private IBrush? _cachedWaveformFill;
+
+    private IReadOnlyList<double>? _cachedPeaks;
+    private Size _cachedPeaksSize;
+    private StreamGeometry? _cachedWaveformGeometry;
+
     public override void Render(DrawingContext context)
     {
         base.Render(context);
@@ -80,15 +98,14 @@ public sealed class TimelineLaneControl : Control
         var rect = new Rect(Bounds.Size);
         if (rect.Width <= 0 || rect.Height <= 0) return;
 
+        EnsureLaneBrushes();
         var radius = new CornerRadius(3);
-        var baseColor = ParseColor(LaneBrush, "#24313B");
-        var brush = new SolidColorBrush(baseColor);
-        context.DrawRectangle(brush, null, rect, radius.TopLeft, radius.TopLeft);
+        context.DrawRectangle(_cachedLaneFill, null, rect, radius.TopLeft, radius.TopLeft);
 
         if (IsVideo)
         {
             DrawFilmstrip(context, rect);
-            context.DrawRectangle(null, new Pen(Color.Parse("#13C8B5").ToUInt32()), rect.Deflate(1), 3, 3);
+            context.DrawRectangle(null, VideoOutlinePen, rect.Deflate(1), 3, 3);
         }
         else
         {
@@ -96,6 +113,21 @@ public sealed class TimelineLaneControl : Control
         }
 
         DrawTrimShade(context, rect);
+    }
+
+    // LaneBrush is a string that changes only when the track it represents
+    // changes, so both brushes derived from it are rebuilt on that transition
+    // rather than per render.
+    private void EnsureLaneBrushes()
+    {
+        var lane = LaneBrush;
+        if (_cachedLaneFill is not null && _cachedWaveformFill is not null && _cachedLaneBrushKey == lane) return;
+
+        _cachedLaneBrushKey = lane;
+        _cachedLaneFill = new SolidColorBrush(ParseColor(lane, "#24313B"));
+        var waveColor = ParseColor(lane, "#FFFFFF");
+        _cachedWaveformFill = new SolidColorBrush(
+            Color.FromArgb(190, Lighten(waveColor.R), Lighten(waveColor.G), Lighten(waveColor.B)));
     }
 
     // Filmstrip is cached as ONE spritesheet image (MediaProbeService.
@@ -170,6 +202,22 @@ public sealed class TimelineLaneControl : Control
         var peaks = Peaks;
         if (peaks is null || peaks.Count == 0) return;
 
+        context.DrawGeometry(_cachedWaveformFill, null, EnsureWaveformGeometry(peaks, rect));
+    }
+
+    // The shape depends only on the peaks and the lane's size, neither of which
+    // changes while a trim handle is being dragged - which is exactly when this
+    // is re-rendered most. Rebuilding ~1400 line segments per pointer-move was
+    // pure waste.
+    private StreamGeometry EnsureWaveformGeometry(IReadOnlyList<double> peaks, Rect rect)
+    {
+        if (_cachedWaveformGeometry is not null &&
+            ReferenceEquals(_cachedPeaks, peaks) &&
+            _cachedPeaksSize == rect.Size)
+        {
+            return _cachedWaveformGeometry;
+        }
+
         var geometry = new StreamGeometry();
         using (var stream = geometry.Open())
         {
@@ -193,9 +241,10 @@ public sealed class TimelineLaneControl : Control
             stream.EndFigure(true);
         }
 
-        var color = ParseColor(LaneBrush, "#FFFFFF");
-        var waveform = new SolidColorBrush(Color.FromArgb(190, Lighten(color.R), Lighten(color.G), Lighten(color.B)));
-        context.DrawGeometry(waveform, null, geometry);
+        _cachedPeaks = peaks;
+        _cachedPeaksSize = rect.Size;
+        _cachedWaveformGeometry = geometry;
+        return geometry;
     }
 
     private void DrawTrimShade(DrawingContext context, Rect rect)
@@ -211,13 +260,37 @@ public sealed class TimelineLaneControl : Control
         if (rect.Width <= 0) return;
         using (context.PushClip(rect))
         {
-            context.DrawRectangle(new SolidColorBrush(Color.FromArgb(120, 10, 15, 19)), null, rect);
-            var pen = new Pen(new SolidColorBrush(Color.FromArgb(18, 255, 255, 255)), 1);
-            for (var x = -rect.Height; x < rect.Width + rect.Height; x += 16)
-            {
-                context.DrawLine(pen, new Point(rect.X + x, rect.Bottom), new Point(rect.X + x + rect.Height, rect.Y));
-            }
+            context.DrawRectangle(ShadeBrush, null, rect);
+            // One tiled fill instead of the ~110 individual DrawLine calls the
+            // 16px-step diagonal loop used to issue per shaded side, per render.
+            context.DrawRectangle(HatchBrush, null, rect);
         }
+    }
+
+    // 16x16 tile carrying a single 45-degree stroke corner to corner; tiled, it
+    // reproduces the same continuous diagonal hatch at the same 16px spacing.
+    private static IBrush CreateHatchBrush()
+    {
+        var geometry = new StreamGeometry();
+        using (var stream = geometry.Open())
+        {
+            stream.BeginFigure(new Point(0, 16), false);
+            stream.LineTo(new Point(16, 0));
+            stream.EndFigure(false);
+        }
+
+        return new DrawingBrush
+        {
+            Drawing = new GeometryDrawing
+            {
+                Geometry = geometry,
+                Pen = new Pen(new SolidColorBrush(Color.FromArgb(18, 255, 255, 255)), 1)
+            },
+            TileMode = TileMode.Tile,
+            SourceRect = new RelativeRect(0, 0, 16, 16, RelativeUnit.Absolute),
+            DestinationRect = new RelativeRect(0, 0, 16, 16, RelativeUnit.Absolute),
+            Stretch = Stretch.None
+        };
     }
 
     private static byte Lighten(byte channel) => (byte)Math.Min(255, channel + 58);

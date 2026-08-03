@@ -2563,7 +2563,8 @@
                       SizeChanged="TimelineSurface_OnSizeChanged"
                       PointerPressed="TimelineSurface_OnPointerPressed"
                       PointerMoved="TimelineSurface_OnPointerMoved"
-                      PointerReleased="TimelineSurface_OnPointerReleased">
+                      PointerReleased="TimelineSurface_OnPointerReleased"
+                      PointerCaptureLost="TimelineSurface_OnPointerCaptureLost">
                   <ItemsControl ItemsSource="{Binding TimelineTracks}">
                     <ItemsControl.ItemsPanel>
                       <ItemsPanelTemplate>

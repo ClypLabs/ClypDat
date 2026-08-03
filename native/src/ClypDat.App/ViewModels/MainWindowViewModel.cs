@@ -4882,7 +4882,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // video load/decode is deferred a tick later (QueueEditorPlayback),
         // and without this the editor would briefly show an empty/black
         // VideoView in between.
-        IsEditorVideoLoading = true;
+        //
+        // Only for an open that a playback start will actually follow, though.
+        // Nothing else ever clears this flag, so the two calls that DON'T lead
+        // to one were each raising a placeholder with no way back down:
+        // PrepareClipForShare (showEditor: false) left it set for the rest of
+        // the session, and the re-open from HydrateSelectedMediaAsync
+        // (preserveEditorText: true) dropped it back over video that was
+        // already playing.
+        if (showEditor && !preserveEditorText) IsEditorVideoLoading = true;
         if (!preserveEditorText)
         {
             EditorTitle = media.Name;
@@ -4931,7 +4939,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             : 0;
         var dropMedalPreMix = medalAudioTrackCount > 1;
         var skippedMedalPreMixTrack = false;
-        var filmstrip = LoadBitmap(media.FilmstripPath);
+        // Filmstrip starts empty and is filled in by StartFilmstripLoad below.
+        // Decoding it here meant a ~2844x160 JPEG decode on the UI thread on
+        // every single open, blocking the editor from appearing - and for no
+        // gain, since EnsureFilmstripAsync short-circuits on an existing file,
+        // so the cached strip still lands about a dispatcher hop later.
+        Avalonia.Media.Imaging.Bitmap? filmstrip = null;
         foreach (var track in media.Tracks)
         {
             if (track.Type == "subtitle") continue;
@@ -6143,16 +6156,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (_gameIsActive || _backgroundFilmstripCts is not null) return;
         var cts = new CancellationTokenSource();
         _backgroundFilmstripCts = cts;
-        _ = HydrateMissingFilmstripsAsync(cts.Token);
+        // This one walks the ENTIRE library, so leaving its per-clip
+        // synchronous prefix on the dispatcher was the worst offender of the
+        // three - library_size iterations of hashing and cache-file reads,
+        // interleaved with the UI's own work.
+        //
+        // The candidate list is snapshotted HERE, on the UI thread, rather than
+        // inside the task: AllClips is an ObservableCollection the library
+        // refresh mutates, and enumerating it from a background thread races
+        // that into an InvalidOperationException.
+        var clips = AllClips.Where(clip => clip.Media.HasVideo && string.IsNullOrEmpty(clip.Media.FilmstripPath)).ToArray();
+        _ = Task.Run(() => HydrateMissingFilmstripsAsync(clips, cts.Token));
     }
 
-    private async Task HydrateMissingFilmstripsAsync(CancellationToken cancellationToken)
+    private async Task HydrateMissingFilmstripsAsync(IReadOnlyList<ClipCardViewModel> clips, CancellationToken cancellationToken)
     {
         var wasCancelled = false;
         try
         {
-            var clips = AllClips.Where(clip => clip.Media.HasVideo && string.IsNullOrEmpty(clip.Media.FilmstripPath)).ToArray();
-            if (clips.Length > 0) AppLog.Info($"Idle timeline hydration: {clips.Length} filmstrip(s).");
+            if (clips.Count > 0) AppLog.Info($"Idle timeline hydration: {clips.Count} filmstrip(s).");
             foreach (var clip in clips)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -6168,15 +6190,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         finally
         {
-            if (_backgroundFilmstripCts?.Token == cancellationToken)
+            // Back to the UI thread before touching _backgroundFilmstripCts or
+            // re-entering StartBackgroundFilmstripHydration - both read/write
+            // ViewModel state that the rest of the app only ever touches from
+            // the dispatcher, and this method no longer runs there.
+            await Dispatcher.UIThread.InvokeAsync(() =>
             {
+                if (_backgroundFilmstripCts?.Token != cancellationToken) return;
                 _backgroundFilmstripCts.Dispose();
                 _backgroundFilmstripCts = null;
                 // Resume only when this run was cancelled mid-flight and the
                 // game closed again before its cleanup finished. Restarting a
                 // completed empty queue here would recurse synchronously.
                 if (wasCancelled && !_gameIsActive) StartBackgroundFilmstripHydration();
-            }
+            });
         }
     }
 
@@ -6397,7 +6424,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _filmstripCts?.Dispose();
         var cts = new CancellationTokenSource();
         _filmstripCts = cts;
-        _ = LoadFilmstripAsync(media, cts.Token);
+        // Task.Run, not a bare call: this runs from OpenMedia on the UI thread,
+        // and everything before EnsureFilmstripAsync's first await - the cache
+        // key's SHA-256, the File.Exists probes, HasCachedVideoStream's
+        // File.ReadAllText + JSON deserialize - would otherwise execute right
+        // here, on the dispatcher, while the user is waiting for the editor to
+        // appear. The ConfigureAwait(false) chain inside MediaProbeService
+        // keeps it off the UI thread from there on.
+        _ = Task.Run(() => LoadFilmstripAsync(media, cts.Token));
     }
 
     private async Task LoadFilmstripAsync(MediaFileInfo media, CancellationToken cancellationToken)
@@ -6439,7 +6473,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _waveformCts?.Cancel();
         _waveformCts?.Dispose();
         _waveformCts = new CancellationTokenSource();
-        _ = LoadWaveformsAsync(media, _waveformCts.Token);
+        var token = _waveformCts.Token;
+        // Same reason as StartFilmstripLoad, and it matters more here: the
+        // waveform path's synchronous prefix includes a DriveInfo.DriveType
+        // probe (PlaybackSession.IsNetworkPath), which can block for seconds on
+        // a dead mapped share.
+        _ = Task.Run(() => LoadWaveformsAsync(media, token));
     }
 
     private async Task LoadWaveformsAsync(MediaFileInfo media, CancellationToken cancellationToken)
@@ -6782,7 +6821,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             bitmap = null;
         }
 
-        ClypDat.App.Services.BitmapCache.Store(path, bitmap);
+        // Only a successful decode is worth remembering. Caching the null meant
+        // a path that merely wasn't written YET - a thumbnail still generating
+        // when the card first asked for it - was recorded as "this clip has no
+        // image" permanently, and no later regeneration could dislodge it.
+        if (bitmap is not null) ClypDat.App.Services.BitmapCache.Store(path, bitmap);
         return bitmap;
     }
 

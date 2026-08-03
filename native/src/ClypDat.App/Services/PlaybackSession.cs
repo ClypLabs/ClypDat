@@ -35,6 +35,9 @@ public sealed class PlaybackSession : IDisposable
     private TimeSpan _lastRequestedPosition = TimeSpan.Zero;
     private readonly SemaphoreSlim _seekLock = new(1, 1);
     private readonly object _transportLock = new();
+    // Completion of the PREVIOUS WasapiOut's endpoint release. Only
+    // RebuildAudioOutput has to respect it (see DisposeAudioOutput).
+    private Task _audioOutputRelease = Task.CompletedTask;
 
     public PlaybackSession()
     {
@@ -118,8 +121,14 @@ public sealed class PlaybackSession : IDisposable
         // higher/spikier read latency blows through it and playback stutters.
         // A bigger demux cache absorbs those latency spikes at the cost of a
         // few MB of RAM; local files keep a modest bump over the default.
+        // Local files get libvlc's own default (300ms) rather than the 1000ms
+        // this used to set unconditionally: file-caching is how much the demuxer
+        // buffers BEFORE it will render anything, so on a local disk - which has
+        // none of the latency spikes this bump exists to absorb - it was simply
+        // 700ms of guaranteed delay added to every single clip open, in exchange
+        // for smoothing out a problem local storage doesn't have.
         var isNetwork = IsNetworkPath(path);
-        _videoMedia.AddOption($":file-caching={(isNetwork ? 5000 : 1000)}");
+        _videoMedia.AddOption($":file-caching={(isNetwork ? 5000 : 300)}");
         VideoPlayer.Media = _videoMedia;
         VideoPlayer.Mute = true;
         VideoPlayer.Volume = 0;
@@ -214,6 +223,11 @@ public sealed class PlaybackSession : IDisposable
         // clipping the final output unprotected.
         _masterVolume = new VolumeSampleProvider(normalized) { Volume = VolumeCurve(_masterVolumePercent) };
         var limited = new SoftLimiterSampleProvider(_masterVolume);
+        // The one place that genuinely needs the previous endpoint gone. By now
+        // the release started at load time has almost always finished already,
+        // so this is normally a no-op; the timeout is only so a WasapiOut whose
+        // PlaybackStopped never fires can't wedge the rebuild forever.
+        try { _audioOutputRelease.Wait(TimeSpan.FromMilliseconds(500)); } catch { }
         _audioOutput = new WasapiOut(AudioClientShareMode.Shared, false, 120);
         _audioOutput.Init(limited);
         AppLog.Debug($"Editor audio output ready: streams={string.Join(",", _audioSources.Keys.OrderBy(key => key))}.");
@@ -360,7 +374,57 @@ public sealed class PlaybackSession : IDisposable
         SeekAsync(time, resumePlayback).GetAwaiter().GetResult();
     }
 
-    public async Task<bool> SeekAsync(TimeSpan time, bool resumePlayback = false, CancellationToken cancellationToken = default, bool isPreview = false)
+    // Scrub/keyboard-repeat seeking: issue the position write and return, with
+    // no lock, no confirmation wait and no audio work at all.
+    //
+    // These used to go through SeekAsync like any other seek, which made them
+    // as slow as the slowest thing in that method. Two costs dominated. First,
+    // serialization: every scrub tick queued behind _seekLock waiting on the
+    // previous tick's settle confirmation, so the picture trailed the cursor by
+    // the confirmation time rather than by the UI's own throttle. Second, and
+    // worse, audio: SeekAsync repositions the ChunkedAudioReaders, and setting
+    // CurrentTime on one closes its open chunk and prefetches three more - so a
+    // drag across a three-track clip was firing off ffmpeg chunk extractions by
+    // the dozen, competing with the video decode the user is actually watching,
+    // to reposition audio that is stopped for the whole drag anyway.
+    //
+    // Audio is repositioned once, by the real SeekAsync the caller issues when
+    // the drag/key-repeat ends. Video is deliberately left running here rather
+    // than paused per tick: pausing and unpausing around every position write
+    // makes libvlc rebuffer, and the next tick (or the settling seek) supersedes
+    // it in a few tens of milliseconds regardless.
+    public void SeekPreview(TimeSpan time)
+    {
+        var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
+        // Same counter the real seeks use, so one of these can never land on
+        // top of a newer settling seek.
+        Interlocked.Increment(ref _seekVersion);
+        _lastRequestedPosition = TimeSpan.FromMilliseconds(milliseconds);
+        try
+        {
+            lock (_transportLock)
+            {
+                ForceVideoSilent();
+                _audioOutput?.Stop();
+                if (IsEnded || VideoPlayer.State == VLCState.Stopped)
+                {
+                    VideoPlayer.Stop();
+                    _ended = false;
+                }
+                // libvlc ignores a Time assignment made before the player has
+                // actually started - see PlayFrom for the same ordering.
+                if (!VideoPlayer.IsPlaying) VideoPlayer.Play();
+                VideoPlayer.SetPause(false);
+                VideoPlayer.Time = milliseconds;
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Editor preview seek failed", error);
+        }
+    }
+
+    public async Task<bool> SeekAsync(TimeSpan time, bool resumePlayback = false, CancellationToken cancellationToken = default)
     {
         var seekVersion = Interlocked.Increment(ref _seekVersion);
         await _seekLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -401,7 +465,7 @@ public sealed class PlaybackSession : IDisposable
             }
             AppLog.Debug($"Editor seek begin: requested={requested.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}, resume={resumePlayback}, version={seekVersion}.");
             if (seekVersion != Interlocked.Read(ref _seekVersion)) return false;
-            var videoReady = await SeekAndWaitAsync(requested, cancellationToken, isPreview).ConfigureAwait(false);
+            var videoReady = await SeekAndWaitAsync(requested, cancellationToken).ConfigureAwait(false);
             if (seekVersion != Interlocked.Read(ref _seekVersion)) return false;
             var settledTime = Position;
             lock (_transportLock)
@@ -541,25 +605,13 @@ public sealed class PlaybackSession : IDisposable
         _seekLock.Dispose();
     }
 
-    private async Task<bool> SeekAndWaitAsync(TimeSpan target, CancellationToken cancellationToken, bool isPreview = false)
+    private async Task<bool> SeekAndWaitAsync(TimeSpan target, CancellationToken cancellationToken)
     {
-        // A drag-scrub preview seek doesn't need to wait for a precise
-        // confirmation - it's purely visual (resumePlayback is always false
-        // for these) and the caller doesn't act differently on true/false
-        // either way. Waiting up to the full 900ms here was the actual
-        // bottleneck during a fast drag: this call is serialized behind
-        // _seekLock, so every scrub tick queued behind whichever one
-        // currently held the lock, and the video visibly lagged the mouse
-        // by however long confirmation took rather than by the UI's own
-        // throttle. A short wait lets each accepted scrub seek get out of
-        // the way quickly so the next (latest) mouse position can start
-        // almost immediately. The 650ms match-tolerance below is untouched -
-        // it only decides how close counts as "landed", not how long to
-        // wait - and the real (non-preview) seek from release/restart/step
-        // keeps the full 900ms, since that's the one that decides whether
-        // playback correctly resumes and shortening it was what caused a
-        // real desync bug previously.
-        var waitTimeout = isPreview ? TimeSpan.FromMilliseconds(180) : TimeSpan.FromMilliseconds(900);
+        // Only real (settling) seeks reach here now - drag-scrub and keyboard
+        // repeat go through SeekPreview, which never waits at all. This one
+        // decides whether playback correctly resumes, so it keeps the full
+        // 900ms; shortening it previously caused a real desync bug.
+        var waitTimeout = TimeSpan.FromMilliseconds(900);
         var targetMs = target.TotalMilliseconds;
         var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         void OnTimeChanged(object? sender, MediaPlayerTimeChangedEventArgs args)
@@ -694,15 +746,26 @@ public sealed class PlaybackSession : IDisposable
 
         if (previous is null) return;
 
-        // WasapiOut.Stop()/Dispose() don't block until its internal render
-        // thread has actually released the shared-mode IAudioClient - closing
-        // one clip's editor session and immediately opening another's (or
-        // re-opening the same one) could construct+Init() a new WasapiOut
-        // before that release finished, which could silently leave the WASAPI
-        // session wedged with no audio for the rest of the app run. Wait for
-        // PlaybackStopped (or a short timeout if it never started) before
-        // disposing, so the endpoint is actually free by the time the next
-        // WasapiOut is created.
+        // The wait below used to run right here, inline, which put it squarely
+        // on the editor-open critical path: LoadVideoAsync called this BEFORE
+        // constructing the new Media, so every clip open after the first spent
+        // up to 300ms tearing down the previous clip's audio endpoint before
+        // libvlc was even told what to decode next. Nothing about opening a new
+        // video needs the old audio endpoint to be gone - only building the
+        // NEXT WasapiOut does, which is what RebuildAudioOutput waits on.
+        _audioOutputRelease = Task.Run(() => ReleaseAudioOutput(previous));
+    }
+
+    // WasapiOut.Stop()/Dispose() don't block until its internal render thread
+    // has actually released the shared-mode IAudioClient - closing one clip's
+    // editor session and immediately opening another's (or re-opening the same
+    // one) could construct+Init() a new WasapiOut before that release finished,
+    // which could silently leave the WASAPI session wedged with no audio for
+    // the rest of the app run. Wait for PlaybackStopped (or a short timeout if
+    // it never started) before disposing, so the endpoint is actually free by
+    // the time the next WasapiOut is created.
+    private static void ReleaseAudioOutput(WasapiOut previous)
+    {
         using var stopped = new ManualResetEventSlim(false);
         void OnStopped(object? sender, StoppedEventArgs args) => stopped.Set();
         previous.PlaybackStopped += OnStopped;
@@ -711,10 +774,14 @@ public sealed class PlaybackSession : IDisposable
             previous.Stop();
             stopped.Wait(TimeSpan.FromMilliseconds(300));
         }
+        catch
+        {
+            // A failed teardown must not take the next clip's audio with it.
+        }
         finally
         {
             previous.PlaybackStopped -= OnStopped;
-            previous.Dispose();
+            try { previous.Dispose(); } catch { }
         }
     }
 

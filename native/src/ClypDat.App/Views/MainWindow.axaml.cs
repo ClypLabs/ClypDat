@@ -60,13 +60,18 @@ public sealed partial class MainWindow : Window
     // throttle here just caps how often that cancel-and-restart happens rather
     // than needing any new synchronization of its own.
     private readonly Stopwatch _timelineScrubThrottle = new();
-    // Lowered from 120ms alongside PlaybackSession's preview-mode seek wait
-    // (see SeekAndWaitAsync) - the confirmation wait used to be the actual
-    // bottleneck (up to 900ms, serialized behind _seekLock), so this throttle
-    // never got a chance to matter. Now that a preview seek gets out of the
-    // way quickly, this can drop closer to its intended job of pacing scrub
-    // updates rather than pacing around a slow seek round-trip.
-    private static readonly TimeSpan TimelineScrubMinInterval = TimeSpan.FromMilliseconds(60);
+    // True only while a settling (non-preview) seek is awaiting confirmation -
+    // see ApplyTimelineSeekAsync and SyncPlaybackPosition.
+    private bool _editorSeekInFlight;
+    private readonly DispatcherTimer _keyboardSeekSettleTimer;
+    private bool _keyboardSeekActive;
+    private bool _keyboardSeekWasPlaying;
+    // Now that scrubbing goes through PlaybackSession.SeekPreview - no lock, no
+    // confirmation wait, no audio work - there is no longer a slow round-trip
+    // for this to pace around, so it can do its actual job of capping the
+    // update rate at roughly one per displayed frame. It was 120ms, then 60ms,
+    // both chosen to sit above a seek cost that no longer exists.
+    private static readonly TimeSpan TimelineScrubMinInterval = TimeSpan.FromMilliseconds(33);
     private IReplayBuffer? _replayBuffer;
     private ReplayBackendOption _activeReplayBackend = ReplayBackendOption.Auto;
     private GlobalHotkeyService? _globalHotkey;
@@ -231,6 +236,13 @@ public sealed partial class MainWindow : Window
                 AppLog.Error("Playback position sync failed (recovered)", error);
             }
         };
+        // Restarted on every arrow-key seek, so it only fires once the key has
+        // actually stopped repeating - see ApplyKeyboardSeek. 220ms sits above
+        // Windows' fastest key-repeat interval (~30ms) with margin, and is
+        // short enough that a single tap still settles immediately enough to
+        // feel like one action.
+        _keyboardSeekSettleTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(220) };
+        _keyboardSeekSettleTimer.Tick += (_, _) => KeyboardSeekSettle();
         _gameDetectionTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _gameDetectionTimer.Tick += (_, _) => UpdateDetectedGame();
         _updateCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromHours(4) };
@@ -4730,17 +4742,11 @@ public sealed partial class MainWindow : Window
         switch (e.Key)
         {
             case Key.Left:
-                _endedAtTrimBoundary = false;
-                var leftWasPlaying = ViewModel.IsPlaying;
-                ViewModel.SeekBySeconds(-1);
-                _ = ApplyTimelineSeekAsync(ViewModel.CurrentTime, leftWasPlaying);
+                ApplyKeyboardSeek(-1);
                 e.Handled = true;
                 break;
             case Key.Right:
-                _endedAtTrimBoundary = false;
-                var rightWasPlaying = ViewModel.IsPlaying;
-                ViewModel.SeekBySeconds(1);
-                _ = ApplyTimelineSeekAsync(ViewModel.CurrentTime, rightWasPlaying);
+                ApplyKeyboardSeek(1);
                 e.Handled = true;
                 break;
             case Key.Space:
@@ -4748,6 +4754,35 @@ public sealed partial class MainWindow : Window
                 e.Handled = true;
                 break;
         }
+    }
+
+    // Arrow-key seeking used to issue a full settling seek per key event, each
+    // waiting up to 900ms for confirmation and serialized behind the last -
+    // so HOLDING an arrow, which is how anyone actually scans through a clip,
+    // queued up a backlog that took seconds to drain and made the key feel
+    // stuck. Held repeats now take the same instant no-wait path as a drag
+    // (SeekPreview), and a single real seek settles the transport once the key
+    // stops repeating - identical in shape to press-drag-release.
+    private void ApplyKeyboardSeek(int seconds)
+    {
+        if (ViewModel is null) return;
+        _endedAtTrimBoundary = false;
+        if (!_keyboardSeekActive) _keyboardSeekWasPlaying = ViewModel.IsPlaying;
+        _keyboardSeekActive = true;
+        ViewModel.SeekBySeconds(seconds);
+        ResetPlayheadClockAfterSeek(ViewModel.CurrentTime);
+        UpdateTimelineChrome();
+        _playback?.SeekPreview(ViewModel.CurrentTime);
+        _keyboardSeekSettleTimer.Stop();
+        _keyboardSeekSettleTimer.Start();
+    }
+
+    private void KeyboardSeekSettle()
+    {
+        _keyboardSeekSettleTimer.Stop();
+        if (!_keyboardSeekActive || ViewModel is null) return;
+        _keyboardSeekActive = false;
+        _ = ApplyTimelineSeekAsync(ViewModel.CurrentTime, _keyboardSeekWasPlaying);
     }
 
     private void MainWindow_OnKeyUp(object? sender, KeyEventArgs e)
@@ -4790,7 +4825,11 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null) return;
         if (_playback is null)
         {
-            await StartEditorPlaybackAsync(CancellationToken.None);
+            // Goes through QueueEditorPlayback rather than calling
+            // StartEditorPlaybackAsync directly: the session construction and
+            // the video load now happen there, ahead of the dispatcher hop, so
+            // this is the only entry point that sets all of that up.
+            QueueEditorPlayback();
             ReassertHoverBarAbovePausedOverlay();
             return;
         }
@@ -4969,13 +5008,29 @@ public sealed partial class MainWindow : Window
         UpdateTimelineFromPointer(e, _timelineDragMode);
 
         // Live-preview the actual frame while dragging instead of leaving the
-        // video dead until release - always paused/silent (resumePlayback:
-        // false) during the drag itself, matching the pause-on-drag-start
-        // behavior above; PointerReleased below issues the real, resume-aware
-        // seek once the user lets go.
+        // video dead until release. Silent throughout - SeekPreview does no
+        // audio work at all - and PointerReleased below issues the real,
+        // resume-aware seek once the user lets go.
         if (_timelineScrubThrottle.Elapsed < TimelineScrubMinInterval) return;
         _timelineScrubThrottle.Restart();
-        _ = ApplyTimelineSeekAsync(ViewModel.CurrentTime, resumePlayback: false, isPreview: true);
+        _endedAtTrimBoundary = false;
+        _playback?.SeekPreview(ViewModel.CurrentTime);
+    }
+
+    // A drag can end without a PointerReleased ever arriving - alt-tab, a
+    // window losing activation, the pointer device going away. Without this the
+    // gesture stayed "active" forever, and _timelineDragMode being stuck at
+    // anything but None permanently disables the position updates in
+    // SyncPlaybackPosition: the playhead simply stops following playback for
+    // the rest of the session.
+    private void TimelineSurface_OnPointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+    {
+        if (_timelineDragMode == TimelineDragMode.None) return;
+        var wasPlaying = _timelineWasPlayingBeforeDrag;
+        _timelineDragMode = TimelineDragMode.None;
+        _timelineWasPlayingBeforeDrag = false;
+        if (ViewModel is null) return;
+        _ = ApplyTimelineSeekAsync(ViewModel.CurrentTime, wasPlaying);
     }
 
     private async void TimelineSurface_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
@@ -6493,32 +6548,40 @@ public sealed partial class MainWindow : Window
         // on screen. Default runs it as soon as pending input/layout work is
         // done instead of waiting for a full render pass, so decode starts
         // essentially in parallel with the panel appearing instead of after it.
+        //
+        // The file work is kicked off HERE, before that hop, rather than inside
+        // it. LoadVideoAsync is a Task.Run, so starting it costs this thread
+        // nothing - but it used to sit behind the whole dispatcher queue, which
+        // meant libvlc did not begin opening the file until the editor panel's
+        // layout had already been serviced. Now the two overlap.
+        if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
+        StopEditorPlayback(cancelQueuedStart: false, stopMode: PlaybackStopMode.Skip);
+        // Reused across editor opens instead of constructing a fresh
+        // PlaybackSession every time - PlaybackSession's constructor spins up a
+        // whole new LibVLC engine + MediaPlayer, which was the bulk of the
+        // "video stays black for a moment" delay on every single clip open.
+        // LoadVideoAsync() already fully tears down and replaces the previous
+        // Media internally, so the same instance is safe to reuse.
+        var session = _playback ?? new PlaybackSession();
+        var videoLoad = session.LoadVideoAsync(ViewModel.SelectedVideoPath);
+
         Dispatcher.UIThread.Post(
             async () =>
             {
                 if (cts.IsCancellationRequested) return;
-                await StartEditorPlaybackAsync(cts.Token);
+                await StartEditorPlaybackAsync(session, videoLoad, cts.Token);
             },
             DispatcherPriority.Default);
     }
 
-    private async Task StartEditorPlaybackAsync(CancellationToken cancellationToken)
+    private async Task StartEditorPlaybackAsync(PlaybackSession playback, Task videoLoad, CancellationToken cancellationToken)
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
         if (cancellationToken.IsCancellationRequested) return;
 
-        StopEditorPlayback(cancelQueuedStart: false, stopMode: PlaybackStopMode.Skip);
-
         try
         {
-            // Reused across editor opens instead of constructing a fresh
-            // PlaybackSession every time - PlaybackSession's constructor spins up a
-            // whole new LibVLC engine + MediaPlayer, which was the bulk of the
-            // "video stays black for a moment" delay on every single clip open.
-            // LoadVideoAsync() already fully tears down and replaces the previous
-            // Media internally, so the same instance is safe to reuse.
-            var playback = _playback ?? new PlaybackSession();
-            await playback.LoadVideoAsync(ViewModel.SelectedVideoPath);
+            await videoLoad;
             if (cancellationToken.IsCancellationRequested) return;
             playback.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
             _playback = playback;
@@ -6559,6 +6622,13 @@ public sealed partial class MainWindow : Window
             var firstFrameClock = System.Diagnostics.Stopwatch.StartNew();
             void OnTimeChanged(object? _, MediaPlayerTimeChangedEventArgs __)
             {
+                // TimeChanged alone only proves the position advanced, not that
+                // a picture exists to show - revealing the VideoView on the very
+                // first tick could swap the thumbnail for a black native surface
+                // for a beat. Vout is libvlc's count of live video outputs, so
+                // waiting for it to come up means there is something rendered
+                // underneath by the time the placeholder is dropped.
+                if (playback.VideoPlayer.VoutCount == 0) return;
                 playback.VideoPlayer.TimeChanged -= OnTimeChanged;
                 videoReady.TrySetResult();
                 // Time from play request to first decoded frame - the primary
@@ -6594,6 +6664,14 @@ public sealed partial class MainWindow : Window
                 ViewModel.SetDuration(playback.Duration);
             }
             UpdateTimelineChrome();
+
+            // Backstop for the Vout gate in OnTimeChanged. If libvlc never
+            // brings a video output up - a file whose video stream won't decode,
+            // a vout that failed to create - nothing would ever clear the
+            // loading flag and the editor would sit on the thumbnail forever.
+            // Reveal anyway rather than stay stuck; a black surface is at least
+            // honest about the clip not playing.
+            _ = RevealEditorVideoIfStalledAsync(videoReady.Task, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -6611,6 +6689,28 @@ public sealed partial class MainWindow : Window
             AppLog.Error("Editor playback failed", error);
             StopEditorPlayback();
             await ShowMessageAsync("Playback unavailable", error.Message);
+        }
+    }
+
+    private async Task RevealEditorVideoIfStalledAsync(Task videoReady, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await videoReady.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (TimeoutException)
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (cancellationToken.IsCancellationRequested || ViewModel is null) return;
+                if (!ViewModel.IsEditorVideoLoading) return;
+                AppLog.Info("Editor video never reported a frame; revealing the video surface anyway.");
+                ViewModel.IsEditorVideoLoading = false;
+            });
         }
     }
 
@@ -6684,6 +6784,11 @@ public sealed partial class MainWindow : Window
         _editorSeekCts = null;
         _playbackTimer.Stop();
         _playheadClock.Stop();
+        // A pending arrow-key settle must not fire a seek into a session that
+        // is being torn down or swapped to another clip.
+        _keyboardSeekSettleTimer.Stop();
+        _keyboardSeekActive = false;
+        _editorSeekInFlight = false;
         _endedAtTrimBoundary = false;
         // Stop and detach the view instead of disposing - the session (and its
         // underlying LibVLC engine) stays alive and gets reused on the next
@@ -7928,6 +8033,10 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null || _playback is null) return;
         if (_timelineDragMode != TimelineDragMode.None) return;
+        // See ApplyTimelineSeekAsync - the drag guard above is already off while
+        // the settling seek runs, and the paused branch below would drag the
+        // playhead back to the pre-seek position mid-flight.
+        if (_editorSeekInFlight) return;
         if (_playback.Duration > TimeSpan.Zero && IsPlausibleDuration(_playback.Duration, ViewModel.Duration))
         {
             ViewModel.SetDuration(_playback.Duration);
@@ -8014,7 +8123,7 @@ public sealed partial class MainWindow : Window
         UpdateTimelineChrome();
     }
 
-    private async Task ApplyTimelineSeekAsync(TimeSpan time, bool resumePlayback, bool isPreview = false)
+    private async Task ApplyTimelineSeekAsync(TimeSpan time, bool resumePlayback)
     {
         if (ViewModel is null) return;
         _editorSeekCts?.Cancel();
@@ -8028,11 +8137,25 @@ public sealed partial class MainWindow : Window
         {
             try
             {
-                didResume = await _playback.SeekAsync(time, resumePlayback, seekCts.Token, isPreview);
+                // TimelineSurface_OnPointerReleased deliberately clears
+                // _timelineDragMode BEFORE awaiting this, so the drag can't keep
+                // following the pointer during the seek. That also drops
+                // SyncPlaybackPosition's drag guard, though, and its paused
+                // branch writes CurrentTime straight from _playback.Position -
+                // so a 16ms timer tick landing mid-seek would yank the playhead
+                // back to where the video hasn't left yet. This flag keeps the
+                // timer off the position for the seek's duration without
+                // restoring the drag.
+                _editorSeekInFlight = true;
+                didResume = await _playback.SeekAsync(time, resumePlayback, seekCts.Token);
             }
             catch (OperationCanceledException)
             {
                 return;
+            }
+            finally
+            {
+                if (_editorSeekCts == seekCts) _editorSeekInFlight = false;
             }
         }
         if (_editorSeekCts != seekCts) return;
