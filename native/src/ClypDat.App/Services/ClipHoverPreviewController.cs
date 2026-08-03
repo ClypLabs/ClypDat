@@ -12,17 +12,37 @@ namespace ClypDat.App.Services;
 
 // One FFmpeg session serves one library card at a time. Raw frames are paced
 // before they leave FFmpeg, while the UI keeps only the newest not-yet-painted
-// frame. This keeps 1080p previews current without letting slow UI paints pile
-// up behind the decoder.
+// frame. This keeps previews current without letting slow UI paints pile up
+// behind the decoder.
+//
+// Frames are decoded at the size of the card that displays them, NOT at the
+// clip's own resolution. This used to be a hardcoded 1920x1080: every frame was
+// 8.29MB of BGRA pushed through an anonymous pipe (~500MB/s at 60fps), scaled
+// with lanczos, and blitted into a 1920x1080 WriteableBitmap - an LOH
+// allocation churned once per hovered card. The card it lands on is CardWidth
+// wide (MainWindowViewModel clamps that to a 220 minimum, typically 220-500),
+// so that was 12-70x more pixels than were ever displayed, and it showed up on
+// low-end machines as a hover stealing a whole core from the capture pipeline.
 internal sealed class ClipHoverPreviewController : IDisposable
 {
-    internal const int Width = 1920;
-    internal const int Height = 1080;
     internal const int MaximumFramesPerSecond = 60;
     internal const int DefaultFramesPerSecond = 30;
+    // What an overloaded preview falls back to. Previews run at the recorded
+    // rate by default; HoverPreviewFramePacer watches whether the machine is
+    // actually sustaining that and steps down to this when it isn't, rather
+    // than letting a preview that can only manage 22fps keep asking for 60 and
+    // burning the difference on frames nobody sees.
+    internal const int ReducedFramesPerSecond = 30;
+    // Used when the card hasn't been laid out yet (no bounds to measure).
+    internal const int DefaultPreviewWidth = 480;
+    internal const int DefaultPreviewHeight = 270;
+    // Long-edge cap. Past this the extra pixels cost pipe bandwidth and UI
+    // upload time without being resolvable on a library card.
+    internal const int MaximumPreviewWidth = 640;
+    private const int MinimumPreviewWidth = 160;
+    private const int MinimumPreviewHeight = 90;
     internal static readonly TimeSpan HoverDelay = TimeSpan.FromMilliseconds(75);
     internal static readonly TimeSpan WarmExitGrace = TimeSpan.FromMilliseconds(150);
-    private const int FrameBytes = Width * Height * 4;
 
     private readonly object _stateLock = new();
     private readonly SemaphoreSlim _sessionLock = new(1, 1);
@@ -34,6 +54,11 @@ internal sealed class ClipHoverPreviewController : IDisposable
     private Process? _process;
     private ClipCardViewModel? _clip;
     private WriteableBitmap? _bitmap;
+    // The size the active session's bitmap and decoder were built for. A warm
+    // session can only be reused when the card still wants the same size -
+    // after a window resize it doesn't, and the old bitmap would be scaled by
+    // the Image control instead of matching it.
+    private PixelSize _previewSize;
     private Action? _requestRepaint;
     private TaskCompletionSource? _attachSignal;
     private int _attachmentVersion;
@@ -41,7 +66,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
     private bool _attached;
     private bool _disposed;
 
-    public void Request(ClipCardViewModel clip, bool enabled, Action? requestRepaint)
+    public void Request(ClipCardViewModel clip, bool enabled, Action? requestRepaint, PixelSize previewSize)
     {
         if (!enabled || requestRepaint is null || !File.Exists(clip.Path)) return;
 
@@ -55,7 +80,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         lock (_stateLock)
         {
             if (_disposed) return;
-            if (_clip == clip)
+            if (_clip == clip && _previewSize == previewSize)
             {
                 warmExitCancellation = _warmExitCancellation;
                 warmReused = warmExitCancellation is not null;
@@ -91,7 +116,37 @@ internal sealed class ClipHoverPreviewController : IDisposable
     StartPending:
         pendingCancellation?.Cancel();
         pendingCancellation?.Dispose();
-        _ = StartPendingAsync(clip, requestRepaint, pendingGeneration, token);
+        _ = StartPendingAsync(clip, requestRepaint, previewSize, pendingGeneration, token);
+    }
+
+    // Pixel size to decode at, from the card's laid-out DIP size and the
+    // window's render scaling. Even dimensions: the decoder's yuv->bgra path
+    // and the bitmap upload both want them, and an odd height silently breaks
+    // some scaler configurations.
+    internal static PixelSize ResolvePreviewSize(Size cardSize, double renderScaling)
+    {
+        var scale = double.IsFinite(renderScaling) && renderScaling > 0 ? renderScaling : 1.0;
+        var width = cardSize.Width * scale;
+        var height = cardSize.Height * scale;
+        if (!double.IsFinite(width) || !double.IsFinite(height) || width < 1 || height < 1)
+        {
+            width = DefaultPreviewWidth;
+            height = DefaultPreviewHeight;
+        }
+
+        if (width > MaximumPreviewWidth)
+        {
+            height *= MaximumPreviewWidth / width;
+            width = MaximumPreviewWidth;
+        }
+
+        return new PixelSize(RoundUpToEven(width, MinimumPreviewWidth), RoundUpToEven(height, MinimumPreviewHeight));
+    }
+
+    private static int RoundUpToEven(double value, int minimum)
+    {
+        var rounded = Math.Max(minimum, (int)Math.Round(value));
+        return rounded % 2 == 0 ? rounded : rounded + 1;
     }
 
     public void PointerLeft(ClipCardViewModel clip)
@@ -168,7 +223,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         Stop(reason);
     }
 
-    private async Task StartPendingAsync(ClipCardViewModel clip, Action requestRepaint, int pendingGeneration, CancellationToken token)
+    private async Task StartPendingAsync(ClipCardViewModel clip, Action requestRepaint, PixelSize previewSize, int pendingGeneration, CancellationToken token)
     {
         try
         {
@@ -197,12 +252,13 @@ internal sealed class ClipHoverPreviewController : IDisposable
                     cancellation = new CancellationTokenSource();
                     _clip = clip;
                     _cancellation = cancellation;
+                    _previewSize = previewSize;
                     _requestRepaint = requestRepaint;
                     _attached = true;
                     _attachmentVersion++;
                     generation = ++_generation;
                 }
-                await RunSessionAsync(clip, generation, cancellation.Token);
+                await RunSessionAsync(clip, generation, previewSize, cancellation.Token);
             }
             finally { _sessionLock.Release(); }
         }
@@ -210,7 +266,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         catch (Exception error) { AppLog.Error("Clip hover preview failed", error); }
     }
 
-    private async Task RunSessionAsync(ClipCardViewModel clip, int generation, CancellationToken token)
+    private async Task RunSessionAsync(ClipCardViewModel clip, int generation, PixelSize previewSize, CancellationToken token)
     {
         var metrics = new PreviewMetrics();
         try
@@ -218,21 +274,30 @@ internal sealed class ClipHoverPreviewController : IDisposable
             var range = clip.HoverPreviewRange;
             if (range.Duration <= TimeSpan.Zero) return;
             var frameRate = ResolveFrameRate(clip.Media.Fps);
+            // Session-scoped, not per decoder run: the whole point is to carry
+            // what it learned about this machine across the preview's loop
+            // restarts instead of re-optimistically asking for 60 every time
+            // the clip wraps around.
+            var pacer = new HoverPreviewFramePacer(frameRate);
+            var frameBytes = previewSize.Width * previewSize.Height * 4;
             var bitmap = await Dispatcher.UIThread.InvokeAsync(
-                () => new WriteableBitmap(new PixelSize(Width, Height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Unpremul));
+                () => new WriteableBitmap(previewSize, new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Unpremul));
             SetBitmap(clip, generation, bitmap);
             if (!IsCurrent(clip, generation)) return;
             var sourceMbps = clip.Duration > TimeSpan.Zero ? clip.SizeBytes * 8d / clip.Duration.TotalSeconds / 1_000_000d : 0;
-            AppLog.Info($"Clip hover preview started: {Path.GetFileName(clip.Path)}, source={clip.Media.Width}x{clip.Media.Height}, sourceMbps={sourceMbps:0.###}, output={Width}x{Height}, fps={frameRate:0.###} (recorded={clip.Media.Fps:0.###}).");
-            var slots = new[] { new FrameSlot(new byte[FrameBytes]), new FrameSlot(new byte[FrameBytes]), new FrameSlot(new byte[FrameBytes]) };
+            AppLog.Info($"Clip hover preview started: {Path.GetFileName(clip.Path)}, source={clip.Media.Width}x{clip.Media.Height}, sourceMbps={sourceMbps:0.###}, output={previewSize.Width}x{previewSize.Height}, fps={frameRate:0.###} (recorded={clip.Media.Fps:0.###}).");
+            var slots = new[] { new FrameSlot(new byte[frameBytes]), new FrameSlot(new byte[frameBytes]), new FrameSlot(new byte[frameBytes]) };
 
             while (!token.IsCancellationRequested && IsCurrent(clip, generation))
             {
-                using var process = StartDecoder(clip.Path, range, frameRate);
+                // Ask FFmpeg for whatever rate the pacer has settled on. Once
+                // it has stepped down, this stops the decode work happening at
+                // all rather than merely throttling reads off the pipe.
+                using var process = StartDecoder(clip.Path, range, pacer.CurrentFrameRate, previewSize);
                 SetProcess(clip, generation, process);
                 var stderr = process.StandardError.ReadToEndAsync();
                 var sourceReadsBefore = GetReadBytes(process);
-                var (decoded, displayed) = await DeliverFramesAsync(process.StandardOutput.BaseStream, slots, clip, generation, bitmap, frameRate, metrics, token);
+                var (decoded, displayed) = await DeliverFramesAsync(process.StandardOutput.BaseStream, slots, clip, generation, bitmap, previewSize, pacer, metrics, token);
                 await process.WaitForExitAsync(CancellationToken.None);
                 metrics.AddReadBytes(GetReadBytes(process) - sourceReadsBefore);
                 ClearProcess(process);
@@ -253,7 +318,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         }
     }
 
-    private async Task<(int Decoded, int Displayed)> DeliverFramesAsync(Stream stream, IReadOnlyList<FrameSlot> slots, ClipCardViewModel clip, int generation, WriteableBitmap bitmap, double frameRate, PreviewMetrics metrics, CancellationToken token)
+    private async Task<(int Decoded, int Displayed)> DeliverFramesAsync(Stream stream, IReadOnlyList<FrameSlot> slots, ClipCardViewModel clip, int generation, WriteableBitmap bitmap, PixelSize previewSize, HoverPreviewFramePacer pacer, PreviewMetrics metrics, CancellationToken token)
     {
         var decodedBefore = metrics.DecodedFrames;
         var displayedBefore = metrics.DisplayedFrames;
@@ -261,15 +326,14 @@ internal sealed class ClipHoverPreviewController : IDisposable
         var freeSlots = Channel.CreateBounded<FrameSlot>(new BoundedChannelOptions(3) { FullMode = BoundedChannelFullMode.Wait, SingleWriter = true, SingleReader = true });
         foreach (var slot in slots) await freeSlots.Writer.WriteAsync(slot, token);
 
-        var producer = ProduceFramesAsync(stream, freeSlots, frames, clip, generation, frameRate, metrics, token);
-        var consumer = ConsumeFramesAsync(frames, freeSlots.Writer, clip, generation, bitmap, metrics, token);
+        var producer = ProduceFramesAsync(stream, freeSlots, frames, clip, generation, pacer, metrics, token);
+        var consumer = ConsumeFramesAsync(frames, freeSlots.Writer, clip, generation, bitmap, previewSize, metrics, token);
         await Task.WhenAll(producer, consumer);
         return (metrics.DecodedFrames - decodedBefore, metrics.DisplayedFrames - displayedBefore);
     }
 
-    private async Task ProduceFramesAsync(Stream stream, Channel<FrameSlot> freeSlots, LatestFrameMailbox<FrameSlot> frames, ClipCardViewModel clip, int generation, double frameRate, PreviewMetrics metrics, CancellationToken token)
+    private async Task ProduceFramesAsync(Stream stream, Channel<FrameSlot> freeSlots, LatestFrameMailbox<FrameSlot> frames, ClipCardViewModel clip, int generation, HoverPreviewFramePacer pacer, PreviewMetrics metrics, CancellationToken token)
     {
-        var pacer = new HoverPreviewFramePacer(frameRate);
         var attachmentVersion = -1;
         try
         {
@@ -284,6 +348,10 @@ internal sealed class ClipHoverPreviewController : IDisposable
                         pacer.Reset();
                     }
                     var delay = pacer.NextDelay(metrics.Elapsed);
+                    if (pacer.TryConsumeRateChange(out var newRate))
+                    {
+                        AppLog.Info($"Clip hover preview rate adapted: {Path.GetFileName(clip.Path)}, now {newRate:0.###} fps (recorded={clip.Media.Fps:0.###}) - the preview was not sustaining the previous rate.");
+                    }
                     if (delay > TimeSpan.Zero) await Task.Delay(delay, token);
                     if (!await ReadFrameAsync(stream, slot.Buffer, token)) return;
                     metrics.MarkDecoded();
@@ -299,14 +367,14 @@ internal sealed class ClipHoverPreviewController : IDisposable
         finally { frames.Complete(); }
     }
 
-    private async Task ConsumeFramesAsync(LatestFrameMailbox<FrameSlot> frames, ChannelWriter<FrameSlot> freeSlots, ClipCardViewModel clip, int generation, WriteableBitmap bitmap, PreviewMetrics metrics, CancellationToken token)
+    private async Task ConsumeFramesAsync(LatestFrameMailbox<FrameSlot> frames, ChannelWriter<FrameSlot> freeSlots, ClipCardViewModel clip, int generation, WriteableBitmap bitmap, PixelSize previewSize, PreviewMetrics metrics, CancellationToken token)
     {
         try
         {
             while (await frames.ReadAsync(token) is { } slot)
             {
                 var uploadStarted = Stopwatch.GetTimestamp();
-                var displayed = await Dispatcher.UIThread.InvokeAsync(() => CopyFrame(clip, generation, bitmap, slot.Buffer), DispatcherPriority.Render);
+                var displayed = await Dispatcher.UIThread.InvokeAsync(() => CopyFrame(clip, generation, bitmap, previewSize, slot.Buffer), DispatcherPriority.Render);
                 metrics.MarkUiUpload(Stopwatch.GetTimestamp() - uploadStarted);
                 if (displayed) metrics.MarkDisplayed();
                 await freeSlots.WriteAsync(slot, token);
@@ -350,22 +418,28 @@ internal sealed class ClipHoverPreviewController : IDisposable
             ? Math.Clamp(recordedFrameRate, 1, MaximumFramesPerSecond)
             : DefaultFramesPerSecond;
 
-    private static Process StartDecoder(string path, (TimeSpan Start, TimeSpan Duration) range, double frameRate)
+    private static Process StartDecoder(string path, (TimeSpan Start, TimeSpan Duration) range, double frameRate, PixelSize previewSize)
     {
         var info = new ProcessStartInfo("ffmpeg") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        foreach (var argument in BuildDecoderArguments(path, range, frameRate)) info.ArgumentList.Add(argument);
+        foreach (var argument in BuildDecoderArguments(path, range, frameRate, previewSize)) info.ArgumentList.Add(argument);
         var process = Process.Start(info) ?? throw new InvalidOperationException("FFmpeg did not start.");
         try { process.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
         return process;
     }
 
-    internal static IReadOnlyList<string> BuildDecoderArguments(string path, (TimeSpan Start, TimeSpan Duration) range, double frameRate)
+    internal static IReadOnlyList<string> BuildDecoderArguments(string path, (TimeSpan Start, TimeSpan Duration) range, double frameRate, PixelSize previewSize)
     {
         var start = range.Start.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
         var duration = range.Duration.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
         var fps = ResolveFrameRate(frameRate).ToString("0.###", CultureInfo.InvariantCulture);
+        var width = previewSize.Width;
+        var height = previewSize.Height;
+        // bilinear, not lanczos. Lanczos costs several times as much per pixel
+        // and its sharpening is invisible once the output is this small - and
+        // at the old fixed 1920x1080 it was paying that cost for a 1080p source
+        // that wasn't even being resized.
         return ["-hide_banner", "-loglevel", "error", "-ss", start, "-i", path, "-t", duration,
-            "-an", "-vf", $"fps={fps},scale=w={Width}:h={Height}:flags=lanczos:force_original_aspect_ratio=decrease,pad={Width}:{Height}:(ow-iw)/2:(oh-ih)/2",
+            "-an", "-vf", $"fps={fps},scale=w={width}:h={height}:flags=bilinear:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
             "-pix_fmt", "bgra", "-f", "rawvideo", "pipe:1"];
     }
 
@@ -390,7 +464,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         lock (_stateLock) { if (IsCurrentLocked(clip, generation)) _process = process; else Kill(process); }
     }
     private void ClearProcess(Process process) { lock (_stateLock) { if (_process == process) _process = null; } }
-    private bool CopyFrame(ClipCardViewModel clip, int generation, WriteableBitmap bitmap, byte[] frame)
+    private bool CopyFrame(ClipCardViewModel clip, int generation, WriteableBitmap bitmap, PixelSize previewSize, byte[] frame)
     {
         Action? requestRepaint;
         lock (_stateLock)
@@ -398,16 +472,18 @@ internal sealed class ClipHoverPreviewController : IDisposable
             if (!IsCurrentLocked(clip, generation) || !_attached) return false;
             requestRepaint = _requestRepaint;
         }
+        var rowBytes = previewSize.Width * 4;
+        var frameBytes = rowBytes * previewSize.Height;
         using var locked = bitmap.Lock();
         unsafe
         {
             fixed (byte* source = frame)
             {
-                if (locked.RowBytes == Width * 4)
-                    Buffer.MemoryCopy(source, (byte*)locked.Address, FrameBytes, FrameBytes);
+                if (locked.RowBytes == rowBytes)
+                    Buffer.MemoryCopy(source, (byte*)locked.Address, frameBytes, frameBytes);
                 else
-                    for (var row = 0; row < Height; row++)
-                        Buffer.MemoryCopy(source + row * Width * 4, (byte*)locked.Address + row * locked.RowBytes, locked.RowBytes, Width * 4);
+                    for (var row = 0; row < previewSize.Height; row++)
+                        Buffer.MemoryCopy(source + row * rowBytes, (byte*)locked.Address + row * locked.RowBytes, locked.RowBytes, rowBytes);
             }
         }
         clip.ShowHoverPreview(bitmap);
@@ -428,7 +504,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
     {
         _generation++;
         var state = new SessionState(_clip, _bitmap, _process, _cancellation, _warmExitCancellation);
-        _clip = null; _bitmap = null; _process = null; _cancellation = null; _warmExitCancellation = null; _requestRepaint = null; _attachSignal = null; _attached = false;
+        _clip = null; _bitmap = null; _previewSize = default; _process = null; _cancellation = null; _warmExitCancellation = null; _requestRepaint = null; _attachSignal = null; _attached = false;
         return state;
     }
     private static void DisposeSession(SessionState state, string reason, bool log)
@@ -480,23 +556,150 @@ internal sealed class ClipHoverPreviewController : IDisposable
     }
 }
 
+// Paces frame reads off the decoder pipe, and watches whether the machine is
+// keeping up with the rate it asked for.
+//
+// The overload signal is already in the pacing itself: NextDelay returns a
+// positive delay when the caller arrived ahead of schedule (there is headroom)
+// and Zero when it arrived late (there is not). A preview that is genuinely
+// sustaining its rate is ahead most of the time; one that is late on most
+// frames is being asked for a rate this machine cannot deliver, and every frame
+// it does manage costs decode, pipe and UI-upload work for a result nobody sees
+// as smoother. In that case step down to ReducedFramesPerSecond, which also
+// halves what FFmpeg is asked to decode on the next loop restart.
 internal sealed class HoverPreviewFramePacer
 {
-    private readonly TimeSpan _interval;
-    private TimeSpan? _nextFrameAt;
+    // One observation window. At 60fps that is a second of preview - long
+    // enough that a single slow paint doesn't trip it, short enough to react
+    // while the user is still hovering.
+    private const int WindowSize = 60;
+    // Late on at least half the window: not keeping up.
+    private const double DegradeLateShare = 0.5;
+    // Comfortably ahead. The gap between this and DegradeLateShare is the
+    // hysteresis band that stops a machine sitting right on the boundary from
+    // flapping between rates.
+    private const double RestoreLateShare = 0.15;
+    // Consecutive clean windows before full rate is tried again. Restoring is
+    // far more cautious than degrading, for the same reason EncoderTuningService
+    // promotes cautiously: a wrong degrade costs preview smoothness, a wrong
+    // restore costs the capture pipeline CPU it cannot spare.
+    private const int RestoreCleanWindows = 5;
+    // Two step-downs in one preview session means this is not a blip - stop
+    // offering full rate back for the rest of the session.
+    private const int MaximumDegrades = 2;
 
-    public HoverPreviewFramePacer(double frameRate) => _interval = TimeSpan.FromSeconds(1 / ClipHoverPreviewController.ResolveFrameRate(frameRate));
-    public void Reset() => _nextFrameAt = null;
+    private readonly double _requestedFrameRate;
+    private readonly double _reducedFrameRate;
+    private TimeSpan _interval;
+    private TimeSpan? _nextFrameAt;
+    private int _windowCount;
+    private int _lateCount;
+    private int _cleanWindows;
+    private int _degrades;
+    private bool _reduced;
+    private double? _pendingRateChange;
+
+    public HoverPreviewFramePacer(double frameRate)
+    {
+        _requestedFrameRate = ClipHoverPreviewController.ResolveFrameRate(frameRate);
+        _reducedFrameRate = Math.Min(_requestedFrameRate, ClipHoverPreviewController.ReducedFramesPerSecond);
+        _interval = TimeSpan.FromSeconds(1 / _requestedFrameRate);
+    }
+
+    public double CurrentFrameRate => _reduced ? _reducedFrameRate : _requestedFrameRate;
+    public bool IsReduced => _reduced;
+
+    // True once per transition, so the caller can log it without the pacer
+    // needing to know which clip it belongs to.
+    public bool TryConsumeRateChange(out double frameRate)
+    {
+        if (_pendingRateChange is not { } pending)
+        {
+            frameRate = 0;
+            return false;
+        }
+        _pendingRateChange = null;
+        frameRate = pending;
+        return true;
+    }
+
+    // Called when the preview re-attaches after the pointer left and came back.
+    // The schedule is stale (wall time ran on while detached) and so is the
+    // observation window - frames missed while nothing was being painted say
+    // nothing about whether this machine can sustain the rate.
+    public void Reset()
+    {
+        _nextFrameAt = null;
+        _windowCount = 0;
+        _lateCount = 0;
+    }
+
     public TimeSpan NextDelay(TimeSpan now)
     {
-        if (_nextFrameAt is null || now >= _nextFrameAt)
+        var hadSchedule = _nextFrameAt is not null;
+        TimeSpan delay;
+        bool late;
+        if (_nextFrameAt is { } scheduled && now < scheduled)
         {
-            _nextFrameAt = now + _interval;
-            return TimeSpan.Zero;
+            late = false;
+            delay = scheduled - now;
+            _nextFrameAt = scheduled + _interval;
         }
-        var delay = _nextFrameAt.Value - now;
-        _nextFrameAt += _interval;
+        else
+        {
+            late = true;
+            _nextFrameAt = now + _interval;
+            delay = TimeSpan.Zero;
+        }
+
+        // The first call after a reset has no schedule to be late against, so
+        // it is late by construction and must not count as evidence.
+        if (hadSchedule) Observe(late);
         return delay;
+    }
+
+    private void Observe(bool late)
+    {
+        // Nothing to step down to (a 24fps clip is already at or below the
+        // reduced rate), or already stepped down as far as this is allowed to.
+        if (_requestedFrameRate <= _reducedFrameRate) return;
+        if (_reduced && _degrades >= MaximumDegrades) return;
+
+        _windowCount++;
+        if (late) _lateCount++;
+        if (_windowCount < WindowSize) return;
+
+        var lateShare = (double)_lateCount / _windowCount;
+        _windowCount = 0;
+        _lateCount = 0;
+
+        if (!_reduced)
+        {
+            if (lateShare < DegradeLateShare) return;
+            _degrades++;
+            SetReduced(true);
+            return;
+        }
+
+        if (lateShare > RestoreLateShare)
+        {
+            _cleanWindows = 0;
+            return;
+        }
+
+        if (++_cleanWindows < RestoreCleanWindows) return;
+        _cleanWindows = 0;
+        SetReduced(false);
+    }
+
+    private void SetReduced(bool reduced)
+    {
+        _reduced = reduced;
+        _interval = TimeSpan.FromSeconds(1 / CurrentFrameRate);
+        // The old schedule was built on the old interval - re-anchor rather
+        // than carrying a deadline that means something different now.
+        _nextFrameAt = null;
+        _pendingRateChange = CurrentFrameRate;
     }
 }
 

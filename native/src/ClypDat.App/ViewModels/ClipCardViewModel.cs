@@ -499,13 +499,38 @@ public sealed class ClipCardViewModel : ViewModelBase
         PersistentStateChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    // Pixel width to decode card thumbnails at, kept in step with CardWidth by
+    // MainWindowViewModel. Static because every card in the library is the same
+    // width - there is no per-card answer to give.
+    //
+    // Thumbnails are written 960px wide (MediaProbeService's "scale=960:-2"),
+    // and decoding one at full size costs ~2MB of BGRA per visible card for a
+    // card that is usually 220-500px across. DecodeToWidth lets Skia downscale
+    // during decode, so both the pixels and the work scale with what is
+    // actually shown.
+    private const int MinimumPreviewDecodeWidth = 160;
+    private static int _previewDecodeWidth = 480;
+
+    public static void SetPreviewDecodeWidth(double cardWidth, double renderScaling)
+    {
+        var scale = double.IsFinite(renderScaling) && renderScaling > 0 ? renderScaling : 1.0;
+        var width = cardWidth * scale;
+        if (!double.IsFinite(width) || width < MinimumPreviewDecodeWidth) width = MinimumPreviewDecodeWidth;
+        // Never decode LARGER than the source - DecodeToWidth would upscale,
+        // spending memory to add no detail.
+        _previewDecodeWidth = Math.Min(ThumbnailSourceWidth, (int)Math.Round(width));
+    }
+
+    // Matches MediaProbeService's thumbnail scale.
+    private const int ThumbnailSourceWidth = 960;
+
     private void SetPreviewImage(string path)
     {
         var old = _previewImage;
         try
         {
             PreviewImage = !string.IsNullOrWhiteSpace(path) && File.Exists(path)
-                ? new Bitmap(path)
+                ? DecodePreview(path)
                 : null;
         }
         catch
@@ -515,6 +540,22 @@ public sealed class ClipCardViewModel : ViewModelBase
         finally
         {
             if (old is not null && old != _previewImage) old.Dispose();
+        }
+    }
+
+    private static Bitmap DecodePreview(string path)
+    {
+        using var stream = File.OpenRead(path);
+        try
+        {
+            return Bitmap.DecodeToWidth(stream, _previewDecodeWidth, BitmapInterpolationMode.MediumQuality);
+        }
+        catch
+        {
+            // Some encoders produce headers DecodeToWidth cannot size up front.
+            // A full decode still shows the card rather than leaving it blank.
+            stream.Position = 0;
+            return new Bitmap(stream);
         }
     }
 }

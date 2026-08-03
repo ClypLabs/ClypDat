@@ -6,7 +6,7 @@ namespace ClypDat.App.Services;
 // that's what the Settings description for "Auto (recommended)" has always
 // promised ("Uses ClypDat's own capture engine for every game"), and it's
 // the backend that's actually been proven reliable across every session.
-public sealed class HybridReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics
+public sealed class HybridReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics, IAdaptiveCaptureFrameRate
 {
     private readonly Func<ReplayBufferConfig> _configProvider;
     private IReplayBuffer? _inner;
@@ -54,6 +54,14 @@ public sealed class HybridReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     }
 
     public void SetCapturePaused(bool paused) => _inner?.SetCapturePaused(paused);
+
+    // Forwarded only when the backend actually running underneath supports it -
+    // the legacy fallback does not, and silently doing nothing is the correct
+    // answer there.
+    public void RequestFrameRate(int frameRate)
+    {
+        if (_inner is IAdaptiveCaptureFrameRate adaptive) adaptive.RequestFrameRate(frameRate);
+    }
 
     public bool LastSaveVideoWasFrozen => _inner?.LastSaveVideoWasFrozen == true;
 

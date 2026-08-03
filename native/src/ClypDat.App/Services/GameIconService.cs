@@ -31,10 +31,76 @@ public static class GameIconService
     // it has failed (protected process, no icon resource, access denied).
     private static readonly HashSet<string> Attempted = new(StringComparer.OrdinalIgnoreCase);
 
-    private static string CachePathFor(string displayName)
+    // One instance for the process rather than one per lookup. The old
+    // per-call `using var client = new HttpClient` churned sockets, and with
+    // no negative cache below it was doing so several times a minute for a
+    // name the store was never going to resolve.
+    private static readonly HttpClient Http = CreateHttpClient();
+
+    private static HttpClient CreateHttpClient()
     {
-        var safe = string.Join("_", displayName.Split(Path.GetInvalidFileNameChars()));
-        return Path.Combine(CacheFolder, $"{safe}.png");
+        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("ClypDat-GameIcons/1.0 (+https://github.com/ClypDat/ClypDat)");
+        return client;
+    }
+
+    // How long a name that resolved to nothing online stays suppressed.
+    //
+    // NetworkAttempted below deliberately un-marks a failed lookup so a later
+    // sweep can retry it - that exists so a game added to the curated
+    // game-icons.json list after a first failed try still picks an icon up.
+    // But every library change triggers a sweep, so in practice a name with no
+    // artwork anywhere (a plain "Desktop Capture" recording, say) re-ran a
+    // Steam store search every time: real logs show eight attempts in ten
+    // minutes. Persisting the miss keeps the eventual-retry behaviour and drops
+    // the cost of it to a File.Exists.
+    private static readonly TimeSpan NegativeCacheRetryAfter = TimeSpan.FromDays(1);
+
+    private static string CachePathFor(string displayName) => Path.Combine(CacheFolder, $"{SafeFileName(displayName)}.png");
+    private static string NegativeMarkerPathFor(string displayName) => Path.Combine(CacheFolder, $"{SafeFileName(displayName)}.miss");
+
+    private static string SafeFileName(string displayName) =>
+        string.Join("_", displayName.Split(Path.GetInvalidFileNameChars()));
+
+    // The marker's own last-write time is the timestamp - no content to parse,
+    // and a manual delete of the file is a valid way to force a retry.
+    private static bool IsNegativeCacheFresh(string displayName)
+    {
+        try
+        {
+            var marker = new FileInfo(NegativeMarkerPathFor(displayName));
+            return marker.Exists && DateTime.UtcNow - marker.LastWriteTimeUtc < NegativeCacheRetryAfter;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void MarkNegative(string displayName)
+    {
+        try
+        {
+            Directory.CreateDirectory(CacheFolder);
+            var path = NegativeMarkerPathFor(displayName);
+            File.WriteAllBytes(path, Array.Empty<byte>());
+            File.SetLastWriteTimeUtc(path, DateTime.UtcNow);
+        }
+        catch
+        {
+            // Best-effort: without the marker this just behaves as it did
+            // before, retrying on the next sweep.
+        }
+    }
+
+    private static void ClearNegative(string displayName)
+    {
+        try
+        {
+            var path = NegativeMarkerPathFor(displayName);
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch { }
     }
 
     // Names are compared with punctuation, casing, trademark symbols and
@@ -142,12 +208,15 @@ public static class GameIconService
                 }
             }
 
-            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("ClypDat-GameIcons/1.0 (+https://github.com/ClypDat/ClypDat)");
+            // Local sources above are cheap and can newly succeed (the game was
+            // just installed), so they are tried every sweep. The online search
+            // is the expensive part and the one worth suppressing.
+            if (IsNegativeCacheFresh(displayName)) return false;
 
-            var url = await ResolveIconUrlAsync(client, displayName, cancellationToken);
+            var url = await ResolveIconUrlAsync(Http, displayName, cancellationToken);
             if (string.IsNullOrWhiteSpace(url))
             {
+                MarkNegative(displayName);
                 AppLog.Info($"Game icon: nothing resolved online for '{displayName}'.");
                 return false;
             }
@@ -158,7 +227,7 @@ public static class GameIconService
                 return false;
             }
 
-            var bytes = await client.GetByteArrayAsync(url, cancellationToken);
+            var bytes = await Http.GetByteArrayAsync(url, cancellationToken);
             using var stream = new MemoryStream(bytes);
             using var bitmap = new Bitmap(stream);
 
@@ -175,7 +244,8 @@ public static class GameIconService
         }
         finally
         {
-            if (!succeeded) lock (NetworkAttempted) NetworkAttempted.Remove(displayName);
+            if (succeeded) ClearNegative(displayName);
+            else lock (NetworkAttempted) NetworkAttempted.Remove(displayName);
         }
     }
 
@@ -438,6 +508,15 @@ public static class GameIconService
                     // live Bitmap) just stays put and gets reused.
                     AppLog.Error($"Game icon cache: could not delete {file}", error);
                 }
+            }
+
+            // Negative markers too, or an explicit refresh would silently skip
+            // every name that missed in the last day - the exact case the user
+            // is reaching for this button to fix. Not counted in `removed`,
+            // which reports cached images.
+            foreach (var marker in Directory.EnumerateFiles(CacheFolder, "*.miss"))
+            {
+                try { File.Delete(marker); } catch { }
             }
         }
         catch (Exception error)

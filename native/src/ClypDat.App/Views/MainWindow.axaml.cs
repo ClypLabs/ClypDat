@@ -252,6 +252,9 @@ public sealed partial class MainWindow : Window
             RevealAfterFirstDarkFrame();
             if (_startupInitialized) return;
             _startupInitialized = true;
+            // Only known once there is a visual root - thumbnails decode to
+            // card pixels, not card DIPs.
+            ViewModel?.SetCardRenderScaling(RenderScaling);
             // Card layout comes from LibraryScrollViewer's own SizeChanged
             // (wired above) - at Opened its width may still be 0.
             ClearLibraryResizeAnchor();
@@ -641,18 +644,39 @@ public sealed partial class MainWindow : Window
         _replayBuffer.SetCapturePaused(shouldPause);
     }
 
-    // Observe-only for now: EncoderTuningService logs the preset change it WOULD
-    // make and never touches a setting. See its own notes for why it is being
-    // run against real sessions before it is allowed to act on anything.
+    // Preset changes stay observe-only (EncoderTuningService logs what it WOULD
+    // do); the frame-rate lever is live, because unlike a preset it needs no
+    // restart. See EncoderTuningService's header.
     private void AttachEncoderTuning(IReplayBuffer buffer)
     {
         if (buffer is IReplayCaptureDiagnostics diagnostics)
         {
             diagnostics.HealthChanged += EncoderTuning_OnHealthChanged;
         }
+
+        _encoderTuning.FrameRateChangeRequested -= EncoderTuning_OnFrameRateChangeRequested;
+        _encoderTuning.FrameRateChangeRequested += EncoderTuning_OnFrameRateChangeRequested;
     }
 
     private void EncoderTuning_OnHealthChanged(object? sender, ReplayCaptureHealth health) => _encoderTuning.OnHealth(health);
+
+    private void EncoderTuning_OnFrameRateChangeRequested(object? sender, EncoderFrameRateChange change)
+    {
+        if (_replayBuffer is IAdaptiveCaptureFrameRate adaptive) adaptive.RequestFrameRate(change.FrameRate);
+
+        // Health arrives off the capture thread, so this event does too.
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (ViewModel is null) return;
+            // Told, not silently downgraded: the whole reason this lever exists
+            // is that a machine could sit at 18.8fps of a requested 60 for
+            // minutes with nothing said about it.
+            ShowClipSavedOverlay(
+                ViewModel.Settings.ClipOverlayPosition,
+                $"Capture dropped to {change.FrameRate} FPS - your GPU couldn't keep up at {change.PreviousFrameRate}",
+                playSound: false);
+        });
+    }
 
     private void InitializeReplayServices()
     {
@@ -2219,7 +2243,7 @@ public sealed partial class MainWindow : Window
             AppLog.Info("Replay started.");
             var activeConfig = ViewModel.CreateReplayConfig();
             _activeReplayTargetIdentity = ReplayTargetIdentity(activeConfig);
-            _encoderTuning.BeginSession(activeConfig.EncoderPreset);
+            _encoderTuning.BeginSession(activeConfig.EncoderPreset, activeConfig.FrameRate);
             // Fresh session, fresh list - but only for a GENUINELY new session
             // (a game was just detected). A quality restart is left open (not
             // cleared here either) so a Full Session VOD that finalizes minutes
@@ -3837,8 +3861,12 @@ public sealed partial class MainWindow : Window
         clip.IsHovered = true;
         var previewImage = control.GetVisualDescendants().OfType<Image>()
             .FirstOrDefault(image => image.Classes.Contains("clipPreviewImage"));
+        // Decode at the size this card actually paints at, not the clip's own
+        // resolution - see ClipHoverPreviewController's class comment.
+        var previewSize = ClipHoverPreviewController.ResolvePreviewSize(
+            previewImage?.Bounds.Size ?? default, RenderScaling);
         _clipHoverPreview.Request(clip, ViewModel?.EnableClipHoverPreview == true && ViewModel.IsLibraryVisible,
-            previewImage is null ? null : () => previewImage.InvalidateVisual());
+            previewImage is null ? null : () => previewImage.InvalidateVisual(), previewSize);
     }
 
     private void ClipCard_OnPointerExited(object? sender, PointerEventArgs e)
@@ -6563,7 +6591,9 @@ public sealed partial class MainWindow : Window
         // LoadVideoAsync() already fully tears down and replaces the previous
         // Media internally, so the same instance is safe to reuse.
         var session = _playback ?? new PlaybackSession();
-        var videoLoad = session.LoadVideoAsync(ViewModel.SelectedVideoPath);
+        // Whether a buffer is armed decides how much of the machine the
+        // decoder may take - see PlaybackSession.ResolveDecodeThreads.
+        var videoLoad = session.LoadVideoAsync(ViewModel.SelectedVideoPath, ViewModel.IsReplayRecording);
 
         Dispatcher.UIThread.Post(
             async () =>

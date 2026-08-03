@@ -5,19 +5,45 @@ namespace ClypDat.App.Services;
 // Watches live capture health and works out what the encoder preset SHOULD be
 // for this machine under real load.
 //
-// Deliberately observe-only for now: it logs the decision it would have made
-// and never changes a setting. The thresholds below are calibrated against one
-// machine's numbers (see NativeReplayBuffer's preset comment - p4 measured
+// PRESET changes remain observe-only: it logs the decision it would have made
+// and never changes the setting. The thresholds below are calibrated against
+// one machine's numbers (see NativeReplayBuffer's preset comment - p4 measured
 // 16-28ms/frame and dropped 110 frames in a 2s window under real gameplay,
 // where the same preset looks perfectly fine on an idle desktop), and applying
 // a preset change costs a full buffer restart. Both are good reasons to let it
 // run against real sessions and check its proposals against what actually
 // happened before it is allowed to act on them.
 //
+// FRAME RATE is different, and this DOES act on it. Once the ladder bottoms out
+// at P1 there is no preset left to spend, and the previous behaviour was to log
+// "resolution or frame rate is the remaining lever" and then do nothing: a real
+// session on an Iris Xe laptop sat at 18.8fps against a 60fps target for
+// minutes, binning a third of the user's frames, and never said so. Halving the
+// target costs no restart at all (see NativeReplayBuffer.RequestFrameRate) and
+// turns dropped frames into a lower but honest rate.
+//
 // Only the Native backend reports the telemetry this needs; other backends are
 // ignored rather than guessed at.
 public sealed class EncoderTuningService
 {
+    // What a machine that cannot sustain its configured rate falls back to.
+    // Only ever one step: below 30 the clip stops being pleasant to watch, at
+    // which point the honest answer is a settings change, not more ratcheting.
+    private const int ReducedFrameRate = 30;
+    // Below this there is nothing worth halving.
+    private const int MinimumFrameRateToReduce = 45;
+
+    // Raised when the target frame rate should change. MainWindow wires this to
+    // the live buffer and to the user-facing toast.
+    public event EventHandler<EncoderFrameRateChange>? FrameRateChangeRequested;
+
+    private int _configuredFrameRate;
+    private int _activeFrameRate;
+    // One step down per session. Handing the rate back and taking it away again
+    // would be worse than either, and this machine has already shown what it
+    // can do.
+    private bool _frameRateReduced;
+
     // Slowest/best-looking first. "Demote" moves toward P1 (cheaper per frame),
     // "promote" moves back toward the user's own setting.
     private static readonly string[] PresetLadder = { "P5", "P4", "P3", "P2", "P1" };
@@ -68,7 +94,7 @@ public sealed class EncoderTuningService
     // Called on every buffer start. The burned-preset set deliberately survives
     // within a run of the app but the streak state does not - a fresh buffer is
     // a fresh set of conditions (different game, different resolution).
-    public void BeginSession(string userPreset)
+    public void BeginSession(string userPreset, int configuredFrameRate)
     {
         _sessionStartUtc = DateTime.UtcNow;
         _lastDecisionUtc = DateTime.MinValue;
@@ -80,7 +106,10 @@ public sealed class EncoderTuningService
         _recentOverloads.Clear();
         _ceilingPreset = Normalize(userPreset);
         _proposedPreset = _ceilingPreset;
-        AppLog.Info($"Encoder tuning: observing session at preset {_ceilingPreset} (observe-only, no settings will change).");
+        _configuredFrameRate = configuredFrameRate;
+        _activeFrameRate = configuredFrameRate;
+        _frameRateReduced = false;
+        AppLog.Info($"Encoder tuning: observing session at preset {_ceilingPreset}, {configuredFrameRate} fps (preset changes are observe-only; frame rate can be lowered if the encoder cannot keep up).");
     }
 
     public void EndSession()
@@ -95,7 +124,8 @@ public sealed class EncoderTuningService
                     $"{_overloadedSamplesSeen} overloaded ({_severeSamplesSeen} severe). " +
                     (string.Equals(_proposedPreset, _ceilingPreset, StringComparison.OrdinalIgnoreCase)
                         ? $"No change proposed to the configured {_ceilingPreset}."
-                        : $"Would have run {_proposedPreset} instead of the configured {_ceilingPreset}."));
+                        : $"Would have run {_proposedPreset} instead of the configured {_ceilingPreset}.") +
+                    (_frameRateReduced ? $" Target frame rate was lowered {_configuredFrameRate} -> {_activeFrameRate} fps." : string.Empty));
 
         _sessionStartUtc = DateTime.MinValue;
     }
@@ -164,10 +194,30 @@ public sealed class EncoderTuningService
         var next = Step(_proposedPreset, +1);
         if (next is null)
         {
-            AppLog.Info($"Encoder tuning: sustained overload at {_proposedPreset}, already at the fastest preset - " +
-                        $"{overloadCount}/{WindowSize} windows severely overloaded, dropped={health.DroppedFrames}, " +
+            // Out of presets. Frame rate is the one remaining lever that can be
+            // pulled live - see this class's header and RequestFrameRate.
+            if (!_frameRateReduced && _activeFrameRate >= MinimumFrameRateToReduce)
+            {
+                _frameRateReduced = true;
+                var previous = _activeFrameRate;
+                _activeFrameRate = ReducedFrameRate;
+                AppLog.Info($"Encoder tuning: sustained overload at {_proposedPreset} with no faster preset left - " +
+                            $"lowering target frame rate {previous} -> {ReducedFrameRate} fps. " +
+                            $"{overloadCount}/{WindowSize} windows severely overloaded, dropped={health.DroppedFrames}, " +
+                            $"queue={health.QueueDepth}/{health.EncodeQueueCapacity}, outputFps={health.OutputFrameRate:0.0}/{health.TargetFrameRate}, " +
+                            $"adapter={health.AdapterDescription}.");
+                FrameRateChangeRequested?.Invoke(this, new EncoderFrameRateChange(previous, ReducedFrameRate));
+                _lastDecisionUtc = now;
+                _recentOverloads.Clear();
+                _cleanSinceUtc = null;
+                _queueDepthSinceClean = 0;
+                return;
+            }
+
+            AppLog.Info($"Encoder tuning: sustained overload at {_proposedPreset}, already at the fastest preset and " +
+                        $"{_activeFrameRate} fps - {overloadCount}/{WindowSize} windows severely overloaded, dropped={health.DroppedFrames}, " +
                         $"queue={health.QueueDepth}/{health.EncodeQueueCapacity}, outputFps={health.OutputFrameRate:0.0}/{health.TargetFrameRate}. " +
-                        "Resolution or frame rate is the remaining lever, not the preset.");
+                        "Capture resolution is the remaining lever, and it needs a settings change.");
             _lastDecisionUtc = now;
             return;
         }
@@ -236,3 +286,5 @@ public sealed class EncoderTuningService
 
     private static string Normalize(string preset) => PresetLadder[IndexOf(preset)];
 }
+
+public sealed record EncoderFrameRateChange(int PreviousFrameRate, int FrameRate);

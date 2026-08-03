@@ -72,6 +72,16 @@ public interface IReplayCaptureDiagnostics
     event EventHandler<ReplayCaptureHealth>? HealthChanged;
 }
 
+// A backend that can be retargeted to a different frame rate without
+// restarting - implemented only where that is genuinely free (the native
+// engine, where it is purely a pacing change). Separate from
+// IReplayCaptureDiagnostics because it is control, not observation, and a
+// backend that cannot do it should not be forced to pretend.
+public interface IAdaptiveCaptureFrameRate
+{
+    void RequestFrameRate(int frameRate);
+}
+
 public interface IReplayBuffer : IDisposable
 {
     bool IsRecording { get; }

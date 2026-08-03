@@ -1,5 +1,6 @@
 using ClypDat.Capture.Abstractions;
 using FFmpeg.AutoGen;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -70,13 +71,22 @@ namespace ClypDat.App.Services;
 // AudioCapturePipeline - the same Game/Chat/Microphone routing, WASAPI capture, and mux
 // logic WindowsReplayBuffer uses, via its own independent instance.
 [SupportedOSPlatform("windows10.0.17763.0")]
-public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics
+public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics, IAdaptiveCaptureFrameRate
 {
     private readonly Func<ReplayBufferConfig> _configProvider;
     private readonly string _bufferFolder;
     private readonly AudioCapturePipeline _audio;
     private readonly object _bufferLock = new();
     private readonly List<RingPacket> _packets = new();
+    // Running total of _packets' payload bytes, maintained on add/trim under
+    // _bufferLock. The diagnostic that reports this used to sum the whole list
+    // every 2 seconds - a LINQ walk over up to 14000 entries while holding the
+    // one lock the encode thread needs for every packet it produces.
+    private long _ringBufferBytes;
+    // Live target frame rate. The capture loop owns the pacing interval and
+    // reads this once per iteration; anything outside the loop asks via
+    // RequestFrameRate rather than touching the interval directly.
+    private int _requestedFrameRate;
     // Recording-paused transitions (see class summary) - trimmed alongside
     // _packets so this never grows unbounded across a long session.
     private readonly List<PauseEvent> _pauseEvents = new();
@@ -125,6 +135,23 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     }
 
     public bool IsRecording => _sessionActive;
+
+    // Retargets pacing on a running session. Cheap and safe mid-session: only
+    // how often a frame is scheduled changes, so the encoder, the GPU scaler
+    // and the stream's parameters all stay exactly as they were and packets
+    // recorded either side of the change still mux into a single clip.
+    //
+    // Resolution deliberately has no equivalent. Changing it means rebuilding
+    // the encoder, which would leave the ring holding packets of two different
+    // sizes - unmuxable into one file - so the only honest implementation would
+    // discard the user's buffered replay history at the exact moment the
+    // machine is struggling. Frame rate is the lever that costs nothing.
+    public void RequestFrameRate(int frameRate)
+    {
+        if (!_sessionActive) return;
+        Volatile.Write(ref _requestedFrameRate, Math.Clamp(frameRate, 15, 240));
+    }
+
     public TimeSpan Duration { get; private set; } = TimeSpan.FromSeconds(60);
     public event EventHandler? RecordingStopped;
     public event EventHandler<ReplayCaptureHealth>? HealthChanged;
@@ -248,7 +275,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         _audio.Stop(deleteCaptureFiles: _backgroundFinalize is null || _backgroundFinalize.IsCompleted);
         lock (_bufferLock)
         {
+            ReturnPooledPackets(0, _packets.Count);
             _packets.Clear();
+            _ringBufferBytes = 0;
             _pauseEvents.Clear();
         }
     }
@@ -257,17 +286,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     {
         if (!_sessionActive) throw new InvalidOperationException("Replay buffer is not recording.");
 
-        // Snapshot under the lock, then scan outside it. The encode thread takes
-        // this same lock to append every single packet, so holding it across two
-        // O(n) predicate scans plus a LINQ pipeline stalled encoding for the
-        // whole selection. Copying the list is a reference memcpy - far cheaper
-        // than the work it replaces, and the snapshot semantics are identical
-        // since the selection only ever needed a consistent view.
-        RingPacket[] ringSnapshot;
-        lock (_bufferLock) ringSnapshot = _packets.ToArray();
-
-        if (ringSnapshot.Length == 0) throw new InvalidOperationException("Replay just started. Try again in a second.");
-
         var requestedStartUtc = clipWindow?.StartUtc ?? MonotonicClock.UtcNow - Duration;
         var requestedEndUtc = clipWindow?.EndUtc ?? MonotonicClock.UtcNow;
         if (requestedEndUtc <= requestedStartUtc)
@@ -275,18 +293,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             throw new InvalidOperationException("The requested replay window is empty.");
         }
 
-        // Saving from a keyframe immediately before the requested event keeps
-        // the remux playable while still producing an event-sized clip.
-        var cutoffUtc = requestedStartUtc;
-        var startIndex = Array.FindLastIndex(ringSnapshot, p => p.WallClockUtc <= cutoffUtc && p.IsKeyframe);
-        if (startIndex < 0) startIndex = Array.FindIndex(ringSnapshot, p => p.IsKeyframe);
-        if (startIndex < 0) throw new InvalidOperationException("Replay just started. Try again in a second.");
-        var endIndex = Array.FindLastIndex(ringSnapshot, p => p.WallClockUtc <= requestedEndUtc);
-        if (endIndex < startIndex) throw new InvalidOperationException("The requested replay window is no longer available.");
-
-        var window = ringSnapshot.AsSpan(startIndex, endIndex - startIndex + 1).ToArray();
-
-        if (window.Length == 0) throw new InvalidOperationException("Replay just started. Try again in a second.");
+        // Selects and copies in one locked pass - see CopyWindowUnderLock for
+        // why the copy is what keeps the ring's pooled payloads safe.
+        var window = CopyWindowUnderLock(requestedStartUtc, requestedEndUtc);
 
         var config = _configProvider();
         var clipName = string.IsNullOrWhiteSpace(titleOverride) ? config.GameDisplayName : titleOverride;
@@ -671,8 +680,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // a MonotonicClock.UtcNow captured at each actual encode, passed
             // straight into DrainToRingBuffer, so idealizing video's own
             // timeline can't drag audio sync off with it.
-            var encodedFrameIndex = 0L;
+            // Accumulated rather than "index * interval", because the interval
+            // is no longer fixed for the life of the session - RequestFrameRate
+            // can halve it when the encoder cannot keep up. Multiplying a
+            // running index by a changed interval would retroactively restate
+            // every timestamp already emitted and jump the timeline; adding the
+            // current interval each time keeps PTS monotonic and exactly spaced
+            // across the change. time_base is microseconds (see the encoder
+            // setup) and independent of frame rate, so nothing else moves.
+            var nextPtsMicroseconds = 0.0;
             var idealFrameIntervalMicroseconds = 1_000_000.0 / Math.Clamp(config.FrameRate, 15, 240);
+            var activeFrameRate = Math.Clamp(config.FrameRate, 15, 240);
+            Volatile.Write(ref _requestedFrameRate, activeFrameRate);
             // The real capture-moment timestamp FIFO (one per avcodec_send_frame
             // call, dequeued one-for-one as packets actually come out - see
             // DrainToRingBuffer for why this, not just "now" at drain time, is
@@ -766,6 +785,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var frameStalenessMs = 0.0;
             var frameStalenessMaxMs = 0.0;
             var frameStalenessCount = 0;
+            // Whether anything new has reached frame->data since the last frame
+            // was handed to the encoder. False means the next scheduled frame
+            // would be a pure duplicate - see the pacing gate below.
+            var freshContentSinceLastEncode = false;
+            var padsSkippedSinceLog = 0;
 
             // Watchdog state for a duplication that stops delivering frames
             // without ever reporting AccessLost. Only AccessLost triggered a
@@ -837,7 +861,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // problem is in this ring buffer/packet handling; if
                     // managedMb spikes far above ringBufferMb, it's elsewhere.
                     long ringBufferBytes;
-                    lock (_bufferLock) ringBufferBytes = _packets.Sum(p => (long)p.Data.Length);
+                    lock (_bufferLock) ringBufferBytes = _ringBufferBytes;
                     var ringBufferMb = ringBufferBytes / (1024 * 1024);
                     // avgEncodeMs now comes from EncodeLoop's own thread (Interlocked
                     // handoff, reset via Exchange so nothing's lost mid-read) - the
@@ -851,10 +875,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var droppedSinceLog = Interlocked.Exchange(ref _encodeDroppedCount, 0);
                     UpdatePeak(ref _peakQueueDepth, encodeQueue.Count);
                     var frameStalenessDenom = Math.Max(1, frameStalenessCount);
-                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, ringBufferMb={ringBufferMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, droppedFrames={droppedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
+                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, ringBufferMb={ringBufferMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
                     var outputFrameRate = framesEncodedSinceLog / diagElapsed;
+                    // Judged against the rate actually being targeted, not the
+                    // configured one: once the tuner has lowered it, hitting 30
+                    // of 30 is healthy, and comparing against the original 60
+                    // would report a permanent overload and ratchet forever.
                     var overloaded = droppedSinceLog > 0 || encodeQueue.Count * 4 >= encodeQueueCapacity * 3 ||
-                                     (hasCapturedRealFrame && outputFrameRate < config.FrameRate * 0.9);
+                                     (hasCapturedRealFrame && outputFrameRate < activeFrameRate * 0.9);
                     // A stall is worse than an overload and reads nothing like one:
                     // no frames arrive at all, so nothing gets dropped and the queue
                     // stays empty - every overload signal above says "healthy" right
@@ -877,7 +905,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     }
                     SetHealth(new ReplayCaptureHealth("Native", "Desktop Duplication",
                         overloaded || isStalled ? ReplayCaptureState.Degraded : ReplayCaptureState.Healthy,
-                        config.FrameRate, framesSeenSinceLog / diagElapsed, framesProcessedSinceLog / diagElapsed,
+                        activeFrameRate, framesSeenSinceLog / diagElapsed, framesProcessedSinceLog / diagElapsed,
                         outputFrameRate, Math.Max(0, framesEncodedSinceLog - framesProcessedSinceLog), droppedSinceLog, encodeQueue.Count,
                         encoderName, "Default adapter",
                         isStalled ? "Capture stalled - no new frames from the display. Recovering." :
@@ -906,6 +934,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     framesEncodedSinceLog = 0;
                     framesSeenSinceLog = 0;
                     framesProcessedSinceLog = 0;
+                    padsSkippedSinceLog = 0;
                     waitMs = 0;
                     getFrameMs = 0;
                     iterationsSinceLog = 0;
@@ -1271,6 +1300,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 // every output frame being unique and perfectly PTS-spaced.
                                 lastFrameContentCapturedUtc = MonotonicClock.UtcNow;
                                 Volatile.Write(ref _lastRealContentTicks, lastFrameContentCapturedUtc.Ticks);
+                                // Set on both the GPU-scale and CPU-copy paths, unlike
+                                // croppedDirty which only the GPU one uses - the pacing
+                                // gate needs to know "is the next scheduled frame a pad"
+                                // regardless of which path produced the content.
+                                freshContentSinceLastEncode = true;
                                 framesProcessedSinceLog++;
                             }
                             // else: occluded - frame->data still holds the last successfully
@@ -1650,12 +1684,30 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     encodeMs += stageStopwatch.Elapsed.TotalMilliseconds;
                 }
 
+                // Picked up here rather than only at session start: when the
+                // encoder cannot sustain the configured rate even at the
+                // cheapest preset, EncoderTuningService lowers it live instead
+                // of letting a third of the frames go in the bin. Only the
+                // pacing interval changes - the encoder, the scaler and the
+                // stream parameters are all untouched, so packets from before
+                // and after the change still mux into one file.
+                var requestedFrameRate = Volatile.Read(ref _requestedFrameRate);
+                if (requestedFrameRate != activeFrameRate && requestedFrameRate > 0)
+                {
+                    activeFrameRate = requestedFrameRate;
+                    targetFrameInterval = TimeSpan.FromSeconds(1.0 / activeFrameRate);
+                    idealFrameIntervalMicroseconds = 1_000_000.0 / activeFrameRate;
+                    acquireTimeoutMs = (uint)Math.Clamp((int)Math.Round(targetFrameInterval.TotalMilliseconds / 2), 1, 8);
+                    SetHealth(_health with { TargetFrameRate = activeFrameRate, UpdatedUtc = DateTime.UtcNow });
+                    AppLog.Info($"Native capture: target frame rate now {activeFrameRate} fps.");
+                }
+
                 if (hasCapturedRealFrame)
                 {
                 // At most 250 ms of duplicate work after a stall. Longer bursts
                 // refill a saturated queue with stale copies and make recovery
                 // worse than dropping the missed interval.
-                var catchUpFramesRemaining = Math.Clamp(config.FrameRate / 4, 4, 60);
+                var catchUpFramesRemaining = Math.Clamp(activeFrameRate / 4, 4, 60);
                 while (stopwatch.Elapsed - lastEncodedAt >= targetFrameInterval)
                 {
                     if (catchUpFramesRemaining-- <= 0)
@@ -1675,9 +1727,32 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // its own real wall-clock timestamp below, specifically so
                     // idealizing video's timeline can't reintroduce the audio-sync
                     // bug that was just fixed.
-                    frame->pts = (long)Math.Round(encodedFrameIndex * idealFrameIntervalMicroseconds);
-                    encodedFrameIndex++;
+                    frame->pts = (long)Math.Round(nextPtsMicroseconds);
+                    nextPtsMicroseconds += idealFrameIntervalMicroseconds;
+
+                    // A pad (nothing new since the last encode) submitted into
+                    // an already-backed-up queue is the worst frame to spend
+                    // encoder time on: it adds no information, and it pushes the
+                    // real frame behind it further back. The friend's Iris Xe
+                    // logs show exactly this - framesEncoded running 2.7x
+                    // framesSeen while the queue sat pinned at 30/30 and output
+                    // collapsed to 18.8fps.
+                    //
+                    // The timeline still advances (lastEncodedAt and
+                    // encodedFrameIndex both moved above), so this reads as a
+                    // dropped frame in the output rather than a slower clip -
+                    // same shape as the catch-up cap right above, which already
+                    // decided that under stall conditions honesty beats padding.
+                    // Only ever skipped while the queue is genuinely deep, so
+                    // steady-state constant-frame-rate output is unchanged.
+                    if (!freshContentSinceLastEncode && encodeQueue.Count * 2 >= encodeQueueCapacity)
+                    {
+                        padsSkippedSinceLog++;
+                        continue;
+                    }
+
                     EncodeScheduledFrame();
+                    freshContentSinceLastEncode = false;
                 }
                 }
 
@@ -2335,7 +2410,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             if (receiveResult < 0) break;
 
             var isKeyframe = (packet->flags & ffmpeg.AV_PKT_FLAG_KEY) != 0;
-            var data = new byte[packet->size];
+            // Pooled, not freshly allocated. This runs once per encoded packet -
+            // 60 times a second for as long as a buffer is armed - and the
+            // arrays live long enough to be promoted before the ring trims them
+            // away, which is the worst possible shape for the GC: a real session
+            // walked the managed heap from 23MB to 281MB across 20 gen2
+            // collections, and one of those collections shows up in the log as a
+            // 714ms capture stall.
+            var data = ArrayPool<byte>.Shared.Rent(packet->size);
             Marshal.Copy((IntPtr)packet->data, data, 0, packet->size);
 
             if (_extraData is null && codecContext->extradata_size > 0)
@@ -2355,7 +2437,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
             lock (_bufferLock)
             {
-                _packets.Add(new RingPacket(data, packet->pts, isKeyframe, realWallClockUtc));
+                _packets.Add(new RingPacket(data, packet->size, packet->pts, isKeyframe, realWallClockUtc));
+                _ringBufferBytes += packet->size;
             }
 
             if (fullSessionFormatContext is not null)
@@ -2641,6 +2724,76 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
     }
 
+    // Hands [index, index + count) back to the pool. Callers must hold
+    // _bufferLock and must remove the entries themselves - this only releases
+    // the payloads and keeps _ringBufferBytes in step.
+    //
+    // Safe to recycle unconditionally because nothing outside the ring ever
+    // holds one of these arrays: SaveReplayAsync takes its own copy of the
+    // bytes before it lets go of the lock (see CopyWindowUnderLock).
+    private void ReturnPooledPackets(int index, int count)
+    {
+        for (var i = index; i < index + count; i++)
+        {
+            var packet = _packets[i];
+            _ringBufferBytes -= packet.Length;
+            ArrayPool<byte>.Shared.Return(packet.Data);
+        }
+    }
+
+    // Selects the save window and copies its bytes out of the ring, both under
+    // the buffer lock.
+    //
+    // The copy is what lets the ring pool its payloads at all. TrimRingBuffer
+    // keeps running once a second for the entire multi-second life of a save,
+    // so handing the remux references into the ring would let it read arrays
+    // that had already been recycled into newer packets - garbage in the middle
+    // of the clip, and only under load. One transient copy per save (a
+    // user-initiated, already-expensive operation) buys back 60 allocations a
+    // second in steady state.
+    //
+    // Selection runs inside the lock rather than off a lock-free snapshot
+    // because the copy has to be in there anyway. These are plain index scans
+    // over value fields, not the LINQ pipeline that made holding this lock
+    // expensive before.
+    private RingPacket[] CopyWindowUnderLock(DateTime requestedStartUtc, DateTime requestedEndUtc)
+    {
+        lock (_bufferLock)
+        {
+            if (_packets.Count == 0) throw new InvalidOperationException("Replay just started. Try again in a second.");
+
+            // Saving from a keyframe immediately before the requested event
+            // keeps the remux playable while still producing an event-sized clip.
+            var startIndex = -1;
+            for (var i = _packets.Count - 1; i >= 0; i--)
+            {
+                if (_packets[i].WallClockUtc <= requestedStartUtc && _packets[i].IsKeyframe) { startIndex = i; break; }
+            }
+            if (startIndex < 0) startIndex = _packets.FindIndex(packet => packet.IsKeyframe);
+            if (startIndex < 0) throw new InvalidOperationException("Replay just started. Try again in a second.");
+
+            var endIndex = -1;
+            for (var i = _packets.Count - 1; i >= 0; i--)
+            {
+                if (_packets[i].WallClockUtc <= requestedEndUtc) { endIndex = i; break; }
+            }
+            if (endIndex < startIndex) throw new InvalidOperationException("The requested replay window is no longer available.");
+
+            var window = new RingPacket[endIndex - startIndex + 1];
+            for (var i = 0; i < window.Length; i++)
+            {
+                var source = _packets[startIndex + i];
+                // Exact-sized, so the copy's Data.Length and Length agree and
+                // it is never handed back to the pool by mistake.
+                var data = new byte[source.Length];
+                Array.Copy(source.Data, data, source.Length);
+                window[i] = source with { Data = data };
+            }
+
+            return window;
+        }
+    }
+
     private void TrimRingBuffer(DateTime? fullSessionStartUtc)
     {
         var cutoff = MonotonicClock.UtcNow - Duration - TimeSpan.FromSeconds(5);
@@ -2648,7 +2801,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         {
             var removeCount = 0;
             while (removeCount < _packets.Count && _packets[removeCount].WallClockUtc < cutoff) removeCount++;
-            if (removeCount > 0) _packets.RemoveRange(0, removeCount);
+            if (removeCount > 0)
+            {
+                ReturnPooledPackets(0, removeCount);
+                _packets.RemoveRange(0, removeCount);
+            }
 
             // _pauseEvents is shared between ring-buffer clip saves (which only
             // ever need the last Duration worth of history) and a running Full
@@ -2782,16 +2939,17 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             {
                 foreach (var ringPacket in window)
                 {
-                    fixed (byte* dataPointer = ringPacket.Data)
-                    {
-                        ffmpeg.av_new_packet(packet, ringPacket.Data.Length);
-                        Marshal.Copy(ringPacket.Data, 0, (IntPtr)packet->data, ringPacket.Data.Length);
-                        packet->pts = packet->dts = ringPacket.PtsMs - basePts;
-                        packet->stream_index = stream->index;
-                        if (ringPacket.IsKeyframe) packet->flags |= ffmpeg.AV_PKT_FLAG_KEY;
-                        ffmpeg.av_interleaved_write_frame(formatContext, packet);
-                        ffmpeg.av_packet_unref(packet);
-                    }
+                    // Length, not Data.Length - see RingPacket. These particular
+                    // packets came from CopyWindowUnderLock and so are already
+                    // exact-sized, but reading the field keeps this correct if
+                    // a pooled packet ever reaches here.
+                    ffmpeg.av_new_packet(packet, ringPacket.Length);
+                    Marshal.Copy(ringPacket.Data, 0, (IntPtr)packet->data, ringPacket.Length);
+                    packet->pts = packet->dts = ringPacket.PtsMs - basePts;
+                    packet->stream_index = stream->index;
+                    if (ringPacket.IsKeyframe) packet->flags |= ffmpeg.AV_PKT_FLAG_KEY;
+                    ffmpeg.av_interleaved_write_frame(formatContext, packet);
+                    ffmpeg.av_packet_unref(packet);
                 }
             }
             finally
@@ -3210,7 +3368,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         public int Y;
     }
 
-    private readonly record struct RingPacket(byte[] Data, long PtsMs, bool IsKeyframe, DateTime WallClockUtc);
+    // Data comes from ArrayPool and is therefore usually LONGER than the packet
+    // it holds - Length, not Data.Length, is the packet. Every consumer must
+    // respect that.
+    private readonly record struct RingPacket(byte[] Data, int Length, long PtsMs, bool IsKeyframe, DateTime WallClockUtc);
 
     private readonly record struct PauseEvent(DateTime WallClockUtc, bool IsPaused);
 }

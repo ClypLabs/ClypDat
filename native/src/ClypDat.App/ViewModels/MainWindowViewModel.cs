@@ -3593,6 +3593,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         CardImageHeight = Math.Floor(CardWidth * 9 / 16);
+        // Thumbnails decode to whatever the cards are now, not to the source's
+        // full 960px - see ClipCardViewModel.SetPreviewDecodeWidth.
+        ClipCardViewModel.SetPreviewDecodeWidth(CardWidth, _cardRenderScaling);
+    }
+
+    // Set by MainWindow once the window has a visual root; 1.0 until then,
+    // which only means the first layout pass decodes at DIP size.
+    private double _cardRenderScaling = 1.0;
+
+    public void SetCardRenderScaling(double renderScaling)
+    {
+        if (Math.Abs(_cardRenderScaling - renderScaling) < 0.001) return;
+        _cardRenderScaling = renderScaling;
+        ClipCardViewModel.SetPreviewDecodeWidth(CardWidth, _cardRenderScaling);
     }
 
     public double CardImageHeight

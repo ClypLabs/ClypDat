@@ -41,6 +41,8 @@ public sealed class AudioCapturePipeline : IDisposable
     private readonly SemaphoreSlim _routeRefreshGate = new(1, 1);
     private Timer? _audioRouteTimer;
     private string _audioRouteKey = string.Empty;
+    private int _stableRoutePasses;
+    private TimeSpan _routeInterval = TimeSpan.FromSeconds(2);
     private ReplayBufferConfig? _activeConfig;
 
     public AudioCapturePipeline(string bufferFolder)
@@ -189,9 +191,9 @@ public sealed class AudioCapturePipeline : IDisposable
 
     private void StartAudioCaptures(ReplayBufferConfig config)
     {
-        using var enumerator = new MMDeviceEnumerator();
-        var resolvedMicDeviceIds = ResolveMicrophoneDeviceIds(enumerator, config.MicrophoneDeviceIds);
-        var routes = ResolveAudioRoutes(config, resolvedMicDeviceIds);
+        using var scope = new RouteScope();
+        var resolvedMicDeviceIds = ResolveMicrophoneDeviceIds(scope.Enumerator, config.MicrophoneDeviceIds);
+        var routes = ResolveAudioRoutes(config, resolvedMicDeviceIds, scope);
         _audioRouteKey = routes.RouteKey;
         AppLog.Info(
             $"Audio route resolved: chatApps={routes.ChatRoutes.Length}, exclusions='{string.Join(",", config.GameAudioExcludedProcesses)}', excludedPids={FormatIds(routes.ExcludedProcessIds)}, gamePids={FormatIds(routes.GameProcessIds)}, mics={resolvedMicDeviceIds.Length}.");
@@ -222,7 +224,7 @@ public sealed class AudioCapturePipeline : IDisposable
             {
                 if (!HasLiveCapture(AudioCaptureKind.Game, "default"))
                 {
-                    StartLoopbackCapture(enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia), AudioCaptureKind.Game, "Game Audio", "default");
+                    StartLoopbackCapture(scope.Enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia), AudioCaptureKind.Game, "Game Audio", "default");
                 }
             }
             catch (Exception error)
@@ -249,7 +251,7 @@ public sealed class AudioCapturePipeline : IDisposable
             if (HasLiveCapture(AudioCaptureKind.Microphone, micId)) continue;
             try
             {
-                var micDevice = enumerator.GetDevice(micId);
+                var micDevice = scope.Enumerator.GetDevice(micId);
                 StartMicrophoneCapture(micDevice, $"Microphone - {micDevice.FriendlyName}", micId);
             }
             catch (Exception error)
@@ -436,10 +438,12 @@ public sealed class AudioCapturePipeline : IDisposable
             if (config is null) return;
             var rolledOver = RollOversizedCaptures();
             TrimMemoryCaptures();
-            using var enumerator = new MMDeviceEnumerator();
-            var resolvedMicDeviceIds = ResolveMicrophoneDeviceIds(enumerator, config.MicrophoneDeviceIds);
-            var routes = ResolveAudioRoutes(config, resolvedMicDeviceIds);
-            if (!rolledOver && string.Equals(routes.RouteKey, _audioRouteKey, StringComparison.Ordinal)) return;
+            using var scope = new RouteScope();
+            var resolvedMicDeviceIds = ResolveMicrophoneDeviceIds(scope.Enumerator, config.MicrophoneDeviceIds);
+            var routes = ResolveAudioRoutes(config, resolvedMicDeviceIds, scope);
+            var unchanged = string.Equals(routes.RouteKey, _audioRouteKey, StringComparison.Ordinal);
+            ApplyRouteInterval(unchanged);
+            if (!rolledOver && unchanged) return;
             try
             {
                 AppLog.Info("Audio route changed; restarting replay audio captures.");
@@ -539,10 +543,45 @@ public sealed class AudioCapturePipeline : IDisposable
         }
     }
 
+    // Resolving the audio route is not cheap - see RouteScope for what one pass
+    // costs - and it was running unconditionally every 2 seconds for as long as
+    // a buffer was armed. Route changes are user actions (launching a game,
+    // plugging in a mic), so noticing one a few seconds later is invisible,
+    // while the polling itself is CPU a low-end machine is already short of.
+    private static readonly TimeSpan FastRouteInterval = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan IdleRouteInterval = TimeSpan.FromSeconds(5);
+    // Consecutive unchanged passes before backing off. At the fast interval
+    // that is ~10s of close attention after anything moves, which covers a
+    // game still spawning its audio helper processes.
+    private const int StableRoutePassesBeforeBackoff = 5;
+
     private void StartAudioRouteTimer()
     {
         _audioRouteTimer?.Dispose();
-        _audioRouteTimer = new Timer(_ => RefreshAudioRoutes(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+        _stableRoutePasses = 0;
+        _routeInterval = FastRouteInterval;
+        _audioRouteTimer = new Timer(_ => RefreshAudioRoutes(), null, FastRouteInterval, FastRouteInterval);
+    }
+
+    private void ApplyRouteInterval(bool unchanged)
+    {
+        if (!unchanged)
+        {
+            _stableRoutePasses = 0;
+            SetRouteInterval(FastRouteInterval);
+            return;
+        }
+
+        if (_stableRoutePasses < StableRoutePassesBeforeBackoff) _stableRoutePasses++;
+        if (_stableRoutePasses >= StableRoutePassesBeforeBackoff) SetRouteInterval(IdleRouteInterval);
+    }
+
+    private void SetRouteInterval(TimeSpan interval)
+    {
+        if (_routeInterval == interval) return;
+        _routeInterval = interval;
+        try { _audioRouteTimer?.Change(interval, interval); }
+        catch (ObjectDisposedException) { }
     }
 
     // Resolves to the actual endpoint ID (not the "default" sentinel) so the caller can
@@ -595,7 +634,7 @@ public sealed class AudioCapturePipeline : IDisposable
             .ToList();
     }
 
-    private static AudioRoutes ResolveAudioRoutes(ReplayBufferConfig config, string[] resolvedMicDeviceIds)
+    private static AudioRoutes ResolveAudioRoutes(ReplayBufferConfig config, string[] resolvedMicDeviceIds, RouteScope scope)
     {
         var chatAppNames = NormalizedList(config.ChatAudioProcessNames);
 
@@ -611,7 +650,7 @@ public sealed class AudioCapturePipeline : IDisposable
         var chatRoutes = new List<ChatRoute>();
         foreach (var appName in chatAppNames)
         {
-            var rootPid = ResolveAppRootProcessId(appName);
+            var rootPid = ResolveAppRootProcessId(appName, scope);
             if (rootPid > 0) chatRoutes.Add(new ChatRoute(appName, rootPid));
         }
 
@@ -622,12 +661,12 @@ public sealed class AudioCapturePipeline : IDisposable
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var excludedPids = exclusionNames
-            .SelectMany(ResolveProcessIds)
+            .SelectMany(scope.ProcessIds)
             .Distinct()
             .OrderBy(pid => pid)
             .ToArray();
         var selfPid = Environment.ProcessId;
-        var gamePids = useProcessRouting ? ResolveGameAudioProcessIds(config.GameExecutableName, excludedPids, selfPid) : Array.Empty<int>();
+        var gamePids = useProcessRouting ? ResolveGameAudioProcessIds(config.GameExecutableName, excludedPids, selfPid, scope) : Array.Empty<int>();
         // One capture per distinct process tree - each capture uses
         // IncludeTargetProcessTree, so keeping a pid whose ancestor is also in
         // the set records the same audio twice (or more: a real save showed
@@ -635,7 +674,7 @@ public sealed class AudioCapturePipeline : IDisposable
         // one smeared/echoing Game track). Same bug class as the chat lowest-
         // PID fix, on the game side.
         var rawGamePids = gamePids;
-        gamePids = CollapseToTreeRoots(gamePids);
+        gamePids = CollapseToTreeRoots(gamePids, scope);
         if (gamePids.Length != rawGamePids.Length)
         {
             AppLog.Info($"Game audio pids collapsed to tree roots: raw={FormatIds(rawGamePids)}, roots={FormatIds(gamePids)}.");
@@ -656,15 +695,15 @@ public sealed class AudioCapturePipeline : IDisposable
     // whose parent isn't another process of the same app; when several exist
     // (crash handlers, detached helpers), prefer the root whose subtree holds
     // a currently-active audio session, then the one with the most children.
-    private static int ResolveAppRootProcessId(string appName)
+    private static int ResolveAppRootProcessId(string appName, RouteScope scope)
     {
-        var appPids = ResolveProcessIds(appName).ToHashSet();
+        var appPids = scope.ProcessIds(appName).ToHashSet();
         if (appPids.Count == 0) return 0;
         if (appPids.Count == 1) return appPids.First();
 
         try
         {
-            var parents = SnapshotParentProcessIds();
+            var parents = scope.ParentProcessIds;
             var roots = appPids.Where(pid => !parents.TryGetValue(pid, out var parent) || !appPids.Contains(parent)).ToArray();
             if (roots.Length == 0) return appPids.Min();
             if (roots.Length == 1) return roots[0];
@@ -680,7 +719,7 @@ public sealed class AudioCapturePipeline : IDisposable
                 return current;
             }
 
-            var audioActive = ResolveActiveAudioProcessIds().Where(appPids.Contains).ToArray();
+            var audioActive = scope.ActiveAudioProcessIds.Where(appPids.Contains).ToArray();
             var audioRoot = audioActive.Select(SubtreeOf).FirstOrDefault(roots.Contains);
             if (audioRoot > 0)
             {
@@ -703,13 +742,13 @@ public sealed class AudioCapturePipeline : IDisposable
 
     // Drops every pid that has an ancestor also present in the set - the
     // survivors are the roots of distinct process trees.
-    private static int[] CollapseToTreeRoots(IReadOnlyCollection<int> pids)
+    private static int[] CollapseToTreeRoots(IReadOnlyCollection<int> pids, RouteScope scope)
     {
         if (pids.Count <= 1) return pids.ToArray();
         try
         {
             var set = pids.ToHashSet();
-            var parents = SnapshotParentProcessIds();
+            var parents = scope.ParentProcessIds;
             return pids.Where(pid =>
             {
                 var current = pid;
@@ -810,24 +849,23 @@ public sealed class AudioCapturePipeline : IDisposable
     // when they're actually among the currently-active audio sessions - only
     // fall back to the broad sweep when the game isn't known or its own
     // process isn't the one producing sound.
-    private static int[] ResolveGameAudioProcessIds(string gameExecutableName, int[] excludedPids, int selfPid)
+    private static int[] ResolveGameAudioProcessIds(string gameExecutableName, int[] excludedPids, int selfPid, RouteScope scope)
     {
-        var activeAudioPids = ResolveActiveAudioProcessIds()
+        var activeAudioPids = scope.ActiveAudioProcessIds
             .Where(pid => pid != selfPid)
             .Except(excludedPids)
             .ToHashSet();
 
-        var gameNamePids = ResolveProcessIds(gameExecutableName).ToHashSet();
+        var gameNamePids = scope.ProcessIds(gameExecutableName).ToHashSet();
         var matched = activeAudioPids.Where(gameNamePids.Contains).OrderBy(pid => pid).ToArray();
         return matched.Length > 0 ? matched : activeAudioPids.OrderBy(pid => pid).ToArray();
     }
 
-    private static IEnumerable<int> ResolveActiveAudioProcessIds()
+    private static int[] ResolveActiveAudioProcessIds(MMDeviceEnumerator enumerator)
     {
         var ids = new HashSet<int>();
         try
         {
-            using var enumerator = new MMDeviceEnumerator();
             using var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
             var sessions = device.AudioSessionManager.Sessions;
             for (var index = 0; index < sessions.Count; index++)
@@ -853,7 +891,41 @@ public sealed class AudioCapturePipeline : IDisposable
             AppLog.Error("Active audio process resolve failed", error);
         }
 
-        return ids;
+        return ids.ToArray();
+    }
+
+    // One pass of audio-route resolution, memoising the expensive lookups that
+    // several steps of that pass each used to do for themselves.
+    //
+    // Per tick this was: three SnapshotParentProcessIds calls (each a Toolhelp
+    // snapshot of every process on the machine), a Process.GetProcessesByName
+    // per configured name plus another for the game (each enumerates every
+    // process and allocates a Process object for it), and two MMDeviceEnumerator
+    // constructions with an audio-session walk behind one of them. None of it
+    // can change within a single pass, and on a 2-second timer with a game
+    // running it was real CPU on a machine already short of it.
+    private sealed class RouteScope : IDisposable
+    {
+        private readonly Dictionary<string, int[]> _processIdsByName = new(StringComparer.OrdinalIgnoreCase);
+        private MMDeviceEnumerator? _enumerator;
+        private Dictionary<int, int>? _parentProcessIds;
+        private int[]? _activeAudioProcessIds;
+
+        public MMDeviceEnumerator Enumerator => _enumerator ??= new MMDeviceEnumerator();
+        public Dictionary<int, int> ParentProcessIds => _parentProcessIds ??= SnapshotParentProcessIds();
+        public int[] ActiveAudioProcessIds => _activeAudioProcessIds ??= ResolveActiveAudioProcessIds(Enumerator);
+
+        public int[] ProcessIds(string processName)
+        {
+            var key = Path.GetFileNameWithoutExtension(processName ?? string.Empty);
+            if (string.IsNullOrWhiteSpace(key)) return Array.Empty<int>();
+            if (_processIdsByName.TryGetValue(key, out var cached)) return cached;
+            var resolved = ResolveProcessIds(key).ToArray();
+            _processIdsByName[key] = resolved;
+            return resolved;
+        }
+
+        public void Dispose() => _enumerator?.Dispose();
     }
 
     // A snapshot of a capture's WAV plus WavStartUtc: the wall-clock moment

@@ -87,7 +87,23 @@ public sealed class PlaybackSession : IDisposable
     // is called synchronously from the UI thread on every editor open after
     // the first, which froze the whole app for however long either of those
     // took.
-    public Task LoadVideoAsync(string path) => Task.Run(() =>
+    // How many decode threads the editor may take, and whether it is allowed to
+    // fall behind rather than fight for the CPU.
+    //
+    // The editor decodes in software (see LoadVideoAsync) and used to ask for
+    // ":avcodec-threads=0" - every core. On a machine with a replay buffer
+    // armed that is the app competing with itself: capture, encode, audio and
+    // the UI all want a core too, and real logs from an 8-thread laptop show
+    // every sustained capture-overload burst starting within seconds of an
+    // editor open. Leave the pipeline room.
+    private static int ResolveDecodeThreads(bool replayArmed)
+    {
+        var cores = Environment.ProcessorCount;
+        var share = replayArmed ? cores / 4 : cores / 2;
+        return Math.Max(2, share);
+    }
+
+    public Task LoadVideoAsync(string path, bool replayArmed = false) => Task.Run(() =>
     {
         Stop();
         DisposeMedia();
@@ -112,9 +128,25 @@ public sealed class PlaybackSession : IDisposable
         _videoMedia.AddOption(":avcodec-skiploopfilter=0");
         _videoMedia.AddOption(":avcodec-skip-frame=0");
         _videoMedia.AddOption(":avcodec-skip-idct=0");
-        // Let the decoder use every core it can rather than libvlc's
-        // conservative default, so it is less likely to fall behind at all.
-        _videoMedia.AddOption(":avcodec-threads=0");
+        // Bounded rather than libvlc's "0" (every core) - see
+        // ResolveDecodeThreads. Still generous enough that a short 1080p clip
+        // decodes comfortably ahead of playback; just not at the price of
+        // starving the capture pipeline of the machine it is recording with.
+        var decodeThreads = ResolveDecodeThreads(replayArmed);
+        _videoMedia.AddOption($":avcodec-threads={decodeThreads}");
+        // With a buffer armed, prefer a dropped frame over stealing time from
+        // capture: these ask libvlc to undo, for this clip only, the two
+        // instance-level quality flags set in the constructor. Idle (no buffer)
+        // playback adds nothing here and keeps the pristine path.
+        //
+        // Fail-safe either way: if libvlc declines to honour them at media
+        // scope the instance-level --no-drop-late-frames/--no-skip-frames still
+        // apply and behaviour is exactly what it was before this change.
+        if (replayArmed)
+        {
+            _videoMedia.AddOption(":drop-late-frames");
+            _videoMedia.AddOption(":skip-frames");
+        }
         // LibVLC already streams windowed around the playhead (it never reads
         // the whole file), but its default read-ahead cache is sized for
         // local disks - on a network drive (UNC path or mapped SMB share) the
@@ -138,7 +170,7 @@ public sealed class PlaybackSession : IDisposable
         // living on a share.
         long sizeMb = 0;
         try { sizeMb = new FileInfo(path).Length / (1024 * 1024); } catch { }
-        AppLog.Debug($"Editor video load: network={isNetwork}, sizeMB={sizeMb}, path={path}");
+        AppLog.Debug($"Editor video load: network={isNetwork}, sizeMB={sizeMb}, replayArmed={replayArmed}, decodeThreads={decodeThreads}, path={path}");
     });
 
     public static bool IsNetworkPath(string path)
