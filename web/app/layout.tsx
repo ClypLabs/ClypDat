@@ -12,7 +12,11 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const siteUrl = "https://clypdat.app";
+// The canonical domain, and it has to be a real one: metadataBase is what
+// every relative URL in the metadata below resolves against, so the og:image
+// is only fetchable by a social scraper if this points somewhere that serves
+// the site. The apex 308-redirects here, so www is the canonical form.
+const siteUrl = "https://www.clypdat.xyz";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
