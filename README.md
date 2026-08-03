@@ -8,6 +8,9 @@ trimming clips and mixing audio tracks before export.
 
 The codebase is `native/` (C#/.NET 10, Avalonia UI).
 
+The marketing website lives in the separate
+[ClypDat-Website repository](https://github.com/ClypDat/ClypDat-Website).
+
 ## Capture
 
 Two capture backends, switchable in Settings (default is Auto):
