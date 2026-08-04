@@ -101,6 +101,7 @@ public static class MemoryTrimmer
             }
 
             var beforeManaged = GC.GetTotalMemory(false);
+            var collectionDeferred = Recording;
 
             AudioChunkCache.Clear();
             BitmapCache.Clear();
@@ -128,9 +129,18 @@ public static class MemoryTrimmer
             EmptyWorkingSet(after.Handle);
 
             using var settled = Process.GetCurrentProcess();
+            // While recording the collection is non-blocking, so it has not run
+            // yet at this point - reporting a before/after heap size there just
+            // prints the same number twice and reads as "the trim reclaimed
+            // nothing", which is not what happened. Say what is actually known
+            // instead. The working-set figure is real either way, but note that
+            // most of that drop is EmptyWorkingSet evicting pages rather than
+            // memory being handed back for good.
+            var managed = collectionDeferred
+                ? $"managedMb {beforeManaged / (1024 * 1024)} (collection deferred to the background GC - recording)"
+                : $"managedMb {beforeManaged / (1024 * 1024)} -> {GC.GetTotalMemory(false) / (1024 * 1024)}";
             AppLog.Info(
-                $"Memory trimmed ({reason}): workingSetMb {beforeWorkingSet / (1024 * 1024)} -> {settled.WorkingSet64 / (1024 * 1024)}, " +
-                $"managedMb {beforeManaged / (1024 * 1024)} -> {GC.GetTotalMemory(false) / (1024 * 1024)}.");
+                $"Memory trimmed ({reason}): workingSetMb {beforeWorkingSet / (1024 * 1024)} -> {settled.WorkingSet64 / (1024 * 1024)}, {managed}.");
         }
         catch (Exception error)
         {
