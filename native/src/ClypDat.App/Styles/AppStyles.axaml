@@ -614,8 +614,14 @@
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
+  <!-- CornerRadius is repeated here deliberately. Setting Background straight
+       onto the ContentPresenter overrides the themed hover setter, and the
+       theme's rounding rides on that same setter rather than on a template
+       binding - without this the button squared off the moment it was hovered
+       while its resting state stayed rounded. -->
   <Style Selector="Button.clipShareIconButton:pointerover /template/ ContentPresenter">
     <Setter Property="Background" Value="#31485B" />
+    <Setter Property="CornerRadius" Value="10" />
   </Style>
   <Style Selector="MenuItem:pointerover /template/ Border#PART_LayoutRoot">
     <Setter Property="Background" Value="#263544" />

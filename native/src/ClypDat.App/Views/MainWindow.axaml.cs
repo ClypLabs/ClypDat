@@ -3330,13 +3330,35 @@ public sealed partial class MainWindow : Window
         // editor's open path starts asynchronous timeline hydration, and if
         // that won the routed-pointer race a clip without a filmstrip looked
         // like it could not be renamed until its timeline image arrived.
-        if (e.Source is CheckBox or Button or PathIcon or TextBox ||
-            e.Source is TextBlock { Classes: var classes } && classes.Contains("editableTitle")) return;
         if (sender is not Control control || !e.GetCurrentPoint(control).Properties.IsLeftButtonPressed) return;
+        if (IsCardChromeSource(e.Source, control)) return;
         if (sender is not Control { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
 
         e.Handled = true;
         await OpenClipCardAsync(clip);
+    }
+
+    // Whether a press landed on one of the card's own interactive controls
+    // rather than on the card itself.
+    //
+    // This used to test e.Source's own type. Hit testing reports the INNERMOST
+    // visual, and for a templated Button that is normally its ContentPresenter -
+    // the themed Background that makes the button hit-testable at all lives
+    // there, not on the Button. So only the share button's 17x17 PathIcon and
+    // its bare edges ever matched; a press anywhere else inside its 40x40 box
+    // fell through and opened the clip in the editor instead of sharing it.
+    //
+    // Walking up to the card root instead means a press is attributed to
+    // whatever control actually owns it, however that control is templated.
+    private static bool IsCardChromeSource(object? source, Control cardRoot)
+    {
+        for (var visual = source as Visual; visual is not null && !ReferenceEquals(visual, cardRoot); visual = visual.GetVisualParent())
+        {
+            if (visual is CheckBox or Button or PathIcon or TextBox) return true;
+            if (visual is TextBlock { Classes: var classes } && classes.Contains("editableTitle")) return true;
+        }
+
+        return false;
     }
 
     private async Task<bool> OpenClipCardAsync(ClipCardViewModel clip)
