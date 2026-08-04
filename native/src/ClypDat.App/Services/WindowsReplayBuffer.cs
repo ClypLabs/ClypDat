@@ -290,16 +290,38 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         if (string.Equals(config.CaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase))
         {
             var monitor = DesktopMonitorService.Resolve(config.CaptureMonitorDeviceName);
-            options.SourceOptions.RecordingSources = new List<RecordingSourceBase>
+            // CLYPDAT_WGC_DISPLAY=1 switches display capture from Desktop
+            // Duplication to Windows.Graphics.Capture.
+            //
+            // Desktop Duplication is a polling API: the capture thread blocks
+            // inside AcquireNextFrame waiting for the screen to change, and
+            // Windows bills time spent inside a graphics call to the process as
+            // GPU engine time. Measured on an idle desktop, the loop sat in that
+            // wait ~100% of every second (avgWaitMs 8.20 over ~121 iterations/s)
+            // and Task Manager reported 20-25% GPU while nvidia-smi reported 6%
+            // at 50W. WGC is callback-driven - the thread parks in an ordinary
+            // Win32 wait that no engine is charged for, which is why SteelSeries
+            // Moments shows ~1.4% doing the same job on the same machine.
+            //
+            // Undocumented but settable; it does not appear in the package's XML
+            // docs, only in the assembly. Window sources expose the same property
+            // read-only because window capture already requires WGC.
+            //
+            // Kept behind an environment variable because the reason this
+            // codebase moved off WGC in the first place was a measured ~40-46fps
+            // delivery ceiling (see NativeReplayBuffer's header comment). That
+            // number predates free-threaded frame pools and MinUpdateInterval, so
+            // it is worth re-testing - but not worth assuming.
+            var useWgc = Environment.GetEnvironmentVariable("CLYPDAT_WGC_DISPLAY") == "1";
+            var displaySource = new DisplayRecordingSource(monitor.DeviceName)
             {
-                new DisplayRecordingSource(monitor.DeviceName)
-                {
-                    IsCursorCaptureEnabled = config.CaptureCursor,
-                    IsBorderRequired = false,
-                    Stretch = StretchMode.Uniform
-                }
+                IsCursorCaptureEnabled = config.CaptureCursor,
+                IsBorderRequired = false,
+                Stretch = StretchMode.Uniform
             };
-            AppLog.Info($"Replay capture source: desktop monitor={monitor.DeviceName}, cursor={config.CaptureCursor}.");
+            if (useWgc) displaySource.RecorderApi = RecorderApi.WindowsGraphicsCapture;
+            options.SourceOptions.RecordingSources = new List<RecordingSourceBase> { displaySource };
+            AppLog.Info($"Replay capture source: desktop monitor={monitor.DeviceName}, cursor={config.CaptureCursor}, api={displaySource.RecorderApi}.");
         }
         else if (config.GameWindowHandle != 0 && IsWindow(config.GameWindowHandle))
         {
