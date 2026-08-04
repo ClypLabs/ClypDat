@@ -799,7 +799,32 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // Polling at 1ms wakes 600-1000 times/sec at 60 FPS and burns CPU/GPU
             // work without creating new desktop frames. Keep enough cadence for
             // target pacing, but let the scheduler sleep through most of a frame.
-            var acquireTimeoutMs = (uint)Math.Clamp((int)Math.Round(targetFrameInterval.TotalMilliseconds / 2), 1, 8);
+            // CLYPDAT_ACQUIRE_TIMEOUT_MS overrides the cap below, to test whether
+            // acquisition and encode pacing sharing one loop is what gets this
+            // process billed 20-25% of the GPU 3D engine on an idle desktop.
+            //
+            // The cap exists because this loop also drives the encode tick, which
+            // has to fire every target interval - so the acquire wait can never
+            // exceed half of one. On an idle desktop that means ~121 calls a
+            // second against ~11 real frames, i.e. ~110 waits per second spent
+            // INSIDE a DXGI call, which Windows bills as GPU engine time. The
+            // Legacy/ScreenRecorderLib backend drives the same API from a thread
+            // with no such constraint and measures 0.70% against this engine's
+            // 21-27%.
+            //
+            // Raising it should trade billed GPU time for pacing accuracy: fewer,
+            // longer waits, but an encode tick that wakes late. Watch padsSkipped
+            // and avgPreAcquireMs alongside the GPU counter - if billed time falls
+            // and pacing degrades, the coupling is confirmed and the real fix is
+            // to decouple the two rather than to keep this override.
+            var acquireTimeoutOverride = Environment.GetEnvironmentVariable("CLYPDAT_ACQUIRE_TIMEOUT_MS");
+            var acquireTimeoutForcedMs = int.TryParse(acquireTimeoutOverride, out var parsedTimeout) && parsedTimeout is > 0 and <= 1000
+                ? parsedTimeout
+                : 0;
+            var acquireTimeoutMs = acquireTimeoutForcedMs > 0
+                ? (uint)acquireTimeoutForcedMs
+                : (uint)Math.Clamp((int)Math.Round(targetFrameInterval.TotalMilliseconds / 2), 1, 8);
+            if (acquireTimeoutForcedMs > 0) AppLog.Info($"Native capture: acquire timeout forced to {acquireTimeoutMs}ms.");
             var lastDiagLog = TimeSpan.Zero;
             var lastRingTrim = TimeSpan.Zero;
             var framesSeen = 0;
@@ -1976,7 +2001,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     activeFrameRate = requestedFrameRate;
                     targetFrameInterval = TimeSpan.FromSeconds(1.0 / activeFrameRate);
                     idealFrameIntervalMicroseconds = 1_000_000.0 / activeFrameRate;
-                    acquireTimeoutMs = (uint)Math.Clamp((int)Math.Round(targetFrameInterval.TotalMilliseconds / 2), 1, 8);
+                    acquireTimeoutMs = acquireTimeoutForcedMs > 0
+                        ? (uint)acquireTimeoutForcedMs
+                        : (uint)Math.Clamp((int)Math.Round(targetFrameInterval.TotalMilliseconds / 2), 1, 8);
                     SetHealth(_health with { TargetFrameRate = activeFrameRate, UpdatedUtc = DateTime.UtcNow });
                     AppLog.Info($"Native capture: target frame rate now {activeFrameRate} fps.");
                 }
