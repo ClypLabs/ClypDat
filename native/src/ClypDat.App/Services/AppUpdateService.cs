@@ -31,11 +31,50 @@ public static class AppUpdateService
 
     public static Version CurrentVersion => Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0);
 
+    // Last ETag and body seen per releases URL, so a repeat check can send
+    // If-None-Match and take a header-only 304 instead of re-downloading a
+    // payload that hasn't changed. The update check runs on a timer for the
+    // whole life of the app and almost always finds nothing new, so nearly
+    // every one of those requests was re-fetching identical bytes - 10KB for
+    // releases/latest, and 126KB for the full release list behind the notes.
+    //
+    // Two entries at most, both small, held for the process lifetime. Static
+    // because CreateClient builds a fresh HttpClient per call, so there is no
+    // longer-lived object to hang this off.
+    //
+    // NOTE: a 304 still costs one request against GitHub's 60/hour
+    // unauthenticated rate limit - verified against X-RateLimit-Remaining,
+    // which decrements on 304s too. This saves bandwidth, latency and the
+    // deserialize; the poll interval is what protects the rate limit.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string ETag, string Body)> ConditionalCache = new();
+
+    // GET url, conditionally. Returns the response body, either fresh or the
+    // cached copy a 304 just confirmed is still current. Null when the request
+    // failed outright, so callers keep their existing failure behaviour rather
+    // than parsing an empty string.
+    private static async Task<string?> GetJsonAsync(HttpClient client, string url, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        var hasCached = ConditionalCache.TryGetValue(url, out var cached);
+        if (hasCached) request.Headers.TryAddWithoutValidation("If-None-Match", cached.ETag);
+
+        using var response = await client.SendAsync(request, cancellationToken);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotModified && hasCached) return cached.Body;
+        if (!response.IsSuccessStatusCode) return null;
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        // GitHub's ETags are weak ("W/..."), which If-None-Match accepts as-is.
+        var etag = response.Headers.ETag?.ToString();
+        if (!string.IsNullOrEmpty(etag)) ConditionalCache[url] = (etag, body);
+        return body;
+    }
+
     public static async Task<AppUpdateInfo?> CheckAsync(CancellationToken cancellationToken = default)
     {
         using var client = CreateClient();
-        await using var stream = await client.GetStreamAsync(LatestReleaseUrl, cancellationToken);
-        var release = await JsonSerializer.DeserializeAsync<ReleaseResponse>(stream, cancellationToken: cancellationToken);
+        var json = await GetJsonAsync(client, LatestReleaseUrl, cancellationToken);
+        if (json is null) return null;
+        var release = JsonSerializer.Deserialize<ReleaseResponse>(json);
         if (release is null || release.Draft || release.Prerelease || !TryParseVersion(release.TagName, out var latest) || latest <= CurrentVersion)
         {
             return null;
@@ -111,8 +150,8 @@ public static class AppUpdateService
         try
         {
             using var client = CreateClient();
-            await using var stream = await client.GetStreamAsync(ReleasesUrl, cancellationToken);
-            var releases = await JsonSerializer.DeserializeAsync<ReleaseResponse[]>(stream, cancellationToken: cancellationToken) ?? [];
+            var json = await GetJsonAsync(client, ReleasesUrl, cancellationToken);
+            var releases = (json is null ? null : JsonSerializer.Deserialize<ReleaseResponse[]>(json)) ?? [];
             // Version equality would fail here: a "v0.1.8" tag parses to a
             // 3-field Version (Revision=-1), but the assembly's CurrentVersion
             // is always 4-field (Revision=0) - compare only the 3 fields the
@@ -132,8 +171,8 @@ public static class AppUpdateService
     {
         try
         {
-            await using var stream = await client.GetStreamAsync(ReleasesUrl, cancellationToken);
-            var releases = await JsonSerializer.DeserializeAsync<ReleaseResponse[]>(stream, cancellationToken: cancellationToken) ?? [];
+            var json = await GetJsonAsync(client, ReleasesUrl, cancellationToken);
+            var releases = (json is null ? null : JsonSerializer.Deserialize<ReleaseResponse[]>(json)) ?? [];
             var whatsNew = new List<string>();
             var fixes = new List<string>();
             foreach (var item in releases

@@ -245,7 +245,16 @@ public sealed partial class MainWindow : Window
         _keyboardSeekSettleTimer.Tick += (_, _) => KeyboardSeekSettle();
         _gameDetectionTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _gameDetectionTimer.Tick += (_, _) => UpdateDetectedGame();
-        _updateCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromHours(4) };
+        // 5 minutes, not the 4 hours this used to be: ClypDat is usually left
+        // running for a whole session, so a 4-hour cadence meant a release
+        // could sit unnoticed for most of a day. Cheap now that the releases
+        // requests are conditional (see AppUpdateService's ETag cache) - an
+        // unchanged check is a header-only 304 instead of a 10KB payload, and
+        // skips the deserialize entirely. Those 304s still count against
+        // GitHub's 60/hour unauthenticated limit (measured - the docs imply
+        // otherwise), so it's the interval that keeps this in budget: 12/hour
+        // leaves plenty of headroom.
+        _updateCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
         _updateCheckTimer.Tick += async (_, _) => await CheckForUpdatesAsync();
         Opened += (_, _) =>
         {
