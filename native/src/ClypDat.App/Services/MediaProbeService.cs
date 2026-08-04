@@ -423,6 +423,19 @@ public sealed class MediaProbeService
             return wholeWaveforms;
         }
 
+        // One ffmpeg over the whole file, every track at once - see
+        // TryStreamWaveformsAsync. The segmented path below is the fallback.
+        var streamClock = System.Diagnostics.Stopwatch.StartNew();
+        var streamed = await TryStreamWaveformsAsync(
+            media.Path, audioTracks, totalSeconds, BucketCount, onPartial, cancellationToken).ConfigureAwait(false);
+        if (streamed is not null)
+        {
+            AppLog.Debug($"Waveform decoded (single pass): tracks={audioTracks.Length}, totalMs={streamClock.ElapsedMilliseconds}, path={media.Path}");
+            var streamedWaveforms = streamed.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<double>)pair.Value);
+            await TryWriteWaveformCacheAsync(cachePath, streamedWaveforms, cancellationToken).ConfigureAwait(false);
+            return streamedWaveforms;
+        }
+
         var peaksByTrack = audioTracks.ToDictionary(
             track => track.Index,
             _ =>
@@ -834,6 +847,206 @@ public sealed class MediaProbeService
         catch
         {
             // Waveform cache is optional.
+        }
+    }
+
+    private const int WaveformSampleRate = 4000;
+
+    // One ffmpeg, one pass over the container, every audio track at once.
+    //
+    // The segmented path spawns an ffmpeg PER TRACK PER SEGMENT, and each of
+    // those demuxes the whole file again: a 115MB three-track clip meant
+    // ~345MB of reads, throttled to two concurrent by ProbeProcessGate, all
+    // of it racing the editor's own audio chunk extraction for the same file.
+    // Measured 16.8s before a single pixel of waveform appeared. Worse, any
+    // clip under 90s is exactly one segment, so the "progressive" left-to-
+    // right paint never happened for the common case - nothing, then
+    // everything.
+    //
+    // Here each track is downmixed to mono 4kHz and amerge'd into one
+    // N-channel stream on stdout, so peaks arrive interleaved as ffmpeg walks
+    // the file once, and every lane fills left-to-right together at whatever
+    // granularity the pipe delivers rather than in 60s steps. Returns null if
+    // ffmpeg fails (an exotic layout, a stream amerge won't take) and the
+    // caller falls back to the segmented path.
+    private static async Task<Dictionary<int, double[]>?> TryStreamWaveformsAsync(
+        string filePath,
+        IReadOnlyList<MediaTrackInfo> audioTracks,
+        double totalSeconds,
+        int bucketCount,
+        Action<int, IReadOnlyList<double>>? onPartial,
+        CancellationToken cancellationToken)
+    {
+        var channels = audioTracks.Count;
+        var args = new List<string> { "-y", "-v", "error", "-threads", "1", "-i", filePath, "-vn", "-sn" };
+        if (channels == 1)
+        {
+            args.AddRange(new[] { "-map", $"0:{audioTracks[0].Index}" });
+        }
+        else
+        {
+            var chain = string.Join(";", audioTracks.Select((track, slot) =>
+                $"[0:{track.Index}]aformat=sample_fmts=flt:sample_rates={WaveformSampleRate}:channel_layouts=mono[w{slot}]"));
+            var merge = string.Concat(Enumerable.Range(0, channels).Select(slot => $"[w{slot}]"));
+            args.AddRange(new[] { "-filter_complex", $"{chain};{merge}amerge=inputs={channels}[wm]", "-map", "[wm]" });
+        }
+
+        args.AddRange(new[] { "-ac", channels.ToString(), "-ar", WaveformSampleRate.ToString(), "-f", "f32le", "-" });
+
+        await ProbeProcessGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var startInfo = new ProcessStartInfo("ffmpeg")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            foreach (var argument in args) startInfo.ArgumentList.Add(argument);
+
+            using var process = Process.Start(startInfo);
+            if (process is null) return null;
+            try
+            {
+                // Same reason as RunProcessCoreAsync: the waveform is the
+                // least urgent thing the editor is doing with this file.
+                process.PriorityClass = ProcessPriorityClass.BelowNormal;
+            }
+            catch
+            {
+                // Priority is a nice-to-have.
+            }
+
+            var errorTask = process.StandardError.ReadToEndAsync();
+            var peaks = audioTracks.ToDictionary(track => track.Index, _ =>
+            {
+                var values = new double[bucketCount];
+                // Undecoded stretches sit at the silence floor so a partially
+                // painted waveform reads as "still loading", not as silence.
+                Array.Fill(values, 0.02);
+                return values;
+            });
+
+            var totalFrames = Math.Max(1L, (long)(totalSeconds * WaveformSampleRate));
+            var frameBytes = channels * sizeof(float);
+            var buffer = new byte[64 * 1024];
+            var carry = new byte[frameBytes];
+            var carryLength = 0;
+            var running = new double[channels];
+            var frameIndex = 0L;
+            var currentBucket = 0;
+            var decodedAny = false;
+            var lastPublish = System.Diagnostics.Stopwatch.StartNew();
+
+            void FlushBucket(int bucket)
+            {
+                for (var slot = 0; slot < channels; slot++)
+                {
+                    peaks[audioTracks[slot].Index][bucket] = Math.Clamp(running[slot], 0, 1);
+                    running[slot] = 0;
+                }
+            }
+
+            void Publish()
+            {
+                if (onPartial is null) return;
+                foreach (var track in audioTracks) onPartial(track.Index, peaks[track.Index].ToArray());
+            }
+
+            try
+            {
+                var stdout = process.StandardOutput.BaseStream;
+                while (true)
+                {
+                    var read = await stdout.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
+                    if (read <= 0) break;
+                    decodedAny = true;
+
+                    var offset = 0;
+                    while (offset < read)
+                    {
+                        // Reassemble frames across pipe-read boundaries - a
+                        // 64KB read is not guaranteed to land on a frame edge.
+                        if (carryLength > 0)
+                        {
+                            var need = Math.Min(frameBytes - carryLength, read - offset);
+                            Buffer.BlockCopy(buffer, offset, carry, carryLength, need);
+                            carryLength += need;
+                            offset += need;
+                            if (carryLength < frameBytes) break;
+                            carryLength = 0;
+                            Accumulate(carry, 0);
+                            continue;
+                        }
+
+                        if (read - offset < frameBytes)
+                        {
+                            carryLength = read - offset;
+                            Buffer.BlockCopy(buffer, offset, carry, 0, carryLength);
+                            break;
+                        }
+
+                        Accumulate(buffer, offset);
+                        offset += frameBytes;
+                    }
+
+                    if (lastPublish.ElapsedMilliseconds >= 120)
+                    {
+                        Publish();
+                        lastPublish.Restart();
+                    }
+                }
+
+                await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                TryKill(process);
+                throw;
+            }
+
+            if (process.ExitCode != 0 || !decodedAny)
+            {
+                var error = (await errorTask.ConfigureAwait(false)).Trim();
+                AppLog.Debug($"Waveform single-pass decode unavailable (exit={process.ExitCode}): {error}");
+                return null;
+            }
+
+            FlushBucket(Math.Min(currentBucket, bucketCount - 1));
+            Publish();
+            return peaks;
+
+            void Accumulate(byte[] source, int offset)
+            {
+                var bucket = (int)Math.Min(bucketCount - 1, frameIndex * bucketCount / totalFrames);
+                if (bucket != currentBucket)
+                {
+                    FlushBucket(currentBucket);
+                    currentBucket = bucket;
+                }
+
+                for (var slot = 0; slot < channels; slot++)
+                {
+                    var value = Math.Abs(BitConverter.ToSingle(source, offset + slot * sizeof(float)));
+                    if (value > running[slot]) running[slot] = value;
+                }
+
+                frameIndex++;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception error)
+        {
+            AppLog.Debug($"Waveform single-pass decode failed: {error.Message}");
+            return null;
+        }
+        finally
+        {
+            ProbeProcessGate.Release();
         }
     }
 
