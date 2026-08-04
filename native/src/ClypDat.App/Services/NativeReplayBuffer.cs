@@ -332,14 +332,22 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // between the hotkey and the saved toast with only the audio
             // snapshot lines to show for it.
             var saveTimer = System.Diagnostics.Stopwatch.StartNew();
-            await Task.Run(() =>
+            // Started, not awaited. The audio pipeline below needs nothing from
+            // the remux (it works off `window`'s timestamps and its own capture
+            // WAVs) and the remux needs nothing from it, but they used to run
+            // strictly one after the other anyway - on a laptop that meant ~9s
+            // of disk-bound remux followed by ~30s of CPU-bound ffmpeg, when
+            // the two barely compete for the same resource. Awaited together
+            // below, before the mux that is the first thing to need both.
+            var remuxTask = Task.Run(() =>
             {
+                var stageTimer = System.Diagnostics.Stopwatch.StartNew();
                 var previousPriority = Thread.CurrentThread.Priority;
                 Thread.CurrentThread.Priority = ThreadPriority.BelowNormal;
                 try { RemuxWindowToMp4(window, tempVideoPath); }
                 finally { Thread.CurrentThread.Priority = previousPriority; }
+                return stageTimer.ElapsedMilliseconds;
             }, cancellationToken);
-            var remuxMs = saveTimer.ElapsedMilliseconds;
 
             // The ring buffer already remuxes exactly the desired window starting at a
             // real keyframe - no offset/trim needed here the way WindowsReplayBuffer's
@@ -418,6 +426,20 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             while (remainingSeconds > 0)
             {
                 var chunkSeconds = Math.Min(SegmentChunkSeconds, remainingSeconds);
+                // Absorb a runt tail rather than emitting a segment for it. A
+                // 60s replay buffer measures a hair over 60s of wall clock, so
+                // the old loop produced a full segment plus a ~1.3s one - and
+                // every segment costs an ffmpeg process PER TRACK, plus a
+                // concat pass per track that a single segment does not need at
+                // all. That turned the common 3-process save into 9, on the
+                // machines least able to afford it. Drift over 61s is no worse
+                // than over 60, which is why the 60s figure was approximate to
+                // begin with.
+                if (remainingSeconds - chunkSeconds < SegmentChunkSeconds / 2)
+                {
+                    chunkSeconds = remainingSeconds;
+                }
+
                 segmentWindows.Add((chunkStartUtc, chunkSeconds));
                 chunkStartUtc += TimeSpan.FromSeconds(chunkSeconds);
                 remainingSeconds -= chunkSeconds;
@@ -426,8 +448,24 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             WritePausedRangesSidecar(config.LibraryFolder, outputPath, ComputePausedRangesSeconds(GetOrderedPauseEvents(), windowStartUtc, windowStartUtc + TimeSpan.FromSeconds(windowDurationSeconds)));
 
             var tracksStartMs = saveTimer.ElapsedMilliseconds;
-            var tracks = await _audio.BuildAlignedTracksAsync(segmentWindows, config, snapshots, cancellationToken);
+            List<(string Label, string Path)> tracks;
+            try
+            {
+                tracks = await _audio.BuildAlignedTracksAsync(segmentWindows, config, snapshots, cancellationToken);
+            }
+            catch
+            {
+                // Let the remux finish before the finally deletes the file it
+                // is still writing, and observe its own failure if it had one.
+                try { await remuxTask; } catch { /* the audio failure is the one worth reporting */ }
+                throw;
+            }
+
             var tracksMs = saveTimer.ElapsedMilliseconds - tracksStartMs;
+            // The mux is the first stage that needs the video file, so this is
+            // where the concurrent remux gets collected. Usually already done.
+            var remuxMs = await remuxTask;
+            var remuxWaitMs = saveTimer.ElapsedMilliseconds - tracksStartMs - tracksMs;
 
             var muxStartMs = saveTimer.ElapsedMilliseconds;
             var muxArgs = new List<string> { "-y", "-i", tempVideoPath };
@@ -443,7 +481,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg mux failed." : result.Error);
             }
 
-            AppLog.Info($"Native replay save timings: totalMs={saveTimer.ElapsedMilliseconds}, remuxMs={remuxMs}, audioTracksMs={tracksMs}, muxMs={saveTimer.ElapsedMilliseconds - muxStartMs}, tracks={tracks.Count}, segments={segmentWindows.Count}, packets={window.Length}.");
+            AppLog.Info($"Native replay save timings: totalMs={saveTimer.ElapsedMilliseconds}, remuxMs={remuxMs} (waited {remuxWaitMs}), audioTracksMs={tracksMs}, muxMs={saveTimer.ElapsedMilliseconds - muxStartMs}, tracks={tracks.Count}, segments={segmentWindows.Count}, packets={window.Length}.");
         }
         finally
         {
@@ -2780,6 +2818,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             while (remainingSeconds > 0)
             {
                 var chunkSeconds = Math.Min(SegmentChunkSeconds, remainingSeconds);
+                // See SaveReplayAsync - a runt tail segment costs an ffmpeg
+                // process per track for a fraction of a second of audio.
+                if (remainingSeconds - chunkSeconds < SegmentChunkSeconds / 2)
+                {
+                    chunkSeconds = remainingSeconds;
+                }
+
                 segmentWindows.Add((chunkStartUtc, chunkSeconds));
                 chunkStartUtc += TimeSpan.FromSeconds(chunkSeconds);
                 remainingSeconds -= chunkSeconds;
