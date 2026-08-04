@@ -2258,11 +2258,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
     private static unsafe void FillFrameBlack(AVFrame* frame, int height)
     {
-        // Y=0, not 16: the frame is signalled full-range (see CreateEncoder's
-        // AVCOL_RANGE_JPEG), where black is 0 and 16 is a visible dark grey.
-        // 16 is limited-range black and was correct before that change.
+        // Y=16, matching the limited-range NV12 both scalers now produce (see
+        // CreateEncoder's AVCOL_RANGE_MPEG). 0 is below-black there and would
+        // be a slightly different black from the rest of the recording.
         var ySize = (uint)(frame->linesize[0] * height);
-        System.Runtime.CompilerServices.Unsafe.InitBlockUnaligned((void*)frame->data[0], 0, ySize);
+        System.Runtime.CompilerServices.Unsafe.InitBlockUnaligned((void*)frame->data[0], 16, ySize);
 
         var uvHeight = (height + 1) / 2;
         var uvSize = (uint)(frame->linesize[1] * uvHeight);
@@ -2283,17 +2283,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             (int)(SwsFlags.SWS_LANCZOS | SwsFlags.SWS_ACCURATE_RND), null, null, null);
         if (swsContext is null) throw new InvalidOperationException("sws_getContext failed.");
 
-        // Desktop Duplication's BGRA capture is full-range (0-255) - without
-        // this, sws_scale's default conversion targets studio/limited range
-        // (16-235) NV12 output, crushing blacks/whites once played back at
-        // the correct (full) range. BT.709 coefficients (not swscale's BT.601
-        // default) because that's what the encoder now tags the output as, and
-        // what any player assumes for HD regardless - converting with 601 and
-        // being decoded as 709 is a real colour shift.
+        // Desktop Duplication's BGRA capture is full-range (0-255), so the
+        // source side is 1; the NV12 output side is 0, studio/limited range
+        // (16-235), because that is what H.264 consumers assume when they
+        // don't read the VUI flag - see CreateEncoder for why we no longer
+        // rely on that flag being honoured. BT.709 coefficients (not swscale's
+        // BT.601 default) because that's what the encoder tags the output as,
+        // and what any player assumes for HD regardless - converting with 601
+        // and being decoded as 709 is a real colour shift.
         var coefficientsPtr = ffmpeg.sws_getCoefficients(ffmpeg.SWS_CS_ITU709);
         var coefficients = new int_array4();
         coefficients.UpdateFrom(new[] { coefficientsPtr[0], coefficientsPtr[1], coefficientsPtr[2], coefficientsPtr[3] });
-        ffmpeg.sws_setColorspaceDetails(swsContext, in coefficients, 1 /* full */, in coefficients, 1 /* full */, 0, 1 << 16, 1 << 16);
+        ffmpeg.sws_setColorspaceDetails(swsContext, in coefficients, 1 /* full source */, in coefficients, 0 /* limited output */, 0, 1 << 16, 1 << 16);
 
         return swsContext;
     }
@@ -2365,34 +2366,35 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             throw new InvalidOperationException($"CreateVideoProcessor failed: {error.Message}", error);
         }
 
-        // Desktop Duplication's input is full-range (0-255) RGB, and left at
-        // its driver defaults the Video Processor's NV12 output nominally
-        // targets studio/limited range (16-235) - same crushed blacks/whites
-        // problem as the CPU sws_scale path (see CreateScaler), just via a
-        // different API. RGB_Range/Usage stay at their already-correct defaults
-        // (full-range RGB in) and YCbCr_Matrix=1 is BT.709, matching what the
-        // encoder tags the output as rather than the BT.601 default that
-        // silently disagreed with how every player reads an HD stream.
+        // The two ends of this conversion are deliberately different ranges, so
+        // they get their own structs. D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE is
+        // UNDEFINED=0, 16_235=1, 0_255=2.
         //
-        // Nominal_Range is Range_0_255, i.e. 2. It was 1, on a comment claiming
-        // that meant full range - D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE is
-        // UNDEFINED=0, 16_235=1, 0_255=2, so 1 asked for exactly the limited
-        // range this whole block exists to avoid. Every GPU-path capture came
-        // out with 16-235 luma while the encoder tagged the stream full-range,
-        // and the two readings of that disagreement are why it hid for so long:
-        // a player that honours the flag (ffmpeg, and so every generated
-        // thumbnail and filmstrip) leaves the luma alone and shows washed-out
-        // grey blacks, while one that ignores it and assumes limited for H.264
-        // (LibVLC, and so the editor's own playback) expands 16-235 to 0-255
-        // and happens to land on the correct picture. The video looked right;
-        // the thumbnails next to it looked grey.
-        var colorSpace = new VideoProcessorColorSpace
+        // Input: Desktop Duplication hands over full-range (0-255) RGB, so the
+        // stream colour space says Range_0_255 - anything else has the driver
+        // mis-reading the captured pixels before it converts them.
+        //
+        // Output: limited range (16-235) NV12, matching the CPU sws_scale path
+        // in CreateScaler and what CreateEncoder now tags the bitstream as.
+        // Both are 1 vs 2 flips away from full-range, which is what this used
+        // to be - see CreateEncoder for why signalling full range in the VUI
+        // turned out not to be enough to get it read back that way.
+        //
+        // YCbCr_Matrix=1 is BT.709, matching the encoder's tag rather than the
+        // BT.601 default that silently disagreed with how every player reads an
+        // HD stream.
+        var inputColorSpace = new VideoProcessorColorSpace
         {
             Nominal_Range = (uint)VideoProcessorNominalRange.Range_0_255,
             YCbCr_Matrix = 1
         };
-        videoContext.VideoProcessorSetStreamColorSpace(processor, 0, colorSpace);
-        videoContext.VideoProcessorSetOutputColorSpace(processor, colorSpace);
+        var outputColorSpace = new VideoProcessorColorSpace
+        {
+            Nominal_Range = (uint)VideoProcessorNominalRange.Range_16_235,
+            YCbCr_Matrix = 1
+        };
+        videoContext.VideoProcessorSetStreamColorSpace(processor, 0, inputColorSpace);
+        videoContext.VideoProcessorSetOutputColorSpace(processor, outputColorSpace);
 
         // Auto processing is ON by default, and Usage=OptimalSpeed above does
         // NOT turn it off - they are separate switches. Left enabled, the
@@ -3621,13 +3623,22 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             codecContext->time_base = encoderTimeBase;
             codecContext->framerate = new AVRational { num = Math.Clamp(config.FrameRate, 15, 240), den = 1 };
             codecContext->pix_fmt = AVPixelFormat.AV_PIX_FMT_NV12;
-            // The scalers (CreateScaler/CreateGpuScaler) now convert the
-            // full-range capture into full-range NV12 - without also
-            // signaling that in the bitstream's VUI, a decoder (including
-            // this app's own editor) has no way to know and falls back to
-            // assuming limited range, crushing blacks/whites right back in
-            // on playback despite the pixels themselves being correct.
-            codecContext->color_range = AVColorRange.AVCOL_RANGE_JPEG;
+            // Limited/studio range (16-235), matching what the scalers
+            // (CreateScaler/CreateGpuScaler) now write, and tagged as such.
+            //
+            // This was AVCOL_RANGE_JPEG with full-range pixels to match, which
+            // is internally consistent and correct by the spec - and still came
+            // out visibly dark everywhere outside this app. Consumers built on
+            // Media Foundation (Explorer's thumbnails and preview, Photos,
+            // Films & TV) ignore H.264's video_full_range_flag, assume limited,
+            // and expand 16-235 -> 0-255 on content that already occupies the
+            // full range: blacks clip to 0 and the whole picture crushes down.
+            // LibVLC, and so the editor's own playback, makes the same
+            // assumption. Emitting limited range makes the flag-ignorers right
+            // by construction, and the flag-honourers (ffmpeg, and so every
+            // generated thumbnail and filmstrip) read the tag and agree - which
+            // is the same reason every other capture tool defaults to limited.
+            codecContext->color_range = AVColorRange.AVCOL_RANGE_MPEG;
             // Both scalers convert with BT.709 coefficients, but these tags
             // were never written, leaving files marked "unknown" - which every
             // player then resolves to BT.709 for HD anyway. That accidentally
