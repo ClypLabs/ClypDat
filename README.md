@@ -2,14 +2,11 @@
 
 <img width="1404" height="914" alt="ClypDat Preview" src="https://github.com/user-attachments/assets/0436efa1-f47b-4a4b-9f8c-15c255c32fd9" />
 
-ClypDat records a rolling buffer of gameplay on Windows and saves the last N
-seconds to a file when you press a hotkey. It also has a built-in editor for
+ClypDat records a rolling buffer of gameplay on Windows and saves the last few
+minutes to a file when you press a hotkey. It also has a built-in editor for
 trimming clips and mixing audio tracks before export.
 
 The codebase is `native/` (C#/.NET 10, Avalonia UI).
-
-The marketing website lives in the separate
-[WebApp repository](https://github.com/ClypDat/WebApp).
 
 ## Capture
 
@@ -39,7 +36,7 @@ browsing for an executable directly.
 
 ## Auto-clipping
 
-Currently ClypDat only has CS2 auto-clipping (Experimental), so expect issues!
+Currently ClypDat only has CS2 auto-clipping for the time-being but we are planning to add more!
 
 For CS2, ClypDat listens to the game's own Game State Integration feed (no
 screen/voice analysis) and can automatically save a clip on kills, a
