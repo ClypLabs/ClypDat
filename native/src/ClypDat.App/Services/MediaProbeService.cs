@@ -432,21 +432,43 @@ public sealed class MediaProbeService
                 return peaks;
             });
 
-        var segmentCount = (int)Math.Ceiling(totalSeconds / SegmentSeconds);
+        // Segment boundaries up front, with a runt tail folded into the
+        // segment before it. A 61s clip used to produce a 60s segment plus a
+        // 1s one, and every segment costs an ffmpeg process PER TRACK - three
+        // extra decodes to draw one second of waveform.
+        var segments = new List<(double Start, double Length)>();
+        var cursor = 0.0;
+        while (cursor < totalSeconds)
+        {
+            var length = Math.Min(SegmentSeconds, totalSeconds - cursor);
+            if (totalSeconds - cursor - length < SegmentSeconds / 2) length = totalSeconds - cursor;
+            segments.Add((cursor, length));
+            cursor += length;
+        }
+
         var decodeClock = System.Diagnostics.Stopwatch.StartNew();
         long firstSegmentMs = -1;
-        for (var segment = 0; segment < segmentCount; segment++)
+        for (var segment = 0; segment < segments.Count; segment++)
         {
-            var segmentStart = segment * SegmentSeconds;
-            var segmentLength = Math.Min(SegmentSeconds, totalSeconds - segmentStart);
+            var (segmentStart, segmentLength) = segments[segment];
             var startBucket = (int)(segmentStart / totalSeconds * BucketCount);
-            var endBucket = segment == segmentCount - 1 ? BucketCount : (int)((segmentStart + segmentLength) / totalSeconds * BucketCount);
+            var endBucket = segment == segments.Count - 1 ? BucketCount : (int)((segmentStart + segmentLength) / totalSeconds * BucketCount);
             if (endBucket <= startBucket) continue;
 
-            foreach (var track in audioTracks)
+            cancellationToken.ThrowIfCancellationRequested();
+            // The tracks of one segment are independent decodes of independent
+            // streams, and they ran strictly one after another - on a clip with
+            // Game/Chat/Mic that is three sequential ffmpeg processes to fill a
+            // single slice of the timeline, on a machine with cores to spare.
+            // Segments stay sequential so the waveform still paints
+            // left-to-right as it arrives.
+            var segmentResults = await Task.WhenAll(audioTracks.Select(track =>
+                ReadWaveformAsync(media.Path, track.Index, segmentStart, segmentLength, cancellationToken))).ConfigureAwait(false);
+
+            for (var index = 0; index < audioTracks.Length; index++)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var segmentPeaks = await ReadWaveformAsync(media.Path, track.Index, segmentStart, segmentLength, cancellationToken).ConfigureAwait(false);
+                var track = audioTracks[index];
+                var segmentPeaks = segmentResults[index];
                 var target = peaksByTrack[track.Index];
                 for (var bucket = startBucket; bucket < endBucket; bucket++)
                 {
@@ -465,7 +487,7 @@ public sealed class MediaProbeService
         // Network-drive diagnostic: first-segment latency is what the user
         // perceives (when the waveform starts appearing); total/segment count
         // shows whether the share's throughput is the bottleneck.
-        AppLog.Debug($"Waveform decoded: segments={segmentCount}x{audioTracks.Length}tracks, firstSegmentMs={firstSegmentMs}, totalMs={decodeClock.ElapsedMilliseconds}, path={media.Path}");
+        AppLog.Debug($"Waveform decoded: segments={segments.Count}x{audioTracks.Length}tracks, firstSegmentMs={firstSegmentMs}, totalMs={decodeClock.ElapsedMilliseconds}, path={media.Path}");
 
         var waveforms = peaksByTrack.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<double>)pair.Value);
         await TryWriteWaveformCacheAsync(cachePath, waveforms, cancellationToken).ConfigureAwait(false);
@@ -829,7 +851,11 @@ public sealed class MediaProbeService
         var tempPath = Path.Combine(Path.GetTempPath(), $"clypdat-waveform-{Guid.NewGuid():N}.f32");
         try
         {
-            var args = new List<string> { "-y", "-v", "error" };
+            // Single-threaded on purpose: decoding one audio stream down to
+            // 4kHz mono is a trivial amount of CPU, and several of these now
+            // run at once. Letting each one spin up a thread per core just
+            // adds scheduling overhead to work that was never parallel.
+            var args = new List<string> { "-y", "-v", "error", "-threads", "1" };
             if (startSeconds is not null && lengthSeconds is not null)
             {
                 args.AddRange(new[] { "-ss", startSeconds.Value.ToString("0.###"), "-t", lengthSeconds.Value.ToString("0.###") });

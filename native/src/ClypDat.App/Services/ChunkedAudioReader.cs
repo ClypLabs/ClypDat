@@ -36,8 +36,27 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
     // own video stream (a clip that plays fine in standalone VLC - one
     // patient reader - broke in the editor's many-reader setup).
     private static readonly ConcurrentDictionary<string, Task> InFlightExtractions = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly SemaphoreSlim ExtractionGate = new(2, 2);
+    // Two was chosen against a network share, where the constraint is the
+    // share and not the CPU. Locally the constraint is the CPU, and a clip
+    // with three audio tracks needs three chunks before it can make a sound -
+    // at two, the third track always waited out a full extraction it had no
+    // reason to.
+    private static readonly SemaphoreSlim ExtractionGate =
+        new(Math.Clamp(Environment.ProcessorCount / 2, 2, 4), Math.Clamp(Environment.ProcessorCount / 2, 2, 4));
     private static readonly SemaphoreSlim NetworkExtractionGate = new(1, 1);
+
+    // Count of chunks somebody is currently WAITING to hear, as opposed to
+    // chunks being fetched ahead of playback. Lookahead work parks until this
+    // hits zero.
+    //
+    // Without this the gate was strictly first-come-first-served, and the
+    // arrival order is set by construction: each track's reader schedules its
+    // own chunk 0 and then its chunk 1 before the next track's reader is even
+    // built. So track 2's chunk 0 queued behind track 1's chunk 1 - audio
+    // nobody needed for another 30 seconds - and track 3 behind both. The log
+    // shows exactly that shape on every editor open: track 1 never starves,
+    // track 2 sits silent ~1.3s, track 3 ~2.9s.
+    private static int _pendingPriority;
 
     private readonly string _inputPath;
     private readonly int _streamIndex;
@@ -94,9 +113,9 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
     public void Prefetch(TimeSpan time)
     {
         var chunkIndex = (int)(Math.Max(0, time.TotalSeconds) / ChunkSeconds);
-        ScheduleExtraction(chunkIndex);
-        ScheduleExtraction(chunkIndex + 1);
-        ScheduleExtraction(chunkIndex - 1);
+        ScheduleExtraction(chunkIndex, priority: true);
+        ScheduleExtraction(chunkIndex + 1, priority: false);
+        ScheduleExtraction(chunkIndex - 1, priority: false);
     }
 
     public int Read(float[] buffer, int offset, int count)
@@ -141,8 +160,9 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
                     // Chunk not extracted yet - emit silence for this stretch so
                     // the timeline keeps moving in sync with the video, and make
                     // sure the chunk (and the next) is on its way.
-                    ScheduleExtraction(chunkIndex);
-                    ScheduleExtraction(chunkIndex + 1);
+                    // This one is being waited on right now, by definition.
+                    ScheduleExtraction(chunkIndex, priority: true);
+                    ScheduleExtraction(chunkIndex + 1, priority: false);
                     var silentSamples = (int)(framesWanted * Channels);
                     Array.Clear(buffer, offset + written, silentSamples);
                     written += silentSamples;
@@ -181,7 +201,7 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
                 // ready before playback gets there.
                 if (frameWithinChunk + read / Channels > ChunkFrames * 3 / 4)
                 {
-                    ScheduleExtraction(chunkIndex + 1);
+                    ScheduleExtraction(chunkIndex + 1, priority: false);
                 }
             }
 
@@ -243,28 +263,47 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
         _openChunkIndex = -1;
     }
 
-    private void ScheduleExtraction(int chunkIndex)
+    private void ScheduleExtraction(int chunkIndex, bool priority)
     {
         if (chunkIndex < 0 || (long)chunkIndex * ChunkFrames >= _totalFrames) return;
         if (AudioChunkCache.Contains(_cacheKey, chunkIndex)) return;
 
         var isNetwork = PlaybackSession.IsNetworkPath(_inputPath);
         var flightKey = $"{_cacheKey}-c{chunkIndex:0000}";
-        InFlightExtractions.GetOrAdd(flightKey, _ => Task.Run(async () =>
+        InFlightExtractions.GetOrAdd(flightKey, _ =>
         {
-            await ExtractionGate.WaitAsync();
-            if (isNetwork) await NetworkExtractionGate.WaitAsync();
-            try
+            if (priority) Interlocked.Increment(ref _pendingPriority);
+            return Task.Run(async () =>
             {
-                if (!AudioChunkCache.Contains(_cacheKey, chunkIndex)) await ExtractChunkAsync(chunkIndex);
-            }
-            finally
-            {
-                if (isNetwork) NetworkExtractionGate.Release();
-                ExtractionGate.Release();
-                InFlightExtractions.TryRemove(flightKey, out Task? _);
-            }
-        }));
+                try
+                {
+                    // Lookahead yields to anything being waited on. Priority
+                    // work always reaches the decrement below, so this cannot
+                    // park forever.
+                    while (!priority && Volatile.Read(ref _pendingPriority) > 0)
+                    {
+                        await Task.Delay(20).ConfigureAwait(false);
+                    }
+
+                    await ExtractionGate.WaitAsync();
+                    if (isNetwork) await NetworkExtractionGate.WaitAsync();
+                    try
+                    {
+                        if (!AudioChunkCache.Contains(_cacheKey, chunkIndex)) await ExtractChunkAsync(chunkIndex);
+                    }
+                    finally
+                    {
+                        if (isNetwork) NetworkExtractionGate.Release();
+                        ExtractionGate.Release();
+                    }
+                }
+                finally
+                {
+                    if (priority) Interlocked.Decrement(ref _pendingPriority);
+                    InFlightExtractions.TryRemove(flightKey, out Task? _);
+                }
+            });
+        });
     }
 
     private async Task ExtractChunkAsync(int chunkIndex)
@@ -280,6 +319,9 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
         {
             "-y",
             "-v", "error",
+            // See MediaProbeService.ReadWaveformAsync - one audio stream is
+            // not worth a thread per core, and several of these run at once.
+            "-threads", "1",
             "-ss", (chunkIndex * ChunkSeconds).ToString(),
             "-t", ChunkSeconds.ToString(),
             "-i", _inputPath,
