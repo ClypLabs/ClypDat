@@ -3004,14 +3004,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public void SaveSelectedClipEditState()
     {
         if (string.IsNullOrWhiteSpace(SelectedVideoPath)) return;
-        ClipEditSidecar.Save(Settings.LibraryFolder, SelectedVideoPath, new ClipEditSettings
+        var edit = new ClipEditSettings
         {
             TrimStartSeconds = Math.Max(0, TrimStart.TotalSeconds),
             TrimEndSeconds = Math.Max(0, TrimEnd.TotalSeconds),
             TrackVolumes = TimelineTracks
                 .Where(track => track.IsAudio)
                 .ToDictionary(track => track.StreamIndex, track => Math.Clamp(track.VolumePercent, 0, 150))
-        });
+        };
+        ClipEditSidecar.Save(Settings.LibraryFolder, SelectedVideoPath, edit);
+
+        // The library card caches this clip's edit state and only reloaded it
+        // on construction or a full refresh, so everything derived from it went
+        // stale the moment a trim was committed - the hover preview kept
+        // starting at (and running for) the previous trim range, and the card's
+        // duration label kept showing the old length.
+        AllClips.FirstOrDefault(clip => string.Equals(clip.Path, SelectedVideoPath, StringComparison.OrdinalIgnoreCase))
+            ?.ApplyClipEdit(edit);
 
         // One-time cleanup: drop the old settings.json-based copy now that this
         // clip's edit state lives in its own sidecar file instead.

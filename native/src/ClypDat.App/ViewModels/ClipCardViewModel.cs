@@ -365,6 +365,24 @@ public sealed class ClipCardViewModel : ViewModelBase
         if (_isPreviewVisible) SetPreviewImage(_previewImagePath);
     }
 
+    // The editor just wrote this clip's edit sidecar. _clipEdit was otherwise
+    // only ever loaded in the constructor and in UpdateMedia, so until the next
+    // full library refresh the card kept answering from the pre-edit values -
+    // which is why a hover preview still started at the OLD trim point despite
+    // HoverPreviewRange reading TrimStartSeconds correctly all along, and why
+    // the duration label kept showing the untrimmed length.
+    //
+    // Takes the settings object the caller just saved rather than re-reading
+    // the sidecar: this runs on the UI thread from every trim/volume commit,
+    // and the value is already in hand.
+    public void ApplyClipEdit(ClipEditSettings edit)
+    {
+        _clipEdit = edit;
+        OnPropertyChanged(nameof(TrimmedDuration));
+        OnPropertyChanged(nameof(HasTrimEdit));
+        OnPropertyChanged(nameof(DurationLabel));
+    }
+
     private int _selectionOrder;
 
     public bool IsSelected
