@@ -671,7 +671,26 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var lastForcedKeyframe = TimeSpan.Zero;
             var lastTargetRefresh = TimeSpan.Zero;
             var lastEncodedAt = TimeSpan.Zero;
+            // Distinct from lastEncodedAt: that one is the IDEAL timeline anchor
+            // and advances by exactly targetFrameInterval whether or not a frame
+            // was actually submitted, which is what keeps PTS spacing correct
+            // across suppressed pads. This is the real "when did a frame last go
+            // out" clock, and it is what the max-hold below measures against.
+            var lastActualEncodeAt = TimeSpan.Zero;
+            // Longest a suppressed run of duplicate pads may go without emitting
+            // anything. Bounded by SaveReplayAsync's stall heuristic, which trims
+            // the front of the audio track when the saved window's duration
+            // exceeds the muxed video's by more than a second - the hold is a
+            // direct term in that difference, so this leaves 4x margin. Also has
+            // to stay well inside the 2s forced-IDR cadence that the ring
+            // buffer's cut points depend on.
+            var maxPadHold = TimeSpan.FromMilliseconds(250);
+            // Last time the per-present crop copy actually ran - see the gate at
+            // its call site for why it is rate-limited rather than run on every
+            // present.
+            var lastCropCopyAt = TimeSpan.Zero;
             var targetFrameInterval = TimeSpan.FromSeconds(1.0 / Math.Clamp(config.FrameRate, 15, 240));
+            var halfTargetFrameInterval = targetFrameInterval / 2;
             // Counts encoded frames (including duplicate/padding ones) so
             // frame->pts can be assigned an IDEAL, constant-rate timestamp
             // (index * exact interval) rather than real elapsed time - see
@@ -732,6 +751,19 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // to find out which is actually happening on this hardware
             // instead of continuing to guess.
             var zeroPresentSkips = 0;
+            // Raw per-present crop-copy counts. Deliberately NOT folded into
+            // avgCopyMapMs: that average divides by frames ENCODED, which is
+            // exactly the metric-reading mistake documented at the crop call
+            // site (it understated the true per-present cost by the
+            // source/target frame rate ratio). These two are the only numbers
+            // that actually show whether the crop-copy rate limiter is working.
+            var cropCopies = 0;
+            var cropCopiesSkipped = 0;
+            // Per-frame scratch, hoisted out of the hot path - see their use
+            // sites. Allocated once per session rather than 60+ times a second.
+            var bltStreams = new VideoProcessorStream[1];
+            var swsSrcData = new byte*[1];
+            var swsSrcStride = new int[1];
             var accumulatedFramesSum = 0L;
             var accumulatedFramesMax = 0L;
             var lastRealPresentTicks = 0L;
@@ -875,8 +907,23 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var droppedSinceLog = Interlocked.Exchange(ref _encodeDroppedCount, 0);
                     UpdatePeak(ref _peakQueueDepth, encodeQueue.Count);
                     var frameStalenessDenom = Math.Max(1, frameStalenessCount);
-                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, ringBufferMb={ringBufferMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
-                    var outputFrameRate = framesEncodedSinceLog / diagElapsed;
+                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, ringBufferMb={ringBufferMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
+                    // Counts pads the pacing gate deliberately declined to submit
+                    // as if they had been. A suppressed pad is a frame the
+                    // encoder was never ASKED to produce, so scoring it as a
+                    // failure to produce one is simply wrong: with duplicate
+                    // suppression on, encoded output legitimately falls to the
+                    // source's own present rate (43fps into a 60fps target on
+                    // one measured machine), which the raw ratio below would
+                    // read as a permanent 72%-of-target overload - pinning the
+                    // UI to Degraded forever and feeding EncoderTuningService
+                    // false overload samples until it demoted the preset and
+                    // halved the target frame rate for no reason at all. This
+                    // is the rate the encoder was actually scheduled at, which
+                    // is the only thing "can it keep up" can meaningfully mean.
+                    // The two signals that unambiguously mean overload
+                    // (droppedSinceLog, queue depth) are untouched.
+                    var outputFrameRate = (framesEncodedSinceLog + padsSkippedSinceLog) / diagElapsed;
                     // Judged against the rate actually being targeted, not the
                     // configured one: once the tuner has lowered it, hitting 30
                     // of 30 is healthy, and comparing against the original 60
@@ -938,6 +985,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     waitMs = 0;
                     getFrameMs = 0;
                     iterationsSinceLog = 0;
+                    cropCopies = 0;
+                    cropCopiesSkipped = 0;
                     zeroPresentSkips = 0;
                     accumulatedFramesSum = 0;
                     accumulatedFramesMax = 0;
@@ -1202,6 +1251,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             // frame) rather than a permanently lost capture.
                             if (!occluded)
                             {
+                                // Whether this present's pixels actually reached the
+                                // pipeline, as opposed to being superseded by a
+                                // newer present already sitting unconsumed in
+                                // croppedTexture - see the crop-copy gate below.
+                                // Always true on the CPU path, which has nowhere to
+                                // hold a pending present and so must convert each one.
+                                var contentAdvanced = false;
                                 // NVENC's actual encode runs asynchronously - avcodec_send_frame
                                 // can return before the encoder has finished reading a PREVIOUS
                                 // submission of this same reused AVFrame's buffer. Without this,
@@ -1231,31 +1287,78 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                     // not by the far larger number of presents it actually
                                     // ran on, so the true cost was understated by exactly the
                                     // source/target ratio.
-                                    stageStopwatch.Restart();
-                                    using (var desktopTexture = desktopResource.QueryInterface<ID3D11Texture2D>())
+                                    // ...but not necessarily on EVERY present. The loop
+                                    // polls at roughly twice the target rate (see
+                                    // acquireTimeoutMs), and a source presenting faster
+                                    // than the target hands us several presents per
+                                    // encode tick, all but the last of which are
+                                    // overwritten in croppedTexture before anything ever
+                                    // reads it. This is a full-resolution BGRA copy - at
+                                    // 1440p that is ~14MB of copy bandwidth thrown away
+                                    // per wasted present, which on an iGPU comes straight
+                                    // out of the same system memory the game is using.
+                                    //
+                                    // This is NOT the throttle described above that was
+                                    // reverted. That one asked "is an encode due yet?" at
+                                    // each present's arrival, so it could refuse a present
+                                    // while croppedTexture held nothing - i.e. while that
+                                    // present was the only candidate content for the
+                                    // coming tick - and that content was then permanently
+                                    // gone, which is the 90-93% cap it measured. This gate
+                                    // asks "is there already an unconsumed present sitting
+                                    // in croppedTexture?" instead. The !croppedDirty branch
+                                    // has no timer in it at all, and EncodeScheduledFrame
+                                    // clears croppedDirty on every tick that consumes
+                                    // content, so the first present after each tick is
+                                    // always copied immediately. A skip can therefore only
+                                    // happen when a newer-or-equal present is already
+                                    // pending and guaranteed to be consumed next tick - no
+                                    // unique frame is ever lost. When the source presents
+                                    // no faster than the target (any V-Sync-on game at a
+                                    // matching target), croppedDirty is false on virtually
+                                    // every arrival and this is bit-identical to copying
+                                    // unconditionally.
+                                    //
+                                    // The cost is freshness, not content: the pixels a tick
+                                    // converts can be up to half a target interval (8.3ms
+                                    // at 60fps) older than the newest present. That is
+                                    // bounded and already measured - watch
+                                    // avgFrameStalenessMs.
+                                    if (!croppedDirty || stopwatch.Elapsed - lastCropCopyAt >= halfTargetFrameInterval)
                                     {
-                                        var box = new Vortice.Mathematics.Box(cropLeft, cropTop, 0, cropLeft + captureWidth, cropTop + captureHeight, 1);
-                                        device.ImmediateContext.CopySubresourceRegion(croppedTexture, 0, 0, 0, 0, desktopTexture, 0, box);
-                                    }
-                                    copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
+                                        stageStopwatch.Restart();
+                                        using (var desktopTexture = desktopResource.QueryInterface<ID3D11Texture2D>())
+                                        {
+                                            var box = new Vortice.Mathematics.Box(cropLeft, cropTop, 0, cropLeft + captureWidth, cropTop + captureHeight, 1);
+                                            device.ImmediateContext.CopySubresourceRegion(croppedTexture, 0, 0, 0, 0, desktopTexture, 0, box);
+                                        }
+                                        copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
 
-                                    // Same screen->crop conversion the CPU path does, then scaled
-                                    // into output pixels so the readback side can draw straight
-                                    // into the NV12 frame without needing the crop rect.
-                                    if (config.CaptureCursor && GetCursorPos(out var gpuCursor))
-                                    {
-                                        var cropX = gpuCursor.X - desktopBounds.Left - cropLeft;
-                                        var cropY = gpuCursor.Y - desktopBounds.Top - cropTop;
-                                        cursorOutputX = (int)((long)cropX * outputWidth / captureWidth);
-                                        cursorOutputY = (int)((long)cropY * outputHeight / captureHeight);
+                                        // Same screen->crop conversion the CPU path does, then scaled
+                                        // into output pixels so the readback side can draw straight
+                                        // into the NV12 frame without needing the crop rect.
+                                        if (config.CaptureCursor && GetCursorPos(out var gpuCursor))
+                                        {
+                                            var cropX = gpuCursor.X - desktopBounds.Left - cropLeft;
+                                            var cropY = gpuCursor.Y - desktopBounds.Top - cropTop;
+                                            cursorOutputX = (int)((long)cropX * outputWidth / captureWidth);
+                                            cursorOutputY = (int)((long)cropY * outputHeight / captureHeight);
+                                        }
+                                        else
+                                        {
+                                            cursorOutputX = int.MinValue;
+                                            cursorOutputY = int.MinValue;
+                                        }
+
+                                        croppedDirty = true;
+                                        lastCropCopyAt = stopwatch.Elapsed;
+                                        cropCopies++;
+                                        contentAdvanced = true;
                                     }
                                     else
                                     {
-                                        cursorOutputX = int.MinValue;
-                                        cursorOutputY = int.MinValue;
+                                        cropCopiesSkipped++;
                                     }
-
-                                    croppedDirty = true;
                                 }
                                 else
                                 {
@@ -1279,15 +1382,19 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                                 cursor.X - desktopBounds.Left - cropLeft,
                                                 cursor.Y - desktopBounds.Top - cropTop);
                                         }
-                                        var srcData = new byte*[1] { (byte*)mapped.DataPointer };
-                                        var srcStride = new int[1] { (int)mapped.RowPitch };
-                                        ffmpeg.sws_scale(swsContext, srcData, srcStride, 0, captureHeight, frame->data, frame->linesize);
+                                        // Reused, same reason as the VideoProcessorStream
+                                        // array on the GPU path: these ran once per
+                                        // present, not per encoded frame.
+                                        swsSrcData[0] = (byte*)mapped.DataPointer;
+                                        swsSrcStride[0] = (int)mapped.RowPitch;
+                                        ffmpeg.sws_scale(swsContext, swsSrcData, swsSrcStride, 0, captureHeight, frame->data, frame->linesize);
                                     }
                                     finally
                                     {
                                         device.ImmediateContext.Unmap(staging, 0);
                                     }
                                     scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
+                                    contentAdvanced = true;
                                 }
 
                                 // Real-world moment this content actually landed in frame->data -
@@ -1298,14 +1405,29 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 // two clocks (source presents, target-fps pacing) run free-running
                                 // and unsynchronized - a plausible source of visible judder despite
                                 // every output frame being unique and perfectly PTS-spaced.
-                                lastFrameContentCapturedUtc = MonotonicClock.UtcNow;
-                                Volatile.Write(ref _lastRealContentTicks, lastFrameContentCapturedUtc.Ticks);
+                                // Only advanced when this present's pixels actually
+                                // went somewhere: a present skipped by the crop-copy
+                                // gate leaves croppedTexture holding slightly older
+                                // content, and claiming otherwise here would hide
+                                // exactly the staleness this metric exists to bound.
+                                if (contentAdvanced)
+                                {
+                                    lastFrameContentCapturedUtc = MonotonicClock.UtcNow;
+                                    framesProcessedSinceLog++;
+                                }
+                                // Unconditional, unlike the above: this is the "capture
+                                // is alive" heartbeat the stall watchdog and the UI read,
+                                // and a present the crop gate declined still proves the
+                                // source is presenting.
+                                Volatile.Write(ref _lastRealContentTicks, MonotonicClock.UtcNow.Ticks);
                                 // Set on both the GPU-scale and CPU-copy paths, unlike
                                 // croppedDirty which only the GPU one uses - the pacing
                                 // gate needs to know "is the next scheduled frame a pad"
                                 // regardless of which path produced the content.
+                                // Also set on a skipped crop copy, which is correct: a
+                                // skip only happens when croppedTexture already holds
+                                // unconsumed content, so the next tick is not a pad.
                                 freshContentSinceLastEncode = true;
-                                framesProcessedSinceLog++;
                             }
                             // else: occluded - frame->data still holds the last successfully
                             // scaled content, re-encoded unchanged below (visual freeze).
@@ -1437,7 +1559,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             // below still works off `staging` alone.
                             try
                             {
-                                if (config.CaptureCursor) throw new NotSupportedException("Desktop cursor uses CPU composition.");
+                                // No CaptureCursor exclusion here any more: the cursor
+                                // is composited into NV12 after the scale (see
+                                // DrawDesktopCursorNv12), so it no longer requires the
+                                // CPU path. This copy of the old restriction outlived
+                                // the initial-setup one and quietly downgraded every
+                                // cursor-enabled capture to the 10-13ms/frame
+                                // sws_scale path the moment a stall triggered a device
+                                // rebuild.
                                 (videoDevice, videoContext, vpEnumerator, videoProcessor, nv12Output, nv12StagingRing, outputView) =
                                     CreateGpuScaler(device, captureWidth, captureHeight, outputWidth, outputHeight, config.FrameRate);
                                 (croppedTexture, inputView) = CreateGpuCropInputView(device, videoDevice, vpEnumerator, captureWidth, captureHeight);
@@ -1579,8 +1708,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     if (useGpuScale && croppedDirty)
                     {
                         stageStopwatch.Restart();
-                        var stream = new VideoProcessorStream { Enable = true, InputSurface = inputView };
-                        videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, new[] { stream });
+                        // Reused rather than allocated per frame - 60/sec of these
+                        // into a loop whose own diagnostics already blame blocking
+                        // GCs for multi-hundred-millisecond capture gaps. inputView
+                        // is refreshed in place because a crop resize or device
+                        // rebuild replaces the view object underneath us.
+                        bltStreams[0].Enable = true;
+                        bltStreams[0].InputSurface = inputView;
+                        videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, bltStreams);
                         var ringLength = nv12StagingRing!.Length;
                         var currentRingIndex = nv12StagingIndex;
                         device.ImmediateContext.CopyResource(nv12StagingRing[currentRingIndex], nv12Output);
@@ -1680,6 +1815,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // frame's duration and turns a 60 FPS clip into ~30 FPS.
                         framesEncoded++;
                         framesEncodedSinceLog++;
+                        // Real (not ideal-timeline) moment a frame last went out,
+                        // which is what the pad-suppression max hold measures
+                        // against - lastEncodedAt cannot serve, since it advances
+                        // on its own grid whether or not anything was submitted.
+                        lastActualEncodeAt = stopwatch.Elapsed;
                     }
                     encodeMs += stageStopwatch.Elapsed.TotalMilliseconds;
                 }
@@ -1696,6 +1836,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 {
                     activeFrameRate = requestedFrameRate;
                     targetFrameInterval = TimeSpan.FromSeconds(1.0 / activeFrameRate);
+                    halfTargetFrameInterval = targetFrameInterval / 2;
                     idealFrameIntervalMicroseconds = 1_000_000.0 / activeFrameRate;
                     acquireTimeoutMs = (uint)Math.Clamp((int)Math.Round(targetFrameInterval.TotalMilliseconds / 2), 1, 8);
                     SetHealth(_health with { TargetFrameRate = activeFrameRate, UpdatedUtc = DateTime.UtcNow });
@@ -1730,22 +1871,39 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     frame->pts = (long)Math.Round(nextPtsMicroseconds);
                     nextPtsMicroseconds += idealFrameIntervalMicroseconds;
 
-                    // A pad (nothing new since the last encode) submitted into
-                    // an already-backed-up queue is the worst frame to spend
-                    // encoder time on: it adds no information, and it pushes the
-                    // real frame behind it further back. The friend's Iris Xe
-                    // logs show exactly this - framesEncoded running 2.7x
-                    // framesSeen while the queue sat pinned at 30/30 and output
-                    // collapsed to 18.8fps.
+                    // A pad (nothing new since the last encode) is a byte-identical
+                    // copy of the frame before it. Encoding one costs a full pass
+                    // through the encoder for zero information, and whenever the
+                    // source presents slower than the target it is not a rare event:
+                    // a 43fps source into a 60fps target made a quarter of all
+                    // encoded frames pads on one measured Iris Xe laptop, where
+                    // encode runs on the same execution units the game renders with.
+                    // On a backed-up queue it is worse still - the pad also pushes
+                    // the real frame behind it further back (the same logs showed
+                    // framesEncoded at 2.7x framesSeen with the queue pinned at
+                    // 30/30 and output collapsed to 18.8fps).
                     //
-                    // The timeline still advances (lastEncodedAt and
-                    // encodedFrameIndex both moved above), so this reads as a
-                    // dropped frame in the output rather than a slower clip -
-                    // same shape as the catch-up cap right above, which already
-                    // decided that under stall conditions honesty beats padding.
-                    // Only ever skipped while the queue is genuinely deep, so
-                    // steady-state constant-frame-rate output is unchanged.
-                    if (!freshContentSinceLastEncode && encodeQueue.Count * 2 >= encodeQueueCapacity)
+                    // This used to be skipped ONLY under that queue pressure. It is
+                    // now the default, because the timeline is safe either way:
+                    // lastEncodedAt and nextPtsMicroseconds both advance above,
+                    // before this check, so a suppressed pad reads as a dropped
+                    // frame in a correctly-spaced timeline rather than a slower
+                    // clip. Duration and playback speed are unchanged; what changes
+                    // is that the file becomes variable-frame-rate, so a player
+                    // computing frames/duration reports the source's real rate
+                    // instead of the configured target. Audio sync is untouched -
+                    // it rides on EncodeJob's own wall clock, which stays
+                    // one-for-one with frames actually submitted.
+                    //
+                    // Two overrides. A due forced-IDR must never be starved, or the
+                    // ring buffer loses the cut points every save depends on (see
+                    // CopyWindowUnderLock's backward keyframe scan). And maxPadHold
+                    // bounds how long a fully static screen may emit nothing at all,
+                    // which SaveReplayAsync's stall heuristic requires - see its
+                    // declaration.
+                    var idrDue = stopwatch.Elapsed - lastForcedKeyframe >= TimeSpan.FromSeconds(2);
+                    var holdExpired = stopwatch.Elapsed - lastActualEncodeAt >= maxPadHold;
+                    if (!freshContentSinceLastEncode && !idrDue && !holdExpired)
                     {
                         padsSkippedSinceLog++;
                         continue;
@@ -1986,11 +2144,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             OutputHeight = (uint)outputHeight,
             InputFrameRate = new Rational((uint)Math.Clamp(frameRate, 15, 240), 1),
             OutputFrameRate = new Rational((uint)Math.Clamp(frameRate, 15, 240), 1),
-            // OptimalQuality, not PlaybackNormal: this is the only lever the
-            // D3D11 Video Processor exposes over which scaling kernel the
-            // driver picks (no caps are queryable that would let us pick one
-            // outright), and a 2:1 downscale is exactly where that choice shows.
-            Usage = VideoUsage.OptimalQuality
+            // Capture runs continuously at the target frame rate, unlike a
+            // one-off export. OptimalQuality can make the driver spend more
+            // 3D time on every crop/scale/colour-conversion pass, competing
+            // with the game for the same GPU. The output is immediately fed
+            // to NVENC, so throughput matters more than a premium resize
+            // kernel here. OptimalSpeed keeps the conversion GPU-side while
+            // avoiding that quality-biased per-frame cost.
+            Usage = VideoUsage.OptimalSpeed
         };
         ID3D11VideoProcessorEnumerator enumerator;
         try
@@ -2138,18 +2299,37 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         var ySrc = (byte*)mapped.DataPointer;
         var yDst = frame->data[0];
         var yDstStride = frame->linesize[0];
-        for (var row = 0; row < height; row++)
+        // The two strides do often agree in practice (D3D11's NV12 pitch and
+        // ffmpeg's align-32 linesize both land on 1920 at 1080p, for one), and
+        // when they do the whole plane is one contiguous block - 1080 separate
+        // memcpy calls collapse into one. The per-row path stays for when they
+        // don't, which is the only case the original comment above covers.
+        if (srcStride == yDstStride)
         {
-            Buffer.MemoryCopy(ySrc + row * srcStride, yDst + row * yDstStride, yDstStride, width);
+            Buffer.MemoryCopy(ySrc, yDst, (long)yDstStride * height, (long)srcStride * height);
+        }
+        else
+        {
+            for (var row = 0; row < height; row++)
+            {
+                Buffer.MemoryCopy(ySrc + row * srcStride, yDst + row * yDstStride, yDstStride, width);
+            }
         }
 
         var uvHeight = (height + 1) / 2;
         var uvSrc = ySrc + srcStride * height;
         var uvDst = frame->data[1];
         var uvDstStride = frame->linesize[1];
-        for (var row = 0; row < uvHeight; row++)
+        if (srcStride == uvDstStride)
         {
-            Buffer.MemoryCopy(uvSrc + row * srcStride, uvDst + row * uvDstStride, uvDstStride, width);
+            Buffer.MemoryCopy(uvSrc, uvDst, (long)uvDstStride * uvHeight, (long)srcStride * uvHeight);
+        }
+        else
+        {
+            for (var row = 0; row < uvHeight; row++)
+            {
+                Buffer.MemoryCopy(uvSrc + row * srcStride, uvDst + row * uvDstStride, uvDstStride, width);
+            }
         }
     }
 
@@ -2934,11 +3114,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             if (headerResult < 0) throw new InvalidOperationException($"avformat_write_header failed ({headerResult}).");
 
             var basePts = window[0].PtsMs;
+            // Only ever read for the final packet, which has no successor to
+            // measure against; every other one overwrites it first.
+            long lastPacketDuration = 0;
             var packet = ffmpeg.av_packet_alloc();
             try
             {
-                foreach (var ringPacket in window)
+                for (var i = 0; i < window.Length; i++)
                 {
+                    var ringPacket = window[i];
                     // Length, not Data.Length - see RingPacket. These particular
                     // packets came from CopyWindowUnderLock and so are already
                     // exact-sized, but reading the field keeps this correct if
@@ -2946,6 +3130,17 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     ffmpeg.av_new_packet(packet, ringPacket.Length);
                     Marshal.Copy(ringPacket.Data, 0, (IntPtr)packet->data, ringPacket.Length);
                     packet->pts = packet->dts = ringPacket.PtsMs - basePts;
+                    // Explicit, because the timeline is no longer a uniform grid:
+                    // the pacing gate suppresses duplicate frames, so consecutive
+                    // packets can be more than one frame interval apart. The muxer
+                    // infers each sample's duration from the NEXT packet's DTS,
+                    // which leaves the final sample of the window with none at all -
+                    // invisible at a constant frame rate, not invisible now. The
+                    // last packet reuses the previous gap for want of a successor.
+                    packet->duration = i + 1 < window.Length
+                        ? window[i + 1].PtsMs - ringPacket.PtsMs
+                        : lastPacketDuration;
+                    lastPacketDuration = packet->duration;
                     packet->stream_index = stream->index;
                     if (ringPacket.IsKeyframe) packet->flags |= ffmpeg.AV_PKT_FLAG_KEY;
                     ffmpeg.av_interleaved_write_frame(formatContext, packet);
@@ -3041,7 +3236,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         _ => "p4"
     };
 
-    private static unsafe void ApplyLowLatencyEncoderOptions(AVCodecContext* codecContext, string candidateName, ReplayBufferConfig config)
+    private static unsafe void ApplyLowLatencyEncoderOptions(AVCodecContext* codecContext, string candidateName, ReplayBufferConfig config, bool lowPower = false)
     {
         void TrySet(string name, string value)
         {
@@ -3128,10 +3323,27 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             case "h264_qsv":
                 TrySet("preset", "veryfast");
                 TrySet("forced_idr", "1");
-                // QSV's default queues up to 4 frames deep before an encoded
-                // packet comes back out - same latency concern as NVENC's
-                // "ll" tune above, just a different knob for a different SDK.
-                TrySet("async_depth", "1");
+                // Back to QSV's own default of 4. This was pinned to 1 out of
+                // the same latency concern as NVENC's "ll" tune above - and
+                // that reasoning was already reversed there, on the grounds
+                // that this is a ring buffer being written to memory, not a
+                // live stream with a latency budget. The identical argument
+                // applies: depth 4 means up to ~66ms of frames sit inside the
+                // encoder before their packets reach the ring, which against a
+                // 60-second buffer is noise. What depth 1 actually bought was a
+                // fully serialised encoder - avcodec_send_frame blocking on the
+                // previous frame's completion, measured at avgEncodeMs 8.6-10.2
+                // at 1080p60 on an Iris Xe laptop.
+                TrySet("async_depth", "4");
+                // Routes encoding to the fixed-function VDENC block instead of
+                // the EU-based path. On an integrated Intel GPU the EU path
+                // competes with the game for the very same execution units,
+                // which is the difference between "capture costs some GPU" and
+                // "the laptop chugs and is hard to control". Not supported in
+                // every preset/rate-control/driver combination, and it fails at
+                // avcodec_open2 rather than here - see CreateEncoder, which
+                // retries QSV without it.
+                if (lowPower) TrySet("low_power", "1");
                 break;
             case "libx264":
                 TrySet("preset", "ultrafast");
@@ -3146,22 +3358,23 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
     private static unsafe AVCodecContext* CreateEncoder(ReplayBufferConfig config, int width, int height, out AVRational timeBase, out string encoderName)
     {
-        timeBase = new AVRational { num = 1, den = 1_000_000 };
+        // Local copy because a local function cannot capture an out parameter.
+        var encoderTimeBase = new AVRational { num = 1, den = 1_000_000 };
+        timeBase = encoderTimeBase;
         encoderName = string.Empty;
 
-        foreach (var candidateName in EncoderCandidates)
+        // One full alloc/configure/open attempt. Returns null if the open
+        // fails - which is the only way some options can report unsupported
+        // (low_power in particular is accepted by av_opt_set and rejected by
+        // avcodec_open2), and a context whose open failed is unusable, so
+        // every attempt has to start from a fresh allocation rather than
+        // re-opening this one.
+        AVCodecContext* TryOpen(AVCodec* candidateCodec, string candidateName, bool lowPower)
         {
-            var candidateCodec = ffmpeg.avcodec_find_encoder_by_name(candidateName);
-            if (candidateCodec is null)
-            {
-                AppLog.Info($"Native encoder probe: {candidateName} not present in this ffmpeg build, skipping.");
-                continue;
-            }
-
             var codecContext = ffmpeg.avcodec_alloc_context3(candidateCodec);
             codecContext->width = width;
             codecContext->height = height;
-            codecContext->time_base = timeBase;
+            codecContext->time_base = encoderTimeBase;
             codecContext->framerate = new AVRational { num = Math.Clamp(config.FrameRate, 15, 240), den = 1 };
             codecContext->pix_fmt = AVPixelFormat.AV_PIX_FMT_NV12;
             // The scalers (CreateScaler/CreateGpuScaler) now convert the
@@ -3199,19 +3412,46 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             codecContext->gop_size = 240;
             codecContext->max_b_frames = 0;
             codecContext->flags |= ffmpeg.AV_CODEC_FLAG_GLOBAL_HEADER;
-            ApplyLowLatencyEncoderOptions(codecContext, candidateName, config);
+            ApplyLowLatencyEncoderOptions(codecContext, candidateName, config, lowPower);
 
             var openResult = ffmpeg.avcodec_open2(codecContext, candidateCodec, null);
-            if (openResult == 0)
+            if (openResult == 0) return codecContext;
+
+            AppLog.Info($"Native encoder probe: {candidateName} failed to open (error {openResult}, lowPower={lowPower}).");
+            var failedContext = codecContext;
+            ffmpeg.avcodec_free_context(&failedContext);
+            return null;
+        }
+
+        foreach (var candidateName in EncoderCandidates)
+        {
+            var candidateCodec = ffmpeg.avcodec_find_encoder_by_name(candidateName);
+            if (candidateCodec is null)
             {
+                AppLog.Info($"Native encoder probe: {candidateName} not present in this ffmpeg build, skipping.");
+                continue;
+            }
+
+            // QSV gets two shots: the fixed-function VDENC path first, then the
+            // ordinary one if this driver/preset combination won't take it. Every
+            // other encoder has nothing to retry, so it gets one. An inner loop
+            // that exhausts its attempts falls through to the next candidate
+            // exactly as a single failed open used to.
+            var lowPowerAttempts = candidateName == "h264_qsv"
+                ? new[] { true, false }
+                : new[] { false };
+
+            foreach (var lowPower in lowPowerAttempts)
+            {
+                var codecContext = TryOpen(candidateCodec, candidateName, lowPower);
+                if (codecContext is null) continue;
+
                 encoderName = candidateName;
-                AppLog.Info($"Native encoder probe: {candidateName} opened successfully.");
+                AppLog.Info($"Native encoder probe: {candidateName} opened successfully (lowPower={lowPower}).");
                 return codecContext;
             }
 
-            AppLog.Info($"Native encoder probe: {candidateName} failed to open (error {openResult}) - no matching GPU/driver, trying next.");
-            var failedContext = codecContext;
-            ffmpeg.avcodec_free_context(&failedContext);
+            AppLog.Info($"Native encoder probe: {candidateName} unusable - no matching GPU/driver, trying next.");
         }
 
         throw new InvalidOperationException("No usable H.264 encoder found (tried NVENC, AMD AMF, Intel QSV, software libx264).");
