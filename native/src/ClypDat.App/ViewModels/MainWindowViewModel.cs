@@ -3007,7 +3007,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             TrimEndSeconds = Math.Max(0, TrimEnd.TotalSeconds),
             TrackVolumes = TimelineTracks
                 .Where(track => track.IsAudio)
-                .ToDictionary(track => track.StreamIndex, track => Math.Clamp(track.VolumePercent, 0, 150))
+                .ToDictionary(track => track.StreamIndex, track => Math.Clamp(track.VolumePercent, 0, 150)),
+            Description = EditorDescription ?? string.Empty
         };
         ClipEditSidecar.Save(Settings.LibraryFolder, SelectedVideoPath, edit);
 
@@ -5010,14 +5011,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(TimelineTrackCount));
         OnPropertyChanged(nameof(EditorTimelineHeight));
 
-        ApplyClipEditState(media.Path);
+        ApplyClipEditState(media.Path, restoreDescription: !preserveEditorText);
         IsEditorVisible = showEditor;
         if (showEditor) OpenEditorSidebar(EditorSidebarSection.Info);
         StartFilmstripLoad(media);
         StartWaveformLoad(media);
     }
 
-    private void ApplyClipEditState(string path)
+    private void ApplyClipEditState(string path, bool restoreDescription = true)
     {
         var edit = ClipEditSidecar.Load(Settings.LibraryFolder, path);
         if (edit is null)
@@ -5046,6 +5047,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 track.VolumePercent = Math.Clamp(volume, 0, 150);
             }
         }
+
+        // OpenMedia clears this to empty before calling in, so a clip with no
+        // saved description correctly shows an empty box rather than inheriting
+        // the previously opened clip's text. Skipped when the caller is
+        // preserving editor text (a re-open of the clip already on screen) -
+        // that path exists precisely to keep what the user has typed, and
+        // reloading the sidecar over it would discard an unsaved edit.
+        if (restoreDescription) EditorDescription = edit.Description ?? string.Empty;
     }
 
     private void ClearSelection()

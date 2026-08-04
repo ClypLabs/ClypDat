@@ -230,6 +230,11 @@ public sealed class ClipEditSettings
     public double TrimStartSeconds { get; set; }
     public double TrimEndSeconds { get; set; }
     public Dictionary<int, double> TrackVolumes { get; set; } = new();
+    // The editor has had a Description box since before this field existed,
+    // bound to a view-model property nothing ever read or persisted - typing in
+    // it and closing the editor silently threw the text away. Sidecars written
+    // before this simply deserialize it as empty.
+    public string Description { get; set; } = string.Empty;
 }
 
 public sealed class GameCaptureOverride

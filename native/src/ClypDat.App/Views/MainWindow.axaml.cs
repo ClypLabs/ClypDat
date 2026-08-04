@@ -3866,11 +3866,15 @@ public sealed partial class MainWindow : Window
 
     // Description is AcceptsReturn, so plain Enter would otherwise just insert
     // a newline. Enter commits and drops focus like the title box; Shift+Enter
-    // keeps the multi-line behaviour for anyone who wants a second line.
+    // is how you add a second line.
     private void EditorDescription_OnKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key != Key.Enter || e.KeyModifiers.HasFlag(KeyModifiers.Shift)) return;
         e.Handled = true;
+        // Writes the sidecar now rather than leaving it to the editor-close
+        // save. Enter reads as a commit, so it should survive a crash or a
+        // force-quit before the editor is closed the normal way.
+        ViewModel?.SaveSelectedClipEditState();
         DropEditorDetailsFocus();
     }
 
