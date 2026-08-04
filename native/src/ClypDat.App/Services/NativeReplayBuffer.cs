@@ -796,9 +796,33 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // than this measured no further benefit and just adds pure
             // syscall/COM-marshaling overhead from calling AcquireNextFrame
             // more often for no timing gain.
-            // Polling at 1ms wakes 600-1000 times/sec at 60 FPS and burns CPU/GPU
-            // work without creating new desktop frames. Keep enough cadence for
-            // target pacing, but let the scheduler sleep through most of a frame.
+            // Two frame intervals, capped at 33ms - it used to be half an interval
+            // capped at 8ms.
+            //
+            // Windows bills this process for GPU engine time PER AcquireNextFrame
+            // CALL, not per millisecond spent waiting in one. Measured on an idle
+            // 4K desktop, where time inside the call was ~100% of wall clock at
+            // every timeout tried, so only the call count moved:
+            //
+            //   timeout   calls/2s   3d
+            //   8ms         280      22.7
+            //   16ms        175      20.3
+            //   33ms        112      12.9
+            //   100ms        74       8.4
+            //
+            // Latency is unaffected while anything is actually happening, because
+            // the timeout is a CEILING: AcquireNextFrame returns the moment a
+            // frame arrives, so a source presenting at the target rate returns in
+            // ~one interval no matter what this is set to. It only lengthens the
+            // wait when the desktop is producing nothing - precisely when there is
+            // no latency to lose.
+            //
+            // Not pushed to 100ms: this loop also drives the encode tick, so the
+            // wait is how long that tick can be delayed, and at 100ms a single
+            // iteration measured 93ms against a 16.7ms tick. 33ms keeps the worst
+            // case near two intervals, which the catch-up path absorbs without
+            // padding (padsSkipped stayed 0 in every run). Getting the rest of the
+            // way needs acquisition moved off this thread entirely.
             // CLYPDAT_ACQUIRE_TIMEOUT_MS overrides the cap below, to test whether
             // acquisition and encode pacing sharing one loop is what gets this
             // process billed 20-25% of the GPU 3D engine on an idle desktop.
@@ -823,7 +847,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 : 0;
             var acquireTimeoutMs = acquireTimeoutForcedMs > 0
                 ? (uint)acquireTimeoutForcedMs
-                : (uint)Math.Clamp((int)Math.Round(targetFrameInterval.TotalMilliseconds / 2), 1, 8);
+                : (uint)Math.Clamp((int)Math.Round(targetFrameInterval.TotalMilliseconds * 2), 1, 33);
             if (acquireTimeoutForcedMs > 0) AppLog.Info($"Native capture: acquire timeout forced to {acquireTimeoutMs}ms.");
             var lastDiagLog = TimeSpan.Zero;
             var lastRingTrim = TimeSpan.Zero;
@@ -2003,7 +2027,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     idealFrameIntervalMicroseconds = 1_000_000.0 / activeFrameRate;
                     acquireTimeoutMs = acquireTimeoutForcedMs > 0
                         ? (uint)acquireTimeoutForcedMs
-                        : (uint)Math.Clamp((int)Math.Round(targetFrameInterval.TotalMilliseconds / 2), 1, 8);
+                        : (uint)Math.Clamp((int)Math.Round(targetFrameInterval.TotalMilliseconds * 2), 1, 33);
                     SetHealth(_health with { TargetFrameRate = activeFrameRate, UpdatedUtc = DateTime.UtcNow });
                     AppLog.Info($"Native capture: target frame rate now {activeFrameRate} fps.");
                 }
