@@ -1,4 +1,4 @@
-using ClypDat.Capture.Abstractions;
+﻿using ClypDat.Capture.Abstractions;
 using FFmpeg.AutoGen;
 using System.Buffers;
 using System.Collections.Concurrent;
@@ -414,14 +414,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // for any configured replay length, not just multi-hour sessions.
             const double SegmentChunkSeconds = 60;
             var segmentWindows = new List<(DateTime StartUtc, double DurationSeconds)>();
-            // Positive AudioSyncOffsetMs pulls the audio SOURCE window earlier
-            // in real time (while keeping each segment's requested duration
-            // the same) - the resulting output audio then plays content that
-            // was actually captured slightly earlier at the same point in the
-            // timeline, which is what "audio sounds delayed relative to
-            // video" needs. Deliberately only shifts the audio side - video's
-            // own PTS/paused-ranges timeline is untouched.
-            var chunkStartUtc = windowStartUtc - TimeSpan.FromMilliseconds(config.AudioSyncOffsetMs);
+            var chunkStartUtc = windowStartUtc;
             var remainingSeconds = windowDurationSeconds;
             while (remainingSeconds > 0)
             {
@@ -2241,6 +2234,38 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         videoContext.VideoProcessorSetStreamColorSpace(processor, 0, colorSpace);
         videoContext.VideoProcessorSetOutputColorSpace(processor, colorSpace);
 
+        // Auto processing is ON by default, and Usage=OptimalSpeed above does
+        // NOT turn it off - they are separate switches. Left enabled, the
+        // driver is free to run its own enhancement pass on every frame
+        // (NVIDIA's does: denoise, edge/detail enhancement, a higher-quality
+        // resize kernel), which is exactly the "extra video processing" this
+        // call exists to refuse.
+        //
+        // Measured on an RTX 4070 Ti capturing 3840x2160 -> 1920x1080 at 60fps:
+        // ClypDat's own 3D-engine share sat at 8-17% with the window closed to
+        // the tray and nothing at all being drawn, while the video-encode
+        // engine held flat at ~6%. With the UI proven not to be the source
+        // (one InvalidateVisual call site in the whole app, no infinite
+        // animations, and hiding the window changed nothing), a per-frame
+        // 4K enhancement pass is what is left holding that floor.
+        //
+        // Frame-rate conversion is refused for the same reason: the encoder
+        // wants one output frame per input frame, and letting the driver
+        // interpolate toward some other rate is work nobody asked for.
+        try
+        {
+            videoContext.VideoProcessorSetStreamAutoProcessingMode(processor, 0, false);
+            videoContext.VideoProcessorSetStreamOutputRate(
+                processor, 0, VideoProcessorOutputRate.Normal, false, null);
+        }
+        catch (Exception error)
+        {
+            // Both are hints a driver is allowed to ignore. A driver that
+            // rejects them outright still scales correctly, just at whatever
+            // cost it prefers - not a reason to fail the capture.
+            AppLog.Info($"Native capture: video processor tuning rejected by the driver ({error.Message}) - scaling continues at driver defaults.");
+        }
+
         // Many D3D11 video processing samples create the VP output resource
         // with BindFlags.RenderTarget even though nothing ever binds it as
         // one - some drivers reject CreateVideoProcessorOutputView with
@@ -2811,9 +2836,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // one uncorrected multi-hour window.
             const double SegmentChunkSeconds = 60;
             var segmentWindows = new List<(DateTime StartUtc, double DurationSeconds)>();
-            // See SaveReplayAsync's identical comment - shifts only the audio
-            // source window, video's own timeline is untouched.
-            var chunkStartUtc = sessionStartUtc - TimeSpan.FromMilliseconds(config.AudioSyncOffsetMs);
+            var chunkStartUtc = sessionStartUtc;
             var remainingSeconds = durationSeconds;
             while (remainingSeconds > 0)
             {

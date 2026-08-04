@@ -1374,8 +1374,8 @@
 
        SliderTrackThemeHeight is the DynamicResource Fluent's rail Border
        reads its Height from - scoped to just this class via Style.Resources
-       (not overridden app-wide) so the plain Sliders elsewhere (noise
-       suppression, audio sync offset) keep Fluent's default thin rail. Bumped
+       (not overridden app-wide) so the plain Sliders elsewhere keep Fluent's
+       default thin rail. Bumped
        from Fluent's default (~4px) to make the whole slider a visibly larger,
        easier target to click, not just a thicker line.
 

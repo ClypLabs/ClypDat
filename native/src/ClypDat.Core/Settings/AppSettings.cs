@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 
 namespace ClypDat.Core.Settings;
 
@@ -78,7 +78,6 @@ public sealed class AppSettings
     // delayed/late); negative shifts audio LATER (fixes audio sounding
     // ahead). Exact WASAPI/hardware-encoder latency varies too much by
     // machine to hardcode a correction.
-    public int AudioSyncOffsetMs { get; set; }
     public string IgnoredUpdateVersion { get; set; } = string.Empty;
     public string ChatAudioDeviceId { get; set; } = string.Empty;
     // Single-selection fields - still the persisted choice while the matching
@@ -91,12 +90,6 @@ public sealed class AppSettings
     public bool MultiMicrophoneEnabled { get; set; }
     public List<string> ChatAudioProcessNames { get; set; } = new();
     public List<string> MicrophoneDeviceIds { get; set; } = new();
-    public bool MicrophoneNoiseSuppressionEnabled { get; set; }
-    // ffmpeg afftdn's nr= (noise reduction) parameter, in dB - higher cuts more
-    // noise but risks eating into speech. afftdn's own valid range is 0.01-97;
-    // clamped tighter (0-30) at the settings-UI layer since anything past ~20
-    // starts sounding artifacty on typical mic noise floors.
-    public double MicrophoneNoiseSuppressionStrength { get; set; } = 12.0;
     public List<string> GameAudioExcludedProcesses { get; set; } = new();
     public bool EnableEditorKeyboardShortcuts { get; set; } = true;
     // On: the editor's playback controls are the floating bar that follows the

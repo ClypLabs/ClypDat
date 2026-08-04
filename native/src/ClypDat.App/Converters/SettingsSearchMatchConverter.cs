@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Linq;
 using Avalonia.Data.Converters;
 using ClypDat.App.Services;
@@ -69,8 +69,7 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         ["Auto-Clip"] = new[] { "Auto Capture", "Auto Capture Events" }.Concat(AutoClipGameNames).ToArray(),
         ["Audio"] = new[]
         {
-            "Audio sources", "Chat Audio App", "Multiple apps", "Microphone", "Multiple mics",
-            "Noise suppression", "Strength", "Audio sync", "Audio sync offset"
+            "Audio sources", "Chat Audio App", "Multiple apps", "Microphone", "Multiple mics"
         },
         ["Game Audio Exclusions"] = new[] { "Excluded apps", "Excluded", "exclusions" },
         ["About"] = new[]

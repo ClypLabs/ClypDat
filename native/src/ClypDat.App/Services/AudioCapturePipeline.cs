@@ -9,7 +9,7 @@ using System.Text;
 namespace ClypDat.App.Services;
 
 // Audio capture (Game/Chat/Microphone process-aware routing, WASAPI loopback/mic
-// capture, noise suppression, aligned-track building) extracted out of
+// capture, aligned-track building) extracted out of
 // WindowsReplayBuffer so both it and NativeReplayBuffer can own an independent
 // instance of the same, already-battle-tested logic instead of duplicating it.
 // None of this was ever the source of the segment-rotation gap bug both backends
@@ -1047,19 +1047,12 @@ public sealed class AudioCapturePipeline : IDisposable
             var trimStart = Math.Max(0, (overlapStartUtc - effectiveStartUtc).TotalSeconds);
             var overlapDuration = Math.Max(0, (overlapEndUtc - overlapStartUtc).TotalSeconds);
             var delayMs = Math.Max(0, (int)Math.Round((overlapStartUtc - windowStartUtc).TotalMilliseconds));
-            // Noise suppression only makes sense on the mic track - Game/Chat audio
-            // is line-level/desktop audio, not a noisy room signal. afftdn's nr= is
-            // in dB; the settings UI clamps to 0-30 (its own valid range is wider,
-            // but higher than ~20 starts eating into speech on typical mic noise).
-            var noiseSuppressionFilter = capture.Kind == AudioCaptureKind.Microphone && config?.MicrophoneNoiseSuppressionEnabled == true
-                ? $"afftdn=nr={FormatSeconds(Math.Clamp(config.MicrophoneNoiseSuppressionStrength, 0, 30))},"
-                : string.Empty;
             // -ss/-t as INPUT options: WAV is constant-bitrate, so ffmpeg seeks
             // straight to the byte offset and reads only this window's worth of
             // the (potentially hours-long) source snapshot, instead of the old
             // atrim filter approach that decoded the file from the top every
             // chunk.
-            var filters = $"[0:a]asetpts=PTS-STARTPTS,aresample=48000,{noiseSuppressionFilter}adelay={delayMs}|{delayMs},apad=whole_dur={FormatSeconds(durationSeconds)},atrim=0:{FormatSeconds(durationSeconds)}[out]";
+            var filters = $"[0:a]asetpts=PTS-STARTPTS,aresample=48000,adelay={delayMs}|{delayMs},apad=whole_dur={FormatSeconds(durationSeconds)},atrim=0:{FormatSeconds(durationSeconds)}[out]";
             AppLog.Debug($"Replay audio overlap: kind={capture.Kind}, pid={capture.ProcessId?.ToString() ?? "none"}, trim={trimStart:0.###}s, overlap={overlapDuration:0.###}s, delay={delayMs}ms, bytes={capture.Session.BytesWritten}.");
 
             var result = await RunGatedProcessAsync("ffmpeg", new[]

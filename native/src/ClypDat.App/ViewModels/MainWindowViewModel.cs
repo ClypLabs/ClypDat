@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Reflection;
@@ -2460,24 +2460,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => SetProperty(ref _selectedGameProcess, value);
     }
 
-    public bool MicrophoneNoiseSuppressionEnabled
-    {
-        get => Settings.MicrophoneNoiseSuppressionEnabled;
-        set { Settings.MicrophoneNoiseSuppressionEnabled = value; OnPropertyChanged(); SaveSettings(); }
-    }
-
-    public double MicrophoneNoiseSuppressionStrength
-    {
-        get => Settings.MicrophoneNoiseSuppressionStrength;
-        set { Settings.MicrophoneNoiseSuppressionStrength = Math.Clamp(value, 0, 30); OnPropertyChanged(); SaveSettings(); }
-    }
-
-    public double AudioSyncOffsetMs
-    {
-        get => Settings.AudioSyncOffsetMs;
-        set { Settings.AudioSyncOffsetMs = (int)Math.Clamp(value, -1000, 1000); OnPropertyChanged(); SaveSettings(); }
-    }
-
     public bool FullSessionRecordingEnabled
     {
         get => Settings.FullSessionRecordingEnabled;
@@ -4428,14 +4410,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             desktopCapture ? string.Empty : ActiveGameDetection.WindowClass,
             effectiveBackend,
             GameWindowHandle: desktopCapture ? IntPtr.Zero : ActiveGameDetection.WindowHandle,
-            MicrophoneNoiseSuppressionEnabled: Settings.MicrophoneNoiseSuppressionEnabled,
-            MicrophoneNoiseSuppressionStrength: Settings.MicrophoneNoiseSuppressionStrength,
             FullSessionRecordingEnabled: Settings.FullSessionRecordingEnabled,
             FullSessionRecordingFolder: LibraryLayout.VodDirectory(Settings.LibraryFolder, desktopCapture ? "Desktop Capture" : ActiveGameDetection.DisplayName),
             FullSessionVideoCodec: Settings.FullSessionVideoCodec,
             FullSessionQuotaGb: Settings.FullSessionQuotaGb,
             FullSessionBackgroundFinalize: Settings.FullSessionBackgroundFinalize,
-            AudioSyncOffsetMs: Settings.AudioSyncOffsetMs,
             ClipFileNameScheme: Settings.ClipFileNameScheme,
             CustomClipFileNameTemplate: Settings.CustomClipFileNameTemplate,
             LibraryFolder: Settings.LibraryFolder,

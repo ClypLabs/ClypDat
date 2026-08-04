@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
 using ClypDat.Capture.Abstractions;
@@ -774,14 +774,11 @@ public sealed record ReplayBufferConfig(
     string GameWindowClass,
     string Backend = "Auto",
     nint GameWindowHandle = 0,
-    bool MicrophoneNoiseSuppressionEnabled = false,
-    double MicrophoneNoiseSuppressionStrength = 12.0,
     bool FullSessionRecordingEnabled = false,
     string FullSessionRecordingFolder = "",
     string FullSessionVideoCodec = "H.264",
     int FullSessionQuotaGb = 0,
     bool FullSessionBackgroundFinalize = true,
-    int AudioSyncOffsetMs = 0,
     string ClipFileNameScheme = "Standard",
     string CustomClipFileNameTemplate = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}",
     string LibraryFolder = "",
@@ -983,8 +980,7 @@ internal sealed class AudioCaptureSession : IDisposable
                 if (earliestNeededUtc is DateTime earliest)
                 {
                     // WAV is CBR, so seconds convert to bytes exactly. The
-                    // margin covers clock jitter and the pipeline's own
-                    // AudioSyncOffsetMs shifting its window earlier.
+                    // margin covers clock jitter.
                     var neededSeconds = (lastSampleUtc - earliest).TotalSeconds + MarginSeconds;
                     keepBytes = neededSeconds > 0 && neededSeconds < long.MaxValue / Math.Max(1, AverageBytesPerSecond)
                         ? (long)(neededSeconds * AverageBytesPerSecond)
