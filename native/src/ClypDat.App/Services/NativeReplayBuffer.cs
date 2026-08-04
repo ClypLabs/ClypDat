@@ -327,6 +327,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // body is fully synchronous, so the restore in the finally really
             // does bracket all of the work (the thread returns to the pool
             // afterwards, so it must be put back).
+            // Stage timings, because "the save takes ages" is not something a
+            // log full of per-stage silence can answer. A real report put 50.9s
+            // between the hotkey and the saved toast with only the audio
+            // snapshot lines to show for it.
+            var saveTimer = System.Diagnostics.Stopwatch.StartNew();
             await Task.Run(() =>
             {
                 var previousPriority = Thread.CurrentThread.Priority;
@@ -334,6 +339,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 try { RemuxWindowToMp4(window, tempVideoPath); }
                 finally { Thread.CurrentThread.Priority = previousPriority; }
             }, cancellationToken);
+            var remuxMs = saveTimer.ElapsedMilliseconds;
 
             // The ring buffer already remuxes exactly the desired window starting at a
             // real keyframe - no offset/trim needed here the way WindowsReplayBuffer's
@@ -364,9 +370,27 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // length (keeping the END - the moment closest to the save
             // request - and cutting from the front) turns that into a
             // shorter but correctly synced clip instead.
-            if (windowDurationSeconds - videoDurationSeconds > 1.0)
+            //
+            // The threshold used to be a full second, which is roughly 20x the
+            // point at which a human hears audio and picture come apart. On a
+            // machine whose encoder is struggling the shortfall lands squarely
+            // in the gap that left open: measured saves on an Iris Xe laptop
+            // came in at 323ms and 486ms of a ~60s clip, both waved through
+            // uncorrected. The audio then plays a window that covers more real
+            // time than the video does, so the two drift steadily further
+            // apart toward the end of the clip - loudest on game audio, where
+            // gunshots and footsteps make a third of a second obvious in a way
+            // voice chat does not. 50ms is about where a mismatch stops being
+            // audible; below it the correction is not worth the frames.
+            const double MaxAudioVideoDeltaSeconds = 0.05;
+            if (windowDurationSeconds - videoDurationSeconds > MaxAudioVideoDeltaSeconds)
             {
-                AppLog.Info($"Native replay: video came up short ({videoDurationSeconds:0.0}s of {windowDurationSeconds:0.0}s requested, likely a capture stall) - trimming audio to match.");
+                var message = $"Native replay: video came up short ({videoDurationSeconds:0.000}s of {windowDurationSeconds:0.000}s requested) - trimming audio to match.";
+                // A second-plus shortfall is a capture stall and worth saying
+                // out loud; the sub-second ones are routine on a loaded
+                // machine and would only spam the log.
+                if (windowDurationSeconds - videoDurationSeconds > 1.0) AppLog.Info(message);
+                else AppLog.Debug(message);
                 windowStartUtc = window[^1].WallClockUtc - TimeSpan.FromSeconds(videoDurationSeconds);
                 windowDurationSeconds = videoDurationSeconds;
             }
@@ -401,8 +425,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
             WritePausedRangesSidecar(config.LibraryFolder, outputPath, ComputePausedRangesSeconds(GetOrderedPauseEvents(), windowStartUtc, windowStartUtc + TimeSpan.FromSeconds(windowDurationSeconds)));
 
+            var tracksStartMs = saveTimer.ElapsedMilliseconds;
             var tracks = await _audio.BuildAlignedTracksAsync(segmentWindows, config, snapshots, cancellationToken);
+            var tracksMs = saveTimer.ElapsedMilliseconds - tracksStartMs;
 
+            var muxStartMs = saveTimer.ElapsedMilliseconds;
             var muxArgs = new List<string> { "-y", "-i", tempVideoPath };
             foreach (var track in tracks) muxArgs.AddRange(new[] { "-i", track.Path });
             muxArgs.AddRange(new[] { "-map", "0:v" });
@@ -415,6 +442,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             {
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg mux failed." : result.Error);
             }
+
+            AppLog.Info($"Native replay save timings: totalMs={saveTimer.ElapsedMilliseconds}, remuxMs={remuxMs}, audioTracksMs={tracksMs}, muxMs={saveTimer.ElapsedMilliseconds - muxStartMs}, tracks={tracks.Count}, segments={segmentWindows.Count}, packets={window.Length}.");
         }
         finally
         {

@@ -938,8 +938,24 @@ internal sealed class AudioCaptureSession : IDisposable
     // used - SnapshotAudioFileAsync immediately -ss seeks past everything
     // before it - so the rest is pure waste. Pass null to copy the whole
     // capture, which is what a Full Session finalize legitimately needs.
+    //
+    // Only the bookkeeping runs under _lock. The bulk copy deliberately does
+    // NOT: it used to, and _lock is the same lock Capture_OnDataAvailable
+    // takes to accept a WASAPI packet, so every save froze all three capture
+    // callbacks for as long as its copy took. A real session shows the whole
+    // chain in one place - the mic's tail copy finished at 22:14:22.290 and
+    // the very next line is "Audio capture gap placed: Microphone,
+    // gap=6670ms". Every save punched a hole in every track the exact size of
+    // its own copy, silently, and the tracks then had to be silence-padded
+    // over it. The bytes being copied are already immutable (the writer only
+    // ever appends past _bytesWritten) and the source is re-opened on its own
+    // read handle, so holding the lock bought nothing.
     public bool SnapshotTo(string path, DateTime? earliestNeededUtc, out DateTime lastSampleUtc)
     {
+        string? sourceFileName = null;
+        long copyFromOffset = 0;
+        long copyBytes = 0;
+
         lock (_lock)
         {
             lastSampleUtc = MonotonicClock.UtcNow;
@@ -1002,9 +1018,10 @@ internal sealed class AudioCaptureSession : IDisposable
                     var blockAlign = Math.Max(1, _capture.WaveFormat.BlockAlign);
                     var skipBytes = Math.Max(0, _bytesWritten - keepBytes);
                     skipBytes -= skipBytes % blockAlign;
-                    using var source = new FileStream(fileStream.Name, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                    source.Seek(dataStart + skipBytes, SeekOrigin.Begin);
-                    WriteTailWav(path, source, _bytesWritten - skipBytes);
+                    // Hand the copy off to the unlocked section below.
+                    sourceFileName = fileStream.Name;
+                    copyFromOffset = dataStart + skipBytes;
+                    copyBytes = _bytesWritten - skipBytes;
                 }
                 else
                 {
@@ -1016,13 +1033,26 @@ internal sealed class AudioCaptureSession : IDisposable
                     using var destination = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
                     memoryStream.WriteTo(destination);
                 }
-
-                return true;
             }
             catch
             {
                 return false;
             }
+        }
+
+        // Unlocked: the capture callbacks are free to keep writing while this
+        // runs. Nothing here touches session state.
+        if (sourceFileName is null) return true;
+        try
+        {
+            using var source = new FileStream(sourceFileName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            source.Seek(copyFromOffset, SeekOrigin.Begin);
+            WriteTailWav(path, source, copyBytes);
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 

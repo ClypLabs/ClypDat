@@ -976,9 +976,11 @@ public sealed class AudioCapturePipeline : IDisposable
             // capture start and save would otherwise shift the anchor by the
             // step amount.
             var lastSampleUtc = capture.EndedAtUtc ?? default;
+            var copyTimer = System.Diagnostics.Stopwatch.StartNew();
             var copied = capture.EndedAtUtc is null
                 ? capture.Session.SnapshotTo(sourceSnapshotPath, earliestNeededUtc, out lastSampleUtc)
                 : CopyAudioFile(capture.Path, sourceSnapshotPath);
+            var copyMs = copyTimer.ElapsedMilliseconds;
             if (!copied || !IsUsableAudioFile(sourceSnapshotPath))
             {
                 TryDelete(sourceSnapshotPath);
@@ -993,7 +995,7 @@ public sealed class AudioCapturePipeline : IDisposable
                 using var reader = new WaveFileReader(sourceSnapshotPath);
                 wavStartUtc = lastSampleUtc - reader.TotalTime;
                 var driftMs = (wavStartUtc - capture.EffectiveStartedAtUtc).TotalMilliseconds;
-                AppLog.Debug($"Audio snapshot anchored: kind={capture.Kind}, sourceKey={capture.SourceKey}, wavSeconds={reader.TotalTime.TotalSeconds:0.0}, startDriftMs={driftMs:0}.");
+                AppLog.Debug($"Audio snapshot anchored: kind={capture.Kind}, sourceKey={capture.SourceKey}, wavSeconds={reader.TotalTime.TotalSeconds:0.0}, startDriftMs={driftMs:0}, copyMs={copyMs}, copyBytes={new FileInfo(sourceSnapshotPath).Length}.");
             }
             catch (Exception error)
             {
