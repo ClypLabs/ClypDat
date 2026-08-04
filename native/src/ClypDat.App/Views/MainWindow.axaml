@@ -2643,7 +2643,11 @@
 
           <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="16" Spacing="12">
-              <Border Background="#151F28" BorderBrush="#293A47" BorderThickness="1" CornerRadius="9" Padding="12">
+              <!-- Focusable so Enter in either box below has somewhere to put
+                   focus: committing has no visible effect otherwise, and the
+                   still-highlighted caret reads as "not saved yet". -->
+              <Border x:Name="EditorDetailsCard" Focusable="True"
+                      Background="#151F28" BorderBrush="#293A47" BorderThickness="1" CornerRadius="9" Padding="12">
                 <StackPanel Spacing="8">
                   <TextBlock Text="DETAILS" Foreground="#9EC6F0" FontSize="11" FontWeight="Bold" />
                   <TextBlock Text="Title" Foreground="#8EA1B6" FontSize="12" />
@@ -2651,7 +2655,8 @@
                            Background="#0D151C" BorderBrush="#263743" KeyDown="EditorTitle_OnKeyDown" />
                   <TextBlock Text="Description" Foreground="#8EA1B6" FontSize="12" Margin="0,2,0,0" />
                   <TextBox Text="{Binding EditorDescription, Mode=TwoWay}" MinHeight="78" AcceptsReturn="True" TextWrapping="Wrap"
-                           PlaceholderText="Add a description" Background="#0D151C" BorderBrush="#263743" Foreground="#D6E2F0" />
+                           PlaceholderText="Add a description" Background="#0D151C" BorderBrush="#263743" Foreground="#D6E2F0"
+                           KeyDown="EditorDescription_OnKeyDown" />
                 </StackPanel>
               </Border>
 

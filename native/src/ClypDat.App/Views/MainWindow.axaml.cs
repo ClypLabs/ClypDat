@@ -3861,6 +3861,26 @@ public sealed partial class MainWindow : Window
         if (e.Key != Key.Enter || ViewModel is null) return;
         e.Handled = true;
         await SubmitEditorTitleAsync();
+        DropEditorDetailsFocus();
+    }
+
+    // Description is AcceptsReturn, so plain Enter would otherwise just insert
+    // a newline. Enter commits and drops focus like the title box; Shift+Enter
+    // keeps the multi-line behaviour for anyone who wants a second line.
+    private void EditorDescription_OnKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || e.KeyModifiers.HasFlag(KeyModifiers.Shift)) return;
+        e.Handled = true;
+        DropEditorDetailsFocus();
+    }
+
+    // The text is already committed by the time this runs (both boxes bind
+    // TwoWay and update per keystroke) - this exists purely so the change LOOKS
+    // committed. Leaving the caret blinking in a still-highlighted box after
+    // Enter reads as "nothing happened", which is the actual complaint.
+    private void DropEditorDetailsFocus()
+    {
+        EditorDetailsCard.Focus();
     }
 
     private async Task SubmitEditorTitleAsync()
