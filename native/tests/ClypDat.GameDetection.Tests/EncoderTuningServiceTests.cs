@@ -18,7 +18,7 @@ public sealed class EncoderTuningServiceTests
         var service = new EncoderTuningService();
         var changes = new List<EncoderFrameRateChange>();
         service.FrameRateChangeRequested += (_, change) => changes.Add(change);
-        service.BeginSession("P1", 60);
+        service.BeginSession("P1", 60, 1080);
 
         Feed(service, severeSamples: 30, frameRate: 60);
 
@@ -33,7 +33,7 @@ public sealed class EncoderTuningServiceTests
         var service = new EncoderTuningService();
         var changes = new List<EncoderFrameRateChange>();
         service.FrameRateChangeRequested += (_, change) => changes.Add(change);
-        service.BeginSession("P1", 60);
+        service.BeginSession("P1", 60, 1080);
 
         // Keep drowning long after the step down. There is nowhere left to go,
         // so it must not ratchet toward an unwatchable frame rate.
@@ -50,7 +50,7 @@ public sealed class EncoderTuningServiceTests
         service.FrameRateChangeRequested += (_, change) => changes.Add(change);
         // P4 has P3/P2/P1 below it - spend those (as observe-only proposals)
         // before touching something the user can see.
-        service.BeginSession("P4", 60);
+        service.BeginSession("P4", 60, 1080);
 
         Feed(service, severeSamples: 60, frameRate: 60);
 
@@ -63,7 +63,7 @@ public sealed class EncoderTuningServiceTests
         var service = new EncoderTuningService();
         var changes = new List<EncoderFrameRateChange>();
         service.FrameRateChangeRequested += (_, change) => changes.Add(change);
-        service.BeginSession("P1", 60);
+        service.BeginSession("P1", 60, 1080);
 
         Feed(service, severeSamples: 0, frameRate: 60, healthySamples: 400);
 
@@ -76,7 +76,7 @@ public sealed class EncoderTuningServiceTests
         var service = new EncoderTuningService();
         var changes = new List<EncoderFrameRateChange>();
         service.FrameRateChangeRequested += (_, change) => changes.Add(change);
-        service.BeginSession("P1", 30);
+        service.BeginSession("P1", 30, 1080);
 
         Feed(service, severeSamples: 200, frameRate: 30);
 
@@ -89,7 +89,7 @@ public sealed class EncoderTuningServiceTests
         var service = new EncoderTuningService();
         var changes = new List<EncoderFrameRateChange>();
         service.FrameRateChangeRequested += (_, change) => changes.Add(change);
-        service.BeginSession("P1", 60);
+        service.BeginSession("P1", 60, 1080);
 
         // The display is not handing over frames at all. The encoder is idle and
         // blameless; lowering its target would fix nothing.

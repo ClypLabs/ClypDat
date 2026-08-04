@@ -25,14 +25,25 @@ namespace ClypDat.App.Services;
 // low-end machines as a hover stealing a whole core from the capture pipeline.
 internal sealed class ClipHoverPreviewController : IDisposable
 {
-    internal const int MaximumFramesPerSecond = 60;
+    // 30, not the recorded 60. Measured against the GPU engine counters while
+    // recording: ClypDat's own 3D-engine time swung by ~11 points purely with
+    // library hover activity, while the capture pipeline's share never moved.
+    // Every preview frame is a pipe read, a memcpy into a WriteableBitmap, and
+    // a texture upload plus composite on the UI thread - and a ~600x340 card
+    // is not a display anyone resolves 60 distinct frames a second on. Halving
+    // the rate halves all of it for no visible difference.
+    internal const int MaximumFramesPerSecond = 30;
     internal const int DefaultFramesPerSecond = 30;
     // What an overloaded preview falls back to. Previews run at the recorded
     // rate by default; HoverPreviewFramePacer watches whether the machine is
     // actually sustaining that and steps down to this when it isn't, rather
     // than letting a preview that can only manage 22fps keep asking for 60 and
     // burning the difference on frames nobody sees.
-    internal const int ReducedFramesPerSecond = 30;
+    // 15, down from 30, because the full rate is now 30 too - at equal values
+    // the pacer's step-down did nothing at all (_reducedFrameRate is a Min of
+    // the two), silently costing the overload protection that this constant
+    // exists to provide.
+    internal const int ReducedFramesPerSecond = 15;
     // Used when the card hasn't been laid out yet (no bounds to measure).
     internal const int DefaultPreviewWidth = 480;
     internal const int DefaultPreviewHeight = 270;
@@ -41,7 +52,14 @@ internal sealed class ClipHoverPreviewController : IDisposable
     internal const int MaximumPreviewWidth = 640;
     private const int MinimumPreviewWidth = 160;
     private const int MinimumPreviewHeight = 90;
-    internal static readonly TimeSpan HoverDelay = TimeSpan.FromMilliseconds(75);
+    // 75ms was short enough that sweeping the pointer across the library
+    // spawned a full ffmpeg decoder for cards the user was only passing over.
+    // The log shows the shape plainly - repeated "preview started" followed by
+    // "warm exit expired" 200-400ms later, each one a process launch, a seek,
+    // and a WriteableBitmap allocation thrown away. 180ms still feels
+    // immediate on a card the pointer actually settles on, and costs nothing
+    // for the ones it does not.
+    internal static readonly TimeSpan HoverDelay = TimeSpan.FromMilliseconds(180);
     internal static readonly TimeSpan WarmExitGrace = TimeSpan.FromMilliseconds(150);
 
     private readonly object _stateLock = new();

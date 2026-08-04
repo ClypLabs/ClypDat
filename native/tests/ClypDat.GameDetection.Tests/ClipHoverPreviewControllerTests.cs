@@ -9,10 +9,12 @@ public sealed class ClipHoverPreviewControllerTests
     [Theory]
     [InlineData(24, 24)]
     [InlineData(29.97, 29.97)]
-    [InlineData(59.94, 59.94)]
-    [InlineData(60, 60)]
-    [InlineData(120, 60)]
-    [InlineData(240, 60)]
+    // Anything above the 30fps preview cap clamps to it - a library card is
+    // not worth decoding and uploading 60 frames a second for.
+    [InlineData(59.94, 30)]
+    [InlineData(60, 30)]
+    [InlineData(120, 30)]
+    [InlineData(240, 30)]
     [InlineData(0, 30)]
     [InlineData(-1, 30)]
     [InlineData(double.NaN, 30)]
@@ -80,7 +82,7 @@ public sealed class ClipHoverPreviewControllerTests
     [Fact]
     public void PreviewDelaysMatchHighQualityDefaults()
     {
-        Assert.Equal(TimeSpan.FromMilliseconds(75), ClipHoverPreviewController.HoverDelay);
+        Assert.Equal(TimeSpan.FromMilliseconds(180), ClipHoverPreviewController.HoverDelay);
         Assert.Equal(TimeSpan.FromMilliseconds(150), ClipHoverPreviewController.WarmExitGrace);
     }
 
@@ -90,7 +92,7 @@ public sealed class ClipHoverPreviewControllerTests
         var pacer = new HoverPreviewFramePacer(60);
 
         Assert.Equal(TimeSpan.Zero, pacer.NextDelay(TimeSpan.FromMilliseconds(100)));
-        Assert.InRange(pacer.NextDelay(TimeSpan.FromMilliseconds(100)).TotalMilliseconds, 16.65, 16.68);
+        Assert.InRange(pacer.NextDelay(TimeSpan.FromMilliseconds(100)).TotalMilliseconds, 33.32, 33.35);
     }
 
     [Fact]
@@ -100,7 +102,7 @@ public sealed class ClipHoverPreviewControllerTests
         pacer.NextDelay(TimeSpan.Zero);
 
         Assert.Equal(TimeSpan.Zero, pacer.NextDelay(TimeSpan.FromMilliseconds(40)));
-        Assert.InRange(pacer.NextDelay(TimeSpan.FromMilliseconds(40)).TotalMilliseconds, 16.65, 16.68);
+        Assert.InRange(pacer.NextDelay(TimeSpan.FromMilliseconds(40)).TotalMilliseconds, 33.32, 33.35);
     }
 
     [Fact]
@@ -113,11 +115,11 @@ public sealed class ClipHoverPreviewControllerTests
         Assert.Equal(TimeSpan.Zero, pacer.NextDelay(TimeSpan.FromSeconds(1)));
     }
 
-    // A machine with decode headroom: 4ms to produce a frame, well inside a
-    // 60fps budget.
+    // A machine with decode headroom: 4ms to produce a frame, well inside the
+    // 33.3ms budget of the 30fps preview cap.
     private const double FastMachineMs = 4;
-    // A machine that needs 40ms per frame - 25fps, nowhere near a 60fps
-    // request, but comfortable at 30.
+    // A machine that needs 40ms per frame - 25fps, short of the 30fps request
+    // but comfortable at the reduced 15.
     private const double SlowMachineMs = 40;
 
     [Fact]
@@ -128,7 +130,7 @@ public sealed class ClipHoverPreviewControllerTests
         Run(pacer, FastMachineMs, frames: 600);
 
         Assert.False(pacer.IsReduced);
-        Assert.Equal(60, pacer.CurrentFrameRate);
+        Assert.Equal(ClipHoverPreviewController.MaximumFramesPerSecond, pacer.CurrentFrameRate);
         Assert.False(pacer.TryConsumeRateChange(out _));
     }
 
@@ -162,9 +164,9 @@ public sealed class ClipHoverPreviewControllerTests
         // Sustained headroom eventually earns it back.
         Run(pacer, FastMachineMs, frames: 400);
         Assert.False(pacer.IsReduced);
-        Assert.Equal(60, pacer.CurrentFrameRate);
+        Assert.Equal(ClipHoverPreviewController.MaximumFramesPerSecond, pacer.CurrentFrameRate);
         Assert.True(pacer.TryConsumeRateChange(out var rate));
-        Assert.Equal(60, rate);
+        Assert.Equal(ClipHoverPreviewController.MaximumFramesPerSecond, rate);
     }
 
     [Fact]
@@ -190,12 +192,15 @@ public sealed class ClipHoverPreviewControllerTests
     [Fact]
     public void FramePacer_NeverDegradesAClipAlreadyAtOrBelowTheReducedRate()
     {
-        var pacer = new HoverPreviewFramePacer(24);
+        // 12, not 24: the reduced rate is 15 now, so a 24fps clip sits above
+        // it and stepping that one down is correct. The case this guards is a
+        // clip already at or under the floor, where there is nothing to gain.
+        var pacer = new HoverPreviewFramePacer(12);
 
         Run(pacer, serviceMs: 200, frames: 600);
 
         Assert.False(pacer.IsReduced);
-        Assert.Equal(24, pacer.CurrentFrameRate);
+        Assert.Equal(12, pacer.CurrentFrameRate);
     }
 
     [Fact]
