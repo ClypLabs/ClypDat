@@ -583,7 +583,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         //
         // Falls back to the copy for the rest of the session if a driver will
         // not hand out an input view for a duplication texture.
-        var directBltAvailable = true;
+        // CLYPDAT_DISABLE_DIRECT_BLT=1 forces the old staging-copy path, so the
+        // two can be measured against each other on one build.
+        var directBltAvailable = Environment.GetEnvironmentVariable("CLYPDAT_DISABLE_DIRECT_BLT") != "1";
         // Input views are per-texture, and Desktop Duplication rotates a small
         // pool of them, so these are cached by native pointer rather than
         // rebuilt per frame. Disposed with the rest of the D3D state.
@@ -763,7 +765,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // present.
             var lastCropCopyAt = TimeSpan.Zero;
             var targetFrameInterval = TimeSpan.FromSeconds(1.0 / Math.Clamp(config.FrameRate, 15, 240));
-            var halfTargetFrameInterval = targetFrameInterval / 2;
             // Counts encoded frames (including duplicate/padding ones) so
             // frame->pts can be assigned an IDEAL, constant-rate timestamp
             // (index * exact interval) rather than real elapsed time - see
@@ -1384,11 +1385,26 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                     // unconditionally.
                                     //
                                     // The cost is freshness, not content: the pixels a tick
-                                    // converts can be up to half a target interval (8.3ms
-                                    // at 60fps) older than the newest present. That is
-                                    // bounded and already measured - watch
-                                    // avgFrameStalenessMs.
-                                    if (!croppedDirty || stopwatch.Elapsed - lastCropCopyAt >= halfTargetFrameInterval)
+                                    // converts can be up to one target interval (16.7ms at
+                                    // 60fps) older than the newest present. That is bounded
+                                    // and already measured - watch avgFrameStalenessMs.
+                                    //
+                                    // A full interval, not the half it used to be. The
+                                    // refresh was close to free while this block was a
+                                    // staging copy and the expensive scale/convert Blt was
+                                    // deferred to the encode tick. It is not free now that
+                                    // the Blt happens HERE: at half an interval a
+                                    // fast-presenting source (a browser scrolling, a video
+                                    // playing) ran ~87 scale passes a second against a 60fps
+                                    // encode, and the extra ~27 were overwritten before
+                                    // anything read them. Measured on a 4K desktop scaled to
+                                    // 1080p60, that was the difference between ~11% and ~16%
+                                    // of the GPU's 3D engine spent on frames nobody sees.
+                                    //
+                                    // The !croppedDirty branch is untouched, so the first
+                                    // present after every tick is still converted
+                                    // immediately and no unique frame is lost.
+                                    if (!croppedDirty || stopwatch.Elapsed - lastCropCopyAt >= targetFrameInterval)
                                     {
                                         stageStopwatch.Restart();
                                         using (var desktopTexture = desktopResource.QueryInterface<ID3D11Texture2D>())
@@ -1959,7 +1975,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 {
                     activeFrameRate = requestedFrameRate;
                     targetFrameInterval = TimeSpan.FromSeconds(1.0 / activeFrameRate);
-                    halfTargetFrameInterval = targetFrameInterval / 2;
                     idealFrameIntervalMicroseconds = 1_000_000.0 / activeFrameRate;
                     acquireTimeoutMs = (uint)Math.Clamp((int)Math.Round(targetFrameInterval.TotalMilliseconds / 2), 1, 8);
                     SetHealth(_health with { TargetFrameRate = activeFrameRate, UpdatedUtc = DateTime.UtcNow });
