@@ -6640,14 +6640,49 @@ public sealed partial class MainWindow : Window
         // "video stays black for a moment" delay on every single clip open.
         // LoadVideoAsync() already fully tears down and replaces the previous
         // Media internally, so the same instance is safe to reuse.
-        var session = _playback ?? new PlaybackSession();
+        // Constructed OFF the UI thread. PlaybackSession's constructor runs
+        // Core.Initialize() and new LibVLC(), which loads libvlc and scans its
+        // whole plugin directory - cold, that is seconds of blocking work, and
+        // it used to run right here on the UI thread. PlaybackSession.WarmUp()
+        // normally pre-pays it, but that is deliberately deferred 45s past
+        // launch to stay out of the way of logon IO, so any clip opened inside
+        // that window paid the full cost with the app frozen: measured at 10.9s
+        // of an unresponsive UI between the click and the editor appearing,
+        // caught by RuntimeHealthWatchdog as
+        //   "UI thread stalled: no response for 5s" ... "recovered after 10.9s".
+        // Off-thread, a cold open still waits on libvlc, but the window keeps
+        // painting and the editor shows its loading state instead of hanging.
+        var existingSession = _playback;
+        var sessionTask = existingSession is not null
+            ? Task.FromResult(existingSession)
+            : Task.Run(() => new PlaybackSession());
+        // Read off the view model here, not inside the continuation - by the
+        // time that runs the selection may already have moved on.
+        var videoPath = ViewModel.SelectedVideoPath;
         // Whether a buffer is armed decides how much of the machine the
         // decoder may take - see PlaybackSession.ResolveDecodeThreads.
-        var videoLoad = session.LoadVideoAsync(ViewModel.SelectedVideoPath, ViewModel.IsReplayRecording);
+        var replayArmed = ViewModel.IsReplayRecording;
+        var videoLoad = sessionTask.ContinueWith(
+            task => task.Result.LoadVideoAsync(videoPath, replayArmed),
+            cts.Token,
+            TaskContinuationOptions.OnlyOnRanToCompletion,
+            TaskScheduler.Default).Unwrap();
 
         Dispatcher.UIThread.Post(
             async () =>
             {
+                if (cts.IsCancellationRequested) return;
+                PlaybackSession session;
+                try
+                {
+                    session = await sessionTask;
+                }
+                catch (Exception error)
+                {
+                    AppLog.Error("Editor playback engine failed to start", error);
+                    return;
+                }
+
                 if (cts.IsCancellationRequested) return;
                 await StartEditorPlaybackAsync(session, videoLoad, cts.Token);
             },
