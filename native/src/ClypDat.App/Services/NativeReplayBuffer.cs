@@ -671,20 +671,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var lastForcedKeyframe = TimeSpan.Zero;
             var lastTargetRefresh = TimeSpan.Zero;
             var lastEncodedAt = TimeSpan.Zero;
-            // Distinct from lastEncodedAt: that one is the IDEAL timeline anchor
-            // and advances by exactly targetFrameInterval whether or not a frame
-            // was actually submitted, which is what keeps PTS spacing correct
-            // across suppressed pads. This is the real "when did a frame last go
-            // out" clock, and it is what the max-hold below measures against.
-            var lastActualEncodeAt = TimeSpan.Zero;
-            // Longest a suppressed run of duplicate pads may go without emitting
-            // anything. Bounded by SaveReplayAsync's stall heuristic, which trims
-            // the front of the audio track when the saved window's duration
-            // exceeds the muxed video's by more than a second - the hold is a
-            // direct term in that difference, so this leaves 4x margin. Also has
-            // to stay well inside the 2s forced-IDR cadence that the ring
-            // buffer's cut points depend on.
-            var maxPadHold = TimeSpan.FromMilliseconds(250);
             // Last time the per-present crop copy actually ran - see the gate at
             // its call site for why it is rate-limited rather than run on every
             // present.
@@ -908,22 +894,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     UpdatePeak(ref _peakQueueDepth, encodeQueue.Count);
                     var frameStalenessDenom = Math.Max(1, frameStalenessCount);
                     AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, ringBufferMb={ringBufferMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
-                    // Counts pads the pacing gate deliberately declined to submit
-                    // as if they had been. A suppressed pad is a frame the
-                    // encoder was never ASKED to produce, so scoring it as a
-                    // failure to produce one is simply wrong: with duplicate
-                    // suppression on, encoded output legitimately falls to the
-                    // source's own present rate (43fps into a 60fps target on
-                    // one measured machine), which the raw ratio below would
-                    // read as a permanent 72%-of-target overload - pinning the
-                    // UI to Degraded forever and feeding EncoderTuningService
-                    // false overload samples until it demoted the preset and
-                    // halved the target frame rate for no reason at all. This
-                    // is the rate the encoder was actually scheduled at, which
-                    // is the only thing "can it keep up" can meaningfully mean.
-                    // The two signals that unambiguously mean overload
-                    // (droppedSinceLog, queue depth) are untouched.
-                    var outputFrameRate = (framesEncodedSinceLog + padsSkippedSinceLog) / diagElapsed;
+                    // Raw encoded rate, deliberately NOT crediting suppressed pads
+                    // back in. Pads are only ever skipped under real queue
+                    // pressure (see the pacing gate), so a rate that falls short
+                    // of target because of them is a genuine overload and should
+                    // read as one.
+                    var outputFrameRate = framesEncodedSinceLog / diagElapsed;
                     // Judged against the rate actually being targeted, not the
                     // configured one: once the tuner has lowered it, hitting 30
                     // of 30 is healthy, and comparing against the original 60
@@ -1815,11 +1791,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // frame's duration and turns a 60 FPS clip into ~30 FPS.
                         framesEncoded++;
                         framesEncodedSinceLog++;
-                        // Real (not ideal-timeline) moment a frame last went out,
-                        // which is what the pad-suppression max hold measures
-                        // against - lastEncodedAt cannot serve, since it advances
-                        // on its own grid whether or not anything was submitted.
-                        lastActualEncodeAt = stopwatch.Elapsed;
                     }
                     encodeMs += stageStopwatch.Elapsed.TotalMilliseconds;
                 }
@@ -1883,27 +1854,28 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // framesEncoded at 2.7x framesSeen with the queue pinned at
                     // 30/30 and output collapsed to 18.8fps).
                     //
-                    // This used to be skipped ONLY under that queue pressure. It is
-                    // now the default, because the timeline is safe either way:
-                    // lastEncodedAt and nextPtsMicroseconds both advance above,
-                    // before this check, so a suppressed pad reads as a dropped
-                    // frame in a correctly-spaced timeline rather than a slower
-                    // clip. Duration and playback speed are unchanged; what changes
-                    // is that the file becomes variable-frame-rate, so a player
-                    // computing frames/duration reports the source's real rate
-                    // instead of the configured target. Audio sync is untouched -
-                    // it rides on EncodeJob's own wall clock, which stays
-                    // one-for-one with frames actually submitted.
+                    // Suppressing pads unconditionally was tried and reverted. It
+                    // did cut encoder work, but it also made the output rate the
+                    // SOURCE's rate rather than the configured one: a game whose
+                    // presentation timing is merely uneven (maxPresentGapMs of
+                    // 36-41ms against a 16.7ms target, measured on a 4070 Ti at a
+                    // steady ~85fps average) leaves real holes in the tick grid,
+                    // and a clip that should read 60fps came out at 53.6. Exact
+                    // constant frame rate is the requirement; the pads that buys
+                    // are cheap on a working encoder (avgEncodeMs 0.46 on NVENC in
+                    // the same logs) and the GPU savings came from the crop-copy
+                    // limiter and the encoder settings, not from here.
                     //
-                    // Two overrides. A due forced-IDR must never be starved, or the
-                    // ring buffer loses the cut points every save depends on (see
-                    // CopyWindowUnderLock's backward keyframe scan). And maxPadHold
-                    // bounds how long a fully static screen may emit nothing at all,
-                    // which SaveReplayAsync's stall heuristic requires - see its
-                    // declaration.
-                    var idrDue = stopwatch.Elapsed - lastForcedKeyframe >= TimeSpan.FromSeconds(2);
-                    var holdExpired = stopwatch.Elapsed - lastActualEncodeAt >= maxPadHold;
-                    if (!freshContentSinceLastEncode && !idrDue && !holdExpired)
+                    // So this stays what it was: a safety valve, not a policy. The
+                    // timeline advances above either way (lastEncodedAt and
+                    // nextPtsMicroseconds both moved before this check), so a
+                    // skipped pad reads as a dropped frame in a correctly-spaced
+                    // timeline rather than a slower clip - the same shape as the
+                    // catch-up cap right above, which already decided that under
+                    // stall conditions honesty beats padding. Only ever skipped
+                    // while the queue is genuinely deep, so steady-state output is
+                    // exactly the configured frame rate.
+                    if (!freshContentSinceLastEncode && encodeQueue.Count * 2 >= encodeQueueCapacity)
                     {
                         padsSkippedSinceLog++;
                         continue;
