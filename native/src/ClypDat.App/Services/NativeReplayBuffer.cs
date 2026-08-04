@@ -2150,12 +2150,27 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // targets studio/limited range (16-235) - same crushed blacks/whites
         // problem as the CPU sws_scale path (see CreateScaler), just via a
         // different API. RGB_Range/Usage stay at their already-correct defaults
-        // (full-range RGB in); Nominal_Range=1 is 0-255/full per
-        // D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE, and YCbCr_Matrix=1 is BT.709 -
-        // matching what the encoder now tags the output as, rather than the
-        // BT.601 default that silently disagreed with how every player reads
-        // an HD stream.
-        var colorSpace = new VideoProcessorColorSpace { Nominal_Range = 1, YCbCr_Matrix = 1 };
+        // (full-range RGB in) and YCbCr_Matrix=1 is BT.709, matching what the
+        // encoder tags the output as rather than the BT.601 default that
+        // silently disagreed with how every player reads an HD stream.
+        //
+        // Nominal_Range is Range_0_255, i.e. 2. It was 1, on a comment claiming
+        // that meant full range - D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE is
+        // UNDEFINED=0, 16_235=1, 0_255=2, so 1 asked for exactly the limited
+        // range this whole block exists to avoid. Every GPU-path capture came
+        // out with 16-235 luma while the encoder tagged the stream full-range,
+        // and the two readings of that disagreement are why it hid for so long:
+        // a player that honours the flag (ffmpeg, and so every generated
+        // thumbnail and filmstrip) leaves the luma alone and shows washed-out
+        // grey blacks, while one that ignores it and assumes limited for H.264
+        // (LibVLC, and so the editor's own playback) expands 16-235 to 0-255
+        // and happens to land on the correct picture. The video looked right;
+        // the thumbnails next to it looked grey.
+        var colorSpace = new VideoProcessorColorSpace
+        {
+            Nominal_Range = (uint)VideoProcessorNominalRange.Range_0_255,
+            YCbCr_Matrix = 1
+        };
         videoContext.VideoProcessorSetStreamColorSpace(processor, 0, colorSpace);
         videoContext.VideoProcessorSetOutputColorSpace(processor, colorSpace);
 
