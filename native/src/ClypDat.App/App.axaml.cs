@@ -29,10 +29,10 @@ public sealed partial class App : Application
         AppLog.Info($"Graphics: os={Environment.OSVersion.Version}; {GraphicsOptionsResolver.ActiveDescription}");
         InstallGlobalExceptionHandlers();
         RuntimeHealthWatchdog.Start();
-        // Idle sweep for everything the explicit trims miss - the editor left
-        // open and then abandoned, a long recording session with no editor
-        // activity at all.
-        MemoryTrimmer.CanTrim = () => _mainWindow?.DataContext is not MainWindowViewModel { IsEditorVisible: true };
+        // Idle sweep for everything the explicit trims miss - a long recording
+        // session with no editor activity at all. State comes from
+        // MemoryTrimmer's own flags, which the view model pushes; see the
+        // comment there for why this is not a callback into the window.
         MemoryTrimmer.Start();
         // Both of these are heavy disk IO with no user waiting on the result -
         // LibVLC's warmup scans its whole plugin directory just to throw the

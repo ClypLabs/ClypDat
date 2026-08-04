@@ -394,7 +394,13 @@ internal static class AudioChunkCache
     // minutes of lookback/lookahead across several tracks at once (a Full
     // Session can have 3-4) without letting a long scrub session's resident
     // set grow without limit.
-    private const long BudgetBytes = 256L * 1024 * 1024;
+    // Halved from 256MB. That was sized as "a few minutes of lookback across
+    // several tracks", but a quarter of a gigabyte of decoded PCM is a large
+    // share of the app's whole footprint, and the chunks it was buying are
+    // ones playback had already passed - at 128MB a three-track clip still
+    // keeps ~3.5 minutes resident per track, which is far more scrubbing
+    // headroom than anyone uses before the extractor can refill it.
+    private const long BudgetBytes = 128L * 1024 * 1024;
 
     private sealed class Entry(byte[] data, long lastUsedTicks)
     {

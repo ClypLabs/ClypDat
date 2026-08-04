@@ -735,6 +735,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set
         {
             if (!SetProperty(ref _isReplayRecording, value)) return;
+            MemoryTrimmer.Recording = value;
             RecorderStatus = value ? "Replay On" : "Replay Off";
             if (value)
             {
@@ -841,6 +842,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         private set
         {
             if (!SetProperty(ref _isEditorVisible, value)) return;
+            MemoryTrimmer.EditorOpen = value;
             OnPropertyChanged(nameof(IsLibraryVisible));
             OnPropertyChanged(nameof(IsSettingsVisible));
             OnPropertyChanged(nameof(ShowLibraryActions));

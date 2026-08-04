@@ -25,7 +25,19 @@ public static class MemoryTrimmer
 {
     // Set by MainWindow. True when the editor is closed - i.e. when the audio
     // chunk and bitmap caches are holding data for a clip nobody is looking at.
-    public static Func<bool>? CanTrim { get; set; }
+    // Plain flags pushed from the view model's setters, not a callback that
+    // reads the window. This runs on its own thread, and every Avalonia
+    // property read from off the UI thread throws - inside the loop's catch
+    // that failed completely silently, so the trimmer never once ran.
+    public static volatile bool EditorOpen;
+
+    // A compacting gen2 collection suspends every managed thread for as long
+    // as it takes to walk the heap, and the capture and encode loops are
+    // managed threads - a few hundred milliseconds there is dropped frames in
+    // someone's game. While recording, the trim still drops the caches and
+    // still hands the pages back; it just leaves the reclaim to the background
+    // GC instead of stopping the world to do it now.
+    public static volatile bool Recording;
 
     private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(30);
     // Trimming is not free (a compacting gen2 collection walks the whole heap),
@@ -59,7 +71,7 @@ public static class MemoryTrimmer
             try
             {
                 if (DateTime.UtcNow - _lastTrimUtc < MinimumInterval) continue;
-                if (CanTrim?.Invoke() != true) continue;
+                if (EditorOpen) continue;
 
                 using var process = Process.GetCurrentProcess();
                 if (process.WorkingSet64 < TrimThresholdBytes) continue;
@@ -93,17 +105,24 @@ public static class MemoryTrimmer
             AudioChunkCache.Clear();
             BitmapCache.Clear();
 
-            // The audio chunks are 5.76MB byte[] each, so they live on the
-            // large object heap, which a normal collection sweeps but never
-            // compacts - without this the freed space stays as LOH holes the
-            // process keeps reserved from the OS.
-            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-            GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
-            GC.WaitForPendingFinalizers();
-            // Second pass: the first one runs the finalizers for the bitmaps
-            // dropped above, and an object only becomes collectable after its
-            // finalizer has run.
-            GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+            if (!Recording)
+            {
+                // The audio chunks are 5.76MB byte[] each, so they live on the
+                // large object heap, which a normal collection sweeps but never
+                // compacts - without this the freed space stays as LOH holes the
+                // process keeps reserved from the OS.
+                GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+                GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+                GC.WaitForPendingFinalizers();
+                // Second pass: the first one runs the finalizers for the bitmaps
+                // dropped above, and an object only becomes collectable after its
+                // finalizer has run.
+                GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+            }
+            else
+            {
+                GC.Collect(2, GCCollectionMode.Optimized, blocking: false, compacting: false);
+            }
 
             using var after = Process.GetCurrentProcess();
             EmptyWorkingSet(after.Handle);
