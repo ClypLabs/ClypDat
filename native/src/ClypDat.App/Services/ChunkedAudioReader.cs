@@ -430,6 +430,19 @@ internal static class AudioChunkCache
         EvictIfNeeded();
     }
 
+    // Drops every resident chunk. Called by MemoryTrimmer when the editor is
+    // closed - nothing is playing, so every byte in here is lookahead for a
+    // clip nobody is watching, and at ~5.76MB per chunk this is the single
+    // largest thing the app holds that it does not currently need. Re-extracts
+    // on demand the next time a clip is opened.
+    public static void Clear()
+    {
+        foreach (var key in Entries.Keys)
+        {
+            Remove(key.CacheKey, key.ChunkIndex);
+        }
+    }
+
     public static void Remove(string cacheKey, int chunkIndex)
     {
         if (Entries.TryRemove((cacheKey, chunkIndex), out var entry))

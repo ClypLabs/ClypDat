@@ -59,6 +59,16 @@ internal static class BitmapCache
         Entries.TryRemove(path, out _);
     }
 
+    // Drops every cached bitmap. Same deliberate non-disposal as Invalidate:
+    // a library card or the editor may still be bound to one of these, and
+    // disposing under a live binding blanks it. Releasing the reference is
+    // what matters - the bitmap's finalizer frees the unmanaged pixel buffer
+    // once nothing is drawing it.
+    public static void Clear()
+    {
+        Entries.Clear();
+    }
+
     // Linear scan for the least-recently-used entry - the capacity cap keeps
     // this cheap, and it only runs when a new entry actually pushes the
     // resident set over the cap.

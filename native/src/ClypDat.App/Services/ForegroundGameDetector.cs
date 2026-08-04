@@ -542,6 +542,13 @@ public sealed class ForegroundGameDetector
             var builder = new StringBuilder(32768);
             var length = builder.Capacity;
             var path = QueryFullProcessImageName(handle, 0, builder, ref length) ? builder.ToString() : string.Empty;
+            // Keyed by PID with nothing ever removing dead ones, this grew for
+            // the whole life of the process - every app the user opened and
+            // closed over a multi-day session left its path behind. Dropping
+            // the lot on overflow is enough: the entries are a lookup shortcut,
+            // and the handful of PIDs with live windows repopulate on the next
+            // tick.
+            if (_processPathCache.Count > 512) _processPathCache.Clear();
             _processPathCache[processId] = (path, creationTicks);
             return path;
         }

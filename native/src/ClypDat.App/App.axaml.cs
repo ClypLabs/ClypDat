@@ -28,6 +28,12 @@ public sealed partial class App : Application
         AppLog.Startup();
         AppLog.Info($"Graphics: os={Environment.OSVersion.Version}; {GraphicsOptionsResolver.ActiveDescription}");
         InstallGlobalExceptionHandlers();
+        RuntimeHealthWatchdog.Start();
+        // Idle sweep for everything the explicit trims miss - the editor left
+        // open and then abandoned, a long recording session with no editor
+        // activity at all.
+        MemoryTrimmer.CanTrim = () => _mainWindow?.DataContext is not MainWindowViewModel { IsEditorVisible: true };
+        MemoryTrimmer.Start();
         // Both of these are heavy disk IO with no user waiting on the result -
         // LibVLC's warmup scans its whole plugin directory just to throw the
         // instance away, and the janitor mass-deletes scratch files (real

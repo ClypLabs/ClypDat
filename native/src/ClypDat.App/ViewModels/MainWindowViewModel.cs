@@ -3959,6 +3959,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             Dispatcher.UIThread.Post(() => _ = AddOrUpdateLibraryClipAsync(editedClipPath));
         }
+
+        // Closing the editor is the moment the app's largest caches - extracted
+        // audio chunks (up to 256MB) and decoded bitmaps - become dead weight.
+        // Off the UI thread: the trim does a blocking compacting gen2
+        // collection and must not be part of the close transition.
+        Task.Run(() => MemoryTrimmer.Trim("editor closed"));
     }
 
     public void OpenSettings()
