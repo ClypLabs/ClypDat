@@ -33,7 +33,7 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
     private readonly IAudioClient _audioClient;
     private readonly IAudioCaptureClientNative _captureClient;
     private CancellationTokenSource? _cts;
-    private Task? _captureTask;
+    private Thread? _captureThread;
     private bool _loggedFirstPacket;
 
     public ProcessLoopbackWaveIn(int processId, ProcessLoopbackCaptureMode mode)
@@ -44,33 +44,55 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
         _audioClient = ActivateAudioClient(_processId, _mode);
         WaveFormat = GetSharedRenderFormat();
 
-        var sessionGuid = Guid.Empty;
-        try
-        {
-            Marshal.ThrowExceptionForHR(_audioClient.Initialize(
-                AudioClientShareMode.Shared,
-                AudioClientStreamFlags.Loopback,
-                0,
-                0,
-                WaveFormat,
-                ref sessionGuid));
-        }
-        catch
-        {
-            Marshal.ThrowExceptionForHR(_audioClient.Initialize(
-                AudioClientShareMode.Shared,
-                AudioClientStreamFlags.None,
-                0,
-                0,
-                WaveFormat,
-                ref sessionGuid));
-        }
+        InitializeClient();
 
         object service;
         var captureClientGuid = AudioCaptureClientGuid;
         Marshal.ThrowExceptionForHR(_audioClient.GetService(captureClientGuid, out service));
         _captureClient = (IAudioCaptureClientNative)service;
         AppLog.Info($"Process loopback initialized: pid={_processId}, mode={_mode}, format={WaveFormat.SampleRate}Hz/{WaveFormat.Channels}ch/{WaveFormat.BitsPerSample}bit.");
+    }
+
+    // Ask WASAPI for a capture buffer big enough to survive a scheduling
+    // stall instead of taking the engine default (one device period, ~10ms in
+    // shared mode). With a 10ms buffer drained by a 10ms poll loop there was
+    // no margin at all: any hiccup longer than a single period overran the
+    // buffer and that audio was gone. Capture is written straight to a rolling
+    // RAM buffer, so a deep capture buffer costs nothing that matters here -
+    // there is no latency budget to protect.
+    private const long BufferDuration100ns = 500 * 10_000L;
+
+    private void InitializeClient()
+    {
+        var sessionGuid = Guid.Empty;
+        Exception? lastError = null;
+        // Loopback before None (process loopback is the whole point of this
+        // class), deep buffer before the default within each - if a driver
+        // rejects the requested size, a working capture at the default size
+        // still beats no capture.
+        foreach (var flags in new[] { AudioClientStreamFlags.Loopback, AudioClientStreamFlags.None })
+        {
+            foreach (var duration in new[] { BufferDuration100ns, 0L })
+            {
+                try
+                {
+                    Marshal.ThrowExceptionForHR(_audioClient.Initialize(
+                        AudioClientShareMode.Shared,
+                        flags,
+                        duration,
+                        0,
+                        WaveFormat,
+                        ref sessionGuid));
+                    return;
+                }
+                catch (Exception error)
+                {
+                    lastError = error;
+                }
+            }
+        }
+
+        throw lastError ?? new InvalidOperationException("Process loopback client could not be initialized.");
     }
 
     public WaveFormat WaveFormat { get; set; }
@@ -81,7 +103,18 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
     {
         if (_cts is not null) return;
         _cts = new CancellationTokenSource();
-        _captureTask = Task.Run(() => CaptureLoop(_cts.Token));
+        var token = _cts.Token;
+        // A dedicated thread, not the thread pool. Draining the capture buffer
+        // on time is the one thing this loop has to do, and a pool work item
+        // queues behind whatever else the app is doing (encode, save, UI) on a
+        // machine that is already out of CPU. See MmcssScope for the rest.
+        _captureThread = new Thread(() => CaptureLoop(token))
+        {
+            IsBackground = true,
+            Priority = ThreadPriority.AboveNormal,
+            Name = $"ClypDat process loopback {_processId}"
+        };
+        _captureThread.Start();
     }
 
     public void StopRecording()
@@ -91,7 +124,7 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
         cts.Cancel();
         try
         {
-            _captureTask?.Wait(TimeSpan.FromSeconds(2));
+            _captureThread?.Join(TimeSpan.FromSeconds(2));
         }
         catch
         {
@@ -101,7 +134,7 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
         {
             _cts?.Dispose();
             _cts = null;
-            _captureTask = null;
+            _captureThread = null;
         }
     }
 
@@ -124,6 +157,7 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
         // system clock step (NTP correction) can't shift mid-session.
         var utcBase = MonotonicClock.UtcNow;
         var qpcBase100ns = Stopwatch.GetTimestamp() * (10_000_000.0 / Stopwatch.Frequency);
+        using var mmcss = MmcssScope.ProAudio($"process loopback pid={_processId}");
         try
         {
             Marshal.ThrowExceptionForHR(_audioClient.Start());

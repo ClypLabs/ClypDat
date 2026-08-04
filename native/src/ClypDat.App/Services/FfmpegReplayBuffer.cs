@@ -1082,6 +1082,11 @@ internal sealed class AudioCaptureSession : IDisposable
     // `retention` at all times and keeps exactly one capture per source,
     // avoiding both problems at once. No-op for a disk-backed (Full
     // Session) capture - unbounded duration is the whole point there.
+    // How far past `retention` a RAM buffer is allowed to run before a
+    // compaction is worth its copy. 15s is ~5.7MB per track at a typical
+    // 48kHz float mix format.
+    private const int CompactSlackSeconds = 15;
+
     public void TrimTo(TimeSpan retention)
     {
         lock (_lock)
@@ -1096,6 +1101,25 @@ internal sealed class AudioCaptureSession : IDisposable
             var trimBytes = _bytesWritten - maxBytes;
             trimBytes -= trimBytes % Math.Max(1, format.BlockAlign);
             if (trimBytes <= 0) return;
+
+            // Compacting copies the WHOLE retained buffer into a fresh
+            // MemoryStream, and AudioCapturePipeline calls this every 2s for
+            // every live track. At the default 60s retention that is ~25MB
+            // copied and re-allocated (large object heap, so gen2) per track
+            // per tick - roughly 37MB/s of pure memcpy plus GC across three
+            // tracks, all of it under _lock, which is the same lock
+            // Capture_OnDataAvailable needs to accept a WASAPI packet. On a
+            // machine with no headroom that stalled the capture callbacks
+            // long enough for WASAPI to overrun its buffer, and the lost
+            // audio showed up in saved clips as crackle and dropouts.
+            //
+            // So only pay for a copy once there is enough overshoot to be
+            // worth one: the buffer floats between retention and retention +
+            // CompactSlack (a few MB of extra RAM per track) while the copy
+            // runs several times less often.
+            var slackBytes = (long)format.AverageBytesPerSecond * CompactSlackSeconds;
+            slackBytes -= slackBytes % Math.Max(1, format.BlockAlign);
+            if (trimBytes < slackBytes) return;
 
             try
             {

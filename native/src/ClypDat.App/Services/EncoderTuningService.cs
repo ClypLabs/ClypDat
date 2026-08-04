@@ -22,6 +22,17 @@ namespace ClypDat.App.Services;
 // target costs no restart at all (see NativeReplayBuffer.RequestFrameRate) and
 // turns dropped frames into a lower but honest rate.
 //
+// CAPTURE HEIGHT is the last lever, and this acts on it too. Once P1 and 30fps
+// are both spent there is nothing left that does not touch resolution, and the
+// previous behaviour was to log "capture resolution is the remaining lever, and
+// it needs a settings change" and then leave the machine there: a real Iris Xe
+// session sat at 1.5-18fps of a requested 30 at 1080p for eight minutes,
+// producing clips nobody would want to keep, while the log quietly explained
+// what a human could have done about it. Unlike the frame rate this costs a
+// buffer restart (the encoder bakes its output size in at start), which is why
+// it is last and why it only ever fires once per run - but a restart that loses
+// the buffered window is cheap next to minutes of 1.5fps footage.
+//
 // Only the Native backend reports the telemetry this needs; other backends are
 // ignored rather than guessed at.
 public sealed class EncoderTuningService
@@ -33,9 +44,19 @@ public sealed class EncoderTuningService
     // Below this there is nothing worth halving.
     private const int MinimumFrameRateToReduce = 45;
 
+    // Same shape for height: one step, to the lowest preset the settings UI
+    // offers. Anything below 720p is a deliberate choice, not a rescue.
+    private const int ReducedHeight = 720;
+    private const int MinimumHeightToReduce = 1080;
+
     // Raised when the target frame rate should change. MainWindow wires this to
     // the live buffer and to the user-facing toast.
     public event EventHandler<EncoderFrameRateChange>? FrameRateChangeRequested;
+
+    // Raised when capture height should drop. MainWindow applies it as a
+    // session override (the user's own setting is left alone) and restarts the
+    // buffer.
+    public event EventHandler<EncoderResolutionChange>? ResolutionChangeRequested;
 
     private int _configuredFrameRate;
     private int _activeFrameRate;
@@ -43,6 +64,13 @@ public sealed class EncoderTuningService
     // would be worse than either, and this machine has already shown what it
     // can do.
     private bool _frameRateReduced;
+
+    // Height, unlike the frame rate, is NOT reset per session: applying it
+    // restarts the buffer, and BeginSession is what a restart calls. Resetting
+    // it there would let the tuner drop the height again on the very session
+    // its own last drop created, one step per restart, forever.
+    private int _activeHeight;
+    private bool _heightReduced;
 
     // Slowest/best-looking first. "Demote" moves toward P1 (cheaper per frame),
     // "promote" moves back toward the user's own setting.
@@ -94,7 +122,7 @@ public sealed class EncoderTuningService
     // Called on every buffer start. The burned-preset set deliberately survives
     // within a run of the app but the streak state does not - a fresh buffer is
     // a fresh set of conditions (different game, different resolution).
-    public void BeginSession(string userPreset, int configuredFrameRate)
+    public void BeginSession(string userPreset, int configuredFrameRate, int configuredHeight)
     {
         _sessionStartUtc = DateTime.UtcNow;
         _lastDecisionUtc = DateTime.MinValue;
@@ -109,7 +137,8 @@ public sealed class EncoderTuningService
         _configuredFrameRate = configuredFrameRate;
         _activeFrameRate = configuredFrameRate;
         _frameRateReduced = false;
-        AppLog.Info($"Encoder tuning: observing session at preset {_ceilingPreset}, {configuredFrameRate} fps (preset changes are observe-only; frame rate can be lowered if the encoder cannot keep up).");
+        _activeHeight = configuredHeight;
+        AppLog.Info($"Encoder tuning: observing session at preset {_ceilingPreset}, {configuredFrameRate} fps, {configuredHeight}p (preset changes are observe-only; frame rate and capture height can be lowered if the encoder cannot keep up).");
     }
 
     public void EndSession()
@@ -125,7 +154,8 @@ public sealed class EncoderTuningService
                     (string.Equals(_proposedPreset, _ceilingPreset, StringComparison.OrdinalIgnoreCase)
                         ? $"No change proposed to the configured {_ceilingPreset}."
                         : $"Would have run {_proposedPreset} instead of the configured {_ceilingPreset}.") +
-                    (_frameRateReduced ? $" Target frame rate was lowered {_configuredFrameRate} -> {_activeFrameRate} fps." : string.Empty));
+                    (_frameRateReduced ? $" Target frame rate was lowered {_configuredFrameRate} -> {_activeFrameRate} fps." : string.Empty) +
+                    (_heightReduced ? $" Capture height was lowered to {_activeHeight}p." : string.Empty));
 
         _sessionStartUtc = DateTime.MinValue;
     }
@@ -214,10 +244,30 @@ public sealed class EncoderTuningService
                 return;
             }
 
-            AppLog.Info($"Encoder tuning: sustained overload at {_proposedPreset}, already at the fastest preset and " +
-                        $"{_activeFrameRate} fps - {overloadCount}/{WindowSize} windows severely overloaded, dropped={health.DroppedFrames}, " +
+            // Frame rate spent too. Capture height is the last thing left, and
+            // it costs a restart - see this class's header.
+            if (!_heightReduced && _activeHeight >= MinimumHeightToReduce)
+            {
+                _heightReduced = true;
+                var previousHeight = _activeHeight;
+                _activeHeight = ReducedHeight;
+                AppLog.Info($"Encoder tuning: sustained overload at {_proposedPreset} and {_activeFrameRate} fps with no faster preset left - " +
+                            $"lowering capture height {previousHeight}p -> {ReducedHeight}p. " +
+                            $"{overloadCount}/{WindowSize} windows severely overloaded, dropped={health.DroppedFrames}, " +
+                            $"queue={health.QueueDepth}/{health.EncodeQueueCapacity}, outputFps={health.OutputFrameRate:0.0}/{health.TargetFrameRate}, " +
+                            $"adapter={health.AdapterDescription}.");
+                ResolutionChangeRequested?.Invoke(this, new EncoderResolutionChange(previousHeight, ReducedHeight));
+                _lastDecisionUtc = now;
+                _recentOverloads.Clear();
+                _cleanSinceUtc = null;
+                _queueDepthSinceClean = 0;
+                return;
+            }
+
+            AppLog.Info($"Encoder tuning: sustained overload at {_proposedPreset}, already at the fastest preset, " +
+                        $"{_activeFrameRate} fps and {_activeHeight}p - {overloadCount}/{WindowSize} windows severely overloaded, dropped={health.DroppedFrames}, " +
                         $"queue={health.QueueDepth}/{health.EncodeQueueCapacity}, outputFps={health.OutputFrameRate:0.0}/{health.TargetFrameRate}. " +
-                        "Capture resolution is the remaining lever, and it needs a settings change.");
+                        "Every automatic lever is spent; this machine needs a lower capture setting than it is configured for.");
             _lastDecisionUtc = now;
             return;
         }
@@ -288,3 +338,5 @@ public sealed class EncoderTuningService
 }
 
 public sealed record EncoderFrameRateChange(int PreviousFrameRate, int FrameRate);
+
+public sealed record EncoderResolutionChange(int PreviousHeight, int Height);

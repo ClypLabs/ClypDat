@@ -16,16 +16,30 @@ namespace ClypDat.App.Services;
 [SupportedOSPlatform("windows")]
 internal sealed class MicrophoneWaveIn : IWaveIn
 {
+    // See ProcessLoopbackWaveIn.BufferDuration100ns - same reasoning, same
+    // 500ms of headroom against a scheduling stall eating live mic audio.
+    private const long BufferDuration100ns = 500 * 10_000L;
+
     private readonly AudioClient _audioClient;
     private CancellationTokenSource? _cts;
-    private Task? _captureTask;
+    private Thread? _captureThread;
     private bool _loggedFirstPacket;
 
     public MicrophoneWaveIn(MMDevice device)
     {
         _audioClient = device.AudioClient;
         WaveFormat = _audioClient.MixFormat;
-        _audioClient.Initialize(AudioClientShareMode.Shared, AudioClientStreamFlags.None, 0, 0, WaveFormat, Guid.Empty);
+        try
+        {
+            _audioClient.Initialize(AudioClientShareMode.Shared, AudioClientStreamFlags.None, BufferDuration100ns, 0, WaveFormat, Guid.Empty);
+        }
+        catch (Exception error)
+        {
+            // A driver that will not give us the buffer size we asked for is
+            // no reason to have no microphone track at all.
+            AppLog.Info($"Mic capture could not use a {BufferDuration100ns / 10_000}ms buffer ({error.GetType().Name}); falling back to the device default.");
+            _audioClient.Initialize(AudioClientShareMode.Shared, AudioClientStreamFlags.None, 0, 0, WaveFormat, Guid.Empty);
+        }
     }
 
     public WaveFormat WaveFormat { get; set; }
@@ -36,7 +50,16 @@ internal sealed class MicrophoneWaveIn : IWaveIn
     {
         if (_cts is not null) return;
         _cts = new CancellationTokenSource();
-        _captureTask = Task.Run(() => CaptureLoop(_cts.Token));
+        var token = _cts.Token;
+        // Dedicated thread rather than a pool work item - see
+        // ProcessLoopbackWaveIn.StartRecording.
+        _captureThread = new Thread(() => CaptureLoop(token))
+        {
+            IsBackground = true,
+            Priority = ThreadPriority.AboveNormal,
+            Name = "ClypDat mic capture"
+        };
+        _captureThread.Start();
     }
 
     public void StopRecording()
@@ -46,7 +69,7 @@ internal sealed class MicrophoneWaveIn : IWaveIn
         cts.Cancel();
         try
         {
-            _captureTask?.Wait(TimeSpan.FromSeconds(2));
+            _captureThread?.Join(TimeSpan.FromSeconds(2));
         }
         catch
         {
@@ -56,7 +79,7 @@ internal sealed class MicrophoneWaveIn : IWaveIn
         {
             _cts?.Dispose();
             _cts = null;
-            _captureTask = null;
+            _captureThread = null;
         }
     }
 
@@ -75,6 +98,7 @@ internal sealed class MicrophoneWaveIn : IWaveIn
         var utcBase = MonotonicClock.UtcNow;
         var qpcBase100ns = Stopwatch.GetTimestamp() * (10_000_000.0 / Stopwatch.Frequency);
         var captureClient = _audioClient.AudioCaptureClient;
+        using var mmcss = MmcssScope.ProAudio("mic capture");
         try
         {
             _audioClient.Start();

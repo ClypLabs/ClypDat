@@ -665,6 +665,8 @@ public sealed partial class MainWindow : Window
 
         _encoderTuning.FrameRateChangeRequested -= EncoderTuning_OnFrameRateChangeRequested;
         _encoderTuning.FrameRateChangeRequested += EncoderTuning_OnFrameRateChangeRequested;
+        _encoderTuning.ResolutionChangeRequested -= EncoderTuning_OnResolutionChangeRequested;
+        _encoderTuning.ResolutionChangeRequested += EncoderTuning_OnResolutionChangeRequested;
     }
 
     private void EncoderTuning_OnHealthChanged(object? sender, ReplayCaptureHealth health) => _encoderTuning.OnHealth(health);
@@ -684,6 +686,23 @@ public sealed partial class MainWindow : Window
                 ViewModel.Settings.ClipOverlayPosition,
                 $"Capture dropped to {change.FrameRate} FPS - your GPU couldn't keep up at {change.PreviousFrameRate}",
                 playSound: false);
+        });
+    }
+
+    // Unlike the frame rate this needs the buffer rebuilt (the encoder fixes
+    // its output size at start), so it goes through the same debounced restart
+    // path a settings change uses.
+    private void EncoderTuning_OnResolutionChangeRequested(object? sender, EncoderResolutionChange change)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (ViewModel is null) return;
+            ViewModel.CaptureHeightOverride = change.Height;
+            ShowClipSavedOverlay(
+                ViewModel.Settings.ClipOverlayPosition,
+                $"Capture dropped to {change.Height}p - your GPU couldn't keep up at {change.PreviousHeight}p",
+                playSound: false);
+            ScheduleReplayRestart();
         });
     }
 
@@ -2252,7 +2271,7 @@ public sealed partial class MainWindow : Window
             AppLog.Info("Replay started.");
             var activeConfig = ViewModel.CreateReplayConfig();
             _activeReplayTargetIdentity = ReplayTargetIdentity(activeConfig);
-            _encoderTuning.BeginSession(activeConfig.EncoderPreset, activeConfig.FrameRate);
+            _encoderTuning.BeginSession(activeConfig.EncoderPreset, activeConfig.FrameRate, activeConfig.MaxHeight);
             // Fresh session, fresh list - but only for a GENUINELY new session
             // (a game was just detected). A quality restart is left open (not
             // cleared here either) so a Full Session VOD that finalizes minutes
