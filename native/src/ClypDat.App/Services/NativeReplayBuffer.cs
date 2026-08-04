@@ -561,6 +561,33 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // convert or whether it should just re-encode the last content as a
         // duplicate. See the encode-time conversion in EncodeScheduledFrame.
         var croppedDirty = false;
+        // Set when the scale/convert Blt already ran at present time straight
+        // off the duplication texture, so the encode tick only has to read
+        // nv12Output back rather than produce it. See directBltAvailable.
+        var nv12Ready = false;
+        // The crop copy above exists purely to outlive the duplication frame.
+        // It is also a full-resolution BGRA copy - at 4K that is 33MB read plus
+        // 33MB written, and the gate below permits it up to TWICE per encode
+        // interval, so a busy screen pays ~8GB/s for it. Measured: this app's
+        // 3D-engine share sits at ~6.5% on a static desktop and climbs past 25%
+        // when the screen is changing, which is the shape of exactly this copy
+        // and nothing else in the pipeline (the Blt and the readback are both
+        // pinned to the encode rate).
+        //
+        // It is avoidable. The Video Processor can read the duplication texture
+        // directly with a source rect, so the crop happens as part of the scale
+        // it was feeding instead of as a separate pass beforehand. That means
+        // doing the Blt while the frame is still acquired rather than deferring
+        // it, which costs nothing: the gate below already limits this block to
+        // roughly the encode rate, which is the rate the deferred Blt ran at.
+        //
+        // Falls back to the copy for the rest of the session if a driver will
+        // not hand out an input view for a duplication texture.
+        var directBltAvailable = true;
+        // Input views are per-texture, and Desktop Duplication rotates a small
+        // pool of them, so these are cached by native pointer rather than
+        // rebuilt per frame. Disposed with the rest of the D3D state.
+        var desktopInputViews = new Dictionary<nint, ID3D11VideoProcessorInputView>();
         // Cursor position for the GPU path, already converted into OUTPUT-resolution
         // pixels at crop time. The crop block is the only place the crop origin and
         // capture size are in scope, but the cursor has to be drawn after the scaled
@@ -1250,6 +1277,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                         // for the next encode tick to convert until a fresh
                                         // present lands in it.
                                         croppedDirty = false;
+                                        nv12Ready = false;
                                     }
 
                                     pendingCropStableCount = 0;
@@ -1365,8 +1393,58 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                         stageStopwatch.Restart();
                                         using (var desktopTexture = desktopResource.QueryInterface<ID3D11Texture2D>())
                                         {
-                                            var box = new Vortice.Mathematics.Box(cropLeft, cropTop, 0, cropLeft + captureWidth, cropTop + captureHeight, 1);
-                                            device.ImmediateContext.CopySubresourceRegion(croppedTexture, 0, 0, 0, 0, desktopTexture, 0, box);
+                                            // Preferred path: scale/convert straight out of the
+                                            // duplication texture with a source rect, so the crop
+                                            // costs nothing of its own. Only valid right here,
+                                            // while the frame is still acquired.
+                                            // One guard around the whole attempt, not just the
+                                            // view creation. The processor was built with the CROP
+                                            // as its declared input size and is now handed the full
+                                            // desktop texture plus a source rect, which the content
+                                            // description is only a hint about - a driver may reject
+                                            // the view, the rect, or the Blt itself, and any of
+                                            // those throwing here would kill the capture thread.
+                                            if (directBltAvailable)
+                                            {
+                                                try
+                                                {
+                                                    var desktopKey = desktopTexture.NativePointer;
+                                                    if (!desktopInputViews.TryGetValue(desktopKey, out var desktopView))
+                                                    {
+                                                        desktopView = videoDevice!.CreateVideoProcessorInputView(desktopTexture, vpEnumerator!, new VideoProcessorInputViewDescription
+                                                        {
+                                                            FourCC = 0,
+                                                            ViewDimension = VideoProcessorInputViewDimension.Texture2D,
+                                                            Texture2D = new Texture2DVideoProcessorInputView { MipSlice = 0, ArraySlice = 0 }
+                                                        });
+                                                        desktopInputViews[desktopKey] = desktopView;
+                                                    }
+
+                                                    videoContext!.VideoProcessorSetStreamSourceRect(
+                                                        videoProcessor, 0, true,
+                                                        new Vortice.RawRect(cropLeft, cropTop, cropLeft + captureWidth, cropTop + captureHeight));
+                                                    bltStreams[0].Enable = true;
+                                                    bltStreams[0].InputSurface = desktopView;
+                                                    videoContext.VideoProcessorBlt(videoProcessor, outputView, 0, 1, bltStreams);
+                                                    nv12Ready = true;
+                                                }
+                                                catch (Exception error)
+                                                {
+                                                    // Take the copy for the rest of the session, and
+                                                    // clear the stream rect so the deferred Blt reads
+                                                    // all of croppedTexture as it always did.
+                                                    directBltAvailable = false;
+                                                    nv12Ready = false;
+                                                    try { videoContext!.VideoProcessorSetStreamSourceRect(videoProcessor, 0, false, null); } catch { /* best effort */ }
+                                                    AppLog.Info($"Native capture: direct video-processor crop unavailable ({error.Message}) - falling back to the full-resolution crop copy.");
+                                                }
+                                            }
+
+                                            if (!nv12Ready)
+                                            {
+                                                var box = new Vortice.Mathematics.Box(cropLeft, cropTop, 0, cropLeft + captureWidth, cropTop + captureHeight, 1);
+                                                device.ImmediateContext.CopySubresourceRegion(croppedTexture, 0, 0, 0, 0, desktopTexture, 0, box);
+                                            }
                                         }
                                         copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
 
@@ -1565,6 +1643,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
                             duplication?.Dispose();
                             staging?.Dispose();
+                            // Keyed by texture pointer and owned by the device
+                            // going away here - a stale entry would hand the
+                            // rebuilt pipeline a view over a dead resource.
+                            foreach (var view in desktopInputViews.Values) view.Dispose();
+                            desktopInputViews.Clear();
+                            nv12Ready = false;
                             inputView?.Dispose();
                             croppedTexture?.Dispose();
                             outputView?.Dispose();
@@ -1749,9 +1833,17 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // GCs for multi-hundred-millisecond capture gaps. inputView
                         // is refreshed in place because a crop resize or device
                         // rebuild replaces the view object underneath us.
-                        bltStreams[0].Enable = true;
-                        bltStreams[0].InputSurface = inputView;
-                        videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, bltStreams);
+                        // Already produced at present time straight off the
+                        // duplication texture - see directBltAvailable. Only the
+                        // fallback copy path still owes a Blt here.
+                        if (!nv12Ready)
+                        {
+                            bltStreams[0].Enable = true;
+                            bltStreams[0].InputSurface = inputView;
+                            videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, bltStreams);
+                        }
+
+                        nv12Ready = false;
                         var ringLength = nv12StagingRing!.Length;
                         var currentRingIndex = nv12StagingIndex;
                         device.ImmediateContext.CopyResource(nv12StagingRing[currentRingIndex], nv12Output);
@@ -2078,6 +2170,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             if (codecContext is not null) { var c = codecContext; ffmpeg.avcodec_free_context(&c); }
             duplication?.Dispose();
             staging?.Dispose();
+            foreach (var view in desktopInputViews.Values) view.Dispose();
+            desktopInputViews.Clear();
             inputView?.Dispose();
             croppedTexture?.Dispose();
             outputView?.Dispose();
