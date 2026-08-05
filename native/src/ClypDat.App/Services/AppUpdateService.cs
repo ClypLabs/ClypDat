@@ -29,6 +29,29 @@ public static class AppUpdateService
     private const string LatestReleaseUrl = $"https://api.github.com/repos/{UpstreamOwner}/{UpstreamRepository}/releases/latest";
     private const string ReleasesUrl = $"https://api.github.com/repos/{UpstreamOwner}/{UpstreamRepository}/releases?per_page=100";
 
+    // Mirror on the marketing site, serving the same JSON shape from Cloudflare
+    // R2. Exists so installs and updates survive GitHub being unreachable -
+    // an outage, or the account being flagged. It is strictly a fallback: while
+    // GitHub answers, nothing below ever touches it.
+    private const string MirrorHost = "www.clypdat.xyz";
+    private const string MirrorApexHost = "clypdat.xyz";
+    private const string MirrorLatestReleaseUrl = $"https://{MirrorHost}/api/releases/latest";
+    private const string MirrorReleasesUrl = $"https://{MirrorHost}/api/releases";
+
+    // Set by --force-mirror to skip GitHub entirely. A fallback path that only
+    // runs during a GitHub outage is a path you discover is broken during a
+    // GitHub outage; this makes it testable on demand.
+    public static bool ForceMirror { get; set; } =
+        Environment.GetCommandLineArgs().Any(argument =>
+            argument.Equals("--force-mirror", StringComparison.OrdinalIgnoreCase));
+
+    // Ordered source list. GitHub first, always.
+    private static IEnumerable<string> LatestReleaseSources =>
+        ForceMirror ? [MirrorLatestReleaseUrl] : [LatestReleaseUrl, MirrorLatestReleaseUrl];
+
+    private static IEnumerable<string> ReleaseListSources =>
+        ForceMirror ? [MirrorReleasesUrl] : [ReleasesUrl, MirrorReleasesUrl];
+
     public static Version CurrentVersion => Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0);
 
     // Last ETag and body seen per releases URL, so a repeat check can send
@@ -52,27 +75,72 @@ public static class AppUpdateService
     // cached copy a 304 just confirmed is still current. Null when the request
     // failed outright, so callers keep their existing failure behaviour rather
     // than parsing an empty string.
-    private static async Task<string?> GetJsonAsync(HttpClient client, string url, CancellationToken cancellationToken)
+    //
+    // ShouldFailOver says whether the next source is worth trying. A 404 is a
+    // real answer from a healthy host - there is simply no release - so it does
+    // not fail over. Transport faults, 5xx, and the rate-limit statuses do:
+    // a user behind CGNAT can exhaust the 60/hour unauthenticated budget while
+    // GitHub itself is perfectly healthy, and the mirror is the way out.
+    private static async Task<(string? Body, bool ShouldFailOver)> GetJsonAsync(HttpClient client, string url, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        var hasCached = ConditionalCache.TryGetValue(url, out var cached);
-        if (hasCached) request.Headers.TryAddWithoutValidation("If-None-Match", cached.ETag);
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            var hasCached = ConditionalCache.TryGetValue(url, out var cached);
+            if (hasCached) request.Headers.TryAddWithoutValidation("If-None-Match", cached.ETag);
 
-        using var response = await client.SendAsync(request, cancellationToken);
-        if (response.StatusCode == System.Net.HttpStatusCode.NotModified && hasCached) return cached.Body;
-        if (!response.IsSuccessStatusCode) return null;
+            using var response = await client.SendAsync(request, cancellationToken);
+            if (response.StatusCode == System.Net.HttpStatusCode.NotModified && hasCached) return (cached.Body, false);
+            if (!response.IsSuccessStatusCode) return (null, IsFailOverStatus(response.StatusCode));
 
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        // GitHub's ETags are weak ("W/..."), which If-None-Match accepts as-is.
-        var etag = response.Headers.ETag?.ToString();
-        if (!string.IsNullOrEmpty(etag)) ConditionalCache[url] = (etag, body);
-        return body;
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            // GitHub's ETags are weak ("W/..."), which If-None-Match accepts as-is.
+            var etag = response.Headers.ETag?.ToString();
+            if (!string.IsNullOrEmpty(etag)) ConditionalCache[url] = (etag, body);
+            return (body, false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The caller gave up; do not burn the fallback on a cancelled check.
+            throw;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or TimeoutException)
+        {
+            // Unreachable, DNS failure, TLS failure, or the per-request timeout.
+            return (null, true);
+        }
+    }
+
+    private static bool IsFailOverStatus(System.Net.HttpStatusCode status) => status is
+        System.Net.HttpStatusCode.Forbidden or        // GitHub reports rate limiting as 403
+        System.Net.HttpStatusCode.TooManyRequests or
+        System.Net.HttpStatusCode.RequestTimeout or
+        >= System.Net.HttpStatusCode.InternalServerError;
+
+    // Walks the source list in order, stopping at the first usable body.
+    private static async Task<string?> GetJsonWithFallbackAsync(HttpClient client, IEnumerable<string> sources, CancellationToken cancellationToken)
+    {
+        string? lastFailed = null;
+        foreach (var url in sources)
+        {
+            var (body, shouldFailOver) = await GetJsonAsync(client, url, cancellationToken);
+            if (body is not null)
+            {
+                if (lastFailed is not null) AppLog.Info($"Update source {lastFailed} unavailable; used {url} instead.");
+                return body;
+            }
+
+            if (!shouldFailOver) return null;
+            lastFailed = url;
+        }
+
+        return null;
     }
 
     public static async Task<AppUpdateInfo?> CheckAsync(CancellationToken cancellationToken = default)
     {
         using var client = CreateClient();
-        var json = await GetJsonAsync(client, LatestReleaseUrl, cancellationToken);
+        var json = await GetJsonWithFallbackAsync(client, LatestReleaseSources, cancellationToken);
         if (json is null) return null;
         var release = JsonSerializer.Deserialize<ReleaseResponse>(json);
         if (release is null || release.Draft || release.Prerelease || !TryParseVersion(release.TagName, out var latest) || latest <= CurrentVersion)
@@ -96,7 +164,7 @@ public static class AppUpdateService
         Directory.CreateDirectory(updateRoot);
         var setupPath = Path.Combine(updateRoot, $"ClypDat-Setup-{update.LatestVersion}.exe");
 
-        using var client = CreateClient();
+        using var client = CreateDownloadClient();
         progress?.Report(new UpdateDownloadProgress("Downloading update...", 0));
         using (var response = await client.GetAsync(update.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
         {
@@ -134,9 +202,24 @@ public static class AppUpdateService
     private static HttpClient CreateClient()
     {
         var client = new HttpClient();
-        client.Timeout = TimeSpan.FromSeconds(30);
+        // Short enough that failing over to the mirror is quick rather than a
+        // half-minute freeze, long enough for a slow connection to fetch the
+        // 126KB release list. The installer download uses its own client below.
+        client.Timeout = TimeSpan.FromSeconds(10);
         client.DefaultRequestHeaders.UserAgent.ParseAdd("ClypDat-AppUpdater");
         client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+        return client;
+    }
+
+    // The metadata timeout must not apply here: HttpClient.Timeout covers the
+    // whole operation, response body included, so any fixed value is a cap on
+    // how long a ~277MB installer may take to arrive. Cancellation is the
+    // caller's CancellationToken instead.
+    private static HttpClient CreateDownloadClient()
+    {
+        var client = new HttpClient();
+        client.Timeout = Timeout.InfiniteTimeSpan;
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("ClypDat-AppUpdater");
         return client;
     }
 
@@ -150,7 +233,7 @@ public static class AppUpdateService
         try
         {
             using var client = CreateClient();
-            var json = await GetJsonAsync(client, ReleasesUrl, cancellationToken);
+            var json = await GetJsonWithFallbackAsync(client, ReleaseListSources, cancellationToken);
             var releases = (json is null ? null : JsonSerializer.Deserialize<ReleaseResponse[]>(json)) ?? [];
             // Version equality would fail here: a "v0.1.8" tag parses to a
             // 3-field Version (Revision=-1), but the assembly's CurrentVersion
@@ -171,7 +254,7 @@ public static class AppUpdateService
     {
         try
         {
-            var json = await GetJsonAsync(client, ReleasesUrl, cancellationToken);
+            var json = await GetJsonWithFallbackAsync(client, ReleaseListSources, cancellationToken);
             var releases = (json is null ? null : JsonSerializer.Deserialize<ReleaseResponse[]>(json)) ?? [];
             var whatsNew = new List<string>();
             var fixes = new List<string>();
@@ -237,6 +320,10 @@ public static class AppUpdateService
         return (whatsNew, fixes);
     }
 
+    // Gate on what the updater is willing to download and execute. Kept as an
+    // explicit host+path allowlist rather than anything looser: this value
+    // comes from a remote JSON document, and whatever passes here gets run
+    // silently with /S.
     internal static bool IsTrustedReleaseAssetUrl(string value)
     {
         if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
@@ -244,8 +331,20 @@ public static class AppUpdateService
             return false;
         }
 
-        return string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase) &&
-            uri.AbsolutePath.StartsWith($"/{UpstreamOwner}/{UpstreamRepository}/releases/download/", StringComparison.OrdinalIgnoreCase);
+        if (string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase))
+        {
+            return uri.AbsolutePath.StartsWith($"/{UpstreamOwner}/{UpstreamRepository}/releases/download/", StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Mirror. The site redirects /download/<asset> to R2; the redirect
+        // target is never checked against this list, so the trust placed here
+        // extends to whoever controls the site and the bucket. Apex is accepted
+        // alongside www because the snapshot is only ever generated with one of
+        // them and a DNS change should not silently break updates.
+        var isMirrorHost = string.Equals(uri.Host, MirrorHost, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(uri.Host, MirrorApexHost, StringComparison.OrdinalIgnoreCase);
+
+        return isMirrorHost && uri.AbsolutePath.StartsWith("/download/", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void TryDelete(string path)
