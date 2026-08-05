@@ -76,11 +76,17 @@ public static class AppUpdateService
     // failed outright, so callers keep their existing failure behaviour rather
     // than parsing an empty string.
     //
-    // ShouldFailOver says whether the next source is worth trying. A 404 is a
-    // real answer from a healthy host - there is simply no release - so it does
-    // not fail over. Transport faults, 5xx, and the rate-limit statuses do:
-    // a user behind CGNAT can exhaust the 60/hour unauthenticated budget while
-    // GitHub itself is perfectly healthy, and the mirror is the way out.
+    // ShouldFailOver says whether the next source is worth trying. Transport
+    // faults, 5xx, and the rate-limit statuses all qualify: a user behind CGNAT
+    // can exhaust the 60/hour unauthenticated budget while GitHub itself is
+    // perfectly healthy, and the mirror is the way out.
+    //
+    // 404 qualifies too. It reads like a definitive "no release exists", but a
+    // flagged repository is served as 404 to anonymous callers while still
+    // reporting public to the owner - so the one failure this mirror was built
+    // for is indistinguishable from an empty repo. The cost of being wrong is
+    // one wasted request to the mirror; the cost of not failing over is every
+    // user silently stuck on their installed version.
     private static async Task<(string? Body, bool ShouldFailOver)> GetJsonAsync(HttpClient client, string url, CancellationToken cancellationToken)
     {
         try
@@ -113,6 +119,7 @@ public static class AppUpdateService
 
     private static bool IsFailOverStatus(System.Net.HttpStatusCode status) => status is
         System.Net.HttpStatusCode.Forbidden or        // GitHub reports rate limiting as 403
+        System.Net.HttpStatusCode.NotFound or         // and a flagged repository as 404
         System.Net.HttpStatusCode.TooManyRequests or
         System.Net.HttpStatusCode.RequestTimeout or
         >= System.Net.HttpStatusCode.InternalServerError;

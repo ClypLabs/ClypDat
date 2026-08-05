@@ -179,3 +179,19 @@ jobs:
             ClypDat-win-x64.zip ClypDat-Portable.exe ClypDat-Setup.exe ClypDat.msi `
             --title "ClypDat $tag" `
             --generate-notes
+
+      # Tells the webapp repo to push this release to the R2 mirror, which is
+      # what keeps downloads and in-app updates alive when GitHub is not serving
+      # this repo. The mirror also syncs on a 6-hour schedule, so a failure here
+      # delays the mirror rather than losing it - hence continue-on-error.
+      - name: Trigger mirror sync
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.MIRROR_DISPATCH_TOKEN }}
+        shell: pwsh
+        run: |
+          if (-not $env:GH_TOKEN) {
+            Write-Host "MIRROR_DISPATCH_TOKEN not set; the scheduled sync will pick this up."
+            exit 0
+          }
+          gh api repos/ClypDat/webapp/dispatches -f event_type=release-published
