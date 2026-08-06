@@ -619,6 +619,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // texture every hardware frame is copied from - a padding tick is only
         // meaningful once there is content there to repeat.
         var hasHardwareContent = false;
+        // The fixed set of NV12 surfaces every hardware frame is written into,
+        // recycled by reference count - see EncodeScheduledFrameHardware for
+        // why it is a fixed set and not ffmpeg's pool per tick. Sized to cover
+        // what the encoder can hold in flight; each one is a real VRAM surface
+        // (5.5MB at 1440p), so this is deliberately not queue-capacity deep.
+        var hardwareSurfaces = Array.Empty<nint>();
         // Vortice wrappers over the pool's texture pointers. ffmpeg hands back
         // a raw ID3D11Texture2D*; wrapping it fresh per frame would allocate 60
         // times a second, and disposing a wrapper would Release a reference the
@@ -732,7 +738,26 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             codecContext = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, out var codecTimeBase, out var encoderName, out var hardwareFramesActive);
             _timeBase = codecTimeBase;
 
-            if (!hardwareFramesActive) ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
+            if (hardwareFramesActive)
+            {
+                hardwareSurfaces = AllocateHardwareSurfaces(hwFramesRef, HardwareSurfaceCount);
+                // A pool that cannot even hand out its working set is not one to
+                // encode from.
+                if (hardwareSurfaces.Length < 2)
+                {
+                    AppLog.Info($"Native capture: only {hardwareSurfaces.Length} D3D11 encode surface(s) available, using system-memory frames.");
+                    ReleaseHardwareSurfaces(ref hardwareSurfaces);
+                    ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
+                    var softwareContext = CreateEncoder(config, outputWidth, outputHeight, out codecTimeBase, out encoderName);
+                    ffmpeg.avcodec_free_context(&codecContext);
+                    codecContext = softwareContext;
+                    _timeBase = codecTimeBase;
+                }
+            }
+            else
+            {
+                ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
+            }
 
             if (InitFullSessionWriter(config, codecContext, out fullSessionFormatContext, out fullSessionStream, out fullSessionTempVideoPath, out fullSessionFinalOutputPath))
             {
@@ -1811,6 +1836,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 // there is nothing to repeat until the rebuilt
                                 // scaler has written a frame.
                                 hasHardwareContent = false;
+                                ReleaseHardwareSurfaces(ref hardwareSurfaces);
                                 hardwarePoolTextures.Clear();
                                 ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
 
@@ -1818,6 +1844,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 {
                                     (hwDeviceRef, hwFramesRef) = TryCreateD3D11EncodeFrames(
                                         device, outputWidth, outputHeight, encodeQueueCapacity + HardwareFramePoolHeadroom);
+                                    if (hwFramesRef != 0)
+                                    {
+                                        hardwareSurfaces = AllocateHardwareSurfaces(hwFramesRef, HardwareSurfaceCount);
+                                        if (hardwareSurfaces.Length < 2)
+                                        {
+                                            ReleaseHardwareSurfaces(ref hardwareSurfaces);
+                                            ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
+                                        }
+                                    }
                                 }
 
                                 var replacement = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, out _, out var rebuiltEncoderName, out var rebuiltHardware);
@@ -1980,31 +2015,38 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // frame rather than a slower clip.
                     if (!hasHardwareContent) return;
 
-                    // EVERY frame gets its own pool surface, pads included.
-                    // Re-sending the previous frame's texture (which is what a
-                    // pad used to do, as a ref-counted clone) hands the encoder
-                    // a surface it may still have mapped from the frame before
-                    // it - NVENC then consumed the frame without emitting a
-                    // packet, silently. Measured: a 60s clip with 709 missing
-                    // ticks landing at 48fps, which is the SOURCE's present
-                    // rate, because effectively only real frames survived.
-                    // A pad now costs one GPU-local copy, and nothing is ever
-                    // in flight twice.
-                    var pooled = ffmpeg.av_frame_alloc();
-                    if (pooled is null)
+                    // A surface nothing else still holds. av_frame_is_writable
+                    // is exactly that question - it reports whether every buffer
+                    // behind the frame has a single reference, and the clone
+                    // handed to the encode queue is the other one. So a slot is
+                    // reusable precisely when its previous frame has finished
+                    // encoding and been freed.
+                    //
+                    // This fixed set exists because neither obvious alternative
+                    // works here. Re-sending the previous frame (a ref-counted
+                    // clone, which is what padding ticks used to do) hands NVENC
+                    // a texture it may still have mapped, and it consumes those
+                    // frames without emitting a packet - a 60s clip came out at
+                    // 48fps, the source's present rate, with 709 missing ticks.
+                    // Taking a fresh buffer from ffmpeg's pool every tick avoids
+                    // that but, since the driver rejects a fixed-size pool (see
+                    // TryCreateD3D11EncodeFrames) and a dynamic one allocates a
+                    // NEW texture whenever no slot is free, it made NVENC
+                    // re-register textures continuously: avgEncodeMs 31-46ms and
+                    // output down to ~21fps.
+                    AVFrame* surface = null;
+                    for (var i = 0; i < hardwareSurfaces.Length; i++)
                     {
-                        Interlocked.Increment(ref _encodeDroppedCount);
-                        Interlocked.Increment(ref _totalDroppedFrames);
-                        scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
-                        return;
+                        var candidate = (AVFrame*)hardwareSurfaces[i];
+                        if (candidate is null || ffmpeg.av_frame_is_writable(candidate) != 1) continue;
+                        surface = candidate;
+                        break;
                     }
 
-                    // Pool exhausted means every surface is still held by a
-                    // frame in the queue - the same condition a full queue
-                    // describes, and handled the same way.
-                    if (ffmpeg.av_hwframe_get_buffer((AVBufferRef*)hwFramesRef, pooled, 0) < 0)
+                    // Every surface is still inside the encoder - the same
+                    // condition a full queue describes, handled the same way.
+                    if (surface is null)
                     {
-                        ffmpeg.av_frame_free(&pooled);
                         Interlocked.Increment(ref _encodeDroppedCount);
                         Interlocked.Increment(ref _totalDroppedFrames);
                         scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
@@ -2013,8 +2055,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
                     // d3d11 frames carry the texture in data[0] and the slice
                     // index in data[1] - which is the destination subresource.
-                    var texturePointer = (nint)pooled->data[0];
-                    var arraySlice = (uint)(nint)pooled->data[1];
+                    var texturePointer = (nint)surface->data[0];
+                    var arraySlice = (uint)(nint)surface->data[1];
                     if (!hardwarePoolTextures.TryGetValue(texturePointer, out var poolTexture))
                     {
                         poolTexture = new ID3D11Texture2D(texturePointer);
@@ -2026,12 +2068,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
                     if (stopwatch.Elapsed - lastForcedKeyframe >= TimeSpan.FromSeconds(2))
                     {
-                        pooled->pict_type = AVPictureType.AV_PICTURE_TYPE_I;
+                        surface->pict_type = AVPictureType.AV_PICTURE_TYPE_I;
                         lastForcedKeyframe = stopwatch.Elapsed;
                     }
                     else
                     {
-                        pooled->pict_type = AVPictureType.AV_PICTURE_TYPE_NONE;
+                        surface->pict_type = AVPictureType.AV_PICTURE_TYPE_NONE;
                     }
 
                     var staleness = (MonotonicClock.UtcNow - lastFrameContentCapturedUtc).TotalMilliseconds;
@@ -2043,10 +2085,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // `frame` never carries pixels on this path - the pacing
                     // loop just set the pts on it, and this is where that pts
                     // meets the texture it belongs to.
-                    pooled->pts = frame->pts;
-                    if (!encodeQueue!.TryAdd(new EncodeJob((nint)pooled, MonotonicClock.UtcNow)))
+                    surface->pts = frame->pts;
+                    var outgoing = ffmpeg.av_frame_clone(surface);
+                    if (outgoing is null)
                     {
-                        var droppedFrame = pooled;
+                        Interlocked.Increment(ref _encodeDroppedCount);
+                        Interlocked.Increment(ref _totalDroppedFrames);
+                    }
+                    else if (!encodeQueue!.TryAdd(new EncodeJob((nint)outgoing, MonotonicClock.UtcNow)))
+                    {
+                        var droppedFrame = outgoing;
                         ffmpeg.av_frame_free(&droppedFrame);
                         Interlocked.Increment(ref _encodeDroppedCount);
                         Interlocked.Increment(ref _totalDroppedFrames);
@@ -2456,6 +2504,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             }
             retiredCodecContexts.Clear();
             hasHardwareContent = false;
+            // Surfaces before the pool that owns their textures, and both before
+            // the device those textures live on (disposed a few lines down).
+            ReleaseHardwareSurfaces(ref hardwareSurfaces);
             // Never disposed, only dropped - these wrappers were built over
             // pointers the pool owns and hold no reference of their own.
             hardwarePoolTextures.Clear();
@@ -3925,6 +3976,40 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // frame the encoder has finished with but not yet unreferenced can't
     // starve the next capture tick.
     private const int HardwareFramePoolHeadroom = 4;
+
+    // Surfaces held for the life of a session (or until a device rebuild
+    // replaces the pool under them).
+    private const int HardwareSurfaceCount = 12;
+
+    private static unsafe nint[] AllocateHardwareSurfaces(nint framesRef, int count)
+    {
+        var surfaces = new List<nint>(count);
+        for (var i = 0; i < count; i++)
+        {
+            var surface = ffmpeg.av_frame_alloc();
+            if (surface is null) break;
+            if (ffmpeg.av_hwframe_get_buffer((AVBufferRef*)framesRef, surface, 0) < 0)
+            {
+                ffmpeg.av_frame_free(&surface);
+                break;
+            }
+
+            surfaces.Add((nint)surface);
+        }
+
+        return surfaces.ToArray();
+    }
+
+    private static unsafe void ReleaseHardwareSurfaces(ref nint[] surfaces)
+    {
+        foreach (var entry in surfaces)
+        {
+            var surface = (AVFrame*)entry;
+            ffmpeg.av_frame_free(&surface);
+        }
+
+        surfaces = Array.Empty<nint>();
+    }
 
     private static unsafe void ReleaseHardwareFrames(ref nint deviceRef, ref nint framesRef)
     {
