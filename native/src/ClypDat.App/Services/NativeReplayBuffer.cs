@@ -77,6 +77,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private readonly string _bufferFolder;
     private readonly AudioCapturePipeline _audio;
     private readonly object _bufferLock = new();
+    // One clip encode at a time. Each save runs ffmpeg to build its audio
+    // tracks and mux the result - three or four processes, ~1.5s - and a burst
+    // of saves ran all of them at once. Four saves inside five seconds put the
+    // encode queue at 30/30 with 18 dropped frames a window, cut capture from
+    // 120 frames per 2s to 18, and slowed the GAME's own presents to 28-54ms:
+    // the clips saved during it read 41-49fps, while the two seconds after the
+    // storm passed logged a clean 120/120 with nothing dropped or skipped.
+    //
+    // The window is still borrowed the moment the hotkey is pressed, so a
+    // queued save still covers the moment the user asked for - only the
+    // expensive part waits.
+    private static readonly SemaphoreSlim SaveEncodeGate = new(1, 1);
     private readonly List<RingPacket> _packets = new();
     // Running total of _packets' payload bytes, maintained on add/trim under
     // _bufferLock. The diagnostic that reports this used to sum the whole list
@@ -310,8 +322,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // BorrowWindowUnderLock. Released in the finally at the end of this
         // method, which is what lets the ring recycle again.
         var window = BorrowWindowUnderLock(requestedStartUtc, requestedEndUtc);
+        var saveGateHeld = false;
         try
         {
+        await SaveEncodeGate.WaitAsync(cancellationToken);
+        saveGateHeld = true;
 
         var config = _configProvider();
         var clipName = string.IsNullOrWhiteSpace(titleOverride) ? config.GameDisplayName : titleOverride;
@@ -503,6 +518,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
         finally
         {
+            if (saveGateHeld) SaveEncodeGate.Release();
             ReleaseBorrowedWindow();
         }
     }
