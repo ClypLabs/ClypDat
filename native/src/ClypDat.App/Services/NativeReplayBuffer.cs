@@ -3850,11 +3850,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
     }
 
-    // D3D11_BIND_RENDER_TARGET. NVENC takes a D3D11 texture as an input
-    // resource directly, but only one it can bind - ffmpeg's own default for a
-    // d3d11va frames pool is D3D11_BIND_DECODER, which is for the decode path
-    // and is not what an encoder input wants.
-    private const uint D3D11BindRenderTarget = 0x20;
+    // Bind flags to try for the encoder's D3D11 frame pool, in order. 0 leaves
+    // ffmpeg's own default (D3D11_BIND_DECODER), which is what its decoder ->
+    // NVENC chain uses and so the best-supported combination; the others are
+    // there only for a driver that refuses it.
+    //
+    // Not a free choice: the pool is one NV12 texture ARRAY, and a bind flag
+    // the driver won't accept for an array of that format fails the whole
+    // CreateTexture2D. D3D11_BIND_RENDER_TARGET (0x20) was tried first here and
+    // failed exactly that way on an RTX 4070 Ti - "D3D11 encode frame pool init
+    // failed (error -1313558101)", AVERROR_UNKNOWN, which is what
+    // hwcontext_d3d11va reports when the texture cannot be created.
+    private static readonly uint[] EncodeFramePoolBindFlags = { 0, 0x20, 0x8 };
 
     // Pool slots beyond the encode queue's own capacity: one for the frame
     // being filled, one held back for padding ticks, and two of slack so a
@@ -3898,6 +3905,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // did.
     private static unsafe (nint DeviceRef, nint FramesRef) TryCreateD3D11EncodeFrames(
         ID3D11Device device, int width, int height, int poolSize)
+    {
+        foreach (var bindFlags in EncodeFramePoolBindFlags)
+        {
+            var attempt = TryCreateD3D11EncodeFrames(device, width, height, poolSize, bindFlags);
+            if (attempt.FramesRef != 0) return attempt;
+        }
+
+        return (0, 0);
+    }
+
+    private static unsafe (nint DeviceRef, nint FramesRef) TryCreateD3D11EncodeFrames(
+        ID3D11Device device, int width, int height, int poolSize, uint bindFlags)
     {
         AVBufferRef* deviceRef = null;
         AVBufferRef* framesRef = null;
@@ -3946,12 +3965,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // same way a full queue is: drop the frame.
             framesContext->initial_pool_size = poolSize;
             var d3dFrames = (AVD3D11VAFramesContext*)framesContext->hwctx;
-            d3dFrames->BindFlags = D3D11BindRenderTarget;
+            if (bindFlags != 0) d3dFrames->BindFlags = bindFlags;
 
             var framesInit = ffmpeg.av_hwframe_ctx_init(framesRef);
             if (framesInit < 0)
             {
-                AppLog.Info($"Native capture: D3D11 encode frame pool init failed (error {framesInit}), using system-memory frames.");
+                AppLog.Info($"Native capture: D3D11 encode frame pool init failed (error {framesInit}, bindFlags=0x{bindFlags:X}).");
                 ffmpeg.av_buffer_unref(&framesRef);
                 ffmpeg.av_buffer_unref(&deviceRef);
                 return (0, 0);
