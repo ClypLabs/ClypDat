@@ -2045,12 +2045,25 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // re-register textures continuously: avgEncodeMs 31-46ms and
                     // output down to ~21fps.
                     AVFrame* surface = null;
-                    for (var i = 0; i < hardwareSurfaces.Length; i++)
+                    // Short spin before giving up. A surface frees the moment
+                    // its packet comes out, and an encode that spikes to ~40ms
+                    // under GPU contention is routinely one tick from releasing
+                    // one - dropping the frame instead punches a hole in a
+                    // timeline that is meant to be exactly the configured rate.
+                    // Bounded well under a frame interval so a genuinely stuck
+                    // encoder still degrades to dropping rather than stalling
+                    // the capture loop behind it.
+                    for (var attempt = 0; attempt < 8 && surface is null; attempt++)
                     {
-                        var candidate = (AVFrame*)hardwareSurfaces[i];
-                        if (candidate is null || ffmpeg.av_frame_is_writable(candidate) != 1) continue;
-                        surface = candidate;
-                        break;
+                        for (var i = 0; i < hardwareSurfaces.Length; i++)
+                        {
+                            var candidate = (AVFrame*)hardwareSurfaces[i];
+                            if (candidate is null || ffmpeg.av_frame_is_writable(candidate) != 1) continue;
+                            surface = candidate;
+                            break;
+                        }
+
+                        if (surface is null) Thread.Sleep(1);
                     }
 
                     // Every surface is still inside the encoder - the same
@@ -3926,6 +3939,20 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 // 7-9ms once the working set fits. Comfortably above
                 // HardwareSurfaceCount so the whole set stays resident.
                 TrySet("surfaces", "16");
+                // How many frames NVENC may hold before releasing the first
+                // packet. Left at its default it uses the surface count, and
+                // this encoder now feeds from a FIXED set of D3D11 surfaces
+                // (HardwareSurfaceCount) that are only recycled once their
+                // packet comes out - so a delay at or above that set is a
+                // deadlock: every surface ends up inside the encoder, waiting
+                // for an input frame that needs a surface to exist. Observed as
+                // capture stopping dead at exactly 8 frames encoded with
+                // avgEncodeMs 0.00 and every later frame dropped.
+                //
+                // Four keeps real pipelining (1 measured as good as serialising
+                // the encoder on other backends) while leaving half the set free
+                // at all times.
+                TrySet("delay", "2");
                 break;
             // AMF/QSV keep their existing usage/preset strings: there's no AMD
             // or Intel hardware here to confirm a change doesn't cost frames,
