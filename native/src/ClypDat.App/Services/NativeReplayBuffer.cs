@@ -645,6 +645,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         var fullSessionStartWallUtc = DateTime.UtcNow;
         var fullSessionGameDisplayName = string.Empty;
         var timerResolutionRaised = TimeBeginPeriod(1) == 0;
+        // The capture loop has one frame interval to acquire, scale and hand
+        // off each frame, and a missed one is a permanent hole in the clip.
+        // MMCSS is what keeps this thread scheduled while a game owns every
+        // core - see MmcssScope.Capture.
+        using var captureMmcss = MmcssScope.Capture("native capture loop");
 
         try
         {
@@ -3014,6 +3019,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // on - CaptureLoop never touches them again after starting this thread.
     private unsafe void EncodeLoop(BlockingCollection<EncodeJob> queue, nint codecContextPtr, nint packetPtr, nint fullSessionFormatContextPtr, nint fullSessionStreamPtr)
     {
+        // Same reasoning as the capture loop: this thread owns the encoder, and
+        // a stall here backs the queue up until frames start being dropped.
+        using var encodeMmcss = MmcssScope.Capture("native encode thread");
         var codecContext = (AVCodecContext*)codecContextPtr;
         var packet = (AVPacket*)packetPtr;
         var fullSessionFormatContext = (AVFormatContext*)fullSessionFormatContextPtr;
