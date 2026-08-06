@@ -611,15 +611,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // on every exit path including an exception mid-loop.
         BlockingCollection<EncodeJob>? encodeQueue = null;
         Thread? encodeThread = null;
-        // Zero-copy encode state (see TryCreateD3D11EncodeFrames). All three
-        // stay 0/null on the system-memory path, which is what every check
-        // below tests for.
+        // Zero-copy encode state (see TryCreateD3D11EncodeFrames). Both stay 0
+        // on the system-memory path, which is what every check below tests for.
         nint hwDeviceRef = 0;
         nint hwFramesRef = 0;
-        // The most recently filled pool frame, kept referenced so a padding
-        // tick (nothing new presented) can re-send the same texture instead of
-        // burning a pool slot on a byte-identical copy.
-        AVFrame* lastHardwareFrame = null;
+        // Whether anything has ever been scaled into nv12Output, which is the
+        // texture every hardware frame is copied from - a padding tick is only
+        // meaningful once there is content there to repeat.
+        var hasHardwareContent = false;
         // Vortice wrappers over the pool's texture pointers. ffmpeg hands back
         // a raw ID3D11Texture2D*; wrapping it fresh per frame would allocate 60
         // times a second, and disposing a wrapper would Release a reference the
@@ -1807,7 +1806,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             // capture continues either way.
                             if (hwFramesRef != 0)
                             {
-                                if (lastHardwareFrame is not null) { var staleHardwareFrame = lastHardwareFrame; ffmpeg.av_frame_free(&staleHardwareFrame); lastHardwareFrame = null; }
+                                // Every pool texture belonged to the device that
+                                // was just destroyed, and nv12Output with them -
+                                // there is nothing to repeat until the rebuilt
+                                // scaler has written a frame.
+                                hasHardwareContent = false;
                                 hardwarePoolTextures.Clear();
                                 ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
 
@@ -1951,9 +1954,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 // just set; it is only ever a carrier on this path.
                 unsafe void EncodeScheduledFrameHardware()
                 {
+                    stageStopwatch.Restart();
+                    // Only a tick with new content owes a Blt. Everything after
+                    // it runs for pads too: nv12Output still holds the last
+                    // scaled frame, so a pad is the same copy from the same
+                    // source, just without re-scaling it.
                     if (croppedDirty)
                     {
-                        stageStopwatch.Restart();
                         if (!nv12Ready)
                         {
                             bltStreams[0].Enable = true;
@@ -1963,60 +1970,68 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
                         nv12Ready = false;
                         croppedDirty = false;
-
-                        var pooled = ffmpeg.av_frame_alloc();
-                        if (pooled is null)
-                        {
-                            Interlocked.Increment(ref _encodeDroppedCount);
-                            Interlocked.Increment(ref _totalDroppedFrames);
-                            scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
-                            return;
-                        }
-
-                        // Pool exhausted means every surface is still held by a
-                        // frame in the queue - the same condition a full queue
-                        // describes, and handled the same way.
-                        if (ffmpeg.av_hwframe_get_buffer((AVBufferRef*)hwFramesRef, pooled, 0) < 0)
-                        {
-                            ffmpeg.av_frame_free(&pooled);
-                            Interlocked.Increment(ref _encodeDroppedCount);
-                            Interlocked.Increment(ref _totalDroppedFrames);
-                            scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
-                            return;
-                        }
-
-                        // d3d11 frames carry the texture in data[0] and, since
-                        // the pool is one texture ARRAY, the slice index in
-                        // data[1] - which is the destination subresource.
-                        var texturePointer = (nint)pooled->data[0];
-                        var arraySlice = (uint)(nint)pooled->data[1];
-                        if (!hardwarePoolTextures.TryGetValue(texturePointer, out var poolTexture))
-                        {
-                            poolTexture = new ID3D11Texture2D(texturePointer);
-                            hardwarePoolTextures[texturePointer] = poolTexture;
-                        }
-
-                        device.ImmediateContext.CopySubresourceRegion(poolTexture, arraySlice, 0, 0, 0, nv12Output!, 0);
-
-                        if (lastHardwareFrame is not null) { var staleHardwareFrame = lastHardwareFrame; ffmpeg.av_frame_free(&staleHardwareFrame); lastHardwareFrame = null; }
-                        lastHardwareFrame = pooled;
-                        scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
+                        hasHardwareContent = true;
                     }
 
-                    // Nothing captured yet at all - no texture to send, and the
-                    // system-memory path's black placeholder has no equivalent
-                    // here. The pacing loop already advanced its timeline, so
-                    // this reads as a dropped frame, not a slower clip.
-                    if (lastHardwareFrame is null) return;
+                    // Nothing has ever been scaled into nv12Output - there is no
+                    // texture to send, and the system-memory path's black
+                    // placeholder has no equivalent here. The pacing loop has
+                    // already advanced its timeline, so this reads as a dropped
+                    // frame rather than a slower clip.
+                    if (!hasHardwareContent) return;
+
+                    // EVERY frame gets its own pool surface, pads included.
+                    // Re-sending the previous frame's texture (which is what a
+                    // pad used to do, as a ref-counted clone) hands the encoder
+                    // a surface it may still have mapped from the frame before
+                    // it - NVENC then consumed the frame without emitting a
+                    // packet, silently. Measured: a 60s clip with 709 missing
+                    // ticks landing at 48fps, which is the SOURCE's present
+                    // rate, because effectively only real frames survived.
+                    // A pad now costs one GPU-local copy, and nothing is ever
+                    // in flight twice.
+                    var pooled = ffmpeg.av_frame_alloc();
+                    if (pooled is null)
+                    {
+                        Interlocked.Increment(ref _encodeDroppedCount);
+                        Interlocked.Increment(ref _totalDroppedFrames);
+                        scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
+                        return;
+                    }
+
+                    // Pool exhausted means every surface is still held by a
+                    // frame in the queue - the same condition a full queue
+                    // describes, and handled the same way.
+                    if (ffmpeg.av_hwframe_get_buffer((AVBufferRef*)hwFramesRef, pooled, 0) < 0)
+                    {
+                        ffmpeg.av_frame_free(&pooled);
+                        Interlocked.Increment(ref _encodeDroppedCount);
+                        Interlocked.Increment(ref _totalDroppedFrames);
+                        scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
+                        return;
+                    }
+
+                    // d3d11 frames carry the texture in data[0] and the slice
+                    // index in data[1] - which is the destination subresource.
+                    var texturePointer = (nint)pooled->data[0];
+                    var arraySlice = (uint)(nint)pooled->data[1];
+                    if (!hardwarePoolTextures.TryGetValue(texturePointer, out var poolTexture))
+                    {
+                        poolTexture = new ID3D11Texture2D(texturePointer);
+                        hardwarePoolTextures[texturePointer] = poolTexture;
+                    }
+
+                    device.ImmediateContext.CopySubresourceRegion(poolTexture, arraySlice, 0, 0, 0, nv12Output!, 0);
+                    scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
 
                     if (stopwatch.Elapsed - lastForcedKeyframe >= TimeSpan.FromSeconds(2))
                     {
-                        lastHardwareFrame->pict_type = AVPictureType.AV_PICTURE_TYPE_I;
+                        pooled->pict_type = AVPictureType.AV_PICTURE_TYPE_I;
                         lastForcedKeyframe = stopwatch.Elapsed;
                     }
                     else
                     {
-                        lastHardwareFrame->pict_type = AVPictureType.AV_PICTURE_TYPE_NONE;
+                        pooled->pict_type = AVPictureType.AV_PICTURE_TYPE_NONE;
                     }
 
                     var staleness = (MonotonicClock.UtcNow - lastFrameContentCapturedUtc).TotalMilliseconds;
@@ -2025,20 +2040,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     frameStalenessCount++;
 
                     stageStopwatch.Restart();
-                    // Cloned, not handed over: a padding tick sends this same
-                    // surface again, so the capture side has to keep its own
-                    // reference. The clone is a ref-counted handle to the very
-                    // same texture, not a copy of it.
-                    lastHardwareFrame->pts = frame->pts;
-                    var outgoing = ffmpeg.av_frame_clone(lastHardwareFrame);
-                    if (outgoing is null)
+                    // `frame` never carries pixels on this path - the pacing
+                    // loop just set the pts on it, and this is where that pts
+                    // meets the texture it belongs to.
+                    pooled->pts = frame->pts;
+                    if (!encodeQueue!.TryAdd(new EncodeJob((nint)pooled, MonotonicClock.UtcNow)))
                     {
-                        Interlocked.Increment(ref _encodeDroppedCount);
-                        Interlocked.Increment(ref _totalDroppedFrames);
-                    }
-                    else if (!encodeQueue!.TryAdd(new EncodeJob((nint)outgoing, MonotonicClock.UtcNow)))
-                    {
-                        var droppedFrame = outgoing;
+                        var droppedFrame = pooled;
                         ffmpeg.av_frame_free(&droppedFrame);
                         Interlocked.Increment(ref _encodeDroppedCount);
                         Interlocked.Increment(ref _totalDroppedFrames);
@@ -2447,10 +2455,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 ffmpeg.avcodec_free_context(&context);
             }
             retiredCodecContexts.Clear();
-            // Frame pool before the textures under it: unreferencing the last
-            // frame is what lets the pool release its D3D11 surfaces, and those
-            // belong to the device disposed a few lines down.
-            if (lastHardwareFrame is not null) { var staleHardwareFrame = lastHardwareFrame; ffmpeg.av_frame_free(&staleHardwareFrame); lastHardwareFrame = null; }
+            hasHardwareContent = false;
             // Never disposed, only dropped - these wrappers were built over
             // pointers the pool owns and hold no reference of their own.
             hardwarePoolTextures.Clear();
@@ -3016,7 +3021,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         var fullSessionStream = (AVStream*)fullSessionStreamPtr;
         // Same FIFO purpose as the original inline version - see DrainToRingBuffer's
         // dequeue site - just living here now since send_frame moved here with it.
-        var pendingFrameWallClocks = new Queue<DateTime>();
+        var pendingFrameWallClocks = new LinkedList<DateTime>();
         try
         {
             foreach (var job in queue.GetConsumingEnumerable())
@@ -3054,6 +3059,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // while droppedFrames and padsSkipped both read 0, which is
                     // what a 60fps capture reading 58fps in the file actually
                     // was. Drain and offer the frame again instead.
+                    // Appended BEFORE the send, and taken back off only if the
+                    // frame is ultimately refused. The drain below (and the one
+                    // inside the EAGAIN retry) pops one of these per packet the
+                    // encoder releases, and those packets belong to frames sent
+                    // several calls ago - so appending after a successful send
+                    // starves the queue exactly when the retry path runs, and
+                    // every packet drained there falls back to "now" for its
+                    // capture timestamp, which is the value audio alignment is
+                    // built on.
+                    pendingFrameWallClocks.AddLast(job.WallClockUtc);
                     var sendResult = ffmpeg.avcodec_send_frame(codecContext, jobFrame);
                     if (sendResult == ffmpeg.AVERROR(ffmpeg.EAGAIN))
                     {
@@ -3063,19 +3078,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
                     if (sendResult == 0)
                     {
-                        // Enqueued only once the encoder has actually accepted
-                        // the frame. DrainToRingBuffer dequeues one of these per
-                        // packet that comes out, so adding an entry for a frame
-                        // that was never encoded shifted every later packet's
-                        // real capture timestamp by one frame - the value audio
-                        // alignment is built on.
-                        pendingFrameWallClocks.Enqueue(job.WallClockUtc);
                         DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrameWallClocks);
                     }
                     else
                     {
                         // Genuinely refused. Counted now, so a clip that comes
                         // up short says so in the diag instead of looking clean.
+                        // Its timestamp comes back off too - no packet will ever
+                        // correspond to it.
+                        pendingFrameWallClocks.RemoveLast();
                         Interlocked.Increment(ref _encodeDroppedCount);
                         Interlocked.Increment(ref _totalDroppedFrames);
                     }
@@ -3102,7 +3113,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
     }
 
-    private unsafe void DrainToRingBuffer(AVCodecContext* codecContext, AVPacket* packet, AVFormatContext* fullSessionFormatContext, AVStream* fullSessionStream, Queue<DateTime> pendingFrameWallClocks)
+    private unsafe void DrainToRingBuffer(AVCodecContext* codecContext, AVPacket* packet, AVFormatContext* fullSessionFormatContext, AVStream* fullSessionStream, LinkedList<DateTime> pendingFrameWallClocks)
     {
         while (true)
         {
@@ -3134,7 +3145,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // before releasing output, and packet->pts is now an IDEAL,
             // constant-rate timestamp (see the pacing gate in CaptureLoop) so
             // it can't be used to derive this the way it used to be.
-            var realWallClockUtc = pendingFrameWallClocks.Count > 0 ? pendingFrameWallClocks.Dequeue() : MonotonicClock.UtcNow;
+            var realWallClockUtc = MonotonicClock.UtcNow;
+            if (pendingFrameWallClocks.First is not null)
+            {
+                realWallClockUtc = pendingFrameWallClocks.First.Value;
+                pendingFrameWallClocks.RemoveFirst();
+            }
 
             lock (_bufferLock)
             {
