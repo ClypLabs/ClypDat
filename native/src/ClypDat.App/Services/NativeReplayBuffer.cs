@@ -3906,10 +3906,25 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private static unsafe (nint DeviceRef, nint FramesRef) TryCreateD3D11EncodeFrames(
         ID3D11Device device, int width, int height, int poolSize)
     {
-        foreach (var bindFlags in EncodeFramePoolBindFlags)
+        // Pool shape matters as much as the flags. A non-zero initial size makes
+        // ffmpeg allocate the whole pool as ONE NV12 texture array, and an RTX
+        // 4070 Ti refuses to create that array at any of the bind flags above -
+        // CreateTexture2D fails and the init reports AVERROR_UNKNOWN. Size 0
+        // switches ffmpeg to allocating a separate single texture per frame,
+        // recycled through its own buffer pool, which is the shape the driver
+        // does accept. Frames in flight are still bounded by the encode queue,
+        // so a dynamic pool is not unbounded VRAM.
+        foreach (var size in new[] { poolSize, 0 })
         {
-            var attempt = TryCreateD3D11EncodeFrames(device, width, height, poolSize, bindFlags);
-            if (attempt.FramesRef != 0) return attempt;
+            foreach (var bindFlags in EncodeFramePoolBindFlags)
+            {
+                var attempt = TryCreateD3D11EncodeFrames(device, width, height, size, bindFlags);
+                if (attempt.FramesRef != 0)
+                {
+                    AppLog.Info($"Native capture: D3D11 encode frame pool ready (poolSize={size}, bindFlags=0x{bindFlags:X}).");
+                    return attempt;
+                }
+            }
         }
 
         return (0, 0);
@@ -4148,11 +4163,23 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 ? new[] { true, false }
                 : new[] { false };
 
-            // Zero-copy is attempted for NVENC only. AMF and QSV advertise
-            // their own D3D11 input paths, but there is no AMD or Intel
-            // hardware here to confirm one against, and the fallback below is
-            // the exact behaviour those paths have today.
-            if (hardwareFramesRef != 0 && candidateName == "h264_nvenc")
+            // NVENC and AMF both take an AV_PIX_FMT_D3D11 frame from a d3d11va
+            // device, so the same pool feeds either - checked against this
+            // build: "Supported hardware devices: cuda d3d11va" for NVENC,
+            // "d3d11va dxva2 amf" for AMF.
+            //
+            // QSV is deliberately not here. It accepts only qsv frames from a
+            // qsv device, so zero-copy there means deriving a QSV device from
+            // the D3D11 one and mapping every captured texture into a qsv frame
+            // on the hot path - new per-frame machinery that there is no Intel
+            // hardware here to test. QSV keeps the system-memory path it has
+            // always used, unchanged.
+            //
+            // None of this is load-bearing on AMD or Intel regardless: the pool
+            // creation, the encoder open and the probe encode below each fall
+            // back to system-memory frames on failure, which is exactly what
+            // those machines do today.
+            if (hardwareFramesRef != 0 && candidateName is "h264_nvenc" or "h264_amf")
             {
                 var probeContext = TryOpen(candidateCodec, candidateName, false, hardwareFrames: true);
                 if (probeContext is not null)
