@@ -210,7 +210,17 @@ public sealed class EncoderTuningService
         if (now - _lastDecisionUtc < Cooldown) return;
 
         var overloadCount = _recentOverloads.Count(entry => entry);
-        if (_recentOverloads.Count >= WindowSize && overloadCount >= DemoteThreshold)
+        // `severe` as well as the window count: the window holds 30s of history
+        // and the cooldown holds a decision back for 60s, so a burst that ended
+        // half a minute ago could still spend a lever while the encoder is
+        // visibly fine RIGHT NOW. That is not theoretical - it fired on this
+        // line and halved a capture's frame rate:
+        //   "sustained overload ... 8/15 windows severely overloaded,
+        //    dropped=0, queue=0/30, outputFps=60.0/60"
+        // Zero drops, empty queue, output exactly at target. Requiring the
+        // current sample to be bad too means a lever is only ever spent on a
+        // problem that is still happening.
+        if (severe && _recentOverloads.Count >= WindowSize && overloadCount >= DemoteThreshold)
         {
             ProposeDemotion(health, now, overloadCount);
             return;
@@ -296,6 +306,38 @@ public sealed class EncoderTuningService
     private void ProposePromotionIfEarned(ReplayCaptureHealth health, DateTime now)
     {
         if (_cleanSinceUtc is null || now - _cleanSinceUtc < PromoteAfterClean) return;
+
+        // Frame rate comes back before any preset does. It was a one-way latch:
+        // nothing anywhere restored it, so a single bad fight pinned the rest of
+        // the session at half the configured rate, and every clip saved after it
+        // read 30fps on a 60fps setting with no explanation the user could see.
+        // The preset ladder below is observe-only, which meant the levers that
+        // actually take effect were exactly the ones that could never be undone.
+        //
+        // Guarded by the same clean streak and queue-headroom test promotion
+        // uses, so this only happens when the machine has demonstrably been
+        // coping for the full window.
+        if (health.EncodeQueueCapacity > 0 && _queueDepthSinceClean * 4 >= health.EncodeQueueCapacity)
+        {
+            return;
+        }
+
+        if (_frameRateReduced && _activeFrameRate < _configuredFrameRate)
+        {
+            var previous = _activeFrameRate;
+            _activeFrameRate = _configuredFrameRate;
+            _frameRateReduced = false;
+            AppLog.Info($"Encoder tuning: restoring target frame rate {previous} -> {_configuredFrameRate} fps - " +
+                        $"clean for {(now - _cleanSinceUtc.Value).TotalMinutes:0.0} min, " +
+                        $"peak queue since clean {_queueDepthSinceClean}/{health.EncodeQueueCapacity}, " +
+                        $"outputFps={health.OutputFrameRate:0.0}/{health.TargetFrameRate}.");
+            FrameRateChangeRequested?.Invoke(this, new EncoderFrameRateChange(previous, _configuredFrameRate));
+            _lastDecisionUtc = now;
+            _cleanSinceUtc = null;
+            _queueDepthSinceClean = 0;
+            return;
+        }
+
         // Never above what the user actually asked for - the tuner's job is to
         // rescue a setting that cannot keep up, not to overrule the choice.
         var next = Step(_proposedPreset, -1);
