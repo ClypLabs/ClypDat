@@ -32,6 +32,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // Start paused until first detector result arrives, so startup cannot
     // briefly launch ffmpeg before a foreground game is known.
     private bool _gameIsActive = true;
+    // Set when a hydration pass was skipped because a game was running, so it
+    // can be picked up once the game exits - see HydrateLibraryClipsAsync.
+    private bool _libraryHydrationDeferredForGame;
     private FileSystemWatcher? _libraryWatcher;
     private DispatcherTimer? _libraryFolderRetryTimer;
     private readonly DispatcherTimer _libraryRefreshDebounce;
@@ -6233,6 +6236,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _backgroundFilmstripCts?.Cancel();
             return;
         }
+
+        // Whatever the game postponed - see HydrateLibraryClipsAsync.
+        if (_libraryHydrationDeferredForGame)
+        {
+            _libraryHydrationDeferredForGame = false;
+            AppLog.Info("Library hydration resuming: no game running.");
+            StartLibraryHydration(AllClips.ToArray());
+        }
+
         StartBackgroundFilmstripHydration();
     }
 
@@ -6665,6 +6677,27 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // it in the list from getting at least its basic info quickly.
     private async Task HydrateLibraryClipsAsync(IReadOnlyList<ClipCardViewModel> clips, CancellationToken cancellationToken)
     {
+        // Not while a game is running. Only the filmstrip sweep used to wait;
+        // the probe and thumbnail passes ran regardless, so launching (or
+        // restarting) ClypDat mid-match spent the next minute running ffprobe
+        // and ffmpeg across the library while the user was playing.
+        //
+        // Measured: the capture queue pinned at 30/30 with 18-30 frames dropped
+        // per 2s window, capture falling from 120 frames per 2s to 20, and the
+        // GAME's own presents stretching to 50ms. Clips saved in that window
+        // read 31-39fps; a minute later, same build, library work finished, the
+        // same capture logged a clean 120/120 with nothing dropped.
+        //
+        // Cards still appear meanwhile - they come from the library cache - they
+        // just wait for their duration and thumbnail. Picked up by
+        // SetGameActiveForTimelineHydration once the game goes away.
+        if (_gameIsActive)
+        {
+            _libraryHydrationDeferredForGame = true;
+            AppLog.Info($"Library hydration deferred: a game is running ({clips.Count} clip(s) waiting).");
+            return;
+        }
+
         try
         {
             // Bar resets per phase (0/clips.Count each time, not a combined
