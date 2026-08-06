@@ -125,6 +125,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // at fixing the suspected cause have made things worse - so measure where
     // the frames actually go before touching the path again. Counters only,
     // no behaviour attached.
+    // A save holds references into the ring instead of copying its bytes out,
+    // so payload recycling has to wait for it - see BorrowWindowUnderLock.
+    private int _borrowedWindowDepth;
+    private readonly List<byte[]> _deferredPayloadReturns = new();
     private long _sendRefusedEagainCount;
     private long _sendFailedOtherCount;
     private long _packetsOutCount;
@@ -302,9 +306,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             throw new InvalidOperationException("The requested replay window is empty.");
         }
 
-        // Selects and copies in one locked pass - see CopyWindowUnderLock for
-        // why the copy is what keeps the ring's pooled payloads safe.
-        var window = CopyWindowUnderLock(requestedStartUtc, requestedEndUtc);
+        // Selected under the lock, payloads borrowed rather than copied - see
+        // BorrowWindowUnderLock. Released in the finally at the end of this
+        // method, which is what lets the ring recycle again.
+        var window = BorrowWindowUnderLock(requestedStartUtc, requestedEndUtc);
+        try
+        {
 
         var config = _configProvider();
         var clipName = string.IsNullOrWhiteSpace(titleOverride) ? config.GameDisplayName : titleOverride;
@@ -493,6 +500,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
         AppLog.Info($"Native replay saved: path={outputPath}, packets={window.Length}.");
         return outputPath;
+        }
+        finally
+        {
+            ReleaseBorrowedWindow();
+        }
     }
 
     public void SetCapturePaused(bool paused)
@@ -3438,21 +3450,58 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // _bufferLock and must remove the entries themselves - this only releases
     // the payloads and keeps _ringBufferBytes in step.
     //
-    // Safe to recycle unconditionally because nothing outside the ring ever
-    // holds one of these arrays: SaveReplayAsync takes its own copy of the
-    // bytes before it lets go of the lock (see CopyWindowUnderLock).
+    // Recycling waits while a save is holding references into the ring - see
+    // BorrowWindowUnderLock. Trimming the entry out of _packets still happens
+    // immediately; only handing the array back to the pool is deferred, so the
+    // ring keeps its own accounting and a save can never read a payload that
+    // has been re-rented under it.
     private void ReturnPooledPackets(int index, int count)
     {
         for (var i = index; i < index + count; i++)
         {
             var packet = _packets[i];
             _ringBufferBytes -= packet.Length;
-            ArrayPool<byte>.Shared.Return(packet.Data);
+            if (_borrowedWindowDepth > 0) _deferredPayloadReturns.Add(packet.Data);
+            else ArrayPool<byte>.Shared.Return(packet.Data);
         }
     }
 
-    // Selects the save window and copies its bytes out of the ring, both under
-    // the buffer lock.
+    // Paired with BorrowWindowUnderLock. Once the last save in flight is done
+    // with its references, everything trimmed while it ran goes back at once.
+    private void ReleaseBorrowedWindow()
+    {
+        lock (_bufferLock)
+        {
+            if (_borrowedWindowDepth > 0) _borrowedWindowDepth--;
+            if (_borrowedWindowDepth > 0 || _deferredPayloadReturns.Count == 0) return;
+
+            foreach (var payload in _deferredPayloadReturns) ArrayPool<byte>.Shared.Return(payload);
+            _deferredPayloadReturns.Clear();
+        }
+    }
+
+    // Selects the save window under the buffer lock and BORROWS its payloads -
+    // no bytes are copied here.
+    //
+    // It used to copy every packet's bytes while holding the lock, which for a
+    // 60s 1440p window is ~3000 allocations and a couple of hundred megabytes
+    // memcpy'd with the ring locked. The encode thread takes that same lock for
+    // every packet it produces, so each save stalled encoding outright: three
+    // saves inside 32 seconds drove the encode queue to 29/30 and 17 dropped
+    // frames while the encoder itself was running at 0.63ms a frame, and the
+    // tuner then halved the capture rate blaming an encoder that was never
+    // behind. Clips saved during that stretch came out at 27-48fps.
+    //
+    // Borrowing instead means the lock is held only for two index scans. What
+    // the copy was protecting against - TrimRingBuffer recycling a payload into
+    // a new packet while the remux is still reading it - is handled by deferring
+    // pool returns for as long as any save holds a window (see
+    // ReturnPooledPackets/ReleaseBorrowedWindow). Entries still leave the ring
+    // on schedule; only the arrays wait.
+    //
+    // Every caller MUST pair this with ReleaseBorrowedWindow in a finally, or
+    // the pool stops recycling for the rest of the session.
+    private RingPacket[] BorrowWindowUnderLock(DateTime requestedStartUtc, DateTime requestedEndUtc)
     //
     // The copy is what lets the ring pool its payloads at all. TrimRingBuffer
     // keeps running once a second for the entire multi-second life of a save,
@@ -3466,7 +3515,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // because the copy has to be in there anyway. These are plain index scans
     // over value fields, not the LINQ pipeline that made holding this lock
     // expensive before.
-    private RingPacket[] CopyWindowUnderLock(DateTime requestedStartUtc, DateTime requestedEndUtc)
     {
         lock (_bufferLock)
         {
@@ -3490,16 +3538,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             if (endIndex < startIndex) throw new InvalidOperationException("The requested replay window is no longer available.");
 
             var window = new RingPacket[endIndex - startIndex + 1];
-            for (var i = 0; i < window.Length; i++)
-            {
-                var source = _packets[startIndex + i];
-                // Exact-sized, so the copy's Data.Length and Length agree and
-                // it is never handed back to the pool by mistake.
-                var data = new byte[source.Length];
-                Array.Copy(source.Data, data, source.Length);
-                window[i] = source with { Data = data };
-            }
-
+            _packets.CopyTo(startIndex, window, 0, window.Length);
+            // Payloads are now referenced by this window as well as the ring.
+            // Readers use RingPacket.Length, never Data.Length, so a pooled
+            // array being longer than its packet does not matter.
+            _borrowedWindowDepth++;
             return window;
         }
     }
