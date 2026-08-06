@@ -3045,10 +3045,39 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 try
                 {
-                    pendingFrameWallClocks.Enqueue(job.WallClockUtc);
-                    if (ffmpeg.avcodec_send_frame(codecContext, jobFrame) == 0)
+                    // EAGAIN from send_frame is not a failure - it means the
+                    // encoder is holding output that has to be collected before
+                    // it will take another frame. This used to be treated as
+                    // "oh well" and the frame was freed unsent, silently and
+                    // uncounted: a saved clip showed 112 missing ticks scattered
+                    // across 61s (24 single-frame gaps, 22 double, and so on)
+                    // while droppedFrames and padsSkipped both read 0, which is
+                    // what a 60fps capture reading 58fps in the file actually
+                    // was. Drain and offer the frame again instead.
+                    var sendResult = ffmpeg.avcodec_send_frame(codecContext, jobFrame);
+                    if (sendResult == ffmpeg.AVERROR(ffmpeg.EAGAIN))
                     {
                         DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrameWallClocks);
+                        sendResult = ffmpeg.avcodec_send_frame(codecContext, jobFrame);
+                    }
+
+                    if (sendResult == 0)
+                    {
+                        // Enqueued only once the encoder has actually accepted
+                        // the frame. DrainToRingBuffer dequeues one of these per
+                        // packet that comes out, so adding an entry for a frame
+                        // that was never encoded shifted every later packet's
+                        // real capture timestamp by one frame - the value audio
+                        // alignment is built on.
+                        pendingFrameWallClocks.Enqueue(job.WallClockUtc);
+                        DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrameWallClocks);
+                    }
+                    else
+                    {
+                        // Genuinely refused. Counted now, so a clip that comes
+                        // up short says so in the diag instead of looking clean.
+                        Interlocked.Increment(ref _encodeDroppedCount);
+                        Interlocked.Increment(ref _totalDroppedFrames);
                     }
                 }
                 finally
