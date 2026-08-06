@@ -2285,7 +2285,19 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // stall conditions honesty beats padding. Only ever skipped
                     // while the queue is genuinely deep, so steady-state output is
                     // exactly the configured frame rate.
-                    if (!freshContentSinceLastEncode && encodeQueue.Count * 2 >= encodeQueueCapacity)
+                    // Arms only when the queue is about to overflow, not at half
+                    // depth. Half was too eager by a wide margin: a 30-deep
+                    // queue routinely sits at 16 during normal gameplay (the
+                    // whole point of having a queue is absorbing exactly that),
+                    // and every tick spent above 15 with nothing newly presented
+                    // punched a hole in the timeline. Measured result was clips
+                    // reading 49-51fps on a 60fps capture whose encoder was
+                    // keeping up - framesEncoded in the diag showed 60.5/s while
+                    // padsSkipped ran 13 per 2s window. A pad is also far
+                    // cheaper than it used to be: on the zero-copy path it
+                    // re-sends the SAME texture, so it costs a frame clone here
+                    // and a near-empty P-frame in the encoder.
+                    if (!freshContentSinceLastEncode && encodeQueue.Count + 2 >= encodeQueueCapacity)
                     {
                         padsSkippedSinceLog++;
                         continue;
