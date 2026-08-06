@@ -2285,19 +2285,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // stall conditions honesty beats padding. Only ever skipped
                     // while the queue is genuinely deep, so steady-state output is
                     // exactly the configured frame rate.
-                    // Arms only when the queue is about to overflow, not at half
-                    // depth. Half was too eager by a wide margin: a 30-deep
-                    // queue routinely sits at 16 during normal gameplay (the
-                    // whole point of having a queue is absorbing exactly that),
-                    // and every tick spent above 15 with nothing newly presented
-                    // punched a hole in the timeline. Measured result was clips
-                    // reading 49-51fps on a 60fps capture whose encoder was
-                    // keeping up - framesEncoded in the diag showed 60.5/s while
-                    // padsSkipped ran 13 per 2s window. A pad is also far
-                    // cheaper than it used to be: on the zero-copy path it
-                    // re-sends the SAME texture, so it costs a frame clone here
-                    // and a near-empty P-frame in the encoder.
-                    if (!freshContentSinceLastEncode && encodeQueue.Count + 2 >= encodeQueueCapacity)
+                    if (!freshContentSinceLastEncode && encodeQueue.Count * 2 >= encodeQueueCapacity)
                     {
                         padsSkippedSinceLog++;
                         continue;
@@ -3862,18 +3850,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
     }
 
-    // Bind flags to try for the encoder's D3D11 frame pool, in order. 0 leaves
-    // ffmpeg's own default (D3D11_BIND_DECODER), which is what its decoder ->
-    // NVENC chain uses and so the best-supported combination; the others are
-    // there only for a driver that refuses it.
-    //
-    // Not a free choice: the pool is one NV12 texture ARRAY, and a bind flag
-    // the driver won't accept for an array of that format fails the whole
-    // CreateTexture2D. D3D11_BIND_RENDER_TARGET (0x20) was tried first here and
-    // failed exactly that way on an RTX 4070 Ti - "D3D11 encode frame pool init
-    // failed (error -1313558101)", AVERROR_UNKNOWN, which is what
-    // hwcontext_d3d11va reports when the texture cannot be created.
-    private static readonly uint[] EncodeFramePoolBindFlags = { 0, 0x20, 0x8 };
+    // D3D11_BIND_RENDER_TARGET. NVENC takes a D3D11 texture as an input
+    // resource directly, but only one it can bind - ffmpeg's own default for a
+    // d3d11va frames pool is D3D11_BIND_DECODER, which is for the decode path
+    // and is not what an encoder input wants.
+    private const uint D3D11BindRenderTarget = 0x20;
 
     // Pool slots beyond the encode queue's own capacity: one for the frame
     // being filled, one held back for padding ticks, and two of slack so a
@@ -3917,33 +3898,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // did.
     private static unsafe (nint DeviceRef, nint FramesRef) TryCreateD3D11EncodeFrames(
         ID3D11Device device, int width, int height, int poolSize)
-    {
-        // Pool shape matters as much as the flags. A non-zero initial size makes
-        // ffmpeg allocate the whole pool as ONE NV12 texture array, and an RTX
-        // 4070 Ti refuses to create that array at any of the bind flags above -
-        // CreateTexture2D fails and the init reports AVERROR_UNKNOWN. Size 0
-        // switches ffmpeg to allocating a separate single texture per frame,
-        // recycled through its own buffer pool, which is the shape the driver
-        // does accept. Frames in flight are still bounded by the encode queue,
-        // so a dynamic pool is not unbounded VRAM.
-        foreach (var size in new[] { poolSize, 0 })
-        {
-            foreach (var bindFlags in EncodeFramePoolBindFlags)
-            {
-                var attempt = TryCreateD3D11EncodeFrames(device, width, height, size, bindFlags);
-                if (attempt.FramesRef != 0)
-                {
-                    AppLog.Info($"Native capture: D3D11 encode frame pool ready (poolSize={size}, bindFlags=0x{bindFlags:X}).");
-                    return attempt;
-                }
-            }
-        }
-
-        return (0, 0);
-    }
-
-    private static unsafe (nint DeviceRef, nint FramesRef) TryCreateD3D11EncodeFrames(
-        ID3D11Device device, int width, int height, int poolSize, uint bindFlags)
     {
         AVBufferRef* deviceRef = null;
         AVBufferRef* framesRef = null;
@@ -3992,12 +3946,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // same way a full queue is: drop the frame.
             framesContext->initial_pool_size = poolSize;
             var d3dFrames = (AVD3D11VAFramesContext*)framesContext->hwctx;
-            if (bindFlags != 0) d3dFrames->BindFlags = bindFlags;
+            d3dFrames->BindFlags = D3D11BindRenderTarget;
 
             var framesInit = ffmpeg.av_hwframe_ctx_init(framesRef);
             if (framesInit < 0)
             {
-                AppLog.Info($"Native capture: D3D11 encode frame pool init failed (error {framesInit}, bindFlags=0x{bindFlags:X}).");
+                AppLog.Info($"Native capture: D3D11 encode frame pool init failed (error {framesInit}), using system-memory frames.");
                 ffmpeg.av_buffer_unref(&framesRef);
                 ffmpeg.av_buffer_unref(&deviceRef);
                 return (0, 0);
@@ -4175,23 +4129,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 ? new[] { true, false }
                 : new[] { false };
 
-            // NVENC and AMF both take an AV_PIX_FMT_D3D11 frame from a d3d11va
-            // device, so the same pool feeds either - checked against this
-            // build: "Supported hardware devices: cuda d3d11va" for NVENC,
-            // "d3d11va dxva2 amf" for AMF.
-            //
-            // QSV is deliberately not here. It accepts only qsv frames from a
-            // qsv device, so zero-copy there means deriving a QSV device from
-            // the D3D11 one and mapping every captured texture into a qsv frame
-            // on the hot path - new per-frame machinery that there is no Intel
-            // hardware here to test. QSV keeps the system-memory path it has
-            // always used, unchanged.
-            //
-            // None of this is load-bearing on AMD or Intel regardless: the pool
-            // creation, the encoder open and the probe encode below each fall
-            // back to system-memory frames on failure, which is exactly what
-            // those machines do today.
-            if (hardwareFramesRef != 0 && candidateName is "h264_nvenc" or "h264_amf")
+            // Zero-copy is attempted for NVENC only. AMF and QSV advertise
+            // their own D3D11 input paths, but there is no AMD or Intel
+            // hardware here to confirm one against, and the fallback below is
+            // the exact behaviour those paths have today.
+            if (hardwareFramesRef != 0 && candidateName == "h264_nvenc")
             {
                 var probeContext = TryOpen(candidateCodec, candidateName, false, hardwareFrames: true);
                 if (probeContext is not null)
