@@ -640,6 +640,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         try
         {
             var config = _configProvider();
+            // Before any D3D work: a game that owns the GPU otherwise outranks
+            // this process's own submissions, which is what turns an 8ms encode
+            // into a 50ms one under load. See GpuSchedulingPriority.
+            GpuSchedulingPriority.RaiseForCapture();
             device = CreateD3D11Device();
 
             var targetHandle = ResolveTargetWindow(config);
