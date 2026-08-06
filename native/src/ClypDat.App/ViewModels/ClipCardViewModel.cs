@@ -351,7 +351,11 @@ public sealed class ClipCardViewModel : ViewModelBase
         {
             var old = _previewImage;
             PreviewImage = null;
-            old?.Dispose();
+            // Deferred, not immediate - see DeferredBitmapDisposal. Opening a
+            // clip collapses the library scroller and runs this for every
+            // realized card in a single turn, while the compositor is still
+            // drawing the frame those bitmaps belong to.
+            DeferredBitmapDisposal.Release(old);
         }
     }
 
@@ -557,7 +561,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         }
         finally
         {
-            if (old is not null && old != _previewImage) old.Dispose();
+            if (old is not null && old != _previewImage) DeferredBitmapDisposal.Release(old);
         }
     }
 

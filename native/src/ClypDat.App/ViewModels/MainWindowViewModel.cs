@@ -843,6 +843,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (!SetProperty(ref _isEditorVisible, value)) return;
             MemoryTrimmer.EditorOpen = value;
+            // The idle filmstrip sweep is the heaviest thing the app does to
+            // the library disk (up to 11 ffmpeg frame grabs per clip, across
+            // the whole library) and it only ever paused for an active game.
+            // On a cold start it is still running when the user clicks their
+            // first clip, so libvlc's open of that clip queues behind it on
+            // the same cold disk - the "editor takes forever to appear" half
+            // of this. Editing beats pre-generating strips for clips nobody
+            // is looking at; the sweep resumes when the editor closes.
+            if (value) _backgroundFilmstripCts?.Cancel();
+            else StartBackgroundFilmstripHydration();
             OnPropertyChanged(nameof(IsLibraryVisible));
             OnPropertyChanged(nameof(IsSettingsVisible));
             OnPropertyChanged(nameof(ShowLibraryActions));
@@ -2778,9 +2788,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         _isRestoringCachedLibrary = true;
+        _restoredClipPaths.Clear();
+        foreach (var clip in AllClips) _restoredClipPaths.Add(clip.Path);
         OnPropertyChanged(nameof(IsRestoringLibraryCache));
         const int initialCardCount = 18;
-        foreach (var state in cached.Take(initialCardCount)) AddCachedClip(state);
+        // Existence checks for every row's thumbnail/filmstrip run off the UI
+        // thread - see NormalizeCachedStates. Two stat calls per clip against
+        // a cold media-cache folder is not something the first paint should
+        // wait on, and it is the same disk the probe/thumbnail hydration
+        // passes are hammering at that exact moment.
+        var firstStates = cached.Take(initialCardCount).ToArray();
+        var firstBatch = await Task.Run(() => NormalizeCachedStates(firstStates));
+        foreach (var state in firstBatch) AddCachedClip(state);
         ApplyGameFilters();
         ApplyClipTypeFilters();
         ApplySearchFilter();
@@ -2799,7 +2818,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             for (var offset = 0; offset < states.Count; offset += batchSize)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var batch = states.Skip(offset).Take(batchSize).ToArray();
+                var rows = states.Skip(offset).Take(batchSize).ToArray();
+                var batch = await Task.Run(() => NormalizeCachedStates(rows), cancellationToken);
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     if (cancellationToken.IsCancellationRequested || !string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase)) return;
@@ -2828,26 +2848,57 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 _cachedLibraryRestoreCts.Dispose();
                 _cachedLibraryRestoreCts = null;
                 _isRestoringCachedLibrary = false;
+                _restoredClipPaths.Clear();
                 OnPropertyChanged(nameof(IsRestoringLibraryCache));
             }
         }
     }
 
+    // The disk-touching half of a cached-row restore, hoisted out so it can run
+    // off the dispatcher (see its callers). Nothing here reads view-model state.
+    private static CachedClipState[] NormalizeCachedStates(IReadOnlyList<CachedClipState> states)
+    {
+        var normalized = new CachedClipState[states.Count];
+        for (var index = 0; index < states.Count; index++)
+        {
+            var state = states[index];
+            normalized[index] = state with
+            {
+                Media = state.Media with
+                {
+                    ThumbnailPath = File.Exists(state.Media.ThumbnailPath) ? state.Media.ThumbnailPath : string.Empty,
+                    FilmstripPath = File.Exists(state.Media.FilmstripPath) ? state.Media.FilmstripPath : string.Empty,
+                    // Old library-cache rows predate HasVideo. Their cached track list
+                    // is still enough to identify audio-only files before hydration.
+                    HasVideo = state.Media.Tracks.Count == 0 || state.Media.Tracks.Any(track => track.Type == "video")
+                }
+            };
+        }
+
+        return normalized;
+    }
+
+    // Takes an already-normalized row (NormalizeCachedStates) - this half only
+    // builds the card and must stay cheap: it runs on the dispatcher, once per
+    // clip, for the whole cached library.
     private void AddCachedClip(CachedClipState state)
     {
-        if (AllClips.Any(clip => string.Equals(clip.Path, state.Media.Path, StringComparison.OrdinalIgnoreCase))) return;
-        var media = state.Media with
-        {
-            ThumbnailPath = File.Exists(state.Media.ThumbnailPath) ? state.Media.ThumbnailPath : string.Empty,
-            FilmstripPath = File.Exists(state.Media.FilmstripPath) ? state.Media.FilmstripPath : string.Empty,
-            // Old library-cache rows predate HasVideo. Their cached track list
-            // is still enough to identify audio-only files before hydration.
-            HasVideo = state.Media.Tracks.Count == 0 || state.Media.Tracks.Any(track => track.Type == "video")
-        };
-        var clip = new ClipCardViewModel(state with { Media = media }, Settings.LibraryFolder);
+        // Set lookup, not a scan of AllClips per row - that made restoring a
+        // cached library quadratic in its own size, all of it on the UI thread,
+        // which is precisely the case (a big library, cold) this path exists
+        // to make fast.
+        if (!_restoredClipPaths.Add(state.Media.Path)) return;
+        var clip = new ClipCardViewModel(state, Settings.LibraryFolder);
         AttachClip(clip);
         AllClips.Add(clip);
     }
+
+    // Paths already in AllClips during a cached restore pass. Live only for the
+    // duration of that pass (cleared at both ends); the watcher's own insert
+    // path feeds it too so a clip that lands mid-restore isn't then added a
+    // second time from the snapshot. RefreshLibraryAsync reconciles everything
+    // against the real folder afterwards regardless.
+    private readonly HashSet<string> _restoredClipPaths = new(StringComparer.OrdinalIgnoreCase);
 
     private void AttachClip(ClipCardViewModel clip) => clip.PersistentStateChanged += Clip_OnPersistentStateChanged;
 
@@ -3347,6 +3398,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         while (insertIndex < AllClips.Count && AllClips[insertIndex].CreatedAt > clip.CreatedAt) insertIndex++;
         AttachClip(clip);
         AllClips.Insert(insertIndex, clip);
+        // No-op outside a cached restore - see _restoredClipPaths.
+        _restoredClipPaths.Add(clip.Path);
         MarkLibraryCacheDirty();
     }
 
@@ -6185,7 +6238,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void StartBackgroundFilmstripHydration()
     {
-        if (_gameIsActive || _backgroundFilmstripCts is not null) return;
+        if (_gameIsActive || IsEditorVisible || _backgroundFilmstripCts is not null) return;
         var cts = new CancellationTokenSource();
         _backgroundFilmstripCts = cts;
         // This one walks the ENTIRE library, so leaving its per-clip
@@ -6218,7 +6271,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         catch (OperationCanceledException)
         {
             wasCancelled = true;
-            AppLog.Info("Idle timeline hydration paused for active game.");
+            AppLog.Info($"Idle timeline hydration paused ({(_gameIsActive ? "active game" : "editor open")}).");
         }
         finally
         {
@@ -6234,7 +6287,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 // Resume only when this run was cancelled mid-flight and the
                 // game closed again before its cleanup finished. Restarting a
                 // completed empty queue here would recurse synchronously.
-                if (wasCancelled && !_gameIsActive) StartBackgroundFilmstripHydration();
+                if (wasCancelled && !_gameIsActive && !IsEditorVisible) StartBackgroundFilmstripHydration();
             });
         }
     }

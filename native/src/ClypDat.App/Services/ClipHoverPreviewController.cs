@@ -530,7 +530,11 @@ internal sealed class ClipHoverPreviewController : IDisposable
         state.Cancellation?.Cancel();
         state.WarmExitCancellation?.Cancel();
         Kill(state.Process);
-        if (state.Clip is not null && state.Bitmap is not null) { state.Clip.HideHoverPreview(state.Bitmap); state.Bitmap.Dispose(); }
+        // Deferred free - see DeferredBitmapDisposal. HideHoverPreview only
+        // swaps the card back to its static thumbnail; the compositor's last
+        // committed frame still draws from this buffer, and Stop("clip opened")
+        // runs this on the very click that opens the editor.
+        if (state.Clip is not null && state.Bitmap is not null) { state.Clip.HideHoverPreview(state.Bitmap); DeferredBitmapDisposal.Release(state.Bitmap); }
         state.Cancellation?.Dispose();
         state.WarmExitCancellation?.Dispose();
         if (log) AppLog.Info($"Clip hover preview cleanup complete: {reason}.");
