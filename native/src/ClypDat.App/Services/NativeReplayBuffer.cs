@@ -3046,9 +3046,39 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 try
                 {
                     pendingFrameWallClocks.Enqueue(job.WallClockUtc);
-                    if (ffmpeg.avcodec_send_frame(codecContext, jobFrame) == 0)
+                    // EAGAIN is not a failure - it means the encoder is holding
+                    // output that has to be collected before it will accept
+                    // another frame. Treating it as one freed the frame unsent,
+                    // silently and uncounted: measured at 112 missing ticks in a
+                    // 61s clip (24 single-frame gaps, 22 double, down to one of
+                    // six) while droppedFrames and padsSkipped both read 0 -
+                    // about 3% of every clip, and why a capture producing a
+                    // dense 60fps timeline still saved as 58.
+                    //
+                    // The drain happens AFTER this frame's timestamp is already
+                    // queued, deliberately: DrainToRingBuffer pops one entry per
+                    // packet it emits, and those packets belong to frames sent
+                    // several calls back, so draining first would starve the
+                    // queue and stamp them with the drain moment instead of
+                    // their real capture time - the value audio alignment reads.
+                    var sendResult = ffmpeg.avcodec_send_frame(codecContext, jobFrame);
+                    if (sendResult == ffmpeg.AVERROR(ffmpeg.EAGAIN))
                     {
                         DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrameWallClocks);
+                        sendResult = ffmpeg.avcodec_send_frame(codecContext, jobFrame);
+                    }
+
+                    if (sendResult == 0)
+                    {
+                        DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrameWallClocks);
+                    }
+                    else
+                    {
+                        // Still refused after the drain. Counted, so a clip that
+                        // comes up short says so in the diagnostics rather than
+                        // looking clean.
+                        Interlocked.Increment(ref _encodeDroppedCount);
+                        Interlocked.Increment(ref _totalDroppedFrames);
                     }
                 }
                 finally
