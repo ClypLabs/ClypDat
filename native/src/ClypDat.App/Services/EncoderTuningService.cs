@@ -87,6 +87,14 @@ public sealed class EncoderTuningService
     // demotion costs some compression quality; a needless promotion costs
     // dropped frames, which is content the user can never get back.
     private static readonly TimeSpan PromoteAfterClean = TimeSpan.FromMinutes(10);
+    // Restoring the frame rate is held to a much shorter streak than a preset
+    // promotion. The asymmetry is deliberate: a preset is the tuner's own
+    // judgement call, but the frame rate is the number the user typed into
+    // Settings, and running below it is a visible, surprising deviation from
+    // what they asked for. Ten minutes of that is far too long to wait,
+    // especially since the reduction is reversed the moment it proves
+    // unnecessary rather than costing anything to try.
+    private static readonly TimeSpan RestoreFrameRateAfterClean = TimeSpan.FromMinutes(2);
 
     // Health arrives every ~2s, so this is a 30s window needing more than half
     // of it bad. It started at 3-of-5 (10s) and that was far too twitchy: a
@@ -234,6 +242,29 @@ public sealed class EncoderTuningService
         var next = Step(_proposedPreset, +1);
         if (next is null)
         {
+            // Neither of the levers below can help unless the ENCODER is the
+            // thing that is behind, and a backed-up encode queue is the only
+            // evidence of that. Output falling short of target has other causes
+            // entirely - a capture thread stalling, a source that is not
+            // presenting - and halving the frame rate or the capture height
+            // fixes none of them; it just halves the user's clips.
+            //
+            // This fired with "dropped=7, queue=0/30, outputFps=32.0/60" while
+            // encode was running at 0.6ms a frame: an empty queue, an idle
+            // encoder, and a user who asked for 60 getting 30 with no visible
+            // explanation. The real shortfall there was ~200ms capture stalls.
+            var encoderIsBehind = health.EncodeQueueCapacity > 0 &&
+                                  health.QueueDepth * 2 >= health.EncodeQueueCapacity;
+            if (!encoderIsBehind)
+            {
+                AppLog.Info($"Encoder tuning: output short of target ({health.OutputFrameRate:0.0}/{health.TargetFrameRate}) but the encode queue is " +
+                            $"{health.QueueDepth}/{health.EncodeQueueCapacity} - the encoder is keeping up, so this is not something a lower " +
+                            "frame rate or capture height can fix. Leaving the configured settings alone.");
+                _lastDecisionUtc = now;
+                _recentOverloads.Clear();
+                return;
+            }
+
             // Out of presets. Frame rate is the one remaining lever that can be
             // pulled live - see this class's header and RequestFrameRate.
             if (!_frameRateReduced && _activeFrameRate >= MinimumFrameRateToReduce)
@@ -305,7 +336,10 @@ public sealed class EncoderTuningService
 
     private void ProposePromotionIfEarned(ReplayCaptureHealth health, DateTime now)
     {
-        if (_cleanSinceUtc is null || now - _cleanSinceUtc < PromoteAfterClean) return;
+        if (_cleanSinceUtc is null) return;
+        // The user's own frame rate comes back first and on its own, shorter
+        // clock - see RestoreFrameRateAfterClean.
+        if (now - _cleanSinceUtc < (_frameRateReduced ? RestoreFrameRateAfterClean : PromoteAfterClean)) return;
 
         // Frame rate comes back before any preset does. It was a one-way latch:
         // nothing anywhere restored it, so a single bad fight pinned the rest of
