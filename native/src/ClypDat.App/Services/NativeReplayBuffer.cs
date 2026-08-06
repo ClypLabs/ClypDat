@@ -753,6 +753,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     codecContext = softwareContext;
                     _timeBase = codecTimeBase;
                 }
+                else
+                {
+                    // Every queued frame is a clone holding one of these
+                    // surfaces, so a queue deeper than the set cannot fill -
+                    // it just turns "wait for a surface" into "drop". Match
+                    // them. Half a second of slack stops mattering when the
+                    // encoder is reading from VRAM and takes single-digit
+                    // milliseconds a frame.
+                    encodeQueueCapacity = hardwareSurfaces.Length;
+                }
             }
             else
             {
@@ -3907,6 +3917,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     TrySet("cq", ConstantQualityTarget(config).ToString());
                 }
                 TrySet("forced-idr", "1");
+                // NVENC keeps a fixed table of registered input resources, one
+                // slot per surface, and a D3D11 texture has to be registered
+                // before it can be encoded from. Cycling more distinct textures
+                // than there are slots makes it unregister and re-register
+                // continuously, which is not cheap: measured avgEncodeMs of
+                // 46-61ms and ~85 frames a second refused outright, against
+                // 7-9ms once the working set fits. Comfortably above
+                // HardwareSurfaceCount so the whole set stays resident.
+                TrySet("surfaces", "16");
                 break;
             // AMF/QSV keep their existing usage/preset strings: there's no AMD
             // or Intel hardware here to confirm a change doesn't cost frames,
@@ -3978,8 +3997,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private const int HardwareFramePoolHeadroom = 4;
 
     // Surfaces held for the life of a session (or until a device rebuild
-    // replaces the pool under them).
-    private const int HardwareSurfaceCount = 12;
+    // replaces the pool under them). Kept under the encoder's registered-frame
+    // table (see the "surfaces" option) - the set has to stay resident there,
+    // and every entry is a real VRAM surface (5.5MB at 1440p).
+    private const int HardwareSurfaceCount = 8;
 
     private static unsafe nint[] AllocateHardwareSurfaces(nint framesRef, int count)
     {
