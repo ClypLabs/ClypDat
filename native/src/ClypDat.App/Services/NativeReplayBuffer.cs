@@ -119,6 +119,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private long _encodeMicrosAccum;
     private long _encodeCountAccum;
     private long _encodeDroppedCount;
+    // Diagnostics for the gap between what capture hands the encoder and what
+    // reaches the ring. Clips arrive 52-260 frames short of a capture that logs
+    // a dense 60fps with droppedFrames and padsSkipped at 0, and three attempts
+    // at fixing the suspected cause have made things worse - so measure where
+    // the frames actually go before touching the path again. Counters only,
+    // no behaviour attached.
+    private long _sendRefusedEagainCount;
+    private long _sendFailedOtherCount;
+    private long _packetsOutCount;
     private long _totalDroppedFrames;
     private int _peakQueueDepth;
     private DateTime? _lastDegradedUtc;
@@ -1065,9 +1074,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var encodeCountSinceLog = Math.Max(1, Interlocked.Exchange(ref _encodeCountAccum, 0));
                     var encodeMicrosSinceLog = Interlocked.Exchange(ref _encodeMicrosAccum, 0);
                     var droppedSinceLog = Interlocked.Exchange(ref _encodeDroppedCount, 0);
+                    var eagainSinceLog = Interlocked.Exchange(ref _sendRefusedEagainCount, 0);
+                    var sendFailedSinceLog = Interlocked.Exchange(ref _sendFailedOtherCount, 0);
+                    var packetsOutSinceLog = Interlocked.Exchange(ref _packetsOutCount, 0);
                     UpdatePeak(ref _peakQueueDepth, encodeQueue.Count);
                     var frameStalenessDenom = Math.Max(1, frameStalenessCount);
-                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, ringBufferMb={ringBufferMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
+                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, ringBufferMb={ringBufferMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
                     // Raw encoded rate, deliberately NOT crediting suppressed pads
                     // back in. Pads are only ever skipped under real queue
                     // pressure (see the pacing gate), so a rate that falls short
@@ -3038,9 +3050,20 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 try
                 {
                     pendingFrameWallClocks.Enqueue(job.WallClockUtc);
-                    if (ffmpeg.avcodec_send_frame(codecContext, jobFrame) == 0)
+                    var sendResult = ffmpeg.avcodec_send_frame(codecContext, jobFrame);
+                    if (sendResult == 0)
                     {
                         DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrameWallClocks);
+                    }
+                    else if (sendResult == ffmpeg.AVERROR(ffmpeg.EAGAIN))
+                    {
+                        // Counted, not handled - see the field declaration. The
+                        // frame is still discarded exactly as before.
+                        Interlocked.Increment(ref _sendRefusedEagainCount);
+                    }
+                    else
+                    {
+                        Interlocked.Increment(ref _sendFailedOtherCount);
                     }
                 }
                 finally
@@ -3099,6 +3122,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // it can't be used to derive this the way it used to be.
             var realWallClockUtc = pendingFrameWallClocks.Count > 0 ? pendingFrameWallClocks.Dequeue() : MonotonicClock.UtcNow;
 
+            Interlocked.Increment(ref _packetsOutCount);
             lock (_bufferLock)
             {
                 _packets.Add(new RingPacket(data, packet->size, packet->pts, isKeyframe, realWallClockUtc));
