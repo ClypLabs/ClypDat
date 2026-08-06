@@ -89,6 +89,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // queued save still covers the moment the user asked for - only the
     // expensive part waits.
     private static readonly SemaphoreSlim SaveEncodeGate = new(1, 1);
+    // Saves currently running, published on the health record so the tuner can
+    // discount overload a save caused - see ReplayCaptureHealth.SaveInProgress.
+    private int _savesInFlight;
     private readonly List<RingPacket> _packets = new();
     // Running total of _packets' payload bytes, maintained on add/trim under
     // _bufferLock. The diagnostic that reports this used to sum the whole list
@@ -323,6 +326,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // method, which is what lets the ring recycle again.
         var window = BorrowWindowUnderLock(requestedStartUtc, requestedEndUtc);
         var saveGateHeld = false;
+        Interlocked.Increment(ref _savesInFlight);
         try
         {
         await SaveEncodeGate.WaitAsync(cancellationToken);
@@ -519,6 +523,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         finally
         {
             if (saveGateHeld) SaveEncodeGate.Release();
+            Interlocked.Decrement(ref _savesInFlight);
             ReleaseBorrowedWindow();
         }
     }
@@ -1165,7 +1170,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             : ReplayDegradeReason.None,
                         AdapterDescription = adapterDescription,
                         EncoderPreset = config.EncoderPreset,
-                        EncodeQueueCapacity = encodeQueueCapacity
+                        EncodeQueueCapacity = encodeQueueCapacity,
+                        // See ReplayCaptureHealth.SaveInProgress. A save backs
+                        // the queue up for a second or two by design; it is not
+                        // evidence the settings are unsustainable.
+                        SaveInProgress = Volatile.Read(ref _savesInFlight) > 0
                     });
                     copyMapMs = 0;
                     scaleMs = 0;

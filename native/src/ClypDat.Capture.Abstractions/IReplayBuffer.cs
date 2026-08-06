@@ -61,6 +61,13 @@ public sealed record ReplayCaptureHealth(
     // (which the user may have changed since this buffer started).
     public string EncoderPreset { get; init; } = string.Empty;
     public int EncodeQueueCapacity { get; init; }
+    // Whether a clip save was running while this sample was taken. A save runs
+    // ffmpeg to build audio tracks and mux the result, which is a real but
+    // brief and entirely self-inflicted load - the encode queue can back right
+    // up for a second or two and recover the moment it finishes. Consumers that
+    // react to sustained overload (EncoderTuningService) must not treat that as
+    // evidence the machine cannot sustain its settings.
+    public bool SaveInProgress { get; init; }
 
     public static ReplayCaptureHealth Unknown(string backend = "Unknown") => new(
         backend, "Unknown", ReplayCaptureState.Unknown, 0, 0, 0, 0, 0, 0, 0, string.Empty, string.Empty, string.Empty, DateTime.UtcNow);

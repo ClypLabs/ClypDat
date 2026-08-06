@@ -185,6 +185,13 @@ public sealed class EncoderTuningService
         // idle and blameless, and demoting for it would ratchet a machine down
         // to P1 for something a faster preset cannot fix.
         if (health.DegradeReason == ReplayDegradeReason.CaptureStall) return;
+        // A clip save runs ffmpeg to build its audio tracks and mux the result.
+        // That backs the encode queue up for a second or two and clears the
+        // moment it finishes - self-inflicted, temporary, and nothing a cheaper
+        // preset or a lower frame rate would prevent. Counting it drove a real
+        // halving: saving four clips in a burst produced "queue=29/30,
+        // dropped=8" and cost the rest of the session half its frame rate.
+        if (health.SaveInProgress) return;
 
         var now = health.UpdatedUtc;
         if (now - _sessionStartUtc < Warmup) return;
