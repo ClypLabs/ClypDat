@@ -306,7 +306,32 @@ public sealed class PlaybackSession : IDisposable
                 VideoPlayer.Time = milliseconds;
             }
             EnsureAudioOutputConnected();
-            if (needsSeek) SeekAudio(time);
+            if (needsSeek)
+            {
+                SeekAudio(time);
+            }
+            else
+            {
+                // Resume from pause, and the one path that never repositioned
+                // audio at all - it assumed the readers were still sitting
+                // exactly where the video is. They are not, reliably: whatever
+                // anchored them last (Pause, or a timeline seek that landed
+                // paused) did so around a VideoPlayer.SetPause(true) that does
+                // not take effect when the call returns. The picture keeps
+                // advancing for some tens of milliseconds after, further if
+                // EnsureAudioOutputConnected had to rebuild WASAPI on the way
+                // through, and the audio ends up anchored that far behind where
+                // the video actually came to rest. Playing from there is the
+                // audio-lagging-video desync after a timeline skip, and it
+                // persisted precisely because only a real seek re-anchored -
+                // hence clicking the timeline again, or pausing and replaying,
+                // "fixing" it.
+                //
+                // The video is stopped at this instant, so VideoPlayer's own
+                // clock is a truthful anchor. Reading it here costs nothing and
+                // makes every resume start both halves from the same place.
+                SeekAudio(Position);
+            }
             VideoPlayer.Play();
             VideoPlayer.SetPause(false);
             // A plain resume-from-pause needs no seek, so audio can start
@@ -357,6 +382,12 @@ public sealed class PlaybackSession : IDisposable
         if (Interlocked.Read(ref _playVersion) != playVersion || !_shouldPlay) return;
         lock (_transportLock)
         {
+            // The readers were anchored to the requested position back in
+            // PlayFrom, but the video has been running for however long the
+            // catch-up wait took, and the wait accepts the video landing up to
+            // 650ms from that request. Starting audio from the stale anchor is
+            // that whole gap of desync. Re-anchor to where the video is now.
+            SeekAudio(Position);
             _audioOutput?.Play();
         }
     }
@@ -508,9 +539,9 @@ public sealed class PlaybackSession : IDisposable
                 // the unadjusted request instead of that actual position is what
                 // caused audible desync after a paused timeline click.
                 EnsureAudioOutputConnected();
-                SeekAudio(settledTime);
                 if (resumePlayback && videoReady)
                 {
+                    SeekAudio(settledTime);
                     VideoPlayer.SetPause(false);
                     SeekAudio(Position);
                     _audioOutput?.Play();
@@ -521,6 +552,13 @@ public sealed class PlaybackSession : IDisposable
                     _shouldPlay = false;
                     _audioOutput?.Stop();
                     VideoPlayer.SetPause(true);
+                    // Anchor AFTER the pause is issued and off the video's own
+                    // clock, not off settledTime, which was sampled before
+                    // EnsureAudioOutputConnected and the pause itself - the
+                    // video has moved on by then. Still not exact (SetPause is
+                    // asynchronous), which is why PlayFrom re-anchors on resume
+                    // rather than trusting this.
+                    SeekAudio(Position);
                 }
             }
 
