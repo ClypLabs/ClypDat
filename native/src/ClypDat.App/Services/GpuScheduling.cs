@@ -20,18 +20,20 @@ namespace ClypDat.App.Services;
 // encoder that was never the bottleneck. Raising priority attacks the actual
 // cause, so those levers stop being pulled for the wrong reason.
 //
-// Two knobs, deliberately both:
+// Two knobs. Only the second is on by default - see each for why:
 //
 //   - Process scheduling priority class (D3DKMTSetProcessSchedulingPriorityClass)
 //     covers EVERY GPU context this process owns. That matters because NVENC's
 //     context is not ours: ffmpeg's h264_nvenc creates its own CUDA/D3D device
 //     internally, so no per-device call we make can reach it. FFmpeg is linked
 //     in-process here (FFmpeg.AutoGen calls avcodec_send_frame directly), so a
-//     process-wide class does reach it. This is the knob that targets the 108ms.
+//     process-wide class does reach it. It also reaches the UI's renderer,
+//     which is why it is now opt-in and off by default.
 //
 //   - Per-device GPU thread priority (IDXGIDevice::SetGPUThreadPriority) covers
 //     the capture device specifically - the crop copy and the scale Blt. This
-//     is the knob that targets the 1.7ms avgScaleMs.
+//     is the knob that targets the 1.7ms avgScaleMs, and it cannot affect any
+//     device but the one it is handed.
 //
 // Both are best-effort and heavily logged. A driver or OS that refuses either
 // leaves capture running exactly as it did before; nothing here is load-bearing.
@@ -60,16 +62,39 @@ internal static class GpuScheduling
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int SetGpuThreadPriorityDelegate(nint self, int priority);
 
-    // Process-wide, and raised once for the life of the process rather than
-    // per capture session. It is not lowered again on stop: a session ending
-    // does not mean the next one is far away (the buffer restarts on every
-    // game/monitor/settings change), and toggling a process-wide GPU class
-    // from whichever thread happens to stop capture is more moving parts than
-    // the gain justifies. The cost of leaving it raised while idle is nil -
-    // an idle process submits no GPU work to prioritize.
+    // DISABLED - opt-in only, via CLYPDAT_GPU_PROCESS_PRIORITY=1.
+    //
+    // This was on by default for one build, and that build is the one an AMD
+    // Radeon RX 9070 XT on Windows Server 2025 rendered as a solid white
+    // window, with the clip toast a solid black block - a window that creates
+    // and lays out fine and then presents nothing.
+    //
+    // The mechanism is not a guess about the driver, it is what this call
+    // does. D3DKMTSetProcessSchedulingPriorityClass is PROCESS-wide, and that
+    // was the whole reason for choosing it: ffmpeg's h264_nvenc builds its own
+    // CUDA/D3D device internally, so nothing scoped to our capture device can
+    // reach it. But "every GPU context in the process" is not only the encoder
+    // - it is also Avalonia's ANGLE/D3D11 render device, which draws the UI.
+    // Raising the whole process to the HIGH scheduling class reorders the UI's
+    // presents against the compositor's, and a window whose presents never
+    // land is exactly a blank one.
+    //
+    // The per-device call below is kept on by default and is not implicated:
+    // it targets the capture device explicitly and cannot touch the renderer.
+    // What is given up by disabling this is the lever aimed at NVENC's own
+    // context - which was never isolated as a win either, since the encode
+    // times it was meant to rescue were measured before and after other
+    // changes, never against this one alone.
+    //
+    // Left in place rather than deleted so it can be re-tested deliberately,
+    // on a machine where a blank window would be noticed immediately, instead
+    // of shipping to everyone again on a hypothesis.
     public static void TryRaiseProcessGpuPriority()
     {
+        if (Environment.GetEnvironmentVariable("CLYPDAT_GPU_PROCESS_PRIORITY")?.Trim() != "1") return;
         if (Interlocked.Exchange(ref _processPriorityRaised, 1) != 0) return;
+
+        AppLog.Info("Native capture: CLYPDAT_GPU_PROCESS_PRIORITY=1 - raising process-wide GPU scheduling priority. This also applies to the UI's render device; a blank or white window means it is not supported here.");
 
         // HIGH first, ABOVE_NORMAL as the fallback. Some drivers/OS
         // configurations refuse HIGH for an unprivileged process; ABOVE_NORMAL
