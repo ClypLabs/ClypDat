@@ -789,37 +789,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
             // Queue depth is decided before the encoder, because the D3D11 frame
             // pool has to cover it: every queued frame holds a VRAM surface.
-            //
-            // One second of work, not half. The old bound was FrameRate/2 clamped
-            // to 60, and the clamp is the part that bit: at 120 FPS the formula
-            // and the clamp agree at 60 slots, so the queue stayed HALF a second
-            // while every frame's encode budget halved to 8.33ms - and above
-            // 120 FPS the clamp took over entirely (0.25s at 240).
-            //
-            // What that cost is not dropped frames, which stayed negligible (6 in
-            // the worst measured window, 0.08% of a clip). It is SKIPPED PADS. The
-            // pacing gate below refuses to pad once the queue is within 2 of
-            // capacity, and a skipped pad is a hole in a timeline that is supposed
-            // to be exactly constant-rate: 109 skipped in one 2s window turned that
-            // stretch into ~55fps inside a 120fps file, which is the judder that
-            // started this. A transient encoder stall was measured putting the
-            // queue only 41 frames behind before recovering on its own the next
-            // window, so a one-second queue absorbs it without ever arming the
-            // pad-skip gate.
-            //
-            // The prior warning here - that a 120-frame queue at 60 FPS turned a
-            // short stall into seconds of stale frames - is respected rather than
-            // reverted: 120 frames at 60 FPS was TWO seconds, and this is bounded
-            // by time instead, so it can never mean more than one. Staleness is
-            // also a weaker concern than that note implies for a replay buffer.
-            // Every queued frame already carries the ideal PTS assigned at pacing
-            // time, so a frame that waits in the queue still lands at the right
-            // point in the clip; nothing downstream is watching this live.
-            //
-            // Costs VRAM in the zero-copy path, where the frame pool has to cover
-            // the queue: at 1440p NV12 that is ~5.5MB a slot, so 120 FPS goes from
-            // ~330MB to ~660MB of pooled surfaces.
-            var encodeQueueCapacity = Math.Clamp(config.FrameRate, 8, 120);
+            // Keep at most roughly half a second of stale work. A 120-frame queue
+            // at 60 FPS turned a short GPU stall into seconds of old frames, then
+            // magnified it with catch-up work. Dropping early is recoverable;
+            // encoding stale frames is visible lag.
+            var encodeQueueCapacity = Math.Clamp(config.FrameRate / 2, 8, 60);
 
             // Zero-copy needs the Video Processor's NV12 output to copy from,
             // so it only applies when the GPU scaler is up. The desktop cursor
