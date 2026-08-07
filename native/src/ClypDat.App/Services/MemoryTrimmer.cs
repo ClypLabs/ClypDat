@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Runtime;
-using System.Runtime.InteropServices;
 
 namespace ClypDat.App.Services;
 
@@ -11,78 +10,33 @@ namespace ClypDat.App.Services;
 // no reason to shrink while nothing is pressuring it. Correct, and still the
 // wrong thing to hold on a machine that is also running a game.
 //
-// So: once the editor is closed, release what is only useful with the editor
-// open, compact what is left, and hand the pages back.
-//
-// On the last step specifically - EmptyWorkingSet is what third-party
-// "memory cleaner" tools do, and on its own it is cosmetic: it evicts pages to
-// the pagefile so Task Manager reports a small number, and they fault straight
-// back in the moment the app touches them, slower than before. It is only
-// honest here because it runs AFTER the caches are actually dropped and the
-// heap actually compacted, so the pages being released are ones that genuinely
-// have nothing in them any more.
+// So: once the editor is closed or recording stops, release data the app no
+// longer owns and let the GC return it normally. Never evict active pages just
+// to reduce Task Manager's working-set number.
 public static class MemoryTrimmer
 {
-    // Set by MainWindow. True when the editor is closed - i.e. when the audio
-    // chunk and bitmap caches are holding data for a clip nobody is looking at.
-    // Plain flags pushed from the view model's setters, not a callback that
-    // reads the window. This runs on its own thread, and every Avalonia
-    // property read from off the UI thread throws - inside the loop's catch
-    // that failed completely silently, so the trimmer never once ran.
+    // Set by MainWindow for diagnostics and possible future cleanup policy.
     public static volatile bool EditorOpen;
 
-    // A compacting gen2 collection suspends every managed thread for as long
-    // as it takes to walk the heap, and the capture and encode loops are
-    // managed threads - a few hundred milliseconds there is dropped frames in
-    // someone's game. While recording, the trim still drops the caches and
-    // still hands the pages back; it just leaves the reclaim to the background
-    // GC instead of stopping the world to do it now.
-    public static volatile bool Recording;
-
-    private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(30);
-    // Trimming is not free (a compacting gen2 collection walks the whole heap),
-    // so it is worth doing on a long idle stretch and not worth repeating every
-    // half minute after that.
-    private static readonly TimeSpan MinimumInterval = TimeSpan.FromMinutes(3);
-    // Below this there is nothing meaningful to reclaim and the collection
-    // would cost more than it returns.
-    private const long TrimThresholdBytes = 250L * 1024 * 1024;
+    private static int _recording;
+    // A compacting gen2 collection suspends managed threads. A transition out
+    // of recording is the first safe point to request one, after the replay
+    // ring has released its packets.
+    public static bool Recording
+    {
+        get => Volatile.Read(ref _recording) != 0;
+        set
+        {
+            var previous = Interlocked.Exchange(ref _recording, value ? 1 : 0);
+            if (previous == 1 && !value) RequestTrim("recording stopped");
+        }
+    }
 
     private static int _started;
-    private static DateTime _lastTrimUtc = DateTime.MinValue;
 
     public static void Start()
     {
         if (Interlocked.Exchange(ref _started, 1) != 0) return;
-        var thread = new Thread(Loop)
-        {
-            IsBackground = true,
-            Name = "ClypDat.MemoryTrimmer",
-            Priority = ThreadPriority.BelowNormal
-        };
-        thread.Start();
-    }
-
-    private static void Loop()
-    {
-        while (true)
-        {
-            Thread.Sleep(CheckInterval);
-            try
-            {
-                if (DateTime.UtcNow - _lastTrimUtc < MinimumInterval) continue;
-                if (EditorOpen) continue;
-
-                using var process = Process.GetCurrentProcess();
-                if (process.WorkingSet64 < TrimThresholdBytes) continue;
-
-                Trim("idle");
-            }
-            catch
-            {
-                // Never let housekeeping take the app down.
-            }
-        }
     }
 
     // Also called directly at the points where a large, known-finished
@@ -93,54 +47,27 @@ public static class MemoryTrimmer
     {
         try
         {
-            _lastTrimUtc = DateTime.UtcNow;
-            long beforeWorkingSet;
+            long beforePrivate;
             using (var before = Process.GetCurrentProcess())
             {
-                beforeWorkingSet = before.WorkingSet64;
+                beforePrivate = before.PrivateMemorySize64;
             }
 
             var beforeManaged = GC.GetTotalMemory(false);
-            var collectionDeferred = Recording;
 
             AudioChunkCache.Clear();
             BitmapCache.Clear();
 
-            if (!Recording)
-            {
-                // The audio chunks are 5.76MB byte[] each, so they live on the
-                // large object heap, which a normal collection sweeps but never
-                // compacts - without this the freed space stays as LOH holes the
-                // process keeps reserved from the OS.
-                GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-                GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
-                GC.WaitForPendingFinalizers();
-                // Second pass: the first one runs the finalizers for the bitmaps
-                // dropped above, and an object only becomes collectable after its
-                // finalizer has run.
-                GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
-            }
-            else
-            {
-                GC.Collect(2, GCCollectionMode.Optimized, blocking: false, compacting: false);
-            }
+            if (Recording) return;
 
-            using var after = Process.GetCurrentProcess();
-            EmptyWorkingSet(after.Handle);
+            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
 
             using var settled = Process.GetCurrentProcess();
-            // While recording the collection is non-blocking, so it has not run
-            // yet at this point - reporting a before/after heap size there just
-            // prints the same number twice and reads as "the trim reclaimed
-            // nothing", which is not what happened. Say what is actually known
-            // instead. The working-set figure is real either way, but note that
-            // most of that drop is EmptyWorkingSet evicting pages rather than
-            // memory being handed back for good.
-            var managed = collectionDeferred
-                ? $"managedMb {beforeManaged / (1024 * 1024)} (collection deferred to the background GC - recording)"
-                : $"managedMb {beforeManaged / (1024 * 1024)} -> {GC.GetTotalMemory(false) / (1024 * 1024)}";
             AppLog.Info(
-                $"Memory trimmed ({reason}): workingSetMb {beforeWorkingSet / (1024 * 1024)} -> {settled.WorkingSet64 / (1024 * 1024)}, {managed}.");
+                $"Memory cleanup ({reason}): privateMb {beforePrivate / (1024 * 1024)} -> {settled.PrivateMemorySize64 / (1024 * 1024)}, managedMb {beforeManaged / (1024 * 1024)} -> {GC.GetTotalMemory(false) / (1024 * 1024)}.");
         }
         catch (Exception error)
         {
@@ -148,6 +75,8 @@ public static class MemoryTrimmer
         }
     }
 
-    [DllImport("psapi.dll", SetLastError = true)]
-    private static extern bool EmptyWorkingSet(IntPtr process);
+    private static void RequestTrim(string reason)
+    {
+        _ = Task.Run(() => Trim(reason));
+    }
 }

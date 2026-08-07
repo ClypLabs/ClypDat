@@ -1,6 +1,5 @@
 ﻿using ClypDat.Capture.Abstractions;
 using FFmpeg.AutoGen;
-using System.Buffers;
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -93,11 +92,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // discount overload a save caused - see ReplayCaptureHealth.SaveInProgress.
     private int _savesInFlight;
     private readonly List<RingPacket> _packets = new();
+    private readonly PacketPayloadPool _packetPayloads = new();
     // Running total of _packets' payload bytes, maintained on add/trim under
     // _bufferLock. The diagnostic that reports this used to sum the whole list
     // every 2 seconds - a LINQ walk over up to 14000 entries while holding the
     // one lock the encode thread needs for every packet it produces.
     private long _ringBufferBytes;
+    private long _ringBufferCapacityBytes;
     // Live target frame rate. The capture loop owns the pacing interval and
     // reads this once per iteration; anything outside the loop asks via
     // RequestFrameRate rather than touching the interval directly.
@@ -247,6 +248,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // The buffer then reported IsRecording forever with an empty ring, and
         // every clip attempt surfaced the ring's "Replay just started. Try
         // again in a second." instead of the actual start failure.
+        _packetPayloads.Activate();
         _sessionActive = true;
         SetHealth(new ReplayCaptureHealth("Native", "Desktop Duplication", ReplayCaptureState.Starting,
             config.FrameRate, 0, 0, 0, 0, 0, 0, string.Empty, string.Empty, string.Empty, DateTime.UtcNow));
@@ -306,8 +308,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             ReturnPooledPackets(0, _packets.Count);
             _packets.Clear();
             _ringBufferBytes = 0;
+            _ringBufferCapacityBytes = 0;
             _pauseEvents.Clear();
         }
+        _packetPayloads.Deactivate();
     }
 
     public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null)
@@ -539,6 +543,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     {
         _captureCts?.Cancel();
         _captureCts?.Dispose();
+        _packetPayloads.Deactivate();
     }
 
     private unsafe void CaptureLoop(CancellationToken token, TaskCompletionSource ready)
@@ -1100,8 +1105,17 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // problem is in this ring buffer/packet handling; if
                     // managedMb spikes far above ringBufferMb, it's elsewhere.
                     long ringBufferBytes;
-                    lock (_bufferLock) ringBufferBytes = _ringBufferBytes;
+                    long ringBufferCapacityBytes;
+                    int ringPacketCount;
+                    lock (_bufferLock)
+                    {
+                        ringBufferBytes = _ringBufferBytes;
+                        ringBufferCapacityBytes = _ringBufferCapacityBytes;
+                        ringPacketCount = _packets.Count;
+                    }
                     var ringBufferMb = ringBufferBytes / (1024 * 1024);
+                    var ringCapacityMb = ringBufferCapacityBytes / (1024 * 1024);
+                    var poolRetainedMb = _packetPayloads.RetainedBytes / (1024 * 1024);
                     // avgEncodeMs now comes from EncodeLoop's own thread (Interlocked
                     // handoff, reset via Exchange so nothing's lost mid-read) - the
                     // capture-thread-local encodeMs is relabeled avgQueueMs, since
@@ -1117,7 +1131,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var packetsOutSinceLog = Interlocked.Exchange(ref _packetsOutCount, 0);
                     UpdatePeak(ref _peakQueueDepth, encodeQueue.Count);
                     var frameStalenessDenom = Math.Max(1, frameStalenessCount);
-                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, ringBufferMb={ringBufferMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
+                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={ringPacketCount}, ringBufferMb={ringBufferMb}, ringCapacityMb={ringCapacityMb}, packetPoolMb={poolRetainedMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
                     // Raw encoded rate, deliberately NOT crediting suppressed pads
                     // back in. Pads are only ever skipped under real queue
                     // pressure (see the pacing gate), so a rate that falls short
@@ -3157,7 +3171,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // walked the managed heap from 23MB to 281MB across 20 gen2
             // collections, and one of those collections shows up in the log as a
             // 714ms capture stall.
-            var data = ArrayPool<byte>.Shared.Rent(packet->size);
+            var data = _packetPayloads.Rent(packet->size);
             Marshal.Copy((IntPtr)packet->data, data, 0, packet->size);
 
             if (_extraData is null && codecContext->extradata_size > 0)
@@ -3180,6 +3194,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             {
                 _packets.Add(new RingPacket(data, packet->size, packet->pts, isKeyframe, realWallClockUtc));
                 _ringBufferBytes += packet->size;
+                _ringBufferCapacityBytes += data.Length;
             }
 
             if (fullSessionFormatContext is not null)
@@ -3505,8 +3520,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         {
             var packet = _packets[i];
             _ringBufferBytes -= packet.Length;
+            _ringBufferCapacityBytes -= packet.Data.Length;
             if (_borrowedWindowDepth > 0) _deferredPayloadReturns.Add(packet.Data);
-            else ArrayPool<byte>.Shared.Return(packet.Data);
+            else _packetPayloads.Return(packet.Data);
         }
     }
 
@@ -3519,7 +3535,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             if (_borrowedWindowDepth > 0) _borrowedWindowDepth--;
             if (_borrowedWindowDepth > 0 || _deferredPayloadReturns.Count == 0) return;
 
-            foreach (var payload in _deferredPayloadReturns) ArrayPool<byte>.Shared.Return(payload);
+            foreach (var payload in _deferredPayloadReturns) _packetPayloads.Return(payload);
             _deferredPayloadReturns.Clear();
         }
     }
@@ -4461,7 +4477,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         public int Y;
     }
 
-    // Data comes from ArrayPool and is therefore usually LONGER than the packet
+    // Data comes from PacketPayloadPool and is usually longer than the packet.
     // it holds - Length, not Data.Length, is the packet. Every consumer must
     // respect that.
     private readonly record struct RingPacket(byte[] Data, int Length, long PtsMs, bool IsKeyframe, DateTime WallClockUtc);

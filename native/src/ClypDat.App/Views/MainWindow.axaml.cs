@@ -3366,6 +3366,59 @@ public sealed partial class MainWindow : Window
         await OpenClipCardAsync(clip);
     }
 
+    private ContextMenu? _clipContextMenu;
+
+    private void ClipCard_OnContextRequested(object? sender, ContextRequestedEventArgs e)
+    {
+        if (sender is not Control { DataContext: ClipCardViewModel clip } card) return;
+
+        _changeGameFlyout?.Hide();
+        var menu = _clipContextMenu ??= CreateClipContextMenu();
+        menu.DataContext = clip;
+        menu.Open(card);
+        e.Handled = true;
+    }
+
+    private ContextMenu CreateClipContextMenu()
+    {
+        MenuItem Item(string header, EventHandler<RoutedEventArgs> click)
+        {
+            var item = new MenuItem { Header = header };
+            item.Click += click;
+            item.PointerEntered += ClipContextMenuItem_OnPointerEntered;
+            return item;
+        }
+
+        var rename = Item("Rename", ClipContextRename_OnClick);
+        rename.Bind(MenuItem.HeaderProperty, new Binding(nameof(ClipCardViewModel.RenameActionLabel)));
+
+        var changeGame = new MenuItem { Classes = { "changeGameMenuItem" }, StaysOpenOnClick = true };
+        changeGame.Bind(Visual.IsVisibleProperty, new Binding(nameof(ClipCardViewModel.CanChangeGame)));
+        changeGame.Bind(MenuItem.HeaderProperty, new Binding(nameof(ClipCardViewModel.SetGameActionLabel)));
+        changeGame.PointerEntered += ClipContextSetGame_OnPointerEntered;
+
+        var delete = new MenuItem { Header = "Delete", Foreground = Brush.Parse("#D85E61") };
+        delete.Click += ClipContextDelete_OnClick;
+        delete.PointerEntered += ClipContextMenuItem_OnPointerEntered;
+
+        return new ContextMenu
+        {
+            Classes = { "clipContextMenu" },
+            Width = 190,
+            Items =
+            {
+                Item("Export", ClipContextExport_OnClick),
+                Item("Share", ClipContextShare_OnClick),
+                Item("Open", ClipContextOpen_OnClick),
+                rename,
+                changeGame,
+                Item("Open file location", ClipContextOpenLocation_OnClick),
+                new Separator(),
+                delete
+            }
+        };
+    }
+
     // Whether a press landed on one of the card's own interactive controls
     // rather than on the card itself.
     //

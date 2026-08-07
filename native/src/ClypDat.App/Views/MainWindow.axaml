@@ -882,27 +882,9 @@
                             CornerRadius="12"
                             BoxShadow="0 6 18 -6 #66000000"
                             PointerPressed="ClipCard_OnPointerPressed"
+                            ContextRequested="ClipCard_OnContextRequested"
                             PointerEntered="ClipCard_OnPointerEntered"
                             PointerExited="ClipCard_OnPointerExited">
-                      <Border.ContextMenu>
-                        <ContextMenu Classes="clipContextMenu" Width="190">
-                          <MenuItem Header="Export" Click="ClipContextExport_OnClick" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
-                          <MenuItem Header="Share" Click="ClipContextShare_OnClick" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
-                          <MenuItem Header="Open" Click="ClipContextOpen_OnClick" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
-                          <MenuItem Header="{Binding RenameActionLabel}" Click="ClipContextRename_OnClick" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
-                          <MenuItem Classes="changeGameMenuItem" IsVisible="{Binding CanChangeGame}" PointerEntered="ClipContextSetGame_OnPointerEntered" StaysOpenOnClick="True">
-                            <MenuItem.Header>
-                              <Grid ColumnDefinitions="*,Auto" Width="150" Margin="18,0,0,0">
-                                <TextBlock Grid.Column="0" Text="{Binding SetGameActionLabel}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                                <PathIcon Grid.Column="1" Data="M8.59,16.59L10,18l6-6l-6-6L8.59,7.41L13.17,12L8.59,16.59z" Width="11" Height="11" Margin="8,0,0,0" Foreground="#8C98A7" VerticalAlignment="Center" />
-                              </Grid>
-                            </MenuItem.Header>
-                          </MenuItem>
-                          <MenuItem Header="Open file location" Click="ClipContextOpenLocation_OnClick" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
-                          <Separator />
-                          <MenuItem Header="Delete" Click="ClipContextDelete_OnClick" Foreground="#D85E61" PointerEntered="ClipContextMenuItem_OnPointerEntered" />
-                        </ContextMenu>
-                      </Border.ContextMenu>
                       <Border CornerRadius="12" ClipToBounds="True">
                           <Grid RowDefinitions="Auto,Auto">
                             <Border Grid.RowSpan="2"
