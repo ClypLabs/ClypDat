@@ -4341,6 +4341,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // resolution) could touch, since none of those affect device-level
         // thread safety. Never tried before now; safe no-op if unsupported.
         TryMarkDeviceMultithreadProtected(device!);
+
+        // Both halves of the priority story - see GpuScheduling. The process
+        // class has to be raised from here rather than at app startup because
+        // it only matters once there is GPU work to schedule, and this is the
+        // one place that work begins; it self-guards against the repeat calls
+        // that a buffer restart causes.
+        GpuScheduling.TryRaiseProcessGpuPriority();
+        GpuScheduling.TryRaiseDeviceGpuPriority(device!.NativePointer);
         return device!;
     }
 
