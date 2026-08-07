@@ -3834,12 +3834,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             ? Math.Clamp(config.MaxBitrateMbps, 5, 1000) * 1_000_000L
             : Math.Clamp(CaptureBitrate(config) * 2L, 8_000_000L, 160_000_000L);
 
-    // "P3" -> "p3". Anything unrecognised falls back to the default rather than
-    // being passed through to av_opt_set as-is.
+    // "P2" -> "p2". Anything unrecognised falls back to the default rather than
+    // being passed through to av_opt_set as-is. P3-P5 are no longer selectable
+    // and are not accepted here either: ReplayEncoderPresetPolicy has already
+    // mapped them to P2 by this point, so anything still carrying one is a
+    // config that bypassed the policy, not a preset to honour.
     private static string NvencPreset(ReplayBufferConfig config) => config.EncoderPreset?.ToLowerInvariant() switch
     {
-        "p1" or "p2" or "p3" or "p4" or "p5" => config.EncoderPreset!.ToLowerInvariant(),
-        _ => "p4"
+        "p1" => "p1",
+        _ => "p2"
     };
 
     private static unsafe void ApplyLowLatencyEncoderOptions(AVCodecContext* codecContext, string candidateName, ReplayBufferConfig config, bool lowPower = false)

@@ -201,11 +201,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ReplayFrameRates = new ObservableCollection<int> { 30, 60, 90, 120, 144, 165, 240 };
         ReplayEncoderPresets = new ObservableCollection<EncoderPresetOption>
         {
-            new("P1", "Fastest. Cheapest on the GPU and the softest picture of the five. Worth dropping to only if capture is genuinely struggling."),
-            new("P2", "Very fast. A visible step up from P1 for very little extra GPU time."),
-            new("P3", "Fast. Sits between P2 and the default without much cost either way."),
-            new("P4", "Balanced, and the default. Noticeably better detail in motion than P1-P3, and comfortably within budget on most GPUs."),
-            new("P5", "Highest quality here, and the most GPU time per frame. Best on a card with headroom to spare - watch for dropped frames if the game is already pushing it.")
+            new("P1", "Fastest. Cheapest on the GPU and the softer of the two. Worth dropping to only if capture is genuinely struggling."),
+            new("P2", "Very fast, and the default. A visible step up from P1 for very little extra GPU time.")
         };
         ReplayRateControlModes = new ObservableCollection<string> { "Constant quality", "Constant bitrate" };
         ExportCodecs = new ObservableCollection<ExportCodecOption>
@@ -348,7 +345,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ResolutionOption> ReplayResolutions { get; }
     public ObservableCollection<int> ReplayFrameRates { get; }
     // Label is what's persisted and handed to NVENC; Description is the hover
-    // text, since "P1".."P5" says nothing on its own about which way is faster.
+    // text, since "P1"/"P2" says nothing on its own about which way is faster.
     public sealed record EncoderPresetOption(string Label, string Description);
 
     public ObservableCollection<EncoderPresetOption> ReplayEncoderPresets { get; }
@@ -1283,8 +1280,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public EncoderPresetOption SelectedReplayEncoderPreset
     {
+        // Resolved through the same policy the encoder uses rather than against
+        // a hardcoded fallback label. A settings.json still holding a removed
+        // P3/P4/P5 has no matching option here, and a literal First(== "P4")
+        // would throw on the very users the removal affects.
         get => ReplayEncoderPresets.FirstOrDefault(preset => preset.Label == Settings.ReplayEncoderPreset)
-               ?? ReplayEncoderPresets.First(preset => preset.Label == "P4");
+               ?? ReplayEncoderPresets.First(preset => preset.Label == ReplayEncoderPresetPolicy.Resolve(Settings.ReplayEncoderPreset));
         set
         {
             if (value is null || Settings.ReplayEncoderPreset == value.Label) return;
