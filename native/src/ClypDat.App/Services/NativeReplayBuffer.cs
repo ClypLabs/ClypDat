@@ -1062,7 +1062,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // static menu) is possible, so this path only ever recreates the
             // duplication - cheap, and invisible if it wasn't needed.
             var stallRecreateAfter = TimeSpan.FromSeconds(10);
-            var recoveryRetryInterval = TimeSpan.FromSeconds(2);
+            // Backs off on repeated failure rather than staying at 2s forever.
+            // A recovery that has failed dozens of times is not going to be
+            // rescued by trying again sooner, and each device-rebuild attempt
+            // is a real cost - a full D3D11 device creation plus an encoder
+            // swap. Reset to the fast interval the moment frames come back.
+            var baseRecoveryRetryInterval = TimeSpan.FromSeconds(2);
+            var maxRecoveryRetryInterval = TimeSpan.FromSeconds(30);
+            var recoveryRetryInterval = baseRecoveryRetryInterval;
             // Three failed recreates means the problem isn't the duplication.
             const int recoveryAttemptsBeforeDeviceRebuild = 3;
 
@@ -1382,6 +1389,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             }
                             lastRealFrameElapsed = stopwatch.Elapsed;
                             recoveryAttempts = 0;
+                            recoveryRetryInterval = baseRecoveryRetryInterval;
 
                             stageStopwatch.Restart();
                             int cropLeft = 0, cropTop = 0, cropWidth = captureWidth, cropHeight = captureHeight;
@@ -1795,6 +1803,23 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     {
                         if (rebuildDevice)
                         {
+                            // Release the duplication we already hold BEFORE
+                            // asking DXGI for another one on the same output.
+                            // DuplicateOutput answers E_INVALIDARG when this
+                            // process is already duplicating that output, so
+                            // building the replacement first - which the
+                            // duplication-only branch below deliberately does
+                            // not do - could never succeed. That is the loop in
+                            // the logs: 40+ consecutive attempts, each one
+                            // standing up a fresh D3D11 device, being refused
+                            // the duplication, tearing the device back down and
+                            // trying again two seconds later, for over half an
+                            // hour. Losing the old duplication early costs
+                            // nothing here; it has already stopped producing
+                            // frames, which is the entire reason for recovering.
+                            duplication?.Dispose();
+                            duplication = null;
+
                             var newDevice = CreateD3D11Device();
                             IDXGIOutputDuplication? newDuplication = null;
                             ID3D11Texture2D? newStaging = null;
@@ -1811,7 +1836,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 throw;
                             }
 
-                            duplication?.Dispose();
                             staging?.Dispose();
                             // Keyed by texture pointer and owned by the device
                             // going away here - a stale entry would hand the
@@ -1926,10 +1950,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         }
 
                         consecutiveAcquireFailures = 0;
+                        recoveryRetryInterval = baseRecoveryRetryInterval;
                     }
                     catch (Exception error)
                     {
-                        AppLog.Error($"Native capture: stall recovery failed (attempt {recoveryAttempts}, rebuildDevice={rebuildDevice}).", error);
+                        var nextInterval = TimeSpan.FromTicks(Math.Min(recoveryRetryInterval.Ticks * 2, maxRecoveryRetryInterval.Ticks));
+                        AppLog.Error($"Native capture: stall recovery failed (attempt {recoveryAttempts}, rebuildDevice={rebuildDevice}, retryInSeconds={nextInterval.TotalSeconds:0.#}).", error);
+                        recoveryRetryInterval = nextInterval;
                     }
 
                     // The recreate above can leave `duplication` null on failure;
@@ -4355,7 +4382,21 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             Vortice.Direct3D.FeatureLevel.Level_11_0,
             Vortice.Direct3D.FeatureLevel.Level_10_1,
         };
-        D3D11.D3D11CreateDevice(null, DriverType.Hardware, DeviceCreationFlags.BgraSupport, levels, out var device, out _, out _).CheckError();
+        // The immediate context is captured and released, NOT discarded with
+        // `out _`. This overload hands back its own AddRef'd wrapper for it, and
+        // a live COM reference on the context keeps the entire D3D11 device
+        // alive no matter how thoroughly the device itself is disposed. Measured
+        // at 14.4MB of private bytes per created-and-disposed device - which the
+        // stall-recovery loop below was doing every 2 seconds, indefinitely,
+        // for a steady ~7MB/s native leak that no GC could reach (it is not
+        // managed memory) and that took the process past 16GB.
+        //
+        // Safe to release: this is a distinct wrapper from the one the device
+        // caches for its own ImmediateContext property (verified by reference
+        // comparison), so the per-frame device.ImmediateContext calls elsewhere
+        // are unaffected.
+        D3D11.D3D11CreateDevice(null, DriverType.Hardware, DeviceCreationFlags.BgraSupport, levels, out var device, out _, out Vortice.Direct3D11.ID3D11DeviceContext? createdContext).CheckError();
+        createdContext?.Dispose();
 
         // Microsoft's own WGC samples explicitly mark the D3D11 device
         // multithread-protected when it's touched from both the capture
