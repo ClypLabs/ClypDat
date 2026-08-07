@@ -134,6 +134,31 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private long _encodeMicrosAccum;
     private long _encodeCountAccum;
     private long _encodeDroppedCount;
+    // Ring-lock instrumentation. avgEncodeMs covers send_frame AND
+    // DrainToRingBuffer, and the drain has to take _bufferLock to append - the
+    // same lock TrimRingBuffer holds on the capture thread while it returns
+    // pooled payloads and shifts the packet list. So a long trim reads as
+    // encoder slowness even though the encoder is idle, waiting.
+    //
+    // Every avgEncodeMs spike measured at 120fps landed on a 2s window where
+    // ringBufferMb fell, which is what a trim looks like from the outside. That
+    // is a correlation, not a mechanism: nobody has ever timed the trim's hold,
+    // and 47ms of RemoveRange on ~7,800 entries is more than the shift alone
+    // should cost. These counters close that gap - hold time and removed count
+    // from the trim side, wait time from the encode side. If the two spike
+    // together the contention is confirmed; if the encode thread waits while no
+    // trim is holding, something else owns the lock and the theory is wrong.
+    //
+    // Written from whichever thread owns the operation and read/reset from
+    // CaptureLoop's diag pass. Diagnostics only - a torn max on a 64-bit field
+    // costs a wrong number in one log line and nothing else, so the max fields
+    // deliberately skip the CAS a correct maximum would need.
+    private long _ringTrimHoldMicrosAccum;
+    private long _ringTrimCount;
+    private long _ringTrimMaxHoldMicros;
+    private long _ringTrimRemovedAccum;
+    private long _ringLockWaitMicrosAccum;
+    private long _ringLockWaitMaxMicros;
     // Diagnostics for the gap between what capture hands the encoder and what
     // reaches the ring. Clips arrive 52-260 frames short of a capture that logs
     // a dense 60fps with droppedFrames and padsSkipped at 0, and three attempts
@@ -1116,8 +1141,21 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var sendFailedSinceLog = Interlocked.Exchange(ref _sendFailedOtherCount, 0);
                     var packetsOutSinceLog = Interlocked.Exchange(ref _packetsOutCount, 0);
                     UpdatePeak(ref _peakQueueDepth, encodeQueue.Count);
+                    // Read and reset together so a window's trim numbers line up
+                    // with the avgEncodeMs of the same window - that pairing is
+                    // the whole point of measuring them.
+                    var ringTrimCountSinceLog = _ringTrimCount;
+                    var ringTrimHoldMicrosSinceLog = _ringTrimHoldMicrosAccum;
+                    var ringTrimMaxHoldMicrosSinceLog = _ringTrimMaxHoldMicros;
+                    var ringTrimRemovedSinceLog = _ringTrimRemovedAccum;
+                    var ringLockWaitMicrosSinceLog = Interlocked.Exchange(ref _ringLockWaitMicrosAccum, 0);
+                    var ringLockWaitMaxMicrosSinceLog = Interlocked.Exchange(ref _ringLockWaitMaxMicros, 0);
+                    _ringTrimCount = 0;
+                    _ringTrimHoldMicrosAccum = 0;
+                    _ringTrimMaxHoldMicros = 0;
+                    _ringTrimRemovedAccum = 0;
                     var frameStalenessDenom = Math.Max(1, frameStalenessCount);
-                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, ringBufferMb={ringBufferMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
+                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={_packets.Count}, ringBufferMb={ringBufferMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, ringTrims={ringTrimCountSinceLog}, avgRingTrimHoldMs={ringTrimHoldMicrosSinceLog / 1000.0 / Math.Max(1, ringTrimCountSinceLog):0.00}, maxRingTrimHoldMs={ringTrimMaxHoldMicrosSinceLog / 1000.0:0.00}, ringTrimRemoved={ringTrimRemovedSinceLog}, avgRingLockWaitMs={ringLockWaitMicrosSinceLog / 1000.0 / Math.Max(1, packetsOutSinceLog):0.00}, maxRingLockWaitMs={ringLockWaitMaxMicrosSinceLog / 1000.0:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
                     // Raw encoded rate, deliberately NOT crediting suppressed pads
                     // back in. Pads are only ever skipped under real queue
                     // pressure (see the pacing gate), so a rate that falls short
@@ -3176,8 +3214,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var realWallClockUtc = pendingFrameWallClocks.Count > 0 ? pendingFrameWallClocks.Dequeue() : MonotonicClock.UtcNow;
 
             Interlocked.Increment(ref _packetsOutCount);
+            // The append itself is trivial; getting IN is what can cost. This
+            // wait is included in avgEncodeMs, so it is the term that makes a
+            // blocked encode thread look like a slow encoder.
+            var lockWaitStart = System.Diagnostics.Stopwatch.GetTimestamp();
             lock (_bufferLock)
             {
+                var waitMicros = (System.Diagnostics.Stopwatch.GetTimestamp() - lockWaitStart) * 1_000_000 / System.Diagnostics.Stopwatch.Frequency;
+                Interlocked.Add(ref _ringLockWaitMicrosAccum, waitMicros);
+                if (waitMicros > _ringLockWaitMaxMicros) _ringLockWaitMaxMicros = waitMicros;
                 _packets.Add(new RingPacket(data, packet->size, packet->pts, isKeyframe, realWallClockUtc));
                 _ringBufferBytes += packet->size;
             }
@@ -3585,12 +3630,30 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         var cutoff = MonotonicClock.UtcNow - Duration - TimeSpan.FromSeconds(5);
         lock (_bufferLock)
         {
+            // Timed from inside the lock on purpose: this is the window during
+            // which the encode thread cannot append, which is the thing under
+            // suspicion. Time spent waiting to get in here is the encode
+            // thread's problem and is measured on that side instead.
+            var holdStart = System.Diagnostics.Stopwatch.GetTimestamp();
             var removeCount = 0;
             while (removeCount < _packets.Count && _packets[removeCount].WallClockUtc < cutoff) removeCount++;
             if (removeCount > 0)
             {
                 ReturnPooledPackets(0, removeCount);
                 _packets.RemoveRange(0, removeCount);
+            }
+
+            var holdMicros = (System.Diagnostics.Stopwatch.GetTimestamp() - holdStart) * 1_000_000 / System.Diagnostics.Stopwatch.Frequency;
+            _ringTrimHoldMicrosAccum += holdMicros;
+            _ringTrimCount++;
+            _ringTrimRemovedAccum += removeCount;
+            if (holdMicros > _ringTrimMaxHoldMicros) _ringTrimMaxHoldMicros = holdMicros;
+            // Called out individually as well as averaged: one 47ms trim in a
+            // 2s window is the whole story and an average over that window
+            // would hide it behind the other ~19 cheap trims.
+            if (holdMicros > 5_000)
+            {
+                AppLog.Info($"Native capture: ring trim held the buffer lock for {holdMicros / 1000.0:0.0}ms - removed={removeCount}, remaining={_packets.Count}, ringMb={_ringBufferBytes / (1024 * 1024)}, deferredReturns={_deferredPayloadReturns.Count}, borrowDepth={_borrowedWindowDepth}.");
             }
 
             // _pauseEvents is shared between ring-buffer clip saves (which only
