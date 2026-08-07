@@ -32,11 +32,59 @@ public static class MemoryTrimmer
         }
     }
 
+    private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(30);
+    // Trimming is not free, so it is worth doing on a long idle stretch and not
+    // worth repeating every half minute after that.
+    private static readonly TimeSpan MinimumInterval = TimeSpan.FromMinutes(3);
+    // Below this there is nothing meaningful to reclaim and the collection
+    // would cost more than it returns. Measured on private bytes, not working
+    // set: nothing evicts pages any more, so working set is no longer the
+    // number that says whether the process is actually holding memory.
+    private const long TrimThresholdBytes = 250L * 1024 * 1024;
+    // IsReplayRecording flips on the view model; the replay ring returns its
+    // packets in StopAsync. Those are not ordered against each other, and a
+    // collection that runs while the ring is still rooted reclaims nothing.
+    private static readonly TimeSpan StopSettleDelay = TimeSpan.FromSeconds(2);
+
     private static int _started;
+    private static int _trimPending;
+    private static DateTime _lastTrimUtc = DateTime.MinValue;
 
     public static void Start()
     {
         if (Interlocked.Exchange(ref _started, 1) != 0) return;
+        var thread = new Thread(Loop)
+        {
+            IsBackground = true,
+            Name = "ClypDat.MemoryTrimmer",
+            Priority = ThreadPriority.BelowNormal
+        };
+        thread.Start();
+    }
+
+    // The periodic pass is the only thing that reclaims anything in the app's
+    // normal state, which is "recording, no window open, for hours". Dropping
+    // it left the heap to grow until something else forced a collection.
+    private static void Loop()
+    {
+        while (true)
+        {
+            Thread.Sleep(CheckInterval);
+            try
+            {
+                if (DateTime.UtcNow - _lastTrimUtc < MinimumInterval) continue;
+                if (EditorOpen) continue;
+
+                using var process = Process.GetCurrentProcess();
+                if (process.PrivateMemorySize64 < TrimThresholdBytes) continue;
+
+                Trim("idle");
+            }
+            catch
+            {
+                // Never let housekeeping take the app down.
+            }
+        }
     }
 
     // Also called directly at the points where a large, known-finished
@@ -47,6 +95,7 @@ public static class MemoryTrimmer
     {
         try
         {
+            _lastTrimUtc = DateTime.UtcNow;
             long beforePrivate;
             using (var before = Process.GetCurrentProcess())
             {
@@ -54,20 +103,45 @@ public static class MemoryTrimmer
             }
 
             var beforeManaged = GC.GetTotalMemory(false);
+            var recording = Recording;
 
             AudioChunkCache.Clear();
             BitmapCache.Clear();
 
-            if (Recording) return;
-
-            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-            GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
-            GC.WaitForPendingFinalizers();
-            GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+            if (recording)
+            {
+                // No blocking, no compaction: a compacting gen2 suspends every
+                // managed thread, and the capture and encode loops are managed
+                // threads - a few hundred milliseconds there is dropped frames
+                // in someone's game. This queues the work for the background
+                // GC instead, which is what keeps the heap from growing without
+                // bound across an all-day recording session.
+                GC.Collect(2, GCCollectionMode.Optimized, blocking: false, compacting: false);
+            }
+            else
+            {
+                // The audio chunks are 5.76MB byte[] each, so they live on the
+                // large object heap, which a normal collection sweeps but never
+                // compacts - without this the freed space stays as LOH holes
+                // the process keeps reserved from the OS.
+                GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+                GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+                GC.WaitForPendingFinalizers();
+                // Second pass: the first one runs the finalizers for the bitmaps
+                // dropped above, and an object only becomes collectable after
+                // its finalizer has run.
+                GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+            }
 
             using var settled = Process.GetCurrentProcess();
+            // While recording the collection is non-blocking, so it has not run
+            // yet at this point - a before/after heap size there prints the same
+            // number twice and reads as "the trim reclaimed nothing".
+            var managed = recording
+                ? $"managedMb {beforeManaged / (1024 * 1024)} (collection deferred to the background GC - recording)"
+                : $"managedMb {beforeManaged / (1024 * 1024)} -> {GC.GetTotalMemory(false) / (1024 * 1024)}";
             AppLog.Info(
-                $"Memory cleanup ({reason}): privateMb {beforePrivate / (1024 * 1024)} -> {settled.PrivateMemorySize64 / (1024 * 1024)}, managedMb {beforeManaged / (1024 * 1024)} -> {GC.GetTotalMemory(false) / (1024 * 1024)}.");
+                $"Memory cleanup ({reason}): privateMb {beforePrivate / (1024 * 1024)} -> {settled.PrivateMemorySize64 / (1024 * 1024)}, {managed}.");
         }
         catch (Exception error)
         {
@@ -75,8 +149,29 @@ public static class MemoryTrimmer
         }
     }
 
+    // Coalesced: replay can stop and restart several times in a few seconds
+    // (game switch, quality change), and each of those transitions asking for
+    // its own compacting gen2 is the stall this was meant to avoid. One pending
+    // cleanup at a time, after the ring has had a moment to hand its packets
+    // back.
     private static void RequestTrim(string reason)
     {
-        _ = Task.Run(() => Trim(reason));
+        if (Interlocked.Exchange(ref _trimPending, 1) != 0) return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(StopSettleDelay).ConfigureAwait(false);
+            }
+            finally
+            {
+                Volatile.Write(ref _trimPending, 0);
+            }
+
+            // Recording came back before the delay elapsed - leave the heap
+            // alone rather than stopping the capture threads we just restarted.
+            if (Recording) return;
+            Trim(reason);
+        });
     }
 }
