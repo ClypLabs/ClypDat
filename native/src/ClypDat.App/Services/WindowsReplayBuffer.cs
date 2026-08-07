@@ -728,10 +728,10 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                 reencodeBase.AddRange(metadataArgs);
 
                 var args = reencodeBase.ToList();
-                args.AddRange(BuildNvencVideoArgs(config));
+                args.AddRange(BuildHardwareVideoArgs(config));
                 args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k", outputPath });
                 result = await RunProcessAsync("ffmpeg", args, cancellationToken);
-                AppLog.Info($"Replay mux (re-encode, NVENC) result: exit={result.ExitCode}, output={outputPath}.");
+                AppLog.Info($"Replay mux (re-encode, {ExportEncoderProbe.Family ?? "nvenc"}) result: exit={result.ExitCode}, output={outputPath}.");
                 if (result.ExitCode != 0)
                 {
                     args = reencodeBase.ToList();
@@ -771,22 +771,32 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         return seconds.ToString("0.###", CultureInfo.InvariantCulture);
     }
 
-    private static string[] BuildNvencVideoArgs(ReplayBufferConfig config)
+    // Vendor from ExportEncoderProbe's cached NVENC -> AMF -> QSV detection
+    // rather than assuming NVENC. The caller falls back to a CPU encode when
+    // this pass exits nonzero, so hardcoding NVENC did not break AMD/Intel
+    // outright - it just meant every clip mux on those machines ran a
+    // guaranteed-to-fail ffmpeg process first and then re-encoded the whole
+    // clip on the CPU, with the GPU's encoder never touched.
+    private static string[] BuildHardwareVideoArgs(ReplayBufferConfig config)
     {
         var bitrate = MuxVideoBitrate(config);
         var maxrate = (int)Math.Round(bitrate * 1.5);
         var bufsize = bitrate * 2;
-        return new[]
+        var rate = new[]
         {
-            "-c:v", "h264_nvenc",
-            "-preset", "p4",
-            "-tune", "hq",
-            "-rc", "vbr",
-            "-cq", "18",
-            "-profile:v", "high",
             "-b:v", bitrate.ToString(CultureInfo.InvariantCulture),
             "-maxrate", maxrate.ToString(CultureInfo.InvariantCulture),
             "-bufsize", bufsize.ToString(CultureInfo.InvariantCulture)
+        };
+
+        return ExportEncoderProbe.Family switch
+        {
+            "amf" => new[] { "-c:v", "h264_amf", "-usage", "transcoding", "-quality", "quality", "-profile:v", "high" }
+                .Concat(rate).ToArray(),
+            "qsv" => new[] { "-c:v", "h264_qsv", "-preset", "medium", "-profile:v", "high" }
+                .Concat(rate).ToArray(),
+            _ => new[] { "-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", "18", "-profile:v", "high" }
+                .Concat(rate).ToArray()
         };
     }
 

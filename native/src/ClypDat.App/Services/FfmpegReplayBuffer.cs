@@ -256,6 +256,13 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         var height = Math.Clamp(maxHeight, 480, 1440);
         var width = Math.Min(3840, MakeEven((int)Math.Round(height * 16 / 9d)));
         var scale = $"scale=w={width}:h={height}:force_original_aspect_ratio=decrease:force_divisible_by=2";
+        // NVENC -> AMD AMF -> Intel QSV -> CPU, the same ladder the native
+        // capture engine walks (NativeReplayBuffer.EncoderCandidates). Only
+        // NVENC was checked before, so an AMD or Intel machine skipped straight
+        // to libx264 and recorded on the CPU with a hardware encoder sitting
+        // idle. Each vendor gets its own low-latency settings; the flag names
+        // do not carry across (NVENC's -preset/-tune/-cq have no meaning to
+        // AMF or QSV), which is why this is a ladder and not one arg list.
         if (SupportsEncoder("h264_nvenc"))
         {
             return new[]
@@ -268,6 +275,33 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
                 "-cq", "23",
                 "-b:v", "0",
                 "-pix_fmt", "yuv420p"
+            };
+        }
+
+        if (SupportsEncoder("h264_amf"))
+        {
+            return new[]
+            {
+                "-c:v", "h264_amf",
+                "-vf", scale,
+                "-usage", "ultralowlatency",
+                "-quality", "speed",
+                "-rc", "cqp",
+                "-qp_i", "23",
+                "-qp_p", "23",
+                "-pix_fmt", "yuv420p"
+            };
+        }
+
+        if (SupportsEncoder("h264_qsv"))
+        {
+            return new[]
+            {
+                "-c:v", "h264_qsv",
+                "-vf", scale,
+                "-preset", "veryfast",
+                "-global_quality", "23",
+                "-pix_fmt", "nv12"
             };
         }
 

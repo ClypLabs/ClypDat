@@ -3377,14 +3377,25 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
             // The ring encoder already produced H.264, so H.264 here is a
             // plain stream copy (fast). H.265/AV1 re-encode the whole session
-            // through NVENC at finalize time for a much smaller file, falling
+            // on the GPU at finalize time for a much smaller file, falling
             // back to a stream copy (not a CPU encode - a multi-hour software
             // re-encode at finalize would be far worse than a bigger file) if
-            // NVENC isn't available.
-            var codecArgs = config.FullSessionVideoCodec switch
+            // no hardware encoder is available.
+            //
+            // Vendor comes from ExportEncoderProbe, the same cached NVENC ->
+            // AMF -> QSV detection the export and share paths use, rather than
+            // assuming NVENC. Hardcoding it meant an AMD or Intel machine ran a
+            // guaranteed-to-fail ffmpeg pass and then silently kept the larger
+            // stream-copy file - the smaller-file feature simply never worked
+            // off NVIDIA, and nothing said so.
+            var codecArgs = (config.FullSessionVideoCodec, ExportEncoderProbe.Family) switch
             {
-                "H.265" => new[] { "-c:v", "hevc_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "24", "-b:v", "0" },
-                "AV1" => new[] { "-c:v", "av1_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "32", "-b:v", "0" },
+                ("H.265", "nvenc") => new[] { "-c:v", "hevc_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "24", "-b:v", "0" },
+                ("AV1", "nvenc") => new[] { "-c:v", "av1_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "32", "-b:v", "0" },
+                ("H.265", "amf") => new[] { "-c:v", "hevc_amf", "-quality", "balanced", "-rc", "cqp", "-qp_i", "24", "-qp_p", "24" },
+                ("AV1", "amf") => new[] { "-c:v", "av1_amf", "-quality", "balanced", "-rc", "cqp", "-qp_i", "32", "-qp_p", "32" },
+                ("H.265", "qsv") => new[] { "-c:v", "hevc_qsv", "-preset", "medium", "-global_quality", "24" },
+                ("AV1", "qsv") => new[] { "-c:v", "av1_qsv", "-preset", "medium", "-global_quality", "32" },
                 _ => new[] { "-c:v", "copy" }
             };
             var result = AudioCapturePipeline.RunProcessAsync("ffmpeg", BuildMuxArgs(codecArgs), CancellationToken.None).GetAwaiter().GetResult();
