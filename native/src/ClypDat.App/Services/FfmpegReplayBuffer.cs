@@ -783,7 +783,7 @@ public sealed record ReplayBufferConfig(
     string CustomClipFileNameTemplate = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}",
     string LibraryFolder = "",
     // Native engine encoder controls - see AppSettings for what each means.
-    string EncoderPreset = "P2",
+    string EncoderPreset = "P4",
     string RateControlMode = "Constant quality",
     int ConstantQuality = 20,
     int MaxBitrateMbps = 40,

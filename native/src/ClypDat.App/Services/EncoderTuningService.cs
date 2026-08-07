@@ -73,10 +73,8 @@ public sealed class EncoderTuningService
     private bool _heightReduced;
 
     // Slowest/best-looking first. "Demote" moves toward P1 (cheaper per frame),
-    // "promote" moves back toward the user's own setting. Only P1 and P2 are
-    // selectable now, so this ladder has exactly one rung to move on - the
-    // frame-rate and capture-height levers below carry the rest of the range.
-    private static readonly string[] PresetLadder = { "P2", "P1" };
+    // "promote" moves back toward the user's own setting.
+    private static readonly string[] PresetLadder = { "P5", "P4", "P3", "P2", "P1" };
 
     // Encoder and driver warm-up, shader compilation and level loading all
     // produce overload that says nothing about the steady state, and they all
@@ -404,7 +402,7 @@ public sealed class EncoderTuningService
         _queueDepthSinceClean = 0;
     }
 
-    // direction +1 steps toward P1 (cheaper), -1 toward P2 (better looking).
+    // direction +1 steps toward P1 (cheaper), -1 toward P5 (better looking).
     private static string? Step(string preset, int direction)
     {
         var index = IndexOf(preset) + direction;
@@ -416,7 +414,7 @@ public sealed class EncoderTuningService
         var index = Array.FindIndex(PresetLadder, entry => string.Equals(entry, preset, StringComparison.OrdinalIgnoreCase));
         // Matches NvencPreset's own fallback, so an unrecognised value lands
         // where the encoder would actually have run it.
-        return index >= 0 ? index : Array.IndexOf(PresetLadder, "P2");
+        return index >= 0 ? index : Array.IndexOf(PresetLadder, "P4");
     }
 
     private static string Normalize(string preset) => PresetLadder[IndexOf(preset)];

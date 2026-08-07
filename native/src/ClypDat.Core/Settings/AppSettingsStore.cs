@@ -22,15 +22,7 @@ public static class AppSettingsStore
             settings.GameAudioExcludedProcesses ??= new List<string>();
             if (string.IsNullOrWhiteSpace(settings.ClipFileNameScheme)) settings.ClipFileNameScheme = "Standard";
             if (string.IsNullOrWhiteSpace(settings.CustomClipFileNameTemplate)) settings.CustomClipFileNameTemplate = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}";
-            // Blank stays blank-checked, but a stored P3/P4/P5 is rewritten
-            // too: those presets no longer exist, and leaving one in the file
-            // means the UI and the encoder both keep resolving it at every read
-            // instead of the setting simply being correct on disk.
-            if (string.IsNullOrWhiteSpace(settings.ReplayEncoderPreset) ||
-                !string.Equals(settings.ReplayEncoderPreset, "P1", StringComparison.OrdinalIgnoreCase))
-            {
-                settings.ReplayEncoderPreset = "P2";
-            }
+            if (string.IsNullOrWhiteSpace(settings.ReplayEncoderPreset)) settings.ReplayEncoderPreset = "P4";
             if (string.IsNullOrWhiteSpace(settings.ReplayRateControlMode)) settings.ReplayRateControlMode = "Constant quality";
             if (!string.Equals(settings.ReplayCaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase)) settings.ReplayCaptureSource = "Game";
             settings.ReplayDesktopMonitorDeviceName ??= string.Empty;
