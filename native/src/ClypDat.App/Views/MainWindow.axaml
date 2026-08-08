@@ -2452,7 +2452,7 @@
                                   Height="22"
                                   HorizontalAlignment="Center"
                                   VerticalAlignment="Center"
-                                  Margin="0,0,0,0"
+                                  Margin="0,3,0,0"
                                   IsVisible="{Binding IsAudio}"
                                   PointerPressed="TrackMuteToggle_OnPointerPressed"
                                   Cursor="Hand"
@@ -2464,11 +2464,17 @@
                                       Foreground="{Binding IsMuted, Converter={x:Static opconv:BoolToMuteBrushConverter.Instance}}"
                                       Data="{Binding EffectiveVolumePercent, Converter={x:Static opconv:VolumeLevelToIconConverter.Instance}}" />
                           </Border>
-                          <!-- No negative margin any more: the lane is tall
-                               enough (TrackLaneViewModel.LaneHeight) for the
-                               label row and this one to sit side by side, so
-                               the slider no longer has to be dragged up
-                               underneath the label to fit. -->
+                          <!-- The lane is tall enough (TrackLaneViewModel.LaneHeight)
+                               for the label row and this one to sit side by
+                               side, so this no longer carries the -10 that used
+                               to drag it up underneath the label to fit.
+                               The -3 that remains is optical alignment, not
+                               layout: this and the mute toggle are both centred
+                               in the same row, but the Slider's rail is not
+                               centred inside the Slider (its template reserves
+                               space above the track), so the rail drew a few
+                               pixels below the icon. The icon's matching +3
+                               brings the two onto one line. -->
                           <Slider Grid.Row="1"
                                   Grid.Column="2"
                                   Classes="volumeSlider"
@@ -2480,6 +2486,7 @@
                                   MinHeight="26"
                                   Padding="0"
                                   VerticalAlignment="Center"
+                                  Margin="0,-3,0,0"
                                   Value="{Binding VolumePercent, Mode=TwoWay}"
                                   IsEnabled="{Binding CanAdjustVolume}"
                                   IsVisible="{Binding IsAudio}"

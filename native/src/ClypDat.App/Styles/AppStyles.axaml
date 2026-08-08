@@ -1460,17 +1460,22 @@
     <Setter Property="BoxShadow" Value="0 0 10 0 #9913C8B5" />
   </Style>
 
+  <!-- A true pill: taller than it is wide, corner radius exactly half the
+       width so the ends are semicircles rather than the rounded-square the
+       earlier 14x16/r5 tab read as. Width is 12 and must stay in step with
+       UpdateTimelineChrome's capWidth, which centres it on the boundary. -->
   <Style Selector="Border.trimCap">
-    <Setter Property="Width" Value="14" />
-    <Setter Property="Height" Value="16" />
-    <Setter Property="CornerRadius" Value="5" />
+    <Setter Property="Width" Value="12" />
+    <Setter Property="Height" Value="22" />
+    <Setter Property="CornerRadius" Value="6" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="BorderBrush" Value="#0A1A1E" />
-    <Setter Property="BoxShadow" Value="0 1 4 0 #99000000" />
+    <Setter Property="BoxShadow" Value="0 2 6 0 #A6000000" />
     <Setter Property="Background">
       <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-        <GradientStop Offset="0" Color="#3DF0DC" />
-        <GradientStop Offset="1" Color="#0EA595" />
+        <GradientStop Offset="0" Color="#5CFFEC" />
+        <GradientStop Offset="0.5" Color="#1CD3BF" />
+        <GradientStop Offset="1" Color="#0B9686" />
       </LinearGradientBrush>
     </Setter>
   </Style>
@@ -1481,8 +1486,8 @@
   </Style>
   <Style Selector="Border.trimGripLine">
     <Setter Property="Width" Value="1.5" />
-    <Setter Property="Height" Value="7" />
+    <Setter Property="Height" Value="9" />
     <Setter Property="CornerRadius" Value="1" />
-    <Setter Property="Background" Value="#66051411" />
+    <Setter Property="Background" Value="#73041310" />
   </Style>
 </Styles>

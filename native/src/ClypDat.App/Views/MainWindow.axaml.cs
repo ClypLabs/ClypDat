@@ -8431,10 +8431,10 @@ public sealed partial class MainWindow : Window
         // Matches TrimStartCap/TrimEndCap's Points width (see XAML) - read as
         // a constant rather than Bounds.Width since the Polygon may not have
         // been measured yet on the very first call.
-        const double capWidth = 14;
-        // The cap is a 16-tall grip tab now (was a 9-tall triangle), so it is
+        const double capWidth = 12;
+        // The cap is a 22-tall pill now (was a 9-tall triangle), so it is
         // lifted further to keep the same few pixels of overlap into the lane.
-        const double capTop = -11;
+        const double capTop = -15;
 
         // Width of the visible line, which is NOT the handle Border's own width -
         // that is deliberately wider and transparent to make the handle easier to
@@ -8444,12 +8444,17 @@ public sealed partial class MainWindow : Window
         const double barWidth = 4;
         var hitPadding = Math.Max(0, (TrimEndHandle.Width - barWidth) / 2);
 
-        // Sits entirely on the excluded side of the boundary (flush against
-        // it, not centered on it) - "thicker" toward the left for the start
-        // handle and toward the right for the end handle, like a bracket
-        // hugging the selected range from outside instead of overlapping it.
+        // CENTERED on the boundary, like the playhead - not offset to the
+        // excluded side of it, which is what the old "bracket hugging the range
+        // from outside" placement did. The lanes shade [0, start] and
+        // [end, width] (TimelineLaneControl.DrawTrimShade), so an outside-hugging
+        // start rail sat entirely to the LEFT of where the shading actually
+        // ends, and the end rail entirely to the right: each read as sitting
+        // beside its own boundary rather than on it, by its full width. Cap
+        // placement inherits the same center, so the pill lands on the boundary
+        // too instead of half a bar off it.
         var startMaxLeft = Math.Max(0, width - barWidth);
-        var startLeft = Math.Clamp(start - barWidth, 0, startMaxLeft);
+        var startLeft = Math.Clamp(start - barWidth / 2, 0, startMaxLeft);
         Canvas.SetLeft(TrimStartHandle, startLeft - hitPadding);
         Canvas.SetTop(TrimStartHandle, 0);
         TrimStartHandle.Height = videoLaneHeight;
@@ -8457,7 +8462,7 @@ public sealed partial class MainWindow : Window
         Canvas.SetTop(TrimStartCap, capTop);
 
         var endMaxLeft = Math.Max(0, width - barWidth);
-        var endLeft = Math.Clamp(end, 0, endMaxLeft);
+        var endLeft = Math.Clamp(end - barWidth / 2, 0, endMaxLeft);
         Canvas.SetLeft(TrimEndHandle, endLeft - hitPadding);
         Canvas.SetTop(TrimEndHandle, 0);
         TrimEndHandle.Height = videoLaneHeight;
