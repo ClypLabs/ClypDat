@@ -2990,6 +2990,7 @@ public sealed partial class MainWindow : Window
     private int _clipOverlayAnimationId;
     private double _clipOverlayAnimationStartOffset;
     private double _clipOverlayAnimationTargetOffset;
+    private double _clipOverlayOffset;
     private Action? _clipOverlayAnimationComplete;
     private static readonly TimeSpan ClipOverlaySlideDuration = TimeSpan.FromMilliseconds(260);
 
@@ -3110,6 +3111,7 @@ public sealed partial class MainWindow : Window
             {
                 _clipOverlayPerPixelOverlay?.Dispose();
                 _clipOverlayPerPixelOverlay = new ServerPerPixelOverlay(_activeClipOverlay, _overlayRoot);
+                _clipOverlayPerPixelOverlay.SetPositionOffset(new Vector(_clipOverlayOffset, 0));
                 _clipOverlayPerPixelOverlay.ShowAndRefresh();
                 WindowTransparencyFallback.ApplyInputSurfaceIfNeeded(_activeClipOverlay);
             }
@@ -3295,7 +3297,7 @@ public sealed partial class MainWindow : Window
         var transitions = _overlayTranslate.Transitions;
         StopClipOverlayAnimation();
         _overlayTranslate.Transitions = null;
-        _overlayTranslate.X = isLeft ? -travel : travel;
+        SetClipOverlayOffset(isLeft ? -travel : travel);
 
         _activeClipOverlay.Show();
 
@@ -3381,7 +3383,7 @@ public sealed partial class MainWindow : Window
         if (_overlayTranslate is null) return;
 
         StopClipOverlayAnimation();
-        _clipOverlayAnimationStartOffset = _overlayTranslate.X;
+        _clipOverlayAnimationStartOffset = _clipOverlayOffset;
         _clipOverlayAnimationTargetOffset = targetOffset;
         _clipOverlayAnimationComplete = completed;
         if (Math.Abs(_clipOverlayAnimationStartOffset - targetOffset) < 0.01)
@@ -3437,7 +3439,16 @@ public sealed partial class MainWindow : Window
     {
         if (_overlayTranslate is null) return;
         var scaling = RenderScaling > 0 ? RenderScaling : 1;
-        _overlayTranslate.X = Math.Round(offset * scaling) / scaling;
+        _clipOverlayOffset = Math.Round(offset * scaling) / scaling;
+        if (WindowsPlatformProfile.IsServer())
+        {
+            _overlayTranslate.X = 0;
+            _clipOverlayPerPixelOverlay?.SetPositionOffset(new Vector(_clipOverlayOffset, 0));
+        }
+        else
+        {
+            _overlayTranslate.X = _clipOverlayOffset;
+        }
         _clipOverlayPerPixelOverlay?.Refresh();
     }
 
