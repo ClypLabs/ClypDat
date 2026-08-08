@@ -1649,7 +1649,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (!SetProperty(ref _autoClipSearchText, value)) return;
             foreach (var game in AutoClipGames)
             {
-                game.IsSearchMatch = string.IsNullOrWhiteSpace(value) || game.Name.Contains(value, StringComparison.OrdinalIgnoreCase) || game.Definition.Events.Any(item => item.Name.Contains(value, StringComparison.OrdinalIgnoreCase));
+                game.IsSearchMatch = string.IsNullOrWhiteSpace(value) || game.MatchesSearch(value);
                 game.SearchQuery = value;
             }
             OnPropertyChanged(nameof(HasAutoClipSearchResults));

@@ -22,6 +22,7 @@ public sealed class Cs2GsiListener : IDisposable
     private int _lastMatchAssists;
     private int _lastRoundNumber = -1;
     private string _lastMapName = string.Empty;
+    private string _lastMapMode = string.Empty;
     private readonly List<DateTime> _roundKillTimes = new();
     private DateTime? _lastRelevantEventUtc;
     private string? _pendingLabel;
@@ -69,6 +70,7 @@ public sealed class Cs2GsiListener : IDisposable
             _lastRoundKills = _lastRoundKillHs = _lastMatchDeaths = _lastMatchAssists = 0;
             _lastRoundNumber = -1;
             _lastMapName = string.Empty;
+            _lastMapMode = string.Empty;
             ClearRoundLocked();
         }
     }
@@ -97,7 +99,7 @@ public sealed class Cs2GsiListener : IDisposable
         }
     }
 
-    private void ProcessPayload(string json)
+    internal void ProcessPayload(string json)
     {
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
@@ -118,6 +120,9 @@ public sealed class Cs2GsiListener : IDisposable
         var mapName = root.TryGetProperty("map", out var mapElement) && mapElement.TryGetProperty("name", out var mapNameElement)
             ? mapNameElement.GetString() ?? string.Empty
             : string.Empty;
+        var mapMode = root.TryGetProperty("map", out mapElement) && mapElement.TryGetProperty("mode", out var mapModeElement)
+            ? mapModeElement.GetString() ?? string.Empty
+            : string.Empty;
         var roundNumber = root.TryGetProperty("map", out var map) && map.TryGetProperty("round", out var roundElement) && roundElement.TryGetInt32(out var parsedRound)
             ? parsedRound
             : (int?)null;
@@ -132,13 +137,22 @@ public sealed class Cs2GsiListener : IDisposable
 
         lock (_stateLock)
         {
-            if (!string.IsNullOrWhiteSpace(mapName) && !string.Equals(mapName, _lastMapName, StringComparison.OrdinalIgnoreCase))
+            var settings = _settingsProvider();
+            var deathmatchDisabled = IsDeathmatch(mapMode) && !settings.DeathmatchClipping;
+            var mapChanged = !string.IsNullOrWhiteSpace(mapName) && !string.Equals(mapName, _lastMapName, StringComparison.OrdinalIgnoreCase);
+            var modeChanged = !string.IsNullOrWhiteSpace(mapMode) && !string.Equals(mapMode, _lastMapMode, StringComparison.OrdinalIgnoreCase);
+            if (mapChanged || modeChanged)
             {
-                FinalizePendingLocked();
+                // If GSI starts sending a Deathmatch mode after an incomplete
+                // snapshot, discard that candidate instead of exporting it.
+                if (deathmatchDisabled && string.IsNullOrWhiteSpace(_lastMapMode)) ClearRoundLocked();
+                else FinalizePendingLocked();
                 _lastMapName = mapName;
+                _lastMapMode = mapMode;
                 _lastRoundNumber = -1;
                 _lastRoundKills = _lastRoundKillHs = 0;
                 ClearRoundLocked();
+                _seeded = false;
             }
 
             if (!_seeded)
@@ -163,9 +177,15 @@ public sealed class Cs2GsiListener : IDisposable
             }
             if (roundNumber.HasValue) _lastRoundNumber = roundNumber.Value;
 
-            var settings = _settingsProvider();
             if (!settings.Enabled)
             {
+                SyncCounters(roundKills, roundKillHs, deaths, assists);
+                return;
+            }
+
+            if (deathmatchDisabled)
+            {
+                ClearRoundLocked();
                 SyncCounters(roundKills, roundKillHs, deaths, assists);
                 return;
             }
@@ -275,6 +295,7 @@ public sealed class Cs2GsiListener : IDisposable
     };
 
     private static bool IsEnabled(AutoClipGameSettings settings, string id) => settings.Events.TryGetValue(id, out var enabled) && enabled;
+    private static bool IsDeathmatch(string mode) => string.Equals(mode, "deathmatch", StringComparison.OrdinalIgnoreCase);
 
     private static string EventIdForLabel(string label) => label switch { "Kill" => "kill", "2K" => "2k", "3K" => "3k", "4K" => "4k", "Ace" => "ace", "Headshot" => "headshot", "Death" => "death", "Assist" => "assist", _ => "kill" };
     private static int KillPriority(string label) => label switch { "Kill" => 10, "2K" => 20, "3K" => 30, "4K" => 40, "Ace" => 50, "Headshot" => 15, _ => 0 };

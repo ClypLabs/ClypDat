@@ -66,7 +66,7 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         // etc.) via AutoClipGameNames below - a per-game name never appears
         // in the section's own static keyword list, since the catalog is
         // the actual source of truth for what games exist.
-        ["Auto-Clip"] = new[] { "Auto Capture", "Auto Capture Events" }.Concat(AutoClipGameNames).ToArray(),
+        ["Auto-Clip"] = new[] { "Auto Capture", "Auto Capture Events", "Deathmatch Clipping", "Deathmatch" }.Concat(AutoClipGameNames).ToArray(),
         ["Audio"] = new[]
         {
             "Audio sources", "Chat Audio App", "Multiple apps", "Microphone", "Multiple mics"
