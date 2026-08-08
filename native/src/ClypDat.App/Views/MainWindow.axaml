@@ -25,6 +25,13 @@
        chrome, so without this the top of the header and the left of the
        sidebar render past the screen edge. -->
   <Grid x:Name="RootLayout" RowDefinitions="48,*">
+    <!-- Somewhere for focus to GO. This Avalonia version's IFocusManager has no
+         ClearFocus, and focus has to land on something focusable, so anything
+         wanting to hand the keyboard back (the search boxes on Enter or an
+         outside click) parks it here. Zero-sized and hit-test-invisible, so it
+         is only ever reachable deliberately. -->
+    <Border x:Name="FocusSink" Focusable="True" Width="0" Height="0" IsHitTestVisible="False"
+            HorizontalAlignment="Left" VerticalAlignment="Top" />
     <Border Grid.Row="0" Background="#171F27" BorderBrush="#1E2A33" BorderThickness="0,0,0,1" PointerPressed="HeaderBar_OnPointerPressed">
       <Grid ColumnDefinitions="Auto,*,Auto,Auto" Margin="12,2,0,0" VerticalAlignment="Stretch">
         <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
@@ -735,7 +742,8 @@
                              VerticalAlignment="Center" />
                 </StackPanel>
               </Border>
-              <TextBox Grid.Column="2"
+              <TextBox x:Name="LibrarySearchBox"
+                       Grid.Column="2"
                        Classes="settingsInput appSearchBox"
                        Text="{Binding LibrarySearchText}"
                        PlaceholderText="Search clips or games"
@@ -1122,7 +1130,7 @@
       <Grid ColumnDefinitions="240,*,Auto">
         <Border Grid.Column="0" Background="#0D1116" BorderBrush="#1E2A33" BorderThickness="0,0,1,0">
           <StackPanel Margin="0,18,16,24" Spacing="2">
-            <TextBox Classes="settingsInput appSearchBox" Text="{Binding SettingsSearchText}" PlaceholderText="Search settings" Margin="14,0,0,14" VerticalContentAlignment="Center">
+            <TextBox x:Name="SettingsSearchBox" Classes="settingsInput appSearchBox" Text="{Binding SettingsSearchText}" PlaceholderText="Search settings" Margin="14,0,0,14" VerticalContentAlignment="Center">
               <TextBox.InnerLeftContent>
                 <Canvas Width="16" Height="16" Margin="10,0,2,0" VerticalAlignment="Center">
                   <Ellipse Canvas.Left="0" Canvas.Top="0" Width="11" Height="11" Stroke="#6B7C8C" StrokeThickness="1.6" />

@@ -475,6 +475,13 @@ public sealed partial class MainWindow : Window
         // Enter just added a line instead of committing. Shift+Enter still
         // falls through to that class handler for a real newline.
         EditorDescriptionBox.AddHandler(KeyDownEvent, EditorDescription_OnKeyDown, RoutingStrategies.Tunnel);
+        // Both search boxes: Enter means "done typing", and a click anywhere
+        // else means the same. Neither clears the query - the results stay up,
+        // the caret just stops owning the keyboard, so Space plays and the
+        // editor's own shortcuts work again without a detour through the mouse.
+        AddHandler(PointerPressedEvent, SearchBox_OnAnyPointerPressed, RoutingStrategies.Tunnel);
+        LibrarySearchBox.AddHandler(KeyDownEvent, SearchBox_OnKeyDown, RoutingStrategies.Tunnel);
+        SettingsSearchBox.AddHandler(KeyDownEvent, SearchBox_OnKeyDown, RoutingStrategies.Tunnel);
         // Game-rail drag - same reasoning as KeyDown/KeyUp above: a plain
         // (bubble) PointerPressed wired directly on a rail Button never saw
         // the press at all, because Button's OWN internal press handling (it
@@ -3970,6 +3977,24 @@ public sealed partial class MainWindow : Window
         EditorDetailsCard.Focus();
     }
 
+    private void SearchBox_OnKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter) return;
+        e.Handled = true;
+        DropFocus();
+    }
+
+    private void SearchBox_OnAnyPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is not Visual focused) return;
+        if (focused != LibrarySearchBox && focused != SettingsSearchBox) return;
+        // A click on the box itself (or its clear button) is not "done".
+        if (e.Source is Visual source && (LibrarySearchBox.IsVisualAncestorOf(source) || SettingsSearchBox.IsVisualAncestorOf(source))) return;
+        DropFocus();
+    }
+
+    private void DropFocus() => FocusSink.Focus();
+
     // Commits and drops focus when a click lands anywhere outside the details
     // card. Clicks INSIDE it are left alone - moving between Title and
     // Description is still one editing session, not the end of one.
@@ -5203,7 +5228,7 @@ public sealed partial class MainWindow : Window
         _trimDragGrabOffsetMs = TrimGrabOffsetMs(e, ViewModel.TrimStart);
         _timelineWasPlayingBeforeDrag = ViewModel.IsPlaying;
         _endedAtTrimBoundary = false;
-        BeginTimelineGesture(e);
+        BeginTimelineGesture(e, pauseNow: true);
         UpdateTimelineFromPointer(e, TimelineDragMode.TrimStart);
         _timelineScrubThrottle.Restart();
         e.Pointer.Capture(TimelineSurface);
@@ -5217,7 +5242,7 @@ public sealed partial class MainWindow : Window
         _trimDragGrabOffsetMs = TrimGrabOffsetMs(e, ViewModel.TrimEnd);
         _timelineWasPlayingBeforeDrag = ViewModel.IsPlaying;
         _endedAtTrimBoundary = false;
-        BeginTimelineGesture(e);
+        BeginTimelineGesture(e, pauseNow: true);
         UpdateTimelineFromPointer(e, TimelineDragMode.TrimEnd);
         _timelineScrubThrottle.Restart();
         e.Pointer.Capture(TimelineSurface);
@@ -5237,10 +5262,29 @@ public sealed partial class MainWindow : Window
     // still needs the pause (SeekPreview drives the picture by hand and audio
     // would run on underneath it), so it is taken on the first real movement
     // instead, in PromoteTimelineGestureToDrag.
-    private void BeginTimelineGesture(PointerEventArgs e)
+    // pauseNow: grabbing a TRIM HANDLE is always an edit, never a "seek here and
+    // keep playing" - and it parks the playhead on the boundary it is moving. If
+    // playback keeps running through that, SyncPlaybackPosition overwrites the
+    // playhead on the very next tick and it drifts off the handle immediately,
+    // which reads as the seeker being misaligned with the trim marker after a
+    // click that never moved anything. The timeline SURFACE is the opposite
+    // case: a plain click there is a seek, and stopping playback for it is the
+    // thing that made seeking feel like a stop and a restart.
+    private void BeginTimelineGesture(PointerEventArgs e, bool pauseNow = false)
     {
         _timelineGestureOrigin = e.GetPosition(TimelineSurface);
         _timelineGesturePaused = false;
+        if (pauseNow) PauseForTimelineGesture();
+    }
+
+    private void PauseForTimelineGesture()
+    {
+        if (_timelineGesturePaused) return;
+        _timelineGesturePaused = true;
+        if (!_timelineWasPlayingBeforeDrag || ViewModel is null) return;
+        _playback?.Pause();
+        ViewModel.IsPlaying = false;
+        _playbackTimer.Stop();
     }
 
     private void PromoteTimelineGestureToDrag(PointerEventArgs e)
@@ -5249,11 +5293,7 @@ public sealed partial class MainWindow : Window
         var travelled = e.GetPosition(TimelineSurface) - _timelineGestureOrigin;
         if (Math.Abs(travelled.X) < TimelineDragThreshold && Math.Abs(travelled.Y) < TimelineDragThreshold) return;
 
-        _timelineGesturePaused = true;
-        if (!_timelineWasPlayingBeforeDrag || ViewModel is null) return;
-        _playback?.Pause();
-        ViewModel.IsPlaying = false;
-        _playbackTimer.Stop();
+        PauseForTimelineGesture();
     }
 
     private void TimelineSurface_OnPointerMoved(object? sender, PointerEventArgs e)
