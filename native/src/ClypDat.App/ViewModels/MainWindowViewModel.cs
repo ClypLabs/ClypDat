@@ -2832,6 +2832,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             _isRestoringCachedLibrary = true;
             PopulateGameFilterOptionsFromCache(cached);
+            PopulateClipTypeFilterOptionsFromCache(cached);
             _restoredClipPaths.Clear();
             foreach (var clip in AllClips) _restoredClipPaths.Add(clip.Path);
             OnPropertyChanged(nameof(IsRestoringLibraryCache));
@@ -5683,6 +5684,40 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             .GroupBy(state => state.ClipInfo?.GameDisplayName ?? state.ClipInfo?.FileTitle ?? ClipFileNaming.StripTimestampSuffix(state.Media.Name), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
         SetGameFilterOptions(countsByGame, removeMissingActiveFilter: false);
+    }
+
+    private void PopulateClipTypeFilterOptionsFromCache(IReadOnlyList<CachedClipState> cached)
+    {
+        var manualCount = 0;
+        var autoClipCount = 0;
+        var vodCount = 0;
+        var medalImportCount = 0;
+        foreach (var state in cached)
+        {
+            if (!string.IsNullOrWhiteSpace(state.ClipInfo?.MedalImportKey)) medalImportCount++;
+            else if (!string.IsNullOrWhiteSpace(state.ClipInfo?.AutoClipEventType)) autoClipCount++;
+            else if (IsCachedStateVod(state)) vodCount++;
+            else manualCount++;
+        }
+
+        var hasMedalImports = medalImportCount > 0;
+        if (!hasMedalImports) _activeClipTypeFilters.Remove(ClipTypeMedalImport);
+        ClipTypeFilterOptions.Clear();
+        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeManual, $"Manual clips ({manualCount})", _activeClipTypeFilters.Contains(ClipTypeManual), OnClipTypeFilterOptionChanged));
+        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeAutoClip, $"Auto-Clips ({autoClipCount})", _activeClipTypeFilters.Contains(ClipTypeAutoClip), OnClipTypeFilterOptionChanged));
+        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeVod, $"Full Session / VODs ({vodCount})", _activeClipTypeFilters.Contains(ClipTypeVod), OnClipTypeFilterOptionChanged));
+        if (hasMedalImports)
+        {
+            ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeMedalImport, $"Medal imports ({medalImportCount})", _activeClipTypeFilters.Contains(ClipTypeMedalImport), OnClipTypeFilterOptionChanged));
+        }
+    }
+
+    private bool IsCachedStateVod(CachedClipState state)
+    {
+        if (state.Media.Duration.TotalSeconds > LibraryLayout.ClipMaximumDurationSeconds) return true;
+        if (string.IsNullOrWhiteSpace(Settings.LibraryFolder)) return false;
+        var relative = Path.GetRelativePath(LibraryLayout.VodsRoot(Settings.LibraryFolder), state.Media.Path);
+        return !relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative);
     }
 
     private bool SetGameFilterOptions(IReadOnlyDictionary<string, int> countsByGame, bool removeMissingActiveFilter)
