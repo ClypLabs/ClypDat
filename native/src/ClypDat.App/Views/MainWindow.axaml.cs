@@ -1859,12 +1859,14 @@ public sealed partial class MainWindow : Window
     {
         ClearScrubberTicks();
 
-        foreach (var (_, contentY, _) in _scrubberDates)
+        foreach (var (_, contentY, clipCount) in _scrubberDates)
         {
             var tick = new Border
             {
-                Width = 6,
-                Height = 2,
+                // Dense dates stand out with a slightly longer pill without
+                // turning the timeline into a second set of text labels.
+                Width = Math.Clamp(4 + Math.Log2(Math.Max(1, clipCount)) * 2, 4, 12),
+                Height = 1,
                 CornerRadius = new CornerRadius(1),
                 Background = Avalonia.Media.Brush.Parse("#8296AC"),
                 IsHitTestVisible = false,
@@ -1874,7 +1876,7 @@ public sealed partial class MainWindow : Window
                 Opacity = 0,
                 Transitions = new Transitions { new DoubleTransition { Property = Border.OpacityProperty, Duration = TimeSpan.FromSeconds(0.08) } }
             };
-            Canvas.SetLeft(tick, 4);
+            Canvas.SetLeft(tick, 26);
             Canvas.SetTop(tick, ContentOffsetToTrackY(contentY) - 1);
             DateScrubberCanvas.Children.Add(tick);
             _scrubberTicks.Add(tick);
@@ -1972,7 +1974,9 @@ public sealed partial class MainWindow : Window
         if (bubbleHeight <= 0) bubbleHeight = 24;
 
         Canvas.SetTop(DateScrubberBubble, thumbTop + DateScrubberThumb.Bounds.Height / 2 - bubbleHeight / 2);
-        Canvas.SetLeft(DateScrubberBubble, -(bubbleWidth > 0 ? bubbleWidth : 64) - 10);
+        // The hit target extends 22px left of the visual rail. Keep this
+        // bubble attached to the rail, not the expanded invisible hit area.
+        Canvas.SetLeft(DateScrubberBubble, -(bubbleWidth > 0 ? bubbleWidth : 64) + 12);
     }
 
     // Hover (not dragging) variant - shows whichever date the CURSOR is over
