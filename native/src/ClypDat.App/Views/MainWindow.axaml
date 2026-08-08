@@ -1057,7 +1057,7 @@
           <Border Grid.Column="1"
                   x:Name="DateScrubberHost"
                   Width="22"
-                  Margin="2,14,4,10"
+                  Margin="2,14,0,10"
                   Background="Transparent"
                   ClipToBounds="False"
                   IsVisible="{Binding IsInitialLibraryLoadComplete}"
@@ -1074,15 +1074,14 @@
                       Width="4"
                       CornerRadius="2"
                       Background="#141C24"
-                      HorizontalAlignment="Left"
-                      Margin="12,0,0,0"
+                      HorizontalAlignment="Right"
                       IsHitTestVisible="False" />
 
               <Canvas x:Name="DateScrubberCanvas" ClipToBounds="False">
                 <!-- Grows from its own centre on hover/drag (scaleX, so the
                      width change animates - Width itself can't transition). -->
                 <Border x:Name="DateScrubberThumb"
-                        Canvas.Left="12"
+                        Canvas.Left="18"
                         Width="4"
                         MinHeight="34"
                         CornerRadius="2"
