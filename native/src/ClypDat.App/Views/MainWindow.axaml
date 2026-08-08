@@ -736,7 +736,7 @@
                 </StackPanel>
               </Border>
               <TextBox Grid.Column="2"
-                       Classes="settingsInput librarySearchBox"
+                       Classes="settingsInput appSearchBox"
                        Text="{Binding LibrarySearchText}"
                        PlaceholderText="Search clips or games"
                        VerticalAlignment="Center"
@@ -1122,7 +1122,7 @@
       <Grid ColumnDefinitions="240,*,Auto">
         <Border Grid.Column="0" Background="#0D1116" BorderBrush="#1E2A33" BorderThickness="0,0,1,0">
           <StackPanel Margin="0,24,16,24" Spacing="2">
-            <TextBox Classes="settingsInput" Text="{Binding SettingsSearchText}" PlaceholderText="Search settings" Margin="22,0,0,14" VerticalContentAlignment="Center">
+            <TextBox Classes="settingsInput appSearchBox" Text="{Binding SettingsSearchText}" PlaceholderText="Search settings" Margin="22,0,0,14" VerticalContentAlignment="Center">
               <TextBox.InnerLeftContent>
                 <Canvas Width="16" Height="16" Margin="10,0,2,0" VerticalAlignment="Center">
                   <Ellipse Canvas.Left="0" Canvas.Top="0" Width="11" Height="11" Stroke="#6B7C8C" StrokeThickness="1.6" />

@@ -4121,10 +4121,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SaveSettings();
     }
 
-    public void CloseSettings()
+    // returnToEditor: put back whatever Settings was opened over, which is right
+    // for every "close Settings" affordance - the user is finished with Settings
+    // and expects to be where they were. The logo button is the exception: it
+    // means Library specifically, so it passes false.
+    public void CloseSettings(bool returnToEditor = true)
     {
         IsSettingsVisible = false;
-        IsEditorVisible = _wasEditorVisibleBeforeSettings && !string.IsNullOrWhiteSpace(SelectedVideoPath);
+        IsEditorVisible = returnToEditor && _wasEditorVisibleBeforeSettings && !string.IsNullOrWhiteSpace(SelectedVideoPath);
     }
 
     public void SetHotkey(string hotkey)

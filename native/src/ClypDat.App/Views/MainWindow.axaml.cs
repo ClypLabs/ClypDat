@@ -4421,7 +4421,11 @@ public sealed partial class MainWindow : Window
 
         if (ViewModel.IsSettingsVisible)
         {
-            ViewModel.CloseSettings();
+            // returnToEditor: false - this button means Library, and it says so
+            // above. CloseSettings' default is to put back whatever Settings was
+            // opened over, which for "open a clip, open Settings, press home"
+            // landed back in the editor rather than the library.
+            ViewModel.CloseSettings(returnToEditor: false);
         }
     }
 

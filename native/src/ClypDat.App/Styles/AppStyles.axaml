@@ -880,13 +880,13 @@
     <Setter Property="FontSize" Value="14" />
     <Setter Property="MinHeight" Value="42" />
   </Style>
-  <!-- The library's search box borrows settingsInput's behaviour but not its
+  <!-- The app's search boxes borrow settingsInput's behaviour but not its
        proportions. A settings field is a 42px form control on a page of form
-       controls; the same thing dropped into a 52px toolbar nearly fills the bar
-       and reads as a form pasted over it. Shorter, pill-shaped, and filled a
-       shade off the bar rather than a shade off the page, so it sits IN the
-       toolbar instead of on top of it. -->
-  <Style Selector="TextBox.librarySearchBox">
+       controls; the same thing used as a search box reads as a form pasted over
+       whatever it sits in - it nearly filled the library's 52px toolbar, and
+       loomed over the settings nav list it heads. Shorter, pill-shaped, and
+       filled a shade off its container rather than a shade off the page. -->
+  <Style Selector="TextBox.appSearchBox">
     <Setter Property="MinHeight" Value="32" />
     <Setter Property="Height" Value="32" />
     <Setter Property="FontSize" Value="13" />
@@ -895,11 +895,11 @@
     <Setter Property="Background" Value="#141D25" />
     <Setter Property="BorderBrush" Value="#243240" />
   </Style>
-  <Style Selector="TextBox.librarySearchBox:pointerover /template/ Border#PART_BorderElement">
+  <Style Selector="TextBox.appSearchBox:pointerover /template/ Border#PART_BorderElement">
     <Setter Property="Background" Value="#18232D" />
     <Setter Property="BorderBrush" Value="#2E4052" />
   </Style>
-  <Style Selector="TextBox.librarySearchBox:focus /template/ Border#PART_BorderElement">
+  <Style Selector="TextBox.appSearchBox:focus /template/ Border#PART_BorderElement">
     <Setter Property="Background" Value="#18232D" />
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
   </Style>
