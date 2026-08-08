@@ -49,6 +49,14 @@ public sealed partial class MainWindow : Window
     // per play session in StartPlayheadClock, the single place a play session
     // actually begins at a given base time.
     private bool _trimEndGuardArmed = true;
+    // A play session starting this close to TrimEnd counts as starting AT the
+    // boundary, not past it. Dragging the trim-end handle parks the playhead
+    // exactly on the new TrimEnd (UpdateTimelineFromPointer), which used to
+    // read as "started past it" and disarm the guard for the rest of the
+    // session - so right after moving TrimEnd, playback sailed straight
+    // through it to the end of the clip. A seek meant as "preview the footage
+    // after the trim point" lands well clear of this.
+    private static readonly TimeSpan TrimBoundaryTolerance = TimeSpan.FromMilliseconds(80);
     private bool _timelineWasPlayingBeforeDrag;
     private readonly Stopwatch _playheadClock = new();
     private TimeSpan _playheadBaseTime = TimeSpan.Zero;
@@ -5023,8 +5031,17 @@ public sealed partial class MainWindow : Window
         }
 
         var startTime = ViewModel.CurrentTime;
+        // Sitting ON the trim-out point has nothing left to play, so Play means
+        // "play the trimmed clip again" - the same thing it means after the
+        // guard auto-stopped there. This is not conditional on _playback.IsEnded
+        // any more: dragging the trim-end handle parks the playhead exactly on
+        // TrimEnd without the media ever ending, and pressing Play there used to
+        // run on past the trim point instead. Bounded above as well, so a seek
+        // deliberately placed beyond TrimEnd still previews forward from there.
         if (_endedAtTrimBoundary ||
-            (_playback.IsEnded && ViewModel.TrimEnd > TimeSpan.Zero && startTime >= ViewModel.TrimEnd - TimeSpan.FromMilliseconds(80)))
+            (ViewModel.TrimEnd > TimeSpan.Zero
+             && startTime >= ViewModel.TrimEnd - TrimBoundaryTolerance
+             && startTime <= ViewModel.TrimEnd + TrimBoundaryTolerance))
         {
             startTime = ViewModel.TrimStart;
             ViewModel.CurrentTime = startTime;
@@ -8460,7 +8477,9 @@ public sealed partial class MainWindow : Window
     private void StartPlayheadClock(TimeSpan time)
     {
         _playheadBaseTime = time < TimeSpan.Zero ? TimeSpan.Zero : time;
-        _trimEndGuardArmed = ViewModel is null || ViewModel.TrimEnd <= TimeSpan.Zero || _playheadBaseTime < ViewModel.TrimEnd;
+        _trimEndGuardArmed = ViewModel is null
+            || ViewModel.TrimEnd <= TimeSpan.Zero
+            || _playheadBaseTime <= ViewModel.TrimEnd + TrimBoundaryTolerance;
         _playheadClock.Restart();
     }
 
