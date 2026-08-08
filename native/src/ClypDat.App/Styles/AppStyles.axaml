@@ -1421,48 +1421,48 @@
 
   <!-- Trim start/end handles.
 
-       These were a flat 4px rectangle with a hard 1px near-black outline and
-       a solid triangle on top - readable, but with no depth, no rounding and
-       no reaction to the pointer, which is what made them look unfinished
-       next to everything else in the editor. The rail is now a rounded bar
-       with a vertical gradient and a soft outer glow, and the cap is a grip
-       tab (see the XAML) rather than a triangle. Both brighten on hover and
-       on the actual drag, so grabbing one confirms itself.
+       Two parts, because one part cannot do both jobs. A hairline spans the
+       whole lane to actually MARK the boundary - that has to be thin, or it
+       hides the frames it is supposed to point between. The grab affordance
+       is a short pill floating at the middle of that line, which has to be
+       chunky enough to look grabbable. Stretching one fat pill over the full
+       lane height tried to be both and read as a blob sitting on the clip.
 
-       Geometry is deliberately unchanged: the bar is still 4px wide and the
-       cap still 14, because UpdateTimelineChrome positions both from those
-       exact numbers (barWidth / capWidth) to land the line on the trim
-       boundary. Anything here that changes width has to change there too. -->
-  <!-- Pill: corner radius is exactly half the width, so the ends are
-       semicircles rather than softened corners. Width must stay in step with
-       UpdateTimelineChrome's barWidth, which centres it on the trim boundary. -->
+       Pill width must stay in step with UpdateTimelineChrome's barWidth,
+       which is what centres the whole handle on the trim boundary. -->
   <Style Selector="Border.trimBar">
-    <Setter Property="Width" Value="9" />
+    <Setter Property="Width" Value="10" />
+    <Setter Property="Height" Value="26" />
     <Setter Property="HorizontalAlignment" Value="Center" />
-    <Setter Property="CornerRadius" Value="4.5" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="CornerRadius" Value="5" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="BorderBrush" Value="#0A1A1E" />
+    <Setter Property="BorderBrush" Value="#0B1D22" />
     <Setter Property="Background">
       <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-        <GradientStop Offset="0" Color="#2BE8D3" />
-        <GradientStop Offset="1" Color="#0FA898" />
+        <GradientStop Offset="0" Color="#4BF2DE" />
+        <GradientStop Offset="1" Color="#0DA294" />
       </LinearGradientBrush>
     </Setter>
-    <Setter Property="BoxShadow" Value="0 0 6 0 #6613C8B5" />
-    <Setter Property="Transitions">
-      <Transitions>
-        <BrushTransition Property="Background" Duration="0:0:0.12" />
-      </Transitions>
+    <Setter Property="BoxShadow" Value="0 1 5 0 #99000000" />
+  </Style>
+  <!-- The hairline. Sits behind the pill and marks the actual cut. -->
+  <Style Selector="Border.trimLine">
+    <Setter Property="Width" Value="2" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Stretch" />
+    <Setter Property="Background" Value="#13C8B5" />
+  </Style>
+  <Style Selector="Border.trimHandle:pointerover > Grid > Border.trimBar">
+    <Setter Property="Background">
+      <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+        <GradientStop Offset="0" Color="#7BFFF0" />
+        <GradientStop Offset="1" Color="#17C7B4" />
+      </LinearGradientBrush>
     </Setter>
   </Style>
-  <Style Selector="Border.trimHandle:pointerover > Border.trimBar">
-    <Setter Property="Background">
-      <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-        <GradientStop Offset="0" Color="#63FFEE" />
-        <GradientStop Offset="1" Color="#19D2BE" />
-      </LinearGradientBrush>
-    </Setter>
-    <Setter Property="BoxShadow" Value="0 0 10 0 #9913C8B5" />
+  <Style Selector="Border.trimHandle:pointerover > Grid > Border.trimLine">
+    <Setter Property="Background" Value="#4BF2DE" />
   </Style>
 
   <Style Selector="StackPanel.trimGrip">

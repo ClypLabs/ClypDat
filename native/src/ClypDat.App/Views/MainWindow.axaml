@@ -2423,7 +2423,11 @@
                                row it draws in and is declared after this one,
                                so without this it hit-tests on top of the button
                                and pressing Reset grabs the slider instead. -->
-                          <Grid Grid.ColumnSpan="3" ColumnDefinitions="*,Auto" ZIndex="2">
+                          <Grid Grid.ColumnSpan="3"
+                                Grid.RowSpan="{Binding LabelRowSpan}"
+                                VerticalAlignment="Center"
+                                ColumnDefinitions="*,Auto"
+                                ZIndex="2">
                             <TextBlock Text="{Binding Label}"
                                        Foreground="#E6EEF7"
                                        FontSize="12"
@@ -2452,7 +2456,7 @@
                                   Height="22"
                                   HorizontalAlignment="Center"
                                   VerticalAlignment="Center"
-                                  Margin="0,2,0,0"
+                                  Margin="0,0,0,0"
                                   IsVisible="{Binding IsAudio}"
                                   PointerPressed="TrackMuteToggle_OnPointerPressed"
                                   Cursor="Hand"
@@ -2464,19 +2468,18 @@
                                       Foreground="{Binding IsMuted, Converter={x:Static opconv:BoolToMuteBrushConverter.Instance}}"
                                       Data="{Binding EffectiveVolumePercent, Converter={x:Static opconv:VolumeLevelToIconConverter.Instance}}" />
                           </Border>
-                          <!-- The lane is tall enough (TrackLaneViewModel.LaneHeight)
-                               for the label row and this one to sit side by
-                               side, so this no longer carries the -10 that used
-                               to drag it up underneath the label to fit.
-                               The negative margin that remains is optical
-                               alignment, not layout: this and the mute toggle
-                               are both centred in the same row, but the
-                               Slider's rail is not centred inside the Slider -
-                               its template lays the track out in an all-Auto
-                               row stack that parks against the top and leaves
-                               the slack below - so the rail drew well under the
-                               icon. Pulling the rail up and nudging the icon
-                               down puts them on one line. -->
+                          <!-- No forced Height any more, and that is what fixes
+                               the thumb being sliced off along the bottom. The
+                               Slider was pinned to 26 while its template wants
+                               more than that for a 16px thumb sitting on the
+                               track; the surplus thumb hung outside the
+                               control's own bounds and got clipped there.
+                               Natural height also lands the rail where
+                               VerticalAlignment="Center" claims it is, instead
+                               of low inside a squeezed box - which is what the
+                               growing pile of negative margins here was
+                               chasing. ClipToBounds is belt and braces: nothing
+                               in this cell should ever cut the thumb again. -->
                           <Slider Grid.Row="1"
                                   Grid.Column="2"
                                   Classes="volumeSlider"
@@ -2484,11 +2487,9 @@
                                   Maximum="150"
                                   TickFrequency="1"
                                   IsSnapToTickEnabled="True"
-                                  Height="26"
-                                  MinHeight="26"
                                   Padding="0"
+                                  ClipToBounds="False"
                                   VerticalAlignment="Center"
-                                  Margin="0,-8,0,0"
                                   Value="{Binding VolumePercent, Mode=TwoWay}"
                                   IsEnabled="{Binding CanAdjustVolume}"
                                   IsVisible="{Binding IsAudio}"
@@ -2602,12 +2603,15 @@
                            the timeline is the playhead's job, and having one
                            here too meant three near-identical markers competing
                            for the same meaning. -->
-                      <Border Classes="trimBar">
-                        <StackPanel Classes="trimGrip" Orientation="Horizontal">
-                          <Border Classes="trimGripLine" />
-                          <Border Classes="trimGripLine" />
-                        </StackPanel>
-                      </Border>
+                      <Grid>
+                        <Border Classes="trimLine" />
+                        <Border Classes="trimBar">
+                          <StackPanel Classes="trimGrip" Orientation="Horizontal">
+                            <Border Classes="trimGripLine" />
+                            <Border Classes="trimGripLine" />
+                          </StackPanel>
+                        </Border>
+                      </Grid>
                     </Border>
                     <Border x:Name="TrimEndHandle"
                             Classes="trimHandle"
@@ -2618,12 +2622,15 @@
                             PointerMoved="TimelineSurface_OnPointerMoved"
                             PointerReleased="TimelineSurface_OnPointerReleased"
                             ToolTip.Tip="Drag to set trim end">
-                      <Border Classes="trimBar">
-                        <StackPanel Classes="trimGrip" Orientation="Horizontal">
-                          <Border Classes="trimGripLine" />
-                          <Border Classes="trimGripLine" />
-                        </StackPanel>
-                      </Border>
+                      <Grid>
+                        <Border Classes="trimLine" />
+                        <Border Classes="trimBar">
+                          <StackPanel Classes="trimGrip" Orientation="Horizontal">
+                            <Border Classes="trimGripLine" />
+                            <Border Classes="trimGripLine" />
+                          </StackPanel>
+                        </Border>
+                      </Grid>
                     </Border>
                   </Canvas>
                 </Grid>
