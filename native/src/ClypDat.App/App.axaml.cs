@@ -41,18 +41,26 @@ public sealed partial class App : Application
         // the worst possible moment: logon, competing with the OS's own boot IO
         // and every other autostart app.
         //
-        // The playback warmup keeps its session now instead of throwing it away
-        // (see PlaybackSession.WarmUp), so it is the difference between the
-        // first clip click building a whole LibVLC engine and it reusing one -
-        // which makes WHEN it runs matter. 45s was long enough that anyone who
-        // opened the app to watch a clip clicked well inside the window and paid
-        // the full cold cost anyway. 12s still clears the logon IO burst.
-        _ = Task.Delay(TimeSpan.FromSeconds(12)).ContinueWith(_ => PlaybackSession.WarmUp(), TaskScheduler.Default);
         _ = Task.Delay(TimeSpan.FromSeconds(45)).ContinueWith(_ => StorageJanitor.CleanupAtStartup(), TaskScheduler.Default);
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var minimized = desktop.Args?.Any(arg => string.Equals(arg, "--minimized", StringComparison.OrdinalIgnoreCase)) == true;
+            // The playback warmup keeps its session now instead of throwing it
+            // away (see PlaybackSession.WarmUp), so it is the difference between
+            // the first clip click building a whole LibVLC engine - measured at
+            // 9-10s cold on a real install - and it reusing one. That makes WHEN
+            // it runs matter, and the answer differs by how the app was started.
+            //
+            // --minimized is the logon autostart: nobody is waiting, and the
+            // logon IO burst is real, so stay out of it. A manual launch is the
+            // opposite - somebody double-clicked the icon, and the overwhelming
+            // reason to do that is to watch a clip. Deferring 12s there just
+            // guaranteed the click landed inside the warm-up window and waited
+            // out the whole construction, which is exactly what the traces kept
+            // showing ("engine ready at 9836ms", clicked at launch+13s).
+            var warmupDelay = minimized ? TimeSpan.FromSeconds(12) : TimeSpan.FromSeconds(1);
+            _ = Task.Delay(warmupDelay).ContinueWith(_ => PlaybackSession.WarmUp(), TaskScheduler.Default);
             _mainWindow = new MainWindow
             {
                 DataContext = new MainWindowViewModel(),

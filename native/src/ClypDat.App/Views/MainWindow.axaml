@@ -2490,7 +2490,7 @@
                                   Padding="0"
                                   ClipToBounds="False"
                                   VerticalAlignment="Center"
-                                  Margin="0,-2,0,0"
+                                  Margin="0,-3,0,0"
                                   Value="{Binding VolumePercent, Mode=TwoWay}"
                                   IsEnabled="{Binding CanAdjustVolume}"
                                   IsVisible="{Binding IsAudio}"
