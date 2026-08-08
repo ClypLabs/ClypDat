@@ -2865,6 +2865,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private async Task RestoreRemainingCachedClipsAsync(IReadOnlyList<CachedClipState> states, string root, CancellationToken cancellationToken)
     {
         const int batchSize = 8;
+        var cardArrivalDelay = TimeSpan.FromMilliseconds(32);
         try
         {
             for (var offset = 0; offset < states.Count; offset += batchSize)
@@ -2872,10 +2873,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 cancellationToken.ThrowIfCancellationRequested();
                 var rows = states.Skip(offset).Take(batchSize).ToArray();
                 var batch = await Task.Run(() => NormalizeCachedStates(rows), cancellationToken);
+
+                // An ItemsControl with a WrapPanel creates every card's visual
+                // tree, including cards outside the viewport. Adding a whole
+                // batch in one dispatcher turn starves native window moves and
+                // resizes. Drip cards in at roughly one per frame instead.
+                foreach (var state in batch)
+                {
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        if (cancellationToken.IsCancellationRequested || !string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase)) return;
+                        AddCachedClip(state);
+                    }, DispatcherPriority.Background);
+                    await Task.Delay(cardArrivalDelay, cancellationToken);
+                }
+
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     if (cancellationToken.IsCancellationRequested || !string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase)) return;
-                    foreach (var state in batch) AddCachedClip(state);
                     ApplyGameFilters();
                     ApplyClipTypeFilters();
                     ApplySearchFilter();
