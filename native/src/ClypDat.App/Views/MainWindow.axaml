@@ -1130,6 +1130,7 @@
           <ItemsControl ItemsSource="{Binding LibraryStartupSkeletonTiles}"
                         IsVisible="{Binding !IsInitialLibraryLoadComplete}"
                         IsHitTestVisible="False"
+                        Grid.Column="0"
                         Margin="-4,0,-4,0">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate>
@@ -1143,15 +1144,15 @@
                     <Grid RowDefinitions="Auto,Auto">
                       <Border Background="#16202A" Height="{Binding $parent[Window].DataContext.CardImageHeight}">
                         <Grid ClipToBounds="True">
-                          <Border Classes="libraryLoadingShimmer">
-                            <Border.Background>
+                          <controls:LoadingShimmer Width="180" HorizontalAlignment="Left">
+                            <controls:LoadingShimmer.Background>
                               <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,0%">
                                 <GradientStop Color="#00344958" Offset="0" />
                                 <GradientStop Color="#4A5A7185" Offset="0.5" />
                                 <GradientStop Color="#00344958" Offset="1" />
                               </LinearGradientBrush>
-                            </Border.Background>
-                          </Border>
+                            </controls:LoadingShimmer.Background>
+                          </controls:LoadingShimmer>
                         </Grid>
                       </Border>
                       <Border Grid.Row="1" Background="#1E2A35">

@@ -39,15 +39,6 @@
       </Style>
     </ControlTheme>
   </Styles.Resources>
-  <Style Selector="Border.libraryLoadingShimmer">
-    <Style.Animations>
-      <Animation Duration="0:0:1.35" IterationCount="Infinite">
-        <KeyFrame Cue="0%"><Setter Property="Opacity" Value="0.28" /></KeyFrame>
-        <KeyFrame Cue="50%"><Setter Property="Opacity" Value="0.9" /></KeyFrame>
-        <KeyFrame Cue="100%"><Setter Property="Opacity" Value="0.28" /></KeyFrame>
-      </Animation>
-    </Style.Animations>
-  </Style>
   <!--
     Shared control styles for the whole app. These must live at Application
     level (referenced from App.axaml), not inside MainWindow.axaml's own

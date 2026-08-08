@@ -330,7 +330,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public AppSettings Settings { get; }
     public Task InitialLibraryLoadTask { get; }
     public ObservableCollection<ClipCardViewModel> AllClips { get; }
-    public IReadOnlyList<int> LibraryStartupSkeletonTiles { get; } = Enumerable.Range(0, 20).ToArray();
+    public IReadOnlyList<int> LibraryStartupSkeletonTiles { get; } = Enumerable.Range(0, 12).ToArray();
     public bool IsRestoringLibraryCache => _isRestoringCachedLibrary;
     public bool IsInitialLibraryLoadComplete
     {
@@ -3679,6 +3679,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         const double scrollbarAllowance = 20;
         var contentWidth = Math.Max(320, availableWidth - scrollbarAllowance);
 
+        int cardColumns;
+        double cardWidth;
         if (Settings.ScaleClipsWithWindow)
         {
             // More columns on a wider window instead of the same fixed
@@ -3686,8 +3688,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // overflows, clamped to a sane [2, 10] range. 24 matches each
             // card's own trailing Margin (MainWindow.axaml's WrapPanel item,
             // Margin="4,4,20,24" - 4 left + 20 right) reserved per column.
-            CardColumns = Math.Clamp((int)Math.Floor(contentWidth / ScaledCardTargetWidth), 2, 10);
-            CardWidth = Math.Max(220, Math.Floor(contentWidth / CardColumns) - 24);
+            cardColumns = Math.Clamp((int)Math.Floor(contentWidth / ScaledCardTargetWidth), 2, 10);
+            cardWidth = Math.Max(220, Math.Floor(contentWidth / cardColumns) - 24);
         }
         else
         {
@@ -3696,14 +3698,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // 64 off the total for three cards needing 72, so the third card
             // never fit and wrapped, which is the other half of the dead space
             // down the right side.
-            CardColumns = 3;
-            CardWidth = Math.Max(220, Math.Floor(contentWidth / 3) - 24);
+            cardColumns = 3;
+            cardWidth = Math.Max(220, Math.Floor(contentWidth / 3) - 24);
         }
 
-        CardImageHeight = Math.Floor(CardWidth * 9 / 16);
+        var cardImageHeight = Math.Floor(cardWidth * 9 / 16);
+        if (CardColumns == cardColumns && CardWidth == cardWidth && CardImageHeight == cardImageHeight) return;
+
+        CardColumns = cardColumns;
+        CardWidth = cardWidth;
+        CardImageHeight = cardImageHeight;
         // Thumbnails decode to whatever the cards are now, not to the source's
         // full 960px - see ClipCardViewModel.SetPreviewDecodeWidth.
-        ClipCardViewModel.SetPreviewDecodeWidth(CardWidth, _cardRenderScaling);
+        ClipCardViewModel.SetPreviewDecodeWidth(cardWidth, _cardRenderScaling);
     }
 
     // Set by MainWindow once the window has a visual root; 1.0 until then,
