@@ -1122,7 +1122,7 @@
       <Grid ColumnDefinitions="240,*,Auto">
         <Border Grid.Column="0" Background="#0D1116" BorderBrush="#1E2A33" BorderThickness="0,0,1,0">
           <StackPanel Margin="0,18,16,24" Spacing="2">
-            <TextBox Classes="settingsInput appSearchBox" Text="{Binding SettingsSearchText}" PlaceholderText="Search settings" Margin="22,0,0,14" VerticalContentAlignment="Center">
+            <TextBox Classes="settingsInput appSearchBox" Text="{Binding SettingsSearchText}" PlaceholderText="Search settings" Margin="14,0,0,14" VerticalContentAlignment="Center">
               <TextBox.InnerLeftContent>
                 <Canvas Width="16" Height="16" Margin="10,0,2,0" VerticalAlignment="Center">
                   <Ellipse Canvas.Left="0" Canvas.Top="0" Width="11" Height="11" Stroke="#6B7C8C" StrokeThickness="1.6" />
@@ -2653,9 +2653,14 @@
                   <TextBox Text="{Binding EditorTitle, Mode=TwoWay}" Foreground="#EDF4FB" FontSize="14" FontWeight="SemiBold"
                            Background="#0D151C" BorderBrush="#263743" KeyDown="EditorTitle_OnKeyDown" />
                   <TextBlock Text="Description" Foreground="#8EA1B6" FontSize="12" Margin="0,2,0,0" />
-                  <TextBox Text="{Binding EditorDescription, Mode=TwoWay}" MinHeight="78" AcceptsReturn="True" TextWrapping="Wrap"
-                           PlaceholderText="Add a description" Background="#0D151C" BorderBrush="#263743" Foreground="#D6E2F0"
-                           KeyDown="EditorDescription_OnKeyDown" />
+                  <!-- KeyDown is wired in code-behind as a TUNNEL handler, not
+                       here: AcceptsReturn makes TextBox's own class handler
+                       consume Enter to insert a newline, and a class handler
+                       runs before an instance handler on the same element - so
+                       a KeyDown="..." attribute here never fired at all. -->
+                  <TextBox x:Name="EditorDescriptionBox"
+                           Text="{Binding EditorDescription, Mode=TwoWay}" MinHeight="78" AcceptsReturn="True" TextWrapping="Wrap"
+                           PlaceholderText="Add a description" Background="#0D151C" BorderBrush="#263743" Foreground="#D6E2F0" />
                 </StackPanel>
               </Border>
 

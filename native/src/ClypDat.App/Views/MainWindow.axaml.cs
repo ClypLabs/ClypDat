@@ -468,6 +468,13 @@ public sealed partial class MainWindow : Window
         // onto anything non-focusable (the video, a lane, plain text), which
         // reads as an edit still in progress long after the user has moved on.
         AddHandler(PointerPressedEvent, EditorDetails_OnAnyPointerPressed, RoutingStrategies.Tunnel);
+        // Tunnel, so it runs BEFORE TextBox's own class handler. With
+        // AcceptsReturn the class handler swallows Enter to insert a newline,
+        // and a class handler beats an instance handler on the same element -
+        // so the KeyDown="..." this box used to carry in XAML never ran, and
+        // Enter just added a line instead of committing. Shift+Enter still
+        // falls through to that class handler for a real newline.
+        EditorDescriptionBox.AddHandler(KeyDownEvent, EditorDescription_OnKeyDown, RoutingStrategies.Tunnel);
         // Game-rail drag - same reasoning as KeyDown/KeyUp above: a plain
         // (bubble) PointerPressed wired directly on a rail Button never saw
         // the press at all, because Button's OWN internal press handling (it
@@ -8568,16 +8575,20 @@ public sealed partial class MainWindow : Window
         Canvas.SetTop(TrimEndHandle, 0);
         TrimEndHandle.Height = videoLaneHeight;
 
-        // Clamped the same way the handles are - uncentered, it could
-        // otherwise poke a sliver out past the timeline's left edge at
-        // CurrentTime=0, visible peeking out from behind TrimStartHandle.
-        var playheadMaxLeft = Math.Max(0, width - TimelinePlayhead.Width);
-        Canvas.SetLeft(TimelinePlayhead, Math.Clamp(playhead - TimelinePlayhead.Width / 2, 0, playheadMaxLeft));
+        // Clamp the POSITION, then centre both parts on it - exactly like the
+        // trim pills above. Clamping the line's own left edge into
+        // [0, width - lineWidth] while the cap was placed unclamped pulled the
+        // two apart at both extremes: at time 0 the clamp shoved the line half
+        // its width to the right while the cap stayed put, so the marker came
+        // apart into a triangle and a line that no longer met. They are one
+        // object and have to be positioned as one.
+        var playheadCenter = Math.Clamp(playhead, 0, width);
+        Canvas.SetLeft(TimelinePlayhead, playheadCenter - TimelinePlayhead.Width / 2);
         // Extend beyond both edges so fractional layout never leaves the
         // playhead visibly short of the final audio lane.
         TimelinePlayhead.Height = height + 16;
         Canvas.SetTop(TimelinePlayhead, -8);
-        Canvas.SetLeft(PlayheadCap, playhead - 8);
+        Canvas.SetLeft(PlayheadCap, playheadCenter - 8);
         Canvas.SetTop(PlayheadCap, -12);
     }
 
