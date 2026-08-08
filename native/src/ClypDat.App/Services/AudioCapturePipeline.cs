@@ -1065,7 +1065,15 @@ public sealed class AudioCapturePipeline : IDisposable
                 "-filter_complex", filters,
                 "-map", "[out]",
                 "-ac", "2",
-                "-c:a", "pcm_s16le",
+                // f32, not s16, for every intermediate in the save chain (this,
+                // the silent filler, and the mix - concat is -c copy, so all
+                // three have to agree). Captures arrive as 32-bit float and a
+                // track can sit far below full scale: the Game track of a
+                // measured clip peaked at -34dBFS, which through s16 left it
+                // with 10 significant bits before it ever reached the AAC
+                // encoder. Whatever the user turns up to hear, they should not
+                // be turning up quantization steps this pipeline added.
+                "-c:a", "pcm_f32le",
                 snapshotPath
             }, CancellationToken.None);
             if (result.ExitCode != 0 || !IsUsableAudioFile(snapshotPath))
@@ -1155,7 +1163,7 @@ public sealed class AudioCapturePipeline : IDisposable
         {
             "-y", "-v", "error",
             "-f", "lavfi", "-t", FormatSeconds(durationSeconds), "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
-            "-c:a", "pcm_s16le",
+            "-c:a", "pcm_f32le",
             path
         }, cancellationToken);
         if (result.ExitCode != 0 || !IsUsableAudioFile(path))
@@ -1181,7 +1189,7 @@ public sealed class AudioCapturePipeline : IDisposable
         {
             "-filter_complex", $"{labels}amix=inputs={clipPaths.Count}:normalize=0,atrim=0:{FormatSeconds(durationSeconds)},asetpts=PTS-STARTPTS[out]",
             "-map", "[out]",
-            "-c:a", "pcm_s16le",
+            "-c:a", "pcm_f32le",
             path
         });
         var result = await RunGatedProcessAsync("ffmpeg", args, cancellationToken);

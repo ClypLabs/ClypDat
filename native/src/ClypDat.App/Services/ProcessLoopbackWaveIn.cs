@@ -201,11 +201,12 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
                         // callback times (which drifted hundreds of ms over
                         // long sessions and desynced saved clips).
                         var packetStartUtc = utcBase + TimeSpan.FromTicks((long)(qpcPosition - qpcBase100ns));
-                        DataAvailable?.Invoke(this, new TimestampedWaveInEventArgs(buffer, bytes, packetStartUtc));
+                        QueueWithDeclick(buffer, bytes, packetStartUtc, flags.HasFlag(AudioClientBufferFlags.Silent) || data == IntPtr.Zero);
                     }
                     Marshal.ThrowExceptionForHR(_captureClient.GetNextPacketSize(out packetFrames));
                 }
 
+                LogSilenceDiagnostic();
                 Thread.Sleep(10);
             }
         }
@@ -215,6 +216,10 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
         }
         finally
         {
+            // The held-back packet still belongs in the capture - without this
+            // every stop (route change, roll, session end) would silently drop
+            // its last packet.
+            EmitPendingPacket(nextSilent: null);
             try
             {
                 _audioClient.Stop();
@@ -226,6 +231,118 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
 
             RecordingStopped?.Invoke(this, new StoppedEventArgs(stoppedError));
         }
+    }
+
+    // WASAPI process loopback does not deliver a continuous stream: whenever
+    // the captured tree has nothing queued for a device period it hands back a
+    // packet flagged SILENT, whose buffer is left as digital zeros. On a 96kHz
+    // endpoint that period is 5ms, and a measured clip had ~6 of these per
+    // second scattered through audio that was playing continuously the whole
+    // time - the zero-run lengths in the saved track came out as exact
+    // multiples of 5ms. Each hole is a step discontinuity at both of its
+    // edges, and a step is a click: that is the crackle a saved clip picks up
+    // while the game itself sounds fine live.
+    //
+    // Ramping the audio into a hole and back out of it turns each one into a
+    // dip nobody can hear. Doing that needs the tail of the OUTGOING packet
+    // faded once the next packet reveals a hole is starting, so one packet is
+    // always held back - 5ms of extra latency, which is nothing for a buffer
+    // that is only read seconds later.
+    private const double DeclickFadeMs = 1.5;
+
+    private byte[]? _pendingBuffer;
+    private int _pendingBytes;
+    private DateTime _pendingStartUtc;
+    private bool _pendingSilent;
+    // Stream starts "in silence" so the very first packet fades in rather than
+    // opening on a step from nothing.
+    private bool _previousSilent = true;
+    private int _silentRuns;
+    private long _silentFrames;
+    private DateTime _nextSilenceLogUtc = DateTime.MinValue;
+
+    private void QueueWithDeclick(byte[] buffer, int bytes, DateTime startUtc, bool silent)
+    {
+        EmitPendingPacket(silent);
+        _pendingBuffer = buffer;
+        _pendingBytes = bytes;
+        _pendingStartUtc = startUtc;
+        _pendingSilent = silent;
+    }
+
+    // nextSilent is null when nothing follows (the capture is stopping), which
+    // is a hole of unbounded length - fade out for the same reason.
+    private void EmitPendingPacket(bool? nextSilent)
+    {
+        var buffer = _pendingBuffer;
+        if (buffer is null) return;
+        _pendingBuffer = null;
+
+        if (_pendingSilent)
+        {
+            if (!_previousSilent) _silentRuns++;
+            _silentFrames += _pendingBytes / Math.Max(1, WaveFormat.BlockAlign);
+        }
+        else
+        {
+            if (_previousSilent) ApplyFade(buffer, _pendingBytes, fadeIn: true);
+            if (nextSilent != false) ApplyFade(buffer, _pendingBytes, fadeIn: false);
+        }
+
+        _previousSilent = _pendingSilent;
+        DataAvailable?.Invoke(this, new TimestampedWaveInEventArgs(buffer, _pendingBytes, _pendingStartUtc));
+    }
+
+    private void ApplyFade(byte[] buffer, int bytes, bool fadeIn)
+    {
+        var format = WaveFormat;
+        // These captures are always the endpoint's 32-bit float mix format;
+        // anything else is left alone rather than reinterpreted wrongly.
+        if (format.BitsPerSample != 32) return;
+        var blockAlign = Math.Max(1, format.BlockAlign);
+        var frames = bytes / blockAlign;
+        if (frames <= 0) return;
+        var fadeFrames = Math.Min(frames, (int)(format.SampleRate * DeclickFadeMs / 1000.0));
+        if (fadeFrames <= 1) return;
+
+        for (var index = 0; index < fadeFrames; index++)
+        {
+            // Raised cosine, so neither end of the ramp is itself a corner -
+            // a linear ramp only trades one discontinuity for two smaller ones
+            // in the first derivative, which still ticks.
+            var position = (index + 1.0) / (fadeFrames + 1.0);
+            var gain = (float)(0.5 - 0.5 * Math.Cos(Math.PI * (fadeIn ? position : 1.0 - position)));
+            var frameOffset = (fadeIn ? index : frames - fadeFrames + index) * blockAlign;
+            for (var channel = 0; channel < format.Channels; channel++)
+            {
+                var sampleOffset = frameOffset + channel * 4;
+                if (sampleOffset + 4 > bytes) break;
+                var faded = BitConverter.ToSingle(buffer, sampleOffset) * gain;
+                BitConverter.TryWriteBytes(buffer.AsSpan(sampleOffset, 4), faded);
+            }
+        }
+    }
+
+    // How much of a capture is actually arriving as SILENT-flagged holes -
+    // the thing the declick above is smoothing over. Logged only when there
+    // are any, once a minute, so a clip that still sounds wrong can be checked
+    // against how much the source stream was actually dropping.
+    private void LogSilenceDiagnostic()
+    {
+        var now = MonotonicClock.UtcNow;
+        if (_nextSilenceLogUtc == DateTime.MinValue)
+        {
+            _nextSilenceLogUtc = now + TimeSpan.FromSeconds(60);
+            return;
+        }
+
+        if (now < _nextSilenceLogUtc) return;
+        _nextSilenceLogUtc = now + TimeSpan.FromSeconds(60);
+        if (_silentRuns == 0) return;
+        var silentMs = _silentFrames * 1000.0 / Math.Max(1, WaveFormat.SampleRate);
+        AppLog.Debug($"Process loopback silent-packet holes: pid={_processId}, runs={_silentRuns}, silentMs={silentMs:0} (declicked).");
+        _silentRuns = 0;
+        _silentFrames = 0;
     }
 
     private static IAudioClient ActivateAudioClient(uint processId, ProcessLoopbackCaptureMode mode)
