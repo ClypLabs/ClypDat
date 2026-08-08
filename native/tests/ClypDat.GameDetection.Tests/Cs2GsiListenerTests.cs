@@ -6,14 +6,24 @@ namespace ClypDat.GameDetection.Tests;
 
 public sealed class Cs2GsiListenerTests
 {
-    [Fact]
-    public void DeathmatchIsOffByDefault()
+    [Theory]
+    [InlineData("casual")]
+    [InlineData("custom")]
+    public void NonCompetitiveModesDoNotClip(string mode)
     {
-        Assert.False(new AutoClipGameSettings().DeathmatchClipping);
+        var settings = Settings();
+        using var listener = new Cs2GsiListener(() => settings);
+        var clips = new List<Cs2AutoClipRequest>();
+        listener.AutoClipReady += (_, request) => clips.Add(request);
+
+        listener.ProcessPayload(Payload(mode, 0));
+        listener.ProcessPayload(Payload(mode, 3, roundOver: true));
+
+        Assert.Empty(clips);
     }
 
     [Fact]
-    public void DeathmatchDoesNotClipWhenDisabled()
+    public void DeathmatchDoesNotClipByDefault()
     {
         var settings = Settings();
         using var listener = new Cs2GsiListener(() => settings);
@@ -38,12 +48,11 @@ public sealed class Cs2GsiListenerTests
         listener.ProcessPayload(Payload("deathmatch", 0));
         listener.ProcessPayload(Payload("deathmatch", 3, roundOver: true));
 
-        var clip = Assert.Single(clips);
-        Assert.Equal("3k", clip.EventId);
+        Assert.Single(clips);
     }
 
     [Fact]
-    public void CompetitiveClipsWhenDeathmatchIsDisabled()
+    public void CompetitiveClips()
     {
         var settings = Settings();
         using var listener = new Cs2GsiListener(() => settings);
@@ -53,43 +62,27 @@ public sealed class Cs2GsiListenerTests
         listener.ProcessPayload(Payload("competitive", 0));
         listener.ProcessPayload(Payload("competitive", 3, roundOver: true));
 
-        Assert.Single(clips);
+        var clip = Assert.Single(clips);
+        Assert.Equal("3k", clip.EventId);
     }
 
     [Fact]
-    public void DisabledDeathmatchDoesNotCreateAClipAfterModeChange()
+    public void NonCompetitiveModeDoesNotCreateAClipAfterModeChange()
     {
         var settings = Settings();
         using var listener = new Cs2GsiListener(() => settings);
         var clips = new List<Cs2AutoClipRequest>();
         listener.AutoClipReady += (_, request) => clips.Add(request);
 
-        listener.ProcessPayload(Payload("deathmatch", 0));
-        listener.ProcessPayload(Payload("deathmatch", 3));
+        listener.ProcessPayload(Payload("custom", 0));
+        listener.ProcessPayload(Payload("custom", 3));
         listener.ProcessPayload(Payload("competitive", 3, roundOver: true));
 
         Assert.Empty(clips);
     }
 
     [Fact]
-    public void TurningOffDeathmatchClippingDropsPendingClip()
-    {
-        var settings = Settings();
-        settings.DeathmatchClipping = true;
-        using var listener = new Cs2GsiListener(() => settings);
-        var clips = new List<Cs2AutoClipRequest>();
-        listener.AutoClipReady += (_, request) => clips.Add(request);
-
-        listener.ProcessPayload(Payload("deathmatch", 0));
-        listener.ProcessPayload(Payload("deathmatch", 3));
-        settings.DeathmatchClipping = false;
-        listener.ProcessPayload(Payload("deathmatch", 3, roundOver: true));
-
-        Assert.Empty(clips);
-    }
-
-    [Fact]
-    public void MissingMapModeKeepsExistingClippingBehavior()
+    public void MissingMapModeDoesNotClip()
     {
         var settings = Settings();
         using var listener = new Cs2GsiListener(() => settings);
@@ -99,7 +92,7 @@ public sealed class Cs2GsiListenerTests
         listener.ProcessPayload(Payload(null, 0));
         listener.ProcessPayload(Payload(null, 3, roundOver: true));
 
-        Assert.Single(clips);
+        Assert.Empty(clips);
     }
 
     private static AutoClipGameSettings Settings() => new()

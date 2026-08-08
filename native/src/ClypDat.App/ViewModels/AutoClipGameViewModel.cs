@@ -31,7 +31,7 @@ public sealed class AutoClipGameViewModel : ViewModelBase
     public ObservableCollection<AutoClipGroupViewModel> Groups { get; }
     public ObservableCollection<AutoClipEventViewModel> UngroupedEvents { get; }
     public bool IsSetupRequired => Definition.RequiresSetup;
-    public bool SupportsDeathmatchClipping => string.Equals(Id, "cs2", StringComparison.OrdinalIgnoreCase);
+    public bool IsCs2 => string.Equals(Id, "cs2", StringComparison.OrdinalIgnoreCase);
     public bool IsEnabled { get => _settings.Enabled; set { if (_settings.Enabled == value) return; _settings.Enabled = value; SaveAndRefresh(); } }
     public bool DeathmatchClipping { get => _settings.DeathmatchClipping; set { if (_settings.DeathmatchClipping == value) return; _settings.DeathmatchClipping = value; OnPropertyChanged(); _save(); } }
     public bool IsSearchMatch { get => _isSearchMatch; set => SetProperty(ref _isSearchMatch, value); }
@@ -46,7 +46,7 @@ public sealed class AutoClipGameViewModel : ViewModelBase
     public bool MatchesSearch(string query) =>
         Name.Contains(query, StringComparison.OrdinalIgnoreCase)
         || Definition.Events.Any(item => item.Name.Contains(query, StringComparison.OrdinalIgnoreCase))
-        || (SupportsDeathmatchClipping && "Deathmatch Clipping".Contains(query, StringComparison.OrdinalIgnoreCase));
+        || (IsCs2 && ("Competitive".Contains(query, StringComparison.OrdinalIgnoreCase) || "Deathmatch Clipping".Contains(query, StringComparison.OrdinalIgnoreCase)));
     public void Refresh() { foreach (var group in Groups) group.Refresh(); }
     private void SaveAndRefresh() { Refresh(); _save(); }
 }

@@ -138,14 +138,14 @@ public sealed class Cs2GsiListener : IDisposable
         lock (_stateLock)
         {
             var settings = _settingsProvider();
-            var deathmatchDisabled = IsDeathmatch(mapMode) && !settings.DeathmatchClipping;
+            var clippingBlocked = !IsCompetitive(mapMode) && !(IsDeathmatch(mapMode) && settings.DeathmatchClipping);
             var mapChanged = !string.IsNullOrWhiteSpace(mapName) && !string.Equals(mapName, _lastMapName, StringComparison.OrdinalIgnoreCase);
             var modeChanged = !string.IsNullOrWhiteSpace(mapMode) && !string.Equals(mapMode, _lastMapMode, StringComparison.OrdinalIgnoreCase);
             if (mapChanged || modeChanged)
             {
-                // If GSI starts sending a Deathmatch mode after an incomplete
-                // snapshot, discard that candidate instead of exporting it.
-                if (deathmatchDisabled && string.IsNullOrWhiteSpace(_lastMapMode)) ClearRoundLocked();
+                // If GSI starts sending a non-Competitive mode after an
+                // incomplete snapshot, discard that candidate instead of exporting it.
+                if (clippingBlocked && string.IsNullOrWhiteSpace(_lastMapMode)) ClearRoundLocked();
                 else FinalizePendingLocked();
                 _lastMapName = mapName;
                 _lastMapMode = mapMode;
@@ -183,7 +183,7 @@ public sealed class Cs2GsiListener : IDisposable
                 return;
             }
 
-            if (deathmatchDisabled)
+            if (clippingBlocked)
             {
                 ClearRoundLocked();
                 SyncCounters(roundKills, roundKillHs, deaths, assists);
@@ -295,6 +295,7 @@ public sealed class Cs2GsiListener : IDisposable
     };
 
     private static bool IsEnabled(AutoClipGameSettings settings, string id) => settings.Events.TryGetValue(id, out var enabled) && enabled;
+    private static bool IsCompetitive(string mode) => string.Equals(mode, "competitive", StringComparison.OrdinalIgnoreCase);
     private static bool IsDeathmatch(string mode) => string.Equals(mode, "deathmatch", StringComparison.OrdinalIgnoreCase);
 
     private static string EventIdForLabel(string label) => label switch { "Kill" => "kill", "2K" => "2k", "3K" => "3k", "4K" => "4k", "Ace" => "ace", "Headshot" => "headshot", "Death" => "death", "Assist" => "assist", _ => "kill" };

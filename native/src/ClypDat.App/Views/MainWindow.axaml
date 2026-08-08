@@ -1890,10 +1890,10 @@
                         <TextBlock Text="{Binding Name}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="16" opconv:SettingsHighlight.Query="{Binding SearchQuery}" />
                         <TextBlock Text="{Binding StatusText}" Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
                         <Button Content="Set up Dota 2" Click="SetupDotaAutoClipButton_OnClick" IsVisible="{Binding IsSetupRequired}" HorizontalAlignment="Left" />
-                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" IsVisible="{Binding SupportsDeathmatchClipping}">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" IsVisible="{Binding IsCs2}">
                           <StackPanel Spacing="2">
                             <TextBlock Text="Deathmatch Clipping" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" />
-                            <TextBlock Text="Save CS2 auto-clips while playing Deathmatch. Off ignores all Deathmatch events." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                            <TextBlock Text="CS2 auto-clips save in Competitive matches. Enable this to also save Deathmatch clips." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
                           </StackPanel>
                           <ToggleSwitch Grid.Column="1" IsChecked="{Binding DeathmatchClipping}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                         </Grid>
