@@ -214,7 +214,7 @@ public sealed class AppSettings
     public bool FullSessionRecordingEnabled { get; set; }
     public string FullSessionRecordingFolder { get; set; } = string.Empty;
     // H.264 = mux the already-encoded stream as-is (fast, bigger file);
-    // H.265/AV1 re-encode at finalize time via NVENC for smaller session files.
+    // AV1 re-encodes at finalize time via NVENC for smaller session files.
     public string FullSessionVideoCodec { get; set; } = "H.264";
     // 0 = unlimited. When set, the oldest ClypDat session recordings are deleted
     // after each save until the session folder fits the quota again.

@@ -886,6 +886,18 @@
        whatever it sits in - it nearly filled the library's 52px toolbar, and
        loomed over the settings nav list it heads. Shorter, pill-shaped, and
        filled a shade off its container rather than a shade off the page. -->
+  <!-- Warning triangle for the amber caution notes. The exclamation is a
+       subpath of the same geometry, so the default even-odd fill punches it
+       out as a hole rather than needing a second element. -->
+  <Style Selector="PathIcon.cautionIcon">
+    <Setter Property="Width" Value="13" />
+    <Setter Property="Height" Value="13" />
+    <Setter Property="Foreground" Value="#E5A00D" />
+    <Setter Property="VerticalAlignment" Value="Top" />
+    <Setter Property="Margin" Value="0,1,0,0" />
+    <Setter Property="Data" Value="M12 2 L23 21 H1 Z M11 9 h2 v6 h-2 z M11 17 h2 v2 h-2 z" />
+  </Style>
+
   <Style Selector="TextBox.appSearchBox">
     <Setter Property="MinHeight" Value="32" />
     <Setter Property="Height" Value="32" />

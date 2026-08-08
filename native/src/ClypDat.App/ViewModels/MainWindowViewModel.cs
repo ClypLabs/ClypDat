@@ -210,8 +210,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ReplayRateControlModes = new ObservableCollection<string> { "Constant quality", "Constant bitrate" };
         ExportCodecs = new ObservableCollection<ExportCodecOption>
         {
+            // No H.265: the option was still being offered after the feature
+            // behind it went away. A saved "H.265" setting falls back to H.264
+            // below, and the encoder argument mappings are deliberately left in
+            // place so nothing breaks on the way through.
             new("H.264", "h264_nvenc", "libx264"),
-            new("H.265", "hevc_nvenc", "libx265"),
             new("AV1", "av1_nvenc", "libaom-av1")
         };
         ReplayBackends = new ObservableCollection<ReplayBackendPreset>
@@ -2522,7 +2525,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
 
-    public IReadOnlyList<string> FullSessionCodecs { get; } = new[] { "H.264 (fastest)", "H.265 (smaller)", "AV1 (smallest)" };
+    // H.265 dropped for the same reason as the export list above - a saved
+    // setting naming it falls through to H.264 via SelectedFullSessionCodec.
+    public IReadOnlyList<string> FullSessionCodecs { get; } = new[] { "H.264 (fastest)", "AV1 (smallest)" };
 
     public string SelectedFullSessionCodec
     {
