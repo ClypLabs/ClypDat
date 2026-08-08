@@ -1143,7 +1143,7 @@
                     <Grid RowDefinitions="Auto,Auto">
                       <Border Background="#16202A" Height="{Binding $parent[Window].DataContext.CardImageHeight}">
                         <Grid ClipToBounds="True">
-                          <Border Classes="libraryLoadingShimmer" Width="180" HorizontalAlignment="Left" Opacity="0.8" RenderTransform="translateX(-220)">
+                          <Border Classes="libraryLoadingShimmer">
                             <Border.Background>
                               <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,0%">
                                 <GradientStop Color="#00344958" Offset="0" />
