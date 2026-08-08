@@ -8428,20 +8428,13 @@ public sealed partial class MainWindow : Window
         // trim rails stop exactly at the filmstrip instead of bleeding into
         // the first audio track.
         var videoLaneHeight = ViewModel.TimelineTracks.FirstOrDefault(track => track.IsVideo)?.LaneHeight ?? 0;
-        // Matches TrimStartCap/TrimEndCap's Points width (see XAML) - read as
-        // a constant rather than Bounds.Width since the Polygon may not have
-        // been measured yet on the very first call.
-        const double capWidth = 12;
-        // The cap is a 22-tall pill now (was a 9-tall triangle), so it is
-        // lifted further to keep the same few pixels of overlap into the lane.
-        const double capTop = -15;
 
-        // Width of the visible line, which is NOT the handle Border's own width -
+        // Width of the visible pill, which is NOT the handle Border's own width -
         // that is deliberately wider and transparent to make the handle easier to
-        // grab (see the XAML). All the placement below works in terms of the line,
-        // then shifts the Border by the padding either side of it so the line still
-        // lands exactly on the trim boundary.
-        const double barWidth = 4;
+        // grab (see the XAML). All the placement below works in terms of the pill,
+        // then shifts the Border by the padding either side of it so the pill still
+        // lands exactly on the trim boundary. Must match Border.trimBar's Width.
+        const double barWidth = 9;
         var hitPadding = Math.Max(0, (TrimEndHandle.Width - barWidth) / 2);
 
         // CENTERED on the boundary, like the playhead - not offset to the
@@ -8450,24 +8443,18 @@ public sealed partial class MainWindow : Window
         // [end, width] (TimelineLaneControl.DrawTrimShade), so an outside-hugging
         // start rail sat entirely to the LEFT of where the shading actually
         // ends, and the end rail entirely to the right: each read as sitting
-        // beside its own boundary rather than on it, by its full width. Cap
-        // placement inherits the same center, so the pill lands on the boundary
-        // too instead of half a bar off it.
+        // beside its own boundary rather than on it, by its full width.
         var startMaxLeft = Math.Max(0, width - barWidth);
         var startLeft = Math.Clamp(start - barWidth / 2, 0, startMaxLeft);
         Canvas.SetLeft(TrimStartHandle, startLeft - hitPadding);
         Canvas.SetTop(TrimStartHandle, 0);
         TrimStartHandle.Height = videoLaneHeight;
-        Canvas.SetLeft(TrimStartCap, startLeft - (capWidth - barWidth) / 2);
-        Canvas.SetTop(TrimStartCap, capTop);
 
         var endMaxLeft = Math.Max(0, width - barWidth);
         var endLeft = Math.Clamp(end - barWidth / 2, 0, endMaxLeft);
         Canvas.SetLeft(TrimEndHandle, endLeft - hitPadding);
         Canvas.SetTop(TrimEndHandle, 0);
         TrimEndHandle.Height = videoLaneHeight;
-        Canvas.SetLeft(TrimEndCap, endLeft - (capWidth - barWidth) / 2);
-        Canvas.SetTop(TrimEndCap, capTop);
 
         // Clamped the same way the handles are - uncentered, it could
         // otherwise poke a sliver out past the timeline's left edge at

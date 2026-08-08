@@ -2452,7 +2452,7 @@
                                   Height="22"
                                   HorizontalAlignment="Center"
                                   VerticalAlignment="Center"
-                                  Margin="0,3,0,0"
+                                  Margin="0,2,0,0"
                                   IsVisible="{Binding IsAudio}"
                                   PointerPressed="TrackMuteToggle_OnPointerPressed"
                                   Cursor="Hand"
@@ -2468,13 +2468,15 @@
                                for the label row and this one to sit side by
                                side, so this no longer carries the -10 that used
                                to drag it up underneath the label to fit.
-                               The -3 that remains is optical alignment, not
-                               layout: this and the mute toggle are both centred
-                               in the same row, but the Slider's rail is not
-                               centred inside the Slider (its template reserves
-                               space above the track), so the rail drew a few
-                               pixels below the icon. The icon's matching +3
-                               brings the two onto one line. -->
+                               The negative margin that remains is optical
+                               alignment, not layout: this and the mute toggle
+                               are both centred in the same row, but the
+                               Slider's rail is not centred inside the Slider -
+                               its template lays the track out in an all-Auto
+                               row stack that parks against the top and leaves
+                               the slack below - so the rail drew well under the
+                               icon. Pulling the rail up and nudging the icon
+                               down puts them on one line. -->
                           <Slider Grid.Row="1"
                                   Grid.Column="2"
                                   Classes="volumeSlider"
@@ -2486,7 +2488,7 @@
                                   MinHeight="26"
                                   Padding="0"
                                   VerticalAlignment="Center"
-                                  Margin="0,-3,0,0"
+                                  Margin="0,-8,0,0"
                                   Value="{Binding VolumePercent, Mode=TwoWay}"
                                   IsEnabled="{Binding CanAdjustVolume}"
                                   IsVisible="{Binding IsAudio}"
@@ -2594,20 +2596,18 @@
                             PointerMoved="TimelineSurface_OnPointerMoved"
                             PointerReleased="TimelineSurface_OnPointerReleased"
                             ToolTip.Tip="Drag to set trim start">
-                      <Border Classes="trimBar" />
-                    </Border>
-                    <!-- Grip tab, replacing the flat triangle that used to cap
-                         these. A triangle is the playhead's own marker shape, so
-                         reusing it here said "position" when these are things
-                         you grab and drag - the rounded tab with grip lines
-                         says that instead, and stops the two reading as the
-                         same object in three different places. Width stays 14 so
-                         UpdateTimelineChrome's capWidth still centres it. -->
-                    <Border x:Name="TrimStartCap" Classes="trimCap" IsHitTestVisible="False">
-                      <StackPanel Classes="trimGrip" Orientation="Horizontal">
-                        <Border Classes="trimGripLine" />
-                        <Border Classes="trimGripLine" />
-                      </StackPanel>
+                      <!-- The rail IS the handle - a pill spanning the video
+                           lane, with grip lines at its middle. There is no
+                           separate cap on top of it any more: a marker above
+                           the timeline is the playhead's job, and having one
+                           here too meant three near-identical markers competing
+                           for the same meaning. -->
+                      <Border Classes="trimBar">
+                        <StackPanel Classes="trimGrip" Orientation="Horizontal">
+                          <Border Classes="trimGripLine" />
+                          <Border Classes="trimGripLine" />
+                        </StackPanel>
+                      </Border>
                     </Border>
                     <Border x:Name="TrimEndHandle"
                             Classes="trimHandle"
@@ -2618,13 +2618,12 @@
                             PointerMoved="TimelineSurface_OnPointerMoved"
                             PointerReleased="TimelineSurface_OnPointerReleased"
                             ToolTip.Tip="Drag to set trim end">
-                      <Border Classes="trimBar" />
-                    </Border>
-                    <Border x:Name="TrimEndCap" Classes="trimCap" IsHitTestVisible="False">
-                      <StackPanel Classes="trimGrip" Orientation="Horizontal">
-                        <Border Classes="trimGripLine" />
-                        <Border Classes="trimGripLine" />
-                      </StackPanel>
+                      <Border Classes="trimBar">
+                        <StackPanel Classes="trimGrip" Orientation="Horizontal">
+                          <Border Classes="trimGripLine" />
+                          <Border Classes="trimGripLine" />
+                        </StackPanel>
+                      </Border>
                     </Border>
                   </Canvas>
                 </Grid>

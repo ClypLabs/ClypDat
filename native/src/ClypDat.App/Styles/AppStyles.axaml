@@ -1433,10 +1433,15 @@
        cap still 14, because UpdateTimelineChrome positions both from those
        exact numbers (barWidth / capWidth) to land the line on the trim
        boundary. Anything here that changes width has to change there too. -->
+  <!-- Pill: corner radius is exactly half the width, so the ends are
+       semicircles rather than softened corners. Width must stay in step with
+       UpdateTimelineChrome's barWidth, which centres it on the trim boundary. -->
   <Style Selector="Border.trimBar">
-    <Setter Property="Width" Value="4" />
+    <Setter Property="Width" Value="9" />
     <Setter Property="HorizontalAlignment" Value="Center" />
-    <Setter Property="CornerRadius" Value="2" />
+    <Setter Property="CornerRadius" Value="4.5" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="#0A1A1E" />
     <Setter Property="Background">
       <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
         <GradientStop Offset="0" Color="#2BE8D3" />
@@ -1460,25 +1465,6 @@
     <Setter Property="BoxShadow" Value="0 0 10 0 #9913C8B5" />
   </Style>
 
-  <!-- A true pill: taller than it is wide, corner radius exactly half the
-       width so the ends are semicircles rather than the rounded-square the
-       earlier 14x16/r5 tab read as. Width is 12 and must stay in step with
-       UpdateTimelineChrome's capWidth, which centres it on the boundary. -->
-  <Style Selector="Border.trimCap">
-    <Setter Property="Width" Value="12" />
-    <Setter Property="Height" Value="22" />
-    <Setter Property="CornerRadius" Value="6" />
-    <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="BorderBrush" Value="#0A1A1E" />
-    <Setter Property="BoxShadow" Value="0 2 6 0 #A6000000" />
-    <Setter Property="Background">
-      <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-        <GradientStop Offset="0" Color="#5CFFEC" />
-        <GradientStop Offset="0.5" Color="#1CD3BF" />
-        <GradientStop Offset="1" Color="#0B9686" />
-      </LinearGradientBrush>
-    </Setter>
-  </Style>
   <Style Selector="StackPanel.trimGrip">
     <Setter Property="HorizontalAlignment" Value="Center" />
     <Setter Property="VerticalAlignment" Value="Center" />
