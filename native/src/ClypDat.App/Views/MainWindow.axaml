@@ -1141,28 +1141,16 @@
               <DataTemplate>
                 <StackPanel Width="{Binding $parent[Window].DataContext.CardWidth}" Margin="4,2,20,4">
                   <Border Background="#24303A" CornerRadius="12" BoxShadow="0 6 18 -6 #66000000" ClipToBounds="True">
-                    <Grid RowDefinitions="Auto,Auto">
-                      <Border Background="#16202A" Height="{Binding $parent[Window].DataContext.CardImageHeight}">
-                        <Grid ClipToBounds="True">
-                          <controls:LoadingShimmer Width="180" HorizontalAlignment="Left">
-                            <controls:LoadingShimmer.Background>
-                              <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,0%">
-                                <GradientStop Color="#00344958" Offset="0" />
-                                <GradientStop Color="#4A5A7185" Offset="0.5" />
-                                <GradientStop Color="#00344958" Offset="1" />
-                              </LinearGradientBrush>
-                            </controls:LoadingShimmer.Background>
-                          </controls:LoadingShimmer>
-                        </Grid>
-                      </Border>
-                      <Border Grid.Row="1" Background="#1E2A35">
-                        <StackPanel Margin="16,13" Spacing="8">
-                          <Border Width="92" Height="10" CornerRadius="5" Background="#334352" HorizontalAlignment="Left" />
-                          <Border Width="{Binding $parent[Window].DataContext.CardWidth, Converter={x:Static opconv:SubtractDoubleConverter.Instance}, ConverterParameter=120}"
-                                  Height="14" CornerRadius="7" Background="#405263" HorizontalAlignment="Left" />
-                          <Border Width="132" Height="10" CornerRadius="5" Background="#334352" HorizontalAlignment="Left" />
-                        </StackPanel>
-                      </Border>
+                    <Grid Height="{Binding $parent[Window].DataContext.CardImageHeight}" Background="#16202A" ClipToBounds="True">
+                      <controls:LoadingShimmer Width="180" HorizontalAlignment="Left">
+                        <controls:LoadingShimmer.Background>
+                          <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,0%">
+                            <GradientStop Color="#00344958" Offset="0" />
+                            <GradientStop Color="#4A5A7185" Offset="0.5" />
+                            <GradientStop Color="#00344958" Offset="1" />
+                          </LinearGradientBrush>
+                        </controls:LoadingShimmer.Background>
+                      </controls:LoadingShimmer>
                     </Grid>
                   </Border>
                 </StackPanel>

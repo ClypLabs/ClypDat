@@ -2834,7 +2834,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _restoredClipPaths.Clear();
             foreach (var clip in AllClips) _restoredClipPaths.Add(clip.Path);
             OnPropertyChanged(nameof(IsRestoringLibraryCache));
-            const int initialCardCount = 18;
+            const int initialCardCount = 6;
             // Existence checks for every row's thumbnail/filmstrip run off the UI
             // thread - see NormalizeCachedStates. Two stat calls per clip against
             // a cold media-cache folder is not something the first paint should
@@ -2849,8 +2849,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             NotifyLibraryChrome();
             AppLog.Info($"Library cache: restored {Math.Min(initialCardCount, cached.Count)}/{cached.Count} cards in {clock.ElapsedMilliseconds}ms.");
 
+            // The first row is enough to make the window useful. Keep the rest
+            // of the cache restore on low-priority dispatcher turns instead of
+            // holding the startup state until every card has been constructed.
+            IsInitialLibraryLoadComplete = true;
             _cachedLibraryRestoreCts = new CancellationTokenSource();
-            await RestoreRemainingCachedClipsAsync(cached.Skip(initialCardCount).ToArray(), root, _cachedLibraryRestoreCts.Token);
+            _ = RestoreRemainingCachedClipsAsync(cached.Skip(initialCardCount).ToArray(), root, _cachedLibraryRestoreCts.Token);
         }
         finally
         {
@@ -2860,7 +2864,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task RestoreRemainingCachedClipsAsync(IReadOnlyList<CachedClipState> states, string root, CancellationToken cancellationToken)
     {
-        const int batchSize = 24;
+        const int batchSize = 8;
         try
         {
             for (var offset = 0; offset < states.Count; offset += batchSize)
