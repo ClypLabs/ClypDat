@@ -4028,8 +4028,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public void OpenSettings()
     {
         _wasEditorVisibleBeforeSettings = IsEditorVisible;
-        IsEditorVisible = false;
+        // Settings goes visible BEFORE the editor goes hidden. Both raise change
+        // notifications that view history samples (CurrentViewState), and doing
+        // it the other way round left an instant where neither was visible -
+        // which samples as Library. Opening Settings from a clip therefore
+        // recorded [Library, Editor, Library, Settings], and Back landed on that
+        // phantom Library entry instead of the clip. This order never leaves the
+        // in-between state: the first change still samples as Editor (unchanged,
+        // so nothing is recorded), and the second samples as Settings.
         IsSettingsVisible = true;
+        IsEditorVisible = false;
     }
 
     private static readonly string[] OnboardingStepOrder =

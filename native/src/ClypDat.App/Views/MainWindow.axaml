@@ -1121,7 +1121,7 @@
     <Border Grid.Column="1" Background="#101820" IsVisible="{Binding IsSettingsVisible}">
       <Grid ColumnDefinitions="240,*,Auto">
         <Border Grid.Column="0" Background="#0D1116" BorderBrush="#1E2A33" BorderThickness="0,0,1,0">
-          <StackPanel Margin="0,24,16,24" Spacing="2">
+          <StackPanel Margin="0,12,16,24" Spacing="2">
             <TextBox Classes="settingsInput appSearchBox" Text="{Binding SettingsSearchText}" PlaceholderText="Search settings" Margin="22,0,0,14" VerticalContentAlignment="Center">
               <TextBox.InnerLeftContent>
                 <Canvas Width="16" Height="16" Margin="10,0,2,0" VerticalAlignment="Center">
