@@ -5134,12 +5134,7 @@ public sealed partial class MainWindow : Window
         _trimDragGrabOffsetMs = 0;
         _timelineWasPlayingBeforeDrag = ViewModel.IsPlaying;
         _endedAtTrimBoundary = false;
-        if (_timelineWasPlayingBeforeDrag)
-        {
-            _playback?.Pause();
-            ViewModel.IsPlaying = false;
-            _playbackTimer.Stop();
-        }
+        BeginTimelineGesture(e);
         UpdateTimelineFromPointer(e, TimelineDragMode.Playhead);
         _timelineScrubThrottle.Restart();
         e.Pointer.Capture(TimelineSurface);
@@ -5153,12 +5148,7 @@ public sealed partial class MainWindow : Window
         _trimDragGrabOffsetMs = TrimGrabOffsetMs(e, ViewModel.TrimStart);
         _timelineWasPlayingBeforeDrag = ViewModel.IsPlaying;
         _endedAtTrimBoundary = false;
-        if (_timelineWasPlayingBeforeDrag)
-        {
-            _playback?.Pause();
-            ViewModel.IsPlaying = false;
-            _playbackTimer.Stop();
-        }
+        BeginTimelineGesture(e);
         UpdateTimelineFromPointer(e, TimelineDragMode.TrimStart);
         _timelineScrubThrottle.Restart();
         e.Pointer.Capture(TimelineSurface);
@@ -5172,21 +5162,49 @@ public sealed partial class MainWindow : Window
         _trimDragGrabOffsetMs = TrimGrabOffsetMs(e, ViewModel.TrimEnd);
         _timelineWasPlayingBeforeDrag = ViewModel.IsPlaying;
         _endedAtTrimBoundary = false;
-        if (_timelineWasPlayingBeforeDrag)
-        {
-            _playback?.Pause();
-            ViewModel.IsPlaying = false;
-            _playbackTimer.Stop();
-        }
+        BeginTimelineGesture(e);
         UpdateTimelineFromPointer(e, TimelineDragMode.TrimEnd);
         _timelineScrubThrottle.Restart();
         e.Pointer.Capture(TimelineSurface);
         e.Handled = true;
     }
 
+    // How far the pointer has to travel before a press counts as a drag rather
+    // than a click. Playback keeps running until it does.
+    private const double TimelineDragThreshold = 4;
+    private Point _timelineGestureOrigin;
+    private bool _timelineGesturePaused;
+
+    // Records where a timeline gesture started WITHOUT pausing. Pausing on
+    // press meant every click froze both halves of playback before anything had
+    // even moved, and the seek that followed then had to restart them - the
+    // stop-and-restart the whole gesture is supposed to feel free of. Scrubbing
+    // still needs the pause (SeekPreview drives the picture by hand and audio
+    // would run on underneath it), so it is taken on the first real movement
+    // instead, in PromoteTimelineGestureToDrag.
+    private void BeginTimelineGesture(PointerEventArgs e)
+    {
+        _timelineGestureOrigin = e.GetPosition(TimelineSurface);
+        _timelineGesturePaused = false;
+    }
+
+    private void PromoteTimelineGestureToDrag(PointerEventArgs e)
+    {
+        if (_timelineGesturePaused) return;
+        var travelled = e.GetPosition(TimelineSurface) - _timelineGestureOrigin;
+        if (Math.Abs(travelled.X) < TimelineDragThreshold && Math.Abs(travelled.Y) < TimelineDragThreshold) return;
+
+        _timelineGesturePaused = true;
+        if (!_timelineWasPlayingBeforeDrag || ViewModel is null) return;
+        _playback?.Pause();
+        ViewModel.IsPlaying = false;
+        _playbackTimer.Stop();
+    }
+
     private void TimelineSurface_OnPointerMoved(object? sender, PointerEventArgs e)
     {
         if (_timelineDragMode == TimelineDragMode.None || ViewModel is null) return;
+        PromoteTimelineGestureToDrag(e);
         UpdateTimelineFromPointer(e, _timelineDragMode);
 
         // Live-preview the actual frame while dragging instead of leaving the
@@ -5196,6 +5214,10 @@ public sealed partial class MainWindow : Window
         if (_timelineScrubThrottle.Elapsed < TimelineScrubMinInterval) return;
         _timelineScrubThrottle.Restart();
         _endedAtTrimBoundary = false;
+        // Keep the audio chunk for wherever this is heading extracting while the
+        // drag is still going, so the resume on release has real samples to play
+        // instead of the silence ChunkedAudioReader emits for a cold chunk.
+        _playback?.PrefetchAudioAt(ViewModel.CurrentTime);
         _playback?.SeekPreview(ViewModel.CurrentTime);
     }
 
@@ -5211,6 +5233,7 @@ public sealed partial class MainWindow : Window
         var wasPlaying = _timelineWasPlayingBeforeDrag;
         _timelineDragMode = TimelineDragMode.None;
         _timelineWasPlayingBeforeDrag = false;
+        _timelineGesturePaused = false;
         if (ViewModel is null) return;
         _ = ApplyTimelineSeekAsync(ViewModel.CurrentTime, wasPlaying);
     }
@@ -5230,6 +5253,7 @@ public sealed partial class MainWindow : Window
         // clip's end is the slow case that made this window wide enough to hit.
         _timelineDragMode = TimelineDragMode.None;
         _timelineWasPlayingBeforeDrag = false;
+        _timelineGesturePaused = false;
         e.Pointer.Capture(null);
         e.Handled = true;
 
@@ -8369,6 +8393,11 @@ public sealed partial class MainWindow : Window
         _editorSeekCts = seekCts;
         _endedAtTrimBoundary = false;
         ViewModel.CurrentTime = time;
+        // Start the chunk for the landing point extracting before the video
+        // seek, not after it - a cold chunk reads as silence (see
+        // ChunkedAudioReader.Read), which would look exactly like the audio
+        // lagging the picture in even though both were released together.
+        _playback?.PrefetchAudioAt(time);
         var didResume = false;
         if (_playback is not null)
         {
