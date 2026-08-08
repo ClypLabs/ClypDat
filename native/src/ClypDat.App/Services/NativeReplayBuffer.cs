@@ -934,10 +934,20 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var acquireTimeoutForcedMs = int.TryParse(acquireTimeoutOverride, out var parsedTimeout) && parsedTimeout is > 0 and <= 1000
                 ? parsedTimeout
                 : 0;
-            var acquireTimeoutMs = acquireTimeoutForcedMs > 0
-                ? (uint)acquireTimeoutForcedMs
-                : (uint)Math.Clamp((int)Math.Round(targetFrameInterval.TotalMilliseconds * 2), 1, 33);
+            // 200ms, and no longer tied to the frame interval at all. The encode
+            // tick moved to its own thread (pacingThread below), so the reason the
+            // wait had to stay under one interval is gone - and with it the ~56
+            // calls a second this made on an idle desktop. An idle desktop now
+            // costs about 5 calls a second. The env override stays for A/B-ing it.
+            //
+            // Not longer than this: the wait is also how long shutdown can take to
+            // notice cancellation, and how long a target-window change or a
+            // duplication recreate waits to be picked up.
+            var acquireTimeoutMs = acquireTimeoutForcedMs > 0 ? (uint)acquireTimeoutForcedMs : 200u;
             if (acquireTimeoutForcedMs > 0) AppLog.Info($"Native capture: acquire timeout forced to {acquireTimeoutMs}ms.");
+            // Serializes every D3D11 immediate/video context touch across the
+            // acquire loop and the pacing tick - see pacingThread below.
+            var gpuLock = new object();
             var lastDiagLog = TimeSpan.Zero;
             var lastRingTrim = TimeSpan.Zero;
             var framesSeen = 0;
@@ -1073,10 +1083,67 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // Three failed recreates means the problem isn't the duplication.
             const int recoveryAttemptsBeforeDeviceRebuild = 3;
 
+            // A dedicated thread, not a pool item: hitting a 16.7ms deadline is
+            // the one thing this has to do, and a pool work item queues behind
+            // whatever else the app is running (the same reasoning as
+            // ProcessLoopbackWaveIn's capture thread). Its lateness is directly
+            // visible in the output - as padsSkipped, and as a clip that reads
+            // under its configured frame rate - so it also runs AboveNormal.
+            var pacingThread = new Thread(() =>
+            {
+                var nextTickAt = stopwatch.Elapsed;
+                while (!token.IsCancellationRequested)
+                {
+                    // Sleep the bulk, yield the tail. Thread.Sleep resolution is
+                    // whole milliseconds at best, so sleeping the whole way to the
+                    // deadline overshoots it; stopping 1ms short and yielding
+                    // through the remainder lands close without burning a core.
+                    var remaining = nextTickAt - stopwatch.Elapsed;
+                    if (remaining > TimeSpan.FromMilliseconds(2)) Thread.Sleep(remaining - TimeSpan.FromMilliseconds(1));
+                    else if (remaining > TimeSpan.Zero) Thread.Yield();
+
+                    try
+                    {
+                        // One lock for every D3D11 context touch on either thread.
+                        // ID3D11DeviceContext is not free-threaded, and the tick's
+                        // encode path shares the immediate context - and
+                        // croppedTexture / staging / swsContext - with the acquire
+                        // loop's crop and Blt. Both sides are sub-millisecond
+                        // (avgCopyMapMs 0.02, avgScaleMs 0.30), so contention here
+                        // costs far less than the acquire calls this split exists
+                        // to stop making.
+                        lock (gpuLock) RunPacingTick();
+                    }
+                    catch (Exception error)
+                    {
+                        AppLog.Error("Native capture pacing tick failed.", error);
+                    }
+
+                    nextTickAt += targetFrameInterval;
+                    // Woken very late (a long GC, a suspended thread): snap the
+                    // deadline forward instead of spinning out a burst of instant
+                    // ticks. RunPacingTick's own catch-up cap has already decided
+                    // how much duplicate work a gap is worth.
+                    if (nextTickAt < stopwatch.Elapsed - targetFrameInterval) nextTickAt = stopwatch.Elapsed;
+                }
+            })
+            {
+                IsBackground = true,
+                Priority = ThreadPriority.AboveNormal,
+                Name = "ClypDat capture pacing"
+            };
+            pacingThread.Start();
+
             while (!token.IsCancellationRequested)
             {
                 if (stopwatch.Elapsed - lastDiagLog >= TimeSpan.FromSeconds(2))
                 {
+                    // Under the GPU lock: half these counters (scaleMs, encodeMs,
+                    // frameStalenessMs, the encoded/pad counts) are now written by
+                    // the pacing thread, and this both reads and zeroes them. Held
+                    // once every two seconds, so it costs the capture nothing.
+                    lock (gpuLock)
+                    {
                     var diagElapsed = Math.Max(0.001, (stopwatch.Elapsed - lastDiagLog).TotalSeconds);
                     lastDiagLog = stopwatch.Elapsed;
                     var n = Math.Max(1, framesEncodedSinceLog);
@@ -1220,6 +1287,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     presentGapMaxMs = 0;
                     preAcquireMs = 0;
                     preAcquireMaxMs = 0;
+                    }
                 }
 
                 // Re-check which window/monitor we should be capturing every second -
@@ -1375,6 +1443,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         }
                         lastRealPresentTicks = frameInfo.LastPresentTime;
 
+                        // Everything this frame does to the GPU - the crop, the
+                        // Blt, the readback, and the crop-size change that
+                        // disposes and rebuilds staging/swsContext/croppedTexture/
+                        // inputView - shares the D3D11 immediate context and those
+                        // same resources with the pacing tick's encode path, which
+                        // now runs on its own thread. One lock over the whole
+                        // per-frame body rather than several around individual
+                        // calls: the resources have to stay coherent across the
+                        // crop-size rebuild, not just during each call.
+                        Monitor.Enter(gpuLock);
                         try
                         {
                             framesSeen++;
@@ -1726,6 +1804,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         }
                         finally
                         {
+                            Monitor.Exit(gpuLock);
                             duplication.ReleaseFrame();
                             desktopResource.Dispose();
                         }
@@ -1999,309 +2078,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     AppLog.Info("Native capture: first foreground frame captured, recording started.");
                 }
 
-                // Pacing/encode gate - now evaluated every iteration regardless of
-                // whether this exact cycle produced fresh content, instead of only
-                // running inside the successful-real-frame branch. Previously the
-                // encoded frame RATE was capped by however fast the SOURCE happened
-                // to deliver genuinely new presents (measured via LastPresentTime:
-                // averaging ~45fps with real bursts past 150fps and lulls near
-                // 40fps, while avgAccumulatedFrames stayed ~1 the whole time -
-                // proof this loop was never actually falling behind the source, it
-                // was just refusing to pad for it). Every other capture tool pads
-                // with a duplicate of the last frame when nothing new has arrived
-                // in time to keep actual encoded fps locked to the target; this now
-                // does the same, reusing frame->data unchanged (identical mechanism
-                // to the existing occlusion freeze) whenever nothing fresh landed.
-                //
-                // A `while` here (not `if`) instead of jumping lastEncodedAt to
-                // "now" catches up with MULTIPLE duplicate-encoded frames if a
-                // real stall (e.g. an AccessLost recreation, a Thread.Sleep(50)
-                // backoff) ever eats more than one interval's worth of real time,
-                // so the declared/ideal timeline below never silently falls behind
-                // real elapsed time.
-                //
-                // Capped, though - a genuine multi-minute stall (seen under heavy
-                // GPU load/driver hiccups) would otherwise make this loop pad
-                // through the ENTIRE gap as thousands of duplicate-encoded copies
-                // of one frozen frame, ballooning both encoded frame count and the
-                // clip's own PTS-derived duration far past what was requested (a
-                // "1 minute" replay length saving a 7+ minute, almost entirely
-                // static clip). Past a couple of seconds' worth of padding, snap
-                // the ideal timeline forward to now instead of mechanically
-                // filling every missed slot.
-                // Skipped entirely until the target window has been in the
-                // foreground at least once - see hasCapturedRealFrame's
-                // declaration above for why (avoids ever writing the
-                // FillFrameBlack placeholder into the ring buffer/full
                 // session as real recorded content).
-                // Shared tail of both pacing modes below: force a keyframe on
-                // schedule, clone frame (already carrying whatever pts/pict_type
-                // the caller just set) and hand it to EncodeLoop. Factored out
-                // since the fixed-rate and adaptive-rate branches only differ in
-                // WHEN/how they decide to call this, not in what encoding a
-                // scheduled frame actually does.
-                // Zero-copy twin of EncodeScheduledFrame below: the scaled NV12
-                // surface goes straight into one of the encoder's own D3D11
-                // pool textures and that texture is what gets queued. No
-                // staging copy, no Map, no plane memcpy, and nothing for
-                // ffmpeg to upload again on the other side - see
-                // TryCreateD3D11EncodeFrames for the measurements that motivate
-                // it. `frame` still carries the pts/pict_type the pacing loop
-                // just set; it is only ever a carrier on this path.
-                unsafe void EncodeScheduledFrameHardware()
-                {
-                    if (croppedDirty)
-                    {
-                        stageStopwatch.Restart();
-                        if (!nv12Ready)
-                        {
-                            bltStreams[0].Enable = true;
-                            bltStreams[0].InputSurface = inputView;
-                            videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, bltStreams);
-                        }
-
-                        nv12Ready = false;
-                        croppedDirty = false;
-
-                        var pooled = ffmpeg.av_frame_alloc();
-                        if (pooled is null)
-                        {
-                            Interlocked.Increment(ref _encodeDroppedCount);
-                            Interlocked.Increment(ref _totalDroppedFrames);
-                            scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
-                            return;
-                        }
-
-                        // Pool exhausted means every surface is still held by a
-                        // frame in the queue - the same condition a full queue
-                        // describes, and handled the same way.
-                        if (ffmpeg.av_hwframe_get_buffer((AVBufferRef*)hwFramesRef, pooled, 0) < 0)
-                        {
-                            ffmpeg.av_frame_free(&pooled);
-                            Interlocked.Increment(ref _encodeDroppedCount);
-                            Interlocked.Increment(ref _totalDroppedFrames);
-                            scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
-                            return;
-                        }
-
-                        // d3d11 frames carry the texture in data[0] and, since
-                        // the pool is one texture ARRAY, the slice index in
-                        // data[1] - which is the destination subresource.
-                        var texturePointer = (nint)pooled->data[0];
-                        var arraySlice = (uint)(nint)pooled->data[1];
-                        if (!hardwarePoolTextures.TryGetValue(texturePointer, out var poolTexture))
-                        {
-                            poolTexture = new ID3D11Texture2D(texturePointer);
-                            hardwarePoolTextures[texturePointer] = poolTexture;
-                        }
-
-                        device.ImmediateContext.CopySubresourceRegion(poolTexture, arraySlice, 0, 0, 0, nv12Output!, 0);
-
-                        if (lastHardwareFrame is not null) { var staleHardwareFrame = lastHardwareFrame; ffmpeg.av_frame_free(&staleHardwareFrame); lastHardwareFrame = null; }
-                        lastHardwareFrame = pooled;
-                        scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
-                    }
-
-                    // Nothing captured yet at all - no texture to send, and the
-                    // system-memory path's black placeholder has no equivalent
-                    // here. The pacing loop already advanced its timeline, so
-                    // this reads as a dropped frame, not a slower clip.
-                    if (lastHardwareFrame is null) return;
-
-                    if (stopwatch.Elapsed - lastForcedKeyframe >= TimeSpan.FromSeconds(2))
-                    {
-                        lastHardwareFrame->pict_type = AVPictureType.AV_PICTURE_TYPE_I;
-                        lastForcedKeyframe = stopwatch.Elapsed;
-                    }
-                    else
-                    {
-                        lastHardwareFrame->pict_type = AVPictureType.AV_PICTURE_TYPE_NONE;
-                    }
-
-                    var staleness = (MonotonicClock.UtcNow - lastFrameContentCapturedUtc).TotalMilliseconds;
-                    frameStalenessMs += staleness;
-                    if (staleness > frameStalenessMaxMs) frameStalenessMaxMs = staleness;
-                    frameStalenessCount++;
-
-                    stageStopwatch.Restart();
-                    // Cloned, not handed over: a padding tick sends this same
-                    // surface again, so the capture side has to keep its own
-                    // reference. The clone is a ref-counted handle to the very
-                    // same texture, not a copy of it.
-                    lastHardwareFrame->pts = frame->pts;
-                    var outgoing = ffmpeg.av_frame_clone(lastHardwareFrame);
-                    if (outgoing is null)
-                    {
-                        Interlocked.Increment(ref _encodeDroppedCount);
-                        Interlocked.Increment(ref _totalDroppedFrames);
-                    }
-                    else if (!encodeQueue!.TryAdd(new EncodeJob((nint)outgoing, MonotonicClock.UtcNow)))
-                    {
-                        var droppedFrame = outgoing;
-                        ffmpeg.av_frame_free(&droppedFrame);
-                        Interlocked.Increment(ref _encodeDroppedCount);
-                        Interlocked.Increment(ref _totalDroppedFrames);
-                    }
-                    else
-                    {
-                        framesEncoded++;
-                        framesEncodedSinceLog++;
-                    }
-
-                    encodeMs += stageStopwatch.Elapsed.TotalMilliseconds;
-                }
-
-                unsafe void EncodeScheduledFrame()
-                {
-                    if (hwFramesRef != 0)
-                    {
-                        EncodeScheduledFrameHardware();
-                        return;
-                    }
-
-                    // Convert whatever the latest present cropped, but only now that a
-                    // frame is actually being encoded - see the crop block above for why
-                    // this moved off the per-present path. Nothing new since the last
-                    // encode means frame->data still holds the right content and this is
-                    // a deliberate duplicate, exactly like the occlusion freeze.
-                    //
-                    // Reads back with DoNotWait, newest ready slot first, and never
-                    // blocks. A fixed "map the slot from N ticks ago" pairing has to
-                    // pick one number for two things it cannot satisfy at once: small
-                    // enough that frame->data isn't needlessly stale, large enough that
-                    // the copy has finished even when the GPU is running late. Two slots
-                    // gave the copy exactly one encode interval, and a 4K game spiking
-                    // blew straight through that - the Map then blocked, which is what
-                    // turned a brief GPU spike into avgScaleMs of 25-92ms, a full encode
-                    // queue and ~100 dropped frames per 2s window.
-                    //
-                    // Asking instead means staleness stays at one interval whenever the
-                    // GPU is keeping up, and degrades to two or three only while it
-                    // isn't, rather than the whole pipeline stalling. If nothing is
-                    // ready at all, frame->data keeps its previous content and this tick
-                    // encodes a duplicate - the same graceful outcome as the occlusion
-                    // freeze, and far cheaper than waiting.
-                    if (useGpuScale && croppedDirty)
-                    {
-                        stageStopwatch.Restart();
-                        // Reused rather than allocated per frame - 60/sec of these
-                        // into a loop whose own diagnostics already blame blocking
-                        // GCs for multi-hundred-millisecond capture gaps. inputView
-                        // is refreshed in place because a crop resize or device
-                        // rebuild replaces the view object underneath us.
-                        // Already produced at present time straight off the
-                        // duplication texture - see directBltAvailable. Only the
-                        // fallback copy path still owes a Blt here.
-                        if (!nv12Ready)
-                        {
-                            bltStreams[0].Enable = true;
-                            bltStreams[0].InputSurface = inputView;
-                            videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, bltStreams);
-                        }
-
-                        nv12Ready = false;
-                        var ringLength = nv12StagingRing!.Length;
-                        var currentRingIndex = nv12StagingIndex;
-                        device.ImmediateContext.CopyResource(nv12StagingRing[currentRingIndex], nv12Output);
-                        if (nv12RingWritten < ringLength) nv12RingWritten++;
-                        copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
-
-                        stageStopwatch.Restart();
-                        // k=1 is the slot written on the previous tick (freshest of the
-                        // finished ones), counting back to the oldest still held.
-                        for (var k = 1; k < nv12RingWritten; k++)
-                        {
-                            var candidate = ((currentRingIndex - k) % ringLength + ringLength) % ringLength;
-                            var mapResult = device.ImmediateContext.Map(
-                                nv12StagingRing[candidate], 0u, MapMode.Read, MapFlags.DoNotWait, out var mapped);
-                            // DXGI_ERROR_WAS_STILL_DRAWING - this slot's copy has not
-                            // landed yet, so try an older one rather than wait on it.
-                            if (mapResult.Failure) continue;
-
-                            try
-                            {
-                                ffmpeg.av_frame_make_writable(frame);
-                                CopyNv12PlanesToFrame(mapped, outputWidth, outputHeight, frame);
-                                if (cursorOutputX != int.MinValue)
-                                {
-                                    DrawDesktopCursorNv12(frame, outputWidth, outputHeight, cursorOutputX, cursorOutputY);
-                                }
-                            }
-                            finally
-                            {
-                                device.ImmediateContext.Unmap(nv12StagingRing[candidate], 0);
-                            }
-
-                            break;
-                        }
-                        scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
-
-                        nv12StagingIndex = (currentRingIndex + 1) % ringLength;
-                        croppedDirty = false;
-                    }
-
-                    // Force a keyframe periodically so the ring buffer always has a nearby
-                    // point to start a save-window at without waiting on the encoder's own
-                    // GOP schedule.
-                    if (stopwatch.Elapsed - lastForcedKeyframe >= TimeSpan.FromSeconds(2))
-                    {
-                        frame->pict_type = AVPictureType.AV_PICTURE_TYPE_I;
-                        lastForcedKeyframe = stopwatch.Elapsed;
-                    }
-                    else
-                    {
-                        frame->pict_type = AVPictureType.AV_PICTURE_TYPE_NONE;
-                    }
-
-                    // avcodec_send_frame/receive_packet themselves now run on
-                    // EncodeLoop's own thread (see its declaration above) - a slow
-                    // NVENC call under real GPU contention used to block THIS
-                    // thread, stalling AcquireNextFrame right along with it (the
-                    // capture freeze this whole diagnostic trail was chasing:
-                    // avgEncodeMs spiking 20x+ with frames backing up hundreds
-                    // deep). av_frame_clone is a cheap ref-counted handle, not a
-                    // pixel copy - av_frame_make_writable up above already treats
-                    // "something else still references this buffer" as
-                    // copy-on-write, so the encode thread holding this clone a
-                    // while longer just means the NEXT capture-thread frame gets
-                    // a fresh buffer instead of racing this one, exactly the
-                    // mechanism that comment already relies on.
-                    // Diagnostic only (see lastFrameContentCapturedUtc's declaration) -
-                    // how old frame->data's content already was at the moment this
-                    // output tick decided to encode it.
-                    var staleness = (MonotonicClock.UtcNow - lastFrameContentCapturedUtc).TotalMilliseconds;
-                    frameStalenessMs += staleness;
-                    if (staleness > frameStalenessMaxMs) frameStalenessMaxMs = staleness;
-                    frameStalenessCount++;
-
-                    stageStopwatch.Restart();
-                    var clonedFrame = ffmpeg.av_frame_clone(frame);
-                    if (clonedFrame is null)
-                    {
-                        AppLog.Error("Native capture: av_frame_clone failed, dropping a frame.");
-                        Interlocked.Increment(ref _encodeDroppedCount);
-                        Interlocked.Increment(ref _totalDroppedFrames);
-                    }
-                    else if (!encodeQueue.TryAdd(new EncodeJob((nint)clonedFrame, MonotonicClock.UtcNow)))
-                    {
-                        // Queue's genuinely full - the encoder can't keep pace even
-                        // decoupled, not just a transient stall. Drop rather than
-                        // block (defeats the whole point) or grow unbounded.
-                        var droppedFrame = clonedFrame;
-                        ffmpeg.av_frame_free(&droppedFrame);
-                        Interlocked.Increment(ref _encodeDroppedCount);
-                        Interlocked.Increment(ref _totalDroppedFrames);
-                    }
-                    else
-                    {
-                        // PTS advances above once per scheduled frame. It must not
-                        // advance again here: doing both doubles every successful
-                        // frame's duration and turns a 60 FPS clip into ~30 FPS.
-                        framesEncoded++;
-                        framesEncodedSinceLog++;
-                    }
-                    encodeMs += stageStopwatch.Elapsed.TotalMilliseconds;
-                }
 
                 // Picked up here rather than only at session start: when the
                 // encoder cannot sustain the configured rate even at the
@@ -2316,13 +2093,324 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     activeFrameRate = requestedFrameRate;
                     targetFrameInterval = TimeSpan.FromSeconds(1.0 / activeFrameRate);
                     idealFrameIntervalMicroseconds = 1_000_000.0 / activeFrameRate;
-                    acquireTimeoutMs = acquireTimeoutForcedMs > 0
-                        ? (uint)acquireTimeoutForcedMs
-                        : (uint)Math.Clamp((int)Math.Round(targetFrameInterval.TotalMilliseconds * 2), 1, 33);
                     SetHealth(_health with { TargetFrameRate = activeFrameRate, UpdatedUtc = DateTime.UtcNow });
                     AppLog.Info($"Native capture: target frame rate now {activeFrameRate} fps.");
                 }
+            }
 
+            // The pacing tick, running on its own thread (see pacingThread below).
+            // Everything in here used to be the tail of the acquire loop above,
+            // which is what forced acquireTimeoutMs to stay under one frame
+            // interval: the tick could never be later than the acquire wait. That
+            // cap is the single biggest cost of this backend - Windows bills GPU
+            // engine time per AcquireNextFrame CALL, and the cap kept the call
+            // count high (see the measurements at acquireTimeoutMs). Split apart,
+            // the acquire wait is free to be long and the tick keeps its own time.
+            // Shared tail of both pacing modes below: force a keyframe on
+            // schedule, clone frame (already carrying whatever pts/pict_type
+            // the caller just set) and hand it to EncodeLoop. Factored out
+            // since the fixed-rate and adaptive-rate branches only differ in
+            // WHEN/how they decide to call this, not in what encoding a
+            // scheduled frame actually does.
+            // Zero-copy twin of EncodeScheduledFrame below: the scaled NV12
+            // surface goes straight into one of the encoder's own D3D11
+            // pool textures and that texture is what gets queued. No
+            // staging copy, no Map, no plane memcpy, and nothing for
+            // ffmpeg to upload again on the other side - see
+            // TryCreateD3D11EncodeFrames for the measurements that motivate
+            // it. `frame` still carries the pts/pict_type the pacing loop
+            // just set; it is only ever a carrier on this path.
+            unsafe void EncodeScheduledFrameHardware()
+            {
+                if (croppedDirty)
+                {
+                    stageStopwatch.Restart();
+                    if (!nv12Ready)
+                    {
+                        bltStreams[0].Enable = true;
+                        bltStreams[0].InputSurface = inputView;
+                        videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, bltStreams);
+                    }
+
+                    nv12Ready = false;
+                    croppedDirty = false;
+
+                    var pooled = ffmpeg.av_frame_alloc();
+                    if (pooled is null)
+                    {
+                        Interlocked.Increment(ref _encodeDroppedCount);
+                        Interlocked.Increment(ref _totalDroppedFrames);
+                        scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
+                        return;
+                    }
+
+                    // Pool exhausted means every surface is still held by a
+                    // frame in the queue - the same condition a full queue
+                    // describes, and handled the same way.
+                    if (ffmpeg.av_hwframe_get_buffer((AVBufferRef*)hwFramesRef, pooled, 0) < 0)
+                    {
+                        ffmpeg.av_frame_free(&pooled);
+                        Interlocked.Increment(ref _encodeDroppedCount);
+                        Interlocked.Increment(ref _totalDroppedFrames);
+                        scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
+                        return;
+                    }
+
+                    // d3d11 frames carry the texture in data[0] and, since
+                    // the pool is one texture ARRAY, the slice index in
+                    // data[1] - which is the destination subresource.
+                    var texturePointer = (nint)pooled->data[0];
+                    var arraySlice = (uint)(nint)pooled->data[1];
+                    if (!hardwarePoolTextures.TryGetValue(texturePointer, out var poolTexture))
+                    {
+                        poolTexture = new ID3D11Texture2D(texturePointer);
+                        hardwarePoolTextures[texturePointer] = poolTexture;
+                    }
+
+                    device.ImmediateContext.CopySubresourceRegion(poolTexture, arraySlice, 0, 0, 0, nv12Output!, 0);
+
+                    if (lastHardwareFrame is not null) { var staleHardwareFrame = lastHardwareFrame; ffmpeg.av_frame_free(&staleHardwareFrame); lastHardwareFrame = null; }
+                    lastHardwareFrame = pooled;
+                    scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
+                }
+
+                // Nothing captured yet at all - no texture to send, and the
+                // system-memory path's black placeholder has no equivalent
+                // here. The pacing loop already advanced its timeline, so
+                // this reads as a dropped frame, not a slower clip.
+                if (lastHardwareFrame is null) return;
+
+                if (stopwatch.Elapsed - lastForcedKeyframe >= TimeSpan.FromSeconds(2))
+                {
+                    lastHardwareFrame->pict_type = AVPictureType.AV_PICTURE_TYPE_I;
+                    lastForcedKeyframe = stopwatch.Elapsed;
+                }
+                else
+                {
+                    lastHardwareFrame->pict_type = AVPictureType.AV_PICTURE_TYPE_NONE;
+                }
+
+                var staleness = (MonotonicClock.UtcNow - lastFrameContentCapturedUtc).TotalMilliseconds;
+                frameStalenessMs += staleness;
+                if (staleness > frameStalenessMaxMs) frameStalenessMaxMs = staleness;
+                frameStalenessCount++;
+
+                stageStopwatch.Restart();
+                // Cloned, not handed over: a padding tick sends this same
+                // surface again, so the capture side has to keep its own
+                // reference. The clone is a ref-counted handle to the very
+                // same texture, not a copy of it.
+                lastHardwareFrame->pts = frame->pts;
+                var outgoing = ffmpeg.av_frame_clone(lastHardwareFrame);
+                if (outgoing is null)
+                {
+                    Interlocked.Increment(ref _encodeDroppedCount);
+                    Interlocked.Increment(ref _totalDroppedFrames);
+                }
+                else if (!encodeQueue!.TryAdd(new EncodeJob((nint)outgoing, MonotonicClock.UtcNow)))
+                {
+                    var droppedFrame = outgoing;
+                    ffmpeg.av_frame_free(&droppedFrame);
+                    Interlocked.Increment(ref _encodeDroppedCount);
+                    Interlocked.Increment(ref _totalDroppedFrames);
+                }
+                else
+                {
+                    framesEncoded++;
+                    framesEncodedSinceLog++;
+                }
+
+                encodeMs += stageStopwatch.Elapsed.TotalMilliseconds;
+            }
+
+            unsafe void EncodeScheduledFrame()
+            {
+                if (hwFramesRef != 0)
+                {
+                    EncodeScheduledFrameHardware();
+                    return;
+                }
+
+                // Convert whatever the latest present cropped, but only now that a
+                // frame is actually being encoded - see the crop block above for why
+                // this moved off the per-present path. Nothing new since the last
+                // encode means frame->data still holds the right content and this is
+                // a deliberate duplicate, exactly like the occlusion freeze.
+                //
+                // Reads back with DoNotWait, newest ready slot first, and never
+                // blocks. A fixed "map the slot from N ticks ago" pairing has to
+                // pick one number for two things it cannot satisfy at once: small
+                // enough that frame->data isn't needlessly stale, large enough that
+                // the copy has finished even when the GPU is running late. Two slots
+                // gave the copy exactly one encode interval, and a 4K game spiking
+                // blew straight through that - the Map then blocked, which is what
+                // turned a brief GPU spike into avgScaleMs of 25-92ms, a full encode
+                // queue and ~100 dropped frames per 2s window.
+                //
+                // Asking instead means staleness stays at one interval whenever the
+                // GPU is keeping up, and degrades to two or three only while it
+                // isn't, rather than the whole pipeline stalling. If nothing is
+                // ready at all, frame->data keeps its previous content and this tick
+                // encodes a duplicate - the same graceful outcome as the occlusion
+                // freeze, and far cheaper than waiting.
+                if (useGpuScale && croppedDirty)
+                {
+                    stageStopwatch.Restart();
+                    // Reused rather than allocated per frame - 60/sec of these
+                    // into a loop whose own diagnostics already blame blocking
+                    // GCs for multi-hundred-millisecond capture gaps. inputView
+                    // is refreshed in place because a crop resize or device
+                    // rebuild replaces the view object underneath us.
+                    // Already produced at present time straight off the
+                    // duplication texture - see directBltAvailable. Only the
+                    // fallback copy path still owes a Blt here.
+                    if (!nv12Ready)
+                    {
+                        bltStreams[0].Enable = true;
+                        bltStreams[0].InputSurface = inputView;
+                        videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, bltStreams);
+                    }
+
+                    nv12Ready = false;
+                    var ringLength = nv12StagingRing!.Length;
+                    var currentRingIndex = nv12StagingIndex;
+                    device.ImmediateContext.CopyResource(nv12StagingRing[currentRingIndex], nv12Output);
+                    if (nv12RingWritten < ringLength) nv12RingWritten++;
+                    copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
+
+                    stageStopwatch.Restart();
+                    // k=1 is the slot written on the previous tick (freshest of the
+                    // finished ones), counting back to the oldest still held.
+                    for (var k = 1; k < nv12RingWritten; k++)
+                    {
+                        var candidate = ((currentRingIndex - k) % ringLength + ringLength) % ringLength;
+                        var mapResult = device.ImmediateContext.Map(
+                            nv12StagingRing[candidate], 0u, MapMode.Read, MapFlags.DoNotWait, out var mapped);
+                        // DXGI_ERROR_WAS_STILL_DRAWING - this slot's copy has not
+                        // landed yet, so try an older one rather than wait on it.
+                        if (mapResult.Failure) continue;
+
+                        try
+                        {
+                            ffmpeg.av_frame_make_writable(frame);
+                            CopyNv12PlanesToFrame(mapped, outputWidth, outputHeight, frame);
+                            if (cursorOutputX != int.MinValue)
+                            {
+                                DrawDesktopCursorNv12(frame, outputWidth, outputHeight, cursorOutputX, cursorOutputY);
+                            }
+                        }
+                        finally
+                        {
+                            device.ImmediateContext.Unmap(nv12StagingRing[candidate], 0);
+                        }
+
+                        break;
+                    }
+                    scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
+
+                    nv12StagingIndex = (currentRingIndex + 1) % ringLength;
+                    croppedDirty = false;
+                }
+
+                // Force a keyframe periodically so the ring buffer always has a nearby
+                // point to start a save-window at without waiting on the encoder's own
+                // GOP schedule.
+                if (stopwatch.Elapsed - lastForcedKeyframe >= TimeSpan.FromSeconds(2))
+                {
+                    frame->pict_type = AVPictureType.AV_PICTURE_TYPE_I;
+                    lastForcedKeyframe = stopwatch.Elapsed;
+                }
+                else
+                {
+                    frame->pict_type = AVPictureType.AV_PICTURE_TYPE_NONE;
+                }
+
+                // avcodec_send_frame/receive_packet themselves now run on
+                // EncodeLoop's own thread (see its declaration above) - a slow
+                // NVENC call under real GPU contention used to block THIS
+                // thread, stalling AcquireNextFrame right along with it (the
+                // capture freeze this whole diagnostic trail was chasing:
+                // avgEncodeMs spiking 20x+ with frames backing up hundreds
+                // deep). av_frame_clone is a cheap ref-counted handle, not a
+                // pixel copy - av_frame_make_writable up above already treats
+                // "something else still references this buffer" as
+                // copy-on-write, so the encode thread holding this clone a
+                // while longer just means the NEXT capture-thread frame gets
+                // a fresh buffer instead of racing this one, exactly the
+                // mechanism that comment already relies on.
+                // Diagnostic only (see lastFrameContentCapturedUtc's declaration) -
+                // how old frame->data's content already was at the moment this
+                // output tick decided to encode it.
+                var staleness = (MonotonicClock.UtcNow - lastFrameContentCapturedUtc).TotalMilliseconds;
+                frameStalenessMs += staleness;
+                if (staleness > frameStalenessMaxMs) frameStalenessMaxMs = staleness;
+                frameStalenessCount++;
+
+                stageStopwatch.Restart();
+                var clonedFrame = ffmpeg.av_frame_clone(frame);
+                if (clonedFrame is null)
+                {
+                    AppLog.Error("Native capture: av_frame_clone failed, dropping a frame.");
+                    Interlocked.Increment(ref _encodeDroppedCount);
+                    Interlocked.Increment(ref _totalDroppedFrames);
+                }
+                else if (!encodeQueue.TryAdd(new EncodeJob((nint)clonedFrame, MonotonicClock.UtcNow)))
+                {
+                    // Queue's genuinely full - the encoder can't keep pace even
+                    // decoupled, not just a transient stall. Drop rather than
+                    // block (defeats the whole point) or grow unbounded.
+                    var droppedFrame = clonedFrame;
+                    ffmpeg.av_frame_free(&droppedFrame);
+                    Interlocked.Increment(ref _encodeDroppedCount);
+                    Interlocked.Increment(ref _totalDroppedFrames);
+                }
+                else
+                {
+                    // PTS advances above once per scheduled frame. It must not
+                    // advance again here: doing both doubles every successful
+                    // frame's duration and turns a 60 FPS clip into ~30 FPS.
+                    framesEncoded++;
+                    framesEncodedSinceLog++;
+                }
+                encodeMs += stageStopwatch.Elapsed.TotalMilliseconds;
+            }
+
+            // Pacing/encode gate - runs on its own clock regardless of whether
+            // the acquire loop produced fresh content, rather than only inside
+            // the successful-real-frame branch it used to live in. Previously the
+            // encoded frame RATE was capped by however fast the SOURCE happened
+            // to deliver genuinely new presents (measured via LastPresentTime:
+            // averaging ~45fps with real bursts past 150fps and lulls near
+            // 40fps, while avgAccumulatedFrames stayed ~1 the whole time -
+            // proof this loop was never actually falling behind the source, it
+            // was just refusing to pad for it). Every other capture tool pads
+            // with a duplicate of the last frame when nothing new has arrived
+            // in time to keep actual encoded fps locked to the target; this now
+            // does the same, reusing frame->data unchanged (identical mechanism
+            // to the existing occlusion freeze) whenever nothing fresh landed.
+            //
+            // A `while` here (not `if`) instead of jumping lastEncodedAt to
+            // "now" catches up with MULTIPLE duplicate-encoded frames if a
+            // real stall (e.g. an AccessLost recreation, a Thread.Sleep(50)
+            // backoff) ever eats more than one interval's worth of real time,
+            // so the declared/ideal timeline below never silently falls behind
+            // real elapsed time.
+            //
+            // Capped, though - a genuine multi-minute stall (seen under heavy
+            // GPU load/driver hiccups) would otherwise make this loop pad
+            // through the ENTIRE gap as thousands of duplicate-encoded copies
+            // of one frozen frame, ballooning both encoded frame count and the
+            // clip's own PTS-derived duration far past what was requested (a
+            // "1 minute" replay length saving a 7+ minute, almost entirely
+            // static clip). Past a couple of seconds' worth of padding, snap
+            // the ideal timeline forward to now instead of mechanically
+            // filling every missed slot.
+            // Skipped entirely until the target window has been in the
+            // foreground at least once - see hasCapturedRealFrame's
+            // declaration above for why (avoids ever writing the
+            // FillFrameBlack placeholder into the ring buffer/full
+            void RunPacingTick()
+            {
                 if (hasCapturedRealFrame)
                 {
                 // At most 250 ms of duplicate work after a stall. Longer bursts
@@ -2405,6 +2493,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
                 if (stopwatch.Elapsed - lastRingTrim >= TimeSpan.FromSeconds(1))
                 {
+                    // Ring trim rides the pacing tick rather than the acquire
+                    // loop now, because the acquire loop can sit in a single
+                    // 200ms wait and this wants to run about once a second
+                    // regardless of whether the desktop is producing anything.
                     lastRingTrim = stopwatch.Elapsed;
                     TrimRingBuffer(fullSessionFormatContext is not null ? fullSessionStartUtc : (DateTime?)null);
                     // Audio captures ended mid-session (e.g. a route change when the
@@ -2421,6 +2513,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     _audio.PruneOlderThan(audioCutoffUtc);
                 }
             }
+
+            pacingThread.Join(TimeSpan.FromSeconds(2));
 
             // Stop accepting new jobs and wait for EncodeLoop to drain everything
             // already queued (including its own final flush of whatever's still

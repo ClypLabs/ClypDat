@@ -5380,6 +5380,31 @@ public sealed partial class MainWindow : Window
         await SaveTrimToOriginalAsync();
     }
 
+    private async void EditorDeleteButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
+        var path = ViewModel.SelectedVideoPath;
+        var clip = ViewModel.AllClips.FirstOrDefault(card => string.Equals(card.Path, path, StringComparison.OrdinalIgnoreCase));
+        if (clip is null) return;
+
+        var confirmed = await ConfirmDeleteAsync(clip.Name);
+        if (!confirmed) return;
+
+        try
+        {
+            // Close the editor BEFORE deleting, not after. The clip is open in a
+            // playback session that holds the file, so deleting underneath it is
+            // a locked-file failure rather than a delete.
+            _clipHoverPreview.Stop("clip deleted");
+            ViewModel.CloseEditor();
+            await ViewModel.DeleteClipAsync(clip);
+        }
+        catch (Exception error)
+        {
+            await ShowMessageAsync("Delete failed", error.Message);
+        }
+    }
+
     private async Task SaveTrimToOriginalAsync()
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
