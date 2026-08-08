@@ -412,18 +412,26 @@ public sealed class PlaybackSession : IDisposable
         AppLog.Debug($"Editor play from requested={time.TotalSeconds:0.###}s (seek={needsSeek}), vlc after={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}.");
     }
 
-    // Holds audio back until the video has actually reached the seek target
-    // (confirmed via TimeChanged - same signal SeekAndWaitAsync uses), bounded
-    // so a seek that never confirms doesn't leave audio silent forever.
-    // Guarded by playVersion (and _shouldPlay) so a Pause/Stop/newer PlayFrom
-    // that happens before this fires can't have it wrongly start audio out
-    // from under whatever state the session has since moved on to.
+    // How far past the seek target the video clock has to get before audio is
+    // allowed to start. Assigning VideoPlayer.Time makes LibVLC report the new
+    // time - and raise TimeChanged carrying it - immediately, before a single
+    // frame at that position has been decoded. So "Time is near the target"
+    // confirms that the seek was ACCEPTED, not that the picture is there, and
+    // a seek issued into a rebuffer satisfies it instantly. Only the clock
+    // actually advancing proves decoding is running again.
+    private const long VideoRollingMs = 40;
+
+    // Holds audio back until the video is genuinely rolling past the seek
+    // target, bounded so a seek that never confirms doesn't leave audio silent
+    // forever. Guarded by playVersion (and _shouldPlay) so a Pause/Stop/newer
+    // PlayFrom that happens before this fires can't have it wrongly start audio
+    // out from under whatever state the session has since moved on to.
     private async Task StartAudioOnceVideoCatchesUpAsync(long playVersion, long targetMs)
     {
         var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         void OnTimeChanged(object? sender, MediaPlayerTimeChangedEventArgs args)
         {
-            if (Math.Abs(args.Time - targetMs) < 650) ready.TrySetResult();
+            if (args.Time > targetMs + VideoRollingMs) ready.TrySetResult();
         }
 
         VideoPlayer.TimeChanged += OnTimeChanged;
@@ -442,11 +450,12 @@ public sealed class PlaybackSession : IDisposable
         if (Interlocked.Read(ref _playVersion) != playVersion || !_shouldPlay) return;
         lock (_transportLock)
         {
-            // The readers were anchored to the requested position back in
-            // PlayFrom, but the video has been running for however long the
-            // catch-up wait took, and the wait accepts the video landing up to
-            // 650ms from that request. Starting audio from the stale anchor is
-            // that whole gap of desync. Re-anchor to where the video is now.
+            // The readers were anchored to the requested position by whoever
+            // called this, but the video has been rolling for however long the
+            // wait took. Starting audio from that stale anchor is exactly that
+            // gap of desync. Re-anchor to where the video actually is now -
+            // which is also what makes the 900ms bail-out safe: audio starts
+            // late in the worst case, never out of sync.
             SeekAudio(Position);
             _audioOutput?.Play();
         }
@@ -603,8 +612,19 @@ public sealed class PlaybackSession : IDisposable
                 {
                     SeekAudio(settledTime);
                     VideoPlayer.SetPause(false);
-                    SeekAudio(Position);
-                    _audioOutput?.Play();
+                    // Audio deliberately does NOT start here. SeekAndWaitAsync
+                    // confirms that LibVLC accepted the seek, which it reports
+                    // the instant Time is assigned - well before it has decoded
+                    // anything at that position. Starting audio on that signal
+                    // ran it against a video still rebuffering: a measured seek
+                    // "settled" in 1ms and the picture then advanced 0.314s over
+                    // the next 0.8s of wall clock, while audio played all 0.8s.
+                    // That half-second of audio-ahead is permanent - nothing
+                    // re-anchors until the next pause or seek. PlayFrom's
+                    // needsSeek path already deferred audio for exactly this
+                    // reason; it just never covered this path, because by the
+                    // time PlayFrom runs after a seek VideoPlayer.Time already
+                    // equals the target, so needsSeek is false.
                     resumed = true;
                 }
                 else
@@ -620,6 +640,11 @@ public sealed class PlaybackSession : IDisposable
                     // rather than trusting this.
                     SeekAudio(Position);
                 }
+            }
+
+            if (resumed)
+            {
+                _ = StartAudioOnceVideoCatchesUpAsync(Interlocked.Read(ref _playVersion), milliseconds);
             }
 
             AppLog.Debug($"Editor seek end: requested={requested.TotalSeconds:0.###}s, settled={settledTime.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}, resume={resumePlayback}, resumed={resumed}, version={seekVersion}.");

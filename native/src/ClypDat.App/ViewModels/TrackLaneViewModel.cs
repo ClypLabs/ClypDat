@@ -45,7 +45,10 @@ public sealed class TrackLaneViewModel : ViewModelBase
     // Keep the normal 6px separator between every lane, but do not leave an
     // empty strip below the final audio (normally microphone) lane.
     public Thickness LaneMargin => IsAudio && IsLastAudioTrack ? new Thickness(0) : new Thickness(0, 0, 0, 6);
-    public Thickness LabelMargin => new(0);
+    // Audio labels sit a couple of pixels low, optically centring them in the
+    // space above the slider row. A video label is centred in the whole box
+    // (LabelRowSpan) and needs no nudge.
+    public Thickness LabelMargin => IsAudio ? new Thickness(0, 2, 0, 0) : new Thickness(0);
     // A video lane has no slider row under its label, so its header spans the
     // whole box and centres in it instead of sitting at the top with empty
     // space below - which is what made "Video" look top-aligned next to the
