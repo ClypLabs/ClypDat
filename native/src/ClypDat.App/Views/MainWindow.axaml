@@ -1121,7 +1121,7 @@
     <Border Grid.Column="1" Background="#101820" IsVisible="{Binding IsSettingsVisible}">
       <Grid ColumnDefinitions="240,*,Auto">
         <Border Grid.Column="0" Background="#0D1116" BorderBrush="#1E2A33" BorderThickness="0,0,1,0">
-          <StackPanel Margin="0,12,16,24" Spacing="2">
+          <StackPanel Margin="0,18,16,24" Spacing="2">
             <TextBox Classes="settingsInput appSearchBox" Text="{Binding SettingsSearchText}" PlaceholderText="Search settings" Margin="22,0,0,14" VerticalContentAlignment="Center">
               <TextBox.InnerLeftContent>
                 <Canvas Width="16" Height="16" Margin="10,0,2,0" VerticalAlignment="Center">
@@ -1195,7 +1195,7 @@
                     </ListBox>
                   </StackPanel>
 
-                  <Border Height="1" Background="#1B242D" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Resolution}" />
+                  <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
 
                   <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Resolution}">
                     <TextBlock Text="Resolution" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -1212,7 +1212,7 @@
                     </Grid>
                   </StackPanel>
 
-                  <Border Height="1" Background="#1B242D" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Frame rate}" />
+                  <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
 
                   <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Frame rate}">
                     <TextBlock Text="Frame rate" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -1267,7 +1267,7 @@
                                opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                   </StackPanel>
 
-                  <Border Height="1" Background="#1B242D" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Rate control}" />
+                  <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
 
                   <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Rate control}">
                     <TextBlock Text="Rate control" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -1335,7 +1335,7 @@
                       <TextBlock Text="Destination folder" Foreground="#B8C7D8" FontWeight="Bold" FontSize="13" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                       <TextBlock Text="{Binding FullSessionRecordingFolderDisplay}" Foreground="#6B7C8C" FontSize="12" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
-                    <Border Height="1" Background="#1B242D" Margin="0,6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Session codec}" />
+                    <Border Height="1" Background="#1B242D" Margin="0,6" IsVisible="{Binding !IsSettingsSearchActive}" />
                     <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Session codec}">
                       <StackPanel Spacing="2" VerticalAlignment="Center">
                         <TextBlock Text="Session codec" Foreground="#B8C7D8" FontWeight="Bold" FontSize="13" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -1343,7 +1343,7 @@
                       </StackPanel>
                       <ComboBox Grid.Column="1" Classes="settingsInput" Width="170" ItemsSource="{Binding FullSessionCodecs}" SelectedItem="{Binding SelectedFullSessionCodec}" VerticalAlignment="Center" />
                     </Grid>
-                    <Border Height="1" Background="#1B242D" Margin="0,6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Finalize in background}" />
+                    <Border Height="1" Background="#1B242D" Margin="0,6" IsVisible="{Binding !IsSettingsSearchActive}" />
                     <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Finalize in background}">
                       <StackPanel Spacing="2" VerticalAlignment="Center">
                         <TextBlock Text="Finalize in background" Foreground="#B8C7D8" FontWeight="Bold" FontSize="13" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -1351,7 +1351,7 @@
                       </StackPanel>
                       <ToggleSwitch Grid.Column="1" IsChecked="{Binding FullSessionBackgroundFinalize}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                     </Grid>
-                    <Border Height="1" Background="#1B242D" Margin="0,6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Storage limit}" />
+                    <Border Height="1" Background="#1B242D" Margin="0,6" IsVisible="{Binding !IsSettingsSearchActive}" />
                     <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Storage limit}">
                       <StackPanel Spacing="2" VerticalAlignment="Center">
                         <TextBlock Text="Storage limit" Foreground="#B8C7D8" FontWeight="Bold" FontSize="13" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -1400,7 +1400,7 @@
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableClipOverlay}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
 
-                  <Border Height="1" Background="#1B242D" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Hide notification overlays from screen capture}" />
+                  <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
 
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Hide notification overlays from screen capture}">
                     <StackPanel Spacing="2" VerticalAlignment="Center">
@@ -1410,7 +1410,7 @@
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding ExcludeOverlaysFromCapture}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
 
-                  <Border Height="1" Background="#1B242D" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show new clips after a session|new clips popup|game closes}" />
+                  <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
 
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show new clips after a session|new clips popup|game closes}">
                     <StackPanel Spacing="2" VerticalAlignment="Center">
@@ -1420,7 +1420,7 @@
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding ShowNewClipsOnGameClose}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
 
-                  <Border Height="1" Background="#1B242D" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clipping started overlay}" />
+                  <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
 
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clipping started overlay}">
                     <StackPanel Spacing="2" VerticalAlignment="Center">
@@ -1430,7 +1430,7 @@
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableGameDetectedOverlay}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
 
-                  <Border Height="1" Background="#1B242D" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show auto-clip detected overlay}" />
+                  <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
 
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show auto-clip detected overlay}">
                     <StackPanel Spacing="2" VerticalAlignment="Center">
@@ -1440,7 +1440,7 @@
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableAutoClipPendingOverlay}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
 
-                  <Border Height="1" Background="#1B242D" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show auto-clip failed overlay}" />
+                  <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
 
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show auto-clip failed overlay}">
                     <StackPanel Spacing="2" VerticalAlignment="Center">
@@ -1450,7 +1450,7 @@
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableAutoClipFailedOverlay}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
 
-                  <Border Height="1" Background="#1B242D" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Overlay position}" />
+                  <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
 
                   <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Overlay position}">
                     <TextBlock Text="Overlay position" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -1480,7 +1480,7 @@
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableClipOverlaySound}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
 
-                  <Border Height="1" Background="#1B242D" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Sound volume}" />
+                  <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
 
                   <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Sound volume}">
                     <TextBlock Text="Sound volume" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -1513,7 +1513,7 @@
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding LaunchOnWindowsStartup}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
-                  <Border Height="1" Background="#1B242D" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Start minimized on boot|Startup}" />
+                  <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Start minimized on boot|Startup}">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Start minimized on boot" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -1521,7 +1521,7 @@
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding StartMinimizedToTray}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
-                  <Border Height="1" Background="#1B242D" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Process priority}" />
+                  <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
                   <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Process priority}">
                     <TextBlock Text="Process priority" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     <TextBlock Text="Gives ClypDat's capture work more CPU scheduling priority when a demanding game is running. Changes apply immediately." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -1639,7 +1639,7 @@
                     </Grid>
                   </StackPanel>
 
-                  <Border Height="1" Background="#1B242D" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Or browse for an executable}" />
+                  <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
 
                   <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Or browse for an executable}">
                     <TextBlock Text="Or browse for an executable" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -1769,7 +1769,7 @@
                     <TextBlock Text="Strip emoji from titles" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding MedalImportStripEmoji}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
-                  <Border Height="1" Background="#1B242D" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Copy instead of move}" />
+                  <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Copy instead of move}">
                     <StackPanel Spacing="2">
                       <TextBlock Text="Copy instead of move" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -1944,7 +1944,7 @@
                     </StackPanel>
                   </StackPanel>
 
-                  <Border Height="1" Background="#1B242D" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Microphone}" />
+                  <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
 
                   <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Microphone}">
                     <Grid ColumnDefinitions="*,Auto">

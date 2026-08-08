@@ -463,6 +463,11 @@ public sealed partial class MainWindow : Window
         // Covers the Settings page's own hotkey button, which lives in this
         // window rather than a popup.
         AddHandler(PointerPressedEvent, HotkeyCapture_OnAnyPointerPressed, RoutingStrategies.Tunnel);
+        // Same reasoning as the clip-title box above: the editor's Title and
+        // Description boxes stayed focused and highlighted after clicking away
+        // onto anything non-focusable (the video, a lane, plain text), which
+        // reads as an edit still in progress long after the user has moved on.
+        AddHandler(PointerPressedEvent, EditorDetails_OnAnyPointerPressed, RoutingStrategies.Tunnel);
         // Game-rail drag - same reasoning as KeyDown/KeyUp above: a plain
         // (bubble) PointerPressed wired directly on a rail Button never saw
         // the press at all, because Button's OWN internal press handling (it
@@ -3956,6 +3961,22 @@ public sealed partial class MainWindow : Window
     private void DropEditorDetailsFocus()
     {
         EditorDetailsCard.Focus();
+    }
+
+    // Commits and drops focus when a click lands anywhere outside the details
+    // card. Clicks INSIDE it are left alone - moving between Title and
+    // Description is still one editing session, not the end of one.
+    private void EditorDetails_OnAnyPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (ViewModel is null || !ViewModel.IsEditorVisible || EditorDetailsCard is null) return;
+        if (TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is not Visual focused) return;
+        // Only act while one of the two boxes actually has the caret; without
+        // this every click in the editor would keep re-saving the sidecar.
+        if (!EditorDetailsCard.IsVisualAncestorOf(focused)) return;
+        if (e.Source is Visual source && EditorDetailsCard.IsVisualAncestorOf(source)) return;
+
+        ViewModel.SaveSelectedClipEditState();
+        DropEditorDetailsFocus();
     }
 
     private async Task SubmitEditorTitleAsync()
