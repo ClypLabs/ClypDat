@@ -10,7 +10,6 @@ public sealed class EncoderTuningServiceTests
     // warm-up and needs 8 severe windows out of a 15-sample window, with a 60s
     // cooldown between decisions.
     private static readonly TimeSpan SampleInterval = TimeSpan.FromSeconds(2);
-    private static readonly DateTime SessionStart = new(2026, 8, 4, 12, 0, 0, DateTimeKind.Utc);
 
     [Fact]
     public void LowersFrameRateOnceTheresNoFasterPresetLeft()
@@ -105,7 +104,10 @@ public sealed class EncoderTuningServiceTests
         int healthySamples = 0,
         ReplayDegradeReason reason = ReplayDegradeReason.EncoderOverload)
     {
-        var clock = SessionStart;
+        // BeginSession uses the real UTC clock. Keep samples relative to that
+        // clock so this test does not turn into permanent warm-up after a date
+        // change.
+        var clock = DateTime.UtcNow;
         for (var i = 0; i < severeSamples + healthySamples; i++)
         {
             // Past the 30s warm-up before anything counts.
