@@ -19,6 +19,8 @@ internal sealed class ServerPerPixelOverlay : IDisposable
     private const int SwHide = 0;
     private const int SwShowNoActivate = 4;
     private const uint UlwAlpha = 0x2;
+    private const uint WdaNone = 0x00000000;
+    private const uint WdaExcludeFromCapture = 0x00000011;
     private const uint DibRgbColors = 0;
     private const uint BiRgb = 0;
     private const uint SwpNoSize = 0x0001;
@@ -96,6 +98,14 @@ internal sealed class ServerPerPixelOverlay : IDisposable
     public void Hide()
     {
         if (_window != IntPtr.Zero) ShowWindow(_window, SwHide);
+    }
+
+    // Native mirror is visible Server overlay, so capture affinity belongs here.
+    public void SetCaptureExcluded(bool exclude)
+    {
+        if (_window == IntPtr.Zero) return;
+        if (!SetWindowDisplayAffinity(_window, exclude ? WdaExcludeFromCapture : WdaNone) && exclude)
+            AppLog.Debug($"Per-pixel overlay capture exclusion unavailable (needs Windows 10 build 19041): error={Marshal.GetLastWin32Error()}.");
     }
 
     public void Dispose()
@@ -246,6 +256,9 @@ internal sealed class ServerPerPixelOverlay : IDisposable
 
     [DllImport("user32.dll")]
     private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowDisplayAffinity(IntPtr window, uint affinity);
 
     [DllImport("gdi32.dll")]
     private static extern IntPtr CreateCompatibleDC(IntPtr dc);

@@ -2980,11 +2980,18 @@ public sealed partial class MainWindow : Window
     }
 
     private Border? _overlayBadge;
+    private Border? _overlayRoot;
     private Border? _overlayAccent;
     private TextBlock? _overlayLabel;
     private StackPanel? _overlayHintRow;
     private TranslateTransform? _overlayTranslate;
     private DispatcherTimer? _overlayHideTimer;
+    private ServerPerPixelOverlay? _clipOverlayPerPixelOverlay;
+    private int _clipOverlayAnimationId;
+    private double _clipOverlayAnimationStartOffset;
+    private double _clipOverlayAnimationTargetOffset;
+    private Action? _clipOverlayAnimationComplete;
+    private static readonly TimeSpan ClipOverlaySlideDuration = TimeSpan.FromMilliseconds(260);
 
     // Built once and reused for the process lifetime. Each notification used to
     // construct a brand-new transparent, topmost Window (and destroy the
@@ -3073,6 +3080,12 @@ public sealed partial class MainWindow : Window
             ClipToBounds = true,
             Child = new DockPanel { Children = { _overlayAccent, content } }
         };
+        _overlayRoot = new Border
+        {
+            Background = Avalonia.Media.Brushes.Transparent,
+            ClipToBounds = true,
+            Child = _overlayBadge
+        };
 
         _activeClipOverlay = new Window
         {
@@ -3088,12 +3101,27 @@ public sealed partial class MainWindow : Window
             // the slide somewhere to go. See ShowClipSavedOverlay.
             SizeToContent = SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.Manual,
-            Content = _overlayBadge
+            Content = _overlayRoot
         };
         _activeClipOverlay.Opened += (_, _) =>
         {
             OverlayTransparencyDiagnostics.Log(_activeClipOverlay, "clip-toast");
-            WindowTransparencyFallback.ApplyIfNeeded(_activeClipOverlay, _overlayBadge.Background, b => _overlayBadge.Background = b);
+            if (WindowsPlatformProfile.IsServer())
+            {
+                _clipOverlayPerPixelOverlay?.Dispose();
+                _clipOverlayPerPixelOverlay = new ServerPerPixelOverlay(_activeClipOverlay, _overlayRoot);
+                _clipOverlayPerPixelOverlay.ShowAndRefresh();
+                WindowTransparencyFallback.ApplyInputSurfaceIfNeeded(_activeClipOverlay);
+            }
+            else
+            {
+                WindowTransparencyFallback.ApplyIfNeeded(_activeClipOverlay, _overlayBadge.Background, b => _overlayBadge.Background = b);
+            }
+        };
+        _activeClipOverlay.Closed += (_, _) =>
+        {
+            _clipOverlayPerPixelOverlay?.Dispose();
+            _clipOverlayPerPixelOverlay = null;
         };
 
         // Movement only, deliberately no opacity transition: the badge slides
@@ -3208,7 +3236,7 @@ public sealed partial class MainWindow : Window
         _overlayHideTimer = null;
 
         EnsureClipOverlay();
-        if (_activeClipOverlay is null || _overlayBadge is null || _overlayLabel is null || _overlayAccent is null || _overlayTranslate is null) return;
+        if (_activeClipOverlay is null || _overlayBadge is null || _overlayRoot is null || _overlayLabel is null || _overlayAccent is null || _overlayTranslate is null) return;
 
         // Position is a live setting, so the side has to be re-applied on every
         // show rather than baked in at construction.
@@ -3265,6 +3293,7 @@ public sealed partial class MainWindow : Window
         // first overlay, because every later one already ends at ±travel and
         // re-assigning it is a no-op.
         var transitions = _overlayTranslate.Transitions;
+        StopClipOverlayAnimation();
         _overlayTranslate.Transitions = null;
         _overlayTranslate.X = isLeft ? -travel : travel;
 
@@ -3288,11 +3317,24 @@ public sealed partial class MainWindow : Window
             SetWindowPos(overlayHandle, HwndTopmost, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
         }
 
+        if (WindowsPlatformProfile.IsServer())
+        {
+            _clipOverlayPerPixelOverlay?.ShowAndRefresh();
+            _clipOverlayPerPixelOverlay?.SetCaptureExcluded(ViewModel?.Settings.ExcludeOverlaysFromCapture ?? true);
+        }
+
         Dispatcher.UIThread.Post(() =>
         {
             if (_overlayTranslate is null) return;
-            _overlayTranslate.Transitions = transitions;
-            _overlayTranslate.X = 0;
+            if (WindowsPlatformProfile.IsServer())
+            {
+                StartClipOverlayAnimation(0);
+            }
+            else
+            {
+                _overlayTranslate.Transitions = transitions;
+                _overlayTranslate.X = 0;
+            }
             // Sound used to fire the instant this method was called - well
             // before the slide transition below even started, so it landed a
             // couple hundred ms ahead of anything visibly happening. Playing it
@@ -3308,7 +3350,18 @@ public sealed partial class MainWindow : Window
             _activeClipOverlayCloseTimer = null;
             // Slide back out the same way it came in - no fade, it just leaves -
             // then hide once that transition has had time to finish playing.
-            if (_overlayTranslate is not null) _overlayTranslate.X = isLeft ? -travel : travel;
+            var exitOffset = isLeft ? -travel : travel;
+            if (WindowsPlatformProfile.IsServer())
+            {
+                StartClipOverlayAnimation(exitOffset, () =>
+                {
+                    _clipOverlayPerPixelOverlay?.Hide();
+                    _activeClipOverlay?.Hide();
+                });
+                return;
+            }
+
+            if (_overlayTranslate is not null) _overlayTranslate.X = exitOffset;
             var hideAfterExit = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(260) };
             hideAfterExit.Tick += (_, _) =>
             {
@@ -3321,6 +3374,71 @@ public sealed partial class MainWindow : Window
         };
         _activeClipOverlayCloseTimer = closeTimer;
         closeTimer.Start();
+    }
+
+    private void StartClipOverlayAnimation(double targetOffset, Action? completed = null)
+    {
+        if (_overlayTranslate is null) return;
+
+        StopClipOverlayAnimation();
+        _clipOverlayAnimationStartOffset = _overlayTranslate.X;
+        _clipOverlayAnimationTargetOffset = targetOffset;
+        _clipOverlayAnimationComplete = completed;
+        if (Math.Abs(_clipOverlayAnimationStartOffset - targetOffset) < 0.01)
+        {
+            SetClipOverlayOffset(targetOffset);
+            var complete = _clipOverlayAnimationComplete;
+            _clipOverlayAnimationComplete = null;
+            complete?.Invoke();
+            return;
+        }
+
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel is null)
+        {
+            SetClipOverlayOffset(targetOffset);
+            var complete = _clipOverlayAnimationComplete;
+            _clipOverlayAnimationComplete = null;
+            complete?.Invoke();
+            return;
+        }
+
+        var animationId = ++_clipOverlayAnimationId;
+        TimeSpan? startTime = null;
+
+        void Step(TimeSpan frameTime)
+        {
+            if (animationId != _clipOverlayAnimationId) return;
+            startTime ??= frameTime;
+            var progress = Math.Clamp((frameTime - startTime.Value).TotalMilliseconds / ClipOverlaySlideDuration.TotalMilliseconds, 0, 1);
+            var eased = 1 - Math.Pow(1 - progress, 3);
+            SetClipOverlayOffset(_clipOverlayAnimationStartOffset + (_clipOverlayAnimationTargetOffset - _clipOverlayAnimationStartOffset) * eased);
+            if (progress < 1)
+            {
+                topLevel.RequestAnimationFrame(Step);
+                return;
+            }
+
+            var complete = _clipOverlayAnimationComplete;
+            StopClipOverlayAnimation();
+            complete?.Invoke();
+        }
+
+        topLevel.RequestAnimationFrame(Step);
+    }
+
+    private void StopClipOverlayAnimation()
+    {
+        _clipOverlayAnimationId++;
+        _clipOverlayAnimationComplete = null;
+    }
+
+    private void SetClipOverlayOffset(double offset)
+    {
+        if (_overlayTranslate is null) return;
+        var scaling = RenderScaling > 0 ? RenderScaling : 1;
+        _overlayTranslate.X = Math.Round(offset * scaling) / scaling;
+        _clipOverlayPerPixelOverlay?.Refresh();
     }
 
     private void ReplayBuffer_OnRecordingStopped(object? sender, EventArgs e)
