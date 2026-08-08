@@ -2418,7 +2418,17 @@
                               CornerRadius="8"
                               ClipToBounds="False">
                         <Grid Margin="8,5" RowDefinitions="Auto,*" ColumnDefinitions="18,10,*">
-                          <Grid Grid.ColumnSpan="3" ColumnDefinitions="*,Auto">
+                          <!-- ZIndex so the Reset button below actually gets its
+                               own clicks. The volume Slider in row 1 is 36px
+                               tall with Margin="0,-10,0,0", so its hit area
+                               reaches 10px up into this row - and being
+                               declared later, it hit-tested on top of the
+                               button sitting there. The button is only ~15px
+                               tall, so that overhang covered essentially all
+                               of it: pressing Reset grabbed the slider and
+                               changed the volume instead. Raising this row
+                               fixes the hit order without moving a pixel. -->
+                          <Grid Grid.ColumnSpan="3" ColumnDefinitions="*,Auto" ZIndex="2">
                             <TextBlock Text="{Binding Label}"
                                        Foreground="#D4E0EA"
                                        FontSize="11"
