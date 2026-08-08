@@ -1380,7 +1380,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string ReplayQualityWarning =>
         string.Equals(Settings.ReplayBackend, "Legacy", StringComparison.OrdinalIgnoreCase)
             ? "Above 1080p60, Windows Capture clips take noticeably longer to process (the clip preview can sit black for a while before it loads)."
-            : "Above 1080p60, ClypDat's capture engine uses noticeably more GPU for as long as the replay buffer is armed - every frame is scaled and encoded continuously, so the cost scales with both resolution and frame rate. It does back off while a demanding game is running, so the figure you see idling on the desktop is the worst case, not what you pay mid-game.";
+            : "Above 1080p60, ClypDat's capture engine uses noticeably more GPU for as long as the replay buffer is armed - every frame is scaled and encoded continuously, so the cost scales with both resolution and frame rate. It uses less while a demanding game is running, so the number you see idling on the desktop is higher than what it costs mid-game.";
 
     // One string covering everything the running buffer baked in at start, so
     // the restart notice doesn't need a field per encoder setting.
