@@ -8434,7 +8434,7 @@ public sealed partial class MainWindow : Window
         // grab (see the XAML). All the placement below works in terms of the pill,
         // then shifts the Border by the padding either side of it so the pill still
         // lands exactly on the trim boundary. Must match Border.trimBar's Width.
-        const double barWidth = 9;
+        const double barWidth = 11;
         var hitPadding = Math.Max(0, (TrimEndHandle.Width - barWidth) / 2);
 
         // CENTERED on the boundary, like the playhead - not offset to the

@@ -1419,23 +1419,17 @@
     <Setter Property="RenderTransform" Value="scale(1.05)" />
   </Style>
 
-  <!-- Trim start/end handles.
+  <!-- Trim start/end handles: one thick pill running the full height of the
+       video lane. Nothing inside it, nothing above it. Corner radius is
+       exactly half the width, so the ends are true semicircles.
 
-       Two parts, because one part cannot do both jobs. A hairline spans the
-       whole lane to actually MARK the boundary - that has to be thin, or it
-       hides the frames it is supposed to point between. The grab affordance
-       is a short pill floating at the middle of that line, which has to be
-       chunky enough to look grabbable. Stretching one fat pill over the full
-       lane height tried to be both and read as a blob sitting on the clip.
-
-       Pill width must stay in step with UpdateTimelineChrome's barWidth,
-       which is what centres the whole handle on the trim boundary. -->
+       Width must stay in step with UpdateTimelineChrome's barWidth, which is
+       what centres the pill on the trim boundary. -->
   <Style Selector="Border.trimBar">
-    <Setter Property="Width" Value="10" />
-    <Setter Property="Height" Value="26" />
+    <Setter Property="Width" Value="11" />
     <Setter Property="HorizontalAlignment" Value="Center" />
-    <Setter Property="VerticalAlignment" Value="Center" />
-    <Setter Property="CornerRadius" Value="5" />
+    <Setter Property="VerticalAlignment" Value="Stretch" />
+    <Setter Property="CornerRadius" Value="5.5" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="BorderBrush" Value="#0B1D22" />
     <Setter Property="Background">
@@ -1446,34 +1440,12 @@
     </Setter>
     <Setter Property="BoxShadow" Value="0 1 5 0 #99000000" />
   </Style>
-  <!-- The hairline. Sits behind the pill and marks the actual cut. -->
-  <Style Selector="Border.trimLine">
-    <Setter Property="Width" Value="2" />
-    <Setter Property="HorizontalAlignment" Value="Center" />
-    <Setter Property="VerticalAlignment" Value="Stretch" />
-    <Setter Property="Background" Value="#13C8B5" />
-  </Style>
-  <Style Selector="Border.trimHandle:pointerover > Grid > Border.trimBar">
+  <Style Selector="Border.trimHandle:pointerover > Border.trimBar">
     <Setter Property="Background">
       <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
         <GradientStop Offset="0" Color="#7BFFF0" />
         <GradientStop Offset="1" Color="#17C7B4" />
       </LinearGradientBrush>
     </Setter>
-  </Style>
-  <Style Selector="Border.trimHandle:pointerover > Grid > Border.trimLine">
-    <Setter Property="Background" Value="#4BF2DE" />
-  </Style>
-
-  <Style Selector="StackPanel.trimGrip">
-    <Setter Property="HorizontalAlignment" Value="Center" />
-    <Setter Property="VerticalAlignment" Value="Center" />
-    <Setter Property="Spacing" Value="3" />
-  </Style>
-  <Style Selector="Border.trimGripLine">
-    <Setter Property="Width" Value="1.5" />
-    <Setter Property="Height" Value="9" />
-    <Setter Property="CornerRadius" Value="1" />
-    <Setter Property="Background" Value="#73041310" />
   </Style>
 </Styles>
