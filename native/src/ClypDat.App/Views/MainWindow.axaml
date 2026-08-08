@@ -776,7 +776,7 @@
              did the same thing against the heading/search bar above, holding the
              cards away from it so they were cut off mid-thumbnail by empty
              background rather than by the bar itself. -->
-        <Grid Margin="20,0,20,0">
+        <Grid Margin="20,0,0,0">
         <DockPanel>
 
           <!-- "Building your library..." banner - HydrateLibraryClipsAsync
@@ -1057,9 +1057,10 @@
           <Border Grid.Column="1"
                   x:Name="DateScrubberHost"
                   Width="22"
-                  Margin="2,14,0,10"
+                  Margin="2,14,4,10"
                   Background="Transparent"
                   ClipToBounds="False"
+                  RenderTransform="translateX(10px)"
                   IsVisible="{Binding IsInitialLibraryLoadComplete}"
                   PointerPressed="DateScrubber_OnPointerPressed"
                   PointerMoved="DateScrubber_OnPointerMoved"
@@ -1074,14 +1075,15 @@
                       Width="4"
                       CornerRadius="2"
                       Background="#141C24"
-                      HorizontalAlignment="Right"
+                      HorizontalAlignment="Left"
+                      Margin="12,0,0,0"
                       IsHitTestVisible="False" />
 
               <Canvas x:Name="DateScrubberCanvas" ClipToBounds="False">
                 <!-- Grows from its own centre on hover/drag (scaleX, so the
                      width change animates - Width itself can't transition). -->
                 <Border x:Name="DateScrubberThumb"
-                        Canvas.Left="18"
+                        Canvas.Left="12"
                         Width="4"
                         MinHeight="34"
                         CornerRadius="2"

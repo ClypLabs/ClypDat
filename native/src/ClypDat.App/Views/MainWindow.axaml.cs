@@ -1874,7 +1874,7 @@ public sealed partial class MainWindow : Window
                 Opacity = 0,
                 Transitions = new Transitions { new DoubleTransition { Property = Border.OpacityProperty, Duration = TimeSpan.FromSeconds(0.08) } }
             };
-            Canvas.SetLeft(tick, 16);
+            Canvas.SetLeft(tick, 4);
             Canvas.SetTop(tick, ContentOffsetToTrackY(contentY) - 1);
             DateScrubberCanvas.Children.Add(tick);
             _scrubberTicks.Add(tick);
