@@ -42,6 +42,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly DispatcherTimer _libraryCacheWriteTimer;
     private CancellationTokenSource? _cachedLibraryRestoreCts;
     private bool _isRestoringCachedLibrary;
+    private bool _isInitialLibraryLoadComplete;
     private bool _libraryCacheDirty;
     private (long Total, long Free) _driveStats;
     // See WasRecentlySelfAdded - suppresses the redundant full-library
@@ -330,6 +331,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public Task InitialLibraryLoadTask { get; }
     public ObservableCollection<ClipCardViewModel> AllClips { get; }
     public bool IsRestoringLibraryCache => _isRestoringCachedLibrary;
+    public bool IsInitialLibraryLoadComplete
+    {
+        get => _isInitialLibraryLoadComplete;
+        private set
+        {
+            if (!SetProperty(ref _isInitialLibraryLoadComplete, value)) return;
+            OnPropertyChanged(nameof(LibraryTitle));
+        }
+    }
     public IReadOnlyList<ClipCardViewModel> GetAudioOnlyClips() => AllClips
         .Where(clip => !clip.Media.HasVideo && clip.Media.Tracks.Count > 0)
         .ToArray();
@@ -397,6 +407,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get
         {
+            if (!IsInitialLibraryLoadComplete) return "Loading library";
             var parts = new List<string>();
             if (_activeGameFilters.Count > 0) parts.Add(string.Join(", ", _activeGameFilters.OrderBy(name => name, StringComparer.OrdinalIgnoreCase)));
 
@@ -2800,43 +2811,50 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // bounded batches while the remaining cached cards arrive.
     private async Task StartInitialLibraryLoadAsync()
     {
-        var root = Settings.LibraryFolder;
-        var clock = System.Diagnostics.Stopwatch.StartNew();
-        // Load is a synchronous SQLite read + per-row JSON deserialize; offload
-        // it so a large cached library doesn't block the window from showing.
-        var cached = await Task.Run(() => _libraryCache.Load(root));
-        if (!string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase))
+        try
         {
-            // Library folder changed again while this load was in flight.
-            return;
+            var root = Settings.LibraryFolder;
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            // Load is a synchronous SQLite read + per-row JSON deserialize; offload
+            // it so a large cached library doesn't block the window from showing.
+            var cached = await Task.Run(() => _libraryCache.Load(root));
+            if (!string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase))
+            {
+                // Library folder changed again while this load was in flight.
+                return;
+            }
+            if (cached.Count == 0)
+            {
+                await RefreshLibraryAsync();
+                return;
+            }
+
+            _isRestoringCachedLibrary = true;
+            _restoredClipPaths.Clear();
+            foreach (var clip in AllClips) _restoredClipPaths.Add(clip.Path);
+            OnPropertyChanged(nameof(IsRestoringLibraryCache));
+            const int initialCardCount = 18;
+            // Existence checks for every row's thumbnail/filmstrip run off the UI
+            // thread - see NormalizeCachedStates. Two stat calls per clip against
+            // a cold media-cache folder is not something the first paint should
+            // wait on, and it is the same disk the probe/thumbnail hydration
+            // passes are hammering at that exact moment.
+            var firstStates = cached.Take(initialCardCount).ToArray();
+            var firstBatch = await Task.Run(() => NormalizeCachedStates(firstStates));
+            foreach (var state in firstBatch) AddCachedClip(state);
+            ApplyGameFilters();
+            ApplyClipTypeFilters();
+            ApplySearchFilter();
+            NotifyLibraryChrome();
+            AppLog.Info($"Library cache: restored {Math.Min(initialCardCount, cached.Count)}/{cached.Count} cards in {clock.ElapsedMilliseconds}ms.");
+
+            _cachedLibraryRestoreCts = new CancellationTokenSource();
+            await RestoreRemainingCachedClipsAsync(cached.Skip(initialCardCount).ToArray(), root, _cachedLibraryRestoreCts.Token);
         }
-        if (cached.Count == 0)
+        finally
         {
-            await RefreshLibraryAsync();
-            return;
+            IsInitialLibraryLoadComplete = true;
         }
-
-        _isRestoringCachedLibrary = true;
-        _restoredClipPaths.Clear();
-        foreach (var clip in AllClips) _restoredClipPaths.Add(clip.Path);
-        OnPropertyChanged(nameof(IsRestoringLibraryCache));
-        const int initialCardCount = 18;
-        // Existence checks for every row's thumbnail/filmstrip run off the UI
-        // thread - see NormalizeCachedStates. Two stat calls per clip against
-        // a cold media-cache folder is not something the first paint should
-        // wait on, and it is the same disk the probe/thumbnail hydration
-        // passes are hammering at that exact moment.
-        var firstStates = cached.Take(initialCardCount).ToArray();
-        var firstBatch = await Task.Run(() => NormalizeCachedStates(firstStates));
-        foreach (var state in firstBatch) AddCachedClip(state);
-        ApplyGameFilters();
-        ApplyClipTypeFilters();
-        ApplySearchFilter();
-        NotifyLibraryChrome();
-        AppLog.Info($"Library cache: restored {Math.Min(initialCardCount, cached.Count)}/{cached.Count} cards in {clock.ElapsedMilliseconds}ms.");
-
-        _cachedLibraryRestoreCts = new CancellationTokenSource();
-        await RestoreRemainingCachedClipsAsync(cached.Skip(initialCardCount).ToArray(), root, _cachedLibraryRestoreCts.Token);
     }
 
     private async Task RestoreRemainingCachedClipsAsync(IReadOnlyList<CachedClipState> states, string root, CancellationToken cancellationToken)

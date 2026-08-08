@@ -720,7 +720,7 @@
                   Background="#0D141A"
                   BorderBrush="#1E2A33"
                   BorderThickness="0,0,0,1">
-            <Grid ColumnDefinitions="Auto,*,240" Margin="20,0">
+            <Grid ColumnDefinitions="Auto,*,240" Margin="20,0" IsEnabled="{Binding IsInitialLibraryLoadComplete}">
               <!-- Matches date headers: hover reveals select-all checkbox and
                    moves the Clips heading right. Selection stays scoped to
                    clips currently shown by Library filters. -->
@@ -826,7 +826,7 @@
             <TextBlock Text="{Binding ClipNotReadyMessage}" Foreground="#B8C7D8" FontSize="12" FontWeight="Bold" />
           </Border>
 
-          <Grid ColumnDefinitions="*,Auto">
+          <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding IsInitialLibraryLoadComplete}">
           <!-- Date scrubber (right column, below) replaces the default
                scrollbar, so hide the ScrollViewer's own. -->
           <ScrollViewer Grid.Column="0" x:Name="LibraryScrollViewer" Margin="-4,0,-4,0" VerticalScrollBarVisibility="Hidden">
@@ -1121,6 +1121,56 @@
             </Panel>
           </Border>
           </Grid>
+
+          <!-- Keep partial cache rows off-screen until startup has reconciled
+               them with disk. The preview keeps first paint intentional while
+               the library data is still arriving. -->
+          <StackPanel IsVisible="{Binding !IsInitialLibraryLoadComplete}"
+                      Margin="4,22,4,0"
+                      Spacing="16">
+            <StackPanel Spacing="5">
+              <TextBlock Text="Loading your library" Foreground="#D8E4F2" FontSize="16" FontWeight="Bold" />
+              <TextBlock Text="Preparing clips and settings" Foreground="#7C8EA3" FontSize="12" />
+            </StackPanel>
+            <ProgressBar IsIndeterminate="True"
+                         Height="4"
+                         CornerRadius="2"
+                         Background="#26313C"
+                         Foreground="{StaticResource AccentBrush}"
+                         HorizontalAlignment="Stretch" />
+            <WrapPanel>
+              <Border Width="368" Height="276" Margin="0,0,20,18" Background="#1B2630" CornerRadius="12" ClipToBounds="True">
+                <Grid RowDefinitions="207,*">
+                  <Border Background="#24303A" />
+                  <StackPanel Grid.Row="1" Margin="16,14" Spacing="9">
+                    <Border Width="96" Height="10" CornerRadius="5" Background="#334352" HorizontalAlignment="Left" />
+                    <Border Width="202" Height="14" CornerRadius="7" Background="#405263" HorizontalAlignment="Left" />
+                    <Border Width="138" Height="10" CornerRadius="5" Background="#334352" HorizontalAlignment="Left" />
+                  </StackPanel>
+                </Grid>
+              </Border>
+              <Border Width="368" Height="276" Margin="0,0,20,18" Background="#1B2630" CornerRadius="12" ClipToBounds="True">
+                <Grid RowDefinitions="207,*">
+                  <Border Background="#24303A" />
+                  <StackPanel Grid.Row="1" Margin="16,14" Spacing="9">
+                    <Border Width="112" Height="10" CornerRadius="5" Background="#334352" HorizontalAlignment="Left" />
+                    <Border Width="184" Height="14" CornerRadius="7" Background="#405263" HorizontalAlignment="Left" />
+                    <Border Width="124" Height="10" CornerRadius="5" Background="#334352" HorizontalAlignment="Left" />
+                  </StackPanel>
+                </Grid>
+              </Border>
+              <Border Width="368" Height="276" Margin="0,0,20,18" Background="#1B2630" CornerRadius="12" ClipToBounds="True">
+                <Grid RowDefinitions="207,*">
+                  <Border Background="#24303A" />
+                  <StackPanel Grid.Row="1" Margin="16,14" Spacing="9">
+                    <Border Width="88" Height="10" CornerRadius="5" Background="#334352" HorizontalAlignment="Left" />
+                    <Border Width="220" Height="14" CornerRadius="7" Background="#405263" HorizontalAlignment="Left" />
+                    <Border Width="146" Height="10" CornerRadius="5" Background="#334352" HorizontalAlignment="Left" />
+                  </StackPanel>
+                </Grid>
+              </Border>
+            </WrapPanel>
+          </StackPanel>
         </DockPanel>
       </Grid>
         </DockPanel>
