@@ -1369,6 +1369,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool ReplayQualityAboveDefault => Settings.ReplayMaxHeight > 1080 || Settings.ReplayFrameRate > 60;
 
+    // Past 1080p60 both backends cost something, but not the same something, so
+    // one shared sentence was telling most users about a cost they were never
+    // going to pay. Windows Capture's is on the SAVE side - its clips take
+    // noticeably longer to process. ClypDat's own engine is the opposite: saves
+    // are quick, and the price is paid continuously by the GPU for as long as
+    // the buffer is armed, which is the part worth warning about before someone
+    // leaves it running all day at 1440p144. Auto resolves to the ClypDat
+    // engine (see the backend list), so it gets that same warning.
+    public string ReplayQualityWarning =>
+        string.Equals(Settings.ReplayBackend, "Legacy", StringComparison.OrdinalIgnoreCase)
+            ? "Above 1080p60, Windows Capture clips take noticeably longer to process (the clip preview can sit black for a while before it loads)."
+            : "Above 1080p60, ClypDat's capture engine uses noticeably more GPU for as long as the replay buffer is armed - every frame is scaled and encoded continuously, so the cost scales with both resolution and frame rate.";
+
     // One string covering everything the running buffer baked in at start, so
     // the restart notice doesn't need a field per encoder setting.
     private string EncoderSignature =>
@@ -1414,6 +1427,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (!SetProperty(ref _selectedReplayBackend, value) || value is null) return;
             Settings.ReplayBackend = value.Value;
+            // The quality warning's TEXT depends on which backend is selected,
+            // not just on the quality being above default, so switching backends
+            // has to refresh it even though no quality setting moved.
+            OnPropertyChanged(nameof(ReplayQualityWarning));
             SaveSettings();
         }
     }

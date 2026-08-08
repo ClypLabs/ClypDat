@@ -1223,7 +1223,7 @@
                         </DataTemplate>
                       </ListBox.ItemTemplate>
                     </ListBox>
-                    <TextBlock Text="Above 1080p60, Windows Capture clips take noticeably longer to process (the clip preview can sit black for a while before it loads)."
+                    <TextBlock Text="{Binding ReplayQualityWarning}"
                                Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap"
                                opconv:SettingsHighlight.Query="{Binding SettingsSearchText}"
                                IsVisible="{Binding ReplayQualityAboveDefault}" />
