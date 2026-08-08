@@ -5665,6 +5665,11 @@ public sealed partial class MainWindow : Window
             await progressDialogTask;
             progressCts.Dispose();
             ViewModel.IsExporting = false;
+            // A save is a large allocation burst with a definite end - decoded
+            // frames, chunk buffers, the progress dialog's own bitmaps - so it
+            // is a known-good moment to hand the memory back rather than waiting
+            // out the idle timer for something already dead.
+            _ = Task.Run(() => MemoryTrimmer.Trim("clip saved"));
         }
     }
 

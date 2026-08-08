@@ -73,12 +73,18 @@ public static class MemoryTrimmer
             try
             {
                 if (DateTime.UtcNow - _lastTrimUtc < MinimumInterval) continue;
-                if (EditorOpen) continue;
 
                 using var process = Process.GetCurrentProcess();
                 if (process.PrivateMemorySize64 < TrimThresholdBytes) continue;
 
-                Trim("idle");
+                // The editor used to be skipped entirely, on the reasoning that
+                // its caches are in use while it is open. But the editor is also
+                // where the allocation actually happens - chunk buffers, decoded
+                // frames, thumbnails - so skipping it meant the one state that
+                // grows the process was the one state that never cleaned up, for
+                // as long as it stayed open. The caches refill on demand; what
+                // this drops is whatever is no longer being looked at.
+                Trim(EditorOpen ? "idle (editor open)" : "idle");
             }
             catch
             {
