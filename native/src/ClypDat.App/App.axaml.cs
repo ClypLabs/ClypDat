@@ -35,13 +35,19 @@ public sealed partial class App : Application
         // comment there for why this is not a callback into the window.
         MemoryTrimmer.Start();
         // Both of these are heavy disk IO with no user waiting on the result -
-        // LibVLC's warmup scans its whole plugin directory just to throw the
-        // instance away, and the janitor mass-deletes scratch files (real
-        // installs seen with 350MB+ of leftovers). Running either at process
-        // start meant paying that cost at the worst possible moment: logon,
-        // competing with the OS's own boot IO and every other autostart app.
-        // Neither is time-sensitive, so push both well past the window opening.
-        _ = Task.Delay(TimeSpan.FromSeconds(45)).ContinueWith(_ => PlaybackSession.WarmUp(), TaskScheduler.Default);
+        // LibVLC's warmup scans its whole plugin directory, and the janitor
+        // mass-deletes scratch files (real installs seen with 350MB+ of
+        // leftovers). Running either at process start meant paying that cost at
+        // the worst possible moment: logon, competing with the OS's own boot IO
+        // and every other autostart app.
+        //
+        // The playback warmup keeps its session now instead of throwing it away
+        // (see PlaybackSession.WarmUp), so it is the difference between the
+        // first clip click building a whole LibVLC engine and it reusing one -
+        // which makes WHEN it runs matter. 45s was long enough that anyone who
+        // opened the app to watch a clip clicked well inside the window and paid
+        // the full cold cost anyway. 12s still clears the logon IO burst.
+        _ = Task.Delay(TimeSpan.FromSeconds(12)).ContinueWith(_ => PlaybackSession.WarmUp(), TaskScheduler.Default);
         _ = Task.Delay(TimeSpan.FromSeconds(45)).ContinueWith(_ => StorageJanitor.CleanupAtStartup(), TaskScheduler.Default);
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)

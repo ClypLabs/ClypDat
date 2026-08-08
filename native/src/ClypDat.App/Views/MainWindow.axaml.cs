@@ -3442,9 +3442,18 @@ public sealed partial class MainWindow : Window
         return false;
     }
 
+    // Wall clock from the user's click to the first decoded frame appearing.
+    // "Editor first frame after Xms" only ever measured the tail of that - it
+    // starts once the video load has already finished - so the part of the wait
+    // the user actually stares at the thumbnail placeholder for (engine
+    // construction, thread-pool pickup, the previous clip's teardown) was
+    // entirely invisible in the logs. Marked at each stage below.
+    private readonly System.Diagnostics.Stopwatch _editorOpenClock = new();
+
     private async Task<bool> OpenClipCardAsync(ClipCardViewModel clip)
     {
         if (ViewModel is null) return false;
+        _editorOpenClock.Restart();
         _clipHoverPreview.Stop("clip opened");
         // Snapshot while Library is still visible/laid out - once
         // OpenClipAsync flips IsEditorVisible, LibraryScrollViewer collapses
@@ -3457,6 +3466,7 @@ public sealed partial class MainWindow : Window
             _libraryReturnAnchorDirty = false;
         }
         if (!await ViewModel.OpenClipAsync(clip)) return false;
+        AppLog.Debug($"Editor open trace: editor state ready at {_editorOpenClock.ElapsedMilliseconds}ms (UI thread).");
         QueueEditorPlayback();
         return true;
     }
@@ -6730,9 +6740,22 @@ public sealed partial class MainWindow : Window
         // Off-thread, a cold open still waits on libvlc, but the window keeps
         // painting and the editor shows its loading state instead of hanging.
         var existingSession = _playback;
+        var openClock = _editorOpenClock;
         var sessionTask = existingSession is not null
             ? Task.FromResult(existingSession)
-            : Task.Run(() => new PlaybackSession());
+            : Task.Run(() =>
+            {
+                // Logged BEFORE any work, so the number is the thread pool's
+                // pickup delay and nothing else. The app runs capture, encode
+                // and several ffmpeg chunk extractions at once, and the pool
+                // injects new threads roughly one per second when saturated -
+                // if a clip open is sitting seconds behind a busy pool, this
+                // line is where it shows up rather than in the engine cost.
+                AppLog.Debug($"Editor open trace: engine construction picked up at {openClock.ElapsedMilliseconds}ms.");
+                var created = PlaybackSession.TakeWarmedOrCreate();
+                AppLog.Debug($"Editor open trace: engine ready at {openClock.ElapsedMilliseconds}ms.");
+                return created;
+            });
         // Read off the view model here, not inside the continuation - by the
         // time that runs the selection may already have moved on.
         var videoPath = ViewModel.SelectedVideoPath;
@@ -6740,7 +6763,11 @@ public sealed partial class MainWindow : Window
         // decoder may take - see PlaybackSession.ResolveDecodeThreads.
         var replayArmed = ViewModel.IsReplayRecording;
         var videoLoad = sessionTask.ContinueWith(
-            task => task.Result.LoadVideoAsync(videoPath, replayArmed),
+            task =>
+            {
+                AppLog.Debug($"Editor open trace: video load picked up at {openClock.ElapsedMilliseconds}ms.");
+                return task.Result.LoadVideoAsync(videoPath, replayArmed);
+            },
             cts.Token,
             TaskContinuationOptions.OnlyOnRanToCompletion,
             TaskScheduler.Default).Unwrap();
@@ -6774,6 +6801,7 @@ public sealed partial class MainWindow : Window
         try
         {
             await videoLoad;
+            AppLog.Debug($"Editor open trace: video load done at {_editorOpenClock.ElapsedMilliseconds}ms.");
             if (cancellationToken.IsCancellationRequested) return;
             playback.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
             _playback = playback;
@@ -6827,7 +6855,7 @@ public sealed partial class MainWindow : Window
                 // "how slow is this clip's storage" number for network-drive
                 // diagnosis (pairs with the "Editor video load: network=..."
                 // line logged at LoadVideo).
-                AppLog.Debug($"Editor first frame after {firstFrameClock.ElapsedMilliseconds}ms.");
+                AppLog.Debug($"Editor first frame after {firstFrameClock.ElapsedMilliseconds}ms (total from click {_editorOpenClock.ElapsedMilliseconds}ms).");
                 Dispatcher.UIThread.Post(() =>
                 {
                     if (cancellationToken.IsCancellationRequested) return;

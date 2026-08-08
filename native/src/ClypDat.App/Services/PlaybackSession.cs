@@ -73,11 +73,26 @@ public sealed class PlaybackSession : IDisposable
     public bool IsEnded => _ended || VideoPlayer.State == VLCState.Ended;
     public bool IsSeeking => _isSeeking;
 
+    // A session built ahead of the first editor open and parked here for it to
+    // claim. WarmUp used to build a throwaway LibVLC and dispose it, which
+    // pre-paid the DLL load and plugin scan but left the first clip click still
+    // constructing the engine + MediaPlayer it actually plays through. Keeping
+    // the real thing means the first open reuses a session exactly the way
+    // every open after the first already does.
+    private static PlaybackSession? _warmed;
+
     public static void WarmUp()
     {
-        global::LibVLCSharp.Shared.Core.Initialize();
-        using var libVlc = new LibVLC("--quiet");
+        var session = new PlaybackSession();
+        // Lost the race against another warm-up (or a click that already took
+        // the slot) - drop this one rather than leak a second engine.
+        if (Interlocked.CompareExchange(ref _warmed, session, null) is not null) session.Dispose();
     }
+
+    // Claims the pre-warmed session if one is parked, otherwise builds one.
+    // Either way the caller owns exactly one session and the slot is left empty
+    // so nothing else can hand the same instance out twice.
+    public static PlaybackSession TakeWarmedOrCreate() => Interlocked.Exchange(ref _warmed, null) ?? new PlaybackSession();
 
     // Runs its whole body on a background thread: Stop() is a genuinely
     // blocking libvlc call (real time tearing down decode/output threads for
@@ -105,9 +120,19 @@ public sealed class PlaybackSession : IDisposable
 
     public Task LoadVideoAsync(string path, bool replayArmed = false) => Task.Run(() =>
     {
+        // Split timings, because the three things this body does have wildly
+        // different costs and only the total was ever visible: Stop() is
+        // libvlc tearing down the PREVIOUS clip's decode/vout threads (real
+        // time, and the whole reason this runs off the UI thread), the
+        // teardown after it disposes the old Media, and the rest is cheap
+        // option-setting. Which one dominates decides where an open-latency
+        // fix has to go.
+        var loadClock = Stopwatch.StartNew();
         Stop();
+        var stopMs = loadClock.ElapsedMilliseconds;
         DisposeMedia();
         DisposeAudio();
+        var teardownMs = loadClock.ElapsedMilliseconds;
         _ended = false;
         _lastRequestedPosition = TimeSpan.Zero;
         _videoMedia = new Media(_libVlc, new Uri(path));
@@ -170,7 +195,7 @@ public sealed class PlaybackSession : IDisposable
         // living on a share.
         long sizeMb = 0;
         try { sizeMb = new FileInfo(path).Length / (1024 * 1024); } catch { }
-        AppLog.Debug($"Editor video load: network={isNetwork}, sizeMB={sizeMb}, replayArmed={replayArmed}, decodeThreads={decodeThreads}, path={path}");
+        AppLog.Debug($"Editor video load: network={isNetwork}, sizeMB={sizeMb}, replayArmed={replayArmed}, decodeThreads={decodeThreads}, stopMs={stopMs}, teardownMs={teardownMs}, totalMs={loadClock.ElapsedMilliseconds}, path={path}");
     });
 
     public static bool IsNetworkPath(string path)
