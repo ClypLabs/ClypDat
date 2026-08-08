@@ -772,6 +772,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set
         {
             if (!SetProperty(ref _activeGameDetection, value)) return;
+            // The trimmer needs to know whether a game is actually running
+            // before it decides a multi-hundred-millisecond GC pause is
+            // affordable - see MemoryTrimmer.GameRunning.
+            MemoryTrimmer.GameRunning = value.IsDetected;
             if (value.IsDetected) EnsureGameCaptureRow(value);
             OnPropertyChanged(nameof(IsAutomaticGameCapture));
             OnPropertyChanged(nameof(IsEffectiveDesktopCapture));

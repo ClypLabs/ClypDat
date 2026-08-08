@@ -2445,6 +2445,12 @@ public sealed partial class MainWindow : Window
                 // Another plain file write with no UI affinity.
                 await Task.Run(() => ClipInfoSidecar.Save(libraryFolder, outputPath, clipInfo));
                 await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
+                // Saving a clip muxes the whole window and decodes a thumbnail
+                // for it - a burst with a definite end, so hand the memory back
+                // rather than carrying it for the rest of the session. The
+                // trimmer itself decides how hard it can collect; mid-game it
+                // stays out of the way.
+                _ = Task.Run(() => MemoryTrimmer.Trim("clip saved"));
             }
             catch (Exception error)
             {

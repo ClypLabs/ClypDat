@@ -18,6 +18,19 @@ public static class MemoryTrimmer
     // Set by MainWindow for diagnostics and possible future cleanup policy.
     public static volatile bool EditorOpen;
 
+    // Whether a game is actually detected right now. This, not Recording, is
+    // what decides whether the real (blocking, compacting) collection can run.
+    //
+    // Recording alone was too blunt: the buffer is armed for hours whether or
+    // not anything is being played, and gating on it meant the full collection
+    // effectively never ran - measured privateMb 1252 -> 1262 on an editor
+    // close, i.e. nothing reclaimed, because the deferred background GC does
+    // not compact the LOH and the LOH is where the 5.76MB audio chunks live.
+    // The pause this avoids only matters when there is a game to drop frames
+    // in; sitting on the desktop with the editor open, it costs nothing anyone
+    // can see.
+    public static volatile bool GameRunning;
+
     private static int _recording;
     // A compacting gen2 collection suspends managed threads. A transition out
     // of recording is the first safe point to request one, after the replay
@@ -109,12 +122,13 @@ public static class MemoryTrimmer
             }
 
             var beforeManaged = GC.GetTotalMemory(false);
-            var recording = Recording;
+            // Only a game in the foreground buys the gentle path now.
+            var deferred = Recording && GameRunning;
 
             AudioChunkCache.Clear();
             BitmapCache.Clear();
 
-            if (recording)
+            if (deferred)
             {
                 // No blocking, no compaction: a compacting gen2 suspends every
                 // managed thread, and the capture and encode loops are managed
@@ -140,11 +154,11 @@ public static class MemoryTrimmer
             }
 
             using var settled = Process.GetCurrentProcess();
-            // While recording the collection is non-blocking, so it has not run
-            // yet at this point - a before/after heap size there prints the same
-            // number twice and reads as "the trim reclaimed nothing".
-            var managed = recording
-                ? $"managedMb {beforeManaged / (1024 * 1024)} (collection deferred to the background GC - recording)"
+            // On the deferred path the collection is non-blocking, so it has not
+            // run yet at this point - a before/after heap size there prints the
+            // same number twice and reads as "the trim reclaimed nothing".
+            var managed = deferred
+                ? $"managedMb {beforeManaged / (1024 * 1024)} (collection deferred to the background GC - game running)"
                 : $"managedMb {beforeManaged / (1024 * 1024)} -> {GC.GetTotalMemory(false) / (1024 * 1024)}";
             AppLog.Info(
                 $"Memory cleanup ({reason}): privateMb {beforePrivate / (1024 * 1024)} -> {settled.PrivateMemorySize64 / (1024 * 1024)}, {managed}.");
