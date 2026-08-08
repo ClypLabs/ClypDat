@@ -4448,7 +4448,30 @@ public sealed partial class MainWindow : Window
         if (sender is Button { Tag: string section } && ViewModel is not null)
         {
             ViewModel.SelectSettingsSection(section);
+            ScrollSettingsSectionIntoView(section);
         }
+    }
+
+    // While a search is active every matching section renders at once
+    // (SettingsSectionVisibleConverter), so the nav list stops being a switcher
+    // and becomes a list of results - and clicking one did nothing visible if
+    // that section happened to be below the fold. Outside a search only one
+    // section is rendered at a time, so there is nothing to scroll to and the
+    // scroll position should be left alone.
+    //
+    // Posted at Loaded priority: the click above may have just changed which
+    // sections are visible, and the target has no position to scroll to until
+    // that layout pass has run.
+    private void ScrollSettingsSectionIntoView(string section)
+    {
+        if (ViewModel?.IsSettingsSearchActive != true) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            var target = SettingsScrollViewer.GetVisualDescendants()
+                .OfType<StackPanel>()
+                .FirstOrDefault(panel => panel.Tag as string == section && panel.IsVisible);
+            target?.BringIntoView();
+        }, DispatcherPriority.Loaded);
     }
 
     private void OpenLogsButton_OnClick(object? sender, RoutedEventArgs e)
