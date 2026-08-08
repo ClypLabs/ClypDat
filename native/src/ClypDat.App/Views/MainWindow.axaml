@@ -2682,9 +2682,9 @@
               <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
                 <Button Content="Share" Height="38" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                         IsEnabled="{Binding !IsExporting}"
-                        ToolTip.Tip="Re-encode to a size cap for Discord and drag the result straight into another app"
+                        ToolTip.Tip="Re-encode to a size cap and drag the result straight into another app"
                         Click="ShareButton_OnClick" />
-                <Button Grid.Column="1" Classes="deleteButton" Content="Delete" Height="38"
+                <Button Grid.Column="1" Classes="dangerButton" Content="Delete" Height="38"
                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                         IsEnabled="{Binding !IsExporting}"
                         ToolTip.Tip="Delete this clip and close the editor"

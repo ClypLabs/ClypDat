@@ -329,6 +329,32 @@
   <Style Selector="Button.primaryButton:not(ToggleSwitch):pointerover">
     <Setter Property="Background" Value="{StaticResource AccentBrushHover}" />
   </Style>
+
+  <!--
+    dangerButton is primaryButton in red, and deliberately does NOT override the
+    control Template the way deleteButton does. Anything sharing a row with a
+    primaryButton has to be geometrically identical to it, and a hand-rolled
+    template is not: deleteButton's own Border/ContentPresenter measured a few
+    pixels narrower than Fluent's, so the editor's Delete sat visibly inset next
+    to Export. Same template, same metrics, only the colours differ.
+    deleteButton stays as it is for the places already using it.
+  -->
+  <Style Selector="Button.dangerButton">
+    <Setter Property="Background" Value="#D85E61" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+  </Style>
+  <!-- Same :not(ToggleSwitch) shape as primaryButton's hover, for the same
+       specificity reason documented directly above it. -->
+  <Style Selector="Button.dangerButton:not(ToggleSwitch):pointerover">
+    <Setter Property="Background" Value="#C64B50" />
+  </Style>
+  <Style Selector="Button.dangerButton:not(ToggleSwitch):pressed">
+    <Setter Property="Background" Value="#AB3D43" />
+  </Style>
   <!--
     Both rules above still lost for Export specifically. Root cause: Fluent's
     own Button ControlTemplate has its OWN internal pointerover visual state
