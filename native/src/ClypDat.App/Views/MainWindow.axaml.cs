@@ -8444,14 +8444,19 @@ public sealed partial class MainWindow : Window
         // start rail sat entirely to the LEFT of where the shading actually
         // ends, and the end rail entirely to the right: each read as sitting
         // beside its own boundary rather than on it, by its full width.
-        var startMaxLeft = Math.Max(0, width - barWidth);
-        var startLeft = Math.Clamp(start - barWidth / 2, 0, startMaxLeft);
+        // Clamp the BOUNDARY, then centre the pill on it. Clamping the pill's
+        // own left edge into [0, width - barWidth] instead is what pushed it
+        // half a width inward at either extreme: a clip trimmed to its very
+        // end drew the pill beside the end rather than on it, and the two
+        // stopped agreeing with the shading exactly where it is most obvious.
+        // Half the pill hanging past the edge is correct - it is centred on a
+        // boundary that is itself at the edge - and nothing here clips it.
+        var startLeft = Math.Clamp(start, 0, width) - barWidth / 2;
         Canvas.SetLeft(TrimStartHandle, startLeft - hitPadding);
         Canvas.SetTop(TrimStartHandle, 0);
         TrimStartHandle.Height = videoLaneHeight;
 
-        var endMaxLeft = Math.Max(0, width - barWidth);
-        var endLeft = Math.Clamp(end - barWidth / 2, 0, endMaxLeft);
+        var endLeft = Math.Clamp(end, 0, width) - barWidth / 2;
         Canvas.SetLeft(TrimEndHandle, endLeft - hitPadding);
         Canvas.SetTop(TrimEndHandle, 0);
         TrimEndHandle.Height = videoLaneHeight;

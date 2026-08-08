@@ -1430,22 +1430,22 @@
     <Setter Property="HorizontalAlignment" Value="Center" />
     <Setter Property="VerticalAlignment" Value="Stretch" />
     <Setter Property="CornerRadius" Value="5.5" />
+    <!-- Flat fill, a hairline of light along the edge instead of a dark
+         outline, and a soft ambient shadow rather than a hard one. The
+         previous top-to-bottom gradient plus near-black border was doing a
+         glossy, beveled thing that reads as older than everything around it. -->
+    <Setter Property="Background" Value="#1ACBB8" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="BorderBrush" Value="#0B1D22" />
-    <Setter Property="Background">
-      <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-        <GradientStop Offset="0" Color="#4BF2DE" />
-        <GradientStop Offset="1" Color="#0DA294" />
-      </LinearGradientBrush>
+    <Setter Property="BorderBrush" Value="#40FFFFFF" />
+    <Setter Property="BoxShadow" Value="0 2 8 0 #59000000" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+      </Transitions>
     </Setter>
-    <Setter Property="BoxShadow" Value="0 1 5 0 #99000000" />
   </Style>
   <Style Selector="Border.trimHandle:pointerover > Border.trimBar">
-    <Setter Property="Background">
-      <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-        <GradientStop Offset="0" Color="#7BFFF0" />
-        <GradientStop Offset="1" Color="#17C7B4" />
-      </LinearGradientBrush>
-    </Setter>
+    <Setter Property="Background" Value="#2EE3CE" />
+    <Setter Property="BorderBrush" Value="#66FFFFFF" />
   </Style>
 </Styles>
