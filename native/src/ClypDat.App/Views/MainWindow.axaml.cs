@@ -8432,6 +8432,9 @@ public sealed partial class MainWindow : Window
         // a constant rather than Bounds.Width since the Polygon may not have
         // been measured yet on the very first call.
         const double capWidth = 14;
+        // The cap is a 16-tall grip tab now (was a 9-tall triangle), so it is
+        // lifted further to keep the same few pixels of overlap into the lane.
+        const double capTop = -11;
 
         // Width of the visible line, which is NOT the handle Border's own width -
         // that is deliberately wider and transparent to make the handle easier to
@@ -8451,7 +8454,7 @@ public sealed partial class MainWindow : Window
         Canvas.SetTop(TrimStartHandle, 0);
         TrimStartHandle.Height = videoLaneHeight;
         Canvas.SetLeft(TrimStartCap, startLeft - (capWidth - barWidth) / 2);
-        Canvas.SetTop(TrimStartCap, -7);
+        Canvas.SetTop(TrimStartCap, capTop);
 
         var endMaxLeft = Math.Max(0, width - barWidth);
         var endLeft = Math.Clamp(end, 0, endMaxLeft);
@@ -8459,7 +8462,7 @@ public sealed partial class MainWindow : Window
         Canvas.SetTop(TrimEndHandle, 0);
         TrimEndHandle.Height = videoLaneHeight;
         Canvas.SetLeft(TrimEndCap, endLeft - (capWidth - barWidth) / 2);
-        Canvas.SetTop(TrimEndCap, -7);
+        Canvas.SetTop(TrimEndCap, capTop);
 
         // Clamped the same way the handles are - uncentered, it could
         // otherwise poke a sliver out past the timeline's left edge at

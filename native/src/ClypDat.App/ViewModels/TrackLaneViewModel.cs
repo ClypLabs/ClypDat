@@ -34,7 +34,11 @@ public sealed class TrackLaneViewModel : ViewModelBase
     // now that it renders filmstrip thumbnails (TimelineLaneControl) - taller
     // than that so the frames are readable, but not as tall as the audio
     // lanes either (64 read as too dominant next to them).
-    public double LaneHeight => IsVideo ? 42 : 56;
+    // Audio went 56 -> 62 so the label row and the slider row each get their
+    // own space instead of the slider being pulled up under the label with a
+    // negative margin - that overlap is what made the box read as cramped, and
+    // it was also what let the slider's hit area cover the Reset button.
+    public double LaneHeight => IsVideo ? 44 : 62;
     // Keep the normal 6px separator between every lane, but do not leave an
     // empty strip below the final audio (normally microphone) lane.
     public Thickness LaneMargin => IsAudio && IsLastAudioTrack ? new Thickness(0) : new Thickness(0, 0, 0, 6);

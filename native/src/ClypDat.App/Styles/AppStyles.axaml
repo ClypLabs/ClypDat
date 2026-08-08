@@ -1418,4 +1418,71 @@
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
     <Setter Property="RenderTransform" Value="scale(1.05)" />
   </Style>
+
+  <!-- Trim start/end handles.
+
+       These were a flat 4px rectangle with a hard 1px near-black outline and
+       a solid triangle on top - readable, but with no depth, no rounding and
+       no reaction to the pointer, which is what made them look unfinished
+       next to everything else in the editor. The rail is now a rounded bar
+       with a vertical gradient and a soft outer glow, and the cap is a grip
+       tab (see the XAML) rather than a triangle. Both brighten on hover and
+       on the actual drag, so grabbing one confirms itself.
+
+       Geometry is deliberately unchanged: the bar is still 4px wide and the
+       cap still 14, because UpdateTimelineChrome positions both from those
+       exact numbers (barWidth / capWidth) to land the line on the trim
+       boundary. Anything here that changes width has to change there too. -->
+  <Style Selector="Border.trimBar">
+    <Setter Property="Width" Value="4" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="CornerRadius" Value="2" />
+    <Setter Property="Background">
+      <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+        <GradientStop Offset="0" Color="#2BE8D3" />
+        <GradientStop Offset="1" Color="#0FA898" />
+      </LinearGradientBrush>
+    </Setter>
+    <Setter Property="BoxShadow" Value="0 0 6 0 #6613C8B5" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Border.trimHandle:pointerover > Border.trimBar">
+    <Setter Property="Background">
+      <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+        <GradientStop Offset="0" Color="#63FFEE" />
+        <GradientStop Offset="1" Color="#19D2BE" />
+      </LinearGradientBrush>
+    </Setter>
+    <Setter Property="BoxShadow" Value="0 0 10 0 #9913C8B5" />
+  </Style>
+
+  <Style Selector="Border.trimCap">
+    <Setter Property="Width" Value="14" />
+    <Setter Property="Height" Value="16" />
+    <Setter Property="CornerRadius" Value="5" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="#0A1A1E" />
+    <Setter Property="BoxShadow" Value="0 1 4 0 #99000000" />
+    <Setter Property="Background">
+      <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+        <GradientStop Offset="0" Color="#3DF0DC" />
+        <GradientStop Offset="1" Color="#0EA595" />
+      </LinearGradientBrush>
+    </Setter>
+  </Style>
+  <Style Selector="StackPanel.trimGrip">
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Spacing" Value="3" />
+  </Style>
+  <Style Selector="Border.trimGripLine">
+    <Setter Property="Width" Value="1.5" />
+    <Setter Property="Height" Value="7" />
+    <Setter Property="CornerRadius" Value="1" />
+    <Setter Property="Background" Value="#66051411" />
+  </Style>
 </Styles>

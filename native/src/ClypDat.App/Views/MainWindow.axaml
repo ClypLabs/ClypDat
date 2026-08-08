@@ -2412,26 +2412,22 @@
                     <DataTemplate>
                       <Border Height="{Binding LaneHeight}"
                               Margin="{Binding LaneMargin}"
-                              Background="#141D24"
-                              BorderBrush="#232F3A"
+                              Background="#151E26"
+                              BorderBrush="#27333F"
                               BorderThickness="1"
-                              CornerRadius="8"
+                              CornerRadius="12"
                               ClipToBounds="False">
-                        <Grid Margin="8,5" RowDefinitions="Auto,*" ColumnDefinitions="18,10,*">
-                          <!-- ZIndex so the Reset button below actually gets its
-                               own clicks. The volume Slider in row 1 is 36px
-                               tall with Margin="0,-10,0,0", so its hit area
-                               reaches 10px up into this row - and being
-                               declared later, it hit-tested on top of the
-                               button sitting there. The button is only ~15px
-                               tall, so that overhang covered essentially all
-                               of it: pressing Reset grabbed the slider and
-                               changed the volume instead. Raising this row
-                               fixes the hit order without moving a pixel. -->
+                        <Grid Margin="12,7" RowDefinitions="Auto,*" ColumnDefinitions="20,10,*">
+                          <!-- ZIndex so the Reset button below keeps its own
+                               clicks. The Slider in row 1 is taller than the
+                               row it draws in and is declared after this one,
+                               so without this it hit-tests on top of the button
+                               and pressing Reset grabs the slider instead. -->
                           <Grid Grid.ColumnSpan="3" ColumnDefinitions="*,Auto" ZIndex="2">
                             <TextBlock Text="{Binding Label}"
-                                       Foreground="#D4E0EA"
-                                       FontSize="11"
+                                       Foreground="#E6EEF7"
+                                       FontSize="12"
+                                       FontWeight="SemiBold"
                                        Margin="{Binding LabelMargin}"
                                        VerticalAlignment="Center"
                                        TextTrimming="CharacterEllipsis" />
@@ -2468,6 +2464,11 @@
                                       Foreground="{Binding IsMuted, Converter={x:Static opconv:BoolToMuteBrushConverter.Instance}}"
                                       Data="{Binding EffectiveVolumePercent, Converter={x:Static opconv:VolumeLevelToIconConverter.Instance}}" />
                           </Border>
+                          <!-- No negative margin any more: the lane is tall
+                               enough (TrackLaneViewModel.LaneHeight) for the
+                               label row and this one to sit side by side, so
+                               the slider no longer has to be dragged up
+                               underneath the label to fit. -->
                           <Slider Grid.Row="1"
                                   Grid.Column="2"
                                   Classes="volumeSlider"
@@ -2475,11 +2476,10 @@
                                   Maximum="150"
                                   TickFrequency="1"
                                   IsSnapToTickEnabled="True"
-                                  Height="36"
-                                  MinHeight="36"
+                                  Height="26"
+                                  MinHeight="26"
                                   Padding="0"
                                   VerticalAlignment="Center"
-                                  Margin="0,-10,0,0"
                                   Value="{Binding VolumePercent, Mode=TwoWay}"
                                   IsEnabled="{Binding CanAdjustVolume}"
                                   IsVisible="{Binding IsAudio}"
@@ -2579,6 +2579,7 @@
                          PositionTimelineChrome offsets by the padding so the
                          visible line still lands exactly on the boundary. -->
                     <Border x:Name="TrimStartHandle"
+                            Classes="trimHandle"
                             Width="28"
                             Background="Transparent"
                             Cursor="SizeWestEast"
@@ -2586,15 +2587,23 @@
                             PointerMoved="TimelineSurface_OnPointerMoved"
                             PointerReleased="TimelineSurface_OnPointerReleased"
                             ToolTip.Tip="Drag to set trim start">
-                      <Border Width="4" Background="#13C8B5" HorizontalAlignment="Center" />
+                      <Border Classes="trimBar" />
                     </Border>
-                    <Polygon x:Name="TrimStartCap"
-                             Points="0,0 14,0 7,9"
-                             Fill="#13C8B5"
-                             Stroke="#071218"
-                             StrokeThickness="1"
-                             IsHitTestVisible="False" />
+                    <!-- Grip tab, replacing the flat triangle that used to cap
+                         these. A triangle is the playhead's own marker shape, so
+                         reusing it here said "position" when these are things
+                         you grab and drag - the rounded tab with grip lines
+                         says that instead, and stops the two reading as the
+                         same object in three different places. Width stays 14 so
+                         UpdateTimelineChrome's capWidth still centres it. -->
+                    <Border x:Name="TrimStartCap" Classes="trimCap" IsHitTestVisible="False">
+                      <StackPanel Classes="trimGrip" Orientation="Horizontal">
+                        <Border Classes="trimGripLine" />
+                        <Border Classes="trimGripLine" />
+                      </StackPanel>
+                    </Border>
                     <Border x:Name="TrimEndHandle"
+                            Classes="trimHandle"
                             Width="28"
                             Background="Transparent"
                             Cursor="SizeWestEast"
@@ -2602,14 +2611,14 @@
                             PointerMoved="TimelineSurface_OnPointerMoved"
                             PointerReleased="TimelineSurface_OnPointerReleased"
                             ToolTip.Tip="Drag to set trim end">
-                      <Border Width="4" Background="#13C8B5" HorizontalAlignment="Center" />
+                      <Border Classes="trimBar" />
                     </Border>
-                    <Polygon x:Name="TrimEndCap"
-                             Points="0,0 14,0 7,9"
-                             Fill="#13C8B5"
-                             Stroke="#071218"
-                             StrokeThickness="1"
-                             IsHitTestVisible="False" />
+                    <Border x:Name="TrimEndCap" Classes="trimCap" IsHitTestVisible="False">
+                      <StackPanel Classes="trimGrip" Orientation="Horizontal">
+                        <Border Classes="trimGripLine" />
+                        <Border Classes="trimGripLine" />
+                      </StackPanel>
+                    </Border>
                   </Canvas>
                 </Grid>
               </Grid>
