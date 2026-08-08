@@ -1104,15 +1104,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
                     try
                     {
-                        // One lock for every D3D11 context touch on either thread.
-                        // ID3D11DeviceContext is not free-threaded, and the tick's
-                        // encode path shares the immediate context - and
-                        // croppedTexture / staging / swsContext - with the acquire
-                        // loop's crop and Blt. Both sides are sub-millisecond
-                        // (avgCopyMapMs 0.02, avgScaleMs 0.30), so contention here
-                        // costs far less than the acquire calls this split exists
-                        // to stop making.
-                        lock (gpuLock) RunPacingTick();
+                        // NOT locked at this level. Holding gpuLock across the whole
+                        // tick was the first attempt and it cost far more than it
+                        // looked like it would: the acquire thread then waited on a
+                        // lock held through the catch-up loop, the frame clone and
+                        // the queue add, and measured avgCopyMapMs went 0.02 -> 7-11
+                        // and avgFrameStalenessMs 13 -> 90 with avgPresentGapMs only
+                        // 11-27. Ninety milliseconds of stale content is video
+                        // lagging wall-clock-timestamped audio, which is worse than
+                        // the GPU cost this whole change is removing. The lock lives
+                        // inside the encode functions instead, around the D3D work
+                        // alone.
+                        RunPacingTick();
                     }
                     catch (Exception error)
                     {
@@ -1443,15 +1446,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         }
                         lastRealPresentTicks = frameInfo.LastPresentTime;
 
-                        // Everything this frame does to the GPU - the crop, the
-                        // Blt, the readback, and the crop-size change that
-                        // disposes and rebuilds staging/swsContext/croppedTexture/
-                        // inputView - shares the D3D11 immediate context and those
-                        // same resources with the pacing tick's encode path, which
-                        // now runs on its own thread. One lock over the whole
-                        // per-frame body rather than several around individual
-                        // calls: the resources have to stay coherent across the
-                        // crop-size rebuild, not just during each call.
+                        // The crop, the Blt and the crop-size rebuild all share the
+                        // D3D11 immediate context - and croppedTexture / staging /
+                        // swsContext - with the pacing tick's encode path, which
+                        // now runs on its own thread. The lock spans this whole
+                        // per-frame body rather than each call, because those
+                        // resources have to stay coherent across the crop-size
+                        // rebuild, not merely during one call. The tick side is
+                        // deliberately much narrower (see EncodeScheduledFrame*):
+                        // locking there at tick granularity starved this thread and
+                        // pushed frame staleness to 90ms.
                         Monitor.Enter(gpuLock);
                         try
                         {
@@ -2125,6 +2129,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 if (croppedDirty)
                 {
                     stageStopwatch.Restart();
+                    // Only the D3D work is serialized against the acquire thread.
+                    // Everything after it (the frame clone, the queue add) touches
+                    // no GPU resource and must not hold the acquire thread up.
+                    AVFrame* pooled;
+                    lock (gpuLock)
+                    {
                     if (!nv12Ready)
                     {
                         bltStreams[0].Enable = true;
@@ -2135,7 +2145,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     nv12Ready = false;
                     croppedDirty = false;
 
-                    var pooled = ffmpeg.av_frame_alloc();
+                    pooled = ffmpeg.av_frame_alloc();
                     if (pooled is null)
                     {
                         Interlocked.Increment(ref _encodeDroppedCount);
@@ -2168,6 +2178,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     }
 
                     device.ImmediateContext.CopySubresourceRegion(poolTexture, arraySlice, 0, 0, 0, nv12Output!, 0);
+                    }
 
                     if (lastHardwareFrame is not null) { var staleHardwareFrame = lastHardwareFrame; ffmpeg.av_frame_free(&staleHardwareFrame); lastHardwareFrame = null; }
                     lastHardwareFrame = pooled;
@@ -2264,18 +2275,23 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // Already produced at present time straight off the
                     // duplication texture - see directBltAvailable. Only the
                     // fallback copy path still owes a Blt here.
-                    if (!nv12Ready)
+                    // As on the hardware path: the lock covers the D3D work only.
+                    int ringLength, currentRingIndex;
+                    lock (gpuLock)
                     {
-                        bltStreams[0].Enable = true;
-                        bltStreams[0].InputSurface = inputView;
-                        videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, bltStreams);
-                    }
+                        if (!nv12Ready)
+                        {
+                            bltStreams[0].Enable = true;
+                            bltStreams[0].InputSurface = inputView;
+                            videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, bltStreams);
+                        }
 
-                    nv12Ready = false;
-                    var ringLength = nv12StagingRing!.Length;
-                    var currentRingIndex = nv12StagingIndex;
-                    device.ImmediateContext.CopyResource(nv12StagingRing[currentRingIndex], nv12Output);
-                    if (nv12RingWritten < ringLength) nv12RingWritten++;
+                        nv12Ready = false;
+                        ringLength = nv12StagingRing!.Length;
+                        currentRingIndex = nv12StagingIndex;
+                        device.ImmediateContext.CopyResource(nv12StagingRing[currentRingIndex], nv12Output);
+                        if (nv12RingWritten < ringLength) nv12RingWritten++;
+                    }
                     copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
 
                     stageStopwatch.Restart();
@@ -2284,12 +2300,19 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     for (var k = 1; k < nv12RingWritten; k++)
                     {
                         var candidate = ((currentRingIndex - k) % ringLength + ringLength) % ringLength;
+                        Monitor.Enter(gpuLock);
                         var mapResult = device.ImmediateContext.Map(
                             nv12StagingRing[candidate], 0u, MapMode.Read, MapFlags.DoNotWait, out var mapped);
                         // DXGI_ERROR_WAS_STILL_DRAWING - this slot's copy has not
                         // landed yet, so try an older one rather than wait on it.
-                        if (mapResult.Failure) continue;
+                        if (mapResult.Failure)
+                        {
+                            Monitor.Exit(gpuLock);
+                            continue;
+                        }
 
+                        // The lock has to span the whole map/copy/unmap - the
+                        // mapped pointer is only valid while it is held.
                         try
                         {
                             ffmpeg.av_frame_make_writable(frame);
@@ -2302,6 +2325,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         finally
                         {
                             device.ImmediateContext.Unmap(nv12StagingRing[candidate], 0);
+                            Monitor.Exit(gpuLock);
                         }
 
                         break;
