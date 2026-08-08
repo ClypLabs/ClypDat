@@ -2831,6 +2831,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
 
             _isRestoringCachedLibrary = true;
+            PopulateGameFilterOptionsFromCache(cached);
             _restoredClipPaths.Clear();
             foreach (var clip in AllClips) _restoredClipPaths.Add(clip.Path);
             OnPropertyChanged(nameof(IsRestoringLibraryCache));
@@ -2917,6 +2918,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 _isRestoringCachedLibrary = false;
                 _restoredClipPaths.Clear();
                 OnPropertyChanged(nameof(IsRestoringLibraryCache));
+                RecomputeGameFilterBadges();
             }
         }
     }
@@ -5236,7 +5238,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(LibraryPossibleClipsDisplay));
         NotifyStorageChrome();
         NotifySelectionChrome();
-        RecomputeGameFilterBadges();
+        // Cached library data already supplied exact game counts before cards
+        // began arriving. Rebuilding this for each trickled-in card would
+        // replace that complete sidebar with a partial one until restore ends.
+        if (!_isRestoringCachedLibrary) RecomputeGameFilterBadges();
         UpdateFirstOfDateFlags();
     }
 
@@ -5642,27 +5647,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             .GroupBy(clip => clip.GameFilterKey, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
 
-        // A previously-active game filter's target game can disappear
-        // entirely (its last clip got deleted) - drop it from the active
-        // set rather than leave the library showing zero clips with no
-        // visible way to tell why.
-        var removedAnyGameFilter = _activeGameFilters.RemoveWhere(name => !countsByGame.ContainsKey(name)) > 0;
-
-        GameFilterOptions.Clear();
-        foreach (var game in countsByGame.OrderByDescending(pair => pair.Value).ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
-        {
-            GameFilterOptions.Add(new FilterOptionViewModel(
-                game.Key,
-                $"{game.Key} ({game.Value})",
-                _activeGameFilters.Contains(game.Key),
-                OnGameFilterOptionChanged)
-            {
-                Icon = GameIconService.TryLoad(game.Key)
-            });
-        }
-
-        RebuildGameRail();
-        RequestMissingGameIcons();
+        var removedAnyGameFilter = SetGameFilterOptions(countsByGame, removeMissingActiveFilter: true);
 
         // Same "(count)" suffix the game filter rows above already get.
         var manualCount = AllClips.Count(clip => clip.IsManualClip);
@@ -5690,6 +5675,40 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsAllClipsActive));
             OnPropertyChanged(nameof(LibraryTitle));
         }
+    }
+
+    private void PopulateGameFilterOptionsFromCache(IReadOnlyList<CachedClipState> cached)
+    {
+        var countsByGame = cached
+            .GroupBy(state => state.ClipInfo?.GameDisplayName ?? state.ClipInfo?.FileTitle ?? ClipFileNaming.StripTimestampSuffix(state.Media.Name), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+        SetGameFilterOptions(countsByGame, removeMissingActiveFilter: false);
+    }
+
+    private bool SetGameFilterOptions(IReadOnlyDictionary<string, int> countsByGame, bool removeMissingActiveFilter)
+    {
+        var removedAnyGameFilter = removeMissingActiveFilter && _activeGameFilters.RemoveWhere(name => !countsByGame.ContainsKey(name)) > 0;
+
+        // A previously-active game filter's target game can disappear
+        // entirely (its last clip got deleted) - drop it from the active
+        // set rather than leave the library showing zero clips with no
+        // visible way to tell why.
+        GameFilterOptions.Clear();
+        foreach (var game in countsByGame.OrderByDescending(pair => pair.Value).ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            GameFilterOptions.Add(new FilterOptionViewModel(
+                game.Key,
+                $"{game.Key} ({game.Value})",
+                _activeGameFilters.Contains(game.Key),
+                OnGameFilterOptionChanged)
+            {
+                Icon = GameIconService.TryLoad(game.Key)
+            });
+        }
+
+        RebuildGameRail();
+        RequestMissingGameIcons();
+        return removedAnyGameFilter;
     }
 
     // ---- Sidebar game rail: folders, ordering, drag/drop ------------------
