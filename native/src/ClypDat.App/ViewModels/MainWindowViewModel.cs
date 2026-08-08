@@ -330,6 +330,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public AppSettings Settings { get; }
     public Task InitialLibraryLoadTask { get; }
     public ObservableCollection<ClipCardViewModel> AllClips { get; }
+    public IReadOnlyList<int> LibraryStartupSkeletonTiles { get; } = Enumerable.Range(0, 20).ToArray();
     public bool IsRestoringLibraryCache => _isRestoringCachedLibrary;
     public bool IsInitialLibraryLoadComplete
     {
