@@ -293,6 +293,9 @@ public sealed class AutoClippingSettings
 public sealed class AutoClipGameSettings
 {
     public bool Enabled { get; set; } = true;
+    // Deathmatch has frequent respawns, so keep its auto-clips opt-in.
+    // Missing values from existing settings.json files deserialize as false.
+    public bool DeathmatchClipping { get; set; }
     public int ListenerPort { get; set; }
     public Dictionary<string, bool> Events { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }

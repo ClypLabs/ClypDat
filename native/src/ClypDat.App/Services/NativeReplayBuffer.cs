@@ -150,6 +150,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private long _packetsOutCount;
     private long _totalDroppedFrames;
     private int _peakQueueDepth;
+    private int _pendingEncoderFrames;
+    private int _peakPendingEncoderFrames;
     private DateTime? _lastDegradedUtc;
     private ReplayCaptureHealth _health = ReplayCaptureHealth.Unknown("Native");
 
@@ -232,6 +234,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         _extraData = null;
         Interlocked.Exchange(ref _totalDroppedFrames, 0);
         Volatile.Write(ref _peakQueueDepth, 0);
+        Volatile.Write(ref _pendingEncoderFrames, 0);
+        Volatile.Write(ref _peakPendingEncoderFrames, 0);
         _lastDegradedUtc = null;
         lock (_bufferLock) _pauseEvents.Clear();
 
@@ -1208,7 +1212,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var packetsOutSinceLog = Interlocked.Exchange(ref _packetsOutCount, 0);
                     UpdatePeak(ref _peakQueueDepth, encodeQueue.Count);
                     var frameStalenessDenom = Math.Max(1, frameStalenessCount);
-                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={ringPacketCount}, ringBufferMb={ringBufferMb}, ringCapacityMb={ringCapacityMb}, packetPoolMb={poolRetainedMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
+                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={ringPacketCount}, ringBufferMb={ringBufferMb}, ringCapacityMb={ringCapacityMb}, packetPoolMb={poolRetainedMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, pendingEncoderFrames={Volatile.Read(ref _pendingEncoderFrames)}, peakPendingEncoderFrames={Volatile.Read(ref _peakPendingEncoderFrames)}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
                     // Raw encoded rate, deliberately NOT crediting suppressed pads
                     // back in. Pads are only ever skipped under real queue
                     // pressure (see the pacing gate), so a rate that falls short
@@ -3212,6 +3216,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         nint SwapCodecContext = 0,
         ManualResetEventSlim? SwapCompleted = null);
 
+    private static unsafe void FreeEncodeFrame(nint framePointer)
+    {
+        if (framePointer == 0) return;
+        var frame = (AVFrame*)framePointer;
+        ffmpeg.av_frame_free(&frame);
+    }
+
     // Runs avcodec_send_frame/receive_packet (and so DrainToRingBuffer, and the
     // full-session mux write inside it) on its own thread, decoupled from
     // CaptureLoop's AcquireNextFrame loop. Existed as a single synchronous call
@@ -3230,9 +3241,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         var packet = (AVPacket*)packetPtr;
         var fullSessionFormatContext = (AVFormatContext*)fullSessionFormatContextPtr;
         var fullSessionStream = (AVStream*)fullSessionStreamPtr;
-        // Same FIFO purpose as the original inline version - see DrainToRingBuffer's
-        // dequeue site - just living here now since send_frame moved here with it.
-        var pendingFrameWallClocks = new Queue<DateTime>();
+        // Some hardware encoders accept a frame before they emit its packet.
+        // Keeping only its timestamp meant the reusable capture frame could be
+        // overwritten while AMF still read it. Retain frame ownership through
+        // packet drain so capture-side writes become copy-on-write.
+        var pendingFrames = new EncoderFrameLifetimeQueue(FreeEncodeFrame);
         try
         {
             foreach (var job in queue.GetConsumingEnumerable())
@@ -3249,7 +3262,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     if (job.SwapCodecContext != 0)
                     {
                         ffmpeg.avcodec_send_frame(codecContext, null);
-                        DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrameWallClocks);
+                        DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrames);
+                        pendingFrames.ReleaseAll();
+                        Volatile.Write(ref _pendingEncoderFrames, 0);
                         codecContext = (AVCodecContext*)job.SwapCodecContext;
                     }
 
@@ -3259,13 +3274,17 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
                 var jobFrame = (AVFrame*)job.FramePtr;
                 var sw = System.Diagnostics.Stopwatch.StartNew();
+                var accepted = false;
                 try
                 {
-                    pendingFrameWallClocks.Enqueue(job.WallClockUtc);
                     var sendResult = ffmpeg.avcodec_send_frame(codecContext, jobFrame);
                     if (sendResult == 0)
                     {
-                        DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrameWallClocks);
+                        pendingFrames.Enqueue(job.FramePtr, job.WallClockUtc);
+                        accepted = true;
+                        Volatile.Write(ref _pendingEncoderFrames, pendingFrames.Count);
+                        UpdatePeak(ref _peakPendingEncoderFrames, pendingFrames.PeakCount);
+                        DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrames);
                     }
                     else if (sendResult == ffmpeg.AVERROR(ffmpeg.EAGAIN))
                     {
@@ -3280,7 +3299,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 }
                 finally
                 {
-                    ffmpeg.av_frame_free(&jobFrame);
+                    if (!accepted) ffmpeg.av_frame_free(&jobFrame);
                 }
                 Interlocked.Add(ref _encodeMicrosAccum, (long)(sw.Elapsed.TotalMilliseconds * 1000));
                 Interlocked.Increment(ref _encodeCountAccum);
@@ -3290,7 +3309,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // loop exited) - flush whatever's still buffered inside the encoder
             // itself, same as the original inline flush used to.
             ffmpeg.avcodec_send_frame(codecContext, null);
-            DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrameWallClocks);
+            DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrames);
         }
         catch (Exception error)
         {
@@ -3298,9 +3317,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // on a plain Thread (unlike Task) crashes the whole process.
             AppLog.Error("Native capture: encode thread failed.", error);
         }
+        finally
+        {
+            pendingFrames.ReleaseAll();
+            Volatile.Write(ref _pendingEncoderFrames, 0);
+        }
     }
 
-    private unsafe void DrainToRingBuffer(AVCodecContext* codecContext, AVPacket* packet, AVFormatContext* fullSessionFormatContext, AVStream* fullSessionStream, Queue<DateTime> pendingFrameWallClocks)
+    private unsafe void DrainToRingBuffer(AVCodecContext* codecContext, AVPacket* packet, AVFormatContext* fullSessionFormatContext, AVStream* fullSessionStream, EncoderFrameLifetimeQueue pendingFrames)
     {
         while (true)
         {
@@ -3308,6 +3332,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             if (receiveResult == ffmpeg.AVERROR(ffmpeg.EAGAIN) || receiveResult == ffmpeg.AVERROR_EOF) break;
             if (receiveResult < 0) break;
 
+            var hasPendingFrame = pendingFrames.TryTake(out var pendingFrame);
+            try
+            {
             var isKeyframe = (packet->flags & ffmpeg.AV_PKT_FLAG_KEY) != 0;
             // Pooled, not freshly allocated. This runs once per encoded packet -
             // 60 times a second for as long as a buffer is armed - and the
@@ -3332,7 +3359,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // before releasing output, and packet->pts is now an IDEAL,
             // constant-rate timestamp (see the pacing gate in CaptureLoop) so
             // it can't be used to derive this the way it used to be.
-            var realWallClockUtc = pendingFrameWallClocks.Count > 0 ? pendingFrameWallClocks.Dequeue() : MonotonicClock.UtcNow;
+            var realWallClockUtc = hasPendingFrame ? pendingFrame.WallClockUtc : MonotonicClock.UtcNow;
 
             Interlocked.Increment(ref _packetsOutCount);
             lock (_bufferLock)
@@ -3354,7 +3381,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 }
             }
 
-            ffmpeg.av_packet_unref(packet);
+            }
+            finally
+            {
+                if (hasPendingFrame) pendingFrames.Release(pendingFrame);
+                Volatile.Write(ref _pendingEncoderFrames, pendingFrames.Count);
+                ffmpeg.av_packet_unref(packet);
+            }
         }
     }
 

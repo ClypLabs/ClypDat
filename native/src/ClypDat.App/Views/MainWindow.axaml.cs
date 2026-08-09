@@ -224,7 +224,11 @@ public sealed partial class MainWindow : Window
         // scroll extent without a size change on this window, so the marker
         // positions have to be recomputed off layout rather than only off
         // Window_OnSizeChanged.
-        LibraryScrollViewer.LayoutUpdated += (_, _) => QueueDateScrubberRebuild();
+        LibraryScrollViewer.LayoutUpdated += (_, _) =>
+        {
+            TryCompleteInitialLibraryLayout();
+            QueueDateScrubberRebuild();
+        };
         _playbackTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         // Guarded like the hover-bar poll timer below (see SetupEditorHoverControls) -
         // SyncPlaybackPosition repositions the "Playback Paused" badge via
@@ -334,21 +338,7 @@ public sealed partial class MainWindow : Window
                         // that happened during that window only takes effect now.
                         Dispatcher.UIThread.Post(() => RestoreLibraryResizeAnchor(anchorPath), DispatcherPriority.Loaded);
                     }
-                    if (e.PropertyName == nameof(MainWindowViewModel.IsRestoringLibraryCache) && !ViewModel.IsRestoringLibraryCache)
-                    {
-                        // Adding cached cards in low-priority batches grows the
-                        // WrapPanel several times during first layout. Avalonia
-                        // can preserve a transient child offset through those
-                        // extent changes, leaving a fresh library slightly
-                        // below its real top. A cache restore is initial/root
-                        // navigation, so its final position is always top.
-                        Dispatcher.UIThread.Post(() =>
-                        {
-                            if (ViewModel?.IsRestoringLibraryCache == true) return;
-                            ClearLibraryResizeAnchor();
-                            LibraryScrollViewer.Offset = default;
-                        }, DispatcherPriority.Loaded);
-                    }
+                    if (e.PropertyName == nameof(MainWindowViewModel.StartupLibraryIndexVersion)) QueueDateScrubberRebuild();
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible)
                         or nameof(MainWindowViewModel.IsEditorVisible)
                         or nameof(MainWindowViewModel.SelectedVideoPath)
@@ -1578,6 +1568,7 @@ public sealed partial class MainWindow : Window
 
     private void LibraryScrollViewer_OnScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
+        LibraryLoadingTilesOverlay.ScrollOffsetY = LibraryScrollViewer.Offset.Y;
         UpdateDateScrubberThumb();
         UpdateScrollToTopButtonVisibility();
         if (e.OffsetDelta.Y == 0) return;
@@ -1767,6 +1758,8 @@ public sealed partial class MainWindow : Window
     // track itself show where each day's clips start, not just the single
     // date the thumb or cursor currently happens to be over.
     private readonly List<Border> _scrubberTicks = new();
+    private const double ScrubberTickTopInset = 5;
+    private const double ScrubberTickRailOverlap = 3;
 
     private void QueueDateScrubberRebuild()
     {
@@ -1783,13 +1776,15 @@ public sealed partial class MainWindow : Window
 
     private void RebuildDateScrubber()
     {
-        if (DateScrubberCanvas is null || ViewModel is null || !ViewModel.IsLibraryVisible) return;
+        if (DateScrubberCanvas is null || DateScrubberTicksCanvas is null || ViewModel is null || !ViewModel.IsLibraryVisible) return;
 
         var trackHeight = DateScrubberHost.Bounds.Height;
         var extentHeight = LibraryScrollViewer.Extent.Height;
         var viewportHeight = LibraryScrollViewer.Viewport.Height;
 
-        var signature = (extentHeight, viewportHeight, trackHeight, ViewModel.AllClips.Count(clip => clip.IsVisibleInLibrary));
+        var usingStartupIndex = ViewModel.HasStartupLibraryIndex;
+        var signature = (extentHeight, viewportHeight, trackHeight,
+            usingStartupIndex ? ViewModel.StartupLibraryIndexVersion : ViewModel.AllClips.Count(clip => clip.IsVisibleInLibrary));
         if (signature == _scrubberSignature) return;
         _scrubberSignature = signature;
 
@@ -1799,6 +1794,19 @@ public sealed partial class MainWindow : Window
 
         // Nothing to scrub through - everything already fits on screen.
         if (trackHeight <= 0 || extentHeight <= 0 || viewportHeight >= extentHeight) return;
+
+        if (usingStartupIndex)
+        {
+            foreach (var marker in ViewModel.StartupLibraryDateMarkers)
+            {
+                var row = marker.FirstVisibleIndex / Math.Max(1, ViewModel.CardColumns);
+                _scrubberDates.Add((marker.Text, row * ViewModel.StartupLibraryRowPitch, marker.Count));
+            }
+
+            if (_scrubberHovered) RebuildScrubberTicks();
+            HighlightCurrentScrubberDate();
+            return;
+        }
 
         var itemsControl = LibraryScrollViewer.Content as ItemsControl ?? LibraryScrollViewer.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault();
         if (itemsControl is null) return;
@@ -1843,11 +1851,29 @@ public sealed partial class MainWindow : Window
         HighlightCurrentScrubberDate();
     }
 
+    private void TryCompleteInitialLibraryLayout()
+    {
+        if (ViewModel is not { IsInitialLibraryLoadComplete: false, HasStartupLibraryIndex: true }) return;
+
+        var container = LibraryItemsControl.GetRealizedContainers()?
+            .FirstOrDefault(control => control.DataContext is ClipCardViewModel && control.Bounds.Height > 0);
+        if (container is null) return;
+
+        var cardSurface = container.GetVisualDescendants()
+            .OfType<Border>()
+            .FirstOrDefault(border => border.Name == "LibraryClipCardSurface" && border.Bounds.Height > 0);
+        var surfaceTop = cardSurface?.TranslatePoint(default, container)?.Y ?? 0;
+        ViewModel.CompleteInitialLibraryLayout(container.Bounds.Height, surfaceTop, cardSurface?.Bounds.Height ?? 0);
+    }
+
     private bool _scrubberHovered;
 
     private void ClearScrubberTicks()
     {
-        foreach (var tick in _scrubberTicks) DateScrubberCanvas.Children.Remove(tick);
+        if (DateScrubberTicksCanvas is not null)
+        {
+            foreach (var tick in _scrubberTicks) DateScrubberTicksCanvas.Children.Remove(tick);
+        }
         _scrubberTicks.Clear();
     }
 
@@ -1859,12 +1885,17 @@ public sealed partial class MainWindow : Window
     {
         ClearScrubberTicks();
 
-        foreach (var (_, contentY, _) in _scrubberDates)
+        foreach (var (_, contentY, clipCount) in _scrubberDates)
         {
+            var tickWidth = Math.Clamp(6 + Math.Log2(Math.Max(1, clipCount)) * 3, 6, 18);
             var tick = new Border
             {
-                Width = 6,
-                Height = 2,
+                // Dense dates stand out with a slightly longer pill without
+                // turning the timeline into a second set of text labels.
+                // Extra width disappears beneath the rail. Visible length
+                // stays at tickWidth while no bright edge shows through it.
+                Width = tickWidth + ScrubberTickRailOverlap,
+                Height = 1,
                 CornerRadius = new CornerRadius(1),
                 Background = Avalonia.Media.Brush.Parse("#8296AC"),
                 IsHitTestVisible = false,
@@ -1874,9 +1905,14 @@ public sealed partial class MainWindow : Window
                 Opacity = 0,
                 Transitions = new Transitions { new DoubleTransition { Property = Border.OpacityProperty, Duration = TimeSpan.FromSeconds(0.08) } }
             };
-            Canvas.SetLeft(tick, 4);
-            Canvas.SetTop(tick, ContentOffsetToTrackY(contentY) - 1);
-            DateScrubberCanvas.Children.Add(tick);
+            var scrollbarLeft = Canvas.GetLeft(DateScrubberThumb);
+            if (double.IsNaN(scrollbarLeft)) scrollbarLeft = 34;
+            Canvas.SetLeft(tick, scrollbarLeft - tickWidth);
+            // Markers are centred on their mapped content position. Keep the
+            // first one five pixels below the rail's top edge, never above it.
+            var tickTop = ContentOffsetToTrackY(contentY) - tick.Height / 2;
+            Canvas.SetTop(tick, Math.Clamp(tickTop, ScrubberTickTopInset, Math.Max(ScrubberTickTopInset, DateScrubberHost.Bounds.Height - tick.Height)));
+            DateScrubberTicksCanvas.Children.Add(tick);
             _scrubberTicks.Add(tick);
         }
     }
@@ -1896,11 +1932,9 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    // Single shared mapping between scroll-content space and track space, so
-    // the thumb, the date labels, and click/drag seeking all agree. The whole
-    // content maps onto the whole track, which makes the thumb a true
-    // viewport window: its top edge is the content at the top of the screen,
-    // so a label lining up with the thumb's top means that date is on screen.
+    // Date markers map the whole content onto the whole rail. The thumb uses
+    // the scrollable range below: its minimum height means its travel cannot
+    // use this direct mapping without reaching the rail bottom too early.
     private double ContentOffsetToTrackY(double contentY)
     {
         var extentHeight = LibraryScrollViewer.Extent.Height;
@@ -1925,9 +1959,12 @@ public sealed partial class MainWindow : Window
 
         DateScrubberThumb.IsVisible = true;
         if (DateScrubberTrack is not null) DateScrubberTrack.IsVisible = true;
-        DateScrubberThumb.Height = Math.Max(28, viewportHeight / extentHeight * trackHeight);
-        var top = ContentOffsetToTrackY(LibraryScrollViewer.Offset.Y);
-        Canvas.SetTop(DateScrubberThumb, Math.Clamp(top, 0, Math.Max(0, trackHeight - DateScrubberThumb.Height)));
+        var thumbHeight = Math.Min(trackHeight, Math.Max(28, viewportHeight / extentHeight * trackHeight));
+        DateScrubberThumb.Height = thumbHeight;
+        var maxOffset = Math.Max(0, extentHeight - viewportHeight);
+        var maxThumbTop = Math.Max(0, trackHeight - thumbHeight);
+        var top = maxOffset <= 0 ? 0 : LibraryScrollViewer.Offset.Y / maxOffset * maxThumbTop;
+        Canvas.SetTop(DateScrubberThumb, Math.Clamp(top, 0, maxThumbTop));
 
         HighlightCurrentScrubberDate();
     }
@@ -1972,7 +2009,9 @@ public sealed partial class MainWindow : Window
         if (bubbleHeight <= 0) bubbleHeight = 24;
 
         Canvas.SetTop(DateScrubberBubble, thumbTop + DateScrubberThumb.Bounds.Height / 2 - bubbleHeight / 2);
-        Canvas.SetLeft(DateScrubberBubble, -(bubbleWidth > 0 ? bubbleWidth : 64) - 10);
+        // The hit target extends 22px left of the visual rail. Keep this
+        // bubble attached to the rail, not the expanded invisible hit area.
+        Canvas.SetLeft(DateScrubberBubble, -(bubbleWidth > 0 ? bubbleWidth : 64) + 12);
     }
 
     // Hover (not dragging) variant - shows whichever date the CURSOR is over
@@ -2003,10 +2042,8 @@ public sealed partial class MainWindow : Window
         Canvas.SetLeft(DateScrubberBubble, -(bubbleWidth > 0 ? bubbleWidth : 64) - 10);
     }
 
-    // y is where the thumb's TOP should land, which by the shared mapping
-    // above is exactly the content offset to scroll to - no half-viewport
-    // fudge, which is what made clicking a date land short of it and made
-    // the thumb slide out from under the cursor mid-drag.
+    // Map thumb travel onto actual scrollable content. This keeps the thumb
+    // flush with the rail bottom only when the final library rows are shown.
     private void SeekLibraryToThumbTop(double y)
     {
         var trackHeight = DateScrubberHost.Bounds.Height;
@@ -2014,10 +2051,15 @@ public sealed partial class MainWindow : Window
         var viewportHeight = LibraryScrollViewer.Viewport.Height;
         if (trackHeight <= 0 || extentHeight <= 0) return;
 
-        var target = y / trackHeight * extentHeight;
+        var maxOffset = Math.Max(0, extentHeight - viewportHeight);
+        var thumbHeight = DateScrubberThumb.Bounds.Height > 0
+            ? DateScrubberThumb.Bounds.Height
+            : Math.Min(trackHeight, Math.Max(28, viewportHeight / extentHeight * trackHeight));
+        var maxThumbTop = Math.Max(0, trackHeight - thumbHeight);
+        var target = maxThumbTop <= 0 ? 0 : Math.Clamp(y, 0, maxThumbTop) / maxThumbTop * maxOffset;
         LibraryScrollViewer.Offset = new Vector(
             LibraryScrollViewer.Offset.X,
-            Math.Clamp(target, 0, Math.Max(0, extentHeight - viewportHeight)));
+            Math.Clamp(target, 0, maxOffset));
         UpdateDateScrubberThumb();
     }
 
@@ -2055,19 +2097,21 @@ public sealed partial class MainWindow : Window
         e.Handled = true;
     }
 
-    // Idle stays deliberately quiet so the library isn't competing with a
-    // bright scrollbar; hover widens it, dragging turns it accent.
+    // Solid rail keeps date ticks visually outside the scrollbar; hover and
+    // dragging make only the handle stronger.
     private void SetScrubberThumbState(bool hovered, bool dragging)
     {
         if (DateScrubberThumb is null) return;
 
         DateScrubberThumb.Background = dragging
             ? (Avalonia.Media.IBrush?)Application.Current?.FindResource("AccentBrush") ?? Avalonia.Media.Brush.Parse("#5864E8")
-            : Avalonia.Media.Brush.Parse(hovered ? "#55697E" : "#3A4857");
+            : Avalonia.Media.Brush.Parse(hovered ? "#C4D7E5" : "#91A9BB");
+        DateScrubberThumb.Opacity = hovered ? 1 : 0;
         DateScrubberThumb.RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse(hovered ? "scaleX(1.75)" : "scaleX(1)");
         if (DateScrubberTrack is not null)
         {
-            DateScrubberTrack.Background = Avalonia.Media.Brush.Parse(hovered ? "#1B2530" : "#141C24");
+            DateScrubberTrack.Background = Avalonia.Media.Brush.Parse(hovered ? "#526979" : "#405262");
+            DateScrubberTrack.Opacity = hovered ? 1 : 0;
         }
     }
 
@@ -2397,8 +2441,8 @@ public sealed partial class MainWindow : Window
 
                 AppLog.Info(isAutoClip ? $"Auto-clip triggered: {autoClipLabel}." : "Replay clip save requested.");
 
-                // The final four seconds belong to the event, not whatever is
-                // happening when a round finishes. Wait for that tail before the
+                // The event tail belongs to the final kill, not whatever is
+                // happening when the round finishes. Wait for it before the
                 // replay buffer snapshots its requested UTC window.
                 if (clipWindow is not null)
                 {
@@ -2980,11 +3024,19 @@ public sealed partial class MainWindow : Window
     }
 
     private Border? _overlayBadge;
+    private Border? _overlayRoot;
     private Border? _overlayAccent;
     private TextBlock? _overlayLabel;
     private StackPanel? _overlayHintRow;
     private TranslateTransform? _overlayTranslate;
     private DispatcherTimer? _overlayHideTimer;
+    private ServerPerPixelOverlay? _clipOverlayPerPixelOverlay;
+    private int _clipOverlayAnimationId;
+    private double _clipOverlayAnimationStartOffset;
+    private double _clipOverlayAnimationTargetOffset;
+    private double _clipOverlayOffset;
+    private Action? _clipOverlayAnimationComplete;
+    private static readonly TimeSpan ClipOverlaySlideDuration = TimeSpan.FromMilliseconds(260);
 
     // Built once and reused for the process lifetime. Each notification used to
     // construct a brand-new transparent, topmost Window (and destroy the
@@ -3073,6 +3125,12 @@ public sealed partial class MainWindow : Window
             ClipToBounds = true,
             Child = new DockPanel { Children = { _overlayAccent, content } }
         };
+        _overlayRoot = new Border
+        {
+            Background = Avalonia.Media.Brushes.Transparent,
+            ClipToBounds = true,
+            Child = _overlayBadge
+        };
 
         _activeClipOverlay = new Window
         {
@@ -3088,12 +3146,28 @@ public sealed partial class MainWindow : Window
             // the slide somewhere to go. See ShowClipSavedOverlay.
             SizeToContent = SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.Manual,
-            Content = _overlayBadge
+            Content = _overlayRoot
         };
         _activeClipOverlay.Opened += (_, _) =>
         {
             OverlayTransparencyDiagnostics.Log(_activeClipOverlay, "clip-toast");
-            WindowTransparencyFallback.ApplyIfNeeded(_activeClipOverlay, _overlayBadge.Background, b => _overlayBadge.Background = b);
+            if (WindowsPlatformProfile.IsServer())
+            {
+                _clipOverlayPerPixelOverlay?.Dispose();
+                _clipOverlayPerPixelOverlay = new ServerPerPixelOverlay(_activeClipOverlay, _overlayRoot);
+                _clipOverlayPerPixelOverlay.SetPositionOffset(new Vector(_clipOverlayOffset, 0));
+                _clipOverlayPerPixelOverlay.ShowAndRefresh();
+                WindowTransparencyFallback.ApplyInputSurfaceIfNeeded(_activeClipOverlay);
+            }
+            else
+            {
+                WindowTransparencyFallback.ApplyIfNeeded(_activeClipOverlay, _overlayBadge.Background, b => _overlayBadge.Background = b);
+            }
+        };
+        _activeClipOverlay.Closed += (_, _) =>
+        {
+            _clipOverlayPerPixelOverlay?.Dispose();
+            _clipOverlayPerPixelOverlay = null;
         };
 
         // Movement only, deliberately no opacity transition: the badge slides
@@ -3208,7 +3282,7 @@ public sealed partial class MainWindow : Window
         _overlayHideTimer = null;
 
         EnsureClipOverlay();
-        if (_activeClipOverlay is null || _overlayBadge is null || _overlayLabel is null || _overlayAccent is null || _overlayTranslate is null) return;
+        if (_activeClipOverlay is null || _overlayBadge is null || _overlayRoot is null || _overlayLabel is null || _overlayAccent is null || _overlayTranslate is null) return;
 
         // Position is a live setting, so the side has to be re-applied on every
         // show rather than baked in at construction.
@@ -3265,8 +3339,9 @@ public sealed partial class MainWindow : Window
         // first overlay, because every later one already ends at ±travel and
         // re-assigning it is a no-op.
         var transitions = _overlayTranslate.Transitions;
+        StopClipOverlayAnimation();
         _overlayTranslate.Transitions = null;
-        _overlayTranslate.X = isLeft ? -travel : travel;
+        SetClipOverlayOffset(isLeft ? -travel : travel);
 
         _activeClipOverlay.Show();
 
@@ -3288,11 +3363,24 @@ public sealed partial class MainWindow : Window
             SetWindowPos(overlayHandle, HwndTopmost, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
         }
 
+        if (WindowsPlatformProfile.IsServer())
+        {
+            _clipOverlayPerPixelOverlay?.ShowAndRefresh();
+            _clipOverlayPerPixelOverlay?.SetCaptureExcluded(ViewModel?.Settings.ExcludeOverlaysFromCapture ?? true);
+        }
+
         Dispatcher.UIThread.Post(() =>
         {
             if (_overlayTranslate is null) return;
-            _overlayTranslate.Transitions = transitions;
-            _overlayTranslate.X = 0;
+            if (WindowsPlatformProfile.IsServer())
+            {
+                StartClipOverlayAnimation(0);
+            }
+            else
+            {
+                _overlayTranslate.Transitions = transitions;
+                _overlayTranslate.X = 0;
+            }
             // Sound used to fire the instant this method was called - well
             // before the slide transition below even started, so it landed a
             // couple hundred ms ahead of anything visibly happening. Playing it
@@ -3308,7 +3396,18 @@ public sealed partial class MainWindow : Window
             _activeClipOverlayCloseTimer = null;
             // Slide back out the same way it came in - no fade, it just leaves -
             // then hide once that transition has had time to finish playing.
-            if (_overlayTranslate is not null) _overlayTranslate.X = isLeft ? -travel : travel;
+            var exitOffset = isLeft ? -travel : travel;
+            if (WindowsPlatformProfile.IsServer())
+            {
+                StartClipOverlayAnimation(exitOffset, () =>
+                {
+                    _clipOverlayPerPixelOverlay?.Hide();
+                    _activeClipOverlay?.Hide();
+                });
+                return;
+            }
+
+            if (_overlayTranslate is not null) _overlayTranslate.X = exitOffset;
             var hideAfterExit = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(260) };
             hideAfterExit.Tick += (_, _) =>
             {
@@ -3321,6 +3420,80 @@ public sealed partial class MainWindow : Window
         };
         _activeClipOverlayCloseTimer = closeTimer;
         closeTimer.Start();
+    }
+
+    private void StartClipOverlayAnimation(double targetOffset, Action? completed = null)
+    {
+        if (_overlayTranslate is null) return;
+
+        StopClipOverlayAnimation();
+        _clipOverlayAnimationStartOffset = _clipOverlayOffset;
+        _clipOverlayAnimationTargetOffset = targetOffset;
+        _clipOverlayAnimationComplete = completed;
+        if (Math.Abs(_clipOverlayAnimationStartOffset - targetOffset) < 0.01)
+        {
+            SetClipOverlayOffset(targetOffset);
+            var complete = _clipOverlayAnimationComplete;
+            _clipOverlayAnimationComplete = null;
+            complete?.Invoke();
+            return;
+        }
+
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel is null)
+        {
+            SetClipOverlayOffset(targetOffset);
+            var complete = _clipOverlayAnimationComplete;
+            _clipOverlayAnimationComplete = null;
+            complete?.Invoke();
+            return;
+        }
+
+        var animationId = ++_clipOverlayAnimationId;
+        TimeSpan? startTime = null;
+
+        void Step(TimeSpan frameTime)
+        {
+            if (animationId != _clipOverlayAnimationId) return;
+            startTime ??= frameTime;
+            var progress = Math.Clamp((frameTime - startTime.Value).TotalMilliseconds / ClipOverlaySlideDuration.TotalMilliseconds, 0, 1);
+            var eased = 1 - Math.Pow(1 - progress, 3);
+            SetClipOverlayOffset(_clipOverlayAnimationStartOffset + (_clipOverlayAnimationTargetOffset - _clipOverlayAnimationStartOffset) * eased);
+            if (progress < 1)
+            {
+                topLevel.RequestAnimationFrame(Step);
+                return;
+            }
+
+            var complete = _clipOverlayAnimationComplete;
+            StopClipOverlayAnimation();
+            complete?.Invoke();
+        }
+
+        topLevel.RequestAnimationFrame(Step);
+    }
+
+    private void StopClipOverlayAnimation()
+    {
+        _clipOverlayAnimationId++;
+        _clipOverlayAnimationComplete = null;
+    }
+
+    private void SetClipOverlayOffset(double offset)
+    {
+        if (_overlayTranslate is null) return;
+        var scaling = RenderScaling > 0 ? RenderScaling : 1;
+        _clipOverlayOffset = Math.Round(offset * scaling) / scaling;
+        if (WindowsPlatformProfile.IsServer())
+        {
+            _overlayTranslate.X = 0;
+            _clipOverlayPerPixelOverlay?.SetPositionOffset(new Vector(_clipOverlayOffset, 0));
+        }
+        else
+        {
+            _overlayTranslate.X = _clipOverlayOffset;
+        }
+        _clipOverlayPerPixelOverlay?.Refresh();
     }
 
     private void ReplayBuffer_OnRecordingStopped(object? sender, EventArgs e)

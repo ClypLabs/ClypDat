@@ -776,7 +776,7 @@
              did the same thing against the heading/search bar above, holding the
              cards away from it so they were cut off mid-thumbnail by empty
              background rather than by the bar itself. -->
-        <Grid Margin="20,0,20,0">
+        <Grid Margin="20,0,0,0">
         <DockPanel>
 
           <!-- "Building your library..." banner - HydrateLibraryClipsAsync
@@ -826,11 +826,29 @@
             <TextBlock Text="{Binding ClipNotReadyMessage}" Foreground="#B8C7D8" FontSize="12" FontWeight="Bold" />
           </Border>
 
+          <Grid>
           <Grid ColumnDefinitions="*,Auto">
           <!-- Date scrubber (right column, below) replaces the default
                scrollbar, so hide the ScrollViewer's own. -->
-          <ScrollViewer Grid.Column="0" x:Name="LibraryScrollViewer" Margin="-4,0,-4,0" VerticalScrollBarVisibility="Hidden">
-            <ItemsControl ItemsSource="{Binding AllClips}">
+          <controls:LibraryLoadingTilesOverlay
+              x:Name="LibraryLoadingTilesOverlay"
+              Grid.Column="0"
+              Margin="-4,0,-24,0"
+              IsVisible="{Binding ShowLibraryLoadingTiles}"
+              TotalTileCount="{Binding LibraryLoadingTileCount}"
+              LoadedTileCount="{Binding LoadedVisibleLibraryTileCount}"
+              ColumnCount="{Binding CardColumns}"
+              TileWidth="{Binding CardWidth}"
+              TileHeight="{Binding LibraryLoadingTileHeight}"
+              TileTopInset="{Binding LibraryLoadingTileTopInset}"
+              RowPitch="{Binding LibraryLoadingRowPitch}"
+              IsHitTestVisible="False" />
+          <ScrollViewer Grid.Column="0" x:Name="LibraryScrollViewer" Margin="-4,0,-24,0" VerticalScrollBarVisibility="Hidden">
+            <ItemsControl x:Name="LibraryItemsControl"
+                          ItemsSource="{Binding AllClips}"
+                          Opacity="{Binding LibraryCardGridOpacity}"
+                          IsHitTestVisible="{Binding IsInitialLibraryLoadComplete}"
+                          MinHeight="{Binding LibraryReservedContentHeight}">
               <!-- WrapPanel, not UniformGrid - UniformGrid pre-computes its
                    row/column count from the total child count (including
                    IsVisible="False" filtered-out cards) and still reserves
@@ -886,7 +904,8 @@
                                    VerticalAlignment="Center" />
                       </StackPanel>
                     </Border>
-                    <Border Background="#24303A"
+                    <Border x:Name="LibraryClipCardSurface"
+                            Background="#24303A"
                             CornerRadius="12"
                             BoxShadow="0 6 18 -6 #66000000"
                             PointerPressed="ClipCard_OnPointerPressed"
@@ -918,15 +937,10 @@
                                     <DropShadowEffect Color="#000000" BlurRadius="10" OffsetX="0" OffsetY="0" Opacity="0.6" />
                                   </TextBlock.Effect>
                                 </TextBlock>
-                                <!-- Selection check and duration badge share one
-                                     top row rather than being positioned
-                                     independently. They have different
-                                     intrinsic heights (the badge's comes from
-                                     its own padding, the CheckBox's from the
-                                     theme), so matching top margins never
-                                     lined them up - centring both inside a
-                                     single row aligns them by construction and
-                                     survives either one changing size. -->
+                                <!-- Checkbox appears only on hover and can be
+                                     taller than the duration pill. Anchor the
+                                     pill at this overlay's top edge so that
+                                     layout change never moves it. -->
                                 <Grid VerticalAlignment="Top" Margin="12" ColumnDefinitions="Auto,*,Auto">
                                   <CheckBox Grid.Column="0"
                                             VerticalAlignment="Center"
@@ -934,7 +948,7 @@
                                             IsVisible="{Binding IsCheckVisible}"
                                             Click="ClipCheckBox_OnClick" />
                                   <Border Grid.Column="2"
-                                          VerticalAlignment="Center"
+                                          VerticalAlignment="Top"
                                           Padding="10,6"
                                           Background="#1A2530"
                                           CornerRadius="18">
@@ -1055,42 +1069,60 @@
                no width. -->
           <Border Grid.Column="1"
                   x:Name="DateScrubberHost"
-                  Width="22"
-                  Margin="2,14,4,10"
+                  Width="44"
+                  Margin="-20,14,4,10"
                   Background="Transparent"
                   ClipToBounds="False"
-                  IsVisible="{Binding IsLibraryVisible}"
+                  RenderTransform="translateX(10px)"
+                  IsVisible="{Binding IsInitialLibraryLoadComplete}"
                   PointerPressed="DateScrubber_OnPointerPressed"
                   PointerMoved="DateScrubber_OnPointerMoved"
                   PointerReleased="DateScrubber_OnPointerReleased"
                   PointerEntered="DateScrubber_OnPointerEntered"
                   PointerExited="DateScrubber_OnPointerExited">
             <Panel ClipToBounds="False">
+              <!-- Tick layer sits below both scrollbar layers, so pills can
+                   run beneath the rail without drawing through it. -->
+              <Canvas x:Name="DateScrubberTicksCanvas"
+                      ClipToBounds="False"
+                      IsHitTestVisible="False" />
+
               <!-- Static rail the thumb rides in, so the track still reads
                    as a scrollbar when the library is short enough that the
                    thumb fills most of it. -->
               <Border x:Name="DateScrubberTrack"
-                      Width="4"
-                      CornerRadius="2"
-                      Background="#141C24"
+                      Width="6"
+                      CornerRadius="3"
+                      Background="#405262"
+                      Opacity="0"
                       HorizontalAlignment="Left"
-                      Margin="12,0,0,0"
-                      IsHitTestVisible="False" />
+                      VerticalAlignment="Stretch"
+                      Margin="34,0,0,0"
+                      IsHitTestVisible="False">
+                <Border.Transitions>
+                  <Transitions>
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.13" />
+                    <BrushTransition Property="Background" Duration="0:0:0.13" />
+                  </Transitions>
+                </Border.Transitions>
+              </Border>
 
               <Canvas x:Name="DateScrubberCanvas" ClipToBounds="False">
                 <!-- Grows from its own centre on hover/drag (scaleX, so the
                      width change animates - Width itself can't transition). -->
                 <Border x:Name="DateScrubberThumb"
-                        Canvas.Left="12"
-                        Width="4"
+                        Canvas.Left="34"
+                        Width="6"
                         MinHeight="34"
-                        CornerRadius="2"
-                        Background="#3A4857"
+                        CornerRadius="3"
+                        Background="#91A9BB"
+                        Opacity="0"
                         RenderTransformOrigin="50%,50%"
                         RenderTransform="scaleX(1)"
                         IsHitTestVisible="False">
                   <Border.Transitions>
                     <Transitions>
+                      <DoubleTransition Property="Opacity" Duration="0:0:0.13" />
                       <BrushTransition Property="Background" Duration="0:0:0.13" />
                       <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.13" />
                     </Transitions>
@@ -1103,7 +1135,7 @@
                 <Border x:Name="DateScrubberBubble"
                         Background="{StaticResource AccentBrush}"
                         CornerRadius="6"
-                        Padding="10,5"
+                        Padding="10,3"
                         BoxShadow="0 6 18 -4 #B0000000"
                         Opacity="0"
                         IsHitTestVisible="False">
@@ -1120,6 +1152,8 @@
               </Canvas>
             </Panel>
           </Border>
+          </Grid>
+
           </Grid>
         </DockPanel>
       </Grid>
@@ -1890,6 +1924,13 @@
                         <TextBlock Text="{Binding Name}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="16" opconv:SettingsHighlight.Query="{Binding SearchQuery}" />
                         <TextBlock Text="{Binding StatusText}" Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
                         <Button Content="Set up Dota 2" Click="SetupDotaAutoClipButton_OnClick" IsVisible="{Binding IsSetupRequired}" HorizontalAlignment="Left" />
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" IsVisible="{Binding IsCs2}">
+                          <StackPanel Spacing="2">
+                            <TextBlock Text="Deathmatch Clipping" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" />
+                            <TextBlock Text="CS2 auto-clips save in Competitive matches. Enable this to also save Deathmatch clips." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                          </StackPanel>
+                          <ToggleSwitch Grid.Column="1" IsChecked="{Binding DeathmatchClipping}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                        </Grid>
                         <ItemsControl ItemsSource="{Binding Groups}">
                           <ItemsControl.ItemTemplate><DataTemplate><StackPanel Spacing="6"><Button Classes="autoClipGroupToggle" Click="AutoClipGroupToggleButton_OnClick"><Grid ColumnDefinitions="20,*" ColumnSpacing="7"><Grid Width="20" Height="20"><Border BorderBrush="#758494" BorderThickness="1" CornerRadius="4" Background="Transparent" /><Border IsVisible="{Binding IsAllEnabled}" BorderBrush="{DynamicResource CheckBoxCheckBackgroundFillChecked}" BorderThickness="1" CornerRadius="4" Background="{DynamicResource CheckBoxCheckBackgroundFillChecked}" /><Border IsVisible="{Binding IsIndeterminate}" BorderBrush="{DynamicResource CheckBoxCheckBackgroundFillChecked}" BorderThickness="1" CornerRadius="4" Background="{DynamicResource CheckBoxCheckBackgroundFillChecked}" /><TextBlock Text="?" IsVisible="{Binding IsAllEnabled}" Foreground="{DynamicResource CheckBoxCheckGlyphForegroundChecked}" FontSize="14" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" /><TextBlock Text="-" IsVisible="{Binding IsIndeterminate}" Foreground="{DynamicResource CheckBoxCheckGlyphForegroundChecked}" FontSize="17" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" /></Grid><TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="#D2DEEC" FontWeight="SemiBold" VerticalAlignment="Center" /></Grid></Button><ItemsControl ItemsSource="{Binding Events}" Margin="26,0,0,0"><ItemsControl.ItemTemplate><DataTemplate><CheckBox Content="{Binding Name}" IsChecked="{Binding IsEnabled}" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></DataTemplate></ItemsControl.ItemTemplate>
                         </ItemsControl>

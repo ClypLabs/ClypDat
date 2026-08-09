@@ -11,6 +11,7 @@ public sealed record Cs2AutoClipRequest(string EventId, string EventType, string
 public sealed class Cs2GsiListener : IDisposable
 {
     private static readonly TimeSpan EventPadding = TimeSpan.FromSeconds(4);
+    private static readonly TimeSpan PostKillCaptureDuration = TimeSpan.FromSeconds(10);
     private readonly Func<AutoClipGameSettings> _settingsProvider;
     private readonly object _stateLock = new();
     private HttpListener? _listener;
@@ -22,8 +23,8 @@ public sealed class Cs2GsiListener : IDisposable
     private int _lastMatchAssists;
     private int _lastRoundNumber = -1;
     private string _lastMapName = string.Empty;
+    private string _lastMapMode = string.Empty;
     private readonly List<DateTime> _roundKillTimes = new();
-    private DateTime? _lastRelevantEventUtc;
     private string? _pendingLabel;
     private readonly List<AutoClipEvent> _roundEvents = new();
 
@@ -69,6 +70,7 @@ public sealed class Cs2GsiListener : IDisposable
             _lastRoundKills = _lastRoundKillHs = _lastMatchDeaths = _lastMatchAssists = 0;
             _lastRoundNumber = -1;
             _lastMapName = string.Empty;
+            _lastMapMode = string.Empty;
             ClearRoundLocked();
         }
     }
@@ -97,7 +99,7 @@ public sealed class Cs2GsiListener : IDisposable
         }
     }
 
-    private void ProcessPayload(string json)
+    internal void ProcessPayload(string json)
     {
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
@@ -118,6 +120,9 @@ public sealed class Cs2GsiListener : IDisposable
         var mapName = root.TryGetProperty("map", out var mapElement) && mapElement.TryGetProperty("name", out var mapNameElement)
             ? mapNameElement.GetString() ?? string.Empty
             : string.Empty;
+        var mapMode = root.TryGetProperty("map", out mapElement) && mapElement.TryGetProperty("mode", out var mapModeElement)
+            ? mapModeElement.GetString() ?? string.Empty
+            : string.Empty;
         var roundNumber = root.TryGetProperty("map", out var map) && map.TryGetProperty("round", out var roundElement) && roundElement.TryGetInt32(out var parsedRound)
             ? parsedRound
             : (int?)null;
@@ -132,13 +137,22 @@ public sealed class Cs2GsiListener : IDisposable
 
         lock (_stateLock)
         {
-            if (!string.IsNullOrWhiteSpace(mapName) && !string.Equals(mapName, _lastMapName, StringComparison.OrdinalIgnoreCase))
+            var settings = _settingsProvider();
+            var clippingBlocked = !IsCompetitive(mapMode) && !(IsDeathmatch(mapMode) && settings.DeathmatchClipping);
+            var mapChanged = !string.IsNullOrWhiteSpace(mapName) && !string.Equals(mapName, _lastMapName, StringComparison.OrdinalIgnoreCase);
+            var modeChanged = !string.IsNullOrWhiteSpace(mapMode) && !string.Equals(mapMode, _lastMapMode, StringComparison.OrdinalIgnoreCase);
+            if (mapChanged || modeChanged)
             {
-                FinalizePendingLocked();
+                // If GSI starts sending a non-Competitive mode after an
+                // incomplete snapshot, discard that candidate instead of exporting it.
+                if (clippingBlocked && string.IsNullOrWhiteSpace(_lastMapMode)) ClearRoundLocked();
+                else FinalizePendingLocked();
                 _lastMapName = mapName;
+                _lastMapMode = mapMode;
                 _lastRoundNumber = -1;
                 _lastRoundKills = _lastRoundKillHs = 0;
                 ClearRoundLocked();
+                _seeded = false;
             }
 
             if (!_seeded)
@@ -163,9 +177,15 @@ public sealed class Cs2GsiListener : IDisposable
             }
             if (roundNumber.HasValue) _lastRoundNumber = roundNumber.Value;
 
-            var settings = _settingsProvider();
             if (!settings.Enabled)
             {
+                SyncCounters(roundKills, roundKillHs, deaths, assists);
+                return;
+            }
+
+            if (clippingBlocked)
+            {
+                ClearRoundLocked();
                 SyncCounters(roundKills, roundKillHs, deaths, assists);
                 return;
             }
@@ -175,7 +195,6 @@ public sealed class Cs2GsiListener : IDisposable
                 for (var killNumber = _lastRoundKills + 1; killNumber <= currentKills; killNumber++)
                 {
                     _roundKillTimes.Add(now);
-                    _lastRelevantEventUtc = now;
                     var label = LabelForKill(killNumber, settings);
                     if (label is not null)
                     {
@@ -198,7 +217,6 @@ public sealed class Cs2GsiListener : IDisposable
 
             if (roundKillHs is { } currentHeadshots && currentHeadshots > _lastRoundKillHs && IsEnabled(settings, "headshot"))
             {
-                _lastRelevantEventUtc = now;
                 if (_pendingLabel is null)
                 {
                     FireStandaloneLocked("Headshot", now);
@@ -208,18 +226,16 @@ public sealed class Cs2GsiListener : IDisposable
 
             if (deaths is { } currentDeaths && currentDeaths > _lastMatchDeaths)
             {
-                _lastRelevantEventUtc = now;
                 if (_pendingLabel is not null)
                 {
                     if (IsEnabled(settings, "death")) _roundEvents.Add(new AutoClipEvent("death", "Death", now));
-                    FinalizePendingLocked(now);
+                    FinalizePendingLocked();
                 }
                 else if (IsEnabled(settings, "death")) FireStandaloneLocked("Death", now);
             }
 
             if (assists is { } currentAssists && currentAssists > _lastMatchAssists && IsEnabled(settings, "assist"))
             {
-                _lastRelevantEventUtc = now;
                 if (_pendingLabel is null) FireStandaloneLocked("Assist", now);
                 else _roundEvents.Add(new AutoClipEvent("assist", "Assist", now));
             }
@@ -237,10 +253,12 @@ public sealed class Cs2GsiListener : IDisposable
         if (assists.HasValue) _lastMatchAssists = assists.Value;
     }
 
-    private void FinalizePendingLocked(DateTime? endOverrideUtc = null)
+    private void FinalizePendingLocked()
     {
         if (_pendingLabel is null || _roundKillTimes.Count == 0) return;
-        var endUtc = (endOverrideUtc ?? _lastRelevantEventUtc ?? _roundKillTimes[^1]) + EventPadding;
+        // Finish ten seconds after final kill. Round-end, death, and assist GSI
+        // snapshots can arrive later, but must not extend event's tail.
+        var endUtc = _roundKillTimes[^1] + PostKillCaptureDuration;
         var startUtc = _roundKillTimes[0] - EventPadding;
         var eventId = EventIdForLabel(_pendingLabel);
         var title = BuildTitle(_roundEvents.Count == 0 ? new[] { new AutoClipEvent(eventId, _pendingLabel, startUtc, KillPriority(_pendingLabel)) } : _roundEvents);
@@ -259,7 +277,6 @@ public sealed class Cs2GsiListener : IDisposable
     private void ClearRoundLocked()
     {
         _roundKillTimes.Clear();
-        _lastRelevantEventUtc = null;
         _pendingLabel = null;
         _roundEvents.Clear();
     }
@@ -275,6 +292,8 @@ public sealed class Cs2GsiListener : IDisposable
     };
 
     private static bool IsEnabled(AutoClipGameSettings settings, string id) => settings.Events.TryGetValue(id, out var enabled) && enabled;
+    private static bool IsCompetitive(string mode) => string.Equals(mode, "competitive", StringComparison.OrdinalIgnoreCase);
+    private static bool IsDeathmatch(string mode) => string.Equals(mode, "deathmatch", StringComparison.OrdinalIgnoreCase);
 
     private static string EventIdForLabel(string label) => label switch { "Kill" => "kill", "2K" => "2k", "3K" => "3k", "4K" => "4k", "Ace" => "ace", "Headshot" => "headshot", "Death" => "death", "Assist" => "assist", _ => "kill" };
     private static int KillPriority(string label) => label switch { "Kill" => 10, "2K" => 20, "3K" => 30, "4K" => 40, "Ace" => 50, "Headshot" => 15, _ => 0 };

@@ -19,6 +19,8 @@ internal sealed class ServerPerPixelOverlay : IDisposable
     private const int SwHide = 0;
     private const int SwShowNoActivate = 4;
     private const uint UlwAlpha = 0x2;
+    private const uint WdaNone = 0x00000000;
+    private const uint WdaExcludeFromCapture = 0x00000011;
     private const uint DibRgbColors = 0;
     private const uint BiRgb = 0;
     private const uint SwpNoSize = 0x0001;
@@ -34,6 +36,7 @@ internal sealed class ServerPerPixelOverlay : IDisposable
     private IntPtr _bits;
     private int _pixelWidth;
     private int _pixelHeight;
+    private Vector _positionOffset;
     private bool _disposed;
 
     public ServerPerPixelOverlay(Window inputWindow, Control source)
@@ -69,7 +72,9 @@ internal sealed class ServerPerPixelOverlay : IDisposable
             EnsureSurface(width, height);
             bitmap.CopyPixels(new PixelRect(0, 0, width, height), _bits, checked(width * height * 4), width * 4);
 
-            var destination = new PointNative(rect.Left, rect.Top);
+            var destination = new PointNative(
+                rect.Left + (int)Math.Round(_positionOffset.X * scaling),
+                rect.Top + (int)Math.Round(_positionOffset.Y * scaling));
             var size = new SizeNative(width, height);
             var source = new PointNative(0, 0);
             var blend = new BlendFunction
@@ -96,6 +101,18 @@ internal sealed class ServerPerPixelOverlay : IDisposable
     public void Hide()
     {
         if (_window != IntPtr.Zero) ShowWindow(_window, SwHide);
+    }
+
+    // Leave source layout intact; move native mirror when an overlay itself
+    // should slide past a screen edge.
+    public void SetPositionOffset(Vector offset) => _positionOffset = offset;
+
+    // Native mirror is visible Server overlay, so capture affinity belongs here.
+    public void SetCaptureExcluded(bool exclude)
+    {
+        if (_window == IntPtr.Zero) return;
+        if (!SetWindowDisplayAffinity(_window, exclude ? WdaExcludeFromCapture : WdaNone) && exclude)
+            AppLog.Debug($"Per-pixel overlay capture exclusion unavailable (needs Windows 10 build 19041): error={Marshal.GetLastWin32Error()}.");
     }
 
     public void Dispose()
@@ -246,6 +263,9 @@ internal sealed class ServerPerPixelOverlay : IDisposable
 
     [DllImport("user32.dll")]
     private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowDisplayAffinity(IntPtr window, uint affinity);
 
     [DllImport("gdi32.dll")]
     private static extern IntPtr CreateCompatibleDC(IntPtr dc);

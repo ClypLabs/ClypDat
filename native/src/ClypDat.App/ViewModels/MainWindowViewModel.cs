@@ -19,6 +19,8 @@ public enum EditorSidebarSection
     Export
 }
 
+internal readonly record struct LibraryStartupDateMarker(string Text, int FirstVisibleIndex, int Count);
+
 public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
     private readonly MediaProbeService _mediaProbe = new();
@@ -42,6 +44,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly DispatcherTimer _libraryCacheWriteTimer;
     private CancellationTokenSource? _cachedLibraryRestoreCts;
     private bool _isRestoringCachedLibrary;
+    private bool _isInitialLibraryLoadComplete;
+    private IReadOnlyList<CachedClipState> _startupLibraryStates = Array.Empty<CachedClipState>();
+    private IReadOnlyList<LibraryStartupDateMarker> _startupLibraryDateMarkers = Array.Empty<LibraryStartupDateMarker>();
+    private int _startupLibraryIndexVersion;
+    private int _startupVisibleClipCount;
+    private int _loadedVisibleLibraryTileCount;
+    private int _loadedStartupClipCount;
+    private double _startupCardChromeHeight = 112;
+    private double _startupCardSurfaceTopInset = 20;
+    private double _startupCardSurfaceChromeHeight = 86;
+    private double _libraryReservedContentHeight;
     private bool _libraryCacheDirty;
     private (long Total, long Free) _driveStats;
     // See WasRecentlySelfAdded - suppresses the redundant full-library
@@ -330,6 +343,33 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public Task InitialLibraryLoadTask { get; }
     public ObservableCollection<ClipCardViewModel> AllClips { get; }
     public bool IsRestoringLibraryCache => _isRestoringCachedLibrary;
+    public bool ShowLibraryLoadingTiles => !IsInitialLibraryLoadComplete || IsRestoringLibraryCache;
+    public int LibraryLoadingTileCount => HasStartupLibraryIndex ? _startupVisibleClipCount : 12;
+    public int LoadedVisibleLibraryTileCount => _loadedVisibleLibraryTileCount;
+    public double LibraryLoadingRowPitch => StartupLibraryRowPitch;
+    public double LibraryLoadingTileTopInset => _startupCardSurfaceTopInset;
+    public double LibraryLoadingTileHeight => Math.Max(1, CardImageHeight + _startupCardSurfaceChromeHeight);
+    public double LibraryReservedContentHeight
+    {
+        get => _libraryReservedContentHeight;
+        private set => SetProperty(ref _libraryReservedContentHeight, value);
+    }
+    internal bool HasStartupLibraryIndex => _startupLibraryStates.Count > 0;
+    internal int StartupLibraryIndexVersion => _startupLibraryIndexVersion;
+    internal IReadOnlyList<LibraryStartupDateMarker> StartupLibraryDateMarkers => _startupLibraryDateMarkers;
+    internal double StartupLibraryRowPitch => Math.Max(1, CardImageHeight + _startupCardChromeHeight);
+    public bool IsInitialLibraryLoadComplete
+    {
+        get => _isInitialLibraryLoadComplete;
+        private set
+        {
+            if (!SetProperty(ref _isInitialLibraryLoadComplete, value)) return;
+            OnPropertyChanged(nameof(LibraryCardGridOpacity));
+            OnPropertyChanged(nameof(LibraryTitle));
+            OnPropertyChanged(nameof(ShowLibraryLoadingTiles));
+        }
+    }
+    public double LibraryCardGridOpacity => IsInitialLibraryLoadComplete ? 1 : 0;
     public IReadOnlyList<ClipCardViewModel> GetAudioOnlyClips() => AllClips
         .Where(clip => !clip.Media.HasVideo && clip.Media.Tracks.Count > 0)
         .ToArray();
@@ -397,6 +437,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get
         {
+            if (IsRestoringLibraryCache && _startupLibraryStates.Count > 0)
+            {
+                var total = _startupLibraryStates.Count;
+                var remaining = Math.Max(0, total - _loadedStartupClipCount);
+                return $"Clips ({total:N0}) ({remaining:N0} left to load)";
+            }
+            if (!IsInitialLibraryLoadComplete) return "Loading library";
             var parts = new List<string>();
             if (_activeGameFilters.Count > 0) parts.Add(string.Join(", ", _activeGameFilters.OrderBy(name => name, StringComparer.OrdinalIgnoreCase)));
 
@@ -1649,7 +1696,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (!SetProperty(ref _autoClipSearchText, value)) return;
             foreach (var game in AutoClipGames)
             {
-                game.IsSearchMatch = string.IsNullOrWhiteSpace(value) || game.Name.Contains(value, StringComparison.OrdinalIgnoreCase) || game.Definition.Events.Any(item => item.Name.Contains(value, StringComparison.OrdinalIgnoreCase));
+                game.IsSearchMatch = string.IsNullOrWhiteSpace(value) || game.MatchesSearch(value);
                 game.SearchQuery = value;
             }
             OnPropertyChanged(nameof(HasAutoClipSearchResults));
@@ -2800,48 +2847,68 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // bounded batches while the remaining cached cards arrive.
     private async Task StartInitialLibraryLoadAsync()
     {
-        var root = Settings.LibraryFolder;
-        var clock = System.Diagnostics.Stopwatch.StartNew();
-        // Load is a synchronous SQLite read + per-row JSON deserialize; offload
-        // it so a large cached library doesn't block the window from showing.
-        var cached = await Task.Run(() => _libraryCache.Load(root));
-        if (!string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase))
+        try
         {
-            // Library folder changed again while this load was in flight.
-            return;
+            var root = Settings.LibraryFolder;
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            // Load is a synchronous SQLite read + per-row JSON deserialize; offload
+            // it so a large cached library doesn't block the window from showing.
+            var cached = await Task.Run(() => _libraryCache.Load(root));
+            if (!string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase))
+            {
+                // Library folder changed again while this load was in flight.
+                return;
+            }
+            if (cached.Count == 0)
+            {
+                await RefreshLibraryAsync();
+                return;
+            }
+
+            _isRestoringCachedLibrary = true;
+            _startupLibraryStates = cached;
+            _loadedStartupClipCount = 0;
+            RefreshStartupLibraryIndex();
+            PopulateGameFilterOptionsFromCache(cached);
+            PopulateClipTypeFilterOptionsFromCache(cached);
+            _restoredClipPaths.Clear();
+            foreach (var clip in AllClips) _restoredClipPaths.Add(clip.Path);
+            OnPropertyChanged(nameof(IsRestoringLibraryCache));
+            OnPropertyChanged(nameof(ShowLibraryLoadingTiles));
+            OnPropertyChanged(nameof(LibraryTitle));
+            const int initialCardCount = 6;
+            // Existence checks for every row's thumbnail/filmstrip run off the UI
+            // thread - see NormalizeCachedStates. Two stat calls per clip against
+            // a cold media-cache folder is not something the first paint should
+            // wait on, and it is the same disk the probe/thumbnail hydration
+            // passes are hammering at that exact moment.
+            var firstStates = cached.Take(initialCardCount).ToArray();
+            var firstBatch = await Task.Run(() => NormalizeCachedStates(firstStates));
+            foreach (var state in firstBatch) AddCachedClip(state);
+            ApplyGameFilters();
+            ApplyClipTypeFilters();
+            ApplySearchFilter();
+            NotifyLibraryChrome();
+            AppLog.Info($"Library cache: restored {Math.Min(initialCardCount, cached.Count)}/{cached.Count} cards in {clock.ElapsedMilliseconds}ms.");
+
+            // MainWindow reveals this measured grid only after it reserves the
+            // cached library's full extent. Until then the shimmer is the only
+            // visible tile surface, so the scrollbar never grows card-by-card.
+            _cachedLibraryRestoreCts = new CancellationTokenSource();
+            _ = RestoreRemainingCachedClipsAsync(cached.Skip(initialCardCount).ToArray(), root, _cachedLibraryRestoreCts.Token);
         }
-        if (cached.Count == 0)
+        finally
         {
-            await RefreshLibraryAsync();
-            return;
+            // Cache misses and errors have no hidden first card to measure.
+            // Do not leave their library behind the startup shimmer forever.
+            if (!HasStartupLibraryIndex) IsInitialLibraryLoadComplete = true;
         }
-
-        _isRestoringCachedLibrary = true;
-        _restoredClipPaths.Clear();
-        foreach (var clip in AllClips) _restoredClipPaths.Add(clip.Path);
-        OnPropertyChanged(nameof(IsRestoringLibraryCache));
-        const int initialCardCount = 18;
-        // Existence checks for every row's thumbnail/filmstrip run off the UI
-        // thread - see NormalizeCachedStates. Two stat calls per clip against
-        // a cold media-cache folder is not something the first paint should
-        // wait on, and it is the same disk the probe/thumbnail hydration
-        // passes are hammering at that exact moment.
-        var firstStates = cached.Take(initialCardCount).ToArray();
-        var firstBatch = await Task.Run(() => NormalizeCachedStates(firstStates));
-        foreach (var state in firstBatch) AddCachedClip(state);
-        ApplyGameFilters();
-        ApplyClipTypeFilters();
-        ApplySearchFilter();
-        NotifyLibraryChrome();
-        AppLog.Info($"Library cache: restored {Math.Min(initialCardCount, cached.Count)}/{cached.Count} cards in {clock.ElapsedMilliseconds}ms.");
-
-        _cachedLibraryRestoreCts = new CancellationTokenSource();
-        await RestoreRemainingCachedClipsAsync(cached.Skip(initialCardCount).ToArray(), root, _cachedLibraryRestoreCts.Token);
     }
 
     private async Task RestoreRemainingCachedClipsAsync(IReadOnlyList<CachedClipState> states, string root, CancellationToken cancellationToken)
     {
-        const int batchSize = 24;
+        const int batchSize = 8;
+        var cardArrivalDelay = TimeSpan.FromMilliseconds(32);
         try
         {
             for (var offset = 0; offset < states.Count; offset += batchSize)
@@ -2849,10 +2916,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 cancellationToken.ThrowIfCancellationRequested();
                 var rows = states.Skip(offset).Take(batchSize).ToArray();
                 var batch = await Task.Run(() => NormalizeCachedStates(rows), cancellationToken);
+
+                // An ItemsControl with a WrapPanel creates every card's visual
+                // tree, including cards outside the viewport. Adding a whole
+                // batch in one dispatcher turn starves native window moves and
+                // resizes. Drip cards in at roughly one per frame instead.
+                foreach (var state in batch)
+                {
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        if (cancellationToken.IsCancellationRequested || !string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase)) return;
+                        AddCachedClip(state);
+                    }, DispatcherPriority.Background);
+                    await Task.Delay(cardArrivalDelay, cancellationToken);
+                }
+
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     if (cancellationToken.IsCancellationRequested || !string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase)) return;
-                    foreach (var state in batch) AddCachedClip(state);
                     ApplyGameFilters();
                     ApplyClipTypeFilters();
                     ApplySearchFilter();
@@ -2877,8 +2958,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 _cachedLibraryRestoreCts.Dispose();
                 _cachedLibraryRestoreCts = null;
                 _isRestoringCachedLibrary = false;
+                _startupLibraryStates = Array.Empty<CachedClipState>();
+                _startupLibraryDateMarkers = Array.Empty<LibraryStartupDateMarker>();
+                _startupVisibleClipCount = 0;
+                _loadedVisibleLibraryTileCount = 0;
+                _loadedStartupClipCount = 0;
+                _startupLibraryIndexVersion++;
+                OnPropertyChanged(nameof(StartupLibraryIndexVersion));
+                OnPropertyChanged(nameof(LibraryLoadingTileCount));
+                OnPropertyChanged(nameof(LoadedVisibleLibraryTileCount));
+                OnPropertyChanged(nameof(ShowLibraryLoadingTiles));
+                LibraryReservedContentHeight = 0;
                 _restoredClipPaths.Clear();
                 OnPropertyChanged(nameof(IsRestoringLibraryCache));
+                OnPropertyChanged(nameof(LibraryTitle));
+                RecomputeGameFilterBadges();
             }
         }
     }
@@ -2920,6 +3014,112 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var clip = new ClipCardViewModel(state, Settings.LibraryFolder);
         AttachClip(clip);
         AllClips.Add(clip);
+        if (_isRestoringCachedLibrary)
+        {
+            _loadedStartupClipCount++;
+            OnPropertyChanged(nameof(LibraryTitle));
+        }
+        if (clip.IsVisibleInLibrary)
+        {
+            _loadedVisibleLibraryTileCount++;
+            OnPropertyChanged(nameof(LoadedVisibleLibraryTileCount));
+        }
+    }
+
+    // Called once MainWindow has measured a hidden real card. The reservation
+    // uses real card chrome, so it remains correct across display scaling and
+    // avoids a scrollbar thumb that shrinks as cached cards trickle in.
+    internal void CompleteInitialLibraryLayout(double measuredRowPitch, double surfaceTopInset, double surfaceHeight)
+    {
+        if (IsInitialLibraryLoadComplete || !HasStartupLibraryIndex) return;
+        if (double.IsFinite(measuredRowPitch) && measuredRowPitch > CardImageHeight)
+        {
+            _startupCardChromeHeight = measuredRowPitch - CardImageHeight;
+            OnPropertyChanged(nameof(LibraryLoadingRowPitch));
+        }
+        if (double.IsFinite(surfaceTopInset) && surfaceTopInset >= 0
+            && double.IsFinite(surfaceHeight) && surfaceHeight > CardImageHeight)
+        {
+            _startupCardSurfaceTopInset = surfaceTopInset;
+            _startupCardSurfaceChromeHeight = surfaceHeight - CardImageHeight;
+            OnPropertyChanged(nameof(LibraryLoadingTileTopInset));
+            OnPropertyChanged(nameof(LibraryLoadingTileHeight));
+        }
+
+        UpdateReservedLibraryExtent();
+        IsInitialLibraryLoadComplete = true;
+    }
+
+    private void RefreshStartupLibraryIndex()
+    {
+        if (!HasStartupLibraryIndex) return;
+
+        var visible = _startupLibraryStates.Where(IsStartupStateVisible).ToArray();
+        var countsByDate = visible
+            .GroupBy(state => state.Media.CreatedAt.ToLocalTime().Date)
+            .ToDictionary(group => group.Key, group => group.Count());
+        var seenDates = new HashSet<DateTime>();
+        var markers = new List<LibraryStartupDateMarker>();
+        for (var index = 0; index < visible.Length; index++)
+        {
+            var state = visible[index];
+            var localDate = state.Media.CreatedAt.ToLocalTime();
+            if (!seenDates.Add(localDate.Date)) continue;
+            var format = localDate.Year == DateTime.Now.Year ? "MMM d" : "MMM d, yyyy";
+            markers.Add(new LibraryStartupDateMarker(
+                localDate.ToString(format).ToUpperInvariant(),
+                index,
+                countsByDate[localDate.Date]));
+        }
+
+        UpdateLoadedVisibleLibraryTileCount();
+        if (_startupVisibleClipCount == visible.Length && _startupLibraryDateMarkers.SequenceEqual(markers)) return;
+        _startupVisibleClipCount = visible.Length;
+        _startupLibraryDateMarkers = markers;
+        _startupLibraryIndexVersion++;
+        OnPropertyChanged(nameof(StartupLibraryIndexVersion));
+        OnPropertyChanged(nameof(LibraryLoadingTileCount));
+        UpdateReservedLibraryExtent();
+    }
+
+    private void UpdateLoadedVisibleLibraryTileCount()
+    {
+        var count = AllClips.Count(clip => clip.IsVisibleInLibrary);
+        if (_loadedVisibleLibraryTileCount == count) return;
+        _loadedVisibleLibraryTileCount = count;
+        OnPropertyChanged(nameof(LoadedVisibleLibraryTileCount));
+    }
+
+    private void UpdateReservedLibraryExtent()
+    {
+        if (!HasStartupLibraryIndex || !IsInitialLibraryLoadComplete && AllClips.Count == 0) return;
+        var rows = (int)Math.Ceiling(_startupVisibleClipCount / (double)Math.Max(1, CardColumns));
+        LibraryReservedContentHeight = rows * StartupLibraryRowPitch;
+    }
+
+    private bool IsStartupStateVisible(CachedClipState state)
+    {
+        var game = CachedStateGameFilterKey(state);
+        if (_activeGameFilters.Count > 0 && !_activeGameFilters.Contains(game)) return false;
+        if (_activeClipTypeFilters.Count > 0 && !MatchesCachedClipTypeFilter(state)) return false;
+
+        var query = _librarySearchText.Trim();
+        return query.Length == 0 ||
+            state.Media.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+            game.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+            (state.ClipInfo?.FileTitle?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false) ||
+            (state.ClipInfo?.CustomTitle?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    private static string CachedStateGameFilterKey(CachedClipState state) =>
+        state.ClipInfo?.GameDisplayName ?? state.ClipInfo?.FileTitle ?? ClipFileNaming.StripTimestampSuffix(state.Media.Name);
+
+    private bool MatchesCachedClipTypeFilter(CachedClipState state)
+    {
+        if (!string.IsNullOrWhiteSpace(state.ClipInfo?.MedalImportKey)) return _activeClipTypeFilters.Contains(ClipTypeMedalImport);
+        if (!string.IsNullOrWhiteSpace(state.ClipInfo?.AutoClipEventType)) return _activeClipTypeFilters.Contains(ClipTypeAutoClip);
+        if (IsCachedStateVod(state)) return _activeClipTypeFilters.Contains(ClipTypeVod);
+        return _activeClipTypeFilters.Contains(ClipTypeManual);
     }
 
     // Paths already in AllClips during a cached restore pass. Live only for the
@@ -3651,15 +3851,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public void UpdateCardLayout(double availableWidth)
     {
         _lastCardLayoutWidth = availableWidth;
-        // The width handed in is the ScrollViewer's OUTER width, which includes
-        // the strip its vertical scrollbar occupies - the WrapPanel inside
-        // actually gets less than that. Both formulas below divide the width up
-        // almost exactly, so those few pixels were enough to push the last card
-        // of every row onto the next one: a window sized for three columns laid
-        // out two and left a card's worth of dead space down the right side.
-        const double scrollbarAllowance = 20;
-        var contentWidth = Math.Max(320, availableWidth - scrollbarAllowance);
+        // LibraryScrollViewer hides its native scrollbar and the custom date
+        // scrubber lives in the sibling column, so its reported width is the
+        // WrapPanel's full usable viewport. Each card already reserves its own
+        // 4px left and 20px right margin; subtracting another scrollbar strip
+        // left a second, visibly oversized gutter on the right.
+        var contentWidth = Math.Max(320, availableWidth);
 
+        int cardColumns;
+        double cardWidth;
         if (Settings.ScaleClipsWithWindow)
         {
             // More columns on a wider window instead of the same fixed
@@ -3667,8 +3867,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // overflows, clamped to a sane [2, 10] range. 24 matches each
             // card's own trailing Margin (MainWindow.axaml's WrapPanel item,
             // Margin="4,4,20,24" - 4 left + 20 right) reserved per column.
-            CardColumns = Math.Clamp((int)Math.Floor(contentWidth / ScaledCardTargetWidth), 2, 10);
-            CardWidth = Math.Max(220, Math.Floor(contentWidth / CardColumns) - 24);
+            cardColumns = Math.Clamp((int)Math.Floor(contentWidth / ScaledCardTargetWidth), 2, 10);
+            cardWidth = Math.Max(220, Math.Floor(contentWidth / cardColumns) - 24);
         }
         else
         {
@@ -3677,14 +3877,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // 64 off the total for three cards needing 72, so the third card
             // never fit and wrapped, which is the other half of the dead space
             // down the right side.
-            CardColumns = 3;
-            CardWidth = Math.Max(220, Math.Floor(contentWidth / 3) - 24);
+            cardColumns = 3;
+            cardWidth = Math.Max(220, Math.Floor(contentWidth / 3) - 24);
         }
 
-        CardImageHeight = Math.Floor(CardWidth * 9 / 16);
+        var cardImageHeight = Math.Floor(cardWidth * 9 / 16);
+        if (CardColumns == cardColumns && CardWidth == cardWidth && CardImageHeight == cardImageHeight) return;
+
+        CardColumns = cardColumns;
+        CardWidth = cardWidth;
+        CardImageHeight = cardImageHeight;
+        OnPropertyChanged(nameof(LibraryLoadingRowPitch));
+        OnPropertyChanged(nameof(LibraryLoadingTileHeight));
+        if (HasStartupLibraryIndex) UpdateReservedLibraryExtent();
         // Thumbnails decode to whatever the cards are now, not to the source's
         // full 960px - see ClipCardViewModel.SetPreviewDecodeWidth.
-        ClipCardViewModel.SetPreviewDecodeWidth(CardWidth, _cardRenderScaling);
+        ClipCardViewModel.SetPreviewDecodeWidth(cardWidth, _cardRenderScaling);
     }
 
     // Set by MainWindow once the window has a visual root; 1.0 until then,
@@ -5191,7 +5399,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(LibraryPossibleClipsDisplay));
         NotifyStorageChrome();
         NotifySelectionChrome();
-        RecomputeGameFilterBadges();
+        // Cached library data already supplied exact game counts before cards
+        // began arriving. Rebuilding this for each trickled-in card would
+        // replace that complete sidebar with a partial one until restore ends.
+        if (!_isRestoringCachedLibrary) RecomputeGameFilterBadges();
         UpdateFirstOfDateFlags();
     }
 
@@ -5597,27 +5808,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             .GroupBy(clip => clip.GameFilterKey, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
 
-        // A previously-active game filter's target game can disappear
-        // entirely (its last clip got deleted) - drop it from the active
-        // set rather than leave the library showing zero clips with no
-        // visible way to tell why.
-        var removedAnyGameFilter = _activeGameFilters.RemoveWhere(name => !countsByGame.ContainsKey(name)) > 0;
-
-        GameFilterOptions.Clear();
-        foreach (var game in countsByGame.OrderByDescending(pair => pair.Value).ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
-        {
-            GameFilterOptions.Add(new FilterOptionViewModel(
-                game.Key,
-                $"{game.Key} ({game.Value})",
-                _activeGameFilters.Contains(game.Key),
-                OnGameFilterOptionChanged)
-            {
-                Icon = GameIconService.TryLoad(game.Key)
-            });
-        }
-
-        RebuildGameRail();
-        RequestMissingGameIcons();
+        var removedAnyGameFilter = SetGameFilterOptions(countsByGame, removeMissingActiveFilter: true);
 
         // Same "(count)" suffix the game filter rows above already get.
         var manualCount = AllClips.Count(clip => clip.IsManualClip);
@@ -5645,6 +5836,74 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsAllClipsActive));
             OnPropertyChanged(nameof(LibraryTitle));
         }
+    }
+
+    private void PopulateGameFilterOptionsFromCache(IReadOnlyList<CachedClipState> cached)
+    {
+        var countsByGame = cached
+            .GroupBy(state => state.ClipInfo?.GameDisplayName ?? state.ClipInfo?.FileTitle ?? ClipFileNaming.StripTimestampSuffix(state.Media.Name), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+        SetGameFilterOptions(countsByGame, removeMissingActiveFilter: false);
+    }
+
+    private void PopulateClipTypeFilterOptionsFromCache(IReadOnlyList<CachedClipState> cached)
+    {
+        var manualCount = 0;
+        var autoClipCount = 0;
+        var vodCount = 0;
+        var medalImportCount = 0;
+        foreach (var state in cached)
+        {
+            if (!string.IsNullOrWhiteSpace(state.ClipInfo?.MedalImportKey)) medalImportCount++;
+            else if (!string.IsNullOrWhiteSpace(state.ClipInfo?.AutoClipEventType)) autoClipCount++;
+            else if (IsCachedStateVod(state)) vodCount++;
+            else manualCount++;
+        }
+
+        var hasMedalImports = medalImportCount > 0;
+        if (!hasMedalImports) _activeClipTypeFilters.Remove(ClipTypeMedalImport);
+        ClipTypeFilterOptions.Clear();
+        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeManual, $"Manual clips ({manualCount})", _activeClipTypeFilters.Contains(ClipTypeManual), OnClipTypeFilterOptionChanged));
+        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeAutoClip, $"Auto-Clips ({autoClipCount})", _activeClipTypeFilters.Contains(ClipTypeAutoClip), OnClipTypeFilterOptionChanged));
+        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeVod, $"Full Session / VODs ({vodCount})", _activeClipTypeFilters.Contains(ClipTypeVod), OnClipTypeFilterOptionChanged));
+        if (hasMedalImports)
+        {
+            ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeMedalImport, $"Medal imports ({medalImportCount})", _activeClipTypeFilters.Contains(ClipTypeMedalImport), OnClipTypeFilterOptionChanged));
+        }
+    }
+
+    private bool IsCachedStateVod(CachedClipState state)
+    {
+        if (state.Media.Duration.TotalSeconds > LibraryLayout.ClipMaximumDurationSeconds) return true;
+        if (string.IsNullOrWhiteSpace(Settings.LibraryFolder)) return false;
+        var relative = Path.GetRelativePath(LibraryLayout.VodsRoot(Settings.LibraryFolder), state.Media.Path);
+        return !relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative);
+    }
+
+    private bool SetGameFilterOptions(IReadOnlyDictionary<string, int> countsByGame, bool removeMissingActiveFilter)
+    {
+        var removedAnyGameFilter = removeMissingActiveFilter && _activeGameFilters.RemoveWhere(name => !countsByGame.ContainsKey(name)) > 0;
+
+        // A previously-active game filter's target game can disappear
+        // entirely (its last clip got deleted) - drop it from the active
+        // set rather than leave the library showing zero clips with no
+        // visible way to tell why.
+        GameFilterOptions.Clear();
+        foreach (var game in countsByGame.OrderByDescending(pair => pair.Value).ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            GameFilterOptions.Add(new FilterOptionViewModel(
+                game.Key,
+                $"{game.Key} ({game.Value})",
+                _activeGameFilters.Contains(game.Key),
+                OnGameFilterOptionChanged)
+            {
+                Icon = GameIconService.TryLoad(game.Key)
+            });
+        }
+
+        RebuildGameRail();
+        RequestMissingGameIcons();
+        return removedAnyGameFilter;
     }
 
     // ---- Sidebar game rail: folders, ordering, drag/drop ------------------
@@ -6118,6 +6377,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             clip.IsMatchedByGameFilter = _activeGameFilters.Count == 0 || _activeGameFilters.Contains(clip.GameFilterKey);
         }
         UpdateDaySelectionStates();
+        if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
         OnPropertyChanged(nameof(IsLibraryHeaderSelected));
     }
 
@@ -6127,6 +6387,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             clip.IsMatchedByClipTypeFilter = _activeClipTypeFilters.Count == 0 || MatchesClipTypeFilter(clip);
         }
+        if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
         OnPropertyChanged(nameof(IsLibraryHeaderSelected));
     }
 
@@ -6202,6 +6463,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (!SetProperty(ref _librarySearchText, value)) return;
             ApplySearchFilter();
+            if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
             OnPropertyChanged(nameof(LibraryTitle));
         }
     }
@@ -6213,6 +6475,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             clip.IsMatchedBySearch = query.Length == 0 || MatchesSearch(clip, query);
         }
+        if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
         OnPropertyChanged(nameof(IsLibraryHeaderSelected));
     }
 

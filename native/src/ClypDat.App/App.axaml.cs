@@ -17,6 +17,7 @@ public sealed partial class App : Application
     private TrayIcon? _trayIcon;
     private MainWindow? _mainWindow;
     private Stream? _trayIconStream;
+    private ServerTrayMenuRenderer? _serverTrayMenuRenderer;
 
     public override void Initialize()
     {
@@ -69,6 +70,11 @@ public sealed partial class App : Application
             };
             _mainWindow.ApplySavedWindowBounds();
             desktop.MainWindow = _mainWindow;
+            if (WindowsPlatformProfile.IsServer())
+            {
+                _serverTrayMenuRenderer = new ServerTrayMenuRenderer("ClypDat");
+                desktop.Exit += (_, _) => _serverTrayMenuRenderer?.Dispose();
+            }
             InitializeTrayIcon();
             if (minimized)
             {
