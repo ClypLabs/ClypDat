@@ -40,6 +40,9 @@ internal sealed class LibraryLoadingTilesOverlay : Control
     // Each tile starts its sweep slightly after the one up-left of it, so the
     // highlight reads as a single diagonal wave crossing the grid.
     private const double DiagonalStaggerSeconds = 0.07;
+    // Horizontal shear per unit of tile height; negative leans the band's top
+    // edge ahead of its bottom, roughly a 27 degree tilt.
+    private const double ShearFactor = -0.5;
     private static readonly Stopwatch Clock = Stopwatch.StartNew();
     private static readonly List<LibraryLoadingTilesOverlay> ActiveOverlays = [];
     private static readonly DispatcherTimer Timer = new() { Interval = TimeSpan.FromMilliseconds(16) };
@@ -54,9 +57,6 @@ internal sealed class LibraryLoadingTilesOverlay : Control
         Spread = -6,
         Color = Color.Parse("#66000000")
     });
-    private StreamGeometry? _shimmerGeometry;
-    private double _shimmerGeometryHeight;
-    private double _shimmerGeometryWidth;
     private RectangleGeometry? _clipGeometry;
 
     static LibraryLoadingTilesOverlay()
@@ -168,9 +168,14 @@ internal sealed class LibraryLoadingTilesOverlay : Control
         var tileHeight = TileHeight;
         var tileWidth = TileWidth;
         var shimmerWidth = tileWidth * 1.3;
-        EnsureShimmerGeometry(tileHeight, shimmerWidth);
         EnsureTileGeometry(tileWidth, tileHeight);
-        var travel = tileWidth + shimmerWidth * 2;
+        // The band is drawn axis-aligned and sheared, so the gradient's own
+        // contour lines lean with it - shearing only the outline would leave
+        // the falloff running straight up and down inside a slanted shape.
+        var slantSpan = Math.Abs(ShearFactor) * tileHeight;
+        var shimmerRect = new Rect(0, 0, shimmerWidth, tileHeight);
+        var startX = -shimmerWidth - slantSpan;
+        var travel = tileWidth + shimmerWidth * 2 + slantSpan * 2;
 
         using (context.PushClip(new Rect(Bounds.Size)))
         {
@@ -197,9 +202,9 @@ internal sealed class LibraryLoadingTilesOverlay : Control
                         var opacity = Math.Sin(Math.PI * t);
                         opacity *= opacity;
                         using (context.PushOpacity(opacity))
-                        using (context.PushTransform(Matrix.CreateTranslation(-shimmerWidth + travel * EaseInOut(t), 0)))
+                        using (context.PushTransform(new Matrix(1, 0, ShearFactor, 1, startX + travel * EaseInOut(t), 0)))
                         {
-                            context.DrawGeometry(ShimmerBrush, null, _shimmerGeometry!);
+                            context.DrawRectangle(ShimmerBrush, null, shimmerRect);
                         }
                     }
                 }
@@ -222,27 +227,6 @@ internal sealed class LibraryLoadingTilesOverlay : Control
             RadiusX = 12,
             RadiusY = 12
         };
-    }
-
-    private void EnsureShimmerGeometry(double tileHeight, double shimmerWidth)
-    {
-        if (_shimmerGeometry is not null
-            && Math.Abs(_shimmerGeometryHeight - tileHeight) < 0.01
-            && Math.Abs(_shimmerGeometryWidth - shimmerWidth) < 0.01) return;
-
-        _shimmerGeometryHeight = tileHeight;
-        _shimmerGeometryWidth = shimmerWidth;
-        var slant = tileHeight * 0.28;
-        var shimmer = new StreamGeometry();
-        using (var geometry = shimmer.Open())
-        {
-            geometry.BeginFigure(new Point(-slant, 0), true);
-            geometry.LineTo(new Point(shimmerWidth - slant, 0));
-            geometry.LineTo(new Point(shimmerWidth + slant, tileHeight));
-            geometry.LineTo(new Point(slant, tileHeight));
-            geometry.EndFigure(true);
-        }
-        _shimmerGeometry = shimmer;
     }
 
     private static IBrush CreateSurfaceBrush() => new LinearGradientBrush
