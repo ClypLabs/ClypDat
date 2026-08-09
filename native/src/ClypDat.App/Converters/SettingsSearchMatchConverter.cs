@@ -44,13 +44,10 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
             "Add games", "Add a running game", "browse for an executable", "Game icons", "Refresh game icons",
             "Excluded games", "Excluded from detection", "capture backend override"
         },
-        ["Import from Medal"] = new[]
+        ["Import Clips"] = new[]
         {
-            "Import options", "Strip emoji from titles", "Copy instead of move", "Scan", "Scan for Medal clips"
-        },
-        ["Import from SteelSeries"] = new[]
-        {
-            "Import options", "Copy instead of move", "Scan", "Scan for SteelSeries clips", "Moments"
+            "Import options", "Medal", "SteelSeries", "Moments", "Strip emoji from titles", "Copy instead of move",
+            "Scan", "Scan for Medal clips", "Scan for SteelSeries clips"
         },
         ["Replay Buffer"] = new[]
         {

@@ -495,6 +495,8 @@ public sealed class ClipCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(GameFilterKey));
         OnPropertyChanged(nameof(IsVod));
         OnPropertyChanged(nameof(IsMedalImport));
+        OnPropertyChanged(nameof(IsSteelSeriesImport));
+        OnPropertyChanged(nameof(IsExternalImport));
         OnPropertyChanged(nameof(CanChangeGame));
         OnPropertyChanged(nameof(IsManualClip));
         OnPropertyChanged(nameof(Name));

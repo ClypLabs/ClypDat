@@ -1185,11 +1185,10 @@
                 </Button>
               </TextBox.InnerRightContent>
             </TextBox>
-            <TextBlock Text="GENERAL" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" Margin="22,0,0,14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter='General|Game Detection|Import from Medal|Import from SteelSeries'}" />
+            <TextBlock Text="GENERAL" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" Margin="22,0,0,14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter='General|Game Detection|Import Clips'}" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=General}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=General}" Tag="General" Content="General" Click="SettingsNavButton_OnClick" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Detection}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Game Detection}" Tag="Game Detection" Content="Game Detection" Click="SettingsNavButton_OnClick" />
-            <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Import from Medal}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Import from Medal}" Tag="Import from Medal" Content="Import from Medal" Click="SettingsNavButton_OnClick" />
-            <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Import from SteelSeries}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Import from SteelSeries}" Tag="Import from SteelSeries" Content="Import from SteelSeries" Click="SettingsNavButton_OnClick" />
+            <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Import Clips}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Import Clips}" Tag="Import Clips" Content="Import Clips" Click="SettingsNavButton_OnClick" />
 
             <TextBlock Text="CAPTURE" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" Margin="22,20,0,14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter='Replay Buffer|Overlays and Notifications|Auto-Clip|Audio|Game Audio Exclusions'}" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Replay Buffer}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Replay Buffer}" Tag="Replay Buffer" Content="Replay Buffer" Click="SettingsNavButton_OnClick" />
@@ -1804,13 +1803,32 @@
               </Border>
             </StackPanel>
 
-            <StackPanel Spacing="18" Tag="Import from Medal">
-              <StackPanel.IsVisible>
-                <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Import from Medal">
-                  <Binding Path="SettingsSearchText" />
-                  <Binding Path="SelectedSettingsSection" />
-                </MultiBinding>
-              </StackPanel.IsVisible>
+            <StackPanel Spacing="18" Tag="Import Clips" IsVisible="{Binding IsImportSourcePickerVisible}">
+              <Border Height="1" Background="#1B242D" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
+              <StackPanel Spacing="4">
+                <TextBlock Text="IMPORT CLIPS" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
+                <TextBlock Text="Choose where your clips come from." Foreground="#93A6B8" TextWrapping="Wrap" />
+              </StackPanel>
+              <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                <Border Classes="settingsCard" Padding="16">
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="Medal" Foreground="#D2DEEC" FontWeight="Bold" FontSize="16" />
+                    <TextBlock Text="Import clips recorded by Medal, including its titles and game metadata." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    <Button Content="Open Medal importer" Classes="primaryButton" Tag="Medal" Click="ChooseImportSourceButton_OnClick" HorizontalAlignment="Left" />
+                  </StackPanel>
+                </Border>
+                <Border Grid.Column="1" Classes="settingsCard" Padding="16">
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="SteelSeries Moments" Foreground="#D2DEEC" FontWeight="Bold" FontSize="16" />
+                    <TextBlock Text="Import Moments clips with metadata dates, titles, games, and auto-clip reasons." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    <Button Content="Open SteelSeries importer" Classes="primaryButton" Tag="SteelSeries" Click="ChooseImportSourceButton_OnClick" HorizontalAlignment="Left" />
+                  </StackPanel>
+                </Border>
+              </Grid>
+            </StackPanel>
+
+            <StackPanel Spacing="18" Tag="Import Clips" IsVisible="{Binding IsMedalImportPageVisible}">
+              <Button Content="← Import sources" Classes="linkButton" Click="BackToImportSourcesButton_OnClick" HorizontalAlignment="Left" Padding="0" />
               <Border Height="1" Background="#1B242D" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
               <StackPanel Spacing="4">
                 <TextBlock Text="IMPORT FROM MEDAL" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
@@ -1885,13 +1903,8 @@
               </Border>
             </StackPanel>
 
-            <StackPanel Spacing="18" Tag="Import from SteelSeries">
-              <StackPanel.IsVisible>
-                <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Import from SteelSeries">
-                  <Binding Path="SettingsSearchText" />
-                  <Binding Path="SelectedSettingsSection" />
-                </MultiBinding>
-              </StackPanel.IsVisible>
+            <StackPanel Spacing="18" Tag="Import Clips" IsVisible="{Binding IsSteelSeriesImportPageVisible}">
+              <Button Content="← Import sources" Classes="linkButton" Click="BackToImportSourcesButton_OnClick" HorizontalAlignment="Left" Padding="0" />
               <Border Height="1" Background="#1B242D" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
               <StackPanel Spacing="4">
                 <TextBlock Text="IMPORT FROM STEELSERIES MOMENTS" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />

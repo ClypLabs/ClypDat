@@ -31,6 +31,16 @@ public sealed class SteelSeriesImportServiceTests
         Assert.Equal("Counter-Strike 2 (Trimmed)", SteelSeriesImportService.NormalizeTitle("Moments clip from Nov 11, 2025", "Counter-Strike 2", "unused", isTrimmed: true));
     }
 
+    [Theory]
+    [InlineData("Auto-clip: Headshot kill", "auto", "headshot", "Headshot kill")]
+    [InlineData("Auto-clip: Double Elimination", "auto", "double_kill", "Double Elimination")]
+    [InlineData(null, "auto", "victory_royale", "Victory Royale")]
+    [InlineData("Moments clip from Nov 11, 2025", "shortcut", "shortcut", null)]
+    public void AutoClipMetadata_ExtractsReasonOnlyWhenAutomatic(string? title, string? triggerType, string? triggerName, string? expected)
+    {
+        Assert.Equal(expected, SteelSeriesImportService.GetAutoClipEventType(title, triggerType, triggerName));
+    }
+
     [Fact]
     public void NormalizeGame_MapsDesktopPlaceholder()
     {

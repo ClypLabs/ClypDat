@@ -14,7 +14,8 @@ public sealed record SteelSeriesClipRecord(
     string Title,
     string? CatalogId = null,
     bool IsLegacyFallback = false,
-    bool IsTrimmed = false);
+    bool IsTrimmed = false,
+    string? AutoClipEventType = null);
 
 public sealed record SteelSeriesScanProgress(double Percent, string Status);
 
@@ -79,7 +80,7 @@ public static class SteelSeriesImportService
         {
             using var connection = OpenReadOnly(DatabasePath);
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT id,name,path,recording_timestamp,thumbnail_path,last_game_name,is_deleted,is_manually_trimmed FROM moments_clips WHERE path IS NOT NULL";
+            command.CommandText = "SELECT id,name,path,recording_timestamp,thumbnail_path,last_game_name,is_deleted,is_manually_trimmed,trigger_type,trigger_name FROM moments_clips WHERE path IS NOT NULL";
             using var reader = command.ExecuteReader();
             var count = 0;
             while (reader.Read())
@@ -99,7 +100,10 @@ public static class SteelSeriesImportService
                 var isTrimmed = !reader.IsDBNull(7) && reader.GetInt64(7) != 0;
                 var title = NormalizeTitle(name, game, Path.GetFileNameWithoutExtension(path), isTrimmed);
                 var thumbnail = reader.IsDBNull(4) ? null : reader.GetString(4);
-                results.Add(new SteelSeriesClipRecord(path, thumbnail, game, capturedAt, title, reader.GetString(0), IsTrimmed: isTrimmed));
+                var triggerType = reader.IsDBNull(8) ? null : reader.GetString(8);
+                var triggerName = reader.IsDBNull(9) ? null : reader.GetString(9);
+                results.Add(new SteelSeriesClipRecord(path, thumbnail, game, capturedAt, title, reader.GetString(0), IsTrimmed: isTrimmed,
+                    AutoClipEventType: GetAutoClipEventType(title, triggerType, triggerName)));
                 progress?.Report(new SteelSeriesScanProgress(Math.Min(40, count / 307d * 40), $"Reading SteelSeries catalog clip {count}..."));
             }
             return true;
@@ -240,14 +244,37 @@ public static class SteelSeriesImportService
                 ?? (TryParseTimestampedName(Path.GetFileNameWithoutExtension(path), out var inferredGame, out _) ? NormalizeGame(inferredGame) : null)
                 ?? "Unknown Game";
             var isTrimmed = root.TryGetProperty("is_manually_trimmed", out var trimmedValue) && trimmedValue.ValueKind == JsonValueKind.True;
-            var title = NormalizeTitle(root.TryGetProperty("name", out var name) ? name.GetString() : null, game, Path.GetFileNameWithoutExtension(path), isTrimmed);
+            var nameText = root.TryGetProperty("name", out var name) ? name.GetString() : null;
+            var title = NormalizeTitle(nameText, game, Path.GetFileNameWithoutExtension(path), isTrimmed);
             var thumbnail = root.TryGetProperty("thumbnail_path", out var thumbnailValue) ? thumbnailValue.GetString() : null;
-            record = new SteelSeriesClipRecord(path, thumbnail, game, capturedAt, title, IsTrimmed: isTrimmed);
+            var triggerType = root.TryGetProperty("trigger_type", out var triggerTypeValue) ? triggerTypeValue.GetString() : null;
+            var triggerName = root.TryGetProperty("trigger_name", out var triggerNameValue) ? triggerNameValue.GetString() : null;
+            var autoclipTrigger = root.TryGetProperty("autoclip_trigger", out var autoclipTriggerValue) ? autoclipTriggerValue.GetString() : null;
+            record = new SteelSeriesClipRecord(path, thumbnail, game, capturedAt, title, IsTrimmed: isTrimmed,
+                AutoClipEventType: GetAutoClipEventType(title, triggerType, triggerName ?? autoclipTrigger));
             return true;
         }
         catch
         {
             return false;
         }
+    }
+
+    internal static string? GetAutoClipEventType(string? title, string? triggerType, string? triggerName)
+    {
+        var isAutoClip = string.Equals(triggerType, "auto", StringComparison.OrdinalIgnoreCase)
+            || (!string.IsNullOrWhiteSpace(triggerName) && !string.Equals(triggerName, "shortcut", StringComparison.OrdinalIgnoreCase))
+            || title?.StartsWith("Auto-clip:", StringComparison.OrdinalIgnoreCase) == true;
+        if (!isAutoClip) return null;
+
+        if (!string.IsNullOrWhiteSpace(title) && title.StartsWith("Auto-clip:", StringComparison.OrdinalIgnoreCase))
+        {
+            var reason = title["Auto-clip:".Length..].Trim();
+            if (reason.Length > 0) return reason;
+        }
+
+        if (string.IsNullOrWhiteSpace(triggerName)) return "Auto-clip";
+        return string.Join(' ', triggerName.Split('_', StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => part.Length == 1 ? part.ToUpperInvariant() : char.ToUpperInvariant(part[0]) + part[1..].ToLowerInvariant()));
     }
 }

@@ -172,7 +172,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings = AppSettingsStore.Load();
         Settings.ProcessPriority = ProcessPriorityService.Normalize(Settings.ProcessPriority);
         ProcessPriorityService.Apply(Settings.ProcessPriority);
-        if (!string.IsNullOrWhiteSpace(Settings.LastSettingsSection)) _selectedSettingsSection = Settings.LastSettingsSection;
+        if (Settings.LastSettingsSection is "Import from Medal" or "Import from SteelSeries")
+        {
+            _selectedSettingsSection = "Import Clips";
+            Settings.LastSettingsSection = "Import Clips";
+        }
+        else if (!string.IsNullOrWhiteSpace(Settings.LastSettingsSection)) _selectedSettingsSection = Settings.LastSettingsSection;
         // Curated game-icons.json entries (delisted store names, curated
         // Steam app IDs like the CS:GO fix) only reach a running app through
         // this - RequestMissingGameIcons only pulls it in as a side effect of
@@ -1116,18 +1121,43 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string AppCommitDisplay => $"({CommitHash})";
     public string AppCommitUrl => $"https://github.com/ClypDat/ClypDat/commit/{CommitHash}";
 
+    private string? _selectedImportSource;
+
     public string SelectedSettingsSection
     {
         get => _selectedSettingsSection;
-        set => SetProperty(ref _selectedSettingsSection, value);
+        set
+        {
+            if (!SetProperty(ref _selectedSettingsSection, value)) return;
+            OnPropertyChanged(nameof(IsImportSourcePickerVisible));
+            OnPropertyChanged(nameof(IsMedalImportPageVisible));
+            OnPropertyChanged(nameof(IsSteelSeriesImportPageVisible));
+        }
     }
 
     public void SelectSettingsSection(string section)
     {
+        if (string.Equals(section, "Import Clips", StringComparison.Ordinal)) SelectImportSource(null);
         SelectedSettingsSection = section;
         Settings.LastSettingsSection = section;
         SaveSettings();
     }
+
+    public bool IsImportSourcePickerVisible => SelectedSettingsSection == "Import Clips" && string.IsNullOrWhiteSpace(_selectedImportSource);
+    public bool IsMedalImportPageVisible => SelectedSettingsSection == "Import Clips" && string.Equals(_selectedImportSource, "Medal", StringComparison.Ordinal);
+    public bool IsSteelSeriesImportPageVisible => SelectedSettingsSection == "Import Clips" && string.Equals(_selectedImportSource, "SteelSeries", StringComparison.Ordinal);
+
+    public void SelectImportSource(string? source)
+    {
+        if (source is not (null or "Medal" or "SteelSeries")) return;
+        if (string.Equals(_selectedImportSource, source, StringComparison.Ordinal)) return;
+        _selectedImportSource = source;
+        OnPropertyChanged(nameof(IsImportSourcePickerVisible));
+        OnPropertyChanged(nameof(IsMedalImportPageVisible));
+        OnPropertyChanged(nameof(IsSteelSeriesImportPageVisible));
+    }
+
+    public void BackToImportSources() => SelectImportSource(null);
 
     public bool IsCapturingHotkey
     {
@@ -2091,6 +2121,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         try
         {
             var found = await Task.Run(() => SteelSeriesImportService.ScanForClips(progress));
+            var backfilled = await Task.Run(() => BackfillSteelSeriesAutoClipMetadata(found));
+            if (backfilled > 0) await RefreshLibraryAsync();
             var importedKeys = LoadSteelSeriesImportHistory();
             AddExistingSteelSeriesImportKeys(importedKeys);
             PersistSteelSeriesImportHistory(importedKeys);
@@ -2167,7 +2199,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                         File.SetLastWriteTimeUtc(destinationPath, row.Record.CapturedAt.UtcDateTime);
                     });
                     var importKey = SteelSeriesImportService.GetImportKey(row.Record);
-                    ClipInfoSidecar.Save(Settings.LibraryFolder, destinationPath, new ClipInfo(row.GameName, null, row.DisplayTitle, row.Record.CapturedAt, SteelSeriesImportKey: importKey));
+                    ClipInfoSidecar.Save(Settings.LibraryFolder, destinationPath, new ClipInfo(row.GameName, row.Record.AutoClipEventType, row.DisplayTitle, row.Record.CapturedAt, SteelSeriesImportKey: importKey));
                     var history = LoadSteelSeriesImportHistory(); history.Add(importKey); PersistSteelSeriesImportHistory(history);
                     await AddOrUpdateLibraryClipAsync(destinationPath);
                     imported++; SteelSeriesImportRows.Remove(row);
@@ -2210,6 +2242,31 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     private static bool IsKnownSteelSeriesImport(SteelSeriesClipRecord record, ISet<string> keys) => keys.Contains(SteelSeriesImportService.GetImportKey(record));
+
+    private int BackfillSteelSeriesAutoClipMetadata(IReadOnlyList<SteelSeriesClipRecord> records)
+    {
+        if (string.IsNullOrWhiteSpace(Settings.LibraryFolder) || !Directory.Exists(Settings.LibraryFolder)) return 0;
+        var reasonsByKey = records
+            .Where(record => !string.IsNullOrWhiteSpace(record.AutoClipEventType))
+            .GroupBy(SteelSeriesImportService.GetImportKey, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First().AutoClipEventType!, StringComparer.Ordinal);
+        if (reasonsByKey.Count == 0) return 0;
+
+        var updated = 0;
+        try
+        {
+            foreach (var path in Directory.EnumerateFiles(Settings.LibraryFolder, "*.*", SearchOption.AllDirectories).Where(MediaProbeService.IsVideoFile))
+            {
+                var info = ClipInfoSidecar.Load(Settings.LibraryFolder, path);
+                if (info is null || string.IsNullOrWhiteSpace(info.SteelSeriesImportKey) || !string.IsNullOrWhiteSpace(info.AutoClipEventType)) continue;
+                if (!reasonsByKey.TryGetValue(info.SteelSeriesImportKey, out var reason)) continue;
+                ClipInfoSidecar.Save(Settings.LibraryFolder, path, info with { AutoClipEventType = reason });
+                updated++;
+            }
+        }
+        catch (Exception error) { AppLog.Error("SteelSeries import: failed backfilling auto-clip metadata.", error); }
+        return updated;
+    }
 
     private void SteelSeriesImportRows_OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
@@ -3325,8 +3382,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private bool MatchesCachedClipTypeFilter(CachedClipState state)
     {
-        if (!string.IsNullOrWhiteSpace(state.ClipInfo?.MedalImportKey)) return _activeClipTypeFilters.Contains(ClipTypeMedalImport);
-        if (!string.IsNullOrWhiteSpace(state.ClipInfo?.AutoClipEventType)) return _activeClipTypeFilters.Contains(ClipTypeAutoClip);
+        var isMedalImport = !string.IsNullOrWhiteSpace(state.ClipInfo?.MedalImportKey);
+        var isSteelSeriesImport = !string.IsNullOrWhiteSpace(state.ClipInfo?.SteelSeriesImportKey);
+        var isAutoClip = !string.IsNullOrWhiteSpace(state.ClipInfo?.AutoClipEventType);
+        if (isMedalImport && _activeClipTypeFilters.Contains(ClipTypeMedalImport)) return true;
+        if (isSteelSeriesImport && _activeClipTypeFilters.Contains(ClipTypeSteelSeriesImport)) return true;
+        if (isAutoClip && _activeClipTypeFilters.Contains(ClipTypeAutoClip)) return true;
+        if (isMedalImport || isSteelSeriesImport || isAutoClip) return false;
         if (IsCachedStateVod(state)) return _activeClipTypeFilters.Contains(ClipTypeVod);
         return _activeClipTypeFilters.Contains(ClipTypeManual);
     }
@@ -6044,11 +6106,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var steelSeriesImportCount = 0;
         foreach (var state in cached)
         {
-            if (!string.IsNullOrWhiteSpace(state.ClipInfo?.MedalImportKey)) medalImportCount++;
-            else if (!string.IsNullOrWhiteSpace(state.ClipInfo?.SteelSeriesImportKey)) steelSeriesImportCount++;
-            else if (!string.IsNullOrWhiteSpace(state.ClipInfo?.AutoClipEventType)) autoClipCount++;
-            else if (IsCachedStateVod(state)) vodCount++;
-            else manualCount++;
+            var isMedalImport = !string.IsNullOrWhiteSpace(state.ClipInfo?.MedalImportKey);
+            var isSteelSeriesImport = !string.IsNullOrWhiteSpace(state.ClipInfo?.SteelSeriesImportKey);
+            var isAutoClip = !string.IsNullOrWhiteSpace(state.ClipInfo?.AutoClipEventType);
+            if (isMedalImport) medalImportCount++;
+            if (isSteelSeriesImport) steelSeriesImportCount++;
+            if (isAutoClip) autoClipCount++;
+            if (!isMedalImport && !isSteelSeriesImport && !isAutoClip)
+            {
+                if (IsCachedStateVod(state)) vodCount++;
+                else manualCount++;
+            }
         }
 
         var hasMedalImports = medalImportCount > 0;
@@ -6599,7 +6667,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // per-button matching and this auto-navigate check work from.
     private static readonly string[] SettingsSectionNames =
     {
-        "General", "Game Detection", "Import from Medal", "Import from SteelSeries",
+        "General", "Game Detection", "Import Clips",
         "Replay Buffer", "Overlays and Notifications", "Auto-Clip", "Audio", "Game Audio Exclusions",
         "About"
     };

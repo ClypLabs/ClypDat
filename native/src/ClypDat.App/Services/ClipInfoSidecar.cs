@@ -8,7 +8,7 @@ namespace ClypDat.App.Services;
 // the tile instead of parsing it back out of the clip's filename, which for a
 // manual clip is just the game name and for an auto-clip is "<event> - <map>".
 // CustomTitle is a separate, user-set display label shown in place of "Clip
-// from {date}" for non-auto-clip cards (manual clips, VODs, Medal imports) -
+// from {date}" for non-auto-clip cards (manual clips, VODs, external imports) -
 // deliberately independent of FileTitle/GameDisplayName so renaming a clip
 // never touches the game association or, for a Medal import, its original
 // event title (e.g. "4K - Inferno").
@@ -20,7 +20,7 @@ public sealed record ClipInfo(
     string? MedalImportKey = null,
     string? CustomTitle = null,
     // Distinguishes a re-encoded Export from the original recording - both are
-    // ordinary "manual" cards (no AutoClipEventType/MedalImportKey) with the
+    // ordinary "manual" cards (no AutoClipEventType/import provenance) with the
     // same CustomTitle-or-fallback tile logic, but an untitled export should
     // read "Exported clip from" (see ClipCardViewModel.ClipFromLabel), not
     // "Clip from", since it's a derived copy rather than the actual recording.

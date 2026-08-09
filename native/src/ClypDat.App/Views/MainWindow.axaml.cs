@@ -4690,6 +4690,16 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void ChooseImportSourceButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string source }) ViewModel?.SelectImportSource(source);
+    }
+
+    private void BackToImportSourcesButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel?.BackToImportSources();
+    }
+
     // While a search is active every matching section renders at once
     // (SettingsSectionVisibleConverter), so the nav list stops being a switcher
     // and becomes a list of results - and clicking one did nothing visible if
