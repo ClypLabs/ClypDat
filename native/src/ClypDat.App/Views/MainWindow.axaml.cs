@@ -1901,7 +1901,11 @@ public sealed partial class MainWindow : Window
             var scrollbarLeft = Canvas.GetLeft(DateScrubberThumb);
             if (double.IsNaN(scrollbarLeft)) scrollbarLeft = 34;
             Canvas.SetLeft(tick, scrollbarLeft - tickWidth);
-            Canvas.SetTop(tick, ContentOffsetToTrackY(contentY) - 1);
+            // Markers are centred on their mapped content position. The first
+            // date maps to zero, so clamp its centred line back inside the
+            // rail instead of letting it extend one pixel above the scrollbar.
+            var tickTop = ContentOffsetToTrackY(contentY) - tick.Height / 2;
+            Canvas.SetTop(tick, Math.Clamp(tickTop, 0, Math.Max(0, DateScrubberHost.Bounds.Height - tick.Height)));
             DateScrubberCanvas.Children.Add(tick);
             _scrubberTicks.Add(tick);
         }
