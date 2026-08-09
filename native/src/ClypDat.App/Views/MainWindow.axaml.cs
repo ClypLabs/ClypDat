@@ -1892,11 +1892,12 @@ public sealed partial class MainWindow : Window
 
         foreach (var (_, contentY, clipCount) in _scrubberDates)
         {
+            var tickWidth = Math.Clamp(6 + Math.Log2(Math.Max(1, clipCount)) * 3, 6, 18);
             var tick = new Border
             {
                 // Dense dates stand out with a slightly longer pill without
                 // turning the timeline into a second set of text labels.
-                Width = Math.Clamp(4 + Math.Log2(Math.Max(1, clipCount)) * 2, 4, 12),
+                Width = tickWidth,
                 Height = 1,
                 CornerRadius = new CornerRadius(1),
                 Background = Avalonia.Media.Brush.Parse("#8296AC"),
@@ -1907,7 +1908,9 @@ public sealed partial class MainWindow : Window
                 Opacity = 0,
                 Transitions = new Transitions { new DoubleTransition { Property = Border.OpacityProperty, Duration = TimeSpan.FromSeconds(0.08) } }
             };
-            Canvas.SetLeft(tick, 26);
+            var scrollbarLeft = Canvas.GetLeft(DateScrubberThumb);
+            if (double.IsNaN(scrollbarLeft)) scrollbarLeft = 34;
+            Canvas.SetLeft(tick, scrollbarLeft - tickWidth);
             Canvas.SetTop(tick, ContentOffsetToTrackY(contentY) - 1);
             DateScrubberCanvas.Children.Add(tick);
             _scrubberTicks.Add(tick);
