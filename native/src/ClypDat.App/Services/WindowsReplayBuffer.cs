@@ -676,7 +676,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
             var metadataArgs = new List<string>();
             for (var i = 0; i < tracks.Count; i++) metadataArgs.AddRange(new[] { $"-metadata:s:a:{i}", $"title={tracks[i].Label}" });
-            metadataArgs.AddRange(new[] { "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("Windows Capture")}" });
+            metadataArgs.AddRange(new[] { "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("ClypDat")}" });
 
             // Trimming via -filter_complex meant decoding and fully re-encoding the
             // clip's entire video track (NVENC/x264) just to get a frame-accurate cut

@@ -244,8 +244,13 @@ public sealed class MediaProbeService
                     formatTags.TryGetProperty("comment", out var commentTag))
                 {
                     var comment = commentTag.GetString() ?? string.Empty;
-                    var prefix = ClipMetadataTagger.BackendTagKey + "=";
-                    if (comment.StartsWith(prefix, StringComparison.Ordinal))
+                    var prefixes = new[]
+                    {
+                        ClipMetadataTagger.BackendTagKey + "=",
+                        ClipMetadataTagger.LegacyBackendTagKey + "="
+                    };
+                    var prefix = prefixes.FirstOrDefault(candidate => comment.StartsWith(candidate, StringComparison.Ordinal));
+                    if (prefix is not null)
                     {
                         captureBackend = comment[prefix.Length..];
                     }

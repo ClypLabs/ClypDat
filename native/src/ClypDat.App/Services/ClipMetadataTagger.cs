@@ -9,14 +9,10 @@ public static class ClipMetadataTagger
     // confirmed by directly probing a tagged file and finding the custom key gone.
     // "comment" is one of the recognized keys, so the backend name is embedded
     // inside it instead, prefixed for unambiguous parsing on read-back.
-    // Left as "EVE_CAPTURE_BACKEND" post-rebrand (not "CLYPDAT_CAPTURE_BACKEND") -
-    // every already-recorded clip has this exact key baked into its file's
-    // comment metadata, and the reader (MediaProbeService) matches on this
-    // literal prefix; renaming it would silently lose the "Captured with"
-    // label for every existing clip. Purely internal/never displayed either
-    // way - see NormalizeBackendLabel for how the *value* (not this key)
-    // still reads correctly as "Native" rather than "EVE Native" post-rebrand.
-    public const string BackendTagKey = "EVE_CAPTURE_BACKEND";
+    // New clips use CLYPDAT_CAPTURE_BACKEND. MediaProbeService also accepts
+    // LegacyBackendTagKey so existing EVE-era clips keep their label.
+    public const string BackendTagKey = "CLYPDAT_CAPTURE_BACKEND";
+    internal const string LegacyBackendTagKey = "EVE_CAPTURE_BACKEND";
     private const string CommentKey = "comment";
 
     public static string BuildCommentValue(string backendLabel) => $"{BackendTagKey}={backendLabel}";
