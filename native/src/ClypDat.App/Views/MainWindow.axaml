@@ -830,17 +830,19 @@
           <Grid ColumnDefinitions="*,Auto">
           <!-- Date scrubber (right column, below) replaces the default
                scrollbar, so hide the ScrollViewer's own. -->
+          <controls:LibraryLoadingTilesOverlay
+              x:Name="LibraryLoadingTilesOverlay"
+              Grid.Column="0"
+              Margin="-4,0,-24,0"
+              IsVisible="{Binding ShowLibraryLoadingTiles}"
+              TotalTileCount="{Binding LibraryLoadingTileCount}"
+              LoadedTileCount="{Binding LoadedVisibleLibraryTileCount}"
+              ColumnCount="{Binding CardColumns}"
+              TileWidth="{Binding CardWidth}"
+              TileHeight="{Binding CardImageHeight}"
+              RowPitch="{Binding LibraryLoadingRowPitch}"
+              IsHitTestVisible="False" />
           <ScrollViewer Grid.Column="0" x:Name="LibraryScrollViewer" Margin="-4,0,-24,0" VerticalScrollBarVisibility="Hidden">
-            <Grid MinHeight="{Binding LibraryReservedContentHeight}">
-              <controls:LibraryLoadingTilesOverlay
-                  IsVisible="{Binding ShowLibraryLoadingTiles}"
-                  TotalTileCount="{Binding LibraryLoadingTileCount}"
-                  LoadedTileCount="{Binding LoadedVisibleLibraryTileCount}"
-                  ColumnCount="{Binding CardColumns}"
-                  TileWidth="{Binding CardWidth}"
-                  TileHeight="{Binding CardImageHeight}"
-                  RowPitch="{Binding LibraryLoadingRowPitch}"
-                  IsHitTestVisible="False" />
             <ItemsControl x:Name="LibraryItemsControl"
                           ItemsSource="{Binding AllClips}"
                           Opacity="{Binding LibraryCardGridOpacity}"
@@ -1034,7 +1036,6 @@
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
-            </Grid>
         </ScrollViewer>
 
           <!-- Floats over the library's bottom-right corner once scrolled

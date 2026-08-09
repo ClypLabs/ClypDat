@@ -1568,6 +1568,7 @@ public sealed partial class MainWindow : Window
 
     private void LibraryScrollViewer_OnScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
+        LibraryLoadingTilesOverlay.ScrollOffsetY = LibraryScrollViewer.Offset.Y;
         UpdateDateScrubberThumb();
         UpdateScrollToTopButtonVisibility();
         if (e.OffsetDelta.Y == 0) return;
