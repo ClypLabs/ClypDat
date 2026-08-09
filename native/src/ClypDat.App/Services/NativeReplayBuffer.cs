@@ -117,6 +117,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private volatile bool _sessionActive;
     private AVRational _timeBase = new() { num = 1, den = 1_000_000 };
     private byte[]? _extraData;
+    private AVCodecID _videoCodecId = AVCodecID.AV_CODEC_ID_H264;
     private int _outputWidth;
     private int _outputHeight;
     // Ticks of the last moment genuinely new captured content was scaled into
@@ -804,6 +805,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
             codecContext = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, out var codecTimeBase, out var encoderName, out var hardwareFramesActive);
             _timeBase = codecTimeBase;
+            _videoCodecId = codecContext->codec_id;
 
             if (!hardwareFramesActive) ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
 
@@ -849,7 +851,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             encodeThread.Start();
 
             var adapterDescription = DescribeAdapter(device);
-            AppLog.Info($"Native capture started (DXGI Desktop Duplication): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, encoder={encoderName}, encodePath={(hardwareFramesActive ? "D3D11 zero-copy" : "system-memory")}, cursorPath={(hardwareFramesActive && gpuCursorAvailable ? "GPU" : (config.CaptureCursor ? "CPU" : "off"))}, queue={encodeQueueCapacity} frames, adapter={adapterDescription}, preset={config.EncoderPreset}, configFrameRate={config.FrameRate}.");
+            var videoCodec = encoderName.StartsWith("av1_", StringComparison.OrdinalIgnoreCase) ? "AV1" : "H.264";
+            AppLog.Info($"Native capture started (DXGI Desktop Duplication): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, codec={videoCodec}, encoder={encoderName}, encodePath={(hardwareFramesActive ? "D3D11 zero-copy" : "system-memory")}, cursorPath={(hardwareFramesActive && gpuCursorAvailable ? "GPU" : (config.CaptureCursor ? "CPU" : "off"))}, queue={encodeQueueCapacity} frames, adapter={adapterDescription}, preset={config.EncoderPreset}, configFrameRate={config.FrameRate}.");
             SetHealth(new ReplayCaptureHealth("Native", "Desktop Duplication", ReplayCaptureState.Healthy,
                 config.FrameRate, 0, 0, 0, 0, 0, 0, encoderName, "Default adapter", string.Empty, DateTime.UtcNow)
             {
@@ -3452,6 +3455,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             {
                 _extraData = new byte[codecContext->extradata_size];
                 Marshal.Copy((IntPtr)codecContext->extradata, _extraData, 0, codecContext->extradata_size);
+                _videoCodecId = codecContext->codec_id;
             }
 
             // Dequeues the real timestamp of whichever frame THIS packet
@@ -3670,12 +3674,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 return muxArgs;
             }
 
-            // The ring encoder already produced H.264, so H.264 here is a
-            // plain stream copy (fast). H.265/AV1 re-encode the whole session
-            // on the GPU at finalize time for a much smaller file, falling
-            // back to a stream copy (not a CPU encode - a multi-hour software
-            // re-encode at finalize would be far worse than a bigger file) if
-            // no hardware encoder is available.
+            // Copy only when requested session codec matches rolling encoder.
+            // Auto replay can produce AV1, so a H.264 full-session request must
+            // re-encode instead of silently writing an AV1 file under H.264
+            // setting. AV1 re-encode still uses hardware only; failed hardware
+            // conversion falls back to source stream copy.
             //
             // Vendor comes from ExportEncoderProbe, the same cached NVENC ->
             // AMF -> QSV detection the export and share paths use, rather than
@@ -3683,14 +3686,27 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // guaranteed-to-fail ffmpeg pass and then silently kept the larger
             // stream-copy file - the smaller-file feature simply never worked
             // off NVIDIA, and nothing said so.
-            var codecArgs = (config.FullSessionVideoCodec, ExportEncoderProbe.Family) switch
+            var sourceCodec = _videoCodecId == AVCodecID.AV_CODEC_ID_AV1 ? "AV1" : "H.264";
+            var targetCodec = config.FullSessionVideoCodec switch
             {
-                ("H.265", "nvenc") => new[] { "-c:v", "hevc_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "24", "-b:v", "0" },
-                ("AV1", "nvenc") => new[] { "-c:v", "av1_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "32", "-b:v", "0" },
-                ("H.265", "amf") => new[] { "-c:v", "hevc_amf", "-quality", "balanced", "-rc", "cqp", "-qp_i", "24", "-qp_p", "24" },
-                ("AV1", "amf") => new[] { "-c:v", "av1_amf", "-quality", "balanced", "-rc", "cqp", "-qp_i", "32", "-qp_p", "32" },
-                ("H.265", "qsv") => new[] { "-c:v", "hevc_qsv", "-preset", "medium", "-global_quality", "24" },
-                ("AV1", "qsv") => new[] { "-c:v", "av1_qsv", "-preset", "medium", "-global_quality", "32" },
+                "AV1" => "AV1",
+                "H.265" => "H.265",
+                _ => "H.264"
+            };
+            var targetFamily = targetCodec == "AV1" ? ExportEncoderProbe.Av1Family : ExportEncoderProbe.Family;
+            var codecArgs = (sourceCodec, targetCodec, targetFamily) switch
+            {
+                (var source, var target, _) when source == target => new[] { "-c:v", "copy" },
+                (_, "H.264", "nvenc") => new[] { "-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "20", "-b:v", "0" },
+                (_, "H.264", "amf") => new[] { "-c:v", "h264_amf", "-quality", "balanced", "-rc", "cqp", "-qp_i", "20", "-qp_p", "20" },
+                (_, "H.264", "qsv") => new[] { "-c:v", "h264_qsv", "-preset", "medium", "-global_quality", "20" },
+                (_, "H.264", null) => new[] { "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20" },
+                (_, "H.265", "nvenc") => new[] { "-c:v", "hevc_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "24", "-b:v", "0" },
+                (_, "H.265", "amf") => new[] { "-c:v", "hevc_amf", "-quality", "balanced", "-rc", "cqp", "-qp_i", "24", "-qp_p", "24" },
+                (_, "H.265", "qsv") => new[] { "-c:v", "hevc_qsv", "-preset", "medium", "-global_quality", "24" },
+                (_, "AV1", "nvenc") => new[] { "-c:v", "av1_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "32", "-b:v", "0" },
+                (_, "AV1", "amf") => new[] { "-c:v", "av1_amf", "-quality", "balanced", "-rc", "cqp", "-qp_i", "32", "-qp_p", "32" },
+                (_, "AV1", "qsv") => new[] { "-c:v", "av1_qsv", "-preset", "medium", "-global_quality", "32" },
                 _ => new[] { "-c:v", "copy" }
             };
             var result = AudioCapturePipeline.RunProcessAsync("ffmpeg", BuildMuxArgs(codecArgs), CancellationToken.None).GetAwaiter().GetResult();
@@ -4003,7 +4019,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var stream = ffmpeg.avformat_new_stream(formatContext, null);
             stream->time_base = _timeBase;
             stream->codecpar->codec_type = AVMediaType.AVMEDIA_TYPE_VIDEO;
-            stream->codecpar->codec_id = AVCodecID.AV_CODEC_ID_H264;
+            stream->codecpar->codec_id = _videoCodecId;
+            stream->codecpar->codec_tag = 0;
             stream->codecpar->width = _outputWidth;
             stream->codecpar->height = _outputHeight;
 
@@ -4087,7 +4104,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // equivalent via the AMF SDK, h264_qsv is Intel's via Quick Sync; libx264 is the
     // last-resort CPU fallback so capture still works even with no usable hardware
     // encoder at all.
-    private static readonly string[] EncoderCandidates = { "h264_nvenc", "h264_amf", "h264_qsv", "libx264" };
+    private static IEnumerable<string> EncoderCandidates(ReplayBufferConfig config)
+        => ReplayVideoCodecPolicy.Candidates(
+            config.VideoCodec,
+            ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.Auto ? ExportEncoderProbe.Av1Family : null);
 
     // h264_nvenc's default preset does real per-frame rate-distortion search,
     // which measured a sustained ~59-60ms/frame (vs. ~0.5ms on p1) during
@@ -4131,6 +4151,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // 0 is excluded deliberately: NVENC reads cq=0 as "auto", which would
     // silently turn constant quality OFF rather than mean "best possible".
     private static int ConstantQualityTarget(ReplayBufferConfig config) => Math.Clamp(config.ConstantQuality, 1, 51);
+
+    private static int Av1QualityTarget(ReplayBufferConfig config) => ReplayVideoCodecPolicy.Av1Quality(config.ConstantQuality);
 
     // Constant bitrate: the user's field is the ceiling by definition (it IS
     // the target). Constant quality has no user-facing ceiling input anymore -
@@ -4219,6 +4241,21 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 }
                 TrySet("forced-idr", "1");
                 break;
+            case "av1_nvenc":
+                TrySet("preset", NvencPreset(config));
+                TrySet("spatial-aq", "1");
+                TrySet("tune", "hq");
+                if (IsConstantBitrate(config))
+                {
+                    TrySet("rc", "cbr");
+                }
+                else
+                {
+                    TrySet("rc", "vbr");
+                    TrySet("cq", Av1QualityTarget(config).ToString());
+                }
+                TrySet("forced-idr", "1");
+                break;
             // AMF/QSV keep their existing usage/preset strings: there's no AMD
             // or Intel hardware here to confirm a change doesn't cost frames,
             // and these paths are untested. They still pick up the context-level
@@ -4233,7 +4270,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 // cut points despite the setting looking present here.
                 TrySet("forced_idr", "1");
                 break;
+            case "av1_amf":
+                TrySet("usage", "ultralowlatency");
+                TrySet("quality", "speed");
+                TrySet("rc", IsConstantBitrate(config) ? "hqcbr" : "qvbr");
+                if (!IsConstantBitrate(config)) TrySet("qvbr_quality_level", Av1QualityTarget(config).ToString());
+                TrySet("forced_idr", "1");
+                break;
             case "h264_qsv":
+            case "av1_qsv":
                 TrySet("preset", "veryfast");
                 TrySet("forced_idr", "1");
                 // Back to QSV's own default of 4. This was pinned to 1 out of
@@ -4464,6 +4509,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         var encoderTimeBase = new AVRational { num = 1, den = 1_000_000 };
         timeBase = encoderTimeBase;
         encoderName = string.Empty;
+        var autoCodec = ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.Auto;
+        var av1Family = autoCodec ? ExportEncoderProbe.Av1Family : null;
+        if (autoCodec)
+        {
+            AppLog.Info(av1Family is null
+                ? "Native replay: AV1 preflight unavailable; trying H.264 candidates."
+                : $"Native replay: AV1 preflight passed for {av1Family}; trying AV1 before H.264 fallback.");
+        }
 
         // One full alloc/configure/open attempt. Returns null if the open
         // fails - which is the only way some options can report unsupported
@@ -4551,7 +4604,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             return null;
         }
 
-        foreach (var candidateName in EncoderCandidates)
+        foreach (var candidateName in EncoderCandidates(config))
         {
             var candidateCodec = ffmpeg.avcodec_find_encoder_by_name(candidateName);
             if (candidateCodec is null)
@@ -4565,7 +4618,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // other encoder has nothing to retry, so it gets one. An inner loop
             // that exhausts its attempts falls through to the next candidate
             // exactly as a single failed open used to.
-            var lowPowerAttempts = candidateName == "h264_qsv"
+            var lowPowerAttempts = candidateName is "h264_qsv" or "av1_qsv"
                 ? new[] { true, false }
                 : new[] { false };
 
@@ -4573,7 +4626,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // their own D3D11 input paths, but there is no AMD or Intel
             // hardware here to confirm one against, and the fallback below is
             // the exact behaviour those paths have today.
-            if (hardwareFramesRef != 0 && candidateName == "h264_nvenc")
+            if (hardwareFramesRef != 0 && candidateName is ("h264_nvenc" or "av1_nvenc"))
             {
                 var probeContext = TryOpen(candidateCodec, candidateName, false, hardwareFrames: true);
                 if (probeContext is not null)
@@ -4592,6 +4645,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         {
                             encoderName = candidateName;
                             usingHardwareFrames = true;
+                            if (ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.Auto && candidateName.StartsWith("h264_", StringComparison.OrdinalIgnoreCase))
+                                AppLog.Info("Native replay: AV1 initialization failed; H.264 fallback selected.");
                             AppLog.Info($"Native encoder probe: {candidateName} opened with D3D11 zero-copy input (no per-frame GPU readback/upload).");
                             return hardwareContext;
                         }
@@ -4609,6 +4664,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 if (codecContext is null) continue;
 
                 encoderName = candidateName;
+                if (ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.Auto && candidateName.StartsWith("h264_", StringComparison.OrdinalIgnoreCase))
+                    AppLog.Info("Native replay: AV1 initialization failed; H.264 fallback selected.");
                 AppLog.Info($"Native encoder probe: {candidateName} opened successfully (lowPower={lowPower}).");
                 return codecContext;
             }
@@ -4616,7 +4673,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             AppLog.Info($"Native encoder probe: {candidateName} unusable - no matching GPU/driver, trying next.");
         }
 
-        throw new InvalidOperationException("No usable H.264 encoder found (tried NVENC, AMD AMF, Intel QSV, software libx264).");
+        throw new InvalidOperationException("No usable replay encoder found (tried hardware AV1, hardware H.264, and software libx264).");
     }
 
     private static int CaptureBitrate(ReplayBufferConfig config)

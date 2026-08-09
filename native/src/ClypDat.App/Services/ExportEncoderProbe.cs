@@ -28,17 +28,29 @@ public static class ExportEncoderProbe
     /// </summary>
     public static string? Family => _probe.Value;
 
+    /// <summary>
+    /// Vendor suffix whose AV1 encoder passed an actual FFmpeg encode, or null
+    /// when this machine cannot hardware-encode AV1. Blocks until prewarm ends.
+    /// </summary>
+    public static string? Av1Family => _av1Probe.Value;
+    public static bool Av1ProbeCompleted => _av1Probe.IsValueCreated;
+
     // Same order capture uses, so a machine that somehow has two usable encoders
     // gets the same answer from both halves of the app.
     private static readonly string[] Candidates = { "nvenc", "amf", "qsv" };
 
     private static readonly Lazy<string?> _probe = new(Detect, LazyThreadSafetyMode.ExecutionAndPublication);
+    private static readonly Lazy<string?> _av1Probe = new(DetectAv1, LazyThreadSafetyMode.ExecutionAndPublication);
 
     /// <summary>
     /// Runs the probe ahead of the first export so the export itself never waits
     /// on it. Safe to call more than once - Lazy runs the detection a single time.
     /// </summary>
-    public static void Prewarm() => Task.Run(() => _ = _probe.Value);
+    public static void Prewarm()
+    {
+        Task.Run(() => _ = _probe.Value);
+        Task.Run(() => _ = _av1Probe.Value);
+    }
 
     private static string? Detect()
     {
@@ -52,6 +64,21 @@ public static class ExportEncoderProbe
         }
 
         AppLog.Info("Export: no hardware encoder available, exports will use the CPU encoder.");
+        return null;
+    }
+
+    private static string? DetectAv1()
+    {
+        foreach (var family in Candidates)
+        {
+            if (CanEncode($"av1_{family}"))
+            {
+                AppLog.Info($"Replay: using {family} hardware AV1 encoder when Auto is selected.");
+                return family;
+            }
+        }
+
+        AppLog.Info("Replay: no hardware AV1 encoder available; Auto will use H.264.");
         return null;
     }
 

@@ -24,6 +24,7 @@ public static class AppSettingsStore
             if (string.IsNullOrWhiteSpace(settings.CustomClipFileNameTemplate)) settings.CustomClipFileNameTemplate = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}";
             if (string.IsNullOrWhiteSpace(settings.ReplayEncoderPreset)) settings.ReplayEncoderPreset = "P4";
             if (string.IsNullOrWhiteSpace(settings.ReplayRateControlMode)) settings.ReplayRateControlMode = "Constant quality";
+            if (!string.Equals(settings.ReplayVideoCodec, "H.264", StringComparison.OrdinalIgnoreCase)) settings.ReplayVideoCodec = "Auto";
             if (!string.Equals(settings.ReplayCaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase)) settings.ReplayCaptureSource = "Game";
             settings.ReplayDesktopMonitorDeviceName ??= string.Empty;
             // Clamped on both ends, not just guarded against <= 0 - a

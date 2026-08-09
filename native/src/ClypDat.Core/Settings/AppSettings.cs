@@ -32,6 +32,10 @@ public sealed class AppSettings
     // resumes as soon as the game exits.
     public bool ReplayAutoSwitchToGameCapture { get; set; } = true;
     public int ReplayDurationSeconds { get; set; } = 60;
+    // Auto prefers hardware AV1 for the native replay engine. H.264 remains
+    // available as an explicit compatibility override. Legacy Windows Capture
+    // continues to use its recorder library's H.264 path.
+    public string ReplayVideoCodec { get; set; } = "Auto";
     // Native engine encoder controls, surfaced directly in Settings rather
     // than hidden behind a coarse quality label.
     // NVENC speed/quality preset, "P1".."P5" - higher spends more GPU time per

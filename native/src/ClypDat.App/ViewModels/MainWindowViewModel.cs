@@ -227,6 +227,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("P5", "Highest quality here, and the most GPU time per frame. Best on a card with headroom to spare - watch for dropped frames if the game is already pushing it.")
         };
         ReplayRateControlModes = new ObservableCollection<string> { "Constant quality", "Constant bitrate" };
+        ReplayVideoCodecs = new ObservableCollection<ReplayVideoCodecOption>
+        {
+            new("Auto (AV1 preferred)", "Auto", "Uses hardware AV1 when available. Falls back to hardware H.264 before replay starts."),
+            new("H.264 (compatibility)", "H.264", "Uses H.264 hardware encoding for widest playback compatibility.")
+        };
         ExportCodecs = new ObservableCollection<ExportCodecOption>
         {
             // No H.265: the option was still being offered after the feature
@@ -290,6 +295,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedReplayCaptureSource = string.Equals(Settings.ReplayCaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase)
             ? "Desktop Capture"
             : "Game Capture";
+        _ = Task.Run(() => ExportEncoderProbe.Av1Family).ContinueWith(_ =>
+            Dispatcher.UIThread.Post(() => OnPropertyChanged(nameof(ReplayVideoCodecStatus))),
+            TaskScheduler.Default);
         RefreshDesktopMonitors();
         _libraryRefreshDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
         _libraryRefreshDebounce.Tick += async (_, _) =>
@@ -409,6 +417,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ObservableCollection<EncoderPresetOption> ReplayEncoderPresets { get; }
     public ObservableCollection<string> ReplayRateControlModes { get; }
+    public sealed record ReplayVideoCodecOption(string Label, string Value, string Description);
+    public ObservableCollection<ReplayVideoCodecOption> ReplayVideoCodecs { get; }
     public ObservableCollection<ReplayBackendPreset> ReplayBackends { get; }
     public ObservableCollection<string> ReplayCaptureSources { get; }
     public ObservableCollection<DesktopMonitorOption> DesktopMonitors { get; }
@@ -1374,6 +1384,38 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public ReplayVideoCodecOption SelectedReplayVideoCodec
+    {
+        get => ReplayVideoCodecs.FirstOrDefault(codec => string.Equals(codec.Value, Settings.ReplayVideoCodec, StringComparison.OrdinalIgnoreCase))
+               ?? ReplayVideoCodecs.First(codec => codec.Value == "Auto");
+        set
+        {
+            if (value is null || string.Equals(Settings.ReplayVideoCodec, value.Value, StringComparison.OrdinalIgnoreCase)) return;
+            Settings.ReplayVideoCodec = value.Value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ReplayVideoCodecStatus));
+            SaveSettings();
+            UpdateReplayQualityRestartRequired();
+        }
+    }
+
+    public string ReplayVideoCodecStatus
+    {
+        get
+        {
+            if (string.Equals(Settings.ReplayBackend, "Legacy", StringComparison.OrdinalIgnoreCase))
+                return "Windows Capture uses H.264; AV1 applies to ClypDat capture.";
+            if (string.Equals(Settings.ReplayVideoCodec, "H.264", StringComparison.OrdinalIgnoreCase))
+                return "H.264 override selected.";
+
+            if (!ExportEncoderProbe.Av1ProbeCompleted) return "Checking hardware AV1 support…";
+            var family = ExportEncoderProbe.Av1Family;
+            return family is null
+                ? "Hardware AV1 unavailable. Auto will use H.264."
+                : $"Hardware AV1 available ({family.ToUpperInvariant()}). Auto will use AV1.";
+        }
+    }
+
     public string SelectedReplayRateControlMode
     {
         get => ReplayRateControlModes.Contains(Settings.ReplayRateControlMode) ? Settings.ReplayRateControlMode : "Constant quality";
@@ -1464,7 +1506,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // One string covering everything the running buffer baked in at start, so
     // the restart notice doesn't need a field per encoder setting.
     private string EncoderSignature =>
-        $"{Settings.ReplayEncoderPreset}|{Settings.ReplayRateControlMode}|{Settings.ReplayConstantQuality}|{Settings.ReplayMaxBitrateMbps}";
+        $"{Settings.ReplayVideoCodec}|{Settings.ReplayEncoderPreset}|{Settings.ReplayRateControlMode}|{Settings.ReplayConstantQuality}|{Settings.ReplayMaxBitrateMbps}";
 
     private void UpdateReplayQualityRestartRequired()
     {
@@ -1510,6 +1552,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // not just on the quality being above default, so switching backends
             // has to refresh it even though no quality setting moved.
             OnPropertyChanged(nameof(ReplayQualityWarning));
+            OnPropertyChanged(nameof(ReplayVideoCodecStatus));
             SaveSettings();
         }
     }
@@ -5066,6 +5109,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RateControlMode: Settings.ReplayRateControlMode,
             ConstantQuality: Settings.ReplayConstantQuality,
             MaxBitrateMbps: Settings.ReplayMaxBitrateMbps,
+            VideoCodec: Settings.ReplayVideoCodec,
             CaptureSource: desktopCapture ? "Desktop" : "Game",
             CaptureMonitorDeviceName: desktopCapture ? desktopMonitor.DeviceName : string.Empty,
             CaptureCursor: desktopCapture && Settings.ReplayDesktopCaptureCursor);
