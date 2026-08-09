@@ -179,6 +179,10 @@ public static class RemoteGameIconsService
             _memoryCache = icons;
             _appIdMemoryCache = appIds;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception error)
         {
             AppLog.Error("Remote game-icons refresh failed (non-fatal)", error);

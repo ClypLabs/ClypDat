@@ -18,12 +18,16 @@ public static class InstalledGameLocator
 
     // Built once per session - scanning manifests and three registry hives is
     // cheap but pointless to repeat, and installs rarely appear mid-session.
-    public static IReadOnlyDictionary<string, string> Index => _index ??= BuildIndex();
+    public static IReadOnlyDictionary<string, string> Index => _index ??= BuildIndex(CancellationToken.None);
 
-    public static string? FindExecutable(string displayName)
+    public static string? FindExecutable(string displayName) => FindExecutable(displayName, CancellationToken.None);
+
+    internal static string? FindExecutable(string displayName, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(displayName)) return null;
-        return Index.TryGetValue(Normalize(displayName), out var path) ? path : null;
+        cancellationToken.ThrowIfCancellationRequested();
+        var index = _index ??= BuildIndex(cancellationToken);
+        return index.TryGetValue(Normalize(displayName), out var path) ? path : null;
     }
 
     private static string Normalize(string name) =>
@@ -93,13 +97,15 @@ public static class InstalledGameLocator
         }
     }
 
-    private static Dictionary<string, string> BuildIndex()
+    private static Dictionary<string, string> BuildIndex(CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var index = new Dictionary<string, string>(StringComparer.Ordinal);
         try
         {
-            AddEpicGames(index);
+            AddEpicGames(index, cancellationToken);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception error)
         {
             AppLog.Error("Epic manifest scan failed (non-fatal)", error);
@@ -107,8 +113,9 @@ public static class InstalledGameLocator
 
         try
         {
-            AddUninstallEntries(index);
+            AddUninstallEntries(index, cancellationToken);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception error)
         {
             AppLog.Error("Uninstall-registry scan failed (non-fatal)", error);
@@ -116,8 +123,9 @@ public static class InstalledGameLocator
 
         try
         {
-            AddStartMenuShortcuts(index);
+            AddStartMenuShortcuts(index, cancellationToken);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception error)
         {
             AppLog.Error("Start-menu shortcut scan failed (non-fatal)", error);
@@ -127,7 +135,7 @@ public static class InstalledGameLocator
         return index;
     }
 
-    private static void AddEpicGames(Dictionary<string, string> index)
+    private static void AddEpicGames(Dictionary<string, string> index, CancellationToken cancellationToken)
     {
         var manifestFolder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
@@ -136,6 +144,7 @@ public static class InstalledGameLocator
 
         foreach (var file in Directory.EnumerateFiles(manifestFolder, "*.item"))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 using var document = JsonDocument.Parse(File.ReadAllText(file));
@@ -166,7 +175,7 @@ public static class InstalledGameLocator
     // uninstall registry between them still miss. The shortcut's own name is
     // the game's name as the user knows it, which is exactly the key icons are
     // looked up under.
-    private static void AddStartMenuShortcuts(Dictionary<string, string> index)
+    private static void AddStartMenuShortcuts(Dictionary<string, string> index, CancellationToken cancellationToken)
     {
         string[] roots =
         {
@@ -178,10 +187,12 @@ public static class InstalledGameLocator
 
         foreach (var root in roots)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) continue;
 
             foreach (var shortcut in Directory.EnumerateFiles(root, "*.lnk", SearchOption.AllDirectories))
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
                     var name = Path.GetFileNameWithoutExtension(shortcut);
@@ -273,7 +284,7 @@ public static class InstalledGameLocator
         void GetCurFile([System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPWStr)] out string fileName);
     }
 
-    private static void AddUninstallEntries(Dictionary<string, string> index)
+    private static void AddUninstallEntries(Dictionary<string, string> index, CancellationToken cancellationToken)
     {
         (RegistryKey Hive, string Path)[] roots =
         {
@@ -289,6 +300,7 @@ public static class InstalledGameLocator
 
             foreach (var subKeyName in uninstall.GetSubKeyNames())
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
                     using var entry = uninstall.OpenSubKey(subKeyName);

@@ -224,7 +224,8 @@ public static class GameIconService
             // icon Windows shows for the game - and it's the only one that
             // covers Epic, Battle.net, EA, GOG and the rest, which no amount of
             // Steam lookups will ever find.
-            var installedExecutable = InstalledGameLocator.FindExecutable(displayName);
+            cancellationToken.ThrowIfCancellationRequested();
+            var installedExecutable = InstalledGameLocator.FindExecutable(displayName, cancellationToken);
             if (installedExecutable is not null)
             {
                 var installedIcon = ExtractIconBitmap(installedExecutable);
@@ -270,6 +271,10 @@ public static class GameIconService
             AppLog.Info($"Game icon fetched for '{displayName}' from {url}.");
             succeeded = true;
             return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception error)
         {

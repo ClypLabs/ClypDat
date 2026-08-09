@@ -2313,6 +2313,7 @@ public sealed partial class MainWindow : Window
         try
         {
             if (_replayBuffer.IsRecording) await _replayBuffer.StopAsync();
+            CaptureBackgroundWorkGate.EndCapture();
             _activeReplayTargetIdentity = string.Empty;
             _encoderTuning.EndSession();
             ViewModel.IsReplayRecording = false;
@@ -2320,6 +2321,7 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
+            CaptureBackgroundWorkGate.EndCapture();
             _replayTransitioning = false;
         }
     }
@@ -2359,6 +2361,7 @@ public sealed partial class MainWindow : Window
             if (_replayBuffer is null) return;
             await EnsureLibraryFolderAsync();
             ApplyCaptureBounds();
+            CaptureBackgroundWorkGate.BeginCapture();
             await Task.Run(() => _replayBuffer.StartAsync());
             AppLog.Info("Replay started.");
             var activeConfig = ViewModel.CreateReplayConfig();
@@ -2386,6 +2389,7 @@ public sealed partial class MainWindow : Window
         catch (Exception error)
         {
             AppLog.Error("Replay start failed", error);
+            CaptureBackgroundWorkGate.EndCapture();
             ViewModel.IsReplayRecording = false;
             // IsReplayRecording's setter is a no-op when the value doesn't change
             // (e.g. a second consecutive failed start while already false), which
@@ -3519,6 +3523,7 @@ public sealed partial class MainWindow : Window
 
     private void ReplayBuffer_OnRecordingStopped(object? sender, EventArgs e)
     {
+        CaptureBackgroundWorkGate.EndCapture();
         Dispatcher.UIThread.Post(() =>
         {
             if (ViewModel is not null)
@@ -3534,7 +3539,9 @@ public sealed partial class MainWindow : Window
         // Curated icon overrides ride the same once-a-day cadence. Only used
         // for games the Steam store search resolves wrongly or not at all, so
         // a failure here costs nothing.
-        await RemoteGameIconsService.RefreshAsync();
+        if (CaptureBackgroundWorkGate.IsCaptureActive) return;
+        try { await RemoteGameIconsService.RefreshAsync(CaptureBackgroundWorkGate.CaptureCancellation); }
+        catch (OperationCanceledException) { }
     }
 
     private async Task RefreshRemoteGameCatalogAsync()
@@ -7152,6 +7159,7 @@ public sealed partial class MainWindow : Window
         // Read off the view model here, not inside the continuation - by the
         // time that runs the selection may already have moved on.
         var videoPath = ViewModel.SelectedVideoPath;
+        var videoCodec = ViewModel.SelectedVideoCodec;
         // Whether a buffer is armed decides how much of the machine the
         // decoder may take - see PlaybackSession.ResolveDecodeThreads.
         var replayArmed = ViewModel.IsReplayRecording;
@@ -7159,7 +7167,7 @@ public sealed partial class MainWindow : Window
             task =>
             {
                 AppLog.Debug($"Editor open trace: video load picked up at {openClock.ElapsedMilliseconds}ms.");
-                return task.Result.LoadVideoAsync(videoPath, replayArmed);
+                return task.Result.LoadVideoAsync(videoPath, videoCodec, replayArmed);
             },
             cts.Token,
             TaskContinuationOptions.OnlyOnRanToCompletion,

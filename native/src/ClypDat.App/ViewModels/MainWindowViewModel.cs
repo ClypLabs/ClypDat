@@ -124,6 +124,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private GameDetection _activeGameDetection = GameDetection.None;
     private string _selectedVideoName = "No video selected";
     private string _selectedVideoPath = string.Empty;
+    private string _selectedVideoCodec = string.Empty;
     private string _selectedThumbnailPath = string.Empty;
     private Avalonia.Media.Imaging.Bitmap? _selectedThumbnail;
     private bool _isEditorVideoLoading;
@@ -187,7 +188,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // just launches that happen to hit a missing icon. EnsureLoadedAsync
         // (not ForceRefreshAsync) still respects its own once-a-day window,
         // so this is cheap on every launch after the first that day.
-        _ = Task.Run(() => RemoteGameIconsService.EnsureLoadedAsync());
+        _ = Task.Run(async () =>
+        {
+            try { await RemoteGameIconsService.EnsureLoadedAsync(CaptureBackgroundWorkGate.CaptureCancellation); }
+            catch (OperationCanceledException) { }
+        });
+        CaptureBackgroundWorkGate.StateChanged += CaptureBackgroundWorkGate_OnStateChanged;
         MedalImportRows.CollectionChanged += MedalImportRows_OnCollectionChanged;
         SteelSeriesImportRows.CollectionChanged += SteelSeriesImportRows_OnCollectionChanged;
         MigrateLegacyMedalImportHistory();
@@ -822,6 +828,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 ReplayQualityRestartRequired = false;
             }
         }
+    }
+
+    private CancellationTokenSource? _gameIconSweepCts;
+    private bool _gameIconWorkQueued;
+
+    private void CaptureBackgroundWorkGate_OnStateChanged(bool captureActive)
+    {
+        if (captureActive)
+        {
+            try { _gameIconSweepCts?.Cancel(); } catch (ObjectDisposedException) { }
+            return;
+        }
+
+        if (!_gameIconWorkQueued) return;
+        _gameIconWorkQueued = false;
+        Dispatcher.UIThread.Post(RequestMissingGameIcons);
     }
 
     public string RecorderStatus
@@ -3020,6 +3042,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         private set => SetProperty(ref _selectedVideoPath, value);
     }
 
+    internal string SelectedVideoCodec => _selectedVideoCodec;
+
     public string SelectedThumbnailPath
     {
         get => _selectedThumbnailPath;
@@ -4165,6 +4189,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        CaptureBackgroundWorkGate.StateChanged -= CaptureBackgroundWorkGate_OnStateChanged;
+        try { _gameIconSweepCts?.Cancel(); } catch (ObjectDisposedException) { }
+        _gameIconSweepCts?.Dispose();
+        _gameIconSweepCts = null;
         _cachedLibraryRestoreCts?.Cancel();
         _cachedLibraryRestoreCts?.Dispose();
         _cachedLibraryRestoreCts = null;
@@ -5585,6 +5613,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ResetVideoZoom();
         SelectedVideoName = media.Name;
         SelectedVideoPath = media.Path;
+        _selectedVideoCodec = media.Tracks.FirstOrDefault(track => track.Type == "video")?.Codec ?? string.Empty;
         SelectedThumbnailPath = media.ThumbnailPath;
         SelectedThumbnail = LoadBitmap(media.ThumbnailPath);
         // Set here, synchronously, so the thumbnail placeholder is already
@@ -6080,12 +6109,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public async Task RefreshGameIconsAsync()
     {
         if (IsRefreshingGameIcons) return;
+        if (CaptureBackgroundWorkGate.IsCaptureActive)
+        {
+            _gameIconWorkQueued = true;
+            GameIconRefreshStatus = "Queued until replay stops.";
+            AppLog.Info("Game icon refresh queued until replay recording stops.");
+            return;
+        }
         IsRefreshingGameIcons = true;
         GameIconRefreshStatus = "Refreshing...";
         try
         {
+            var captureToken = CaptureBackgroundWorkGate.CaptureCancellation;
             var removed = await Task.Run(GameIconService.ClearCache);
-            await RemoteGameIconsService.ForceRefreshAsync();
+            await RemoteGameIconsService.ForceRefreshAsync(captureToken);
 
             // Clearing the rail's own bitmaps is what makes the games count as
             // missing again - RequestMissingGameIcons goes off HasIcon, and the
@@ -6102,6 +6139,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 ? $"Cleared {removed} cached icons."
                 : $"Cleared {removed} cached icons - looking up {total} games again.";
             AppLog.Info($"Game icons refreshed by user: {removed} cached images removed, {total} games queued.");
+        }
+        catch (OperationCanceledException) when (CaptureBackgroundWorkGate.IsCaptureActive)
+        {
+            _gameIconWorkQueued = true;
+            GameIconRefreshStatus = "Queued until replay stops.";
         }
         catch (Exception error)
         {
@@ -6125,13 +6167,36 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // every game name once, not only empty slots.
         var missing = GameFilterOptions.Select(option => option.Key).ToArray();
         if (missing.Length == 0) return;
+        if (CaptureBackgroundWorkGate.IsCaptureActive)
+        {
+            _gameIconWorkQueued = true;
+            return;
+        }
+
+        try { _gameIconSweepCts?.Cancel(); } catch (ObjectDisposedException) { }
+        _gameIconSweepCts?.Dispose();
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(CaptureBackgroundWorkGate.CaptureCancellation);
+        _gameIconSweepCts = cts;
 
         _ = Task.Run(async () =>
         {
-            foreach (var gameKey in missing)
+            try
             {
-                if (!await GameIconService.EnsureFromNetworkAsync(gameKey)) continue;
-                Dispatcher.UIThread.Post(() => ApplyGameIcon(gameKey));
+                foreach (var gameKey in missing)
+                {
+                    cts.Token.ThrowIfCancellationRequested();
+                    if (!await GameIconService.EnsureFromNetworkAsync(gameKey, cts.Token)) continue;
+                    Dispatcher.UIThread.Post(() => ApplyGameIcon(gameKey));
+                }
+            }
+            catch (OperationCanceledException) when (cts.IsCancellationRequested)
+            {
+                _gameIconWorkQueued = true;
+            }
+            finally
+            {
+                if (ReferenceEquals(_gameIconSweepCts, cts)) _gameIconSweepCts = null;
+                cts.Dispose();
             }
         });
     }
