@@ -183,7 +183,6 @@ public sealed partial class MainWindow : Window
     private bool _hoverControlsSlidingOut;
     private DispatcherTimer? _editorToolsPanelResizeSettleTimer;
     private string? _libraryResizeAnchorPath;
-    private bool _libraryResizeAnchorRestoreQueued;
     private DispatcherTimer? _libraryResizeAnchorSettleTimer;
     private int _libraryResizeAnchorGeneration;
     private double? _libraryResizeExpectedOffsetY;
@@ -197,8 +196,8 @@ public sealed partial class MainWindow : Window
     // with the new width) again.
     private string? _libraryReturnAnchorPath;
     private bool _libraryReturnAnchorDirty;
-    private bool _libraryCardLayoutQueued;
-    private double _lastLibraryCardViewportWidth = double.NaN;
+    private bool _libraryResizeAnchorRestorePending;
+    private string? _libraryReturnAnchorRestorePath;
     // Win32 can present a newly-created client area before Avalonia's first
     // compositor frame. DWM cloaks that first native frame until two Avalonia
     // frame callbacks have passed, leaving a dark rendered surface to reveal.
@@ -219,16 +218,14 @@ public sealed partial class MainWindow : Window
         RootLayout.Margin = OffScreenMargin;
         UpdateViewNavButtons();
         LibraryScrollViewer.ScrollChanged += LibraryScrollViewer_OnScrollChanged;
-        // Viewport is not final during SizeChanged. Queue once after arrange
-        // so WrapPanel and cards calculate against same visible width.
-        LibraryScrollViewer.SizeChanged += (_, _) => QueueLibraryCardLayout();
+        LibraryCardPanel.MetricsChanged += (_, layout) => ViewModel?.UpdateCardLayout(layout);
         // Card visibility flips (filtering) and hydration both change the
         // scroll extent without a size change on this window, so the marker
         // positions have to be recomputed off layout rather than only off
         // Window_OnSizeChanged.
         LibraryScrollViewer.LayoutUpdated += (_, _) =>
         {
-            QueueLibraryCardLayout();
+            CompleteLibraryLayoutPass();
             TryCompleteInitialLibraryLayout();
             QueueDateScrubberRebuild();
         };
@@ -279,8 +276,6 @@ public sealed partial class MainWindow : Window
             // Only known once there is a visual root - thumbnails decode to
             // card pixels, not card DIPs.
             ViewModel?.SetCardRenderScaling(RenderScaling);
-            // Card layout comes from LibraryScrollViewer's own SizeChanged
-            // (wired above) - at Opened its width may still be 0.
             ClearLibraryResizeAnchor();
             LibraryScrollViewer.Offset = default;
             InitializeReplayServices();
@@ -334,12 +329,9 @@ public sealed partial class MainWindow : Window
                     {
                         _libraryReturnAnchorDirty = false;
                         var anchorPath = _libraryReturnAnchorPath;
-                        // Loaded priority so this runs after the layout pass that
-                        // finally re-measures LibraryScrollViewer/the WrapPanel at
-                        // its current width - it was collapsed (no layout at all)
-                        // for the whole time the editor was open, so the resize
-                        // that happened during that window only takes effect now.
-                        Dispatcher.UIThread.Post(() => RestoreLibraryResizeAnchor(anchorPath), DispatcherPriority.Loaded);
+                        // LibraryCardPanel publishes current geometry before its
+                        // children measure. Restore on the first completed pass.
+                        _libraryReturnAnchorRestorePath = anchorPath;
                     }
                     if (e.PropertyName == nameof(MainWindowViewModel.StartupLibraryIndexVersion)) QueueDateScrubberRebuild();
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible)
@@ -1569,19 +1561,18 @@ public sealed partial class MainWindow : Window
         return (firstFullyVisible ?? firstIntersecting)?.Path;
     }
 
-    private void QueueLibraryCardLayout()
+    private void CompleteLibraryLayoutPass()
     {
-        if (_libraryCardLayoutQueued) return;
-        _libraryCardLayoutQueued = true;
-        Dispatcher.UIThread.Post(() =>
+        if (_libraryReturnAnchorRestorePath is not null)
         {
-            _libraryCardLayoutQueued = false;
-            var viewportWidth = LibraryScrollViewer.Viewport.Width;
-            if (viewportWidth <= 0 || Math.Abs(viewportWidth - _lastLibraryCardViewportWidth) < 0.01) return;
+            var path = _libraryReturnAnchorRestorePath;
+            _libraryReturnAnchorRestorePath = null;
+            RestoreLibraryResizeAnchor(path);
+        }
 
-            _lastLibraryCardViewportWidth = viewportWidth;
-            ViewModel?.UpdateCardLayout(viewportWidth);
-        }, DispatcherPriority.Loaded);
+        if (!_libraryResizeAnchorRestorePending) return;
+        _libraryResizeAnchorRestorePending = false;
+        RestoreLibraryResizeAnchor(_libraryResizeAnchorPath);
     }
 
     private void LibraryScrollViewer_OnScrollChanged(object? sender, ScrollChangedEventArgs e)
@@ -1654,14 +1645,8 @@ public sealed partial class MainWindow : Window
 
     private void QueueLibraryResizeAnchorRestore()
     {
-        if (_libraryResizeAnchorPath is null || _libraryResizeAnchorRestoreQueued) return;
-
-        _libraryResizeAnchorRestoreQueued = true;
-        Dispatcher.UIThread.Post(() =>
-        {
-            _libraryResizeAnchorRestoreQueued = false;
-            RestoreLibraryResizeAnchor(_libraryResizeAnchorPath);
-        }, DispatcherPriority.Loaded);
+        if (_libraryResizeAnchorPath is null) return;
+        _libraryResizeAnchorRestorePending = true;
     }
 
     private void ResetLibraryResizeAnchorSettleTimer()
@@ -1683,11 +1668,8 @@ public sealed partial class MainWindow : Window
     {
         _libraryResizeAnchorSettleTimer?.Stop();
         var generation = _libraryResizeAnchorGeneration;
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (generation != _libraryResizeAnchorGeneration) return;
-            if (!RestoreLibraryResizeAnchor(_libraryResizeAnchorPath)) ClearLibraryResizeAnchor();
-        }, DispatcherPriority.Loaded);
+        if (generation != _libraryResizeAnchorGeneration) return;
+        if (!RestoreLibraryResizeAnchor(_libraryResizeAnchorPath)) ClearLibraryResizeAnchor();
     }
 
     private bool RestoreLibraryResizeAnchor(string? anchorPath)

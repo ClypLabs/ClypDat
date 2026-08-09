@@ -830,20 +830,7 @@
           <Grid ColumnDefinitions="*,Auto">
           <!-- Date scrubber (right column, below) replaces the default
                scrollbar, so hide the ScrollViewer's own. -->
-          <controls:LibraryLoadingTilesOverlay
-              x:Name="LibraryLoadingTilesOverlay"
-              Grid.Column="0"
-              Margin="-4,0,-24,0"
-              IsVisible="{Binding ShowLibraryLoadingTiles}"
-              TotalTileCount="{Binding LibraryLoadingTileCount}"
-              LoadedTileCount="{Binding LoadedVisibleLibraryTileCount}"
-              ColumnCount="{Binding CardColumns}"
-              TileWidth="{Binding CardWidth}"
-              TileHeight="{Binding LibraryLoadingTileHeight}"
-              TileTopInset="{Binding LibraryLoadingTileTopInset}"
-              RowPitch="{Binding LibraryLoadingRowPitch}"
-              IsHitTestVisible="False" />
-          <ScrollViewer Grid.Column="0" x:Name="LibraryScrollViewer" Margin="-4,0,-24,0" VerticalScrollBarVisibility="Hidden">
+          <ScrollViewer Grid.Column="0" x:Name="LibraryScrollViewer" Margin="-4,0,-24,0" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled">
             <ItemsControl x:Name="LibraryItemsControl"
                           ItemsSource="{Binding AllClips}"
                           Opacity="{Binding LibraryCardGridOpacity}"
@@ -859,12 +846,14 @@
                    CardWidth still lands 3-per-row the same as before. -->
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
-                  <WrapPanel Orientation="Horizontal" />
+                  <controls:LibraryCardPanel x:Name="LibraryCardPanel"
+                                             Orientation="Horizontal"
+                                             ScaleWithWindow="{Binding ScaleClipsWithWindow}" />
                 </ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
-                  <StackPanel Width="{Binding $parent[Window].DataContext.CardWidth}"
+                  <StackPanel HorizontalAlignment="Stretch"
                               Margin="4,2,20,4"
                               IsVisible="{Binding IsVisibleInLibrary}"
                               EffectiveViewportChanged="ClipCard_OnEffectiveViewportChanged">
@@ -1034,6 +1023,20 @@
               </ItemsControl.ItemTemplate>
             </ItemsControl>
         </ScrollViewer>
+          <controls:LibraryLoadingTilesOverlay
+              x:Name="LibraryLoadingTilesOverlay"
+              Grid.Column="0"
+              ZIndex="1"
+              Margin="-4,0,-24,0"
+              IsVisible="{Binding ShowLibraryLoadingTiles}"
+              TotalTileCount="{Binding LibraryLoadingTileCount}"
+              LoadedTileCount="{Binding LoadedVisibleLibraryTileCount}"
+              ColumnCount="{Binding CardColumns}"
+              TileWidth="{Binding CardWidth}"
+              TileHeight="{Binding LibraryLoadingTileHeight}"
+              TileTopInset="{Binding LibraryLoadingTileTopInset}"
+              RowPitch="{Binding LibraryLoadingRowPitch}"
+              IsHitTestVisible="False" />
 
           <!-- Floats over the library's bottom-right corner once scrolled
                far enough down (ShowScrollToTopButton, toggled off

@@ -2387,10 +2387,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Settings.ScaleClipsWithWindow = value;
             OnPropertyChanged();
             SaveSettings();
-            // Re-lay the grid immediately against whatever width the window
-            // is already at, rather than waiting for the next resize to
-            // notice the toggle changed.
-            if (_lastCardLayoutWidth > 0) UpdateCardLayout(_lastCardLayoutWidth);
         }
     }
 
@@ -3835,14 +3831,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return true;
     }
 
-    private double _lastCardLayoutWidth;
-
-    // availableWidth is LibraryScrollViewer's arranged viewport width, not
-    // window width. Its margins are part of WrapPanel's measured space.
-    public void UpdateCardLayout(double availableWidth)
+    // Called by LibraryCardPanel before it measures card children.
+    internal void UpdateCardLayout(LibraryCardLayout layout)
     {
-        _lastCardLayoutWidth = availableWidth;
-        var layout = LibraryCardLayoutCalculator.Calculate(availableWidth, Settings.ScaleClipsWithWindow);
         if (CardColumns == layout.Columns && CardWidth == layout.Width && CardImageHeight == layout.ImageHeight) return;
 
         CardColumns = layout.Columns;

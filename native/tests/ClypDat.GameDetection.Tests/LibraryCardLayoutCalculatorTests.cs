@@ -33,6 +33,20 @@ public sealed class LibraryCardLayoutCalculatorTests
     }
 
     [Theory]
+    [InlineData(1, 2)]
+    [InlineData(799.999, 2)]
+    [InlineData(3999.999, 9)]
+    [InlineData(4000, 10)]
+    [InlineData(12000.5, 10)]
+    public void Calculate_ScaledModeClampsColumnsAcrossFractionalWidths(double viewportWidth, int expectedColumns)
+    {
+        var layout = LibraryCardLayoutCalculator.Calculate(viewportWidth, scaleWithWindow: true);
+
+        Assert.Equal(expectedColumns, layout.Columns);
+        Assert.True(layout.Width >= 220);
+    }
+
+    [Theory]
     [InlineData(1000)]
     [InlineData(1200.5)]
     [InlineData(2400)]
