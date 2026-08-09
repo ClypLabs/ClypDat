@@ -2,10 +2,9 @@ using ClypDat.Capture.Abstractions;
 
 namespace ClypDat.App.Services;
 
-// Auto prefers Native (ClypDat's own DXGI Desktop Duplication engine) -
-// that's what the Settings description for "Auto (recommended)" has always
-// promised ("Uses ClypDat's own capture engine for every game"), and it's
-// the backend that's actually been proven reliable across every session.
+// Auto uses WGC for a detected game window. Native DXGI remains the desktop
+// path and the fallback when WGC cannot start. This keeps game capture tied to
+// its HWND instead of the current foreground window.
 public sealed class HybridReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics, IAdaptiveCaptureFrameRate
 {
     private readonly Func<ReplayBufferConfig> _configProvider;
@@ -25,18 +24,45 @@ public sealed class HybridReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         if (IsRecording) return;
 
         var config = _configProvider();
+        var useWindowCapture = OperatingSystem.IsWindows()
+            && !string.Equals(config.CaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase)
+            && config.GameWindowHandle != 0;
+        var primary = useWindowCapture
+            ? (IReplayBuffer)new WindowsReplayBuffer(_configProvider)
+            : new NativeReplayBuffer(_configProvider);
+
         try
         {
-            var native = new NativeReplayBuffer(_configProvider);
-            await StartInnerAsync(native, cancellationToken);
+            await StartInnerAsync(primary, cancellationToken);
             _fallbackReason = string.Empty;
-            SetHealth(new ReplayCaptureHealth("Hybrid", "Desktop Duplication", ReplayCaptureState.Starting,
+            SetHealth(new ReplayCaptureHealth("Hybrid",
+                useWindowCapture ? "Windows Graphics Capture" : "Desktop Duplication",
+                ReplayCaptureState.Starting,
                 config.FrameRate, 0, 0, 0, 0, 0, 0, string.Empty, string.Empty, string.Empty, DateTime.UtcNow));
             return;
         }
         catch (Exception error)
         {
-            AppLog.Error("Hybrid capture: Native capture failed to start.", error);
+            if (useWindowCapture)
+            {
+                _fallbackReason = "Windows Graphics Capture unavailable; using DXGI monitor capture.";
+                AppLog.Error("Hybrid capture: WGC window capture failed; falling back to native DXGI capture.", error);
+                try
+                {
+                    await StartInnerAsync(new NativeReplayBuffer(_configProvider), cancellationToken);
+                    SetHealth(GetHealthSnapshot());
+                    return;
+                }
+                catch (Exception fallbackError)
+                {
+                    AppLog.Error("Hybrid capture: native DXGI fallback failed to start.", fallbackError);
+                }
+            }
+            else
+            {
+                AppLog.Error("Hybrid capture: native DXGI capture failed to start.", error);
+            }
+
             _fallbackReason = "Native capture unavailable.";
             SetHealth(new ReplayCaptureHealth("Hybrid", "Unavailable", ReplayCaptureState.Failed,
                 config.FrameRate, 0, 0, 0, 0, 0, 0, string.Empty, string.Empty, _fallbackReason, DateTime.UtcNow));

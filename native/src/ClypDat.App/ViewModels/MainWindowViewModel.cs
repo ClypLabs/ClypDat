@@ -243,9 +243,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
         ReplayBackends = new ObservableCollection<ReplayBackendPreset>
         {
-            new("Auto (recommended)", "Auto", "Uses ClypDat's own capture engine for every game - no process hook, so it's safe for anti-cheat-protected games too, with no stop/start gaps between segments."),
-            new("ClypDat", "Native", "ClypDat's own capture engine - a true rolling buffer with no stop/start gaps between segments, and true per-window capture that keeps recording the game through alt-tabs and overlays. Used automatically on Auto."),
-            new("Windows Capture", "Legacy", "Captures the screen directly with no process hook, so games with anti-cheat can get captured properly, at the cost of slightly higher overhead.")
+            new("Auto (recommended)", "Auto", "Uses Windows Graphics Capture for detected game windows, with ClypDat's native monitor capture as a safe fallback. No process hooks."),
+            new("ClypDat", "Native", "Uses ClypDat's native DXGI monitor capture and rolling memory buffer. Best for desktop capture and direct GPU encoding."),
+            new("Windows Capture", "Legacy", "Uses Windows Graphics Capture for game windows with a file-backed replay buffer. No process hooks.")
         };
         ReplayCaptureSources = new ObservableCollection<string> { "Game Capture", "Desktop Capture" };
         DesktopMonitors = new ObservableCollection<DesktopMonitorOption>();
