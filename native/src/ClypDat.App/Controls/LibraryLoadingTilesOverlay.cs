@@ -168,7 +168,7 @@ internal sealed class LibraryLoadingTilesOverlay : Control
         var now = Clock.Elapsed.TotalSeconds;
         var tileHeight = TileHeight;
         var tileWidth = TileWidth;
-        var shimmerWidth = tileWidth * 1.3;
+        var shimmerWidth = tileWidth * 2.0;
         EnsureTileGeometry(tileWidth, tileHeight);
         // The band is drawn axis-aligned and sheared, so the gradient's own
         // contour lines lean with it - shearing only the outline would leave
