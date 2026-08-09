@@ -4,7 +4,7 @@ using Avalonia.Data.Converters;
 namespace ClypDat.App.Converters;
 
 // Maps a ClipTypeFilterOptions row's Key (the fixed ClipTypeManual/AutoClip/
-// Vod/MedalImport constants in MainWindowViewModel) to the PathIcon glyph
+// Vod/Imported constants in MainWindowViewModel) to the PathIcon glyph
 // the Library sidebar's icon-only Sections rail shows for it - keeps the
 // icon rail data-driven off the same ItemsControl the text labels/counts
 // already come from, instead of four hand-written buttons that'd drift out
@@ -25,8 +25,7 @@ public sealed class ClipTypeKeyToIconConverter : IValueConverter
             "Manual" => PencilIcon,
             "AutoClip" => BoltIcon,
             "Vod" => MovieIcon,
-            "MedalImport" => ImportIcon,
-            "SteelSeriesImport" => ImportIcon,
+            "Imported" or "MedalImport" or "SteelSeriesImport" => ImportIcon,
             _ => MovieIcon
         };
     }

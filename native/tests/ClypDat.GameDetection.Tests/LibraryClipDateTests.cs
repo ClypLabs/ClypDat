@@ -12,6 +12,8 @@ public sealed class LibraryClipDateTests
     [InlineData("DESKTOPCAPTURE", "Desktop Capture")]
     [InlineData("Desktop", "Desktop Capture")]
     [InlineData("RobloxPlayerBeta", "Roblox")]
+    [InlineData("VALORANT-Win64-Shipping.exe", "Valorant")]
+    [InlineData("LeagueClientUx.exe", "League of Legends")]
     public void NormalizeGameDisplayName_UsesCanonicalBuckets(string input, string expected)
     {
         Assert.Equal(expected, ClipCardViewModel.NormalizeGameDisplayName(input));

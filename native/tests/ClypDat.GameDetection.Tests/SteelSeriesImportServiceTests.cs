@@ -58,6 +58,16 @@ public sealed class SteelSeriesImportServiceTests
         Assert.Equal("Desktop Capture", SteelSeriesImportService.NormalizeGame("DESKTOPCAPTURE"));
     }
 
+    [Theory]
+    [InlineData(@"D:\Arashii\Videos\SteelSeries Moments\Saved Clips\clip.mp4", true)]
+    [InlineData(@"D:\Arashii\Videos\SteelSeries Moments\Game\Saved Clips\clip.mp4", true)]
+    [InlineData(@"D:\Arashii\Videos\SteelSeries Moments\Saved Clips Archive\clip.mp4", false)]
+    [InlineData(@"D:\Arashii\Videos\SteelSeries Moments\Game\clip.mp4", false)]
+    public void SavedClipsFolder_IsExcludedFromImport(string path, bool expected)
+    {
+        Assert.Equal(expected, SteelSeriesImportService.IsSavedClipsPath(path));
+    }
+
     [Fact]
     public void CatalogIdentity_UsesStableCatalogId()
     {

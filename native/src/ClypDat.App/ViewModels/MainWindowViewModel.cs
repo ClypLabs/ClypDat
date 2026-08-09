@@ -474,7 +474,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ClipTypeManual => "Manual Clips",
         ClipTypeAutoClip => "Auto-Clips",
         ClipTypeVod => "Full Session / VODs",
-        ClipTypeMedalImport => "Medal Imports",
+        ClipTypeImported => "Imported",
         _ => key
     };
     public string LibraryFolderDisplay => string.IsNullOrWhiteSpace(Settings.LibraryFolder)
@@ -3391,8 +3391,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var isMedalImport = !string.IsNullOrWhiteSpace(state.ClipInfo?.MedalImportKey);
         var isSteelSeriesImport = !string.IsNullOrWhiteSpace(state.ClipInfo?.SteelSeriesImportKey);
         var isAutoClip = !string.IsNullOrWhiteSpace(state.ClipInfo?.AutoClipEventType);
-        if (isMedalImport && _activeClipTypeFilters.Contains(ClipTypeMedalImport)) return true;
-        if (isSteelSeriesImport && _activeClipTypeFilters.Contains(ClipTypeSteelSeriesImport)) return true;
+        if ((isMedalImport || isSteelSeriesImport) && _activeClipTypeFilters.Contains(ClipTypeImported)) return true;
         if (isAutoClip && _activeClipTypeFilters.Contains(ClipTypeAutoClip)) return true;
         if (isMedalImport || isSteelSeriesImport || isAutoClip) return false;
         if (IsCachedStateVod(state)) return _activeClipTypeFilters.Contains(ClipTypeVod);
@@ -6063,8 +6062,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private const string ClipTypeManual = "Manual";
     private const string ClipTypeAutoClip = "AutoClip";
     private const string ClipTypeVod = "Vod";
-    private const string ClipTypeMedalImport = "MedalImport";
-    private const string ClipTypeSteelSeriesImport = "SteelSeriesImport";
+    private const string ClipTypeImported = "Imported";
 
     // Rebuilds the Game Filters / Clip Type Filters checklist option lists -
     // works the same for ClypDat-recorded and Medal-imported clips since both
@@ -6082,29 +6080,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var manualCount = AllClips.Count(clip => clip.IsManualClip);
         var autoClipCount = AllClips.Count(clip => clip.IsAutoClip);
         var vodCount = AllClips.Count(clip => clip.IsVod);
-        var medalImportCount = AllClips.Count(clip => clip.IsMedalImport);
-        var steelSeriesImportCount = AllClips.Count(clip => clip.IsSteelSeriesImport);
-        var hasMedalImports = medalImportCount > 0;
-        var hasSteelSeriesImports = steelSeriesImportCount > 0;
-        var removedAnyClipTypeFilter = !hasMedalImports && _activeClipTypeFilters.Remove(ClipTypeMedalImport);
-        var removedAnySteelSeriesFilter = !hasSteelSeriesImports && _activeClipTypeFilters.Remove(ClipTypeSteelSeriesImport);
+        var importedCount = AllClips.Count(clip => clip.IsMedalImport || clip.IsSteelSeriesImport);
+        var hasImports = importedCount > 0;
+        var removedAnyClipTypeFilter = !hasImports && _activeClipTypeFilters.Remove(ClipTypeImported);
 
         ClipTypeFilterOptions.Clear();
         ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeManual, $"Manual clips ({manualCount})", _activeClipTypeFilters.Contains(ClipTypeManual), OnClipTypeFilterOptionChanged));
         ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeAutoClip, $"Auto-Clips ({autoClipCount})", _activeClipTypeFilters.Contains(ClipTypeAutoClip), OnClipTypeFilterOptionChanged));
         ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeVod, $"Full Session / VODs ({vodCount})", _activeClipTypeFilters.Contains(ClipTypeVod), OnClipTypeFilterOptionChanged));
-        if (hasMedalImports)
+        if (hasImports)
         {
-            ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeMedalImport, $"Medal imports ({medalImportCount})", _activeClipTypeFilters.Contains(ClipTypeMedalImport), OnClipTypeFilterOptionChanged));
-        }
-        if (hasSteelSeriesImports)
-        {
-            ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeSteelSeriesImport, $"SteelSeries imports ({steelSeriesImportCount})", _activeClipTypeFilters.Contains(ClipTypeSteelSeriesImport), OnClipTypeFilterOptionChanged));
+            ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeImported, $"Imported ({importedCount})", _activeClipTypeFilters.Contains(ClipTypeImported), OnClipTypeFilterOptionChanged));
         }
 
         if (removedAnyGameFilter) ApplyGameFilters();
-        if (removedAnyClipTypeFilter || removedAnySteelSeriesFilter) ApplyClipTypeFilters();
-        if (removedAnyGameFilter || removedAnyClipTypeFilter || removedAnySteelSeriesFilter)
+        if (removedAnyClipTypeFilter) ApplyClipTypeFilters();
+        if (removedAnyGameFilter || removedAnyClipTypeFilter)
         {
             OnPropertyChanged(nameof(IsGameFilterActive));
             OnPropertyChanged(nameof(IsClipTypeFilterActive));
@@ -6126,15 +6117,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var manualCount = 0;
         var autoClipCount = 0;
         var vodCount = 0;
-        var medalImportCount = 0;
-        var steelSeriesImportCount = 0;
+        var importedCount = 0;
         foreach (var state in cached)
         {
             var isMedalImport = !string.IsNullOrWhiteSpace(state.ClipInfo?.MedalImportKey);
             var isSteelSeriesImport = !string.IsNullOrWhiteSpace(state.ClipInfo?.SteelSeriesImportKey);
             var isAutoClip = !string.IsNullOrWhiteSpace(state.ClipInfo?.AutoClipEventType);
-            if (isMedalImport) medalImportCount++;
-            if (isSteelSeriesImport) steelSeriesImportCount++;
+            if (isMedalImport || isSteelSeriesImport) importedCount++;
             if (isAutoClip) autoClipCount++;
             if (!isMedalImport && !isSteelSeriesImport && !isAutoClip)
             {
@@ -6143,21 +6132,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
         }
 
-        var hasMedalImports = medalImportCount > 0;
-        var hasSteelSeriesImports = steelSeriesImportCount > 0;
-        if (!hasMedalImports) _activeClipTypeFilters.Remove(ClipTypeMedalImport);
-        if (!hasSteelSeriesImports) _activeClipTypeFilters.Remove(ClipTypeSteelSeriesImport);
+        var hasImports = importedCount > 0;
+        if (!hasImports) _activeClipTypeFilters.Remove(ClipTypeImported);
         ClipTypeFilterOptions.Clear();
         ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeManual, $"Manual clips ({manualCount})", _activeClipTypeFilters.Contains(ClipTypeManual), OnClipTypeFilterOptionChanged));
         ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeAutoClip, $"Auto-Clips ({autoClipCount})", _activeClipTypeFilters.Contains(ClipTypeAutoClip), OnClipTypeFilterOptionChanged));
         ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeVod, $"Full Session / VODs ({vodCount})", _activeClipTypeFilters.Contains(ClipTypeVod), OnClipTypeFilterOptionChanged));
-        if (hasMedalImports)
+        if (hasImports)
         {
-            ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeMedalImport, $"Medal imports ({medalImportCount})", _activeClipTypeFilters.Contains(ClipTypeMedalImport), OnClipTypeFilterOptionChanged));
-        }
-        if (hasSteelSeriesImports)
-        {
-            ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeSteelSeriesImport, $"SteelSeries imports ({steelSeriesImportCount})", _activeClipTypeFilters.Contains(ClipTypeSteelSeriesImport), OnClipTypeFilterOptionChanged));
+            ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeImported, $"Imported ({importedCount})", _activeClipTypeFilters.Contains(ClipTypeImported), OnClipTypeFilterOptionChanged));
         }
     }
 
@@ -6580,6 +6563,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void SelectClipTypeSection(string? key)
     {
+        key = NormalizeClipTypeKey(key);
         _activeClipTypeFilters.Clear();
         if (key is not null) _activeClipTypeFilters.Add(key);
         foreach (var option in ClipTypeFilterOptions) option.SetCheckedSilently(string.Equals(option.Key, key, StringComparison.OrdinalIgnoreCase));
@@ -6651,6 +6635,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void OnClipTypeFilterOptionChanged(string key, bool isChecked)
     {
+        key = NormalizeClipTypeKey(key)!;
         if (isChecked) _activeClipTypeFilters.Add(key);
         else _activeClipTypeFilters.Remove(key);
         ApplyClipTypeFilters();
@@ -6658,6 +6643,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(IsAllClipsActive));
         OnPropertyChanged(nameof(LibraryTitle));
     }
+
+    private static string? NormalizeClipTypeKey(string? key) =>
+        key is "MedalImport" or "SteelSeriesImport" ? ClipTypeImported : key;
 
     private void ApplyGameFilters()
     {
@@ -6779,8 +6767,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return (clip.IsManualClip && _activeClipTypeFilters.Contains(ClipTypeManual))
             || (clip.IsAutoClip && _activeClipTypeFilters.Contains(ClipTypeAutoClip))
             || (clip.IsVod && _activeClipTypeFilters.Contains(ClipTypeVod))
-            || (clip.IsMedalImport && _activeClipTypeFilters.Contains(ClipTypeMedalImport))
-            || (clip.IsSteelSeriesImport && _activeClipTypeFilters.Contains(ClipTypeSteelSeriesImport));
+            || ((clip.IsMedalImport || clip.IsSteelSeriesImport) && _activeClipTypeFilters.Contains(ClipTypeImported));
     }
 
     private void NotifySelectionChrome()

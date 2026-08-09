@@ -27,6 +27,19 @@ internal sealed class LibraryCardPanel : WrapPanel
 
     protected override Size MeasureOverride(Size availableSize)
     {
+        // ItemsControl keeps every clip container in its visual tree.  A
+        // filtered card's template can be collapsed while the container still
+        // receives the fixed ItemWidth, which makes WrapPanel reserve empty
+        // columns/rows. Collapse the container itself before the base panel
+        // measures so filtered cards compact into contiguous rows.
+        foreach (var child in Children)
+        {
+            if (child.DataContext is ClipCardViewModel clip)
+            {
+                child.IsVisible = clip.IsVisibleInLibrary;
+            }
+        }
+
         // Horizontal scrolling is disabled on the owning ScrollViewer, so this
         // is the finite width WrapPanel will use for the actual row packing.
         if (double.IsFinite(availableSize.Width) && availableSize.Width > 0)

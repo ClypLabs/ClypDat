@@ -89,6 +89,7 @@ public static class SteelSeriesImportService
                 count++;
                 if (reader.GetInt64(6) != 0) continue;
                 var path = reader.GetString(2);
+                if (IsSavedClipsPath(path)) continue;
                 if (!File.Exists(path) || !seenPaths.Add(path)) continue;
                 var fileStem = Path.GetFileNameWithoutExtension(path);
                 var hasFilenameTimestamp = TryParseTimestampedName(fileStem, out _, out var filenameCapturedAt);
@@ -124,7 +125,7 @@ public static class SteelSeriesImportService
         try
         {
             files = Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirectories)
-                .Where(path => MediaProbeService.IsVideoFile(path)).ToArray();
+                .Where(path => !IsSavedClipsPath(path) && MediaProbeService.IsVideoFile(path)).ToArray();
         }
         catch (Exception error)
         {
@@ -137,7 +138,7 @@ public static class SteelSeriesImportService
             var path = files[i];
             if (!seenPaths.Add(path)) continue;
             SteelSeriesClipRecord record;
-            if (!IsSavedClipsPath(path) && TryReadEmbeddedMetadata(path, out var embedded))
+            if (TryReadEmbeddedMetadata(path, out var embedded))
             {
                 record = embedded;
             }
@@ -203,8 +204,12 @@ public static class SteelSeriesImportService
     }
 
     private static string DatabasePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "SteelSeries", "GG", "apps", "moments", "db", "database.db");
-    private static bool IsSavedClipsPath(string path) =>
-        string.Equals(Path.GetFileName(Path.GetDirectoryName(path)), "Saved Clips", StringComparison.OrdinalIgnoreCase);
+    internal static bool IsSavedClipsPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        return path.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries)
+            .Any(part => string.Equals(part, "Saved Clips", StringComparison.OrdinalIgnoreCase));
+    }
 
     private static bool TryReadEmbeddedMetadata(string path, out SteelSeriesClipRecord record)
     {

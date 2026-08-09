@@ -234,6 +234,8 @@ public sealed class ClipCardViewModel : ViewModelBase
             "DESKTOP" or "DESKTOPCAPTURE" => "Desktop Capture",
             "FORTNITECLIENT-WIN64-SHIPPING" or "FORTNITECLIENT-WIN64-SHIPPING.EXE" => "Fortnite",
             "ROBLOXPLAYERBETA" or "ROBLOXPLAYERBETA.EXE" or "ROBLOXPLAYERLAUNCHER" or "ROBLOXPLAYERLAUNCHER.EXE" => "Roblox",
+            "VALORANT" or "VALORANT-WIN64-SHIPPING" or "VALORANT-WIN64-SHIPPING.EXE" => "Valorant",
+            "LEAGUECLIENT" or "LEAGUECLIENT.EXE" or "LEAGUECLIENTUX" or "LEAGUECLIENTUX.EXE" or "LEAGUECLIENTUXRELEASE" or "LEAGUECLIENTUXRELEASE.EXE" => "League of Legends",
             _ => normalized
         };
     }

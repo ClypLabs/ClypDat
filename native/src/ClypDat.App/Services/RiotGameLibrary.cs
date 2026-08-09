@@ -50,7 +50,8 @@ public sealed class RiotGameLibrary
                 using var document = JsonDocument.Parse(File.ReadAllText(installsJson));
                 foreach (var property in document.RootElement.EnumerateObject())
                 {
-                    AddIfGameFolder(games, property.Name);
+                    AddIfRiotGamePath(games, property.Name);
+                    AddManifestPaths(games, property.Value, property.Name);
                 }
             }
             catch
@@ -64,11 +65,58 @@ public sealed class RiotGameLibrary
         {
             foreach (var folder in Directory.EnumerateDirectories(defaultRoot))
             {
-                AddIfGameFolder(games, folder);
+                AddIfRiotGamePath(games, folder);
             }
         }
 
         return games.Values.OrderByDescending(game => game.InstallPath.Length).ToArray();
+    }
+
+    private static void AddManifestPaths(Dictionary<string, RiotGameInstall> games, JsonElement element, string propertyName)
+    {
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            if (propertyName.Contains("path", StringComparison.OrdinalIgnoreCase) ||
+                propertyName.Contains("dir", StringComparison.OrdinalIgnoreCase) ||
+                propertyName.Contains("install", StringComparison.OrdinalIgnoreCase))
+            {
+                AddIfRiotGamePath(games, element.GetString());
+            }
+            return;
+        }
+
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject()) AddManifestPaths(games, property.Value, property.Name);
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray()) AddManifestPaths(games, item, propertyName);
+        }
+    }
+
+    private static void AddIfRiotGamePath(Dictionary<string, RiotGameInstall> games, string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return;
+        try
+        {
+            var full = Path.GetFullPath(path);
+            var marker = Path.DirectorySeparatorChar + "Riot Games" + Path.DirectorySeparatorChar;
+            var markerIndex = full.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (markerIndex >= 0)
+            {
+                var afterRoot = full[(markerIndex + marker.Length)..];
+                var gameName = afterRoot.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(gameName))
+                {
+                    var riotRoot = full[..(markerIndex + marker.Length - 1)];
+                    AddIfGameFolder(games, Path.Combine(riotRoot, gameName));
+                    return;
+                }
+            }
+        }
+        catch { }
+        AddIfGameFolder(games, path);
     }
 
     private static void AddIfGameFolder(Dictionary<string, RiotGameInstall> games, string? path)
@@ -77,8 +125,14 @@ public sealed class RiotGameLibrary
         var full = Path.GetFullPath(path);
         var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(full));
         // The client's own install folder, not a game.
-        if (string.IsNullOrWhiteSpace(name) || string.Equals(name, "Riot Client", StringComparison.OrdinalIgnoreCase)) return;
-        games.TryAdd(full, new RiotGameInstall(name, full));
+        if (string.IsNullOrWhiteSpace(name) || name.StartsWith("Riot Client", StringComparison.OrdinalIgnoreCase)) return;
+        var displayName = name.ToUpperInvariant() switch
+        {
+            "VALORANT" => "Valorant",
+            "LEAGUE OF LEGENDS" => "League of Legends",
+            _ => name
+        };
+        games.TryAdd(full, new RiotGameInstall(displayName, full));
     }
 
     private static bool IsUnderPath(string candidate, string root)
