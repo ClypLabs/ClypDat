@@ -834,11 +834,11 @@
             <ItemsControl x:Name="LibraryItemsControl"
                           ItemsSource="{Binding AllClips}"
                           Opacity="{Binding LibraryCardGridOpacity}"
-                          IsHitTestVisible="{Binding IsInitialLibraryLoadComplete}"
-                          MinHeight="{Binding LibraryReservedContentHeight}">
+                          IsHitTestVisible="{Binding IsInitialLibraryLoadComplete}">
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
                   <controls:LibraryCardPanel ScaleWithWindow="{Binding ScaleClipsWithWindow}"
+                                             ReservedHeight="{Binding LibraryReservedContentHeight}"
                                              MetricsChanged="LibraryCardPanel_OnMetricsChanged" />
                 </ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>

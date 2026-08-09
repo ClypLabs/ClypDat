@@ -4,11 +4,17 @@ internal readonly record struct LibraryCardLayout(int Columns, double Width, dou
 
 internal static class LibraryCardLayoutCalculator
 {
-    internal const double HorizontalMargin = 24;
+    internal const double CardLeftInset = 4;
+    internal const double CardRightInset = 20;
+    internal const double CardTopInset = 2;
+    internal const double CardBottomInset = 4;
+    internal const double HorizontalMargin = CardLeftInset + CardRightInset;
     private const double MinimumContentWidth = 320;
     private const double MinimumCardWidth = 220;
     private const double ScaledCardTargetWidth = 400;
     private const double SafetyReserve = 1;
+
+    internal static double SlotWidth(double cardWidth) => cardWidth + HorizontalMargin;
 
     public static LibraryCardLayout Calculate(double viewportWidth, bool scaleWithWindow)
     {

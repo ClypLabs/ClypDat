@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Threading;
+using ClypDat.App.ViewModels;
 
 namespace ClypDat.App.Controls;
 
@@ -37,8 +38,8 @@ internal sealed class LibraryLoadingTilesOverlay : Control
 
     private const double SweepDurationSeconds = 1.6;
     private const double PauseDurationSeconds = 0.6;
-    // Each tile starts its sweep slightly after the one up-left of it, so the
-    // highlight reads as a single diagonal wave crossing the grid.
+    // Each tile starts its sweep slightly after the previous row-major tile,
+    // matching restore order while still reading as a diagonal wave.
     private const double DiagonalStaggerSeconds = 0.07;
     // Horizontal shear per unit of tile height; negative leans the band's top
     // edge ahead of its bottom, roughly a 27 degree tilt.
@@ -182,15 +183,19 @@ internal sealed class LibraryLoadingTilesOverlay : Control
             for (var row = firstRow; row < lastRow; row++)
             {
                 var rowStart = Math.Max(firstTile, row * columns);
-                var rowEnd = Math.Min(TotalTileCount, rowStart + columns);
+                var rowEnd = Math.Min(TotalTileCount, (row + 1) * columns);
                 for (var index = rowStart; index < rowEnd; index++)
                 {
                     var column = index % columns;
-                    var tile = new Rect(4 + column * (tileWidth + 24), TileTopInset + row * RowPitch - ScrollOffsetY, tileWidth, tileHeight);
+                    var tile = new Rect(
+                        LibraryCardLayoutCalculator.CardLeftInset + column * LibraryCardLayoutCalculator.SlotWidth(tileWidth),
+                        TileTopInset + row * RowPitch - ScrollOffsetY,
+                        tileWidth,
+                        tileHeight);
 
                     context.DrawRectangle(SurfaceBrush, SurfacePen, new RoundedRect(tile, 12), TileShadow);
 
-                    var phase = ((now - (row + column) * DiagonalStaggerSeconds) % cycle + cycle) % cycle;
+                    var phase = ((now - index * DiagonalStaggerSeconds) % cycle + cycle) % cycle;
                     if (phase >= SweepDurationSeconds) continue;
 
                     using (context.PushTransform(Matrix.CreateTranslation(tile.X, tile.Y)))

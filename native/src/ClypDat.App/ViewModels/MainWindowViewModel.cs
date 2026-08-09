@@ -3132,13 +3132,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var clock = System.Diagnostics.Stopwatch.StartNew();
             // Load is a synchronous SQLite read + per-row JSON deserialize; offload
             // it so a large cached library doesn't block the window from showing.
-            var cached = await Task.Run(() => _libraryCache.Load(root));
+            var cached = (await Task.Run(() => _libraryCache.Load(root)))
+                .OrderByDescending(state => state.Media.CreatedAt)
+                .ThenBy(state => state.Media.Path, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
             if (!string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase))
             {
                 // Library folder changed again while this load was in flight.
                 return;
             }
-            if (cached.Count == 0)
+            if (cached.Length == 0)
             {
                 await RefreshLibraryAsync();
                 return;
@@ -3168,7 +3171,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ApplyClipTypeFilters();
             ApplySearchFilter();
             NotifyLibraryChrome();
-            AppLog.Info($"Library cache: restored {Math.Min(initialCardCount, cached.Count)}/{cached.Count} cards in {clock.ElapsedMilliseconds}ms.");
+            AppLog.Info($"Library cache: restored {Math.Min(initialCardCount, cached.Length)}/{cached.Length} cards in {clock.ElapsedMilliseconds}ms.");
 
             // MainWindow reveals this measured grid only after it reserves the
             // cached library's full extent. Until then the shimmer is the only
@@ -6597,16 +6600,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // however many are set. Used by the logo/home button.
     public void ClearAllFilters()
     {
+        var gamesBefore = string.Join(", ", _activeGameFilters.OrderBy(key => key, StringComparer.OrdinalIgnoreCase));
+        var clipTypesBefore = string.Join(", ", _activeClipTypeFilters.OrderBy(key => key, StringComparer.OrdinalIgnoreCase));
+        var searchBefore = _librarySearchText;
+        AppLog.Info($"Library filters reset: games=[{gamesBefore}], clipTypes=[{clipTypesBefore}], search='{searchBefore}'.");
+
         _activeGameFilters.Clear();
         _activeClipTypeFilters.Clear();
         foreach (var option in GameFilterOptions) option.SetCheckedSilently(false);
         foreach (var option in ClipTypeFilterOptions) option.SetCheckedSilently(false);
+        LibrarySearchText = string.Empty;
         ApplyGameFilters();
         ApplyClipTypeFilters();
+        ApplySearchFilter();
         OnPropertyChanged(nameof(IsGameFilterActive));
         OnPropertyChanged(nameof(IsClipTypeFilterActive));
         OnPropertyChanged(nameof(IsAllClipsActive));
+        OnPropertyChanged(nameof(LibraryReservedContentHeight));
         OnPropertyChanged(nameof(LibraryTitle));
+        var visible = AllClips.Count(clip => clip.IsVisibleInLibrary);
+        AppLog.Info($"Library filters reset complete: {visible}/{AllClips.Count} clips visible.");
     }
 
     public bool CombineSidebarFilters
