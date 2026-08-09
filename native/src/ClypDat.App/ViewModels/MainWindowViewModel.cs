@@ -1409,10 +1409,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 return "H.264 override selected.";
 
             if (!ExportEncoderProbe.Av1ProbeCompleted) return "Checking hardware AV1 support…";
-            var family = ExportEncoderProbe.Av1Family;
-            return family is null
+            return ExportEncoderProbe.Av1Family is null
                 ? "Hardware AV1 unavailable. Auto will use H.264."
-                : $"Hardware AV1 available ({family.ToUpperInvariant()}). Auto will use AV1.";
+                : "Hardware AV1 available. Auto will use AV1.";
         }
     }
 
