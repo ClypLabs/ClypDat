@@ -1025,6 +1025,7 @@
               ColumnCount="{Binding CardColumns}"
               TileWidth="{Binding CardWidth}"
               TileHeight="{Binding LibraryLoadingTileHeight}"
+              TileImageHeight="{Binding CardImageHeight}"
               TileTopInset="{Binding LibraryLoadingTileTopInset}"
               RowPitch="{Binding LibraryLoadingRowPitch}"
               IsHitTestVisible="False" />
