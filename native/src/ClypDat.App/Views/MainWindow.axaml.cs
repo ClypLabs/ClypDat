@@ -1758,6 +1758,7 @@ public sealed partial class MainWindow : Window
     // track itself show where each day's clips start, not just the single
     // date the thumb or cursor currently happens to be over.
     private readonly List<Border> _scrubberTicks = new();
+    private const double ScrubberTickTopInset = 5;
 
     private void QueueDateScrubberRebuild()
     {
@@ -1901,11 +1902,10 @@ public sealed partial class MainWindow : Window
             var scrollbarLeft = Canvas.GetLeft(DateScrubberThumb);
             if (double.IsNaN(scrollbarLeft)) scrollbarLeft = 34;
             Canvas.SetLeft(tick, scrollbarLeft - tickWidth);
-            // Markers are centred on their mapped content position. The first
-            // date maps to zero, so clamp its centred line back inside the
-            // rail instead of letting it extend one pixel above the scrollbar.
+            // Markers are centred on their mapped content position. Keep the
+            // first one five pixels below the rail's top edge, never above it.
             var tickTop = ContentOffsetToTrackY(contentY) - tick.Height / 2;
-            Canvas.SetTop(tick, Math.Clamp(tickTop, 0, Math.Max(0, DateScrubberHost.Bounds.Height - tick.Height)));
+            Canvas.SetTop(tick, Math.Clamp(tickTop, ScrubberTickTopInset, Math.Max(ScrubberTickTopInset, DateScrubberHost.Bounds.Height - tick.Height)));
             DateScrubberCanvas.Children.Add(tick);
             _scrubberTicks.Add(tick);
         }
@@ -1926,11 +1926,9 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    // Single shared mapping between scroll-content space and track space, so
-    // the thumb, the date labels, and click/drag seeking all agree. The whole
-    // content maps onto the whole track, which makes the thumb a true
-    // viewport window: its top edge is the content at the top of the screen,
-    // so a label lining up with the thumb's top means that date is on screen.
+    // Date markers map the whole content onto the whole rail. The thumb uses
+    // the scrollable range below: its minimum height means its travel cannot
+    // use this direct mapping without reaching the rail bottom too early.
     private double ContentOffsetToTrackY(double contentY)
     {
         var extentHeight = LibraryScrollViewer.Extent.Height;
@@ -1955,9 +1953,12 @@ public sealed partial class MainWindow : Window
 
         DateScrubberThumb.IsVisible = true;
         if (DateScrubberTrack is not null) DateScrubberTrack.IsVisible = true;
-        DateScrubberThumb.Height = Math.Max(28, viewportHeight / extentHeight * trackHeight);
-        var top = ContentOffsetToTrackY(LibraryScrollViewer.Offset.Y);
-        Canvas.SetTop(DateScrubberThumb, Math.Clamp(top, 0, Math.Max(0, trackHeight - DateScrubberThumb.Height)));
+        var thumbHeight = Math.Min(trackHeight, Math.Max(28, viewportHeight / extentHeight * trackHeight));
+        DateScrubberThumb.Height = thumbHeight;
+        var maxOffset = Math.Max(0, extentHeight - viewportHeight);
+        var maxThumbTop = Math.Max(0, trackHeight - thumbHeight);
+        var top = maxOffset <= 0 ? 0 : LibraryScrollViewer.Offset.Y / maxOffset * maxThumbTop;
+        Canvas.SetTop(DateScrubberThumb, Math.Clamp(top, 0, maxThumbTop));
 
         HighlightCurrentScrubberDate();
     }
@@ -2035,10 +2036,8 @@ public sealed partial class MainWindow : Window
         Canvas.SetLeft(DateScrubberBubble, -(bubbleWidth > 0 ? bubbleWidth : 64) - 10);
     }
 
-    // y is where the thumb's TOP should land, which by the shared mapping
-    // above is exactly the content offset to scroll to - no half-viewport
-    // fudge, which is what made clicking a date land short of it and made
-    // the thumb slide out from under the cursor mid-drag.
+    // Map thumb travel onto actual scrollable content. This keeps the thumb
+    // flush with the rail bottom only when the final library rows are shown.
     private void SeekLibraryToThumbTop(double y)
     {
         var trackHeight = DateScrubberHost.Bounds.Height;
@@ -2046,10 +2045,15 @@ public sealed partial class MainWindow : Window
         var viewportHeight = LibraryScrollViewer.Viewport.Height;
         if (trackHeight <= 0 || extentHeight <= 0) return;
 
-        var target = y / trackHeight * extentHeight;
+        var maxOffset = Math.Max(0, extentHeight - viewportHeight);
+        var thumbHeight = DateScrubberThumb.Bounds.Height > 0
+            ? DateScrubberThumb.Bounds.Height
+            : Math.Min(trackHeight, Math.Max(28, viewportHeight / extentHeight * trackHeight));
+        var maxThumbTop = Math.Max(0, trackHeight - thumbHeight);
+        var target = maxThumbTop <= 0 ? 0 : Math.Clamp(y, 0, maxThumbTop) / maxThumbTop * maxOffset;
         LibraryScrollViewer.Offset = new Vector(
             LibraryScrollViewer.Offset.X,
-            Math.Clamp(target, 0, Math.Max(0, extentHeight - viewportHeight)));
+            Math.Clamp(target, 0, maxOffset));
         UpdateDateScrubberThumb();
     }
 
