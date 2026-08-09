@@ -2441,8 +2441,8 @@ public sealed partial class MainWindow : Window
 
                 AppLog.Info(isAutoClip ? $"Auto-clip triggered: {autoClipLabel}." : "Replay clip save requested.");
 
-                // The final four seconds belong to the event, not whatever is
-                // happening when a round finishes. Wait for that tail before the
+                // The event tail belongs to the final kill, not whatever is
+                // happening when the round finishes. Wait for it before the
                 // replay buffer snapshots its requested UTC window.
                 if (clipWindow is not null)
                 {

@@ -67,6 +67,21 @@ public sealed class Cs2GsiListenerTests
     }
 
     [Fact]
+    public void CompetitiveClipCapturesTenSecondsAfterFinalKill()
+    {
+        var settings = Settings();
+        using var listener = new Cs2GsiListener(() => settings);
+        var clips = new List<Cs2AutoClipRequest>();
+        listener.AutoClipReady += (_, request) => clips.Add(request);
+
+        listener.ProcessPayload(Payload("competitive", 0));
+        listener.ProcessPayload(Payload("competitive", 3, roundOver: true));
+
+        var clip = Assert.Single(clips);
+        Assert.InRange((clip.EndUtc - clip.StartUtc).TotalSeconds, 13.9, 14.1);
+    }
+
+    [Fact]
     public void NonCompetitiveModeDoesNotCreateAClipAfterModeChange()
     {
         var settings = Settings();
