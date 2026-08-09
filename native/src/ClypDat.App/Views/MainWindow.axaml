@@ -1036,6 +1036,7 @@
                an instant Offset snap - ScrollViewer.Offset isn't a
                Transitions-animatable property in Avalonia. -->
           <Button Grid.Column="0"
+                  ZIndex="2"
                   Classes="scrollToTopButton"
                   HorizontalAlignment="Right"
                   VerticalAlignment="Bottom"
@@ -1063,6 +1064,7 @@
                no width. -->
           <Border Grid.Column="1"
                   x:Name="DateScrubberHost"
+                  ZIndex="2"
                   Width="44"
                   Margin="-20,14,4,10"
                   Background="Transparent"

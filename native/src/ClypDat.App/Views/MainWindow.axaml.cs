@@ -666,58 +666,17 @@ public sealed partial class MainWindow : Window
         _replayBuffer.SetCapturePaused(shouldPause);
     }
 
-    // Preset changes stay observe-only (EncoderTuningService logs what it WOULD
-    // do); the frame-rate lever is live, because unlike a preset it needs no
-    // restart. See EncoderTuningService's header.
+    // Encoder tuning is diagnostic-only. User-selected capture quality remains
+    // fixed for the lifetime of a replay session.
     private void AttachEncoderTuning(IReplayBuffer buffer)
     {
         if (buffer is IReplayCaptureDiagnostics diagnostics)
         {
             diagnostics.HealthChanged += EncoderTuning_OnHealthChanged;
         }
-
-        _encoderTuning.FrameRateChangeRequested -= EncoderTuning_OnFrameRateChangeRequested;
-        _encoderTuning.FrameRateChangeRequested += EncoderTuning_OnFrameRateChangeRequested;
-        _encoderTuning.ResolutionChangeRequested -= EncoderTuning_OnResolutionChangeRequested;
-        _encoderTuning.ResolutionChangeRequested += EncoderTuning_OnResolutionChangeRequested;
     }
 
     private void EncoderTuning_OnHealthChanged(object? sender, ReplayCaptureHealth health) => _encoderTuning.OnHealth(health);
-
-    private void EncoderTuning_OnFrameRateChangeRequested(object? sender, EncoderFrameRateChange change)
-    {
-        if (_replayBuffer is IAdaptiveCaptureFrameRate adaptive) adaptive.RequestFrameRate(change.FrameRate);
-
-        // Health arrives off the capture thread, so this event does too.
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (ViewModel is null) return;
-            // Told, not silently downgraded: the whole reason this lever exists
-            // is that a machine could sit at 18.8fps of a requested 60 for
-            // minutes with nothing said about it.
-            ShowClipSavedOverlay(
-                ViewModel.Settings.ClipOverlayPosition,
-                $"Capture dropped to {change.FrameRate} FPS - your GPU couldn't keep up at {change.PreviousFrameRate}",
-                playSound: false);
-        });
-    }
-
-    // Unlike the frame rate this needs the buffer rebuilt (the encoder fixes
-    // its output size at start), so it goes through the same debounced restart
-    // path a settings change uses.
-    private void EncoderTuning_OnResolutionChangeRequested(object? sender, EncoderResolutionChange change)
-    {
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (ViewModel is null) return;
-            ViewModel.CaptureHeightOverride = change.Height;
-            ShowClipSavedOverlay(
-                ViewModel.Settings.ClipOverlayPosition,
-                $"Capture dropped to {change.Height}p - your GPU couldn't keep up at {change.PreviousHeight}p",
-                playSound: false);
-            ScheduleReplayRestart();
-        });
-    }
 
     private void InitializeReplayServices()
     {

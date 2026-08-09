@@ -1295,17 +1295,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    // Height the encoder tuner forced this run because the machine could not
-    // sustain the configured one (see EncoderTuningService). 0 means none.
-    // Deliberately NOT persisted and deliberately not written into Settings:
-    // the user's choice stays their choice, and a laptop that struggled with
-    // one game shouldn't silently rewrite the setting for every other machine
-    // state. Cleared as soon as the user picks a resolution themselves.
-    public int CaptureHeightOverride { get; set; }
-
-    private int EffectiveReplayMaxHeight =>
-        CaptureHeightOverride > 0 ? Math.Min(CaptureHeightOverride, Settings.ReplayMaxHeight) : Settings.ReplayMaxHeight;
-
     public ResolutionOption SelectedReplayResolution
     {
         get
@@ -1323,7 +1312,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 _customReplayResolutionSelected = false;
                 Settings.ReplayMaxHeight = value.Height;
-                CaptureHeightOverride = 0;
             }
 
             OnPropertyChanged();
@@ -1350,7 +1338,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (int.TryParse(value, out var height))
             {
                 Settings.ReplayMaxHeight = Math.Clamp(height, 480, 2160);
-                CaptureHeightOverride = 0;
                 SaveSettings();
                 UpdateReplayQualityRestartRequired();
                 OnPropertyChanged(nameof(ReplayQualityAboveDefault));
@@ -5049,7 +5036,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         return new ReplayBufferConfig(
             SelectedReplayDurationPreset?.Seconds ?? Settings.ReplayDurationSeconds,
-            EffectiveReplayMaxHeight,
+            Settings.ReplayMaxHeight,
             Settings.ReplayFrameRate,
             desktopCapture ? desktopMonitor.X : ReplayCaptureX,
             desktopCapture ? desktopMonitor.Y : ReplayCaptureY,

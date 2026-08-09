@@ -6,95 +6,93 @@ namespace ClypDat.GameDetection.Tests;
 
 public sealed class EncoderTuningServiceTests
 {
-    // Health arrives roughly every 2s; the service ignores the first 30s as
-    // warm-up and needs 8 severe windows out of a 15-sample window, with a 60s
-    // cooldown between decisions.
     private static readonly TimeSpan SampleInterval = TimeSpan.FromSeconds(2);
 
     [Fact]
-    public void LowersFrameRateOnceTheresNoFasterPresetLeft()
+    public void NeverLowersConfiguredFrameRateAtPresetFloor()
     {
         var service = new EncoderTuningService();
-        var changes = new List<EncoderFrameRateChange>();
-        service.FrameRateChangeRequested += (_, change) => changes.Add(change);
+        var frameRateChanges = new List<EncoderFrameRateChange>();
+        var resolutionChanges = new List<EncoderResolutionChange>();
+        service.FrameRateChangeRequested += (_, change) => frameRateChanges.Add(change);
+        service.ResolutionChangeRequested += (_, change) => resolutionChanges.Add(change);
         service.BeginSession("P1", 60, 1080);
 
-        Feed(service, severeSamples: 30, frameRate: 60);
+        Feed(service, severeSamples: 300, frameRate: 60, queueDepth: 30);
 
-        var change = Assert.Single(changes);
-        Assert.Equal(60, change.PreviousFrameRate);
-        Assert.Equal(30, change.FrameRate);
+        Assert.Empty(frameRateChanges);
+        Assert.Empty(resolutionChanges);
     }
 
     [Fact]
-    public void OnlyLowersTheFrameRateOncePerSession()
+    public void NeverRequestsResolutionChange()
     {
         var service = new EncoderTuningService();
-        var changes = new List<EncoderFrameRateChange>();
-        service.FrameRateChangeRequested += (_, change) => changes.Add(change);
+        var resolutionChanges = new List<EncoderResolutionChange>();
+        service.ResolutionChangeRequested += (_, change) => resolutionChanges.Add(change);
         service.BeginSession("P1", 60, 1080);
 
-        // Keep drowning long after the step down. There is nowhere left to go,
-        // so it must not ratchet toward an unwatchable frame rate.
-        Feed(service, severeSamples: 400, frameRate: 60);
+        Feed(service, severeSamples: 300, frameRate: 60, queueDepth: 30);
 
-        Assert.Single(changes);
+        Assert.Empty(resolutionChanges);
     }
 
     [Fact]
-    public void LeavesTheFrameRateAloneWhenAFasterPresetIsStillAvailable()
+    public void LeavesFasterPresetAsAnObservationOnlyProposal()
     {
         var service = new EncoderTuningService();
         var changes = new List<EncoderFrameRateChange>();
         service.FrameRateChangeRequested += (_, change) => changes.Add(change);
-        // P4 has P3/P2/P1 below it - spend those (as observe-only proposals)
-        // before touching something the user can see.
         service.BeginSession("P4", 60, 1080);
 
-        Feed(service, severeSamples: 60, frameRate: 60);
+        Feed(service, severeSamples: 60, frameRate: 60, queueDepth: 30);
 
         Assert.Empty(changes);
     }
 
     [Fact]
-    public void LeavesAHealthySessionAtItsConfiguredFrameRate()
+    public void LeavesHealthySessionAtItsConfiguredQuality()
     {
         var service = new EncoderTuningService();
-        var changes = new List<EncoderFrameRateChange>();
-        service.FrameRateChangeRequested += (_, change) => changes.Add(change);
+        var frameRateChanges = new List<EncoderFrameRateChange>();
+        var resolutionChanges = new List<EncoderResolutionChange>();
+        service.FrameRateChangeRequested += (_, change) => frameRateChanges.Add(change);
+        service.ResolutionChangeRequested += (_, change) => resolutionChanges.Add(change);
         service.BeginSession("P1", 60, 1080);
 
-        Feed(service, severeSamples: 0, frameRate: 60, healthySamples: 400);
+        Feed(service, severeSamples: 0, frameRate: 60, healthySamples: 400, queueDepth: 0);
 
-        Assert.Empty(changes);
+        Assert.Empty(frameRateChanges);
+        Assert.Empty(resolutionChanges);
     }
 
     [Fact]
-    public void DoesNotHalveAFrameRateThatIsAlreadyLow()
+    public void DoesNotHalveAlreadyLowConfiguredRate()
     {
         var service = new EncoderTuningService();
         var changes = new List<EncoderFrameRateChange>();
         service.FrameRateChangeRequested += (_, change) => changes.Add(change);
         service.BeginSession("P1", 30, 1080);
 
-        Feed(service, severeSamples: 200, frameRate: 30);
+        Feed(service, severeSamples: 200, frameRate: 30, queueDepth: 30);
 
         Assert.Empty(changes);
     }
 
     [Fact]
-    public void IgnoresACaptureStallWhichNoEncoderSettingCanFix()
+    public void IgnoresCaptureStallForEncoderTuning()
     {
         var service = new EncoderTuningService();
-        var changes = new List<EncoderFrameRateChange>();
-        service.FrameRateChangeRequested += (_, change) => changes.Add(change);
+        var frameRateChanges = new List<EncoderFrameRateChange>();
+        var resolutionChanges = new List<EncoderResolutionChange>();
+        service.FrameRateChangeRequested += (_, change) => frameRateChanges.Add(change);
+        service.ResolutionChangeRequested += (_, change) => resolutionChanges.Add(change);
         service.BeginSession("P1", 60, 1080);
 
-        // The display is not handing over frames at all. The encoder is idle and
-        // blameless; lowering its target would fix nothing.
-        Feed(service, severeSamples: 200, frameRate: 60, reason: ReplayDegradeReason.CaptureStall);
+        Feed(service, severeSamples: 200, frameRate: 60, queueDepth: 0, reason: ReplayDegradeReason.CaptureStall);
 
-        Assert.Empty(changes);
+        Assert.Empty(frameRateChanges);
+        Assert.Empty(resolutionChanges);
     }
 
     private static void Feed(
@@ -102,48 +100,46 @@ public sealed class EncoderTuningServiceTests
         int severeSamples,
         int frameRate,
         int healthySamples = 0,
+        int queueDepth = 0,
         ReplayDegradeReason reason = ReplayDegradeReason.EncoderOverload)
     {
-        // BeginSession uses the real UTC clock. Keep samples relative to that
-        // clock so this test does not turn into permanent warm-up after a date
-        // change.
         var clock = DateTime.UtcNow;
         for (var i = 0; i < severeSamples + healthySamples; i++)
         {
-            // Past the 30s warm-up before anything counts.
             clock += SampleInterval;
             var severe = i < severeSamples;
             service.OnHealth(Health(
                 clock,
                 frameRate,
-                // Severe means output has collapsed below 70% of target, which
-                // is what separates a real failure from a bursty loading screen.
-                outputFrameRate: severe ? frameRate * 0.3 : frameRate,
-                reason: severe ? reason : ReplayDegradeReason.None));
+                severe ? frameRate * 0.3 : frameRate,
+                severe ? reason : ReplayDegradeReason.None,
+                queueDepth));
         }
     }
 
-    private static ReplayCaptureHealth Health(DateTime updatedUtc, int targetFrameRate, double outputFrameRate, ReplayDegradeReason reason)
+    private static ReplayCaptureHealth Health(
+        DateTime updatedUtc,
+        int targetFrameRate,
+        double outputFrameRate,
+        ReplayDegradeReason reason,
+        int queueDepth)
     {
-        var overloaded = reason != ReplayDegradeReason.None;
         return new ReplayCaptureHealth(
             "Hybrid",
             "Desktop Duplication",
-            overloaded ? ReplayCaptureState.Degraded : ReplayCaptureState.Healthy,
+            reason == ReplayDegradeReason.None ? ReplayCaptureState.Healthy : ReplayCaptureState.Degraded,
             targetFrameRate,
             InputFrameRate: targetFrameRate,
             UniqueFrameRate: targetFrameRate,
             outputFrameRate,
             DuplicateFrames: 0,
-            DroppedFrames: overloaded ? 90 : 0,
-            QueueDepth: overloaded ? 30 : 0,
+            DroppedFrames: reason == ReplayDegradeReason.EncoderOverload ? 90 : 0,
+            queueDepth,
             "h264_qsv",
             "Default adapter",
             string.Empty,
             updatedUtc)
         {
-            // Both of these have to be populated or the service treats the
-            // record as coming from a backend that cannot report what it needs.
             EncodeQueueCapacity = 30,
             EncoderPreset = "P1",
             DegradeReason = reason,

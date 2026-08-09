@@ -853,10 +853,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var lastForcedKeyframe = TimeSpan.Zero;
             var lastTargetRefresh = TimeSpan.Zero;
             var lastEncodedAt = TimeSpan.Zero;
-            // Last time the per-present crop copy actually ran - see the gate at
-            // its call site for why it is rate-limited rather than run on every
-            // present.
-            var lastCropCopyAt = TimeSpan.Zero;
             var targetFrameInterval = TimeSpan.FromSeconds(1.0 / Math.Clamp(config.FrameRate, 15, 240));
             // Counts encoded frames (including duplicate/padding ones) so
             // frame->pts can be assigned an IDEAL, constant-rate timestamp
@@ -878,6 +874,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var idealFrameIntervalMicroseconds = 1_000_000.0 / Math.Clamp(config.FrameRate, 15, 240);
             var activeFrameRate = Math.Clamp(config.FrameRate, 15, 240);
             Volatile.Write(ref _requestedFrameRate, activeFrameRate);
+            var cropSamplingBudget = new PresentSamplingBudget(activeFrameRate);
             // The real capture-moment timestamp FIFO (one per avcodec_send_frame
             // call, dequeued one-for-one as packets actually come out - see
             // DrainToRingBuffer for why this, not just "now" at drain time, is
@@ -1214,17 +1211,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var frameStalenessDenom = Math.Max(1, frameStalenessCount);
                     AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={ringPacketCount}, ringBufferMb={ringBufferMb}, ringCapacityMb={ringCapacityMb}, packetPoolMb={poolRetainedMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, pendingEncoderFrames={Volatile.Read(ref _pendingEncoderFrames)}, peakPendingEncoderFrames={Volatile.Read(ref _peakPendingEncoderFrames)}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}.");
                     // Raw encoded rate, deliberately NOT crediting suppressed pads
-                    // back in. Pads are only ever skipped under real queue
-                    // pressure (see the pacing gate), so a rate that falls short
-                    // of target because of them is a genuine overload and should
-                    // read as one.
+                    // back in. It remains useful telemetry, but a low rate with
+                    // an empty queue is a pacing/source shortfall, not encoder
+                    // overload and must not trigger quality advice.
                     var outputFrameRate = framesEncodedSinceLog / diagElapsed;
-                    // Judged against the rate actually being targeted, not the
-                    // configured one: once the tuner has lowered it, hitting 30
-                    // of 30 is healthy, and comparing against the original 60
-                    // would report a permanent overload and ratchet forever.
-                    var overloaded = droppedSinceLog > 0 || encodeQueue.Count * 4 >= encodeQueueCapacity * 3 ||
-                                     (hasCapturedRealFrame && outputFrameRate < activeFrameRate * 0.9);
+                    var encoderPressure = droppedSinceLog > 0 || encodeQueue.Count * 4 >= encodeQueueCapacity * 3;
+                    var outputShortfall = hasCapturedRealFrame && outputFrameRate < activeFrameRate * 0.9;
+                    var overloaded = encoderPressure;
                     // A stall is worse than an overload and reads nothing like one:
                     // no frames arrive at all, so nothing gets dropped and the queue
                     // stays empty - every overload signal above says "healthy" right
@@ -1251,7 +1244,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         outputFrameRate, Math.Max(0, framesEncodedSinceLog - framesProcessedSinceLog), droppedSinceLog, encodeQueue.Count,
                         encoderName, "Default adapter",
                         isStalled ? "Capture stalled - no new frames from the display. Recovering." :
-                        overloaded ? "Capture overload. Output may fall below target FPS." : string.Empty,
+                        overloaded ? "Capture overload. Output may fall below target FPS." :
+                        outputShortfall ? "Capture cadence below target; encoder queue is keeping up." : string.Empty,
                         DateTime.UtcNow)
                     {
                         TotalDroppedFrames = Interlocked.Read(ref _totalDroppedFrames),
@@ -1637,8 +1631,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                     // 60fps) older than the newest present. That is bounded
                                     // and already measured - watch avgFrameStalenessMs.
                                     //
-                                    // A full interval, not the half it used to be. The
-                                    // refresh was close to free while this block was a
+                                    // The sampling budget preserves a full interval of
+                                    // credit and allows one short burst. The refresh was
+                                    // close to free while this block was a
                                     // staging copy and the expensive scale/convert Blt was
                                     // deferred to the encode tick. It is not free now that
                                     // the Blt happens HERE: at half an interval a
@@ -1652,7 +1647,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                     // The !croppedDirty branch is untouched, so the first
                                     // present after every tick is still converted
                                     // immediately and no unique frame is lost.
-                                    if (!croppedDirty || stopwatch.Elapsed - lastCropCopyAt >= targetFrameInterval)
+                                    if (cropSamplingBudget.TryConsume(stopwatch.Elapsed, croppedDirty))
                                     {
                                         stageStopwatch.Restart();
                                         using (var desktopTexture = desktopResource.QueryInterface<ID3D11Texture2D>())
@@ -1729,7 +1724,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                         }
 
                                         croppedDirty = true;
-                                        lastCropCopyAt = stopwatch.Elapsed;
                                         cropCopies++;
                                         contentAdvanced = true;
                                     }
@@ -2101,6 +2095,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     activeFrameRate = requestedFrameRate;
                     targetFrameInterval = TimeSpan.FromSeconds(1.0 / activeFrameRate);
                     idealFrameIntervalMicroseconds = 1_000_000.0 / activeFrameRate;
+                    cropSamplingBudget.SetRate(activeFrameRate, stopwatch.Elapsed);
                     SetHealth(_health with { TargetFrameRate = activeFrameRate, UpdatedUtc = DateTime.UtcNow });
                     AppLog.Info($"Native capture: target frame rate now {activeFrameRate} fps.");
                 }
