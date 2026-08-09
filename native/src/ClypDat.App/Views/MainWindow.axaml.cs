@@ -476,6 +476,7 @@ public sealed partial class MainWindow : Window
         AddHandler(PointerPressedEvent, GameRailItem_OnPointerPressed, RoutingStrategies.Tunnel);
         AddHandler(PointerMovedEvent, GameRailItem_OnPointerMoved, RoutingStrategies.Tunnel);
         AddHandler(PointerReleasedEvent, GameRailItem_OnPointerReleased, RoutingStrategies.Tunnel);
+        AddHandler(PointerPressedEvent, LibraryFilterButton_OnPointerPressed, RoutingStrategies.Tunnel, true);
 
         // Change Game's flyout (see ClipContextSetGame_OnClick) never
         // light-dismissed on an outside click on its own, through three
@@ -788,6 +789,23 @@ public sealed partial class MainWindow : Window
         if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings();
         var key = (sender as Button)?.DataContext as FilterOptionViewModel;
         ViewModel.SelectClipTypeSection(key?.Key);
+    }
+
+    // Custom rail template/input routing can consume Button.Click before it
+    // reaches these filter tiles. Handle marked tiles at tunnel time so mouse
+    // activation remains reliable; game tiles stay on normal Click/drag flow.
+    private void LibraryFilterButton_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
+        var source = e.Source as Control;
+        var button = source is Button sourceButton && sourceButton.Classes.Contains("libraryFilterButton")
+            ? sourceButton
+            : source?.GetVisualAncestors().OfType<Button>()
+                .FirstOrDefault(candidate => candidate.Classes.Contains("libraryFilterButton"));
+        if (button is null) return;
+
+        e.Handled = true;
+        LibraryClipTypeSectionButton_OnClick(button, new RoutedEventArgs());
     }
 
     // ---- Sidebar game rail: folders, ordering, drag/drop -------------------
