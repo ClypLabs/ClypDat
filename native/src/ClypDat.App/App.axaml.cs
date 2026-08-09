@@ -42,6 +42,7 @@ public sealed partial class App : Application
         // the worst possible moment: logon, competing with the OS's own boot IO
         // and every other autostart app.
         //
+        StorageJanitor.Initialize();
         _ = Task.Delay(TimeSpan.FromSeconds(45)).ContinueWith(_ => StorageJanitor.CleanupAtStartup(), TaskScheduler.Default);
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)

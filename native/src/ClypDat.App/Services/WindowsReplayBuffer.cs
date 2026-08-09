@@ -37,7 +37,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     private static readonly TimeSpan MinRecorderRestartInterval = TimeSpan.FromSeconds(18);
     private TaskCompletionSource<string>? _completion;
     private readonly SemaphoreSlim _transition = new(1, 1);
-    private readonly List<ReplayVideoSegment> _segments = new();
+    private readonly List<ReplaySegmentWindow> _segments = new();
     private volatile bool _sessionActive;
 
     public WindowsReplayBuffer(Func<ReplayBufferConfig> configProvider)
@@ -113,7 +113,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
     public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null)
     {
-        ReplayVideoSegment[] sourceSegments;
+        ReplaySegmentWindow[] sourceSegments;
         double videoOffsetSeconds;
         double clipDurationSeconds;
         ReplayBufferConfig config;
@@ -144,16 +144,10 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             if (activeSegment is not null)
             {
                 AddSegment(activeSegment);
-                // Restart capture immediately, before the ffprobe hydration pass below -
-                // that pass runs ffprobe once per buffered segment and can easily take a
-                // second or more with a full buffer, and until now the recorder stayed
-                // fully stopped for all of it. That was real, silent recording downtime
-                // that landed inside the replay window: concat just glues segments back
-                // to back with continuous timestamps, so the missing wall-clock time
-                // wasn't represented anywhere - playback simply jumped forward across it,
-                // in perfect A/V sync since both tracks skipped the same real gap.
-                if (IsRecording) StartRecorder();
             }
+            // Restart regardless of stop outcome. A timeout can leave no usable file,
+            // but must never leave an active session with no recorder.
+            if (!recorderIsFresh && IsRecording) StartRecorder();
 
             var availableSegments = await HydrateSegmentDurationsAsync(GetReplaySegments(), cancellationToken);
             if (availableSegments.Length == 0)
@@ -161,10 +155,10 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                 throw new InvalidOperationException("Replay buffer has no finished segments yet.");
             }
 
-            var requestedDuration = clipWindow is null
-                ? Duration.TotalSeconds
-                : Math.Max(0, (clipWindow.EndUtc - clipWindow.StartUtc).TotalSeconds);
-            (sourceSegments, videoOffsetSeconds, clipDurationSeconds) = SelectReplayWindow(availableSegments, requestedDuration);
+            var requestedEndUtc = clipWindow?.EndUtc ?? MonotonicClock.UtcNow;
+            var requestedStartUtc = clipWindow?.StartUtc ?? requestedEndUtc - Duration;
+            (sourceSegments, videoOffsetSeconds, clipDurationSeconds) = ReplaySegmentWindowSelector.Select(
+                availableSegments, requestedStartUtc, requestedEndUtc);
             if (clipDurationSeconds < 1)
             {
                 throw new InvalidOperationException("Replay just started. Try again in a second.");
@@ -253,7 +247,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         }
     }
 
-    private async Task<ReplayVideoSegment?> TryStopCurrentRecordingAsync(CancellationToken cancellationToken)
+    private async Task<ReplaySegmentWindow?> TryStopCurrentRecordingAsync(CancellationToken cancellationToken)
     {
         var recorder = _recorder ?? throw new InvalidOperationException("Replay buffer is not running.");
         var completion = _completion ?? throw new InvalidOperationException("Replay buffer is not ready.");
@@ -275,17 +269,21 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         }
         catch (TimeoutException error)
         {
-            AppLog.Error($"Replay segment stop timed out; dropping active segment: path={_activePath}", error);
+            AppLog.Error($"Replay segment stop timed out; retaining recovery candidate: path={_activePath}", error);
             var failedPath = _activePath;
             DisposeRecorder();
-            TryDelete(failedPath);
+            if (File.Exists(failedPath) && new FileInfo(failedPath).Length > 0)
+            {
+                return new ReplaySegmentWindow(failedPath, startedAt, endedAt, TimeSpan.Zero);
+            }
+
             return null;
         }
 
         DisposeRecorder();
         var bytes = File.Exists(path) ? new FileInfo(path).Length : 0;
         AppLog.Info($"Replay segment stopped: path={path}, start={startedAt:o}, end={endedAt:o}, wallDuration={(endedAt - startedAt).TotalSeconds:0.###}s, bytes={bytes}.");
-        return new ReplayVideoSegment(path, startedAt, endedAt, TimeSpan.Zero);
+        return new ReplaySegmentWindow(path, startedAt, endedAt, TimeSpan.Zero);
     }
 
     private static RecorderOptions CreateOptions(ReplayBufferConfig config)
@@ -417,7 +415,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         return value % 2 == 0 ? value : value + 1;
     }
 
-    private ReplayVideoSegment[] GetReplaySegments()
+    private ReplaySegmentWindow[] GetReplaySegments()
     {
         var cutoff = MonotonicClock.UtcNow - Duration - TimeSpan.FromSeconds(2);
         return _segments
@@ -426,7 +424,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             .ToArray();
     }
 
-    private void AddSegment(ReplayVideoSegment segment)
+    private void AddSegment(ReplaySegmentWindow segment)
     {
         if (File.Exists(segment.Path)) _segments.Add(segment);
     }
@@ -443,9 +441,9 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         _audio.PruneOlderThan(cutoff);
     }
 
-    private async Task<ReplayVideoSegment[]> HydrateSegmentDurationsAsync(ReplayVideoSegment[] segments, CancellationToken cancellationToken)
+    private async Task<ReplaySegmentWindow[]> HydrateSegmentDurationsAsync(ReplaySegmentWindow[] segments, CancellationToken cancellationToken)
     {
-        var hydrated = new List<ReplayVideoSegment>(segments.Length);
+        var hydrated = new List<ReplaySegmentWindow>(segments.Length);
         foreach (var segment in segments)
         {
             var duration = segment.VideoDuration > TimeSpan.Zero
@@ -470,26 +468,11 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             else
             {
                 AppLog.Info($"Replay segment skipped: no usable duration, path={segment.Path}.");
+                TryDelete(segment.Path);
             }
         }
 
         return hydrated.ToArray();
-    }
-
-    private static (ReplayVideoSegment[] Segments, double FirstOffsetSeconds, double DurationSeconds) SelectReplayWindow(ReplayVideoSegment[] segments, double targetDurationSeconds)
-    {
-        var selected = new List<ReplayVideoSegment>();
-        var total = 0d;
-        for (var index = segments.Length - 1; index >= 0 && total < targetDurationSeconds; index--)
-        {
-            selected.Insert(0, segments[index]);
-            total += segments[index].VideoDuration.TotalSeconds;
-        }
-
-        total = selected.Sum(segment => segment.VideoDuration.TotalSeconds);
-        var duration = Math.Min(total, targetDurationSeconds);
-        var offset = Math.Max(0, total - duration);
-        return (selected.ToArray(), offset, duration);
     }
 
     // Returns the timestamp of the video's own keyframe at-or-before targetSeconds -
@@ -565,7 +548,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         return TimeSpan.Zero;
     }
 
-    private async Task<string> BuildReplayVideoAsync(IReadOnlyList<ReplayVideoSegment> segments, CancellationToken cancellationToken)
+    private async Task<string> BuildReplayVideoAsync(IReadOnlyList<ReplaySegmentWindow> segments, CancellationToken cancellationToken)
     {
         var concatPath = Path.Combine(_bufferFolder, $"concat_{Guid.NewGuid():N}.txt");
         var stitchedPath = Path.Combine(_bufferFolder, $"stitched_{Guid.NewGuid():N}.mp4");
@@ -664,7 +647,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     // own accurate wall window) and concatenating those aligned slices in the
     // same order as the video segments, instead of one flat trim across the
     // whole clip.
-    private async Task MuxAudioTracksAsync(string videoPath, string outputPath, double videoOffsetSeconds, IReadOnlyList<ReplayVideoSegment> sourceSegments, double clipDurationSeconds, ReplayBufferConfig config, CancellationToken cancellationToken)
+    private async Task MuxAudioTracksAsync(string videoPath, string outputPath, double videoOffsetSeconds, IReadOnlyList<ReplaySegmentWindow> sourceSegments, double clipDurationSeconds, ReplayBufferConfig config, CancellationToken cancellationToken)
     {
         var snapshots = new List<string>();
         var duration = Math.Max(1, clipDurationSeconds);
@@ -753,7 +736,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         }
     }
 
-    private static List<(DateTime StartUtc, double DurationSeconds)> BuildSegmentWindows(IReadOnlyList<ReplayVideoSegment> sourceSegments, double videoOffsetSeconds)
+    private static List<(DateTime StartUtc, double DurationSeconds)> BuildSegmentWindows(IReadOnlyList<ReplaySegmentWindow> sourceSegments, double videoOffsetSeconds)
     {
         var windows = new List<(DateTime StartUtc, double DurationSeconds)>(sourceSegments.Count);
         var remainingOffset = videoOffsetSeconds;
@@ -950,8 +933,6 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
         return process;
     }
-
-    private sealed record ReplayVideoSegment(string Path, DateTime StartedAtUtc, DateTime EndedAtUtc, TimeSpan VideoDuration);
 
     private static bool IsUsableAudioFile(string path)
     {
