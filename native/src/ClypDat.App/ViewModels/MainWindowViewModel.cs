@@ -5678,10 +5678,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private void UpdateFirstOfDateFlags()
     {
         var seenDates = new HashSet<DateTime>();
-        foreach (var clip in AllClips)
+        foreach (var clip in AllClips.Where(clip => clip.IsVisibleInLibrary))
         {
             clip.IsFirstOfDate = seenDates.Add(clip.CreatedAt.ToLocalTime().Date);
         }
+
+        foreach (var clip in AllClips.Where(clip => !clip.IsVisibleInLibrary)) clip.IsFirstOfDate = false;
     }
 
     private readonly HashSet<string> _activeGameFilters = new(StringComparer.OrdinalIgnoreCase);
@@ -6000,7 +6002,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // once per session.
     private void RequestMissingGameIcons()
     {
-        var missing = GameFilterOptions.Where(option => !option.HasIcon).Select(option => option.Key).ToArray();
+        // Curated assets can replace stale cached or executable icons, so sweep
+        // every game name once, not only empty slots.
+        var missing = GameFilterOptions.Select(option => option.Key).ToArray();
         if (missing.Length == 0) return;
 
         _ = Task.Run(async () =>
@@ -6653,6 +6657,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             clip.IsMatchedByGameFilter = _activeGameFilters.Count == 0 || _activeGameFilters.Contains(clip.GameFilterKey);
         }
+        UpdateFirstOfDateFlags();
         UpdateDaySelectionStates();
         if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
         OnPropertyChanged(nameof(IsLibraryHeaderSelected));
@@ -6664,6 +6669,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             clip.IsMatchedByClipTypeFilter = _activeClipTypeFilters.Count == 0 || MatchesClipTypeFilter(clip);
         }
+        UpdateFirstOfDateFlags();
         if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
         OnPropertyChanged(nameof(IsLibraryHeaderSelected));
     }
@@ -6752,6 +6758,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             clip.IsMatchedBySearch = query.Length == 0 || MatchesSearch(clip, query);
         }
+        UpdateFirstOfDateFlags();
         if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
         OnPropertyChanged(nameof(IsLibraryHeaderSelected));
     }

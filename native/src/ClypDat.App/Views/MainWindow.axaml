@@ -836,18 +836,9 @@
                           Opacity="{Binding LibraryCardGridOpacity}"
                           IsHitTestVisible="{Binding IsInitialLibraryLoadComplete}"
                           MinHeight="{Binding LibraryReservedContentHeight}">
-              <!-- WrapPanel, not UniformGrid - UniformGrid pre-computes its
-                   row/column count from the total child count (including
-                   IsVisible="False" filtered-out cards) and still reserves
-                   each one's grid cell, leaving gaps above whatever's left
-                   visible when most of the library is filtered out.
-                   WrapPanel properly skips invisible children during layout
-                   so visible cards compact together - each card's own
-                   CardWidth still lands 3-per-row the same as before. -->
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
-                  <controls:LibraryCardPanel Orientation="Horizontal"
-                                             ScaleWithWindow="{Binding ScaleClipsWithWindow}"
+                  <controls:LibraryCardPanel ScaleWithWindow="{Binding ScaleClipsWithWindow}"
                                              MetricsChanged="LibraryCardPanel_OnMetricsChanged" />
                 </ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>

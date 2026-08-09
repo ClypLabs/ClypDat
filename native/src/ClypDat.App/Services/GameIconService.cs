@@ -57,6 +57,7 @@ public static class GameIconService
     private static readonly TimeSpan NegativeCacheRetryAfter = TimeSpan.FromDays(1);
 
     private static string CachePathFor(string displayName) => Path.Combine(CacheFolder, $"{SafeFileName(displayName)}.png");
+    private static string CuratedSourcePathFor(string displayName) => Path.Combine(CacheFolder, $"{SafeFileName(displayName)}.source");
     private static string NegativeMarkerPathFor(string displayName) => Path.Combine(CacheFolder, $"{SafeFileName(displayName)}.miss");
 
     private static string SafeFileName(string displayName) =>
@@ -144,8 +145,8 @@ public static class GameIconService
     /// <summary>
     /// Resolves an icon for a game from the internet, so a game only ever
     /// clipped (never seen running by this install) still gets real artwork.
-    /// Tried in order: an installed copy on this machine, the curated icon-URL
-    /// list, the curated Steam app ID, then a Steam store search by name.
+    /// Tried in order: curated icon URL, Steam library cache, existing cache,
+    /// installed copy, curated Steam app ID, then a Steam store search by name.
     /// Entirely automatic - the curated entries exist only for games the store
     /// search can't resolve (not on Steam, delisted, or a different name).
     /// </summary>
@@ -173,6 +174,39 @@ public static class GameIconService
             // recent games publish a stale community icon hash, while the
             // local library cache is the artwork the player actually sees.
             await RemoteGameIconsService.EnsureLoadedAsync(cancellationToken);
+
+            var curatedUrl = RemoteGameIconsService.LoadCached()
+                .FirstOrDefault(pair => string.Equals(pair.Key, displayName, StringComparison.OrdinalIgnoreCase)).Value;
+            if (!string.IsNullOrWhiteSpace(curatedUrl) && IsAllowedIconUrl(curatedUrl))
+            {
+                var sourcePath = CuratedSourcePathFor(displayName);
+                var currentSource = File.Exists(sourcePath) ? File.ReadAllText(sourcePath) : null;
+                if (!File.Exists(CachePathFor(displayName)) || !string.Equals(currentSource, curatedUrl, StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        var curatedBytes = await Http.GetByteArrayAsync(curatedUrl, cancellationToken);
+                        using var curatedStream = new MemoryStream(curatedBytes);
+                        using var curatedBitmap = new Bitmap(curatedStream);
+                        Directory.CreateDirectory(CacheFolder);
+                        curatedBitmap.Save(CachePathFor(displayName), PngBitmapEncoderOptions.Default);
+                        File.WriteAllText(sourcePath, curatedUrl);
+                        AppLog.Info($"Curated game icon refreshed for '{displayName}' from {curatedUrl}.");
+                        succeeded = true;
+                        return true;
+                    }
+                    catch (Exception error)
+                    {
+                        AppLog.Error($"Curated game icon refresh failed for '{displayName}' (non-fatal)", error);
+                    }
+                }
+                else
+                {
+                    succeeded = true;
+                    return false;
+                }
+            }
+
             if (TryCacheSteamLibraryIcon(displayName))
             {
                 succeeded = true;
@@ -518,6 +552,11 @@ public static class GameIconService
             {
                 try { File.Delete(marker); } catch { }
             }
+
+            foreach (var marker in Directory.EnumerateFiles(CacheFolder, "*.source"))
+            {
+                try { File.Delete(marker); } catch { }
+            }
         }
         catch (Exception error)
         {
@@ -545,6 +584,8 @@ public static class GameIconService
             if (!File.Exists(source) || File.Exists(destination)) return;
             Directory.CreateDirectory(CacheFolder);
             File.Copy(source, destination);
+            var sourceMarker = CuratedSourcePathFor(fromDisplayName);
+            if (File.Exists(sourceMarker)) File.Copy(sourceMarker, CuratedSourcePathFor(toDisplayName), overwrite: true);
         }
         catch (Exception error)
         {

@@ -9,7 +9,7 @@ Only add a file here when a game genuinely can't be covered any other way -
 a `steamAppIds` entry in `game-icons.json` is preferred, since that keeps the
 art coming from Steam's own CDN.
 
-Format: 256x256 PNG, artwork edge to edge on an opaque brand-coloured tile.
+Format: 512x512 PNG, artwork edge to edge on an opaque brand-coloured tile.
 The sidebar draws them at 30px inside a rounded square, so a wordmark that
 needs reading at full size is fine - colour and shape are what identify the
 game at that size.

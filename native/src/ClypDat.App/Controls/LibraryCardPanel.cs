@@ -4,10 +4,9 @@ using ClypDat.App.ViewModels;
 
 namespace ClypDat.App.Controls;
 
-// Publishes card geometry during the same measure pass that WrapPanel uses to
-// size its children. Keeping the slot width and view-model geometry together
-// prevents one frame of cards using the previous viewport's width.
-internal sealed class LibraryCardPanel : WrapPanel
+// Publishes card geometry during same measure pass used to pack children.
+// Keeps slot width and view-model geometry together, preventing stale-width frames.
+internal sealed class LibraryCardPanel : Panel
 {
     public static readonly StyledProperty<bool> ScaleWithWindowProperty =
         AvaloniaProperty.Register<LibraryCardPanel, bool>(nameof(ScaleWithWindow), true);
@@ -27,28 +26,61 @@ internal sealed class LibraryCardPanel : WrapPanel
 
     protected override Size MeasureOverride(Size availableSize)
     {
-        // ItemsControl keeps every clip container in its visual tree.  A
-        // filtered card's template can be collapsed while the container still
-        // receives the fixed ItemWidth, which makes WrapPanel reserve empty
-        // columns/rows. Collapse the container itself before the base panel
-        // measures so filtered cards compact into contiguous rows.
         foreach (var child in Children)
         {
-            if (child.DataContext is ClipCardViewModel clip)
-            {
-                child.IsVisible = clip.IsVisibleInLibrary;
-            }
+            if (child.DataContext is ClipCardViewModel clip) child.IsVisible = clip.IsVisibleInLibrary;
         }
 
-        // Horizontal scrolling is disabled on the owning ScrollViewer, so this
-        // is the finite width WrapPanel will use for the actual row packing.
-        if (double.IsFinite(availableSize.Width) && availableSize.Width > 0)
+        if (!double.IsFinite(availableSize.Width) || availableSize.Width <= 0)
         {
-            var layout = LibraryCardLayoutCalculator.Calculate(availableSize.Width, ScaleWithWindow);
-            ItemWidth = layout.Width + LibraryCardLayoutCalculator.HorizontalMargin;
-            MetricsChanged?.Invoke(this, layout);
+            foreach (var child in Children) child.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            return new Size(0, Children.Where(child => child.IsVisible).Select(child => child.DesiredSize.Height).DefaultIfEmpty().Max());
         }
 
-        return base.MeasureOverride(availableSize);
+        var layout = LibraryCardLayoutCalculator.Calculate(availableSize.Width, ScaleWithWindow);
+        MetricsChanged?.Invoke(this, layout);
+
+        var slotWidth = layout.Width + LibraryCardLayoutCalculator.HorizontalMargin;
+        var visible = Children.Where(child => child.IsVisible).ToArray();
+        foreach (var child in Children)
+        {
+            if (child.IsVisible) child.Measure(new Size(slotWidth, double.PositiveInfinity));
+            else child.Measure(new Size(0, 0));
+        }
+
+        var height = 0d;
+        for (var index = 0; index < visible.Length; index += layout.Columns)
+        {
+            height += visible.Skip(index).Take(layout.Columns).Max(child => child.DesiredSize.Height);
+        }
+
+        return new Size(Math.Min(availableSize.Width, slotWidth * layout.Columns), height);
+    }
+
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        if (!double.IsFinite(finalSize.Width) || finalSize.Width <= 0)
+        {
+            foreach (var child in Children) child.Arrange(new Rect(0, 0, 0, 0));
+            return finalSize;
+        }
+
+        var layout = LibraryCardLayoutCalculator.Calculate(finalSize.Width, ScaleWithWindow);
+        var slotWidth = layout.Width + LibraryCardLayoutCalculator.HorizontalMargin;
+        var visible = Children.Where(child => child.IsVisible).ToArray();
+        var y = 0d;
+        for (var index = 0; index < visible.Length; index += layout.Columns)
+        {
+            var row = visible.Skip(index).Take(layout.Columns).ToArray();
+            var rowHeight = row.Max(child => child.DesiredSize.Height);
+            for (var column = 0; column < row.Length; column++)
+            {
+                row[column].Arrange(new Rect(column * slotWidth, y, slotWidth, rowHeight));
+            }
+            y += rowHeight;
+        }
+
+        foreach (var child in Children.Where(child => !child.IsVisible)) child.Arrange(new Rect(0, 0, 0, 0));
+        return new Size(finalSize.Width, y);
     }
 }

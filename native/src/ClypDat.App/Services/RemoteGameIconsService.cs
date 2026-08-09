@@ -71,6 +71,7 @@ public static class RemoteGameIconsService
     {
         if (_memoryCache is not null) return _memoryCache;
         _memoryCache = TryReadCacheEntry()?.Icons ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        MergePackagedManifest(_memoryCache, null);
         return _memoryCache;
     }
 
@@ -84,7 +85,31 @@ public static class RemoteGameIconsService
     {
         if (_appIdMemoryCache is not null) return _appIdMemoryCache;
         _appIdMemoryCache = TryReadCacheEntry()?.SteamAppIds ?? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        MergePackagedManifest(null, _appIdMemoryCache);
         return _appIdMemoryCache;
+    }
+
+    private static void MergePackagedManifest(Dictionary<string, string>? icons, Dictionary<string, int>? appIds)
+    {
+        try
+        {
+            if (!File.Exists(LocalManifestPath)) return;
+            var document = JsonSerializer.Deserialize<IconsDocument>(File.ReadAllText(LocalManifestPath), DocumentOptions);
+            if (icons is not null)
+            {
+                foreach (var pair in document?.Icons ?? new Dictionary<string, string>())
+                    if (!string.IsNullOrWhiteSpace(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value)) icons[pair.Key] = pair.Value;
+            }
+            if (appIds is not null)
+            {
+                foreach (var pair in document?.SteamAppIds ?? new Dictionary<string, int>())
+                    if (!string.IsNullOrWhiteSpace(pair.Key) && pair.Value > 0) appIds[pair.Key] = pair.Value;
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Packaged game-icons manifest merge failed (non-fatal)", error);
+        }
     }
 
     /// <summary>
