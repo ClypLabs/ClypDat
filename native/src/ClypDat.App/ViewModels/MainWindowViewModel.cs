@@ -50,6 +50,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _startupLibraryIndexVersion;
     private int _startupVisibleClipCount;
     private int _loadedVisibleLibraryTileCount;
+    private int _loadedStartupClipCount;
     private double _startupCardChromeHeight = 112;
     private double _startupCardSurfaceTopInset = 20;
     private double _startupCardSurfaceChromeHeight = 86;
@@ -436,6 +437,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get
         {
+            if (IsRestoringLibraryCache && _startupLibraryStates.Count > 0)
+            {
+                var total = _startupLibraryStates.Count;
+                var remaining = Math.Max(0, total - _loadedStartupClipCount);
+                return $"Clips ({total:N0}) ({remaining:N0} left to load)";
+            }
             if (!IsInitialLibraryLoadComplete) return "Loading library";
             var parts = new List<string>();
             if (_activeGameFilters.Count > 0) parts.Add(string.Join(", ", _activeGameFilters.OrderBy(name => name, StringComparer.OrdinalIgnoreCase)));
@@ -2860,6 +2867,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             _isRestoringCachedLibrary = true;
             _startupLibraryStates = cached;
+            _loadedStartupClipCount = 0;
             RefreshStartupLibraryIndex();
             PopulateGameFilterOptionsFromCache(cached);
             PopulateClipTypeFilterOptionsFromCache(cached);
@@ -2867,6 +2875,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             foreach (var clip in AllClips) _restoredClipPaths.Add(clip.Path);
             OnPropertyChanged(nameof(IsRestoringLibraryCache));
             OnPropertyChanged(nameof(ShowLibraryLoadingTiles));
+            OnPropertyChanged(nameof(LibraryTitle));
             const int initialCardCount = 6;
             // Existence checks for every row's thumbnail/filmstrip run off the UI
             // thread - see NormalizeCachedStates. Two stat calls per clip against
@@ -2953,6 +2962,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 _startupLibraryDateMarkers = Array.Empty<LibraryStartupDateMarker>();
                 _startupVisibleClipCount = 0;
                 _loadedVisibleLibraryTileCount = 0;
+                _loadedStartupClipCount = 0;
                 _startupLibraryIndexVersion++;
                 OnPropertyChanged(nameof(StartupLibraryIndexVersion));
                 OnPropertyChanged(nameof(LibraryLoadingTileCount));
@@ -2961,6 +2971,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 LibraryReservedContentHeight = 0;
                 _restoredClipPaths.Clear();
                 OnPropertyChanged(nameof(IsRestoringLibraryCache));
+                OnPropertyChanged(nameof(LibraryTitle));
                 RecomputeGameFilterBadges();
             }
         }
@@ -3003,6 +3014,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var clip = new ClipCardViewModel(state, Settings.LibraryFolder);
         AttachClip(clip);
         AllClips.Add(clip);
+        if (_isRestoringCachedLibrary)
+        {
+            _loadedStartupClipCount++;
+            OnPropertyChanged(nameof(LibraryTitle));
+        }
         if (clip.IsVisibleInLibrary)
         {
             _loadedVisibleLibraryTileCount++;
