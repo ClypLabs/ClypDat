@@ -174,7 +174,7 @@ public static class SteelSeriesImportService
     internal static string? NormalizeGame(string? game)
     {
         if (string.IsNullOrWhiteSpace(game) || game.Equals("moments.desktopModeGameName", StringComparison.OrdinalIgnoreCase)) return null;
-        if (game.Equals("DESKTOPCAPTURE", StringComparison.OrdinalIgnoreCase)) return "Desktop";
+        if (game.Equals("DESKTOPCAPTURE", StringComparison.OrdinalIgnoreCase)) return "Desktop Capture";
         return game.Trim();
     }
 

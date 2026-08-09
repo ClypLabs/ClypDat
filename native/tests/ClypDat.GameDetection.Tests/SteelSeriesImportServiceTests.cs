@@ -55,7 +55,7 @@ public sealed class SteelSeriesImportServiceTests
     public void NormalizeGame_MapsDesktopPlaceholder()
     {
         Assert.Null(SteelSeriesImportService.NormalizeGame("moments.desktopModeGameName"));
-        Assert.Equal("Desktop", SteelSeriesImportService.NormalizeGame("DESKTOPCAPTURE"));
+        Assert.Equal("Desktop Capture", SteelSeriesImportService.NormalizeGame("DESKTOPCAPTURE"));
     }
 
     [Fact]

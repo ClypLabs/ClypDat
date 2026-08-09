@@ -3384,7 +3384,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     private static string CachedStateGameFilterKey(CachedClipState state) =>
-        state.ClipInfo?.GameDisplayName ?? state.ClipInfo?.FileTitle ?? ClipFileNaming.StripTimestampSuffix(state.Media.Name);
+        ClipCardViewModel.NormalizeGameDisplayName(state.ClipInfo?.GameDisplayName ?? state.ClipInfo?.FileTitle ?? ClipFileNaming.StripTimestampSuffix(state.Media.Name));
 
     private bool MatchesCachedClipTypeFilter(CachedClipState state)
     {
@@ -6116,7 +6116,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private void PopulateGameFilterOptionsFromCache(IReadOnlyList<CachedClipState> cached)
     {
         var countsByGame = cached
-            .GroupBy(state => state.ClipInfo?.GameDisplayName ?? state.ClipInfo?.FileTitle ?? ClipFileNaming.StripTimestampSuffix(state.Media.Name), StringComparer.OrdinalIgnoreCase)
+            .GroupBy(state => ClipCardViewModel.NormalizeGameDisplayName(state.ClipInfo?.GameDisplayName ?? state.ClipInfo?.FileTitle ?? ClipFileNaming.StripTimestampSuffix(state.Media.Name)), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
         SetGameFilterOptions(countsByGame, removeMissingActiveFilter: false);
     }

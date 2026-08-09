@@ -345,7 +345,7 @@
                                UniformToFill lets that square art sit edge to edge
                                in the tile. -->
                           <Border Width="30" Height="30" CornerRadius="8" ClipToBounds="True" IsVisible="{Binding HasIcon}">
-                            <Image Source="{Binding Icon}" Width="30" Height="30" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <Image Source="{Binding Icon}" Width="30" Height="30" Stretch="UniformToFill" RenderOptions.BitmapInterpolationMode="HighQuality" HorizontalAlignment="Center" VerticalAlignment="Center" />
                           </Border>
                         </Panel>
                       </Button>
@@ -522,7 +522,7 @@
                                     <TextBlock Text="{Binding Key, Converter={x:Static opconv:FirstLetterConverter.Instance}}" FontWeight="Bold" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                   </Border>
                                   <Border Width="30" Height="30" CornerRadius="8" ClipToBounds="True" IsVisible="{Binding HasIcon}">
-                                    <Image Source="{Binding Icon}" Width="30" Height="30" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    <Image Source="{Binding Icon}" Width="30" Height="30" Stretch="UniformToFill" RenderOptions.BitmapInterpolationMode="HighQuality" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                   </Border>
                                 </Panel>
                               </Button>

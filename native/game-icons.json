@@ -36,12 +36,16 @@
     "CSGO": 4465480,
     "Umamusume": 3224770,
     "Umamusume Pretty Derby": 3224770,
-    "Umamusume: Pretty Derby": 3224770
+    "Umamusume: Pretty Derby": 3224770,
+    "Battlefield 6": 2807960,
+    "Battlefield™ 6": 2807960
   },
   "icons": {
     "VALORANT": "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons/valorant.png",
     "League of Legends": "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons/league-of-legends.png",
     "Roblox": "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons/roblox.png",
+    "RobloxPlayerBeta": "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons/roblox.png",
+    "RobloxPlayerLauncher": "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons/roblox.png",
     "Minecraft": "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons/minecraft.png"
   }
 }

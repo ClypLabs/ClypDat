@@ -103,6 +103,7 @@
 
   <ItemGroup>
     <Content Include="..\..\game-catalog.json" Link="game-catalog.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\game-icons.json" Link="game-icons.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- git rev-parse failing (no git on PATH, source distributed without

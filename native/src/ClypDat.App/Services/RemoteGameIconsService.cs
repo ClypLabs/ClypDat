@@ -17,6 +17,7 @@ public static class RemoteGameIconsService
 {
     private const string IconsUrl = "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons.json";
     private const string CacheFileName = "remote-game-icons.json";
+    private static string LocalManifestPath => Path.Combine(AppContext.BaseDirectory, "game-icons.json");
 
     private static readonly TimeSpan RefreshInterval = TimeSpan.FromHours(24);
 
@@ -124,7 +125,16 @@ public static class RemoteGameIconsService
 
             using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
             client.DefaultRequestHeaders.UserAgent.ParseAdd("ClypDat-GameIcons");
-            var json = await client.GetStringAsync(IconsUrl, cancellationToken);
+            string json;
+            try
+            {
+                json = await client.GetStringAsync(IconsUrl, cancellationToken);
+            }
+            catch when (File.Exists(LocalManifestPath))
+            {
+                json = await File.ReadAllTextAsync(LocalManifestPath, cancellationToken);
+                AppLog.Info("Remote game-icons refresh unavailable; loaded packaged manifest.");
+            }
 
             var document = JsonSerializer.Deserialize<IconsDocument>(json, DocumentOptions);
             var icons = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

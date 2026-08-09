@@ -84,7 +84,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     // auto-clip label plus a " yyyy-MM-dd HH-mm-ss" timestamp appended for
     // uniqueness on disk (e.g. "Marvel Rivals 2026-07-11 22-16-11"). Strip that
     // suffix back off for display; there's no separately stored game field.
-    public string GameNameLabel => _clipInfo?.FileTitle ?? ClipFileNaming.StripTimestampSuffix(Name);
+    public string GameNameLabel => NormalizeGameDisplayName(_clipInfo?.FileTitle ?? ClipFileNaming.StripTimestampSuffix(Name));
 
     public string ClipFromLabel => _clipInfo?.IsExport == true
         ? $"Exported clip from: {CreatedAt:MMM d, yyyy}"
@@ -107,7 +107,9 @@ public sealed class ClipCardViewModel : ViewModelBase
     public bool IsSteelSeriesImport => !string.IsNullOrWhiteSpace(_clipInfo?.SteelSeriesImportKey);
     public bool IsExternalImport => IsMedalImport || IsSteelSeriesImport;
     public bool IsManualClip => !IsAutoClip && !IsVod && !IsExternalImport;
-    public string TileTopLabel => IsAutoClip || IsExternalImport ? (_clipInfo!.GameDisplayName ?? GameNameLabel) : GameNameLabel;
+    public string TileTopLabel => IsAutoClip || IsExternalImport
+        ? NormalizeGameDisplayName(_clipInfo!.GameDisplayName ?? GameNameLabel)
+        : GameNameLabel;
     public string TileMainLabel => IsAutoClip
         ? GameNameLabel
         : IsSteelSeriesImport
@@ -217,7 +219,24 @@ public sealed class ClipCardViewModel : ViewModelBase
     // already resolves to the real game name for both auto-clips (sidecar's
     // GameDisplayName) and everything else (filename-parsed), for both
     // ClypDat-recorded and Medal-imported clips.
-    public string GameFilterKey => _clipInfo?.GameDisplayName ?? TileTopLabel;
+    public string GameFilterKey => NormalizeGameDisplayName(_clipInfo?.GameDisplayName ?? TileTopLabel);
+
+    internal static string NormalizeGameDisplayName(string? name)
+    {
+        var normalized = name?.Trim() ?? string.Empty;
+        if (normalized.EndsWith(" (Trimmed)", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized[..^" (Trimmed)".Length].TrimEnd();
+        }
+
+        return normalized.ToUpperInvariant() switch
+        {
+            "DESKTOP" or "DESKTOPCAPTURE" => "Desktop Capture",
+            "FORTNITECLIENT-WIN64-SHIPPING" or "FORTNITECLIENT-WIN64-SHIPPING.EXE" => "Fortnite",
+            "ROBLOXPLAYERBETA" or "ROBLOXPLAYERBETA.EXE" or "ROBLOXPLAYERLAUNCHER" or "ROBLOXPLAYERLAUNCHER.EXE" => "Roblox",
+            _ => normalized
+        };
+    }
 
     private string _setGameActionLabel = "Change game";
 

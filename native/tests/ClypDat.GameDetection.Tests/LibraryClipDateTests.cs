@@ -6,6 +6,17 @@ namespace ClypDat.GameDetection.Tests;
 
 public sealed class LibraryClipDateTests
 {
+    [Theory]
+    [InlineData("FortniteClient-Win64-Shipping", "Fortnite")]
+    [InlineData("FortniteClient-Win64-Shipping (Trimmed)", "Fortnite")]
+    [InlineData("DESKTOPCAPTURE", "Desktop Capture")]
+    [InlineData("Desktop", "Desktop Capture")]
+    [InlineData("RobloxPlayerBeta", "Roblox")]
+    public void NormalizeGameDisplayName_UsesCanonicalBuckets(string input, string expected)
+    {
+        Assert.Equal(expected, ClipCardViewModel.NormalizeGameDisplayName(input));
+    }
+
     [Fact]
     public void LateSidecarUpdate_NotifiesDateHeaderLabel()
     {
