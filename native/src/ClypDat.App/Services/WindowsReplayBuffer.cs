@@ -135,7 +135,11 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             // the current segment is still very fresh costs at most a few seconds off the
             // tail of a queued clip - imperceptible against a replay window that's many
             // seconds to minutes long - in exchange for not thrashing the recorder.
-            var recorderIsFresh = MonotonicClock.UtcNow - _lastRecorderRestartUtc < MinRecorderRestartInterval;
+            // Explicit clip windows carry the hotkey/event timestamp. Reusing
+            // a fresh segment would omit its tail by up to 18 seconds, so only
+            // un-timestamped callers may use the restart-throttling shortcut.
+            var recorderIsFresh = clipWindow is null
+                && MonotonicClock.UtcNow - _lastRecorderRestartUtc < MinRecorderRestartInterval;
             var activeSegment = recorderIsFresh ? null : await TryStopCurrentRecordingAsync(cancellationToken);
             if (activeSegment is not null)
             {

@@ -30,7 +30,7 @@ public sealed class GlobalHotkeyService : IDisposable
     private readonly ManualResetEventSlim _ready = new(false);
     private uint _threadId;
 
-    public event EventHandler? Pressed;
+    public event EventHandler<ReplayHotkeyPressedEventArgs>? Pressed;
 
     public void SetHotkey(string hotkey)
     {
@@ -80,7 +80,7 @@ public sealed class GlobalHotkeyService : IDisposable
         {
             if (msg.Message == WmHotkey && msg.WParam.ToInt32() == HotkeyId)
             {
-                Pressed?.Invoke(this, EventArgs.Empty);
+                Pressed?.Invoke(this, new ReplayHotkeyPressedEventArgs(MonotonicClock.UtcNow));
             }
             else if (msg.Message == WmApplyHotkey)
             {
@@ -211,4 +211,9 @@ public sealed class GlobalHotkeyService : IDisposable
 
     [DllImport("kernel32.dll")]
     private static extern uint GetCurrentThreadId();
+}
+
+public sealed class ReplayHotkeyPressedEventArgs(DateTime pressedAtUtc) : EventArgs
+{
+    public DateTime PressedAtUtc { get; } = pressedAtUtc;
 }

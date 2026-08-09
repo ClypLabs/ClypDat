@@ -688,7 +688,12 @@ public sealed partial class MainWindow : Window
         _activeReplayBackend = ReplayBufferFactory.ResolveEffectiveBackend(ViewModel.CreateReplayConfig());
         _globalHotkey = new GlobalHotkeyService();
         _globalHotkey.SetHotkey(ViewModel.Settings.SaveReplayHotkey);
-        _globalHotkey.Pressed += (_, _) => Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(), DispatcherPriority.Send);
+        _globalHotkey.Pressed += (_, args) => Dispatcher.UIThread.Post(() =>
+        {
+            var duration = TimeSpan.FromSeconds(Math.Clamp(ViewModel.Settings.ReplayDurationSeconds, 30, 1200));
+            var endUtc = args.PressedAtUtc;
+            _ = SaveReplayClipAsync(clipWindow: new ReplayClipWindow(endUtc - duration, endUtc));
+        }, DispatcherPriority.Send);
         try
         {
             _globalHotkey.Start();

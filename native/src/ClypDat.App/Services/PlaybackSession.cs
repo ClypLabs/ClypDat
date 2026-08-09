@@ -35,6 +35,7 @@ public sealed class PlaybackSession : IDisposable
     private TimeSpan _lastRequestedPosition = TimeSpan.Zero;
     private readonly SemaphoreSlim _seekLock = new(1, 1);
     private readonly object _transportLock = new();
+    private CancellationTokenSource? _previewSeekCts;
     // Completion of the PREVIOUS WasapiOut's endpoint release. Only
     // RebuildAudioOutput has to respect it (see DisposeAudioOutput).
     private Task _audioOutputRelease = Task.CompletedTask;
@@ -172,41 +173,15 @@ public sealed class PlaybackSession : IDisposable
         _lastRequestedPosition = TimeSpan.Zero;
         _videoMedia = new Media(_libVlc, new Uri(path));
         _videoMedia.AddOption(":no-audio");
-        // Hardware decode (both hard-forced "d3d11va" and negotiated "any")
-        // still showed blocky macroblock corruption on some NVENC-encoded
-        // clips that play back clean in standalone VLC - the GPU decode path
-        // was opening successfully (so "any" had nothing to fall back from)
-        // and just decoding wrong, likely a stale-reference/driver quirk with
-        // this content's GOP structure. Forcing software decode removes the
-        // GPU decode path from the equation entirely; editor clips are short
-        // enough that CPU decode cost isn't a real concern.
-        _videoMedia.AddOption(":avcodec-hw=none");
-        // Belt-and-braces alongside the instance-level --no-skip-frames above:
-        // these are the decoder's own quality shortcuts, and skipping the
-        // deblocking filter in particular is exactly what makes H.264 look
-        // blocky. 0 = skip nothing.
-        _videoMedia.AddOption(":avcodec-skiploopfilter=0");
-        _videoMedia.AddOption(":avcodec-skip-frame=0");
-        _videoMedia.AddOption(":avcodec-skip-idct=0");
+        // Negotiate hardware decode; LibVLC falls back to software when the
+        // selected hardware path cannot decode this stream.
+        _videoMedia.AddOption(":avcodec-hw=any");
         // Bounded rather than libvlc's "0" (every core) - see
         // ResolveDecodeThreads. Still generous enough that a short 1080p clip
         // decodes comfortably ahead of playback; just not at the price of
         // starving the capture pipeline of the machine it is recording with.
         var decodeThreads = ResolveDecodeThreads(replayArmed);
         _videoMedia.AddOption($":avcodec-threads={decodeThreads}");
-        // With a buffer armed, prefer a dropped frame over stealing time from
-        // capture: these ask libvlc to undo, for this clip only, the two
-        // instance-level quality flags set in the constructor. Idle (no buffer)
-        // playback adds nothing here and keeps the pristine path.
-        //
-        // Fail-safe either way: if libvlc declines to honour them at media
-        // scope the instance-level --no-drop-late-frames/--no-skip-frames still
-        // apply and behaviour is exactly what it was before this change.
-        if (replayArmed)
-        {
-            _videoMedia.AddOption(":drop-late-frames");
-            _videoMedia.AddOption(":skip-frames");
-        }
         // LibVLC already streams windowed around the playhead (it never reads
         // the whole file), but its default read-ahead cache is sized for
         // local disks - on a network drive (UNC path or mapped SMB share) the
@@ -510,9 +485,7 @@ public sealed class PlaybackSession : IDisposable
     public void SeekPreview(TimeSpan time)
     {
         var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
-        // Same counter the real seeks use, so one of these can never land on
-        // top of a newer settling seek.
-        Interlocked.Increment(ref _seekVersion);
+        var previewVersion = Interlocked.Increment(ref _seekVersion);
         _lastRequestedPosition = TimeSpan.FromMilliseconds(milliseconds);
         try
         {
@@ -525,12 +498,19 @@ public sealed class PlaybackSession : IDisposable
                     VideoPlayer.Stop();
                     _ended = false;
                 }
-                // libvlc ignores a Time assignment made before the player has
-                // actually started - see PlayFrom for the same ordering.
+                // LibVLC ignores a Time assignment before the player starts.
                 if (!VideoPlayer.IsPlaying) VideoPlayer.Play();
-                VideoPlayer.SetPause(false);
-                VideoPlayer.Time = milliseconds;
+                VideoPlayer.SetPause(true);
             }
+
+            // Drag events can arrive faster than keyframe decode. Cancel the
+            // previous delayed write and decode only latest target. Final
+            // release calls SeekAsync for one accurate, confirmed seek.
+            _previewSeekCts?.Cancel();
+            _previewSeekCts?.Dispose();
+            var cts = new CancellationTokenSource();
+            _previewSeekCts = cts;
+            _ = ApplyPreviewSeekAsync(previewVersion, milliseconds, cts.Token);
         }
         catch (Exception error)
         {
@@ -538,8 +518,29 @@ public sealed class PlaybackSession : IDisposable
         }
     }
 
+    private async Task ApplyPreviewSeekAsync(long version, long milliseconds, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(25), cancellationToken).ConfigureAwait(false);
+            if (version != Interlocked.Read(ref _seekVersion)) return;
+            lock (_transportLock)
+            {
+                if (version != Interlocked.Read(ref _seekVersion)) return;
+                VideoPlayer.SetPause(true);
+                VideoPlayer.Time = milliseconds;
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception error)
+        {
+            AppLog.Error("Editor preview seek apply failed", error);
+        }
+    }
+
     public async Task<bool> SeekAsync(TimeSpan time, bool resumePlayback = false, CancellationToken cancellationToken = default)
     {
+        _previewSeekCts?.Cancel();
         var seekVersion = Interlocked.Increment(ref _seekVersion);
         await _seekLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         if (seekVersion != Interlocked.Read(ref _seekVersion))
@@ -731,6 +732,9 @@ public sealed class PlaybackSession : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _previewSeekCts?.Cancel();
+        _previewSeekCts?.Dispose();
+        _previewSeekCts = null;
         Stop();
         VideoPlayer.Dispose();
         DisposeAudio();
