@@ -776,7 +776,7 @@
              did the same thing against the heading/search bar above, holding the
              cards away from it so they were cut off mid-thumbnail by empty
              background rather than by the bar itself. -->
-        <Grid Margin="20,0">
+        <Grid Margin="20,0,0,0">
         <DockPanel>
 
           <!-- "Building your library..." banner - HydrateLibraryClipsAsync

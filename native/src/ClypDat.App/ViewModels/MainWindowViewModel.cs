@@ -3797,14 +3797,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public void UpdateCardLayout(double availableWidth)
     {
         _lastCardLayoutWidth = availableWidth;
-        // The width handed in is the ScrollViewer's OUTER width, which includes
-        // the strip its vertical scrollbar occupies - the WrapPanel inside
-        // actually gets less than that. Both formulas below divide the width up
-        // almost exactly, so those few pixels were enough to push the last card
-        // of every row onto the next one: a window sized for three columns laid
-        // out two and left a card's worth of dead space down the right side.
-        const double scrollbarAllowance = 20;
-        var contentWidth = Math.Max(320, availableWidth - scrollbarAllowance);
+        // LibraryScrollViewer hides its native scrollbar and the custom date
+        // scrubber lives in the sibling column, so its reported width is the
+        // WrapPanel's full usable viewport. Each card already reserves its own
+        // 4px left and 20px right margin; subtracting another scrollbar strip
+        // left a second, visibly oversized gutter on the right.
+        var contentWidth = Math.Max(320, availableWidth);
 
         int cardColumns;
         double cardWidth;
