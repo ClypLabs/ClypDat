@@ -937,15 +937,10 @@
                                     <DropShadowEffect Color="#000000" BlurRadius="10" OffsetX="0" OffsetY="0" Opacity="0.6" />
                                   </TextBlock.Effect>
                                 </TextBlock>
-                                <!-- Selection check and duration badge share one
-                                     top row rather than being positioned
-                                     independently. They have different
-                                     intrinsic heights (the badge's comes from
-                                     its own padding, the CheckBox's from the
-                                     theme), so matching top margins never
-                                     lined them up - centring both inside a
-                                     single row aligns them by construction and
-                                     survives either one changing size. -->
+                                <!-- Checkbox appears only on hover and can be
+                                     taller than the duration pill. Anchor the
+                                     pill at this overlay's top edge so that
+                                     layout change never moves it. -->
                                 <Grid VerticalAlignment="Top" Margin="12" ColumnDefinitions="Auto,*,Auto">
                                   <CheckBox Grid.Column="0"
                                             VerticalAlignment="Center"
@@ -953,7 +948,7 @@
                                             IsVisible="{Binding IsCheckVisible}"
                                             Click="ClipCheckBox_OnClick" />
                                   <Border Grid.Column="2"
-                                          VerticalAlignment="Center"
+                                          VerticalAlignment="Top"
                                           Padding="10,6"
                                           Background="#1A2530"
                                           CornerRadius="18">
