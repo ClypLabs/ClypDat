@@ -1076,10 +1076,11 @@
                    as a scrollbar when the library is short enough that the
                    thumb fills most of it. -->
               <Border x:Name="DateScrubberTrack"
-                      Width="4"
-                      CornerRadius="2"
-                      Background="#141C24"
+                      Width="6"
+                      CornerRadius="3"
+                      Background="#405262"
                       HorizontalAlignment="Left"
+                      VerticalAlignment="Stretch"
                       Margin="34,0,0,0"
                       IsHitTestVisible="False" />
 
@@ -1088,10 +1089,10 @@
                      width change animates - Width itself can't transition). -->
                 <Border x:Name="DateScrubberThumb"
                         Canvas.Left="34"
-                        Width="4"
+                        Width="6"
                         MinHeight="34"
-                        CornerRadius="2"
-                        Background="#3A4857"
+                        CornerRadius="3"
+                        Background="#91A9BB"
                         RenderTransformOrigin="50%,50%"
                         RenderTransform="scaleX(1)"
                         IsHitTestVisible="False">

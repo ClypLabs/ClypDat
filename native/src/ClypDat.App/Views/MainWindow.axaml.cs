@@ -2093,19 +2093,19 @@ public sealed partial class MainWindow : Window
         e.Handled = true;
     }
 
-    // Idle stays deliberately quiet so the library isn't competing with a
-    // bright scrollbar; hover widens it, dragging turns it accent.
+    // Solid rail keeps date ticks visually outside the scrollbar; hover and
+    // dragging make only the handle stronger.
     private void SetScrubberThumbState(bool hovered, bool dragging)
     {
         if (DateScrubberThumb is null) return;
 
         DateScrubberThumb.Background = dragging
             ? (Avalonia.Media.IBrush?)Application.Current?.FindResource("AccentBrush") ?? Avalonia.Media.Brush.Parse("#5864E8")
-            : Avalonia.Media.Brush.Parse(hovered ? "#55697E" : "#3A4857");
+            : Avalonia.Media.Brush.Parse(hovered ? "#C4D7E5" : "#91A9BB");
         DateScrubberThumb.RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse(hovered ? "scaleX(1.75)" : "scaleX(1)");
         if (DateScrubberTrack is not null)
         {
-            DateScrubberTrack.Background = Avalonia.Media.Brush.Parse(hovered ? "#1B2530" : "#141C24");
+            DateScrubberTrack.Background = Avalonia.Media.Brush.Parse(hovered ? "#526979" : "#405262");
         }
     }
 
