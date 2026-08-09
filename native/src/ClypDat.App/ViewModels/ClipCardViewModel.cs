@@ -512,6 +512,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(SizeBytes));
         OnPropertyChanged(nameof(LastWriteTimeUtc));
         OnPropertyChanged(nameof(DateLabel));
+        OnPropertyChanged(nameof(DateHeaderLabel));
         OnPropertyChanged(nameof(RelativeDateLabel));
         OnPropertyChanged(nameof(ClipFromLabel));
         OnPropertyChanged(nameof(GameNameLabel));

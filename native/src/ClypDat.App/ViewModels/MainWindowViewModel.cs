@@ -3898,15 +3898,31 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     // Inserts at the position that keeps AllClips newest-first (CreatedAt
     // descending) without a full re-sort.
+    internal static int FindSortedClipIndex(IReadOnlyList<ClipCardViewModel> clips, ClipCardViewModel clip) =>
+        clips.Where(existing => !ReferenceEquals(existing, clip))
+            .TakeWhile(existing => existing.CreatedAt > clip.CreatedAt)
+            .Count();
+
     private void InsertClipSorted(ClipCardViewModel clip)
     {
-        var insertIndex = 0;
-        while (insertIndex < AllClips.Count && AllClips[insertIndex].CreatedAt > clip.CreatedAt) insertIndex++;
+        var insertIndex = FindSortedClipIndex(AllClips, clip);
         AttachClip(clip);
         AllClips.Insert(insertIndex, clip);
         // No-op outside a cached restore - see _restoredClipPaths.
         _restoredClipPaths.Add(clip.Path);
         MarkLibraryCacheDirty();
+    }
+
+    // A watcher can create a card before an import's metadata sidecar is
+    // written. When the later update changes CreatedAt, keep the collection's
+    // newest-first invariant so per-day headers land on the correct card.
+    private void RepositionClipSorted(ClipCardViewModel clip)
+    {
+        var oldIndex = AllClips.IndexOf(clip);
+        if (oldIndex < 0) return;
+
+        var newIndex = FindSortedClipIndex(AllClips, clip);
+        if (newIndex != oldIndex) AllClips.Move(oldIndex, newIndex);
     }
 
     public async Task AddOrUpdateLibraryClipAsync(string filePath)
@@ -3924,7 +3940,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ClipCardViewModel clip;
         if (existing is not null)
         {
+            var previousCreatedAt = existing.CreatedAt;
             existing.UpdateMedia(media);
+            if (existing.CreatedAt != previousCreatedAt) RepositionClipSorted(existing);
             clip = existing;
         }
         else
