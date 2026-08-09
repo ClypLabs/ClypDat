@@ -41,7 +41,7 @@ public static class MemoryTrimmer
         set
         {
             var previous = Interlocked.Exchange(ref _recording, value ? 1 : 0);
-            if (previous == 1 && !value) RequestTrim("recording stopped");
+            if (previous == 1 && !value) RequestStoppedRecordingTrim();
         }
     }
 
@@ -60,8 +60,11 @@ public static class MemoryTrimmer
     private static readonly TimeSpan StopSettleDelay = TimeSpan.FromSeconds(2);
 
     private static int _started;
-    private static int _trimPending;
+    private static readonly AutoResetEvent TrimRequested = new(false);
+    private static readonly object RequestGate = new();
     private static DateTime _lastTrimUtc = DateTime.MinValue;
+    private static string? _pendingReason;
+    private static int _coalescedRequests;
 
     public static void Start()
     {
@@ -80,28 +83,41 @@ public static class MemoryTrimmer
     // it left the heap to grow until something else forced a collection.
     private static void Loop()
     {
+        var nextPeriodicCheckUtc = DateTime.UtcNow + CheckInterval;
         while (true)
         {
-            Thread.Sleep(CheckInterval);
             try
             {
-                if (DateTime.UtcNow - _lastTrimUtc < MinimumInterval) continue;
+                var now = DateTime.UtcNow;
+                if (now >= nextPeriodicCheckUtc)
+                {
+                    nextPeriodicCheckUtc = now + CheckInterval;
+                    using var process = Process.GetCurrentProcess();
+                    if (process.PrivateMemorySize64 >= TrimThresholdBytes)
+                    {
+                        RequestTrim(EditorOpen ? "idle (editor open)" : "idle");
+                    }
+                }
 
-                using var process = Process.GetCurrentProcess();
-                if (process.PrivateMemorySize64 < TrimThresholdBytes) continue;
+                if (TryTakeRequest(now, out var reason, out var coalesced))
+                {
+                    RunTrim(reason, coalesced);
+                    continue;
+                }
 
-                // The editor used to be skipped entirely, on the reasoning that
-                // its caches are in use while it is open. But the editor is also
-                // where the allocation actually happens - chunk buffers, decoded
-                // frames, thumbnails - so skipping it meant the one state that
-                // grows the process was the one state that never cleaned up, for
-                // as long as it stayed open. The caches refill on demand; what
-                // this drops is whatever is no longer being looked at.
-                Trim(EditorOpen ? "idle (editor open)" : "idle");
+                var wakeAt = nextPeriodicCheckUtc;
+                if (HasPendingRequest())
+                {
+                    var nextTrimUtc = _lastTrimUtc + MinimumInterval;
+                    if (nextTrimUtc < wakeAt) wakeAt = nextTrimUtc;
+                }
+                var wait = wakeAt - DateTime.UtcNow;
+                TrimRequested.WaitOne(wait <= TimeSpan.Zero ? TimeSpan.Zero : wait);
             }
-            catch
+            catch (Exception error)
             {
-                // Never let housekeeping take the app down.
+                AppLog.Error("Memory trim scheduler failed", error);
+                TrimRequested.WaitOne(CheckInterval);
             }
         }
     }
@@ -110,11 +126,45 @@ public static class MemoryTrimmer
     // allocation burst just ended (closing the editor, finishing a clip save),
     // rather than waiting out the idle timer for memory we already know is
     // dead.
-    public static void Trim(string reason)
+    public static void RequestTrim(string reason)
+    {
+        lock (RequestGate)
+        {
+            if (_pendingReason is not null) _coalescedRequests++;
+            _pendingReason = reason;
+        }
+
+        TrimRequested.Set();
+    }
+
+    private static bool TryTakeRequest(DateTime now, out string reason, out int coalesced)
+    {
+        reason = string.Empty;
+        coalesced = 0;
+        if (now - _lastTrimUtc < MinimumInterval) return false;
+
+        lock (RequestGate)
+        {
+            if (_pendingReason is null) return false;
+            reason = _pendingReason;
+            coalesced = _coalescedRequests;
+            _pendingReason = null;
+            _coalescedRequests = 0;
+            return true;
+        }
+    }
+
+    private static bool HasPendingRequest()
+    {
+        lock (RequestGate) return _pendingReason is not null;
+    }
+
+    private static void RunTrim(string reason, int coalesced)
     {
         try
         {
             _lastTrimUtc = DateTime.UtcNow;
+            var stopwatch = Stopwatch.StartNew();
             long beforePrivate;
             using (var before = Process.GetCurrentProcess())
             {
@@ -122,6 +172,7 @@ public static class MemoryTrimmer
             }
 
             var beforeManaged = GC.GetTotalMemory(false);
+            var beforeGen2 = GC.CollectionCount(2);
             // Only a game in the foreground buys the gentle path now.
             var deferred = Recording && GameRunning;
 
@@ -146,11 +197,6 @@ public static class MemoryTrimmer
                 // the process keeps reserved from the OS.
                 GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
                 GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
-                GC.WaitForPendingFinalizers();
-                // Second pass: the first one runs the finalizers for the bitmaps
-                // dropped above, and an object only becomes collectable after
-                // its finalizer has run.
-                GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
             }
 
             using var settled = Process.GetCurrentProcess();
@@ -161,7 +207,7 @@ public static class MemoryTrimmer
                 ? $"managedMb {beforeManaged / (1024 * 1024)} (collection deferred to the background GC - game running)"
                 : $"managedMb {beforeManaged / (1024 * 1024)} -> {GC.GetTotalMemory(false) / (1024 * 1024)}";
             AppLog.Info(
-                $"Memory cleanup ({reason}): privateMb {beforePrivate / (1024 * 1024)} -> {settled.PrivateMemorySize64 / (1024 * 1024)}, {managed}.");
+                $"Memory cleanup ({reason}): privateMb {beforePrivate / (1024 * 1024)} -> {settled.PrivateMemorySize64 / (1024 * 1024)}, {managed}, mode={(deferred ? "background" : "compacting")}, gen2Delta={GC.CollectionCount(2) - beforeGen2}, coalesced={coalesced}, elapsedMs={stopwatch.ElapsedMilliseconds}.");
         }
         catch (Exception error)
         {
@@ -169,29 +215,16 @@ public static class MemoryTrimmer
         }
     }
 
-    // Coalesced: replay can stop and restart several times in a few seconds
-    // (game switch, quality change), and each of those transitions asking for
-    // its own compacting gen2 is the stall this was meant to avoid. One pending
-    // cleanup at a time, after the ring has had a moment to hand its packets
-    // back.
-    private static void RequestTrim(string reason)
+    private static void RequestStoppedRecordingTrim()
     {
-        if (Interlocked.Exchange(ref _trimPending, 1) != 0) return;
         _ = Task.Run(async () =>
         {
-            try
-            {
-                await Task.Delay(StopSettleDelay).ConfigureAwait(false);
-            }
-            finally
-            {
-                Volatile.Write(ref _trimPending, 0);
-            }
+            await Task.Delay(StopSettleDelay).ConfigureAwait(false);
 
             // Recording came back before the delay elapsed - leave the heap
             // alone rather than stopping the capture threads we just restarted.
             if (Recording) return;
-            Trim(reason);
+            RequestTrim("recording stopped");
         });
     }
 }

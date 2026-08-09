@@ -37,7 +37,14 @@ internal static class BitmapCache
 
     public static void Store(string path, Bitmap? bitmap)
     {
-        Entries[path] = new Entry(bitmap, Stopwatch.GetTimestamp());
+        Entries.AddOrUpdate(
+            path,
+            _ => new Entry(bitmap, Stopwatch.GetTimestamp()),
+            (_, previous) =>
+            {
+                Retire(previous);
+                return new Entry(bitmap, Stopwatch.GetTimestamp());
+            });
         EvictIfNeeded();
     }
 
@@ -56,7 +63,7 @@ internal static class BitmapCache
     // bitmap's own finalizer releases the unmanaged buffer.
     public static void Invalidate(string path)
     {
-        Entries.TryRemove(path, out _);
+        if (Entries.TryRemove(path, out var entry)) Retire(entry);
     }
 
     // Drops every cached bitmap. Same deliberate non-disposal as Invalidate:
@@ -66,7 +73,10 @@ internal static class BitmapCache
     // once nothing is drawing it.
     public static void Clear()
     {
-        Entries.Clear();
+        foreach (var pair in Entries)
+        {
+            if (Entries.TryRemove(pair.Key, out var entry)) Retire(entry);
+        }
     }
 
     // Linear scan for the least-recently-used entry - the capacity cap keeps
@@ -91,8 +101,13 @@ internal static class BitmapCache
                 }
 
                 if (oldestKey is null) return;
-                Entries.TryRemove(oldestKey, out _);
+                if (Entries.TryRemove(oldestKey, out var entry)) Retire(entry);
             }
         }
+    }
+
+    private static void Retire(Entry entry)
+    {
+        DeferredBitmapDisposal.ReleaseReferenceAfterRender(entry.Bitmap);
     }
 }

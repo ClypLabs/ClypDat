@@ -4504,7 +4504,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // audio chunks (up to 256MB) and decoded bitmaps - become dead weight.
         // Off the UI thread: the trim does a blocking compacting gen2
         // collection and must not be part of the close transition.
-        Task.Run(() => MemoryTrimmer.Trim("editor closed"));
+        MemoryTrimmer.RequestTrim("editor closed");
     }
 
     public void OpenSettings()
