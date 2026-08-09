@@ -557,12 +557,17 @@
     <Setter Property="BorderBrush" Value="#A9C9E5" />
   </Style>
   <Style Selector="MenuFlyoutPresenter">
+    <!-- Fluent places its rows through this resource, not the presenter's
+         Padding property. Removing its 4px vertical margin makes first and
+         last hover states meet the rounded menu boundary. -->
+    <Style.Resources>
+      <Thickness x:Key="MenuFlyoutScrollerMargin">0</Thickness>
+    </Style.Resources>
     <Setter Property="Background" Value="#141D24" />
     <Setter Property="BorderBrush" Value="#2C3B48" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
     <Setter Property="ClipToBounds" Value="True" />
-    <Setter Property="Padding" Value="6,6,6,0" />
     <Setter Property="MinWidth" Value="180" />
   </Style>
   <Style Selector="ContextMenu">
