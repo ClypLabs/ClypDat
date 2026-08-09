@@ -15,7 +15,8 @@ public sealed record SteelSeriesClipRecord(
     string? CatalogId = null,
     bool IsLegacyFallback = false,
     bool IsTrimmed = false,
-    string? AutoClipEventType = null);
+    string? AutoClipEventType = null,
+    bool HasMeaningfulTitle = true);
 
 public sealed record SteelSeriesScanProgress(double Percent, string Status);
 
@@ -89,21 +90,22 @@ public static class SteelSeriesImportService
                 if (reader.GetInt64(6) != 0) continue;
                 var path = reader.GetString(2);
                 if (!File.Exists(path) || !seenPaths.Add(path)) continue;
-                if (!TryParseTimestamp(reader.IsDBNull(3) ? null : reader.GetString(3), out var capturedAt))
-                {
-                    if (!TryParseTimestampedName(Path.GetFileNameWithoutExtension(path), out _, out capturedAt)) continue;
-                }
+                var fileStem = Path.GetFileNameWithoutExtension(path);
+                var hasFilenameTimestamp = TryParseTimestampedName(fileStem, out _, out var filenameCapturedAt);
+                if (!TryParseTimestamp(reader.IsDBNull(3) ? null : reader.GetString(3), out var metadataCapturedAt) && !hasFilenameTimestamp) continue;
+                var capturedAt = hasFilenameTimestamp ? filenameCapturedAt : metadataCapturedAt;
                 var game = NormalizeGame(reader.IsDBNull(5) ? null : reader.GetString(5));
                 if (string.IsNullOrWhiteSpace(game)) TryParseTimestampedName(Path.GetFileNameWithoutExtension(path), out game, out _);
                 game = string.IsNullOrWhiteSpace(game) ? "Unknown Game" : game;
                 var name = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
                 var isTrimmed = !reader.IsDBNull(7) && reader.GetInt64(7) != 0;
-                var title = NormalizeTitle(name, game, Path.GetFileNameWithoutExtension(path), isTrimmed);
+                var title = NormalizeTitle(name, game, fileStem, isTrimmed);
                 var thumbnail = reader.IsDBNull(4) ? null : reader.GetString(4);
                 var triggerType = reader.IsDBNull(8) ? null : reader.GetString(8);
                 var triggerName = reader.IsDBNull(9) ? null : reader.GetString(9);
                 results.Add(new SteelSeriesClipRecord(path, thumbnail, game, capturedAt, title, reader.GetString(0), IsTrimmed: isTrimmed,
-                    AutoClipEventType: GetAutoClipEventType(title, triggerType, triggerName)));
+                    AutoClipEventType: GetAutoClipEventType(title, triggerType, triggerName),
+                    HasMeaningfulTitle: HasMeaningfulTitle(name, game, fileStem)));
                 progress?.Report(new SteelSeriesScanProgress(Math.Min(40, count / 307d * 40), $"Reading SteelSeries catalog clip {count}..."));
             }
             return true;
@@ -142,7 +144,8 @@ public static class SteelSeriesImportService
             else if (TryParseTimestampedName(Path.GetFileNameWithoutExtension(path), out var game, out var capturedAt))
             {
                 record = new SteelSeriesClipRecord(path, null, NormalizeGame(game) ?? "Unknown Game", capturedAt,
-                    NormalizeTitle(Path.GetFileNameWithoutExtension(path), NormalizeGame(game) ?? "Unknown Game", Path.GetFileNameWithoutExtension(path)));
+                    NormalizeTitle(Path.GetFileNameWithoutExtension(path), NormalizeGame(game) ?? "Unknown Game", Path.GetFileNameWithoutExtension(path)),
+                    HasMeaningfulTitle: false);
             }
             else
             {
@@ -150,7 +153,8 @@ public static class SteelSeriesImportService
                 try { fallback = new DateTimeOffset(File.GetLastWriteTime(path)); }
                 catch { fallback = DateTimeOffset.Now; }
                 record = new SteelSeriesClipRecord(path, null, "Unknown Game", fallback,
-                    Path.GetFileNameWithoutExtension(path), IsLegacyFallback: true);
+                    Path.GetFileNameWithoutExtension(path), IsLegacyFallback: true,
+                    HasMeaningfulTitle: HasMeaningfulTitle(Path.GetFileNameWithoutExtension(path), "Unknown Game", Path.GetFileNameWithoutExtension(path)));
             }
             results.Add(record);
             progress?.Report(new SteelSeriesScanProgress(40 + 60d * (i + 1) / Math.Max(1, files.Length), $"Scanning SteelSeries file {i + 1} of {files.Length}..."));
@@ -239,19 +243,22 @@ public static class SteelSeriesImportService
             if (string.IsNullOrWhiteSpace(metadataJson)) return false;
             using var metadata = JsonDocument.Parse(metadataJson);
             var root = metadata.RootElement;
-            if (!TryParseTimestamp(root.TryGetProperty("recording_timestamp", out var timestamp) ? timestamp.GetString() : null, out var capturedAt)) return false;
+            if (!TryParseTimestamp(root.TryGetProperty("recording_timestamp", out var timestamp) ? timestamp.GetString() : null, out var metadataCapturedAt)) return false;
+            var fileStem = Path.GetFileNameWithoutExtension(path);
+            var capturedAt = TryParseTimestampedName(fileStem, out _, out var filenameCapturedAt) ? filenameCapturedAt : metadataCapturedAt;
             var game = NormalizeGame(root.TryGetProperty("last_game_name", out var gameValue) ? gameValue.GetString() : null)
-                ?? (TryParseTimestampedName(Path.GetFileNameWithoutExtension(path), out var inferredGame, out _) ? NormalizeGame(inferredGame) : null)
+                ?? (TryParseTimestampedName(fileStem, out var inferredGame, out _) ? NormalizeGame(inferredGame) : null)
                 ?? "Unknown Game";
             var isTrimmed = root.TryGetProperty("is_manually_trimmed", out var trimmedValue) && trimmedValue.ValueKind == JsonValueKind.True;
             var nameText = root.TryGetProperty("name", out var name) ? name.GetString() : null;
-            var title = NormalizeTitle(nameText, game, Path.GetFileNameWithoutExtension(path), isTrimmed);
+            var title = NormalizeTitle(nameText, game, fileStem, isTrimmed);
             var thumbnail = root.TryGetProperty("thumbnail_path", out var thumbnailValue) ? thumbnailValue.GetString() : null;
             var triggerType = root.TryGetProperty("trigger_type", out var triggerTypeValue) ? triggerTypeValue.GetString() : null;
             var triggerName = root.TryGetProperty("trigger_name", out var triggerNameValue) ? triggerNameValue.GetString() : null;
             var autoclipTrigger = root.TryGetProperty("autoclip_trigger", out var autoclipTriggerValue) ? autoclipTriggerValue.GetString() : null;
             record = new SteelSeriesClipRecord(path, thumbnail, game, capturedAt, title, IsTrimmed: isTrimmed,
-                AutoClipEventType: GetAutoClipEventType(title, triggerType, triggerName ?? autoclipTrigger));
+                AutoClipEventType: GetAutoClipEventType(title, triggerType, triggerName ?? autoclipTrigger),
+                HasMeaningfulTitle: HasMeaningfulTitle(nameText, game, fileStem));
             return true;
         }
         catch
@@ -276,5 +283,12 @@ public static class SteelSeriesImportService
         if (string.IsNullOrWhiteSpace(triggerName)) return "Auto-clip";
         return string.Join(' ', triggerName.Split('_', StringSplitOptions.RemoveEmptyEntries)
             .Select(part => part.Length == 1 ? part.ToUpperInvariant() : char.ToUpperInvariant(part[0]) + part[1..].ToLowerInvariant()));
+    }
+
+    internal static bool HasMeaningfulTitle(string? title, string game, string fileStem)
+    {
+        title = title?.Trim() ?? string.Empty;
+        if (title.Length == 0 || GenericTitlePattern.IsMatch(title) || TryParseTimestampedName(title, out _, out _)) return false;
+        return !title.Equals(game, StringComparison.OrdinalIgnoreCase);
     }
 }

@@ -2199,7 +2199,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                         File.SetLastWriteTimeUtc(destinationPath, row.Record.CapturedAt.UtcDateTime);
                     });
                     var importKey = SteelSeriesImportService.GetImportKey(row.Record);
-                    ClipInfoSidecar.Save(Settings.LibraryFolder, destinationPath, new ClipInfo(row.GameName, row.Record.AutoClipEventType, row.DisplayTitle, row.Record.CapturedAt, SteelSeriesImportKey: importKey));
+                    var fileTitle = row.Record.HasMeaningfulTitle ? row.DisplayTitle : null;
+                    ClipInfoSidecar.Save(Settings.LibraryFolder, destinationPath, new ClipInfo(row.GameName, row.Record.AutoClipEventType, fileTitle, row.Record.CapturedAt, SteelSeriesImportKey: importKey));
                     var history = LoadSteelSeriesImportHistory(); history.Add(importKey); PersistSteelSeriesImportHistory(history);
                     await AddOrUpdateLibraryClipAsync(destinationPath);
                     imported++; SteelSeriesImportRows.Remove(row);
@@ -2246,11 +2247,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int BackfillSteelSeriesAutoClipMetadata(IReadOnlyList<SteelSeriesClipRecord> records)
     {
         if (string.IsNullOrWhiteSpace(Settings.LibraryFolder) || !Directory.Exists(Settings.LibraryFolder)) return 0;
-        var reasonsByKey = records
-            .Where(record => !string.IsNullOrWhiteSpace(record.AutoClipEventType))
+        var recordsByKey = records
             .GroupBy(SteelSeriesImportService.GetImportKey, StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.First().AutoClipEventType!, StringComparer.Ordinal);
-        if (reasonsByKey.Count == 0) return 0;
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        if (recordsByKey.Count == 0) return 0;
 
         var updated = 0;
         try
@@ -2259,8 +2259,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 var info = ClipInfoSidecar.Load(Settings.LibraryFolder, path);
                 if (info is null || string.IsNullOrWhiteSpace(info.SteelSeriesImportKey) || !string.IsNullOrWhiteSpace(info.AutoClipEventType)) continue;
-                if (!reasonsByKey.TryGetValue(info.SteelSeriesImportKey, out var reason)) continue;
-                ClipInfoSidecar.Save(Settings.LibraryFolder, path, info with { AutoClipEventType = reason });
+                if (!recordsByKey.TryGetValue(info.SteelSeriesImportKey, out var record)) continue;
+                var needsGenericTitleFix = !record.HasMeaningfulTitle && !string.IsNullOrWhiteSpace(info.FileTitle);
+                if (string.IsNullOrWhiteSpace(record.AutoClipEventType) && !needsGenericTitleFix) continue;
+                ClipInfoSidecar.Save(Settings.LibraryFolder, path, info with
+                {
+                    AutoClipEventType = record.AutoClipEventType ?? info.AutoClipEventType,
+                    FileTitle = needsGenericTitleFix ? null : info.FileTitle
+                });
                 updated++;
             }
         }

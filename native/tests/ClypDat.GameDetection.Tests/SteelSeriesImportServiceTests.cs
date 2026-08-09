@@ -41,6 +41,16 @@ public sealed class SteelSeriesImportServiceTests
         Assert.Equal(expected, SteelSeriesImportService.GetAutoClipEventType(title, triggerType, triggerName));
     }
 
+    [Theory]
+    [InlineData("Moments clip from Dec 30, 2025", "Marvel Rivals", false)]
+    [InlineData("Marvel Rivals", "Marvel Rivals", false)]
+    [InlineData("Auto-clip: Headshot kill", "Counter-Strike 2", true)]
+    [InlineData("A10 WARTHOG MAKES ME WET", "War Thunder", true)]
+    public void TitleClassification_OnlyKeepsMeaningfulTitles(string title, string game, bool expected)
+    {
+        Assert.Equal(expected, SteelSeriesImportService.HasMeaningfulTitle(title, game, "unused"));
+    }
+
     [Fact]
     public void NormalizeGame_MapsDesktopPlaceholder()
     {

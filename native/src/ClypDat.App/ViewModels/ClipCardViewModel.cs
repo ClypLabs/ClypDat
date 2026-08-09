@@ -63,7 +63,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     public MediaFileInfo Media => _media;
     public string Name => Media.Name;
     public string Path => Media.Path;
-    public DateTimeOffset CreatedAt => Media.CreatedAt;
+    public DateTimeOffset CreatedAt => IsSteelSeriesImport && _clipInfo?.CapturedAt is { } capturedAt ? capturedAt : Media.CreatedAt;
     public TimeSpan Duration => Media.Duration;
     public long SizeBytes => Media.SizeBytes;
     public DateTime LastWriteTimeUtc => Media.LastWriteTimeUtc;
@@ -108,7 +108,13 @@ public sealed class ClipCardViewModel : ViewModelBase
     public bool IsExternalImport => IsMedalImport || IsSteelSeriesImport;
     public bool IsManualClip => !IsAutoClip && !IsVod && !IsExternalImport;
     public string TileTopLabel => IsAutoClip || IsExternalImport ? (_clipInfo!.GameDisplayName ?? GameNameLabel) : GameNameLabel;
-    public string TileMainLabel => IsAutoClip || IsExternalImport ? GameNameLabel : (CustomTitle ?? ClipFromLabel);
+    public string TileMainLabel => IsAutoClip
+        ? GameNameLabel
+        : IsSteelSeriesImport
+            ? (_clipInfo?.FileTitle ?? ClipFromLabel)
+            : IsExternalImport
+                ? GameNameLabel
+                : (CustomTitle ?? ClipFromLabel);
     public string AutoClipEventTypeLabel => _clipInfo?.AutoClipEventType ?? string.Empty;
 
     // Matches Cs2GsiListener's label format: "Kill", "2K".."4K", "Ace", each
