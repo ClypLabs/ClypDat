@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.VisualTree;
 using ClypDat.App.ViewModels;
+using System.ComponentModel;
 
 namespace ClypDat.App.Controls;
 
@@ -16,6 +17,7 @@ internal sealed class LibraryCardPanel : Panel
         AvaloniaProperty.Register<LibraryCardPanel, double>(nameof(ReservedHeight));
 
     public event EventHandler<LibraryCardLayout>? MetricsChanged;
+    private readonly Dictionary<ClipCardViewModel, PropertyChangedEventHandler> _visibilitySubscriptions = [];
 
     static LibraryCardPanel()
     {
@@ -37,6 +39,7 @@ internal sealed class LibraryCardPanel : Panel
 
     protected override Size MeasureOverride(Size availableSize)
     {
+        SyncVisibilitySubscriptions();
         var visible = Children.Where(IsClipVisible).ToArray();
         var reservedHeight = double.IsFinite(ReservedHeight) ? Math.Max(0, ReservedHeight) : 0;
 
@@ -97,13 +100,49 @@ internal sealed class LibraryCardPanel : Panel
         return new Size(finalSize.Width, Math.Max(y, reservedHeight));
     }
 
+    private void SyncVisibilitySubscriptions()
+    {
+        var current = Children
+            .Select(TryGetClip)
+            .Where(clip => clip is not null)
+            .Cast<ClipCardViewModel>()
+            .ToHashSet();
+
+        foreach (var stale in _visibilitySubscriptions.Keys.Where(clip => !current.Contains(clip)).ToArray())
+        {
+            stale.PropertyChanged -= _visibilitySubscriptions[stale];
+            _visibilitySubscriptions.Remove(stale);
+        }
+
+        foreach (var clip in current)
+        {
+            if (_visibilitySubscriptions.ContainsKey(clip)) continue;
+            PropertyChangedEventHandler handler = (_, change) =>
+            {
+                if (change.PropertyName is nameof(ClipCardViewModel.IsVisibleInLibrary)
+                    or nameof(ClipCardViewModel.IsMatchedByGameFilter)
+                    or nameof(ClipCardViewModel.IsMatchedByClipTypeFilter)
+                    or nameof(ClipCardViewModel.IsMatchedBySearch))
+                {
+                    InvalidateMeasure();
+                    InvalidateArrange();
+                }
+            };
+            _visibilitySubscriptions.Add(clip, handler);
+            clip.PropertyChanged += handler;
+        }
+    }
+
     private static bool IsClipVisible(Control child)
     {
-        var clip = child.DataContext as ClipCardViewModel
-            ?? child.GetVisualDescendants().OfType<Control>()
-                .Select(descendant => descendant.DataContext)
-                .OfType<ClipCardViewModel>()
-                .FirstOrDefault();
+        var clip = TryGetClip(child);
         return clip?.IsVisibleInLibrary ?? child.IsVisible;
     }
+
+    private static ClipCardViewModel? TryGetClip(Control child) =>
+        child.DataContext as ClipCardViewModel
+        ?? child.GetVisualDescendants().OfType<Control>()
+            .Select(descendant => descendant.DataContext)
+            .OfType<ClipCardViewModel>()
+            .FirstOrDefault();
 }

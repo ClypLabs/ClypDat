@@ -834,7 +834,8 @@
             <ItemsControl x:Name="LibraryItemsControl"
                           ItemsSource="{Binding AllClips}"
                           Opacity="{Binding LibraryCardGridOpacity}"
-                          IsHitTestVisible="{Binding IsInitialLibraryLoadComplete}">
+                          IsHitTestVisible="{Binding IsInitialLibraryLoadComplete}"
+                          VerticalAlignment="Top">
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
                   <controls:LibraryCardPanel ScaleWithWindow="{Binding ScaleClipsWithWindow}"
@@ -846,7 +847,6 @@
                 <DataTemplate>
                   <StackPanel HorizontalAlignment="Stretch"
                               Margin="4,2,20,4"
-                              IsVisible="{Binding IsVisibleInLibrary}"
                               EffectiveViewportChanged="ClipCard_OnEffectiveViewportChanged">
                     <!-- Per-card date header, replacing the old shared
                          per-day group header - only rendered on the first
