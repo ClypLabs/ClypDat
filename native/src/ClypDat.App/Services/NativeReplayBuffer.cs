@@ -648,6 +648,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // arrow along with the frame). int.MinValue means "no cursor this frame".
         var cursorOutputX = int.MinValue;
         var cursorOutputY = int.MinValue;
+        ID3D11Texture2D? cursorTexture = null;
+        ID3D11VideoProcessorInputView? cursorInputView = null;
+        var gpuCursorAvailable = false;
         AVCodecContext* codecContext = null;
         SwsContext* swsContext = null;
         AVFrame* frame = null;
@@ -773,18 +776,27 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
             // Queue depth is decided before the encoder, because the D3D11 frame
             // pool has to cover it: every queued frame holds a VRAM surface.
-            // Keep at most roughly half a second of stale work. A 120-frame queue
-            // at 60 FPS turned a short GPU stall into seconds of old frames, then
-            // magnified it with catch-up work. Dropping early is recoverable;
-            // encoding stale frames is visible lag.
-            var encodeQueueCapacity = Math.Clamp(config.FrameRate / 2, 8, 60);
+            // Keep one second of bounded work. Replay capture is not a live
+            // preview: spending bounded VRAM here absorbs short game spikes and
+            // prevents them becoming timestamp holes.
+            var encodeQueueCapacity = Math.Clamp(config.FrameRate, 8, 120);
 
-            // Zero-copy needs the Video Processor's NV12 output to copy from,
-            // so it only applies when the GPU scaler is up. The desktop cursor
-            // is composited into the frame on the CPU (DrawDesktopCursorNv12)
-            // and there is nothing on the GPU path to draw it with, so a
-            // cursor-enabled capture keeps the system-memory frames it needs.
-            if (useGpuScale && !config.CaptureCursor)
+            if (useGpuScale && config.CaptureCursor)
+            {
+                try
+                {
+                    (cursorTexture, cursorInputView) = CreateGpuCursorOverlay(device, videoDevice!, vpEnumerator!);
+                    gpuCursorAvailable = true;
+                }
+                catch (Exception error)
+                {
+                    AppLog.Info($"Native capture: GPU cursor overlay unavailable; using system-memory cursor path ({error.Message}).");
+                }
+            }
+
+            // Zero-copy requires GPU scale. Cursor-enabled capture also requires
+            // GPU cursor composition so NVENC never sees a CPU round trip.
+            if (useGpuScale && (!config.CaptureCursor || gpuCursorAvailable))
             {
                 (hwDeviceRef, hwFramesRef) = TryCreateD3D11EncodeFrames(
                     device, outputWidth, outputHeight, encodeQueueCapacity + HardwareFramePoolHeadroom);
@@ -837,7 +849,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             encodeThread.Start();
 
             var adapterDescription = DescribeAdapter(device);
-            AppLog.Info($"Native capture started (DXGI Desktop Duplication): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, encoder={encoderName}, adapter={adapterDescription}, preset={config.EncoderPreset}, configFrameRate={config.FrameRate}.");
+            AppLog.Info($"Native capture started (DXGI Desktop Duplication): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, encoder={encoderName}, encodePath={(hardwareFramesActive ? "D3D11 zero-copy" : "system-memory")}, cursorPath={(hardwareFramesActive && gpuCursorAvailable ? "GPU" : (config.CaptureCursor ? "CPU" : "off"))}, queue={encodeQueueCapacity} frames, adapter={adapterDescription}, preset={config.EncoderPreset}, configFrameRate={config.FrameRate}.");
             SetHealth(new ReplayCaptureHealth("Native", "Desktop Duplication", ReplayCaptureState.Healthy,
                 config.FrameRate, 0, 0, 0, 0, 0, 0, encoderName, "Default adapter", string.Empty, DateTime.UtcNow)
             {
@@ -984,7 +996,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var cropCopiesSkipped = 0;
             // Per-frame scratch, hoisted out of the hot path - see their use
             // sites. Allocated once per session rather than 60+ times a second.
-            var bltStreams = new VideoProcessorStream[1];
+            var bltStreams = new VideoProcessorStream[2];
             var swsSrcData = new byte*[1];
             var swsSrcStride = new int[1];
             var accumulatedFramesSum = 0L;
@@ -1926,6 +1938,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             nv12Ready = false;
                             inputView?.Dispose();
                             croppedTexture?.Dispose();
+                            cursorInputView?.Dispose();
+                            cursorTexture?.Dispose();
                             outputView?.Dispose();
                             if (nv12StagingRing is not null) foreach (var t in nv12StagingRing) t.Dispose();
                             nv12Output?.Dispose();
@@ -1937,6 +1951,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
                             inputView = null;
                             croppedTexture = null;
+                            cursorInputView = null;
+                            cursorTexture = null;
+                            gpuCursorAvailable = false;
                             outputView = null;
                             nv12StagingRing = null;
                             nv12Output = null;
@@ -1965,6 +1982,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 (videoDevice, videoContext, vpEnumerator, videoProcessor, nv12Output, nv12StagingRing, outputView) =
                                     CreateGpuScaler(device, captureWidth, captureHeight, outputWidth, outputHeight, config.FrameRate);
                                 (croppedTexture, inputView) = CreateGpuCropInputView(device, videoDevice, vpEnumerator, captureWidth, captureHeight);
+                                if (config.CaptureCursor)
+                                {
+                                    (cursorTexture, cursorInputView) = CreateGpuCursorOverlay(device, videoDevice, vpEnumerator);
+                                    gpuCursorAvailable = true;
+                                }
                                 useGpuScale = true;
                             }
                             catch (Exception error)
@@ -1988,7 +2010,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 hardwarePoolTextures.Clear();
                                 ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
 
-                                if (useGpuScale && !config.CaptureCursor)
+                                if (useGpuScale && (!config.CaptureCursor || gpuCursorAvailable))
                                 {
                                     (hwDeviceRef, hwFramesRef) = TryCreateD3D11EncodeFrames(
                                         device, outputWidth, outputHeight, encodeQueueCapacity + HardwareFramePoolHeadroom);
@@ -2138,7 +2160,29 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     {
                         bltStreams[0].Enable = true;
                         bltStreams[0].InputSurface = inputView;
-                        videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, bltStreams);
+                        if (gpuCursorAvailable && cursorInputView is not null)
+                        {
+                            var cursorVisible = cursorOutputX > -12 && cursorOutputY > -15 &&
+                                cursorOutputX < outputWidth && cursorOutputY < outputHeight;
+                            if (cursorVisible)
+                            {
+                                UpdateGpuCursorOverlay(device, cursorTexture!);
+                                bltStreams[1].Enable = true;
+                                bltStreams[1].InputSurface = cursorInputView;
+                                videoContext!.VideoProcessorSetStreamSourceRect(videoProcessor, 1, true, new Vortice.RawRect(0, 0, 12, 15));
+                                videoContext.VideoProcessorSetStreamDestRect(videoProcessor, 1, true, new Vortice.RawRect(cursorOutputX, cursorOutputY, cursorOutputX + 12, cursorOutputY + 15));
+                                videoContext.VideoProcessorSetStreamAlpha(videoProcessor, 1, true, 1.0f);
+                            }
+                            else
+                            {
+                                bltStreams[1].Enable = false;
+                            }
+                        }
+                        else
+                        {
+                            bltStreams[1].Enable = false;
+                        }
+                        videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 2, bltStreams);
                     }
 
                     nv12Ready = false;
@@ -2673,6 +2717,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             desktopInputViews.Clear();
             inputView?.Dispose();
             croppedTexture?.Dispose();
+            cursorInputView?.Dispose();
+            cursorTexture?.Dispose();
             outputView?.Dispose();
             if (nv12StagingRing is not null) foreach (var t in nv12StagingRing) t.Dispose();
             nv12Output?.Dispose();
@@ -2746,6 +2792,67 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             CPUAccessFlags = CpuAccessFlags.Read,
             BindFlags = BindFlags.None
         });
+    }
+
+    private static (ID3D11Texture2D Texture, ID3D11VideoProcessorInputView InputView) CreateGpuCursorOverlay(
+        ID3D11Device device, ID3D11VideoDevice videoDevice, ID3D11VideoProcessorEnumerator enumerator)
+    {
+        var texture = device.CreateTexture2D(new Texture2DDescription
+        {
+            Width = 12,
+            Height = 15,
+            MipLevels = 1,
+            ArraySize = 1,
+            Format = Format.B8G8R8A8_UNorm,
+            SampleDescription = new SampleDescription(1, 0),
+            Usage = ResourceUsage.Dynamic,
+            CPUAccessFlags = CpuAccessFlags.Write,
+            BindFlags = BindFlags.None
+        });
+
+        try
+        {
+            var inputView = videoDevice.CreateVideoProcessorInputView(texture, enumerator, new VideoProcessorInputViewDescription
+            {
+                FourCC = 0,
+                ViewDimension = VideoProcessorInputViewDimension.Texture2D,
+                Texture2D = new Texture2DVideoProcessorInputView { MipSlice = 0, ArraySlice = 0 }
+            });
+            return (texture, inputView);
+        }
+        catch
+        {
+            texture.Dispose();
+            throw;
+        }
+    }
+
+    private static unsafe void UpdateGpuCursorOverlay(ID3D11Device device, ID3D11Texture2D texture)
+    {
+        var mapped = device.ImmediateContext.Map(texture, 0, MapMode.WriteDiscard, MapFlags.None);
+        try
+        {
+            var pixels = (byte*)mapped.DataPointer;
+            for (var row = 0; row < 15; row++)
+            {
+                new Span<byte>(pixels + row * (int)mapped.RowPitch, 12 * 4).Clear();
+                for (var column = 0; column < 12; column++)
+                {
+                    var inside = column <= row / 2 || (row > 7 && column >= 3 && column <= 6 && row - 7 <= column - 2);
+                    if (!inside) continue;
+                    var edge = column == 0 || column == row / 2 || row == 0;
+                    var target = pixels + row * (int)mapped.RowPitch + column * 4;
+                    target[0] = edge ? (byte)0 : (byte)245;
+                    target[1] = edge ? (byte)0 : (byte)245;
+                    target[2] = edge ? (byte)0 : (byte)245;
+                    target[3] = 255;
+                }
+            }
+        }
+        finally
+        {
+            device.ImmediateContext.Unmap(texture, 0);
+        }
     }
 
     // Sets up the D3D11 Video Processor to do the crop->NV12-downscale that
@@ -4208,8 +4315,32 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // Best-effort by design: every failure path here returns (0, 0) and the
     // caller stays on the system-memory path, which still works exactly as it
     // did.
+    private static readonly uint[] EncodeFramePoolBindFlags = { 0, D3D11BindRenderTarget, 0x8 };
+
     private static unsafe (nint DeviceRef, nint FramesRef) TryCreateD3D11EncodeFrames(
         ID3D11Device device, int width, int height, int poolSize)
+    {
+        // RTX 4070 Ti drivers reject ffmpeg's fixed NV12 texture array. Dynamic
+        // single-texture allocation is accepted and remains bounded by queue
+        // capacity, so retry it after fixed-pool attempts.
+        foreach (var size in new[] { poolSize, 0 })
+        {
+            foreach (var bindFlags in EncodeFramePoolBindFlags)
+            {
+                var attempt = TryCreateD3D11EncodeFrames(device, width, height, size, bindFlags);
+                if (attempt.FramesRef != 0)
+                {
+                    AppLog.Info($"Native capture: D3D11 encode frame pool ready (poolSize={size}, bindFlags=0x{bindFlags:X}).");
+                    return attempt;
+                }
+            }
+        }
+
+        return (0, 0);
+    }
+
+    private static unsafe (nint DeviceRef, nint FramesRef) TryCreateD3D11EncodeFrames(
+        ID3D11Device device, int width, int height, int poolSize, uint bindFlags)
     {
         AVBufferRef* deviceRef = null;
         AVBufferRef* framesRef = null;
@@ -4250,15 +4381,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             framesContext->sw_format = AVPixelFormat.AV_PIX_FMT_NV12;
             framesContext->width = width;
             framesContext->height = height;
-            // A fixed pool, sized just past the encode queue: every frame in
-            // flight holds one slot, plus the one held back for padding ticks.
-            // Each slot is a real NV12 surface in VRAM (5.5MB at 1440p), so
-            // this is not free - a pool the size of the old 30-deep queue would
-            // be ~200MB taken away from the game. Exhaustion is handled the
-            // same way a full queue is: drop the frame.
+            // Fixed pool when driver accepts texture arrays; size 0 requests
+            // ffmpeg's dynamic single-texture pool. Both stay bounded by the
+            // encode queue and headroom.
             framesContext->initial_pool_size = poolSize;
             var d3dFrames = (AVD3D11VAFramesContext*)framesContext->hwctx;
-            d3dFrames->BindFlags = D3D11BindRenderTarget;
+            d3dFrames->BindFlags = bindFlags;
 
             var framesInit = ffmpeg.av_hwframe_ctx_init(framesRef);
             if (framesInit < 0)
