@@ -49,6 +49,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private IReadOnlyList<LibraryStartupDateMarker> _startupLibraryDateMarkers = Array.Empty<LibraryStartupDateMarker>();
     private int _startupLibraryIndexVersion;
     private int _startupVisibleClipCount;
+    private int _loadedVisibleLibraryTileCount;
     private double _startupCardChromeHeight = 112;
     private double _libraryReservedContentHeight;
     private bool _libraryCacheDirty;
@@ -338,8 +339,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public AppSettings Settings { get; }
     public Task InitialLibraryLoadTask { get; }
     public ObservableCollection<ClipCardViewModel> AllClips { get; }
-    public IReadOnlyList<int> LibraryStartupSkeletonTiles { get; } = Enumerable.Range(0, 12).ToArray();
     public bool IsRestoringLibraryCache => _isRestoringCachedLibrary;
+    public bool ShowLibraryLoadingTiles => !IsInitialLibraryLoadComplete || IsRestoringLibraryCache;
+    public int LibraryLoadingTileCount => HasStartupLibraryIndex ? _startupVisibleClipCount : 12;
+    public int LoadedVisibleLibraryTileCount => _loadedVisibleLibraryTileCount;
+    public double LibraryLoadingRowPitch => StartupLibraryRowPitch;
     public double LibraryReservedContentHeight
     {
         get => _libraryReservedContentHeight;
@@ -357,6 +361,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (!SetProperty(ref _isInitialLibraryLoadComplete, value)) return;
             OnPropertyChanged(nameof(LibraryCardGridOpacity));
             OnPropertyChanged(nameof(LibraryTitle));
+            OnPropertyChanged(nameof(ShowLibraryLoadingTiles));
         }
     }
     public double LibraryCardGridOpacity => IsInitialLibraryLoadComplete ? 1 : 0;
@@ -2857,6 +2862,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _restoredClipPaths.Clear();
             foreach (var clip in AllClips) _restoredClipPaths.Add(clip.Path);
             OnPropertyChanged(nameof(IsRestoringLibraryCache));
+            OnPropertyChanged(nameof(ShowLibraryLoadingTiles));
             const int initialCardCount = 6;
             // Existence checks for every row's thumbnail/filmstrip run off the UI
             // thread - see NormalizeCachedStates. Two stat calls per clip against
@@ -2942,8 +2948,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 _startupLibraryStates = Array.Empty<CachedClipState>();
                 _startupLibraryDateMarkers = Array.Empty<LibraryStartupDateMarker>();
                 _startupVisibleClipCount = 0;
+                _loadedVisibleLibraryTileCount = 0;
                 _startupLibraryIndexVersion++;
                 OnPropertyChanged(nameof(StartupLibraryIndexVersion));
+                OnPropertyChanged(nameof(LibraryLoadingTileCount));
+                OnPropertyChanged(nameof(LoadedVisibleLibraryTileCount));
+                OnPropertyChanged(nameof(ShowLibraryLoadingTiles));
                 LibraryReservedContentHeight = 0;
                 _restoredClipPaths.Clear();
                 OnPropertyChanged(nameof(IsRestoringLibraryCache));
@@ -2989,6 +2999,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var clip = new ClipCardViewModel(state, Settings.LibraryFolder);
         AttachClip(clip);
         AllClips.Add(clip);
+        if (clip.IsVisibleInLibrary)
+        {
+            _loadedVisibleLibraryTileCount++;
+            OnPropertyChanged(nameof(LoadedVisibleLibraryTileCount));
+        }
     }
 
     // Called once MainWindow has measured a hidden real card. The reservation
@@ -3000,6 +3015,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (double.IsFinite(measuredRowPitch) && measuredRowPitch > CardImageHeight)
         {
             _startupCardChromeHeight = measuredRowPitch - CardImageHeight;
+            OnPropertyChanged(nameof(LibraryLoadingRowPitch));
         }
 
         UpdateReservedLibraryExtent();
@@ -3028,12 +3044,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 countsByDate[localDate.Date]));
         }
 
+        UpdateLoadedVisibleLibraryTileCount();
         if (_startupVisibleClipCount == visible.Length && _startupLibraryDateMarkers.SequenceEqual(markers)) return;
         _startupVisibleClipCount = visible.Length;
         _startupLibraryDateMarkers = markers;
         _startupLibraryIndexVersion++;
         OnPropertyChanged(nameof(StartupLibraryIndexVersion));
+        OnPropertyChanged(nameof(LibraryLoadingTileCount));
         UpdateReservedLibraryExtent();
+    }
+
+    private void UpdateLoadedVisibleLibraryTileCount()
+    {
+        var count = AllClips.Count(clip => clip.IsVisibleInLibrary);
+        if (_loadedVisibleLibraryTileCount == count) return;
+        _loadedVisibleLibraryTileCount = count;
+        OnPropertyChanged(nameof(LoadedVisibleLibraryTileCount));
     }
 
     private void UpdateReservedLibraryExtent()
@@ -3833,6 +3859,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         CardColumns = cardColumns;
         CardWidth = cardWidth;
         CardImageHeight = cardImageHeight;
+        OnPropertyChanged(nameof(LibraryLoadingRowPitch));
         if (HasStartupLibraryIndex) UpdateReservedLibraryExtent();
         // Thumbnails decode to whatever the cards are now, not to the source's
         // full 960px - see ClipCardViewModel.SetPreviewDecodeWidth.

@@ -831,6 +831,16 @@
           <!-- Date scrubber (right column, below) replaces the default
                scrollbar, so hide the ScrollViewer's own. -->
           <ScrollViewer Grid.Column="0" x:Name="LibraryScrollViewer" Margin="-4,0,-24,0" VerticalScrollBarVisibility="Hidden">
+            <Grid MinHeight="{Binding LibraryReservedContentHeight}">
+              <controls:LibraryLoadingTilesOverlay
+                  IsVisible="{Binding ShowLibraryLoadingTiles}"
+                  TotalTileCount="{Binding LibraryLoadingTileCount}"
+                  LoadedTileCount="{Binding LoadedVisibleLibraryTileCount}"
+                  ColumnCount="{Binding CardColumns}"
+                  TileWidth="{Binding CardWidth}"
+                  TileHeight="{Binding CardImageHeight}"
+                  RowPitch="{Binding LibraryLoadingRowPitch}"
+                  IsHitTestVisible="False" />
             <ItemsControl x:Name="LibraryItemsControl"
                           ItemsSource="{Binding AllClips}"
                           Opacity="{Binding LibraryCardGridOpacity}"
@@ -1024,6 +1034,7 @@
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
+            </Grid>
         </ScrollViewer>
 
           <!-- Floats over the library's bottom-right corner once scrolled
@@ -1139,40 +1150,6 @@
           </Border>
           </Grid>
 
-          <!-- Keep the real ScrollViewer measured while data is loading: card
-               columns must settle from its first layout, not from later mouse
-               input. These placeholders match real card geometry, then a
-               lightweight shimmer sweeps each thumbnail until data is ready. -->
-          <ItemsControl ItemsSource="{Binding LibraryStartupSkeletonTiles}"
-                        IsVisible="{Binding !IsInitialLibraryLoadComplete}"
-                        IsHitTestVisible="False"
-                        Grid.Column="0"
-                        Margin="-4,0,-24,0">
-            <ItemsControl.ItemsPanel>
-              <ItemsPanelTemplate>
-                <WrapPanel Orientation="Horizontal" />
-              </ItemsPanelTemplate>
-            </ItemsControl.ItemsPanel>
-            <ItemsControl.ItemTemplate>
-              <DataTemplate>
-                <StackPanel Width="{Binding $parent[Window].DataContext.CardWidth}" Margin="4,2,20,4">
-                  <Border Background="#24303A" CornerRadius="12" BoxShadow="0 6 18 -6 #66000000" ClipToBounds="True">
-                    <Grid Height="{Binding $parent[Window].DataContext.CardImageHeight}" Background="#16202A" ClipToBounds="True">
-                      <controls:LoadingShimmer Width="180" HorizontalAlignment="Left">
-                        <controls:LoadingShimmer.Background>
-                          <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,0%">
-                            <GradientStop Color="#00344958" Offset="0" />
-                            <GradientStop Color="#4A5A7185" Offset="0.5" />
-                            <GradientStop Color="#00344958" Offset="1" />
-                          </LinearGradientBrush>
-                        </controls:LoadingShimmer.Background>
-                      </controls:LoadingShimmer>
-                    </Grid>
-                  </Border>
-                </StackPanel>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
           </Grid>
         </DockPanel>
       </Grid>
