@@ -51,6 +51,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _startupVisibleClipCount;
     private int _loadedVisibleLibraryTileCount;
     private double _startupCardChromeHeight = 112;
+    private double _startupCardSurfaceTopInset = 20;
+    private double _startupCardSurfaceChromeHeight = 86;
     private double _libraryReservedContentHeight;
     private bool _libraryCacheDirty;
     private (long Total, long Free) _driveStats;
@@ -344,6 +346,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public int LibraryLoadingTileCount => HasStartupLibraryIndex ? _startupVisibleClipCount : 12;
     public int LoadedVisibleLibraryTileCount => _loadedVisibleLibraryTileCount;
     public double LibraryLoadingRowPitch => StartupLibraryRowPitch;
+    public double LibraryLoadingTileTopInset => _startupCardSurfaceTopInset;
+    public double LibraryLoadingTileHeight => Math.Max(1, CardImageHeight + _startupCardSurfaceChromeHeight);
     public double LibraryReservedContentHeight
     {
         get => _libraryReservedContentHeight;
@@ -3009,13 +3013,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // Called once MainWindow has measured a hidden real card. The reservation
     // uses real card chrome, so it remains correct across display scaling and
     // avoids a scrollbar thumb that shrinks as cached cards trickle in.
-    internal void CompleteInitialLibraryLayout(double measuredRowPitch)
+    internal void CompleteInitialLibraryLayout(double measuredRowPitch, double surfaceTopInset, double surfaceHeight)
     {
         if (IsInitialLibraryLoadComplete || !HasStartupLibraryIndex) return;
         if (double.IsFinite(measuredRowPitch) && measuredRowPitch > CardImageHeight)
         {
             _startupCardChromeHeight = measuredRowPitch - CardImageHeight;
             OnPropertyChanged(nameof(LibraryLoadingRowPitch));
+        }
+        if (double.IsFinite(surfaceTopInset) && surfaceTopInset >= 0
+            && double.IsFinite(surfaceHeight) && surfaceHeight > CardImageHeight)
+        {
+            _startupCardSurfaceTopInset = surfaceTopInset;
+            _startupCardSurfaceChromeHeight = surfaceHeight - CardImageHeight;
+            OnPropertyChanged(nameof(LibraryLoadingTileTopInset));
+            OnPropertyChanged(nameof(LibraryLoadingTileHeight));
         }
 
         UpdateReservedLibraryExtent();
@@ -3860,6 +3872,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         CardWidth = cardWidth;
         CardImageHeight = cardImageHeight;
         OnPropertyChanged(nameof(LibraryLoadingRowPitch));
+        OnPropertyChanged(nameof(LibraryLoadingTileHeight));
         if (HasStartupLibraryIndex) UpdateReservedLibraryExtent();
         // Thumbnails decode to whatever the cards are now, not to the source's
         // full 960px - see ClipCardViewModel.SetPreviewDecodeWidth.

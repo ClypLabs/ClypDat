@@ -26,6 +26,9 @@ internal sealed class LibraryLoadingTilesOverlay : Control
     public static readonly StyledProperty<double> TileHeightProperty =
         AvaloniaProperty.Register<LibraryLoadingTilesOverlay, double>(nameof(TileHeight));
 
+    public static readonly StyledProperty<double> TileTopInsetProperty =
+        AvaloniaProperty.Register<LibraryLoadingTilesOverlay, double>(nameof(TileTopInset));
+
     public static readonly StyledProperty<double> RowPitchProperty =
         AvaloniaProperty.Register<LibraryLoadingTilesOverlay, double>(nameof(RowPitch));
 
@@ -51,6 +54,7 @@ internal sealed class LibraryLoadingTilesOverlay : Control
             ColumnCountProperty,
             TileWidthProperty,
             TileHeightProperty,
+            TileTopInsetProperty,
             RowPitchProperty,
             ScrollOffsetYProperty);
         Timer.Tick += (_, _) =>
@@ -94,6 +98,12 @@ internal sealed class LibraryLoadingTilesOverlay : Control
     {
         get => GetValue(TileHeightProperty);
         set => SetValue(TileHeightProperty, value);
+    }
+
+    public double TileTopInset
+    {
+        get => GetValue(TileTopInsetProperty);
+        set => SetValue(TileTopInsetProperty, value);
     }
 
     public double RowPitch
@@ -142,7 +152,7 @@ internal sealed class LibraryLoadingTilesOverlay : Control
         var lastRow = Math.Min((int)Math.Ceiling(TotalTileCount / (double)columns), (int)Math.Ceiling(viewportBottom / RowPitch) + 1);
         var cycle = SweepDurationSeconds + PauseDurationSeconds;
         var sweep = Math.Min(1, (Clock.Elapsed.TotalSeconds % cycle) / SweepDurationSeconds);
-        var tileHeight = Math.Max(TileHeight, RowPitch - 6);
+        var tileHeight = TileHeight;
         var shimmerWidth = TileWidth * 1.4;
         EnsureShimmerGeometry(tileHeight, shimmerWidth);
 
@@ -155,7 +165,7 @@ internal sealed class LibraryLoadingTilesOverlay : Control
                 for (var index = rowStart; index < rowEnd; index++)
                 {
                     var column = index % columns;
-                    var tile = new Rect(4 + column * (TileWidth + 24), 2 + row * RowPitch - ScrollOffsetY, TileWidth, tileHeight);
+                    var tile = new Rect(4 + column * (TileWidth + 24), TileTopInset + row * RowPitch - ScrollOffsetY, TileWidth, tileHeight);
                     context.DrawRectangle(TileBrush, null, tile, 12, 12);
                     using (context.PushClip(tile))
                     {
@@ -193,8 +203,8 @@ internal sealed class LibraryLoadingTilesOverlay : Control
 
     private static IBrush CreateShimmerBrush() => new LinearGradientBrush
     {
-        StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
-        EndPoint = new RelativePoint(1, 1, RelativeUnit.Relative),
+        StartPoint = new RelativePoint(0, 0.5, RelativeUnit.Relative),
+        EndPoint = new RelativePoint(1, 0.5, RelativeUnit.Relative),
         GradientStops =
         {
             new GradientStop(Color.Parse("#00344958"), 0),

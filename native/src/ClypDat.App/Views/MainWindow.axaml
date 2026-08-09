@@ -839,7 +839,8 @@
               LoadedTileCount="{Binding LoadedVisibleLibraryTileCount}"
               ColumnCount="{Binding CardColumns}"
               TileWidth="{Binding CardWidth}"
-              TileHeight="{Binding CardImageHeight}"
+              TileHeight="{Binding LibraryLoadingTileHeight}"
+              TileTopInset="{Binding LibraryLoadingTileTopInset}"
               RowPitch="{Binding LibraryLoadingRowPitch}"
               IsHitTestVisible="False" />
           <ScrollViewer Grid.Column="0" x:Name="LibraryScrollViewer" Margin="-4,0,-24,0" VerticalScrollBarVisibility="Hidden">
@@ -903,7 +904,8 @@
                                    VerticalAlignment="Center" />
                       </StackPanel>
                     </Border>
-                    <Border Background="#24303A"
+                    <Border x:Name="LibraryClipCardSurface"
+                            Background="#24303A"
                             CornerRadius="12"
                             BoxShadow="0 6 18 -6 #66000000"
                             PointerPressed="ClipCard_OnPointerPressed"

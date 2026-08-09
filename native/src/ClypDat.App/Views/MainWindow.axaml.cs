@@ -1857,7 +1857,11 @@ public sealed partial class MainWindow : Window
             .FirstOrDefault(control => control.DataContext is ClipCardViewModel && control.Bounds.Height > 0);
         if (container is null) return;
 
-        ViewModel.CompleteInitialLibraryLayout(container.Bounds.Height);
+        var cardSurface = container.GetVisualDescendants()
+            .OfType<Border>()
+            .FirstOrDefault(border => border.Name == "LibraryClipCardSurface" && border.Bounds.Height > 0);
+        var surfaceTop = cardSurface?.TranslatePoint(default, container)?.Y ?? 0;
+        ViewModel.CompleteInitialLibraryLayout(container.Bounds.Height, surfaceTop, cardSurface?.Bounds.Height ?? 0);
     }
 
     private bool _scrubberHovered;
