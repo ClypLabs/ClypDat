@@ -3270,6 +3270,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 NotifyLibraryChrome();
                 AppLog.Info($"Library cache: restore complete, {AllClips.Count} cards available before disk reconciliation.");
                 await RefreshLibraryAsync();
+                await PersistLibraryCacheSnapshotAsync();
             }
         }
         catch (OperationCanceledException)
@@ -3298,7 +3299,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 OnPropertyChanged(nameof(IsRestoringLibraryCache));
                 OnPropertyChanged(nameof(LibraryTitle));
                 RecomputeGameFilterBadges();
-                MarkLibraryCacheDirty();
             }
         }
     }
@@ -3480,6 +3480,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var root = Settings.LibraryFolder;
         var snapshot = AllClips.Select(clip => clip.ToCachedState()).ToArray();
         _ = Task.Run(() => _libraryCache.Save(root, snapshot));
+    }
+
+    private async Task PersistLibraryCacheSnapshotAsync()
+    {
+        _libraryCacheWriteTimer.Stop();
+        _libraryCacheDirty = false;
+        var root = Settings.LibraryFolder;
+        var snapshot = AllClips.Select(clip => clip.ToCachedState()).ToArray();
+        await Task.Run(() => _libraryCache.Save(root, snapshot));
+        AppLog.Info($"Library cache: persisted {snapshot.Length} cards after startup reconciliation.");
     }
 
     public Task LoadLibraryFolderAsync(string folderPath)
