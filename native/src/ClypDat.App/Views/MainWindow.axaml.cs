@@ -2102,10 +2102,12 @@ public sealed partial class MainWindow : Window
         DateScrubberThumb.Background = dragging
             ? (Avalonia.Media.IBrush?)Application.Current?.FindResource("AccentBrush") ?? Avalonia.Media.Brush.Parse("#5864E8")
             : Avalonia.Media.Brush.Parse(hovered ? "#C4D7E5" : "#91A9BB");
+        DateScrubberThumb.Opacity = hovered ? 1 : 0;
         DateScrubberThumb.RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse(hovered ? "scaleX(1.75)" : "scaleX(1)");
         if (DateScrubberTrack is not null)
         {
             DateScrubberTrack.Background = Avalonia.Media.Brush.Parse(hovered ? "#526979" : "#405262");
+            DateScrubberTrack.Opacity = hovered ? 1 : 0;
         }
     }
 
