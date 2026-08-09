@@ -477,6 +477,7 @@ public sealed partial class MainWindow : Window
         AddHandler(PointerMovedEvent, GameRailItem_OnPointerMoved, RoutingStrategies.Tunnel);
         AddHandler(PointerReleasedEvent, GameRailItem_OnPointerReleased, RoutingStrategies.Tunnel);
         AddHandler(PointerPressedEvent, LibraryFilterButton_OnPointerPressed, RoutingStrategies.Tunnel, true);
+        AddHandler(PointerPressedEvent, AllClipsFilterButton_OnPointerPressed, RoutingStrategies.Tunnel, true);
 
         // Change Game's flyout (see ClipContextSetGame_OnClick) never
         // light-dismissed on an outside click on its own, through three
@@ -789,8 +790,33 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null) return;
         if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings();
         var key = (sender as Button)?.DataContext as FilterOptionViewModel;
-        if (key is null) ViewModel.ClearAllFilters();
+        if (key is null) ResetLibraryToAllClips();
         else ViewModel.SelectClipTypeSection(key.Key);
+        ResetLibraryFilterScroll();
+    }
+
+    private void AllClipsFilterButton_OnClick(object? sender, RoutedEventArgs e) =>
+        ResetLibraryToAllClips();
+
+    private void AllClipsFilterButton_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (e.GetCurrentPoint(this).Properties.PointerUpdateKind != PointerUpdateKind.LeftButtonPressed)
+            return;
+
+        var source = e.Source as Control;
+        if (source != AllClipsFilterButton &&
+            source?.GetVisualAncestors().Contains(AllClipsFilterButton) != true)
+            return;
+
+        e.Handled = true;
+        ResetLibraryToAllClips();
+    }
+
+    private void ResetLibraryToAllClips()
+    {
+        if (ViewModel is null) return;
+        if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings();
+        ViewModel.ClearAllFilters();
         ResetLibraryFilterScroll();
     }
 

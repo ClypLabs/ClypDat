@@ -351,7 +351,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsRestoringLibraryCache => _isRestoringCachedLibrary;
     public bool ShowLibraryLoadingTiles => !IsInitialLibraryLoadComplete || IsRestoringLibraryCache;
     public int LibraryLoadingTileCount => HasStartupLibraryIndex ? _startupVisibleClipCount : 12;
-    public int LoadedVisibleLibraryTileCount => _loadedVisibleLibraryTileCount;
+    // Real cards stay transparent until first measured layout pass. Keep
+    // overlay covering every slot until reveal.
+    public int LoadedVisibleLibraryTileCount => IsInitialLibraryLoadComplete
+        ? _loadedVisibleLibraryTileCount
+        : 0;
     public double LibraryLoadingRowPitch => StartupLibraryRowPitch;
     public double LibraryLoadingTileTopInset => _startupCardSurfaceTopInset;
     public double LibraryLoadingTileHeight => Math.Max(1, CardImageHeight + _startupCardSurfaceChromeHeight);
@@ -373,6 +377,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (!SetProperty(ref _isInitialLibraryLoadComplete, value)) return;
             OnPropertyChanged(nameof(LibraryCardGridOpacity));
+            OnPropertyChanged(nameof(LoadedVisibleLibraryTileCount));
             OnPropertyChanged(nameof(LibraryTitle));
             OnPropertyChanged(nameof(ShowLibraryLoadingTiles));
         }
@@ -6056,14 +6061,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string? ActiveGameFilterKey => _activeGameFilters.Count == 1 ? _activeGameFilters.First() : null;
     public string? ActiveClipTypeFilterKey => _activeClipTypeFilters.Count == 1 ? _activeClipTypeFilters.First() : null;
 
-    // With Combine off, only one thing in the whole rail can ever be
-    // selected at a time (a game and a section can't both be active, see
-    // SelectGameSection/SelectClipTypeSection), so "All Clips" there really
-    // means "nothing at all is selected" - it has to drop out the moment a
-    // game is picked, not just when a clip-type section is. Combine on, the
-    // two groups are independent again and "All Clips" goes back to meaning
-    // just its own group, same as "All Games" does for the game side.
-    public bool IsAllClipsActive => !IsClipTypeFilterActive && (Settings.CombineSidebarFilters || !IsGameFilterActive);
+    // "All Clips" is universal reset state. It is active only when neither
+    // game nor clip-type filter group is selected, including combined mode.
+    public bool IsAllClipsActive => !IsGameFilterActive && !IsClipTypeFilterActive;
 
     private const string ClipTypeManual = "Manual";
     private const string ClipTypeAutoClip = "AutoClip";
@@ -6597,8 +6597,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // however many are set. Used by the logo/home button.
     public void ClearAllFilters()
     {
-        if (_activeGameFilters.Count == 0 && _activeClipTypeFilters.Count == 0) return;
-
         _activeGameFilters.Clear();
         _activeClipTypeFilters.Clear();
         foreach (var option in GameFilterOptions) option.SetCheckedSilently(false);
