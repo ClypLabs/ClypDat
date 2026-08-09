@@ -197,6 +197,8 @@ public sealed partial class MainWindow : Window
     // with the new width) again.
     private string? _libraryReturnAnchorPath;
     private bool _libraryReturnAnchorDirty;
+    private bool _libraryCardLayoutQueued;
+    private double _lastLibraryCardViewportWidth = double.NaN;
     // Win32 can present a newly-created client area before Avalonia's first
     // compositor frame. DWM cloaks that first native frame until two Avalonia
     // frame callbacks have passed, leaving a dark rendered surface to reveal.
@@ -217,15 +219,16 @@ public sealed partial class MainWindow : Window
         RootLayout.Margin = OffScreenMargin;
         UpdateViewNavButtons();
         LibraryScrollViewer.ScrollChanged += LibraryScrollViewer_OnScrollChanged;
-        // Card layout follows the grid's real width, not the window's - the
-        // sidebar rail and date scrubber both sit outside this ScrollViewer.
-        LibraryScrollViewer.SizeChanged += (_, sizeArgs) => ViewModel?.UpdateCardLayout(sizeArgs.NewSize.Width);
+        // Viewport is not final during SizeChanged. Queue once after arrange
+        // so WrapPanel and cards calculate against same visible width.
+        LibraryScrollViewer.SizeChanged += (_, _) => QueueLibraryCardLayout();
         // Card visibility flips (filtering) and hydration both change the
         // scroll extent without a size change on this window, so the marker
         // positions have to be recomputed off layout rather than only off
         // Window_OnSizeChanged.
         LibraryScrollViewer.LayoutUpdated += (_, _) =>
         {
+            QueueLibraryCardLayout();
             TryCompleteInitialLibraryLayout();
             QueueDateScrubberRebuild();
         };
@@ -1564,6 +1567,21 @@ public sealed partial class MainWindow : Window
         }
 
         return (firstFullyVisible ?? firstIntersecting)?.Path;
+    }
+
+    private void QueueLibraryCardLayout()
+    {
+        if (_libraryCardLayoutQueued) return;
+        _libraryCardLayoutQueued = true;
+        Dispatcher.UIThread.Post(() =>
+        {
+            _libraryCardLayoutQueued = false;
+            var viewportWidth = LibraryScrollViewer.Viewport.Width;
+            if (viewportWidth <= 0 || Math.Abs(viewportWidth - _lastLibraryCardViewportWidth) < 0.01) return;
+
+            _lastLibraryCardViewportWidth = viewportWidth;
+            ViewModel?.UpdateCardLayout(viewportWidth);
+        }, DispatcherPriority.Loaded);
     }
 
     private void LibraryScrollViewer_OnScrollChanged(object? sender, ScrollChangedEventArgs e)

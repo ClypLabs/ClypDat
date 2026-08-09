@@ -3837,62 +3837,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private double _lastCardLayoutWidth;
 
-    // Target card width for ScaleClipsWithWindow - picked so a maximized
-    // ~2560px-wide (1440p) window lands around 6 columns, per the reference
-    // point this setting was calibrated against.
-    private const double ScaledCardTargetWidth = 400;
-
-    // availableWidth is the card grid's OWN width (the library ScrollViewer's
-    // rendered width), not the window's. It used to be passed the window
-    // width minus a flat 48 for chrome, which stopped being anywhere near
-    // right once the sidebar rail and date scrubber took ~130px out of the
-    // row - the extra column that assumption bought never fit, leaving a
-    // column-wide empty gap down the right of the library.
+    // availableWidth is LibraryScrollViewer's arranged viewport width, not
+    // window width. Its margins are part of WrapPanel's measured space.
     public void UpdateCardLayout(double availableWidth)
     {
         _lastCardLayoutWidth = availableWidth;
-        // LibraryScrollViewer hides its native scrollbar and the custom date
-        // scrubber lives in the sibling column, so its reported width is the
-        // WrapPanel's full usable viewport. Each card already reserves its own
-        // 4px left and 20px right margin; subtracting another scrollbar strip
-        // left a second, visibly oversized gutter on the right.
-        var contentWidth = Math.Max(320, availableWidth);
+        var layout = LibraryCardLayoutCalculator.Calculate(availableWidth, Settings.ScaleClipsWithWindow);
+        if (CardColumns == layout.Columns && CardWidth == layout.Width && CardImageHeight == layout.ImageHeight) return;
 
-        int cardColumns;
-        double cardWidth;
-        if (Settings.ScaleClipsWithWindow)
-        {
-            // More columns on a wider window instead of the same fixed
-            // count just stretching wider - floor so a partial column never
-            // overflows, clamped to a sane [2, 10] range. 24 matches each
-            // card's own trailing Margin (MainWindow.axaml's WrapPanel item,
-            // Margin="4,4,20,24" - 4 left + 20 right) reserved per column.
-            cardColumns = Math.Clamp((int)Math.Floor(contentWidth / ScaledCardTargetWidth), 2, 10);
-            cardWidth = Math.Max(220, Math.Floor(contentWidth / cardColumns) - 24);
-        }
-        else
-        {
-            // Fixed three columns. Reserves the same 24px per card the scaled
-            // branch does (4 left + 20 right of margin) - the old formula took
-            // 64 off the total for three cards needing 72, so the third card
-            // never fit and wrapped, which is the other half of the dead space
-            // down the right side.
-            cardColumns = 3;
-            cardWidth = Math.Max(220, Math.Floor(contentWidth / 3) - 24);
-        }
-
-        var cardImageHeight = Math.Floor(cardWidth * 9 / 16);
-        if (CardColumns == cardColumns && CardWidth == cardWidth && CardImageHeight == cardImageHeight) return;
-
-        CardColumns = cardColumns;
-        CardWidth = cardWidth;
-        CardImageHeight = cardImageHeight;
+        CardColumns = layout.Columns;
+        CardWidth = layout.Width;
+        CardImageHeight = layout.ImageHeight;
         OnPropertyChanged(nameof(LibraryLoadingRowPitch));
         OnPropertyChanged(nameof(LibraryLoadingTileHeight));
         if (HasStartupLibraryIndex) UpdateReservedLibraryExtent();
         // Thumbnails decode to whatever the cards are now, not to the source's
         // full 960px - see ClipCardViewModel.SetPreviewDecodeWidth.
-        ClipCardViewModel.SetPreviewDecodeWidth(cardWidth, _cardRenderScaling);
+        ClipCardViewModel.SetPreviewDecodeWidth(layout.Width, _cardRenderScaling);
     }
 
     // Set by MainWindow once the window has a visual root; 1.0 until then,
