@@ -831,7 +831,11 @@
           <!-- Date scrubber (right column, below) replaces the default
                scrollbar, so hide the ScrollViewer's own. -->
           <ScrollViewer Grid.Column="0" x:Name="LibraryScrollViewer" Margin="-4,0,-4,0" VerticalScrollBarVisibility="Hidden">
-            <ItemsControl ItemsSource="{Binding AllClips}" IsVisible="{Binding IsInitialLibraryLoadComplete}">
+            <ItemsControl x:Name="LibraryItemsControl"
+                          ItemsSource="{Binding AllClips}"
+                          Opacity="{Binding LibraryCardGridOpacity}"
+                          IsHitTestVisible="{Binding IsInitialLibraryLoadComplete}"
+                          MinHeight="{Binding LibraryReservedContentHeight}">
               <!-- WrapPanel, not UniformGrid - UniformGrid pre-computes its
                    row/column count from the total child count (including
                    IsVisible="False" filtered-out cards) and still reserves

@@ -224,7 +224,11 @@ public sealed partial class MainWindow : Window
         // scroll extent without a size change on this window, so the marker
         // positions have to be recomputed off layout rather than only off
         // Window_OnSizeChanged.
-        LibraryScrollViewer.LayoutUpdated += (_, _) => QueueDateScrubberRebuild();
+        LibraryScrollViewer.LayoutUpdated += (_, _) =>
+        {
+            TryCompleteInitialLibraryLayout();
+            QueueDateScrubberRebuild();
+        };
         _playbackTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         // Guarded like the hover-bar poll timer below (see SetupEditorHoverControls) -
         // SyncPlaybackPosition repositions the "Playback Paused" badge via
@@ -349,6 +353,7 @@ public sealed partial class MainWindow : Window
                             LibraryScrollViewer.Offset = default;
                         }, DispatcherPriority.Loaded);
                     }
+                    if (e.PropertyName == nameof(MainWindowViewModel.StartupLibraryIndexVersion)) QueueDateScrubberRebuild();
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible)
                         or nameof(MainWindowViewModel.IsEditorVisible)
                         or nameof(MainWindowViewModel.SelectedVideoPath)
@@ -1789,7 +1794,9 @@ public sealed partial class MainWindow : Window
         var extentHeight = LibraryScrollViewer.Extent.Height;
         var viewportHeight = LibraryScrollViewer.Viewport.Height;
 
-        var signature = (extentHeight, viewportHeight, trackHeight, ViewModel.AllClips.Count(clip => clip.IsVisibleInLibrary));
+        var usingStartupIndex = ViewModel.HasStartupLibraryIndex;
+        var signature = (extentHeight, viewportHeight, trackHeight,
+            usingStartupIndex ? ViewModel.StartupLibraryIndexVersion : ViewModel.AllClips.Count(clip => clip.IsVisibleInLibrary));
         if (signature == _scrubberSignature) return;
         _scrubberSignature = signature;
 
@@ -1799,6 +1806,19 @@ public sealed partial class MainWindow : Window
 
         // Nothing to scrub through - everything already fits on screen.
         if (trackHeight <= 0 || extentHeight <= 0 || viewportHeight >= extentHeight) return;
+
+        if (usingStartupIndex)
+        {
+            foreach (var marker in ViewModel.StartupLibraryDateMarkers)
+            {
+                var row = marker.FirstVisibleIndex / Math.Max(1, ViewModel.CardColumns);
+                _scrubberDates.Add((marker.Text, row * ViewModel.StartupLibraryRowPitch, marker.Count));
+            }
+
+            if (_scrubberHovered) RebuildScrubberTicks();
+            HighlightCurrentScrubberDate();
+            return;
+        }
 
         var itemsControl = LibraryScrollViewer.Content as ItemsControl ?? LibraryScrollViewer.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault();
         if (itemsControl is null) return;
@@ -1841,6 +1861,17 @@ public sealed partial class MainWindow : Window
         // PointerExited) is what actually empties the canvas.
         if (_scrubberHovered) RebuildScrubberTicks();
         HighlightCurrentScrubberDate();
+    }
+
+    private void TryCompleteInitialLibraryLayout()
+    {
+        if (ViewModel is not { IsInitialLibraryLoadComplete: false, HasStartupLibraryIndex: true }) return;
+
+        var container = LibraryItemsControl.GetRealizedContainers()?
+            .FirstOrDefault(control => control.DataContext is ClipCardViewModel && control.Bounds.Height > 0);
+        if (container is null) return;
+
+        ViewModel.CompleteInitialLibraryLayout(container.Bounds.Height);
     }
 
     private bool _scrubberHovered;
