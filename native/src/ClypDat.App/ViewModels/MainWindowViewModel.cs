@@ -184,6 +184,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // so this is cheap on every launch after the first that day.
         _ = Task.Run(() => RemoteGameIconsService.EnsureLoadedAsync());
         MedalImportRows.CollectionChanged += MedalImportRows_OnCollectionChanged;
+        SteelSeriesImportRows.CollectionChanged += SteelSeriesImportRows_OnCollectionChanged;
         MigrateLegacyMedalImportHistory();
         AllClips = new ObservableCollection<ClipCardViewModel>();
         TimelineTracks = new ObservableCollection<TrackLaneViewModel>();
@@ -1856,6 +1857,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public ObservableCollection<MedalImportRowViewModel> MedalImportRows { get; } = new();
+    public ObservableCollection<SteelSeriesImportRowViewModel> SteelSeriesImportRows { get; } = new();
 
     public bool? MedalImportSelectionState
     {
@@ -1942,6 +1944,64 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set { Settings.MedalImportCopyNotMove = value; OnPropertyChanged(); SaveSettings(); }
     }
 
+    private bool _steelSeriesScanned;
+    public bool SteelSeriesScanned { get => _steelSeriesScanned; set => SetProperty(ref _steelSeriesScanned, value); }
+
+    private bool _steelSeriesImportInProgress;
+    public bool SteelSeriesImportInProgress
+    {
+        get => _steelSeriesImportInProgress;
+        set
+        {
+            if (!SetProperty(ref _steelSeriesImportInProgress, value)) return;
+            OnPropertyChanged(nameof(CanToggleSteelSeriesImportSelection));
+            OnPropertyChanged(nameof(ShowSteelSeriesImportStatusText));
+        }
+    }
+
+    private double _steelSeriesImportProgressPercent;
+    public double SteelSeriesImportProgressPercent { get => _steelSeriesImportProgressPercent; set => SetProperty(ref _steelSeriesImportProgressPercent, value); }
+
+    private string _steelSeriesScanStatusText = "Not scanned yet - click Scan for SteelSeries Clips to look for Moments clips.";
+    public string SteelSeriesScanStatusText { get => _steelSeriesScanStatusText; set => SetProperty(ref _steelSeriesScanStatusText, value); }
+
+    private string _steelSeriesImportStatusText = string.Empty;
+    public string SteelSeriesImportStatusText
+    {
+        get => _steelSeriesImportStatusText;
+        set
+        {
+            if (!SetProperty(ref _steelSeriesImportStatusText, value)) return;
+            OnPropertyChanged(nameof(ShowSteelSeriesImportStatusText));
+        }
+    }
+
+    public bool ShowSteelSeriesImportStatusText => !SteelSeriesImportInProgress && !string.IsNullOrWhiteSpace(SteelSeriesImportStatusText);
+    public bool SteelSeriesImportCopyNotMove
+    {
+        get => Settings.SteelSeriesImportCopyNotMove;
+        set { if (Settings.SteelSeriesImportCopyNotMove == value) return; Settings.SteelSeriesImportCopyNotMove = value; OnPropertyChanged(); SaveSettings(); }
+    }
+
+    public bool? SteelSeriesImportSelectionState
+    {
+        get
+        {
+            var selectable = SteelSeriesImportRows.Where(row => row.CanImport).ToArray();
+            if (selectable.Length == 0 || selectable.All(row => !row.IsSelected)) return false;
+            return selectable.All(row => row.IsSelected) ? true : null;
+        }
+    }
+
+    public bool CanToggleSteelSeriesImportSelection => !SteelSeriesImportInProgress && SteelSeriesImportRows.Any(row => row.CanImport);
+
+    public void ToggleSteelSeriesImportSelection()
+    {
+        var selectAll = SteelSeriesImportSelectionState != true;
+        foreach (var row in SteelSeriesImportRows.Where(row => row.CanImport)) row.IsSelected = selectAll;
+        NotifySteelSeriesImportSelectionState();
+    }
+
     public async Task ScanForMedalClipsAsync()
     {
         MedalImportRows.Clear();
@@ -2016,6 +2076,159 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public async Task ScanForSteelSeriesClipsAsync()
+    {
+        SteelSeriesImportRows.Clear();
+        SteelSeriesImportInProgress = true;
+        SteelSeriesImportProgressPercent = 0;
+        SteelSeriesImportStatusText = "Finding SteelSeries Moments clips...";
+        IProgress<SteelSeriesScanProgress> progress = new Progress<SteelSeriesScanProgress>(update =>
+        {
+            if (!SteelSeriesImportInProgress) return;
+            SteelSeriesImportProgressPercent = Math.Max(SteelSeriesImportProgressPercent, Math.Clamp(update.Percent, 0, 100));
+            SteelSeriesImportStatusText = update.Status;
+        });
+        try
+        {
+            var found = await Task.Run(() => SteelSeriesImportService.ScanForClips(progress));
+            var importedKeys = LoadSteelSeriesImportHistory();
+            AddExistingSteelSeriesImportKeys(importedKeys);
+            PersistSteelSeriesImportHistory(importedKeys);
+            var candidates = found.GroupBy(SteelSeriesImportService.GetImportKey, StringComparer.Ordinal).Select(group => group.First()).ToArray();
+            var available = candidates.Where(record => !IsKnownSteelSeriesImport(record, importedKeys)).OrderByDescending(record => record.CapturedAt).ToArray();
+            foreach (var record in available) SteelSeriesImportRows.Add(new SteelSeriesImportRowViewModel(record));
+            var alreadyImported = candidates.Length - available.Length;
+            SteelSeriesScanStatusText = available.Length switch
+            {
+                0 when alreadyImported > 0 => $"No new SteelSeries clips found ({alreadyImported} already imported).",
+                0 => "No SteelSeries clips found.",
+                1 when alreadyImported > 0 => $"1 new SteelSeries clip found ({alreadyImported} already imported).",
+                1 => "1 new SteelSeries clip found.",
+                _ when alreadyImported > 0 => $"{available.Length} new SteelSeries clips found ({alreadyImported} already imported).",
+                _ => $"{available.Length} new SteelSeries clips found."
+            };
+            SteelSeriesScanned = true;
+            SteelSeriesImportProgressPercent = 100;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("SteelSeries import: scan processing failed.", error);
+            SteelSeriesScanStatusText = $"Scan failed: {error.Message}";
+            SteelSeriesScanned = true;
+        }
+        finally
+        {
+            SteelSeriesImportInProgress = false;
+            SteelSeriesImportStatusText = string.Empty;
+        }
+    }
+
+    public async Task ImportSelectedSteelSeriesClipsAsync()
+    {
+        var selected = SteelSeriesImportRows.Where(row => row.IsSelected && row.CanImport).ToList();
+        if (selected.Count == 0) return;
+        SteelSeriesImportInProgress = true;
+        SteelSeriesImportProgressPercent = 0;
+        var imported = 0;
+        var failed = 0;
+        try
+        {
+            for (var i = 0; i < selected.Count; i++)
+            {
+                var row = selected[i];
+                SteelSeriesImportStatusText = $"Validating {i + 1} of {selected.Count}: {row.DisplayTitle}";
+                MediaDurationProbeResult probe;
+                try { probe = await _mediaProbe.ProbeDurationAsync(row.Record.VideoPath); }
+                catch (Exception error)
+                {
+                    row.SetValidationError("Unreadable or incomplete video; SteelSeries did not finish writing it.");
+                    AppLog.Error($"SteelSeries import: unreadable source {row.Record.VideoPath}", error);
+                    failed++; SteelSeriesImportProgressPercent = (i + 1) * 100.0 / selected.Count; continue;
+                }
+                if (probe.Duration <= TimeSpan.Zero)
+                {
+                    row.SetValidationError("Unreadable or incomplete video; SteelSeries did not finish writing it.");
+                    failed++; SteelSeriesImportProgressPercent = (i + 1) * 100.0 / selected.Count; continue;
+                }
+                row.SetValidatedDuration(probe.Duration);
+                SteelSeriesImportStatusText = $"Importing {i + 1} of {selected.Count}: {row.DisplayTitle}";
+                try
+                {
+                    var extension = Path.GetExtension(row.Record.VideoPath).TrimStart('.');
+                    var fileName = ClipFileNaming.BuildFileName(row.DisplayTitle, row.CreatedAtLocal, extension, Settings.ClipFileNameScheme, Settings.CustomClipFileNameTemplate, row.GameName);
+                    var destinationDir = LibraryLayout.VideoDirectory(Settings.LibraryFolder, row.Duration, row.GameName);
+                    Directory.CreateDirectory(destinationDir);
+                    var destinationPath = ClipFileNaming.BuildUniquePath(destinationDir, fileName);
+                    await Task.Run(() =>
+                    {
+                        if (SteelSeriesImportCopyNotMove) File.Copy(row.Record.VideoPath, destinationPath, overwrite: false);
+                        else File.Move(row.Record.VideoPath, destinationPath);
+                        File.SetCreationTimeUtc(destinationPath, row.Record.CapturedAt.UtcDateTime);
+                        File.SetLastWriteTimeUtc(destinationPath, row.Record.CapturedAt.UtcDateTime);
+                    });
+                    var importKey = SteelSeriesImportService.GetImportKey(row.Record);
+                    ClipInfoSidecar.Save(Settings.LibraryFolder, destinationPath, new ClipInfo(row.GameName, null, row.DisplayTitle, row.Record.CapturedAt, SteelSeriesImportKey: importKey));
+                    var history = LoadSteelSeriesImportHistory(); history.Add(importKey); PersistSteelSeriesImportHistory(history);
+                    await AddOrUpdateLibraryClipAsync(destinationPath);
+                    imported++; SteelSeriesImportRows.Remove(row);
+                }
+                catch (Exception error) { AppLog.Error($"SteelSeries import failed for {row.Record.VideoPath}", error); failed++; }
+                SteelSeriesImportProgressPercent = (i + 1) * 100.0 / selected.Count;
+            }
+        }
+        finally
+        {
+            SteelSeriesImportInProgress = false;
+            SteelSeriesImportStatusText = failed == 0 ? $"Imported {imported} SteelSeries clip{(imported == 1 ? "" : "s")}." : $"Imported {imported}, {failed} failed - see logs.";
+        }
+    }
+
+    private HashSet<string> LoadSteelSeriesImportHistory()
+    {
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        if (!string.IsNullOrWhiteSpace(Settings.LibraryFolder) && SteelSeriesImportHistoryStore.TryLoad(Settings.LibraryFolder, out var saved)) keys.UnionWith(saved);
+        return keys;
+    }
+
+    private void PersistSteelSeriesImportHistory(ISet<string> keys)
+    {
+        if (!string.IsNullOrWhiteSpace(Settings.LibraryFolder)) SteelSeriesImportHistoryStore.TrySave(Settings.LibraryFolder, keys);
+    }
+
+    private void AddExistingSteelSeriesImportKeys(ISet<string> keys)
+    {
+        if (string.IsNullOrWhiteSpace(Settings.LibraryFolder)) return;
+        try
+        {
+            foreach (var path in Directory.EnumerateFiles(Settings.LibraryFolder, "*.*", SearchOption.AllDirectories).Where(MediaProbeService.IsVideoFile))
+            {
+                var key = ClipInfoSidecar.Load(Settings.LibraryFolder, path)?.SteelSeriesImportKey;
+                if (!string.IsNullOrWhiteSpace(key)) keys.Add(key);
+            }
+        }
+        catch (Exception error) { AppLog.Error("SteelSeries import: failed reading existing imported clips.", error); }
+    }
+
+    private static bool IsKnownSteelSeriesImport(SteelSeriesClipRecord record, ISet<string> keys) => keys.Contains(SteelSeriesImportService.GetImportKey(record));
+
+    private void SteelSeriesImportRows_OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.NewItems is not null) foreach (SteelSeriesImportRowViewModel row in e.NewItems) row.PropertyChanged += SteelSeriesImportRow_OnPropertyChanged;
+        if (e.OldItems is not null) foreach (SteelSeriesImportRowViewModel row in e.OldItems) row.PropertyChanged -= SteelSeriesImportRow_OnPropertyChanged;
+        NotifySteelSeriesImportSelectionState();
+    }
+
+    private void SteelSeriesImportRow_OnPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(SteelSeriesImportRowViewModel.IsSelected) or nameof(SteelSeriesImportRowViewModel.CanImport)) NotifySteelSeriesImportSelectionState();
+    }
+
+    private void NotifySteelSeriesImportSelectionState()
+    {
+        OnPropertyChanged(nameof(SteelSeriesImportSelectionState));
+        OnPropertyChanged(nameof(CanToggleSteelSeriesImportSelection));
+    }
+
     private async Task<int> RepairMalformedMedalImportsAsync(IReadOnlyList<MedalClipRecord> sources, ISet<string> importedKeys, IProgress<MedalScanProgress> progress)
     {
         if (string.IsNullOrWhiteSpace(Settings.LibraryFolder) || !Directory.Exists(Settings.LibraryFolder)) return 0;
@@ -2079,7 +2292,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 if (Settings.ClipEdits.Remove(ClipEditKey(videoPath), out var edit)) Settings.ClipEdits[ClipEditKey(destinationPath)] = edit;
 
                 var newKey = MedalImportService.GetImportKey(source);
-                ClipInfoSidecar.Save(libraryRoot, destinationPath, new ClipInfo(source.GameFolderName, info.AutoClipEventType, title, source.CreatedAtUtc, newKey));
+                ClipInfoSidecar.Save(libraryRoot, destinationPath, new ClipInfo(source.GameFolderName, info.AutoClipEventType, title, source.CreatedAtUtc, newKey, SteelSeriesImportKey: info.SteelSeriesImportKey));
                 if (!string.IsNullOrWhiteSpace(oldKey)) importedKeys.Remove(oldKey);
                 importedKeys.Add(newKey);
                 repaired++;
@@ -3234,7 +3447,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 targetPath = ClipFileNaming.BuildUniquePath(directory, fileName);
                 // Store naming metadata before moving so future scheme changes do
                 // not have to reverse-engineer a user-defined template.
-                ClipInfoSidecar.Save(Settings.LibraryFolder, sourcePath, new ClipInfo(game, info?.AutoClipEventType, title, timestamp, info?.MedalImportKey));
+                ClipInfoSidecar.Save(Settings.LibraryFolder, sourcePath, new ClipInfo(game, info?.AutoClipEventType, title, timestamp, info?.MedalImportKey, SteelSeriesImportKey: info?.SteelSeriesImportKey));
                 File.Move(sourcePath, targetPath);
                 MoveClipSidecars(sourcePath, targetPath);
                 _mediaProbe.MoveCacheFor(sourcePath, targetPath);
@@ -3502,7 +3715,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     {
                         medalKey = MedalImportService.GetImportKey(timestamp.ToUniversalTime(), new FileInfo(destinationPath).Length);
                     }
-                    ClipInfoSidecar.Save(libraryRoot, destinationPath, new ClipInfo(game, info?.AutoClipEventType, title, timestamp, medalKey));
+                    ClipInfoSidecar.Save(libraryRoot, destinationPath, new ClipInfo(game, info?.AutoClipEventType, title, timestamp, medalKey, SteelSeriesImportKey: info?.SteelSeriesImportKey));
                 }
                 catch (Exception error)
                 {
@@ -3951,6 +4164,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         var selected = AllClips.Where(clip => clip.IsSelected).ToArray();
         HashSet<string>? importedKeys = null;
+        HashSet<string>? steelSeriesKeys = null;
         foreach (var clip in selected)
         {
             // Read the sidecar's MedalImportKey BEFORE deleting it below - once
@@ -3962,6 +4176,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 importedKeys ??= LoadMedalImportHistory();
                 importedKeys.Remove(medalImportKey);
+            }
+            var steelSeriesImportKey = ClipInfoSidecar.Load(Settings.LibraryFolder, clip.Path)?.SteelSeriesImportKey;
+            if (!string.IsNullOrWhiteSpace(steelSeriesImportKey))
+            {
+                steelSeriesKeys ??= LoadSteelSeriesImportHistory();
+                steelSeriesKeys.Remove(steelSeriesImportKey);
             }
 
             // Suppresses the watcher's own Deleted echo for this path -
@@ -3978,6 +4198,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         if (importedKeys is not null) PersistMedalImportHistory(importedKeys);
+        if (steelSeriesKeys is not null) PersistSteelSeriesImportHistory(steelSeriesKeys);
 
         // Every currently-selected clip just got deleted above, so a plain
         // ClearSelection is correct here (not per-clip SetClipSelected) and
@@ -3997,6 +4218,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var importedKeys = LoadMedalImportHistory();
             importedKeys.Remove(medalImportKey);
             PersistMedalImportHistory(importedKeys);
+        }
+        var steelSeriesImportKey = ClipInfoSidecar.Load(Settings.LibraryFolder, clip.Path)?.SteelSeriesImportKey;
+        if (!string.IsNullOrWhiteSpace(steelSeriesImportKey))
+        {
+            var steelSeriesKeys = LoadSteelSeriesImportHistory();
+            steelSeriesKeys.Remove(steelSeriesImportKey);
+            PersistSteelSeriesImportHistory(steelSeriesKeys);
         }
 
         _recentlySelfAddedPaths[clip.Path] = DateTime.UtcNow;
@@ -5533,7 +5761,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 info?.AutoClipEventType,
                 title,
                 info?.CapturedAt?.LocalDateTime ?? timestamp,
-                info?.MedalImportKey));
+                info?.MedalImportKey,
+                SteelSeriesImportKey: info?.SteelSeriesImportKey));
             return destinationPath;
         }
         catch (Exception error)
@@ -5749,6 +5978,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private const string ClipTypeAutoClip = "AutoClip";
     private const string ClipTypeVod = "Vod";
     private const string ClipTypeMedalImport = "MedalImport";
+    private const string ClipTypeSteelSeriesImport = "SteelSeriesImport";
 
     // Rebuilds the Game Filters / Clip Type Filters checklist option lists -
     // works the same for ClypDat-recorded and Medal-imported clips since both
@@ -5767,8 +5997,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var autoClipCount = AllClips.Count(clip => clip.IsAutoClip);
         var vodCount = AllClips.Count(clip => clip.IsVod);
         var medalImportCount = AllClips.Count(clip => clip.IsMedalImport);
+        var steelSeriesImportCount = AllClips.Count(clip => clip.IsSteelSeriesImport);
         var hasMedalImports = medalImportCount > 0;
+        var hasSteelSeriesImports = steelSeriesImportCount > 0;
         var removedAnyClipTypeFilter = !hasMedalImports && _activeClipTypeFilters.Remove(ClipTypeMedalImport);
+        var removedAnySteelSeriesFilter = !hasSteelSeriesImports && _activeClipTypeFilters.Remove(ClipTypeSteelSeriesImport);
 
         ClipTypeFilterOptions.Clear();
         ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeManual, $"Manual clips ({manualCount})", _activeClipTypeFilters.Contains(ClipTypeManual), OnClipTypeFilterOptionChanged));
@@ -5778,10 +6011,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeMedalImport, $"Medal imports ({medalImportCount})", _activeClipTypeFilters.Contains(ClipTypeMedalImport), OnClipTypeFilterOptionChanged));
         }
+        if (hasSteelSeriesImports)
+        {
+            ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeSteelSeriesImport, $"SteelSeries imports ({steelSeriesImportCount})", _activeClipTypeFilters.Contains(ClipTypeSteelSeriesImport), OnClipTypeFilterOptionChanged));
+        }
 
         if (removedAnyGameFilter) ApplyGameFilters();
-        if (removedAnyClipTypeFilter) ApplyClipTypeFilters();
-        if (removedAnyGameFilter || removedAnyClipTypeFilter)
+        if (removedAnyClipTypeFilter || removedAnySteelSeriesFilter) ApplyClipTypeFilters();
+        if (removedAnyGameFilter || removedAnyClipTypeFilter || removedAnySteelSeriesFilter)
         {
             OnPropertyChanged(nameof(IsGameFilterActive));
             OnPropertyChanged(nameof(IsClipTypeFilterActive));
@@ -5804,16 +6041,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var autoClipCount = 0;
         var vodCount = 0;
         var medalImportCount = 0;
+        var steelSeriesImportCount = 0;
         foreach (var state in cached)
         {
             if (!string.IsNullOrWhiteSpace(state.ClipInfo?.MedalImportKey)) medalImportCount++;
+            else if (!string.IsNullOrWhiteSpace(state.ClipInfo?.SteelSeriesImportKey)) steelSeriesImportCount++;
             else if (!string.IsNullOrWhiteSpace(state.ClipInfo?.AutoClipEventType)) autoClipCount++;
             else if (IsCachedStateVod(state)) vodCount++;
             else manualCount++;
         }
 
         var hasMedalImports = medalImportCount > 0;
+        var hasSteelSeriesImports = steelSeriesImportCount > 0;
         if (!hasMedalImports) _activeClipTypeFilters.Remove(ClipTypeMedalImport);
+        if (!hasSteelSeriesImports) _activeClipTypeFilters.Remove(ClipTypeSteelSeriesImport);
         ClipTypeFilterOptions.Clear();
         ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeManual, $"Manual clips ({manualCount})", _activeClipTypeFilters.Contains(ClipTypeManual), OnClipTypeFilterOptionChanged));
         ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeAutoClip, $"Auto-Clips ({autoClipCount})", _activeClipTypeFilters.Contains(ClipTypeAutoClip), OnClipTypeFilterOptionChanged));
@@ -5821,6 +6062,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (hasMedalImports)
         {
             ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeMedalImport, $"Medal imports ({medalImportCount})", _activeClipTypeFilters.Contains(ClipTypeMedalImport), OnClipTypeFilterOptionChanged));
+        }
+        if (hasSteelSeriesImports)
+        {
+            ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeSteelSeriesImport, $"SteelSeries imports ({steelSeriesImportCount})", _activeClipTypeFilters.Contains(ClipTypeSteelSeriesImport), OnClipTypeFilterOptionChanged));
         }
     }
 
@@ -6354,7 +6599,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // per-button matching and this auto-navigate check work from.
     private static readonly string[] SettingsSectionNames =
     {
-        "General", "Game Detection", "Import from Medal",
+        "General", "Game Detection", "Import from Medal", "Import from SteelSeries",
         "Replay Buffer", "Overlays and Notifications", "Auto-Clip", "Audio", "Game Audio Exclusions",
         "About"
     };
@@ -6442,7 +6687,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return (clip.IsManualClip && _activeClipTypeFilters.Contains(ClipTypeManual))
             || (clip.IsAutoClip && _activeClipTypeFilters.Contains(ClipTypeAutoClip))
             || (clip.IsVod && _activeClipTypeFilters.Contains(ClipTypeVod))
-            || (clip.IsMedalImport && _activeClipTypeFilters.Contains(ClipTypeMedalImport));
+            || (clip.IsMedalImport && _activeClipTypeFilters.Contains(ClipTypeMedalImport))
+            || (clip.IsSteelSeriesImport && _activeClipTypeFilters.Contains(ClipTypeSteelSeriesImport));
     }
 
     private void NotifySelectionChrome()

@@ -4757,6 +4757,23 @@ public sealed partial class MainWindow : Window
         ViewModel?.ToggleMedalImportSelection();
     }
 
+    private async void ScanSteelSeriesButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is not null) await ViewModel.ScanForSteelSeriesClipsAsync();
+    }
+
+    private async void ImportSteelSeriesButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        await EnsureLibraryFolderAsync();
+        await ViewModel.ImportSelectedSteelSeriesClipsAsync();
+    }
+
+    private void ToggleSteelSeriesImportSelection_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel?.ToggleSteelSeriesImportSelection();
+    }
+
     private async void BrowseCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;

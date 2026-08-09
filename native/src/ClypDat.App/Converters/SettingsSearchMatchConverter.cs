@@ -48,6 +48,10 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         {
             "Import options", "Strip emoji from titles", "Copy instead of move", "Scan", "Scan for Medal clips"
         },
+        ["Import from SteelSeries"] = new[]
+        {
+            "Import options", "Copy instead of move", "Scan", "Scan for SteelSeries clips", "Moments"
+        },
         ["Replay Buffer"] = new[]
         {
             "Hotkey", "Save hotkey", "Recording", "Replay length", "Resolution", "Frame rate",

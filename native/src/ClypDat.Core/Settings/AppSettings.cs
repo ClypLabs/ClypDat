@@ -188,6 +188,7 @@ public sealed class AppSettings
     public Cs2AutoClipSettings Cs2AutoClip { get; set; } = new();
     public bool MedalImportStripEmoji { get; set; } = false;
     public bool MedalImportCopyNotMove { get; set; } = true;
+    public bool SteelSeriesImportCopyNotMove { get; set; } = true;
     // Suppresses the startup prompt for audio-only MP4 sidecars. ClypDat
     // still keeps them in the library; it only stops asking whether to remove
     // them.

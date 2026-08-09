@@ -26,6 +26,7 @@ public sealed class ClipTypeKeyToIconConverter : IValueConverter
             "AutoClip" => BoltIcon,
             "Vod" => MovieIcon,
             "MedalImport" => ImportIcon,
+            "SteelSeriesImport" => ImportIcon,
             _ => MovieIcon
         };
     }

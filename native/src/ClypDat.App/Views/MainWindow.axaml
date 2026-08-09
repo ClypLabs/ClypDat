@@ -1185,10 +1185,11 @@
                 </Button>
               </TextBox.InnerRightContent>
             </TextBox>
-            <TextBlock Text="GENERAL" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" Margin="22,0,0,14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter='General|Game Detection|Import from Medal'}" />
+            <TextBlock Text="GENERAL" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" Margin="22,0,0,14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter='General|Game Detection|Import from Medal|Import from SteelSeries'}" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=General}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=General}" Tag="General" Content="General" Click="SettingsNavButton_OnClick" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Detection}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Game Detection}" Tag="Game Detection" Content="Game Detection" Click="SettingsNavButton_OnClick" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Import from Medal}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Import from Medal}" Tag="Import from Medal" Content="Import from Medal" Click="SettingsNavButton_OnClick" />
+            <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Import from SteelSeries}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Import from SteelSeries}" Tag="Import from SteelSeries" Content="Import from SteelSeries" Click="SettingsNavButton_OnClick" />
 
             <TextBlock Text="CAPTURE" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" Margin="22,20,0,14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter='Replay Buffer|Overlays and Notifications|Auto-Clip|Audio|Game Audio Exclusions'}" />
             <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Replay Buffer}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Replay Buffer}" Tag="Replay Buffer" Content="Replay Buffer" Click="SettingsNavButton_OnClick" />
@@ -1872,6 +1873,69 @@
                                 <TextBlock Foreground="#6B7C8C" FontSize="11">
                                   <Run Text="{Binding GameFolderName}" /><Run Text=" � " /><Run Text="{Binding CreatedAtLocal}" />
                                 </TextBlock>
+                                <TextBlock Text="{Binding ValidationMessage}" Foreground="#D85E61" FontSize="11" TextWrapping="Wrap" IsVisible="{Binding HasValidationMessage}" />
+                              </StackPanel>
+                            </Grid>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+            </StackPanel>
+
+            <StackPanel Spacing="18" Tag="Import from SteelSeries">
+              <StackPanel.IsVisible>
+                <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Import from SteelSeries">
+                  <Binding Path="SettingsSearchText" />
+                  <Binding Path="SelectedSettingsSection" />
+                </MultiBinding>
+              </StackPanel.IsVisible>
+              <Border Height="1" Background="#1B242D" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
+              <StackPanel Spacing="4">
+                <TextBlock Text="IMPORT FROM STEELSERIES MOMENTS" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
+                <TextBlock Text="Finds SteelSeries Moments clips locally and copies (or moves) them into your ClypDat library, keeping meaningful Moments titles and capture dates." Foreground="#93A6B8" TextWrapping="Wrap" />
+              </StackPanel>
+              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Copy instead of move}">
+                <Grid ColumnDefinitions="*,Auto">
+                  <StackPanel Spacing="2">
+                    <TextBlock Text="Copy instead of move" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                    <TextBlock Text="On: SteelSeries keeps its own copy. Off: clips are removed from Moments once imported." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <ToggleSwitch Grid.Column="1" IsChecked="{Binding SteelSeriesImportCopyNotMove}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                </Grid>
+              </Border>
+              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Scan for SteelSeries clips|Scan}">
+                <StackPanel Spacing="16">
+                  <TextBlock Text="SCAN" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                      <TextBlock Text="Scan for SteelSeries clips" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                      <TextBlock Text="{Binding SteelSeriesScanStatusText}" Foreground="#93A6B8" FontSize="12" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="Scan for SteelSeries Clips" Classes="primaryButton" Click="ScanSteelSeriesButton_OnClick" IsEnabled="{Binding !SteelSeriesImportInProgress}" VerticalAlignment="Center" />
+                  </Grid>
+                  <StackPanel IsVisible="{Binding SteelSeriesImportInProgress}" Spacing="6">
+                    <ProgressBar Minimum="0" Maximum="100" Value="{Binding SteelSeriesImportProgressPercent}" Height="8" />
+                    <TextBlock Text="{Binding SteelSeriesImportStatusText}" Foreground="#6B7C8C" FontSize="12" />
+                  </StackPanel>
+                  <TextBlock Text="{Binding SteelSeriesImportStatusText}" Foreground="#6B7C8C" FontSize="12" IsVisible="{Binding ShowSteelSeriesImportStatusText}" />
+                  <StackPanel Spacing="14" IsVisible="{Binding SteelSeriesScanned}">
+                    <Border Height="1" Background="#1B242D" />
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12" Margin="12,0,0,0">
+                      <CheckBox IsThreeState="True" IsChecked="{Binding SteelSeriesImportSelectionState, Mode=OneWay}" IsEnabled="{Binding CanToggleSteelSeriesImportSelection}" Click="ToggleSteelSeriesImportSelection_OnClick" ToolTip.Tip="Select or deselect all SteelSeries clips" VerticalAlignment="Center" />
+                      <Button Grid.Column="1" Content="Import Selected" Click="ImportSteelSeriesButton_OnClick" HorizontalAlignment="Left" Classes="primaryButton" IsEnabled="{Binding !SteelSeriesImportInProgress}" />
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding SteelSeriesImportRows}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Border Background="#0F171E" BorderBrush="#1E2A33" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,0,8">
+                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                              <CheckBox IsChecked="{Binding IsSelected}" IsEnabled="{Binding CanImport}" VerticalAlignment="Center" />
+                              <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding DisplayTitle}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" FontFamily="Segoe UI,Segoe UI Emoji" />
+                                <TextBlock Foreground="#6B7C8C" FontSize="11"><Run Text="{Binding GameName}" /><Run Text=" • " /><Run Text="{Binding CreatedAtLocal}" /></TextBlock>
                                 <TextBlock Text="{Binding ValidationMessage}" Foreground="#D85E61" FontSize="11" TextWrapping="Wrap" IsVisible="{Binding HasValidationMessage}" />
                               </StackPanel>
                             </Grid>

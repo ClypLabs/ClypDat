@@ -37,7 +37,8 @@ public sealed record ClipInfo(
     bool IsTrimmed = false,
     // Null is legacy game capture. New desktop clips use "Desktop" so editor
     // behavior does not depend on transient capture sidecars.
-    string? CaptureSource = null);
+    string? CaptureSource = null,
+    string? SteelSeriesImportKey = null);
 
 public static class ClipInfoSidecar
 {

@@ -104,9 +104,11 @@ public sealed class ClipCardViewModel : ViewModelBase
     public bool IsAutoClip => !string.IsNullOrWhiteSpace(_clipInfo?.AutoClipEventType);
     public bool IsVod => _isVod;
     public bool IsMedalImport => !string.IsNullOrWhiteSpace(_clipInfo?.MedalImportKey);
-    public bool IsManualClip => !IsAutoClip && !IsVod && !IsMedalImport;
-    public string TileTopLabel => IsAutoClip || IsMedalImport ? (_clipInfo!.GameDisplayName ?? GameNameLabel) : GameNameLabel;
-    public string TileMainLabel => IsAutoClip || IsMedalImport ? GameNameLabel : (CustomTitle ?? ClipFromLabel);
+    public bool IsSteelSeriesImport => !string.IsNullOrWhiteSpace(_clipInfo?.SteelSeriesImportKey);
+    public bool IsExternalImport => IsMedalImport || IsSteelSeriesImport;
+    public bool IsManualClip => !IsAutoClip && !IsVod && !IsExternalImport;
+    public string TileTopLabel => IsAutoClip || IsExternalImport ? (_clipInfo!.GameDisplayName ?? GameNameLabel) : GameNameLabel;
+    public string TileMainLabel => IsAutoClip || IsExternalImport ? GameNameLabel : (CustomTitle ?? ClipFromLabel);
     public string AutoClipEventTypeLabel => _clipInfo?.AutoClipEventType ?? string.Empty;
 
     // Matches Cs2GsiListener's label format: "Kill", "2K".."4K", "Ace", each
@@ -200,6 +202,8 @@ public sealed class ClipCardViewModel : ViewModelBase
     public string GameLabel => "VIDEO";
     public string CaptureBackendLabel => IsMedalImport
         ? "Imported from Medal"
+        : IsSteelSeriesImport
+            ? "Imported from SteelSeries Moments"
         : (string.IsNullOrWhiteSpace(Media.CaptureBackend) ? string.Empty : $"Captured with: {ClipMetadataTagger.NormalizeBackendLabel(Media.CaptureBackend)}");
     public bool HasCaptureBackendLabel => !string.IsNullOrWhiteSpace(CaptureBackendLabel);
 
