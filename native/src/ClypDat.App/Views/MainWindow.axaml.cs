@@ -1759,6 +1759,7 @@ public sealed partial class MainWindow : Window
     // date the thumb or cursor currently happens to be over.
     private readonly List<Border> _scrubberTicks = new();
     private const double ScrubberTickTopInset = 5;
+    private const double ScrubberTickRailOverlap = 3;
 
     private void QueueDateScrubberRebuild()
     {
@@ -1775,7 +1776,7 @@ public sealed partial class MainWindow : Window
 
     private void RebuildDateScrubber()
     {
-        if (DateScrubberCanvas is null || ViewModel is null || !ViewModel.IsLibraryVisible) return;
+        if (DateScrubberCanvas is null || DateScrubberTicksCanvas is null || ViewModel is null || !ViewModel.IsLibraryVisible) return;
 
         var trackHeight = DateScrubberHost.Bounds.Height;
         var extentHeight = LibraryScrollViewer.Extent.Height;
@@ -1869,7 +1870,10 @@ public sealed partial class MainWindow : Window
 
     private void ClearScrubberTicks()
     {
-        foreach (var tick in _scrubberTicks) DateScrubberCanvas.Children.Remove(tick);
+        if (DateScrubberTicksCanvas is not null)
+        {
+            foreach (var tick in _scrubberTicks) DateScrubberTicksCanvas.Children.Remove(tick);
+        }
         _scrubberTicks.Clear();
     }
 
@@ -1888,7 +1892,9 @@ public sealed partial class MainWindow : Window
             {
                 // Dense dates stand out with a slightly longer pill without
                 // turning the timeline into a second set of text labels.
-                Width = tickWidth,
+                // Extra width disappears beneath the rail. Visible length
+                // stays at tickWidth while no bright edge shows through it.
+                Width = tickWidth + ScrubberTickRailOverlap,
                 Height = 1,
                 CornerRadius = new CornerRadius(1),
                 Background = Avalonia.Media.Brush.Parse("#8296AC"),
@@ -1906,7 +1912,7 @@ public sealed partial class MainWindow : Window
             // first one five pixels below the rail's top edge, never above it.
             var tickTop = ContentOffsetToTrackY(contentY) - tick.Height / 2;
             Canvas.SetTop(tick, Math.Clamp(tickTop, ScrubberTickTopInset, Math.Max(ScrubberTickTopInset, DateScrubberHost.Bounds.Height - tick.Height)));
-            DateScrubberCanvas.Children.Add(tick);
+            DateScrubberTicksCanvas.Children.Add(tick);
             _scrubberTicks.Add(tick);
         }
     }

@@ -1081,6 +1081,12 @@
                   PointerEntered="DateScrubber_OnPointerEntered"
                   PointerExited="DateScrubber_OnPointerExited">
             <Panel ClipToBounds="False">
+              <!-- Tick layer sits below both scrollbar layers, so pills can
+                   run beneath the rail without drawing through it. -->
+              <Canvas x:Name="DateScrubberTicksCanvas"
+                      ClipToBounds="False"
+                      IsHitTestVisible="False" />
+
               <!-- Static rail the thumb rides in, so the track still reads
                    as a scrollbar when the library is short enough that the
                    thumb fills most of it. -->
