@@ -830,7 +830,7 @@
           <Grid ColumnDefinitions="*,Auto">
           <!-- Date scrubber (right column, below) replaces the default
                scrollbar, so hide the ScrollViewer's own. -->
-          <ScrollViewer Grid.Column="0" x:Name="LibraryScrollViewer" Margin="-4,0,-4,0" VerticalScrollBarVisibility="Hidden">
+          <ScrollViewer Grid.Column="0" x:Name="LibraryScrollViewer" Margin="-4,0,-14,0" VerticalScrollBarVisibility="Hidden">
             <ItemsControl x:Name="LibraryItemsControl"
                           ItemsSource="{Binding AllClips}"
                           Opacity="{Binding LibraryCardGridOpacity}"
@@ -1147,7 +1147,7 @@
                         IsVisible="{Binding !IsInitialLibraryLoadComplete}"
                         IsHitTestVisible="False"
                         Grid.Column="0"
-                        Margin="-4,0,-4,0">
+                        Margin="-4,0,-14,0">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate>
                 <WrapPanel Orientation="Horizontal" />
