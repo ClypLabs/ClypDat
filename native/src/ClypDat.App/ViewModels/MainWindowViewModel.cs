@@ -357,7 +357,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public double LibraryLoadingTileHeight => Math.Max(1, CardImageHeight + _startupCardSurfaceChromeHeight);
     public double LibraryReservedContentHeight
     {
-        get => _libraryReservedContentHeight;
+        get => IsGameFilterActive || IsClipTypeFilterActive || !string.IsNullOrWhiteSpace(_librarySearchText)
+            ? 0
+            : _libraryReservedContentHeight;
         private set => SetProperty(ref _libraryReservedContentHeight, value);
     }
     internal bool HasStartupLibraryIndex => _startupLibraryStates.Count > 0;
@@ -6545,6 +6547,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (gameKey is not null) _activeGameFilters.Add(gameKey);
         foreach (var option in GameFilterOptions) option.SetCheckedSilently(string.Equals(option.Key, gameKey, StringComparison.OrdinalIgnoreCase));
         ApplyGameFilters();
+        OnPropertyChanged(nameof(LibraryReservedContentHeight));
 
         // Not combined: only one filter is ever active, game or clip-type -
         // this must clear the other side whether gameKey is a real game
@@ -6572,6 +6575,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (key is not null) _activeClipTypeFilters.Add(key);
         foreach (var option in ClipTypeFilterOptions) option.SetCheckedSilently(string.Equals(option.Key, key, StringComparison.OrdinalIgnoreCase));
         ApplyClipTypeFilters();
+        OnPropertyChanged(nameof(LibraryReservedContentHeight));
 
         // Same reasoning as SelectGameSection's own clear-the-other-side
         // block - "All Clips" (key null) must clear an active game filter
@@ -6661,6 +6665,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         UpdateDaySelectionStates();
         if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
         OnPropertyChanged(nameof(IsLibraryHeaderSelected));
+        OnPropertyChanged(nameof(LibraryReservedContentHeight));
     }
 
     private void ApplyClipTypeFilters()
@@ -6672,6 +6677,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         UpdateFirstOfDateFlags();
         if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
         OnPropertyChanged(nameof(IsLibraryHeaderSelected));
+        OnPropertyChanged(nameof(LibraryReservedContentHeight));
     }
 
     private string _settingsSearchText = string.Empty;
@@ -6746,6 +6752,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (!SetProperty(ref _librarySearchText, value)) return;
             ApplySearchFilter();
+            OnPropertyChanged(nameof(LibraryReservedContentHeight));
             if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
             OnPropertyChanged(nameof(LibraryTitle));
         }

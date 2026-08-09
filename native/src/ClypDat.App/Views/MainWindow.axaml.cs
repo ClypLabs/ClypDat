@@ -781,6 +781,7 @@ public sealed partial class MainWindow : Window
         if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings();
         var key = (sender as Button)?.DataContext as FilterOptionViewModel;
         ViewModel.SelectGameSection(key?.Key);
+        ResetLibraryFilterScroll();
     }
 
     private void LibraryClipTypeSectionButton_OnClick(object? sender, RoutedEventArgs e)
@@ -788,7 +789,17 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null) return;
         if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings();
         var key = (sender as Button)?.DataContext as FilterOptionViewModel;
-        ViewModel.SelectClipTypeSection(key?.Key);
+        if (key is null) ViewModel.ClearAllFilters();
+        else ViewModel.SelectClipTypeSection(key.Key);
+        ResetLibraryFilterScroll();
+    }
+
+    private void ResetLibraryFilterScroll()
+    {
+        ClearLibraryResizeAnchor();
+        _libraryResizeExpectedOffsetY = null;
+        if (LibraryScrollViewer.Offset.Y != 0)
+            LibraryScrollViewer.Offset = new Vector(LibraryScrollViewer.Offset.X, 0);
     }
 
     // Custom rail template/input routing can consume Button.Click before it

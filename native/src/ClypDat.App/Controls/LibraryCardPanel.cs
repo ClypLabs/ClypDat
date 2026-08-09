@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.VisualTree;
 using ClypDat.App.ViewModels;
 
 namespace ClypDat.App.Controls;
@@ -26,22 +27,24 @@ internal sealed class LibraryCardPanel : Panel
 
     protected override Size MeasureOverride(Size availableSize)
     {
+        var visibility = Children.Select(child => (Child: child, Visible: IsClipVisible(child))).ToArray();
         foreach (var child in Children)
         {
-            if (child.DataContext is ClipCardViewModel clip) child.IsVisible = clip.IsVisibleInLibrary;
+            var state = visibility.First(item => ReferenceEquals(item.Child, child));
+            child.IsVisible = state.Visible;
         }
 
         if (!double.IsFinite(availableSize.Width) || availableSize.Width <= 0)
         {
             foreach (var child in Children) child.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            return new Size(0, Children.Where(child => child.IsVisible).Select(child => child.DesiredSize.Height).DefaultIfEmpty().Max());
+            return new Size(0, visibility.Where(item => item.Visible).Select(item => item.Child.DesiredSize.Height).DefaultIfEmpty().Max());
         }
 
         var layout = LibraryCardLayoutCalculator.Calculate(availableSize.Width, ScaleWithWindow);
         MetricsChanged?.Invoke(this, layout);
 
         var slotWidth = layout.Width + LibraryCardLayoutCalculator.HorizontalMargin;
-        var visible = Children.Where(child => child.IsVisible).ToArray();
+        var visible = visibility.Where(item => item.Visible).Select(item => item.Child).ToArray();
         foreach (var child in Children)
         {
             if (child.IsVisible) child.Measure(new Size(slotWidth, double.PositiveInfinity));
@@ -67,7 +70,7 @@ internal sealed class LibraryCardPanel : Panel
 
         var layout = LibraryCardLayoutCalculator.Calculate(finalSize.Width, ScaleWithWindow);
         var slotWidth = layout.Width + LibraryCardLayoutCalculator.HorizontalMargin;
-        var visible = Children.Where(child => child.IsVisible).ToArray();
+        var visible = Children.Where(IsClipVisible).ToArray();
         var y = 0d;
         for (var index = 0; index < visible.Length; index += layout.Columns)
         {
@@ -82,5 +85,15 @@ internal sealed class LibraryCardPanel : Panel
 
         foreach (var child in Children.Where(child => !child.IsVisible)) child.Arrange(new Rect(0, 0, 0, 0));
         return new Size(finalSize.Width, y);
+    }
+
+    private static bool IsClipVisible(Control child)
+    {
+        var clip = child.DataContext as ClipCardViewModel
+            ?? child.GetVisualDescendants().OfType<Control>()
+                .Select(descendant => descendant.DataContext)
+                .OfType<ClipCardViewModel>()
+                .FirstOrDefault();
+        return clip?.IsVisibleInLibrary ?? child.IsVisible;
     }
 }
