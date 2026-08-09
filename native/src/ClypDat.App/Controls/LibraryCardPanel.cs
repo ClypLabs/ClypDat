@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Presenters;
 using Avalonia.VisualTree;
 using ClypDat.App.ViewModels;
 using System.ComponentModel;
@@ -103,7 +104,7 @@ internal sealed class LibraryCardPanel : Panel
     private void SyncVisibilitySubscriptions()
     {
         var current = Children
-            .Select(TryGetClip)
+            .Select(ResolveClip)
             .Where(clip => clip is not null)
             .Cast<ClipCardViewModel>()
             .ToHashSet();
@@ -135,12 +136,18 @@ internal sealed class LibraryCardPanel : Panel
 
     private static bool IsClipVisible(Control child)
     {
-        var clip = TryGetClip(child);
+        var clip = ResolveClip(child);
         return clip?.IsVisibleInLibrary ?? child.IsVisible;
     }
 
-    private static ClipCardViewModel? TryGetClip(Control child) =>
+    internal static ClipCardViewModel? ResolveClip(Control child) =>
         child.DataContext as ClipCardViewModel
+        ?? (child as ContentPresenter)?.Content as ClipCardViewModel
+        ?? (child as ContentControl)?.Content as ClipCardViewModel
+        ?? child.GetVisualDescendants().OfType<ContentPresenter>()
+            .Select(presenter => presenter.Content)
+            .OfType<ClipCardViewModel>()
+            .FirstOrDefault()
         ?? child.GetVisualDescendants().OfType<Control>()
             .Select(descendant => descendant.DataContext)
             .OfType<ClipCardViewModel>()

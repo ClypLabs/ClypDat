@@ -450,7 +450,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get
         {
-            if (IsRestoringLibraryCache && _startupLibraryStates.Count > 0)
+            if (IsRestoringLibraryCache && _startupLibraryStates.Count > 0 && _startupLibraryStates.Count > _loadedStartupClipCount)
             {
                 var total = _startupLibraryStates.Count;
                 var remaining = Math.Max(0, total - _loadedStartupClipCount);
@@ -2170,11 +2170,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SteelSeriesImportProgressPercent = 0;
         var imported = 0;
         var failed = 0;
+        var importedKeys = LoadSteelSeriesImportHistory();
         try
         {
             for (var i = 0; i < selected.Count; i++)
             {
                 var row = selected[i];
+                string? destinationPath = null;
+                string? stagingPath = null;
+                var importKey = SteelSeriesImportService.GetImportKey(row.Record);
                 SteelSeriesImportStatusText = $"Validating {i + 1} of {selected.Count}: {row.DisplayTitle}";
                 MediaDurationProbeResult probe;
                 try { probe = await _mediaProbe.ProbeDurationAsync(row.Record.VideoPath); }
@@ -2197,29 +2201,68 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     var fileName = ClipFileNaming.BuildFileName(row.DisplayTitle, row.CreatedAtLocal, extension, Settings.ClipFileNameScheme, Settings.CustomClipFileNameTemplate, row.GameName);
                     var destinationDir = LibraryLayout.VideoDirectory(Settings.LibraryFolder, row.Duration, row.GameName);
                     Directory.CreateDirectory(destinationDir);
-                    var destinationPath = ClipFileNaming.BuildUniquePath(destinationDir, fileName);
+                    destinationPath = ClipFileNaming.BuildUniquePath(destinationDir, fileName);
+                    stagingPath = destinationPath + ".clypdat-staging-" + Guid.NewGuid().ToString("N");
                     await Task.Run(() =>
                     {
-                        if (SteelSeriesImportCopyNotMove) File.Copy(row.Record.VideoPath, destinationPath, overwrite: false);
-                        else File.Move(row.Record.VideoPath, destinationPath);
-                        File.SetCreationTimeUtc(destinationPath, row.Record.CapturedAt.UtcDateTime);
-                        File.SetLastWriteTimeUtc(destinationPath, row.Record.CapturedAt.UtcDateTime);
+                        if (SteelSeriesImportCopyNotMove) File.Copy(row.Record.VideoPath, stagingPath, overwrite: false);
+                        else File.Move(row.Record.VideoPath, stagingPath);
+                        File.SetCreationTimeUtc(stagingPath, row.Record.CapturedAt.UtcDateTime);
+                        File.SetLastWriteTimeUtc(stagingPath, row.Record.CapturedAt.UtcDateTime);
                     });
-                    var importKey = SteelSeriesImportService.GetImportKey(row.Record);
                     var fileTitle = row.Record.HasMeaningfulTitle ? row.DisplayTitle : null;
                     ClipInfoSidecar.Save(Settings.LibraryFolder, destinationPath, new ClipInfo(row.GameName, row.Record.AutoClipEventType, fileTitle, row.Record.CapturedAt, SteelSeriesImportKey: importKey));
-                    var history = LoadSteelSeriesImportHistory(); history.Add(importKey); PersistSteelSeriesImportHistory(history);
+                    _recentlySelfAddedPaths[destinationPath] = DateTime.UtcNow;
+                    await Task.Run(() => File.Move(stagingPath, destinationPath));
+                    stagingPath = null;
                     await AddOrUpdateLibraryClipAsync(destinationPath);
+                    importedKeys.Add(importKey);
                     imported++; SteelSeriesImportRows.Remove(row);
                 }
-                catch (Exception error) { AppLog.Error($"SteelSeries import failed for {row.Record.VideoPath}", error); failed++; }
+                catch (Exception error)
+                {
+                    AppLog.Error($"SteelSeries import failed for {row.Record.VideoPath}", error);
+                    if (stagingPath is not null && File.Exists(stagingPath))
+                    {
+                        try
+                        {
+                            if (SteelSeriesImportCopyNotMove) File.Delete(stagingPath);
+                            else File.Move(stagingPath, row.Record.VideoPath);
+                        }
+                        catch (Exception rollbackError)
+                        {
+                            AppLog.Error($"SteelSeries import rollback failed for {row.Record.VideoPath}", rollbackError);
+                        }
+                    }
+                    if (destinationPath is not null && File.Exists(destinationPath))
+                    {
+                        try
+                        {
+                            if (SteelSeriesImportCopyNotMove) File.Delete(destinationPath);
+                            else if (!File.Exists(row.Record.VideoPath)) File.Move(destinationPath, row.Record.VideoPath);
+                        }
+                        catch (Exception rollbackError)
+                        {
+                            AppLog.Error($"SteelSeries imported file cleanup failed for {destinationPath}", rollbackError);
+                        }
+                    }
+                    if (destinationPath is not null)
+                    {
+                        ClipInfoSidecar.Delete(Settings.LibraryFolder, destinationPath);
+                        var orphan = AllClips.FirstOrDefault(clip => string.Equals(clip.Path, destinationPath, StringComparison.OrdinalIgnoreCase));
+                        if (orphan is not null) RemoveClipFromLibraryCore(orphan);
+                    }
+                    failed++;
+                }
                 SteelSeriesImportProgressPercent = (i + 1) * 100.0 / selected.Count;
             }
+            PersistSteelSeriesImportHistory(importedKeys);
         }
         finally
         {
             SteelSeriesImportInProgress = false;
             SteelSeriesImportStatusText = failed == 0 ? $"Imported {imported} SteelSeries clip{(imported == 1 ? "" : "s")}." : $"Imported {imported}, {failed} failed - see logs.";
+            AppLog.Info($"SteelSeries import complete: {imported} imported, {failed} failed.");
         }
     }
 
@@ -3255,6 +3298,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 OnPropertyChanged(nameof(IsRestoringLibraryCache));
                 OnPropertyChanged(nameof(LibraryTitle));
                 RecomputeGameFilterBadges();
+                MarkLibraryCacheDirty();
             }
         }
     }
@@ -3701,6 +3745,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             await Task.Run(MigrateLegacySessionTitles);
             StartLibraryWatcher(folderVerified: true);
 
+            // Remove stale duplicate cards left by older refresh races before
+            // taking the path snapshot used by this reconciliation.
+            var duplicateClips = AllClips
+                .GroupBy(clip => clip.Path, StringComparer.OrdinalIgnoreCase)
+                .SelectMany(group => group.Skip(1))
+                .ToArray();
+            foreach (var duplicate in duplicateClips) RemoveClipFromLibraryCore(duplicate);
+            if (duplicateClips.Length > 0)
+            {
+                AppLog.Info($"Library refresh: removed {duplicateClips.Length} duplicate card(s) before reconciliation.");
+            }
+
             // Snapshot what's already showing before handing off to a
             // background thread. TryAdd (not ToDictionary) so a latent
             // duplicate path can't throw and abort the whole refresh - same
@@ -3944,28 +4000,41 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // finishes.
         _recentlySelfAddedPaths[filePath] = DateTime.UtcNow;
         var clock = System.Diagnostics.Stopwatch.StartNew();
-        var media = _mediaProbe.CreateLibraryStub(filePath);
-        var existing = AllClips.FirstOrDefault(clip => string.Equals(clip.Path, filePath, StringComparison.OrdinalIgnoreCase));
         ClipCardViewModel clip;
-        if (existing is not null)
+        await _libraryRefreshLock.WaitAsync();
+        try
         {
-            var previousCreatedAt = existing.CreatedAt;
-            existing.UpdateMedia(media);
-            if (existing.CreatedAt != previousCreatedAt) RepositionClipSorted(existing);
-            clip = existing;
+            // RefreshLibraryAsync holds same lock across its snapshot, disk
+            // diff, and collection mutation. This prevents watcher refresh from
+            // snapshotting before this direct add, then inserting same path.
+            var media = _mediaProbe.CreateLibraryStub(filePath);
+            var existing = AllClips.FirstOrDefault(candidate =>
+                string.Equals(candidate.Path, filePath, StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
+            {
+                var previousCreatedAt = existing.CreatedAt;
+                existing.UpdateMedia(media);
+                if (existing.CreatedAt != previousCreatedAt) RepositionClipSorted(existing);
+                clip = existing;
+            }
+            else
+            {
+                clip = new ClipCardViewModel(media, Settings.LibraryFolder);
+                InsertClipSorted(clip);
+                // Every new library file passes through here, including the ones
+                // the folder watcher notices on its own - which is the only way
+                // a Full Session VOD is ever seen, since its background finalize
+                // lands well after the buffer has stopped.
+                ClipAdded?.Invoke(this, clip);
+            }
+
+            NotifyLibraryChrome();
         }
-        else
+        finally
         {
-            clip = new ClipCardViewModel(media, Settings.LibraryFolder);
-            InsertClipSorted(clip);
-            // Every new library file passes through here, including the ones the
-            // folder watcher notices on its own - which is the only way a Full
-            // Session VOD is ever seen, since its background finalize lands well
-            // after the buffer has stopped. See MainWindow's session collector.
-            ClipAdded?.Invoke(this, clip);
+            _libraryRefreshLock.Release();
         }
 
-        NotifyLibraryChrome();
         AppLog.Debug($"Library quick add: {filePath} in {clock.ElapsedMilliseconds}ms.");
 
         // Metadata first (fast - a probe-cache hit is a JSON read, and even a
@@ -6066,7 +6135,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     // "All Clips" is universal reset state. It is active only when neither
     // game nor clip-type filter group is selected, including combined mode.
-    public bool IsAllClipsActive => !IsGameFilterActive && !IsClipTypeFilterActive;
+    public bool IsAllClipsActive => !IsGameFilterActive && !IsClipTypeFilterActive && string.IsNullOrWhiteSpace(_librarySearchText);
 
     private const string ClipTypeManual = "Manual";
     private const string ClipTypeAutoClip = "AutoClip";
@@ -6569,6 +6638,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(IsGameFilterActive));
         OnPropertyChanged(nameof(IsAllClipsActive));
         OnPropertyChanged(nameof(LibraryTitle));
+        AppLog.Info($"Library game filter selected: key='{gameKey ?? ""}', visible={AllClips.Count(clip => clip.IsVisibleInLibrary)}/{AllClips.Count}.");
     }
 
     public void SelectClipTypeSection(string? key)
@@ -6594,6 +6664,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(IsClipTypeFilterActive));
         OnPropertyChanged(nameof(IsAllClipsActive));
         OnPropertyChanged(nameof(LibraryTitle));
+        AppLog.Info($"Library clip-type filter selected: key='{key ?? ""}', visible={AllClips.Count(clip => clip.IsVisibleInLibrary)}/{AllClips.Count}.");
     }
 
     // Back to the whole library in one action - both filter groups at once,
@@ -6766,6 +6837,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(LibraryReservedContentHeight));
             if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
             OnPropertyChanged(nameof(LibraryTitle));
+            OnPropertyChanged(nameof(IsAllClipsActive));
         }
     }
 

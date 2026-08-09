@@ -13,10 +13,20 @@ internal sealed class LibraryCacheStore
 {
     private const int SchemaVersion = 1;
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
-    private readonly string _databasePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "ClypDat",
-        "library-cache.db");
+    private readonly string _databasePath;
+
+    public LibraryCacheStore()
+        : this(null)
+    {
+    }
+
+    internal LibraryCacheStore(string? databasePath)
+    {
+        _databasePath = databasePath ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "ClypDat",
+            "library-cache.db");
+    }
 
     public IReadOnlyList<CachedClipState> Load(string libraryRoot)
     {
@@ -65,6 +75,15 @@ internal sealed class LibraryCacheStore
 
         try
         {
+            var uniqueEntries = entries
+                .GroupBy(entry => entry.Media.Path, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToArray();
+            if (uniqueEntries.Length != entries.Count)
+            {
+                AppLog.Info($"Library cache: collapsed {entries.Count - uniqueEntries.Length} duplicate path(s) before save.");
+            }
+
             using var connection = Open();
             EnsureSchema(connection);
             using var transaction = connection.BeginTransaction();
@@ -90,7 +109,7 @@ internal sealed class LibraryCacheStore
                 var createdParameter = insert.Parameters.Add("$created", SqliteType.Integer);
                 var payloadParameter = insert.Parameters.Add("$payload", SqliteType.Text);
 
-                foreach (var entry in entries)
+                foreach (var entry in uniqueEntries)
                 {
                     rootParameter.Value = root;
                     pathParameter.Value = entry.Media.Path;
