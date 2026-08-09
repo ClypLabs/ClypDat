@@ -218,7 +218,6 @@ public sealed partial class MainWindow : Window
         RootLayout.Margin = OffScreenMargin;
         UpdateViewNavButtons();
         LibraryScrollViewer.ScrollChanged += LibraryScrollViewer_OnScrollChanged;
-        LibraryCardPanel.MetricsChanged += (_, layout) => ViewModel?.UpdateCardLayout(layout);
         // Card visibility flips (filtering) and hydration both change the
         // scroll extent without a size change on this window, so the marker
         // positions have to be recomputed off layout rather than only off
@@ -1574,6 +1573,9 @@ public sealed partial class MainWindow : Window
         _libraryResizeAnchorRestorePending = false;
         RestoreLibraryResizeAnchor(_libraryResizeAnchorPath);
     }
+
+    private void LibraryCardPanel_OnMetricsChanged(object? sender, LibraryCardLayout layout) =>
+        ViewModel?.UpdateCardLayout(layout);
 
     private void LibraryScrollViewer_OnScrollChanged(object? sender, ScrollChangedEventArgs e)
     {

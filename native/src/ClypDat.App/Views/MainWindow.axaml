@@ -846,9 +846,9 @@
                    CardWidth still lands 3-per-row the same as before. -->
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
-                  <controls:LibraryCardPanel x:Name="LibraryCardPanel"
-                                             Orientation="Horizontal"
-                                             ScaleWithWindow="{Binding ScaleClipsWithWindow}" />
+                  <controls:LibraryCardPanel Orientation="Horizontal"
+                                             ScaleWithWindow="{Binding ScaleClipsWithWindow}"
+                                             MetricsChanged="LibraryCardPanel_OnMetricsChanged" />
                 </ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
