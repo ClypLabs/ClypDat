@@ -338,21 +338,6 @@ public sealed partial class MainWindow : Window
                         // that happened during that window only takes effect now.
                         Dispatcher.UIThread.Post(() => RestoreLibraryResizeAnchor(anchorPath), DispatcherPriority.Loaded);
                     }
-                    if (e.PropertyName == nameof(MainWindowViewModel.IsRestoringLibraryCache) && !ViewModel.IsRestoringLibraryCache)
-                    {
-                        // Adding cached cards in low-priority batches grows the
-                        // WrapPanel several times during first layout. Avalonia
-                        // can preserve a transient child offset through those
-                        // extent changes, leaving a fresh library slightly
-                        // below its real top. A cache restore is initial/root
-                        // navigation, so its final position is always top.
-                        Dispatcher.UIThread.Post(() =>
-                        {
-                            if (ViewModel?.IsRestoringLibraryCache == true) return;
-                            ClearLibraryResizeAnchor();
-                            LibraryScrollViewer.Offset = default;
-                        }, DispatcherPriority.Loaded);
-                    }
                     if (e.PropertyName == nameof(MainWindowViewModel.StartupLibraryIndexVersion)) QueueDateScrubberRebuild();
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible)
                         or nameof(MainWindowViewModel.IsEditorVisible)

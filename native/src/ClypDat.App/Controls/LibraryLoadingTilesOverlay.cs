@@ -35,7 +35,7 @@ internal sealed class LibraryLoadingTilesOverlay : Control
     private static readonly List<LibraryLoadingTilesOverlay> ActiveOverlays = [];
     private static readonly DispatcherTimer Timer = new() { Interval = TimeSpan.FromMilliseconds(16) };
     private static readonly IBrush TileBrush = new SolidColorBrush(Color.Parse("#16202A"));
-    private static readonly IBrush ShimmerBrush = new SolidColorBrush(Color.Parse("#4A5A7185"));
+    private static readonly IBrush ShimmerBrush = CreateShimmerBrush();
     private Rect _effectiveViewport;
 
     static LibraryLoadingTilesOverlay()
@@ -150,7 +150,7 @@ internal sealed class LibraryLoadingTilesOverlay : Control
         var lastRow = Math.Min((int)Math.Ceiling(TotalTileCount / (double)columns), (int)Math.Ceiling(viewport.Bottom / RowPitch) + 1);
         var cycle = SweepDurationSeconds + PauseDurationSeconds;
         var sweep = Math.Min(1, (Clock.Elapsed.TotalSeconds % cycle) / SweepDurationSeconds);
-        var shimmerWidth = TileWidth * 0.38;
+        var shimmerWidth = TileWidth * 0.58;
 
         using (context.PushClip(new Rect(Bounds.Size)))
         {
@@ -166,10 +166,34 @@ internal sealed class LibraryLoadingTilesOverlay : Control
                     using (context.PushClip(tile))
                     {
                         var shimmerX = tile.X - shimmerWidth + (TileWidth + shimmerWidth * 2) * sweep;
-                        context.DrawRectangle(ShimmerBrush, null, new Rect(shimmerX, tile.Y, shimmerWidth, tile.Height));
+                        var slant = tile.Height * 0.36;
+                        var shimmer = new StreamGeometry();
+                        using (var geometry = shimmer.Open())
+                        {
+                            geometry.BeginFigure(new Point(shimmerX - slant, tile.Y), true);
+                            geometry.LineTo(new Point(shimmerX + shimmerWidth - slant, tile.Y));
+                            geometry.LineTo(new Point(shimmerX + shimmerWidth + slant, tile.Bottom));
+                            geometry.LineTo(new Point(shimmerX + slant, tile.Bottom));
+                            geometry.EndFigure(true);
+                        }
+                        context.DrawGeometry(ShimmerBrush, null, shimmer);
                     }
                 }
             }
         }
     }
+
+    private static IBrush CreateShimmerBrush() => new LinearGradientBrush
+    {
+        StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+        EndPoint = new RelativePoint(1, 1, RelativeUnit.Relative),
+        GradientStops =
+        {
+            new GradientStop(Color.Parse("#00344958"), 0),
+            new GradientStop(Color.Parse("#245A7185"), 0.28),
+            new GradientStop(Color.Parse("#805A7185"), 0.5),
+            new GradientStop(Color.Parse("#245A7185"), 0.72),
+            new GradientStop(Color.Parse("#00344958"), 1)
+        }
+    };
 }
