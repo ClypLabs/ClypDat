@@ -2496,7 +2496,7 @@ public sealed partial class MainWindow : Window
                 // rather than carrying it for the rest of the session. The
                 // trimmer itself decides how hard it can collect; mid-game it
                 // stays out of the way.
-                _ = Task.Run(() => MemoryTrimmer.Trim("clip saved"));
+                MemoryTrimmer.RequestTrim("clip saved");
             }
             catch (Exception error)
             {
@@ -5972,7 +5972,7 @@ public sealed partial class MainWindow : Window
             // frames, chunk buffers, the progress dialog's own bitmaps - so it
             // is a known-good moment to hand the memory back rather than waiting
             // out the idle timer for something already dead.
-            _ = Task.Run(() => MemoryTrimmer.Trim("clip saved"));
+            MemoryTrimmer.RequestTrim("clip saved");
         }
     }
 

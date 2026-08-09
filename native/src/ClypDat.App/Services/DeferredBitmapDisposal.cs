@@ -1,4 +1,5 @@
 using Avalonia.Threading;
+using System.Collections.Concurrent;
 
 namespace ClypDat.App.Services;
 
@@ -26,6 +27,9 @@ namespace ClypDat.App.Services;
 // releasing promptly.
 internal static class DeferredBitmapDisposal
 {
+    private static readonly ConcurrentDictionary<long, object> FinalizerReferences = new();
+    private static long _nextReferenceId;
+
     public static void Release(IDisposable? bitmap)
     {
         if (bitmap is null) return;
@@ -37,6 +41,22 @@ internal static class DeferredBitmapDisposal
                     try { bitmap.Dispose(); }
                     catch { /* Freeing a preview image must never take the app down. */ }
                 },
+                DispatcherPriority.Background),
+            DispatcherPriority.Background);
+    }
+
+    // Cache eviction must not Dispose a bitmap because a live binding may still
+    // own it. It still needs this render fence: a forced GC can otherwise run
+    // its finalizer while the compositor is drawing the previous frame.
+    public static void ReleaseReferenceAfterRender(object? value)
+    {
+        if (value is null) return;
+
+        var id = Interlocked.Increment(ref _nextReferenceId);
+        FinalizerReferences[id] = value;
+        Dispatcher.UIThread.Post(
+            () => Dispatcher.UIThread.Post(
+                () => FinalizerReferences.TryRemove(id, out _),
                 DispatcherPriority.Background),
             DispatcherPriority.Background);
     }
