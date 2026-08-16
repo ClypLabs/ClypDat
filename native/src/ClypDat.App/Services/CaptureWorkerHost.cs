@@ -8,7 +8,7 @@ namespace ClypDat.App.Services;
 internal static class CaptureWorkerHost
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private static readonly object WriteSync = new();
+    private static readonly SemaphoreSlim WriteGate = new(1, 1);
     private static readonly List<CaptureWorkerSaveResult> UnacknowledgedSaves = new();
     private static readonly SemaphoreSlim SaveGate = new(1, 1);
     private static readonly StorageProtectionService Storage = new();
@@ -251,11 +251,15 @@ internal static class CaptureWorkerHost
 
     private static async Task SendAsync(Stream stream, string type, Guid requestId, object payload, CancellationToken cancellationToken)
     {
-        lock (WriteSync)
+        await WriteGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            CaptureWorkerPipe.WriteAsync(stream, type, requestId, payload, cancellationToken).GetAwaiter().GetResult();
+            await CaptureWorkerPipe.WriteAsync(stream, type, requestId, payload, cancellationToken).ConfigureAwait(false);
         }
-        await Task.CompletedTask;
+        finally
+        {
+            WriteGate.Release();
+        }
     }
 
     private static void ApplyWorkerPriority()

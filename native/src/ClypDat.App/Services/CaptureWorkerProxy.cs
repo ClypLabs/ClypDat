@@ -9,7 +9,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
 {
     private readonly Func<ReplayBufferConfig> _configProvider;
     private readonly SemaphoreSlim _connectionGate = new(1, 1);
-    private readonly object _writeSync = new();
+    private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly Dictionary<Guid, TaskCompletionSource<JsonElement>> _pending = new();
     private NamedPipeClientStream? _pipe;
     private Process? _process;
@@ -77,6 +77,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         _disposed = true;
         Disconnect();
         _connectionGate.Dispose();
+        _writeGate.Dispose();
     }
 
     private async Task EnsureAttachedAsync(CancellationToken cancellationToken)
@@ -127,10 +128,16 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         lock (_pending) _pending[requestId] = completion;
         try
         {
-            lock (_writeSync)
+            await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                CaptureWorkerPipe.WriteAsync(pipe, type, requestId, payload, cancellationToken).GetAwaiter().GetResult();
+                await CaptureWorkerPipe.WriteAsync(pipe, type, requestId, payload, cancellationToken).ConfigureAwait(false);
             }
+            finally
+            {
+                _writeGate.Release();
+            }
+
             var result = await completion.Task.WaitAsync(cancellationToken);
             return result.Deserialize<T>() ?? throw new InvalidDataException($"Capture worker returned invalid {type} response.");
         }
