@@ -15,10 +15,20 @@ public static class AppSettingsStore
     {
         try
         {
-            if (!File.Exists(SettingsPath)) return new AppSettings { HasSeenOnboarding = false };
+            if (!File.Exists(SettingsPath)) return new AppSettings
+            {
+                HasSeenOnboarding = false,
+                ReplayBitrateDefault15Applied = true
+            };
             var json = File.ReadAllText(SettingsPath);
             var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
             MigrateReplayBitrate(json, settings);
+            if (!settings.ReplayBitrateDefault15Applied)
+            {
+                if (settings.ReplayBitrateMbps == 40) settings.ReplayBitrateMbps = 15;
+                settings.ReplayBitrateDefault15Applied = true;
+                Save(settings);
+            }
             settings.ClipEdits ??= new Dictionary<string, ClipEditSettings>(StringComparer.OrdinalIgnoreCase);
             settings.GameAudioExcludedProcesses ??= new List<string>();
             if (string.IsNullOrWhiteSpace(settings.ClipFileNameScheme)) settings.ClipFileNameScheme = "Standard";

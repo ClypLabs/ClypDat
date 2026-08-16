@@ -1340,7 +1340,7 @@
                     <TextBlock Text="Bitrate (Mbps)" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayBitrateOptions}" SelectedItem="{Binding SelectedReplayBitrateOption}" />
                     <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
-                      <TextBox Classes="settingsInput compactNumber" Width="72" Text="{Binding ReplayBitrateMbps}" PlaceholderText="15" />
+                       <TextBox Classes="settingsInput compactNumber" Width="72" Text="{Binding ReplayBitrateMbps}" PlaceholderText="15" IsVisible="{Binding IsCustomReplayBitrate}" />
                       <TextBlock Grid.Column="1" Text="5-1000 Mbps. Fixed CBR target; default 15 Mbps."
                                  Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center" />
                     </Grid>

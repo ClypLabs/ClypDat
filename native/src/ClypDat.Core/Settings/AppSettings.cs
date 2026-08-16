@@ -44,6 +44,9 @@ public sealed class AppSettings
     public string ReplayEncoderPreset { get; set; } = "P1";
     // Fixed CBR target for every replay backend. Persisted range: 5-1000 Mbps.
     public int ReplayBitrateMbps { get; set; } = 15;
+    // Existing installs that received the old 40 Mbps default are switched to
+    // the current 15 Mbps default once; later user choices are preserved.
+    public bool ReplayBitrateDefault15Applied { get; set; }
     public int ReplayFrameRate { get; set; } = 60;
     public int ReplayMaxHeight { get; set; } = 1080;
     public string ReplayBackend { get; set; } = "Auto";
