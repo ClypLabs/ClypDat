@@ -32,6 +32,10 @@ internal static class Program
         // playback warmup, and all other desktop initialization.
         if (args.Contains("--capture-worker", StringComparer.OrdinalIgnoreCase))
         {
+            // The worker owns all replay backends, including the native FFmpeg
+            // path. Initialize bundled FFmpeg before the worker loads any
+            // backend; the normal UI path does this below after its mutex setup.
+            FfmpegPathResolver.EnsureBundledFfmpegOnPath();
             CaptureWorkerHost.Run();
             return;
         }
