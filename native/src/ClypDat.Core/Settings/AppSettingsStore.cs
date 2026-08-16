@@ -18,12 +18,12 @@ public static class AppSettingsStore
             if (!File.Exists(SettingsPath)) return new AppSettings { HasSeenOnboarding = false };
             var json = File.ReadAllText(SettingsPath);
             var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+            MigrateReplayBitrate(json, settings);
             settings.ClipEdits ??= new Dictionary<string, ClipEditSettings>(StringComparer.OrdinalIgnoreCase);
             settings.GameAudioExcludedProcesses ??= new List<string>();
             if (string.IsNullOrWhiteSpace(settings.ClipFileNameScheme)) settings.ClipFileNameScheme = "Standard";
             if (string.IsNullOrWhiteSpace(settings.CustomClipFileNameTemplate)) settings.CustomClipFileNameTemplate = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}";
             if (string.IsNullOrWhiteSpace(settings.ReplayEncoderPreset)) settings.ReplayEncoderPreset = "P4";
-            if (string.IsNullOrWhiteSpace(settings.ReplayRateControlMode)) settings.ReplayRateControlMode = "Constant quality";
             if (!string.Equals(settings.ReplayVideoCodec, "H.264", StringComparison.OrdinalIgnoreCase)) settings.ReplayVideoCodec = "Auto";
             if (!string.Equals(settings.ReplayCaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase)) settings.ReplayCaptureSource = "Game";
             settings.ReplayDesktopMonitorDeviceName ??= string.Empty;
@@ -33,8 +33,7 @@ public static class AppSettingsStore
             // existed) used to load as-is and show in the box indefinitely
             // while the encoder silently re-clamped it underneath, reading as
             // though the limit wasn't enforced at all.
-            settings.ReplayConstantQuality = settings.ReplayConstantQuality <= 0 ? 20 : Math.Clamp(settings.ReplayConstantQuality, 1, 51);
-            settings.ReplayMaxBitrateMbps = settings.ReplayMaxBitrateMbps <= 0 ? 40 : Math.Clamp(settings.ReplayMaxBitrateMbps, 5, 1000);
+            settings.ReplayBitrateMbps = Math.Clamp(settings.ReplayBitrateMbps <= 0 ? 15 : settings.ReplayBitrateMbps, 5, 1000);
             if (settings.ReplayFrameRate <= 0) settings.ReplayFrameRate = 60;
             // One-time switch-on: the floating hover bar is the default now,
             // but existing settings.json files already carry an explicit false
@@ -77,6 +76,40 @@ public static class AppSettingsStore
         catch
         {
             return new AppSettings();
+        }
+    }
+
+    private static void MigrateReplayBitrate(string json, AppSettings settings)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            if (root.TryGetProperty("ReplayBitrateMbps", out var current) && current.TryGetInt32(out var currentValue))
+            {
+                settings.ReplayBitrateMbps = currentValue;
+                return;
+            }
+
+            // Existing explicit CBR users retain their saved target. CQ and
+            // missing/unknown modes get fixed-CBR default 15 Mbps.
+            var mode = root.TryGetProperty("ReplayRateControlMode", out var modeValue)
+                ? modeValue.GetString()
+                : null;
+            if (string.Equals(mode, "Constant bitrate", StringComparison.OrdinalIgnoreCase)
+                && root.TryGetProperty("ReplayMaxBitrateMbps", out var oldBitrate)
+                && oldBitrate.TryGetInt32(out var oldValue))
+            {
+                settings.ReplayBitrateMbps = oldValue;
+            }
+            else
+            {
+                settings.ReplayBitrateMbps = 15;
+            }
+        }
+        catch
+        {
+            settings.ReplayBitrateMbps = 15;
         }
     }
 

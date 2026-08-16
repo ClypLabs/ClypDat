@@ -38,10 +38,4 @@ public sealed class ReplayVideoCodecPolicyTests
         Assert.Equal(new[] { "h264_nvenc", "h264_amf", "h264_qsv", "libx264" }, candidates);
     }
 
-    [Theory]
-    [InlineData(1, 13)]
-    [InlineData(20, 32)]
-    [InlineData(51, 63)]
-    public void Av1Quality_MapsExistingH264Scale(int h264Quality, int expected) =>
-        Assert.Equal(expected, ReplayVideoCodecPolicy.Av1Quality(h264Quality));
 }

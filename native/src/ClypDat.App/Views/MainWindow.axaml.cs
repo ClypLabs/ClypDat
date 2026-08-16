@@ -82,7 +82,6 @@ public sealed partial class MainWindow : Window
     private static readonly TimeSpan TimelineScrubMinInterval = TimeSpan.FromMilliseconds(33);
     private IReplayBuffer? _replayBuffer;
     private ReplayBackendOption _activeReplayBackend = ReplayBackendOption.Auto;
-    private GlobalHotkeyService? _globalHotkey;
     private readonly HashSet<string> _capturedHotkeyKeys = new(StringComparer.OrdinalIgnoreCase);
     // Set only while capture was started from a control living in a popup
     // (the Replay Buffer flyout), so its handlers can be detached again.
@@ -420,13 +419,13 @@ public sealed partial class MainWindow : Window
         {
             _clipHoverPreview.Dispose();
             _libraryResizeAnchorSettleTimer?.Stop();
-            _globalHotkey?.Dispose();
             _cs2GsiListener?.Dispose();
             _dotaGsiListener?.Dispose();
             _leagueAutoClipListener?.Dispose();
             _gameDetectionTimer.Stop();
             _updateCheckTimer.Stop();
             if (_replayBuffer is not null) _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
+            if (_replayBuffer is IReplayCaptureWorkerEvents workerEvents) workerEvents.SaveCompleted -= Worker_SaveCompleted;
             _replayBuffer?.Dispose();
             _playback?.Dispose();
             _recordingPausedOverlay?.Close();
@@ -674,9 +673,27 @@ public sealed partial class MainWindow : Window
         {
             diagnostics.HealthChanged += EncoderTuning_OnHealthChanged;
         }
+        if (buffer is IReplayCaptureWorkerEvents workerEvents)
+            workerEvents.SaveCompleted += Worker_SaveCompleted;
     }
 
-    private void EncoderTuning_OnHealthChanged(object? sender, ReplayCaptureHealth health) => _encoderTuning.OnHealth(health);
+    private void Worker_SaveCompleted(object? sender, ReplaySaveCompleted completed)
+    {
+        if (string.IsNullOrWhiteSpace(completed.Path) || !string.IsNullOrWhiteSpace(completed.Error)) return;
+        Dispatcher.UIThread.Post(async () =>
+        {
+            if (ViewModel?.IsSavingReplayClip == true) return;
+            RememberSessionClip(completed.Path);
+            ShowClipSavedNotification();
+            if (ViewModel is not null) await ViewModel.AddOrUpdateLibraryClipAsync(completed.Path);
+        });
+    }
+
+    private void EncoderTuning_OnHealthChanged(object? sender, ReplayCaptureHealth health)
+    {
+        _encoderTuning.OnHealth(health);
+        ViewModel?.UpdateReplayStorageHealth(health.Storage);
+    }
 
     private void InitializeReplayServices()
     {
@@ -686,25 +703,17 @@ public sealed partial class MainWindow : Window
         _replayBuffer.RecordingStopped += ReplayBuffer_OnRecordingStopped;
         AttachEncoderTuning(_replayBuffer);
         _activeReplayBackend = ReplayBufferFactory.ResolveEffectiveBackend(ViewModel.CreateReplayConfig());
-        _globalHotkey = new GlobalHotkeyService();
-        _globalHotkey.SetHotkey(ViewModel.Settings.SaveReplayHotkey);
-        _globalHotkey.Pressed += (_, args) => Dispatcher.UIThread.Post(() =>
-        {
-            var duration = TimeSpan.FromSeconds(Math.Clamp(ViewModel.Settings.ReplayDurationSeconds, 30, 1200));
-            var endUtc = args.PressedAtUtc;
-            _ = SaveReplayClipAsync(clipWindow: new ReplayClipWindow(endUtc - duration, endUtc));
-        }, DispatcherPriority.Send);
-        try
-        {
-            _globalHotkey.Start();
-        }
-        catch
-        {
-            // Global hotkey failure should not block editor startup.
-        }
-
         ViewModel.RecorderStatus = ReplayIdleStatus;
         UpdateDetectedGame();
+    }
+
+    public async Task ShutdownCaptureWorkerAsync()
+    {
+        if (_replayBuffer is IReplayCaptureWorkerControl worker)
+        {
+            try { await worker.ShutdownWorkerAsync(); }
+            catch (Exception error) { AppLog.Info($"Capture worker shutdown failed: {error.Message}"); }
+        }
     }
 
     private void EnsureReplayBufferMatchesGame()
@@ -717,6 +726,7 @@ public sealed partial class MainWindow : Window
         AppLog.Info($"Replay backend switching: {_activeReplayBackend} -> {desired} for game={config.GameExecutableName}.");
         _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
         if (_replayBuffer is IReplayCaptureDiagnostics oldDiagnostics) oldDiagnostics.HealthChanged -= EncoderTuning_OnHealthChanged;
+        if (_replayBuffer is IReplayCaptureWorkerEvents oldWorkerEvents) oldWorkerEvents.SaveCompleted -= Worker_SaveCompleted;
         _replayBuffer.Dispose();
         _replayBuffer = ReplayBufferFactory.Create(ViewModel.CreateReplayConfig);
         _replayBuffer.RecordingStopped += ReplayBuffer_OnRecordingStopped;
@@ -2211,7 +2221,7 @@ public sealed partial class MainWindow : Window
         config.CaptureSource,
         config.CaptureMonitorDeviceName,
         config.GameExecutableName,
-        config.GameWindowHandle.ToInt64(),
+        config.GameWindowHandle,
         config.Backend);
 
     private void ReconcileReplayTarget()
@@ -5282,7 +5292,8 @@ public sealed partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(hotkey))
             {
                 ViewModel.SetHotkey(hotkey);
-                _globalHotkey?.SetHotkey(hotkey);
+                if (_replayBuffer is IReplayCaptureWorkerControl worker)
+                    _ = worker.UpdateHotkeyAsync(hotkey);
                 AppLog.Info($"Save hotkey set to {hotkey}.");
             }
 
@@ -6709,6 +6720,7 @@ public sealed partial class MainWindow : Window
                 // so the helper waited forever and the app never restarted.
                 // Exit for real, exactly like the tray's own Quit item.
                 AllowRealClose = true;
+                await ShutdownCaptureWorkerAsync();
                 if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
                 {
                     desktop.Shutdown();

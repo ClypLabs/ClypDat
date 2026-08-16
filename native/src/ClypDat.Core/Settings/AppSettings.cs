@@ -42,21 +42,8 @@ public sealed class AppSettings
     // frame for better compression. P1 is required by default because the
     // default 60 FPS capture must survive uncapped, VSync-off gameplay.
     public string ReplayEncoderPreset { get; set; } = "P1";
-    // "Constant quality" | "Constant bitrate" - picks whether ReplayConstantQuality
-    // or ReplayMaxBitrateMbps governs the encode.
-    public string ReplayRateControlMode { get; set; } = "Constant quality";
-    // Constant-quality target (NVENC cq / x264 crf) on the H.264 quantiser
-    // scale, 1-51. Lower is BETTER quality and bigger files - the scale runs
-    // the opposite way to how a "quality" number usually reads.
-    public int ReplayConstantQuality { get; set; } = 20;
-    // Constant-bitrate mode's target (and what bounds the in-memory ring
-    // buffer's size). Constant-quality mode has no user-facing bitrate input -
-    // its ceiling is derived from resolution/fps instead (see NativeReplayBuffer
-    // .MaxBitrate). Allowed up to 1000 Mbps, which is far past anything
-    // sensible - the ring buffer keeps every buffered second in RAM, so rate x
-    // buffer length is roughly its footprint and the top of the range will eat
-    // gigabytes.
-    public int ReplayMaxBitrateMbps { get; set; } = 40;
+    // Fixed CBR target for every replay backend. Persisted range: 5-1000 Mbps.
+    public int ReplayBitrateMbps { get; set; } = 15;
     public int ReplayFrameRate { get; set; } = 60;
     public int ReplayMaxHeight { get; set; } = 1080;
     public string ReplayBackend { get; set; } = "Auto";

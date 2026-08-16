@@ -702,8 +702,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var config = _configProvider();
             // Before any D3D work: a game that owns the GPU otherwise outranks
             // this process's own submissions, which is what turns an 8ms encode
-            // into a 50ms one under load. See GpuSchedulingPriority.
-            GpuSchedulingPriority.RaiseForCapture();
+            // into a 50ms one under load. Device priority is applied by worker.
             device = CreateD3D11Device();
 
             var targetHandle = ResolveTargetWindow(config);
@@ -3295,7 +3294,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
     private static nint ResolveTargetWindow(ReplayBufferConfig config)
     {
-        return config.GameWindowHandle != 0 && IsWindow(config.GameWindowHandle) ? config.GameWindowHandle : 0;
+        return config.GameWindowHandle != 0 && IsWindow((nint)config.GameWindowHandle) ? (nint)config.GameWindowHandle : 0;
     }
 
     private static nint GetPrimaryMonitorHandle()
@@ -4143,25 +4142,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // costs roughly 125MB at 16Mbps and scales linearly from there. Only
     // Constant bitrate mode takes a user bitrate value now - Constant quality's
     // ceiling is always derived (see MaxBitrate below).
-    private static bool IsConstantBitrate(ReplayBufferConfig config) =>
-        string.Equals(config.RateControlMode, "Constant bitrate", StringComparison.OrdinalIgnoreCase);
-
-    // 1-51 is the H.264 quantiser's own range, so this is the full span
-    // the encoders actually accept rather than an arbitrary narrowing.
-    // 0 is excluded deliberately: NVENC reads cq=0 as "auto", which would
-    // silently turn constant quality OFF rather than mean "best possible".
-    private static int ConstantQualityTarget(ReplayBufferConfig config) => Math.Clamp(config.ConstantQuality, 1, 51);
-
-    private static int Av1QualityTarget(ReplayBufferConfig config) => ReplayVideoCodecPolicy.Av1Quality(config.ConstantQuality);
-
-    // Constant bitrate: the user's field is the ceiling by definition (it IS
-    // the target). Constant quality has no user-facing ceiling input anymore -
-    // derive a generous one from the same resolution/fps estimate CaptureBitrate
-    // uses, so a burst can still borrow bits without an unbounded ring buffer.
-    private static long MaxBitrate(ReplayBufferConfig config) =>
-        IsConstantBitrate(config)
-            ? Math.Clamp(config.MaxBitrateMbps, 5, 1000) * 1_000_000L
-            : Math.Clamp(CaptureBitrate(config) * 2L, 8_000_000L, 160_000_000L);
+    private static long FixedBitrate(ReplayBufferConfig config) => Math.Clamp(config.BitrateMbps, 5, 1000) * 1_000_000L;
 
     // "P3" -> "p3". Anything unrecognised falls back to the default rather than
     // being passed through to av_opt_set as-is.
@@ -4226,34 +4207,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 // where the content actually needs them, at the same average
                 // bitrate and so the same file size and ring-buffer footprint.
                 TrySet("tune", "hq");
-                // Constant quality: cq drives the actual bit spend and
-                // bit_rate/rc_max_rate (set on the context) are only an average
-                // target and a derived hard ceiling. Constant bitrate: the rate
-                // itself is the constraint, so no cq at all.
-                if (IsConstantBitrate(config))
-                {
-                    TrySet("rc", "cbr");
-                }
-                else
-                {
-                    TrySet("rc", "vbr");
-                    TrySet("cq", ConstantQualityTarget(config).ToString());
-                }
+                TrySet("rc", "cbr");
                 TrySet("forced-idr", "1");
                 break;
             case "av1_nvenc":
                 TrySet("preset", NvencPreset(config));
                 TrySet("spatial-aq", "1");
                 TrySet("tune", "hq");
-                if (IsConstantBitrate(config))
-                {
-                    TrySet("rc", "cbr");
-                }
-                else
-                {
-                    TrySet("rc", "vbr");
-                    TrySet("cq", Av1QualityTarget(config).ToString());
-                }
+                TrySet("rc", "cbr");
                 TrySet("forced-idr", "1");
                 break;
             // AMF/QSV keep their existing usage/preset strings: there's no AMD
@@ -4263,6 +4224,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             case "h264_amf":
                 TrySet("usage", "ultralowlatency");
                 TrySet("quality", "speed");
+                TrySet("rc", "cbr");
                 // AMF's equivalent knob is spelled with an underscore, not a
                 // dash like NVENC's - this was silently a no-op under the
                 // wrong name (TrySet just logs and moves on for an unknown
@@ -4273,13 +4235,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             case "av1_amf":
                 TrySet("usage", "ultralowlatency");
                 TrySet("quality", "speed");
-                TrySet("rc", IsConstantBitrate(config) ? "hqcbr" : "qvbr");
-                if (!IsConstantBitrate(config)) TrySet("qvbr_quality_level", Av1QualityTarget(config).ToString());
+                TrySet("rc", "hqcbr");
                 TrySet("forced_idr", "1");
                 break;
             case "h264_qsv":
             case "av1_qsv":
                 TrySet("preset", "veryfast");
+                TrySet("rc_mode", "cbr");
                 TrySet("forced_idr", "1");
                 // Back to QSV's own default of 4. This was pinned to 1 out of
                 // the same latency concern as NVENC's "ll" tune above - and
@@ -4306,10 +4268,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             case "libx264":
                 TrySet("preset", "ultrafast");
                 TrySet("tune", "zerolatency");
-                // x264's own constant-quality knob, so the CPU fallback tracks
-                // the same user setting the hardware encoders do. In
-                // constant-bitrate mode it's left off and bit_rate governs.
-                if (!IsConstantBitrate(config)) TrySet("crf", ConstantQualityTarget(config).ToString());
+                TrySet("bitrate", FixedBitrate(config).ToString());
                 break;
         }
     }
@@ -4557,12 +4516,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             codecContext->colorspace = AVColorSpace.AVCOL_SPC_BT709;
             codecContext->color_primaries = AVColorPrimaries.AVCOL_PRI_BT709;
             codecContext->color_trc = AVColorTransferCharacteristic.AVCOL_TRC_BT709;
-            // Constant bitrate means the configured rate IS the target, so
-            // bit_rate and the ceiling are the same number. Constant quality
-            // leaves the resolution/fps-derived estimate as the nominal average
-            // and lets a derived ceiling bound how far a burst may exceed it.
-            var maxBitrate = MaxBitrate(config);
-            codecContext->bit_rate = IsConstantBitrate(config) ? maxBitrate : CaptureBitrate(config);
+            var maxBitrate = FixedBitrate(config);
+            codecContext->bit_rate = maxBitrate;
             // A real VBV to spend against, rather than leaving it unset and
             // letting the encoder fall back to an effectively per-frame budget.
             // One second of buffer lets a burst of hard-to-compress motion
@@ -4571,7 +4526,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // is the hard ceiling from the user's quality setting - with
             // constant-quality rate control it's this, not bit_rate, that bounds
             // how large a clip (and the in-memory ring buffer) can actually get.
-            codecContext->rc_buffer_size = (int)codecContext->bit_rate;
+            codecContext->rc_buffer_size = (int)maxBitrate;
             codecContext->rc_max_rate = maxBitrate;
             codecContext->gop_size = 240;
             codecContext->max_b_frames = 0;
@@ -4674,21 +4629,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
 
         throw new InvalidOperationException("No usable replay encoder found (tried hardware AV1, hardware H.264, and software libx264).");
-    }
-
-    private static int CaptureBitrate(ReplayBufferConfig config)
-    {
-        var height = Math.Clamp(config.MaxHeight, 480, 2160);
-        var frameRate = Math.Clamp(config.FrameRate, 15, 240);
-        var megapixels = height switch
-        {
-            >= 2160 => 8.3,
-            >= 1440 => 3.7,
-            >= 1080 => 2.1,
-            >= 720 => 0.9,
-            _ => 0.4
-        };
-        return (int)Math.Clamp(megapixels * frameRate * 130_000, 8_000_000, 80_000_000);
     }
 
     private static (int Width, int Height) CaptureOutputSize(ReplayBufferConfig config, int sourceWidth, int sourceHeight)

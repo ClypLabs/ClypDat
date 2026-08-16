@@ -91,10 +91,9 @@ internal static class GpuScheduling
     // of shipping to everyone again on a hypothesis.
     public static void TryRaiseProcessGpuPriority()
     {
-        if (Environment.GetEnvironmentVariable("CLYPDAT_GPU_PROCESS_PRIORITY")?.Trim() != "1") return;
         if (Interlocked.Exchange(ref _processPriorityRaised, 1) != 0) return;
 
-        AppLog.Info("Native capture: CLYPDAT_GPU_PROCESS_PRIORITY=1 - raising process-wide GPU scheduling priority. This also applies to the UI's render device; a blank or white window means it is not supported here.");
+        AppLog.Info("Capture worker: raising process-wide GPU scheduling priority.");
 
         // HIGH first, ABOVE_NORMAL as the fallback. Some drivers/OS
         // configurations refuse HIGH for an unprivileged process; ABOVE_NORMAL

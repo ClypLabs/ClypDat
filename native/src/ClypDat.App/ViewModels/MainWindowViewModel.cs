@@ -8,6 +8,7 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using ClypDat.App.Converters;
 using ClypDat.App.Services;
+using ClypDat.Capture.Abstractions;
 using ClypDat.Core.Settings;
 
 namespace ClypDat.App.ViewModels;
@@ -110,6 +111,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _activeReplayFrameRate;
     private string _activeReplayEncoderSignature = string.Empty;
     private bool _replayQualityRestartRequired;
+    private ReplayStorageHealth _replayStorageHealth = ReplayStorageHealth.Unknown;
     private string _selectedClipOverlayPosition = "Top Right";
     private string _selectedClipOverlayVolume = "Medium";
     private string _selectedClipFileNameScheme = ClipFileNaming.StandardScheme;
@@ -172,7 +174,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         Settings = AppSettingsStore.Load();
         Settings.ProcessPriority = ProcessPriorityService.Normalize(Settings.ProcessPriority);
-        ProcessPriorityService.Apply(Settings.ProcessPriority);
         if (Settings.LastSettingsSection is "Import from Medal" or "Import from SteelSeries")
         {
             _selectedSettingsSection = "Import Clips";
@@ -232,7 +233,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("P4", "Balanced, and the default. Noticeably better detail in motion than P1-P3, and comfortably within budget on most GPUs."),
             new("P5", "Highest quality here, and the most GPU time per frame. Best on a card with headroom to spare - watch for dropped frames if the game is already pushing it.")
         };
-        ReplayRateControlModes = new ObservableCollection<string> { "Constant quality", "Constant bitrate" };
+        ReplayBitrateOptions = new ObservableCollection<string> { "10 Mbps", "15 Mbps", "20 Mbps", "40 Mbps", "60 Mbps", "80 Mbps", "120 Mbps", "Custom" };
         ReplayVideoCodecs = new ObservableCollection<ReplayVideoCodecOption>
         {
             new("Auto (AV1 preferred)", "Auto", "Uses hardware AV1 when available. Falls back to hardware H.264 before replay starts."),
@@ -422,7 +423,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public sealed record EncoderPresetOption(string Label, string Description);
 
     public ObservableCollection<EncoderPresetOption> ReplayEncoderPresets { get; }
-    public ObservableCollection<string> ReplayRateControlModes { get; }
+    public ObservableCollection<string> ReplayBitrateOptions { get; }
     public sealed record ReplayVideoCodecOption(string Label, string Value, string Description);
     public ObservableCollection<ReplayVideoCodecOption> ReplayVideoCodecs { get; }
     public ObservableCollection<ReplayBackendPreset> ReplayBackends { get; }
@@ -1437,26 +1438,28 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public string SelectedReplayRateControlMode
+    public string SelectedReplayBitrateOption
     {
-        get => ReplayRateControlModes.Contains(Settings.ReplayRateControlMode) ? Settings.ReplayRateControlMode : "Constant quality";
+        get => ReplayBitrateOptions.FirstOrDefault(option => option.StartsWith(Settings.ReplayBitrateMbps.ToString(), StringComparison.Ordinal)) ?? "Custom";
         set
         {
-            if (string.IsNullOrWhiteSpace(value) || Settings.ReplayRateControlMode == value) return;
-            Settings.ReplayRateControlMode = value;
+            if (string.Equals(value, "Custom", StringComparison.Ordinal))
+            {
+                OnPropertyChanged(nameof(IsCustomReplayBitrate));
+                return;
+            }
+            if (!int.TryParse(value.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0], out var bitrate)) return;
+            if (Settings.ReplayBitrateMbps == bitrate) return;
+            Settings.ReplayBitrateMbps = Math.Clamp(bitrate, 5, 1000);
             OnPropertyChanged();
-            OnPropertyChanged(nameof(IsConstantQualityMode));
-            OnPropertyChanged(nameof(IsConstantBitrateMode));
+            OnPropertyChanged(nameof(ReplayBitrateMbps));
+            OnPropertyChanged(nameof(IsCustomReplayBitrate));
             SaveSettings();
             UpdateReplayQualityRestartRequired();
         }
     }
 
-    // Drives which of the two value fields the Encoder card shows. Constant
-    // quality's bitrate is derived automatically (see NativeReplayBuffer
-    // .MaxBitrate), so the bitrate field only appears in Constant bitrate mode.
-    public bool IsConstantQualityMode => !string.Equals(Settings.ReplayRateControlMode, "Constant bitrate", StringComparison.OrdinalIgnoreCase);
-    public bool IsConstantBitrateMode => !IsConstantQualityMode;
+    public bool IsCustomReplayBitrate => string.Equals(SelectedReplayBitrateOption, "Custom", StringComparison.Ordinal);
 
     // A TextBox binding ignores a PropertyChanged raised while it is itself
     // mid source-update, so a clamped or rejected value stayed on screen as
@@ -1477,35 +1480,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Dispatcher.UIThread.Post(() => OnPropertyChanged(propertyName));
     }
 
-    public string ReplayConstantQuality
+    public string ReplayBitrateMbps
     {
-        get => Settings.ReplayConstantQuality.ToString();
-        set
-        {
-            if (int.TryParse(value, out var quality))
-            {
-                Settings.ReplayConstantQuality = Math.Clamp(quality, 1, 51);
-                SaveSettings();
-                UpdateReplayQualityRestartRequired();
-            }
-
-            SyncNumericBox(nameof(ReplayConstantQuality), value, Settings.ReplayConstantQuality);
-        }
-    }
-
-    public string ReplayMaxBitrateMbps
-    {
-        get => Settings.ReplayMaxBitrateMbps.ToString();
+        get => Settings.ReplayBitrateMbps.ToString();
         set
         {
             if (int.TryParse(value, out var mbps))
             {
-                Settings.ReplayMaxBitrateMbps = Math.Clamp(mbps, 5, 1000);
+                Settings.ReplayBitrateMbps = Math.Clamp(mbps, 5, 1000);
                 SaveSettings();
                 UpdateReplayQualityRestartRequired();
+                OnPropertyChanged(nameof(SelectedReplayBitrateOption));
+                OnPropertyChanged(nameof(IsCustomReplayBitrate));
             }
 
-            SyncNumericBox(nameof(ReplayMaxBitrateMbps), value, Settings.ReplayMaxBitrateMbps);
+            SyncNumericBox(nameof(ReplayBitrateMbps), value, Settings.ReplayBitrateMbps);
         }
     }
 
@@ -1527,7 +1516,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // One string covering everything the running buffer baked in at start, so
     // the restart notice doesn't need a field per encoder setting.
     private string EncoderSignature =>
-        $"{Settings.ReplayVideoCodec}|{Settings.ReplayEncoderPreset}|{Settings.ReplayRateControlMode}|{Settings.ReplayConstantQuality}|{Settings.ReplayMaxBitrateMbps}";
+        $"{Settings.ReplayVideoCodec}|{Settings.ReplayEncoderPreset}|{Settings.ReplayBitrateMbps}";
 
     private void UpdateReplayQualityRestartRequired()
     {
@@ -1541,6 +1530,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get => _replayQualityRestartRequired;
         private set => SetProperty(ref _replayQualityRestartRequired, value);
+    }
+
+    public bool ReplayStorageWarningVisible => _replayStorageHealth.State is ReplayStorageState.Warning or ReplayStorageState.Critical or ReplayStorageState.Inaccessible;
+    public string ReplayStorageWarning => _replayStorageHealth.State switch
+    {
+        ReplayStorageState.Critical => $"Storage critical: {_replayStorageHealth.Reason}",
+        ReplayStorageState.Warning => $"Storage warning: {_replayStorageHealth.Reason}",
+        ReplayStorageState.Inaccessible => $"Storage unavailable: {_replayStorageHealth.Reason}",
+        _ => string.Empty
+    };
+
+    public void UpdateReplayStorageHealth(ReplayStorageHealth health)
+    {
+        _replayStorageHealth = health;
+        OnPropertyChanged(nameof(ReplayStorageWarningVisible));
+        OnPropertyChanged(nameof(ReplayStorageWarning));
     }
 
     public void MarkReplayBufferRestarted()
@@ -2724,7 +2729,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var normalized = ProcessPriorityService.Normalize(value);
             if (Settings.ProcessPriority == normalized) return;
             Settings.ProcessPriority = normalized;
-            ProcessPriorityService.Apply(normalized);
             OnPropertyChanged();
             SaveSettings();
         }
@@ -5133,13 +5137,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             CustomClipFileNameTemplate: Settings.CustomClipFileNameTemplate,
             LibraryFolder: Settings.LibraryFolder,
             EncoderPreset: ReplayEncoderPresetPolicy.Resolve(Settings.ReplayEncoderPreset),
-            RateControlMode: Settings.ReplayRateControlMode,
-            ConstantQuality: Settings.ReplayConstantQuality,
-            MaxBitrateMbps: Settings.ReplayMaxBitrateMbps,
+            BitrateMbps: Settings.ReplayBitrateMbps,
             VideoCodec: Settings.ReplayVideoCodec,
             CaptureSource: desktopCapture ? "Desktop" : "Game",
             CaptureMonitorDeviceName: desktopCapture ? desktopMonitor.DeviceName : string.Empty,
-            CaptureCursor: desktopCapture && Settings.ReplayDesktopCaptureCursor);
+            CaptureCursor: desktopCapture && Settings.ReplayDesktopCaptureCursor,
+            ProcessPriority: Settings.ProcessPriority,
+            SaveReplayHotkey: Settings.SaveReplayHotkey);
     }
 
     public void SetDuration(TimeSpan duration)

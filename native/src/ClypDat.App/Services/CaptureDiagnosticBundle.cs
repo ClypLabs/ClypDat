@@ -25,7 +25,9 @@ public static class CaptureDiagnosticBundle
             processorCount = Environment.ProcessorCount,
             utc = DateTime.UtcNow
         });
-        var logs = Directory.EnumerateFiles(AppLog.LogFolder, "clypdat*.log");
+        var logs = Directory.EnumerateFiles(AppLog.LogFolder, "clypdat*.log")
+            .Concat(new[] { Path.Combine(AppLog.LogFolder, "capture-worker.log") })
+            .Where(File.Exists);
         foreach (var log in logs.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             var entry = archive.CreateEntry($"logs/{Path.GetFileName(log)}", CompressionLevel.Optimal);

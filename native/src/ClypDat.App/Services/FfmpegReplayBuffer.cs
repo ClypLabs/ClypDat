@@ -230,7 +230,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
             audioOutputIndex++;
         }
 
-        args.AddRange(BuildVideoEncoderArguments(config.MaxHeight));
+        args.AddRange(BuildVideoEncoderArguments(config));
         if (audioTitles.Count > 0)
         {
             args.AddRange(new[]
@@ -251,11 +251,13 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         return args.ToArray();
     }
 
-    private static string[] BuildVideoEncoderArguments(int maxHeight)
+    private static string[] BuildVideoEncoderArguments(ReplayBufferConfig config)
     {
-        var height = Math.Clamp(maxHeight, 480, 1440);
+        var height = Math.Clamp(config.MaxHeight, 480, 1440);
         var width = Math.Min(3840, MakeEven((int)Math.Round(height * 16 / 9d)));
         var scale = $"scale=w={width}:h={height}:force_original_aspect_ratio=decrease:force_divisible_by=2";
+        var bitrate = Math.Clamp(config.BitrateMbps, 5, 1000) * 1_000_000;
+        var rate = new[] { "-b:v", bitrate.ToString(), "-maxrate", bitrate.ToString(), "-bufsize", bitrate.ToString() };
         // NVENC -> AMD AMF -> Intel QSV -> CPU, the same ladder the native
         // capture engine walks (NativeReplayBuffer.EncoderCandidates). Only
         // NVENC was checked before, so an AMD or Intel machine skipped straight
@@ -271,11 +273,9 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
                 "-vf", scale,
                 "-preset", "p1",
                 "-tune", "ull",
-                "-rc", "vbr",
-                "-cq", "23",
-                "-b:v", "0",
+                "-rc", "cbr",
                 "-pix_fmt", "yuv420p"
-            };
+            }.Concat(rate).ToArray();
         }
 
         if (SupportsEncoder("h264_amf"))
@@ -286,11 +286,8 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
                 "-vf", scale,
                 "-usage", "ultralowlatency",
                 "-quality", "speed",
-                "-rc", "cqp",
-                "-qp_i", "23",
-                "-qp_p", "23",
                 "-pix_fmt", "yuv420p"
-            };
+            }.Concat(new[] { "-rc", "cbr" }).Concat(rate).ToArray();
         }
 
         if (SupportsEncoder("h264_qsv"))
@@ -300,9 +297,8 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
                 "-c:v", "h264_qsv",
                 "-vf", scale,
                 "-preset", "veryfast",
-                "-global_quality", "23",
                 "-pix_fmt", "nv12"
-            };
+            }.Concat(rate).ToArray();
         }
 
         return new[]
@@ -312,9 +308,8 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
             "-preset", "ultrafast",
             "-tune", "zerolatency",
             "-threads", "2",
-            "-crf", "28",
             "-pix_fmt", "yuv420p"
-        };
+        }.Concat(rate).ToArray();
     }
 
     private static void AddWasapiInput(List<string> args, string device)
@@ -807,7 +802,7 @@ public sealed record ReplayBufferConfig(
     string GameWindowTitle,
     string GameWindowClass,
     string Backend = "Auto",
-    nint GameWindowHandle = 0,
+    long GameWindowHandle = 0,
     bool FullSessionRecordingEnabled = false,
     string FullSessionRecordingFolder = "",
     string FullSessionVideoCodec = "H.264",
@@ -819,12 +814,12 @@ public sealed record ReplayBufferConfig(
     // Native engine encoder controls - see AppSettings for what each means.
     string VideoCodec = "Auto",
     string EncoderPreset = "P4",
-    string RateControlMode = "Constant quality",
-    int ConstantQuality = 20,
-    int MaxBitrateMbps = 40,
+    int BitrateMbps = 15,
     string CaptureSource = "Game",
     string CaptureMonitorDeviceName = "",
-    bool CaptureCursor = false);
+    bool CaptureCursor = false,
+    string ProcessPriority = "Normal",
+    string SaveReplayHotkey = "Ctrl+Shift+F9");
 
 internal sealed class AudioCaptureSession : IDisposable
 {

@@ -28,6 +28,14 @@ internal static class Program
         // capture devices, or UI initialization can have side effects.
         if (args.Contains("--verify-self-contained", StringComparer.Ordinal)) return;
 
+        // Capture worker must stay independent from Avalonia, UI mutex, SQLite,
+        // playback warmup, and all other desktop initialization.
+        if (args.Contains("--capture-worker", StringComparer.OrdinalIgnoreCase))
+        {
+            CaptureWorkerHost.Run();
+            return;
+        }
+
         // Must run before anything else touches %LocalAppData%\ClypDat (AppLog,
         // settings, caches) - one-time migration from the pre-rebrand "EVE" name.
         MigrateFromLegacyEveInstall();

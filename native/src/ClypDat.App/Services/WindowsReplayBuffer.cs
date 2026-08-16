@@ -325,11 +325,11 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             options.SourceOptions.RecordingSources = new List<RecordingSourceBase> { displaySource };
             AppLog.Info($"Replay capture source: desktop monitor={monitor.DeviceName}, cursor={config.CaptureCursor}, api={displaySource.RecorderApi}.");
         }
-        else if (config.GameWindowHandle != 0 && IsWindow(config.GameWindowHandle))
+        else if (config.GameWindowHandle != 0 && IsWindow((nint)config.GameWindowHandle))
         {
             options.SourceOptions.RecordingSources = new List<RecordingSourceBase>
             {
-                new WindowRecordingSource(config.GameWindowHandle)
+                new WindowRecordingSource((nint)config.GameWindowHandle)
                 {
                     IsCursorCaptureEnabled = false,
                     IsBorderRequired = false,
@@ -360,7 +360,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         {
             Encoder = new H264VideoEncoder
             {
-                BitrateMode = H264BitrateControlMode.UnconstrainedVBR,
+                BitrateMode = H264BitrateControlMode.CBR,
                 EncoderProfile = H264Profile.High
             },
             IsHardwareEncodingEnabled = true,
@@ -368,7 +368,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             IsThrottlingDisabled = true,
             IsFixedFramerate = true,
             Quality = 85,
-            Bitrate = CaptureBitrate(config),
+            Bitrate = FixedBitrate(config),
             Framerate = Math.Clamp(config.FrameRate, 15, 240)
         };
 
@@ -380,23 +380,9 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
         return TimeSpan.FromSeconds(Math.Clamp(Math.Min(Duration.TotalSeconds, MaxVideoSegmentDuration.TotalSeconds), 5, MaxVideoSegmentDuration.TotalSeconds));
     }
 
-    private static int CaptureBitrate(ReplayBufferConfig config)
+    private static int FixedBitrate(ReplayBufferConfig config)
     {
-        var height = Math.Clamp(config.MaxHeight, 480, 2160);
-        var frameRate = Math.Clamp(config.FrameRate, 15, 240);
-        var megapixels = height switch
-        {
-            >= 2160 => 8.3,
-            >= 1440 => 3.7,
-            >= 1080 => 2.1,
-            >= 720 => 0.9,
-            _ => 0.4
-        };
-        // Windows Capture (ScreenRecorderLib/Media Foundation) looks noticeably
-        // softer at equivalent nominal bitrate, so it needs a higher target
-        // to look comparable - bumped from ~115k to
-        // ~170k per megapixel-frame after a quality complaint at the old rate.
-        return (int)Math.Clamp(megapixels * frameRate * 170_000, 8_000_000, 80_000_000);
+        return Math.Clamp(config.BitrateMbps, 5, 1000) * 1_000_000;
     }
 
     private static ScreenSize CaptureOutputSize(ReplayBufferConfig config)
@@ -722,7 +708,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                 if (result.ExitCode != 0)
                 {
                     args = reencodeBase.ToList();
-                    args.AddRange(BuildSoftwareVideoArgs());
+                    args.AddRange(BuildSoftwareVideoArgs(config));
                     args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k", outputPath });
                     result = await RunProcessAsync("ffmpeg", args, cancellationToken);
                     AppLog.Info($"Replay mux (re-encode, software) result: exit={result.ExitCode}, output={outputPath}.");
@@ -767,8 +753,8 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     private static string[] BuildHardwareVideoArgs(ReplayBufferConfig config)
     {
         var bitrate = MuxVideoBitrate(config);
-        var maxrate = (int)Math.Round(bitrate * 1.5);
-        var bufsize = bitrate * 2;
+        var maxrate = bitrate;
+        var bufsize = bitrate;
         var rate = new[]
         {
             "-b:v", bitrate.ToString(CultureInfo.InvariantCulture),
@@ -782,29 +768,26 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                 .Concat(rate).ToArray(),
             "qsv" => new[] { "-c:v", "h264_qsv", "-preset", "medium", "-profile:v", "high" }
                 .Concat(rate).ToArray(),
-            _ => new[] { "-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", "18", "-profile:v", "high" }
+            _ => new[] { "-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq", "-rc", "cbr", "-profile:v", "high" }
                 .Concat(rate).ToArray()
         };
     }
 
-    private static string[] BuildSoftwareVideoArgs()
+    private static string[] BuildSoftwareVideoArgs(ReplayBufferConfig config)
     {
-        return new[] { "-c:v", "libx264", "-preset", "veryfast", "-crf", "18" };
+        var bitrate = Math.Clamp(config.BitrateMbps, 5, 1000) * 1_000_000;
+        return new[]
+        {
+            "-c:v", "libx264", "-preset", "veryfast",
+            "-b:v", bitrate.ToString(CultureInfo.InvariantCulture),
+            "-maxrate", bitrate.ToString(CultureInfo.InvariantCulture),
+            "-bufsize", bitrate.ToString(CultureInfo.InvariantCulture)
+        };
     }
 
     private static int MuxVideoBitrate(ReplayBufferConfig config)
     {
-        var height = Math.Clamp(config.MaxHeight, 480, 2160);
-        var frameRate = Math.Clamp(config.FrameRate, 15, 240);
-        var baseRate = height switch
-        {
-            >= 2160 => 48_000_000,
-            >= 1440 => 32_000_000,
-            >= 1080 => 20_000_000,
-            >= 720 => 10_000_000,
-            _ => 6_000_000
-        };
-        return frameRate >= 60 ? baseRate : (int)Math.Round(baseRate * 0.7);
+        return Math.Clamp(config.BitrateMbps, 5, 1000) * 1_000_000;
     }
 
     private void RecoverRecorderAfterFailure()

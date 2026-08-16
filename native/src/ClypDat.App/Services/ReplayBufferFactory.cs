@@ -9,6 +9,13 @@ public static class ReplayBufferFactory
     {
         if (!OperatingSystem.IsWindows()) return new FfmpegReplayBuffer(configProvider);
 
+        return new CaptureWorkerProxy(configProvider);
+    }
+
+    internal static IReplayBuffer CreateLocal(Func<ReplayBufferConfig> configProvider)
+    {
+        if (!OperatingSystem.IsWindows()) return new FfmpegReplayBuffer(configProvider);
+
         var backend = ResolveEffectiveBackend(configProvider());
         if (backend == ReplayBackendOption.Auto)
         {

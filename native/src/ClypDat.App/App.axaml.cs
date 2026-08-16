@@ -190,8 +190,9 @@ public sealed partial class App : Application
             var settingsItem = new NativeMenuItem("Settings");
             settingsItem.Click += (_, _) => OpenSettingsFromTray();
             var quitItem = new NativeMenuItem("Quit");
-            quitItem.Click += (_, _) =>
+            quitItem.Click += async (_, _) =>
             {
+                if (_mainWindow is not null) await _mainWindow.ShutdownCaptureWorkerAsync();
                 _trayIcon?.Dispose();
                 if (_mainWindow is not null) _mainWindow.AllowRealClose = true;
                 if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)

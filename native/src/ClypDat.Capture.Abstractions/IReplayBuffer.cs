@@ -21,6 +21,26 @@ public enum ReplayCaptureState
 // with the encoder sitting idle and blameless. Anything reacting to Degraded -
 // notably the encoder auto-tuner - has to tell them apart, and matching on the
 // human-readable LastFailure text is far too brittle to hang that on.
+public enum ReplayStorageState
+{
+    Healthy,
+    Warning,
+    Critical,
+    Inaccessible
+}
+
+public sealed record ReplayStorageHealth(
+    ReplayStorageState State,
+    long FreeBytes,
+    double RecentWriteLatencyMs,
+    double PeakWriteLatencyMs,
+    string VolumeRole,
+    string Reason,
+    DateTime UpdatedUtc)
+{
+    public static ReplayStorageHealth Unknown => new(ReplayStorageState.Healthy, -1, 0, 0, string.Empty, string.Empty, DateTime.UtcNow);
+}
+
 public enum ReplayDegradeReason
 {
     None,
@@ -69,6 +89,8 @@ public sealed record ReplayCaptureHealth(
     // evidence the machine cannot sustain its settings.
     public bool SaveInProgress { get; init; }
 
+    public ReplayStorageHealth Storage { get; init; } = ReplayStorageHealth.Unknown;
+
     public static ReplayCaptureHealth Unknown(string backend = "Unknown") => new(
         backend, "Unknown", ReplayCaptureState.Unknown, 0, 0, 0, 0, 0, 0, 0, string.Empty, string.Empty, string.Empty, DateTime.UtcNow);
 }
@@ -77,6 +99,26 @@ public interface IReplayCaptureDiagnostics
 {
     ReplayCaptureHealth GetHealthSnapshot();
     event EventHandler<ReplayCaptureHealth>? HealthChanged;
+}
+
+public sealed record ReplaySaveCompleted(string Path, string? Title, DateTime CompletedUtc, string? Error = null);
+
+public interface IReplayCaptureWorkerEvents
+{
+    event EventHandler<ReplaySaveCompleted>? SaveCompleted;
+}
+
+public interface IReplayCaptureWorkerControl
+{
+    Task ShutdownWorkerAsync(CancellationToken cancellationToken = default);
+    Task UpdateHotkeyAsync(string hotkey, CancellationToken cancellationToken = default);
+}
+
+public interface IStoragePressureObserver
+{
+    ReplayStorageHealth StorageHealth { get; }
+    void RecordWrite(string path, TimeSpan elapsed);
+    bool CanSave(int bitrateMbps, TimeSpan duration, out string reason);
 }
 
 // A backend that can be retargeted to a different frame rate without

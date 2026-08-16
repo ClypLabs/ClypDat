@@ -27,5 +27,4 @@ public static class ReplayVideoCodecPolicy
 
     // UI quality keeps existing H.264 1-51 meaning. AV1 uses 0-63; +12
     // matches existing export policy (H.264 20, AV1 32) at default.
-    public static int Av1Quality(int h264Quality) => Math.Clamp(Math.Clamp(h264Quality, 1, 51) + 12, 1, 63);
 }
