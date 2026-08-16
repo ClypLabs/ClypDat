@@ -283,11 +283,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SyncIgnoredGameExecutableRows();
         // Three synchronous MMDeviceEnumerator COM enumerations. At cold boot
         // the Windows Audio service and USB/Bluetooth drivers are often still
-        // coming up and this can block for seconds - running it inline here
-        // blocked window construction itself. Posted at Background priority so
-        // the window finishes laying out and showing first; the device lists
-        // just populate a moment later instead of gating the whole launch.
-        Dispatcher.UIThread.Post(RefreshAudioDevices, DispatcherPriority.Background);
+        // coming up and this can block for seconds. Keep both enumeration and
+        // device-name resolution off Avalonia's UI thread; only the finished
+        // lists are applied back on the dispatcher.
+        _ = RefreshAudioDevicesAsync();
         SelectedReplayDurationPreset = ReplayDurationPresets.FirstOrDefault(preset => preset.Seconds == Settings.ReplayDurationSeconds) ??
                                        ReplayDurationPresets.First(preset => preset.Seconds == 60);
         _selectedReplayFrameRate = ReplayFrameRates.Contains(Settings.ReplayFrameRate) ? Settings.ReplayFrameRate : 60;
@@ -4995,15 +4994,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SaveSettings();
     }
 
-    public void RefreshAudioDevices()
+    public async Task RefreshAudioDevicesAsync()
+    {
+        var snapshot = await Task.Run(() => (
+            RenderDevices: _audioDevices.GetRenderDevices(includeDisabled: true).ToArray(),
+            DefaultMicrophoneName: _audioDevices.GetDefaultCaptureDeviceName(),
+            CaptureDevices: _audioDevices.GetCaptureDevices().ToArray()));
+
+        await Dispatcher.UIThread.InvokeAsync(() => ApplyAudioDeviceSnapshot(snapshot));
+    }
+
+    private void ApplyAudioDeviceSnapshot((AudioDeviceOption[] RenderDevices, string? DefaultMicrophoneName, AudioDeviceOption[] CaptureDevices) snapshot)
     {
         ChatAudioDevices.Clear();
-        foreach (var device in _audioDevices.GetRenderDevices(includeDisabled: true)) ChatAudioDevices.Add(device);
+        foreach (var device in snapshot.RenderDevices) ChatAudioDevices.Add(device);
         MicrophoneDevices.Clear();
-        var defaultMicName = _audioDevices.GetDefaultCaptureDeviceName();
         MicrophoneDevices.Add(new AudioDeviceOption(AudioDeviceOption.DefaultDeviceId,
-            string.IsNullOrWhiteSpace(defaultMicName) ? "Default" : $"Default - {defaultMicName}"));
-        foreach (var device in _audioDevices.GetCaptureDevices()) MicrophoneDevices.Add(device);
+            string.IsNullOrWhiteSpace(snapshot.DefaultMicrophoneName) ? "Default" : $"Default - {snapshot.DefaultMicrophoneName}"));
+        foreach (var device in snapshot.CaptureDevices) MicrophoneDevices.Add(device);
 
         // Restore the saved selection for display without persisting a fallback over it:
         // the saved device id may just be temporarily missing from this enumeration pass
