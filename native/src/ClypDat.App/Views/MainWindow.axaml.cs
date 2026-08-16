@@ -425,7 +425,11 @@ public sealed partial class MainWindow : Window
             _gameDetectionTimer.Stop();
             _updateCheckTimer.Stop();
             if (_replayBuffer is not null) _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
-            if (_replayBuffer is IReplayCaptureWorkerEvents workerEvents) workerEvents.SaveCompleted -= Worker_SaveCompleted;
+            if (_replayBuffer is IReplayCaptureWorkerEvents workerEvents)
+            {
+                workerEvents.RecordingStateChanged -= Worker_RecordingStateChanged;
+                workerEvents.SaveCompleted -= Worker_SaveCompleted;
+            }
             _replayBuffer?.Dispose();
             _playback?.Dispose();
             _recordingPausedOverlay?.Close();
@@ -674,7 +678,21 @@ public sealed partial class MainWindow : Window
             diagnostics.HealthChanged += EncoderTuning_OnHealthChanged;
         }
         if (buffer is IReplayCaptureWorkerEvents workerEvents)
+        {
+            workerEvents.RecordingStateChanged += Worker_RecordingStateChanged;
             workerEvents.SaveCompleted += Worker_SaveCompleted;
+        }
+    }
+
+    private void Worker_RecordingStateChanged(object? sender, EventArgs args)
+    {
+        if (sender is not IReplayBuffer buffer) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!ReferenceEquals(_replayBuffer, buffer) || ViewModel is null) return;
+            ViewModel.IsReplayRecording = buffer.IsRecording;
+            if (!buffer.IsRecording) UpdateRecorderStatusFromState();
+        });
     }
 
     private void Worker_SaveCompleted(object? sender, ReplaySaveCompleted completed)
@@ -726,7 +744,11 @@ public sealed partial class MainWindow : Window
         AppLog.Info($"Replay backend switching: {_activeReplayBackend} -> {desired} for game={config.GameExecutableName}.");
         _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
         if (_replayBuffer is IReplayCaptureDiagnostics oldDiagnostics) oldDiagnostics.HealthChanged -= EncoderTuning_OnHealthChanged;
-        if (_replayBuffer is IReplayCaptureWorkerEvents oldWorkerEvents) oldWorkerEvents.SaveCompleted -= Worker_SaveCompleted;
+        if (_replayBuffer is IReplayCaptureWorkerEvents oldWorkerEvents)
+        {
+            oldWorkerEvents.RecordingStateChanged -= Worker_RecordingStateChanged;
+            oldWorkerEvents.SaveCompleted -= Worker_SaveCompleted;
+        }
         _replayBuffer.Dispose();
         _replayBuffer = ReplayBufferFactory.Create(ViewModel.CreateReplayConfig);
         _replayBuffer.RecordingStopped += ReplayBuffer_OnRecordingStopped;

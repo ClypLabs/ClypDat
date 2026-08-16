@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.IO.Pipes;
+using Avalonia.Threading;
 using ClypDat.Capture.Abstractions;
 
 namespace ClypDat.App.Services;
@@ -24,6 +25,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     public TimeSpan Duration => TimeSpan.FromSeconds(Math.Max(0, _health.UpdatedUtc == default ? 0 : _durationSeconds));
     private double _durationSeconds;
     public event EventHandler? RecordingStopped;
+    public event EventHandler? RecordingStateChanged;
     public event EventHandler<ReplayCaptureHealth>? HealthChanged;
     public event EventHandler<ReplaySaveCompleted>? SaveCompleted;
     public ReplayCaptureHealth GetHealthSnapshot() => _health;
@@ -32,8 +34,10 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
         await EnsureAttachedAsync(cancellationToken);
+        if (_isRecording) return;
         await SendAsync<CaptureWorkerAck>("start", new { }, cancellationToken);
         _isRecording = true;
+        RecordingStateChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
@@ -41,6 +45,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         if (!await TryEnsureAttachedAsync(cancellationToken)) return;
         await SendAsync<CaptureWorkerAck>("stop", new { }, cancellationToken);
         _isRecording = false;
+        RecordingStateChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null)
@@ -94,6 +99,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
             await SendAsync<CaptureWorkerHandshake>("handshake", new { ClientId = Environment.ProcessId }, cancellationToken);
             var attach = await SendAsync<CaptureWorkerAttachResponse>("attach", _configProvider(), cancellationToken);
             _isRecording = attach.Recording;
+            RecordingStateChanged?.Invoke(this, EventArgs.Empty);
             _durationSeconds = _configProvider().DurationSeconds;
             PublishHealth(attach.Health);
             foreach (var save in attach.UnacknowledgedSaves)
@@ -176,13 +182,23 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
 
                 switch (message.Type)
                 {
-                    case "health": PublishHealth(message.Payload.Deserialize<ReplayCaptureHealth>()); break;
-                    case "recording-stopped": _isRecording = false; RecordingStopped?.Invoke(this, EventArgs.Empty); break;
+                    case "health":
+                        var health = message.Payload.Deserialize<ReplayCaptureHealth>();
+                        if (health is not null) Dispatcher.UIThread.Post(() => PublishHealth(health));
+                        break;
+                    case "recording-stopped":
+                        Dispatcher.UIThread.Post(() =>
+                        {
+                            _isRecording = false;
+                            RecordingStateChanged?.Invoke(this, EventArgs.Empty);
+                            RecordingStopped?.Invoke(this, EventArgs.Empty);
+                        });
+                        break;
                     case "save-completed":
                         var completed = message.Payload.Deserialize<CaptureWorkerSaveResult>();
                         if (completed is not null)
                         {
-                            SaveCompleted?.Invoke(this, new ReplaySaveCompleted(completed.Path, completed.Title, completed.CompletedUtc, completed.Error));
+                            Dispatcher.UIThread.Post(() => SaveCompleted?.Invoke(this, new ReplaySaveCompleted(completed.Path, completed.Title, completed.CompletedUtc, completed.Error)));
                             _ = SendBestEffortAsync("ack-save", new { completed.Path });
                         }
                         break;
