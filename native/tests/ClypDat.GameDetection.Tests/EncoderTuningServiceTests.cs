@@ -9,111 +9,114 @@ public sealed class EncoderTuningServiceTests
     private static readonly TimeSpan SampleInterval = TimeSpan.FromSeconds(2);
 
     [Fact]
-    public void NeverLowersConfiguredFrameRateAtPresetFloor()
+    public void Lowers120FpsToMeasured60FpsCapacity()
     {
         var service = new EncoderTuningService();
-        var frameRateChanges = new List<EncoderFrameRateChange>();
-        var resolutionChanges = new List<EncoderResolutionChange>();
-        service.FrameRateChangeRequested += (_, change) => frameRateChanges.Add(change);
-        service.ResolutionChangeRequested += (_, change) => resolutionChanges.Add(change);
-        service.BeginSession("P1", 60, 1080);
+        var changes = Changes(service);
+        service.BeginSession("P1", 120, 1440);
 
-        Feed(service, severeSamples: 300, frameRate: 60, queueDepth: 30);
+        Feed(service, 30, targetFrameRate: 120, outputFrameRate: 61, queueDepth: 80, queueCapacity: 120);
 
-        Assert.Empty(frameRateChanges);
-        Assert.Empty(resolutionChanges);
+        var change = Assert.Single(changes);
+        Assert.Equal(new EncoderFrameRateChange(120, 60), change);
+    }
+
+    [Fact]
+    public void CanReduceAgainAfterCooldownWhenOverloadContinues()
+    {
+        var service = new EncoderTuningService();
+        var changes = Changes(service);
+        service.BeginSession("P4", 120, 1080);
+
+        Feed(service, 30, 120, 61, 80, 120);
+        Feed(service, 60, 120, 35, 80, 120);
+
+        Assert.Equal(new[]
+        {
+            new EncoderFrameRateChange(120, 60),
+            new EncoderFrameRateChange(60, 30)
+        }, changes);
+    }
+
+    [Fact]
+    public void RestoresConfiguredRateAfterCleanPeriod()
+    {
+        var service = new EncoderTuningService();
+        var changes = Changes(service);
+        service.BeginSession("P1", 120, 1440);
+
+        Feed(service, 30, 120, 61, 80, 120);
+        Feed(service, 310, 120, 120, 0, 120, ReplayDegradeReason.None, ReplayCaptureState.Healthy, startUtc: DateTime.UtcNow.AddMinutes(2));
+
+        Assert.Equal(new[]
+        {
+            new EncoderFrameRateChange(120, 60),
+            new EncoderFrameRateChange(60, 120)
+        }, changes);
+    }
+
+    [Fact]
+    public void DoesNotGoBelow30Fps()
+    {
+        var service = new EncoderTuningService();
+        var changes = Changes(service);
+        service.BeginSession("P1", 30, 1080);
+
+        Feed(service, 300, 30, 10, 30, 30);
+
+        Assert.Empty(changes);
+    }
+
+    [Fact]
+    public void IgnoresCaptureStallAndSaveOverload()
+    {
+        var service = new EncoderTuningService();
+        var changes = Changes(service);
+        service.BeginSession("P1", 120, 1080);
+
+        Feed(service, 30, 120, 10, 80, 120, ReplayDegradeReason.CaptureStall);
+        Feed(service, 30, 120, 10, 80, 120, ReplayDegradeReason.EncoderOverload, ReplayCaptureState.Degraded, saveInProgress: true);
+
+        Assert.Empty(changes);
     }
 
     [Fact]
     public void NeverRequestsResolutionChange()
     {
         var service = new EncoderTuningService();
-        var resolutionChanges = new List<EncoderResolutionChange>();
-        service.ResolutionChangeRequested += (_, change) => resolutionChanges.Add(change);
-        service.BeginSession("P1", 60, 1080);
+        var changes = new List<EncoderResolutionChange>();
+        service.ResolutionChangeRequested += (_, change) => changes.Add(change);
+        service.BeginSession("P1", 120, 1080);
 
-        Feed(service, severeSamples: 300, frameRate: 60, queueDepth: 30);
-
-        Assert.Empty(resolutionChanges);
-    }
-
-    [Fact]
-    public void LeavesFasterPresetAsAnObservationOnlyProposal()
-    {
-        var service = new EncoderTuningService();
-        var changes = new List<EncoderFrameRateChange>();
-        service.FrameRateChangeRequested += (_, change) => changes.Add(change);
-        service.BeginSession("P4", 60, 1080);
-
-        Feed(service, severeSamples: 60, frameRate: 60, queueDepth: 30);
+        Feed(service, 30, 120, 61, 80, 120);
 
         Assert.Empty(changes);
     }
 
-    [Fact]
-    public void LeavesHealthySessionAtItsConfiguredQuality()
+    private static List<EncoderFrameRateChange> Changes(EncoderTuningService service)
     {
-        var service = new EncoderTuningService();
-        var frameRateChanges = new List<EncoderFrameRateChange>();
-        var resolutionChanges = new List<EncoderResolutionChange>();
-        service.FrameRateChangeRequested += (_, change) => frameRateChanges.Add(change);
-        service.ResolutionChangeRequested += (_, change) => resolutionChanges.Add(change);
-        service.BeginSession("P1", 60, 1080);
-
-        Feed(service, severeSamples: 0, frameRate: 60, healthySamples: 400, queueDepth: 0);
-
-        Assert.Empty(frameRateChanges);
-        Assert.Empty(resolutionChanges);
-    }
-
-    [Fact]
-    public void DoesNotHalveAlreadyLowConfiguredRate()
-    {
-        var service = new EncoderTuningService();
         var changes = new List<EncoderFrameRateChange>();
         service.FrameRateChangeRequested += (_, change) => changes.Add(change);
-        service.BeginSession("P1", 30, 1080);
-
-        Feed(service, severeSamples: 200, frameRate: 30, queueDepth: 30);
-
-        Assert.Empty(changes);
-    }
-
-    [Fact]
-    public void IgnoresCaptureStallForEncoderTuning()
-    {
-        var service = new EncoderTuningService();
-        var frameRateChanges = new List<EncoderFrameRateChange>();
-        var resolutionChanges = new List<EncoderResolutionChange>();
-        service.FrameRateChangeRequested += (_, change) => frameRateChanges.Add(change);
-        service.ResolutionChangeRequested += (_, change) => resolutionChanges.Add(change);
-        service.BeginSession("P1", 60, 1080);
-
-        Feed(service, severeSamples: 200, frameRate: 60, queueDepth: 0, reason: ReplayDegradeReason.CaptureStall);
-
-        Assert.Empty(frameRateChanges);
-        Assert.Empty(resolutionChanges);
+        return changes;
     }
 
     private static void Feed(
         EncoderTuningService service,
-        int severeSamples,
-        int frameRate,
-        int healthySamples = 0,
-        int queueDepth = 0,
-        ReplayDegradeReason reason = ReplayDegradeReason.EncoderOverload)
+        int samples,
+        int targetFrameRate,
+        double outputFrameRate,
+        int queueDepth,
+        int queueCapacity,
+        ReplayDegradeReason reason = ReplayDegradeReason.EncoderOverload,
+        ReplayCaptureState state = ReplayCaptureState.Degraded,
+        bool saveInProgress = false,
+        DateTime? startUtc = null)
     {
-        var clock = DateTime.UtcNow;
-        for (var i = 0; i < severeSamples + healthySamples; i++)
+        var clock = startUtc ?? DateTime.UtcNow;
+        for (var i = 0; i < samples; i++)
         {
             clock += SampleInterval;
-            var severe = i < severeSamples;
-            service.OnHealth(Health(
-                clock,
-                frameRate,
-                severe ? frameRate * 0.3 : frameRate,
-                severe ? reason : ReplayDegradeReason.None,
-                queueDepth));
+            service.OnHealth(Health(clock, targetFrameRate, outputFrameRate, reason, state, queueDepth, queueCapacity, saveInProgress));
         }
     }
 
@@ -122,12 +125,15 @@ public sealed class EncoderTuningServiceTests
         int targetFrameRate,
         double outputFrameRate,
         ReplayDegradeReason reason,
-        int queueDepth)
+        ReplayCaptureState state,
+        int queueDepth,
+        int queueCapacity,
+        bool saveInProgress)
     {
         return new ReplayCaptureHealth(
             "Hybrid",
             "Desktop Duplication",
-            reason == ReplayDegradeReason.None ? ReplayCaptureState.Healthy : ReplayCaptureState.Degraded,
+            state,
             targetFrameRate,
             InputFrameRate: targetFrameRate,
             UniqueFrameRate: targetFrameRate,
@@ -140,10 +146,11 @@ public sealed class EncoderTuningServiceTests
             string.Empty,
             updatedUtc)
         {
-            EncodeQueueCapacity = 30,
+            EncodeQueueCapacity = queueCapacity,
             EncoderPreset = "P1",
             DegradeReason = reason,
-            AdapterDescription = "Intel(R) Iris(R) Xe Graphics"
+            AdapterDescription = "Intel(R) Iris(R) Xe Graphics",
+            SaveInProgress = saveInProgress
         };
     }
 }

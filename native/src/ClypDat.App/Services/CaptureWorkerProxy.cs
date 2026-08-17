@@ -34,8 +34,28 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
         await EnsureAttachedAsync(cancellationToken);
+
+        var config = _configProvider();
+        var attach = await AttachConfigAsync(config, cancellationToken);
+        if (!string.Equals(attach.ConfigIdentity, ReplayBufferConfigIdentity.Serialize(config), StringComparison.Ordinal))
+        {
+            if (attach.Recording)
+            {
+                var stop = await SendAsync<CaptureWorkerAck>("stop", new { }, cancellationToken);
+                EnsureAccepted(stop, "stop capture before applying new configuration");
+                _isRecording = false;
+                RecordingStateChanged?.Invoke(this, EventArgs.Empty);
+            }
+
+            attach = await AttachConfigAsync(config, cancellationToken);
+            if (!string.Equals(attach.ConfigIdentity, ReplayBufferConfigIdentity.Serialize(config), StringComparison.Ordinal))
+                throw new InvalidOperationException("Capture worker did not apply requested capture configuration.");
+        }
+
+        ApplyAttachState(attach, config);
         if (_isRecording) return;
-        await SendAsync<CaptureWorkerAck>("start", new { }, cancellationToken);
+        var start = await SendAsync<CaptureWorkerAck>("start", new { }, cancellationToken);
+        EnsureAccepted(start, "start capture");
         _isRecording = true;
         RecordingStateChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -97,11 +117,9 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
             await _pipe.ConnectAsync(5000, cancellationToken);
             _reader = Task.Run(() => ReadLoopAsync(_pipe));
             await SendAsync<CaptureWorkerHandshake>("handshake", new { ClientId = Environment.ProcessId }, cancellationToken);
-            var attach = await SendAsync<CaptureWorkerAttachResponse>("attach", _configProvider(), cancellationToken);
-            _isRecording = attach.Recording;
-            RecordingStateChanged?.Invoke(this, EventArgs.Empty);
-            _durationSeconds = _configProvider().DurationSeconds;
-            PublishHealth(attach.Health);
+            var config = _configProvider();
+            var attach = await AttachConfigAsync(config, cancellationToken);
+            ApplyAttachState(attach, config);
             foreach (var save in attach.UnacknowledgedSaves)
             {
                 SaveCompleted?.Invoke(this, new ReplaySaveCompleted(save.Path, save.Title, save.CompletedUtc, save.Error));
@@ -109,6 +127,22 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
             }
         }
         finally { _connectionGate.Release(); }
+    }
+
+    private async Task<CaptureWorkerAttachResponse> AttachConfigAsync(ReplayBufferConfig config, CancellationToken cancellationToken)
+        => await SendAsync<CaptureWorkerAttachResponse>("attach", config, cancellationToken);
+
+    private void ApplyAttachState(CaptureWorkerAttachResponse attach, ReplayBufferConfig config)
+    {
+        _isRecording = attach.Recording;
+        _durationSeconds = config.DurationSeconds;
+        RecordingStateChanged?.Invoke(this, EventArgs.Empty);
+        PublishHealth(attach.Health);
+    }
+
+    private static void EnsureAccepted(CaptureWorkerAck ack, string operation)
+    {
+        if (!ack.Accepted) throw new InvalidOperationException($"Capture worker failed to {operation}: {ack.Error}");
     }
 
     private async Task<bool> TryEnsureAttachedAsync(CancellationToken cancellationToken)

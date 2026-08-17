@@ -81,6 +81,8 @@ public sealed partial class MainWindow : Window
     // both chosen to sit above a seek cost that no longer exists.
     private static readonly TimeSpan TimelineScrubMinInterval = TimeSpan.FromMilliseconds(33);
     private IReplayBuffer? _replayBuffer;
+    private ReplayBufferConfig? _replayConfigSnapshot;
+    private ReplayBufferConfig? _activeReplayConfigSnapshot;
     private ReplayBackendOption _activeReplayBackend = ReplayBackendOption.Auto;
     private readonly HashSet<string> _capturedHotkeyKeys = new(StringComparer.OrdinalIgnoreCase);
     // Set only while capture was started from a control living in a popup
@@ -669,8 +671,8 @@ public sealed partial class MainWindow : Window
         _replayBuffer.SetCapturePaused(shouldPause);
     }
 
-    // Encoder tuning is diagnostic-only. User-selected capture quality remains
-    // fixed for the lifetime of a replay session.
+    // Encoder tuning may lower live frame pacing temporarily. User-selected
+    // capture quality remains the ceiling for the replay session.
     private void AttachEncoderTuning(IReplayBuffer buffer)
     {
         if (buffer is IReplayCaptureDiagnostics diagnostics)
@@ -713,14 +715,34 @@ public sealed partial class MainWindow : Window
         ViewModel?.UpdateReplayStorageHealth(health.Storage);
     }
 
+    private void EncoderTuning_OnFrameRateChangeRequested(object? sender, EncoderFrameRateChange change)
+    {
+        Dispatcher.UIThread.Post(() => ApplyEncoderFrameRateChange(change));
+    }
+
+    private void ApplyEncoderFrameRateChange(EncoderFrameRateChange change)
+    {
+        if (_replayBuffer is not IAdaptiveCaptureFrameRate adaptive)
+        {
+            AppLog.Info($"Encoder tuning: requested {change.FrameRate} fps, active replay backend cannot retarget live.");
+            return;
+        }
+
+        adaptive.RequestFrameRate(change.FrameRate);
+        ShowClipNotification($"Capture adjusted to {change.FrameRate} FPS", playSound: false);
+    }
+
     private void InitializeReplayServices()
     {
         if (ViewModel is null || _replayBuffer is not null) return;
 
-        _replayBuffer = ReplayBufferFactory.Create(ViewModel.CreateReplayConfig);
+        var initialConfig = ViewModel.CreateReplayConfig();
+        _replayConfigSnapshot = initialConfig;
+        _replayBuffer = ReplayBufferFactory.Create(() => _replayConfigSnapshot ?? throw new InvalidOperationException("Replay configuration unavailable."));
         _replayBuffer.RecordingStopped += ReplayBuffer_OnRecordingStopped;
         AttachEncoderTuning(_replayBuffer);
-        _activeReplayBackend = ReplayBufferFactory.ResolveEffectiveBackend(ViewModel.CreateReplayConfig());
+        _encoderTuning.FrameRateChangeRequested += EncoderTuning_OnFrameRateChangeRequested;
+        _activeReplayBackend = ReplayBufferFactory.ResolveEffectiveBackend(initialConfig);
         ViewModel.RecorderStatus = ReplayIdleStatus;
         UpdateDetectedGame();
     }
@@ -750,7 +772,8 @@ public sealed partial class MainWindow : Window
             oldWorkerEvents.SaveCompleted -= Worker_SaveCompleted;
         }
         _replayBuffer.Dispose();
-        _replayBuffer = ReplayBufferFactory.Create(ViewModel.CreateReplayConfig);
+        _replayConfigSnapshot = config;
+        _replayBuffer = ReplayBufferFactory.Create(() => _replayConfigSnapshot ?? throw new InvalidOperationException("Replay configuration unavailable."));
         _replayBuffer.RecordingStopped += ReplayBuffer_OnRecordingStopped;
         AttachEncoderTuning(_replayBuffer);
         _activeReplayBackend = desired;
@@ -2347,6 +2370,7 @@ public sealed partial class MainWindow : Window
             if (_replayBuffer.IsRecording) await _replayBuffer.StopAsync();
             CaptureBackgroundWorkGate.EndCapture();
             _activeReplayTargetIdentity = string.Empty;
+            _activeReplayConfigSnapshot = null;
             _encoderTuning.EndSession();
             ViewModel.IsReplayRecording = false;
             ViewModel.RecorderStatus = ReplayIdleStatus;
@@ -2393,10 +2417,12 @@ public sealed partial class MainWindow : Window
             if (_replayBuffer is null) return;
             await EnsureLibraryFolderAsync();
             ApplyCaptureBounds();
+            _replayConfigSnapshot = ViewModel.CreateReplayConfig();
             CaptureBackgroundWorkGate.BeginCapture();
             await Task.Run(() => _replayBuffer.StartAsync());
             AppLog.Info("Replay started.");
-            var activeConfig = ViewModel.CreateReplayConfig();
+            var activeConfig = _replayConfigSnapshot ?? throw new InvalidOperationException("Replay configuration unavailable after start.");
+            _activeReplayConfigSnapshot = activeConfig;
             _activeReplayTargetIdentity = ReplayTargetIdentity(activeConfig);
             _encoderTuning.BeginSession(activeConfig.EncoderPreset, activeConfig.FrameRate, activeConfig.MaxHeight);
             // Fresh session, fresh list - but only for a GENUINELY new session
@@ -2422,6 +2448,7 @@ public sealed partial class MainWindow : Window
         {
             AppLog.Error("Replay start failed", error);
             CaptureBackgroundWorkGate.EndCapture();
+            _activeReplayConfigSnapshot = null;
             ViewModel.IsReplayRecording = false;
             // IsReplayRecording's setter is a no-op when the value doesn't change
             // (e.g. a second consecutive failed start while already false), which
@@ -2536,7 +2563,7 @@ public sealed partial class MainWindow : Window
                 // Emoji display title and stable plain event type are carried
                 // separately, so tile icons/counts never parse presentation text.
                 var libraryFolder = ViewModel.Settings.LibraryFolder;
-                var replayConfig = ViewModel.CreateReplayConfig();
+                var replayConfig = _activeReplayConfigSnapshot ?? _replayConfigSnapshot ?? ViewModel.CreateReplayConfig();
                 var clipInfo = new ClipInfo(
                     replayConfig.GameDisplayName,
                     autoClipEventType ?? autoClipLabel?.Split(" - ", 2)[0],

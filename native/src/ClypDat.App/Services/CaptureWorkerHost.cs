@@ -233,7 +233,7 @@ internal static class CaptureWorkerHost
     }
 
     private static string ConfigIdentity(ReplayBufferConfig? config)
-        => config is null ? string.Empty : JsonSerializer.Serialize(config, JsonOptions);
+        => ReplayBufferConfigIdentity.Serialize(config);
 
     private static async Task ReplyAsync(Stream client, CaptureWorkerEnvelope request, object payload, CancellationToken cancellationToken)
     {
