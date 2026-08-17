@@ -198,7 +198,7 @@
               </Flyout>
             </Button.Flyout>
           </Button>
-          <Button Grid.Column="1" Content="Clip" IsEnabled="{Binding IsReplayRecording}" Click="ClipButton_OnClick" Margin="10,0,0,0" />
+          <Button Grid.Column="1" Content="Clyp" IsEnabled="{Binding IsReplayRecording}" Click="ClipButton_OnClick" Margin="10,0,0,0" />
           <TextBlock Grid.Column="2" Text="{Binding HotkeyDisplay}" Foreground="#93A6B8" FontWeight="Bold" VerticalAlignment="Center" Margin="10,0,0,0" />
           <Border Grid.Column="3" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding ShowLibraryStatus}" Margin="10,0,0,0" />
           <Button Grid.Column="4" Classes="linkButton" Click="ActiveGameButton_OnClick" IsVisible="{Binding ShowLibraryStatus}" Margin="10,0,0,0" ToolTip.Tip="Click for detection options">
@@ -277,7 +277,7 @@
         <Grid RowDefinitions="*,Auto">
           <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Hidden">
             <StackPanel Margin="0,16,0,16" Spacing="2">
-              <Button x:Name="AllClipsFilterButton" Classes="railIconButton" Classes.active="{Binding IsAllClipsActive}" Click="AllClipsFilterButton_OnClick" ToolTip.Tip="All Clips">
+              <Button x:Name="AllClipsFilterButton" Classes="railIconButton" Classes.active="{Binding IsAllClipsActive}" Click="AllClipsFilterButton_OnClick" ToolTip.Tip="All Clyps">
                 <PathIcon Data="M4,4h4v4H4V4z M10,4h4v4h-4V4z M16,4h4v4h-4V4z M4,10h4v4H4v-4z M10,10h4v4h-4v-4z M16,10h4v4h-4v-4z M4,16h4v4H4v-4z M10,16h4v4h-4v-4z M16,16h4v4h-4v-4z" Width="18" Height="18" />
               </Button>
               <ItemsControl ItemsSource="{Binding ClipTypeFilterOptions}">
@@ -753,7 +753,7 @@
                        Grid.Column="2"
                        Classes="settingsInput appSearchBox"
                        Text="{Binding LibrarySearchText}"
-                       PlaceholderText="Search clips or games"
+                       PlaceholderText="Search Clyps or Games"
                        VerticalAlignment="Center"
                        VerticalContentAlignment="Center">
                 <TextBox.InnerLeftContent>
@@ -1262,22 +1262,22 @@
                     </ListBox.ItemTemplate>
                   </ListBox>
 
-                  <Grid ColumnDefinitions="150,150,150" ColumnSpacing="12" HorizontalAlignment="Left" IsVisible="{Binding IsCustomReplayQuality}">
+                  <Grid ColumnDefinitions="160,120,120" ColumnSpacing="12" HorizontalAlignment="Left" IsVisible="{Binding IsCustomReplayQuality}">
                     <StackPanel Spacing="3">
                       <TextBlock Text="Resolution" Foreground="#B8C7D8" FontSize="12" />
-                      <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}">
+                      <ComboBox Classes="settingsInput" Width="160" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}">
                         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Resolution}" /></DataTemplate></ComboBox.ItemTemplate>
                       </ComboBox>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Spacing="3">
                       <TextBlock Text="FPS" Foreground="#B8C7D8" FontSize="12" />
-                      <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}">
+                      <ComboBox Classes="settingsInput" Width="120" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}">
                         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding StringFormat={}{0}}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=FrameRate}" /></DataTemplate></ComboBox.ItemTemplate>
                       </ComboBox>
                     </StackPanel>
                     <StackPanel Grid.Column="2" Spacing="3">
                       <TextBlock Text="Bitrate" Foreground="#B8C7D8" FontSize="12" />
-                      <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayBitrateOptions}" SelectedItem="{Binding SelectedReplayBitrateOption}">
+                      <ComboBox Classes="settingsInput" Width="120" ItemsSource="{Binding ReplayBitrateOptions}" SelectedItem="{Binding SelectedReplayBitrateOption}">
                         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Bitrate}" /></DataTemplate></ComboBox.ItemTemplate>
                       </ComboBox>
                     </StackPanel>
