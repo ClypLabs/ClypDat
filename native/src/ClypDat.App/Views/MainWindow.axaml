@@ -1283,15 +1283,15 @@
                     </StackPanel>
                   </Grid>
 
-                  <Border Background="#0D151C" BorderBrush="#263544" BorderThickness="1" CornerRadius="8" Padding="12,9" IsVisible="{Binding ReplayQualityAboveDefault}">
-                    <StackPanel Spacing="3">
-                      <TextBlock FontSize="11" TextWrapping="Wrap">
+                  <Border Background="#0D151C" BorderBrush="#263544" BorderThickness="1" CornerRadius="8" Padding="14,11" IsVisible="{Binding ReplayQualityAboveDefault}">
+                    <StackPanel Spacing="4">
+                      <TextBlock FontSize="12" TextWrapping="Wrap">
                         <Run Text="Performance note: " Foreground="#FF8B8B" FontWeight="Bold" />
                         <Run Text="{Binding ReplayQualityWarningSummary}" Foreground="#B8C7D8" />
                       </TextBlock>
-                      <TextBlock Text="• Check capture headroom during gameplay; higher quality increases encoder workload." Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" />
-                      <TextBlock Text="• Adaptive FPS may lower the live target when encoder health declines." Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" />
-                      <TextBlock Text="• Stable output usually matters more than maximum resolution." Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" />
+                      <TextBlock Text="• Check capture headroom during gameplay; higher quality increases encoder workload." Foreground="#93A6B8" FontSize="11" TextWrapping="Wrap" />
+                      <TextBlock Text="• Adaptive FPS may lower the live target when encoder health declines." Foreground="#93A6B8" FontSize="11" TextWrapping="Wrap" />
+                      <TextBlock Text="• Stable output usually matters more than maximum resolution." Foreground="#93A6B8" FontSize="11" TextWrapping="Wrap" />
                     </StackPanel>
                   </Border>
 
