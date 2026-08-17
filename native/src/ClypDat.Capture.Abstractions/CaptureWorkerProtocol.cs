@@ -34,7 +34,6 @@ public sealed record CaptureWorkerEnvelope(
     Guid RequestId,
     JsonElement Payload);
 
-public sealed record CaptureWorkerCommand(string Type, JsonElement Payload);
 public sealed record CaptureWorkerAck(bool Accepted, string Error = "");
 public sealed record CaptureWorkerHandshake(int Version, string ClientId);
 public sealed record CaptureWorkerAttachResponse(
