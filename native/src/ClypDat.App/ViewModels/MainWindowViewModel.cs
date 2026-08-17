@@ -1669,9 +1669,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         get
         {
             var exceeded = new List<string>();
-            if (Settings.ReplayMaxHeight > 1080) exceeded.Add($"{Settings.ReplayMaxHeight}p resolution");
-            if (Settings.ReplayFrameRate > 60) exceeded.Add($"{Settings.ReplayFrameRate} FPS");
-            if (Settings.ReplayBitrateMbps > 15) exceeded.Add($"{Settings.ReplayBitrateMbps} Mbps bitrate");
+            if (Settings.ReplayMaxHeight > 1080) exceeded.Add($"{Settings.ReplayMaxHeight}p");
+            if (Settings.ReplayFrameRate > 60) exceeded.Add($"{Settings.ReplayFrameRate}fps");
+            if (Settings.ReplayBitrateMbps > 15) exceeded.Add($"{Settings.ReplayBitrateMbps}Mbps");
             return $"Your selected quality options exceed ClypDat's default: {string.Join(", ", exceeded)}.";
         }
     }
