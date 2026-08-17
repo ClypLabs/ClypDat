@@ -1581,7 +1581,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool ReplayQualityAboveDefault =>
         IsCustomReplayQuality &&
-        (Settings.ReplayMaxHeight > 1080 || Settings.ReplayFrameRate > 60 || Settings.ReplayBitrateMbps > 15);
+        (Settings.ReplayMaxHeight > 1080 || Settings.ReplayFrameRate > 60 || Settings.ReplayBitrateMbps > 20);
 
     public string ReplayQualityWarningSummary
     {
@@ -1590,7 +1590,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var exceeded = new List<string>();
             if (Settings.ReplayMaxHeight > 1080) exceeded.Add($"{Settings.ReplayMaxHeight}p");
             if (Settings.ReplayFrameRate > 60) exceeded.Add($"{Settings.ReplayFrameRate}fps");
-            if (Settings.ReplayBitrateMbps > 15) exceeded.Add($"{Settings.ReplayBitrateMbps}Mbps");
+            if (Settings.ReplayBitrateMbps > 20) exceeded.Add($"{Settings.ReplayBitrateMbps}Mbps");
             return $"Your selected quality options exceed ClypDat's default: {string.Join(", ", exceeded)}.";
         }
     }

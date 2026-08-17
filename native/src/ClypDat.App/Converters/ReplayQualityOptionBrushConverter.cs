@@ -18,7 +18,7 @@ public sealed class ReplayQualityOptionBrushConverter : IValueConverter
         {
             "Resolution" => value is ResolutionOption option && option.Height > 1080,
             "FrameRate" => value is int frameRate && frameRate > 60,
-            "Bitrate" => value is string bitrate && int.TryParse(new string(bitrate.TakeWhile(char.IsDigit).ToArray()), out var mbps) && mbps > 15,
+            "Bitrate" => value is string bitrate && int.TryParse(new string(bitrate.TakeWhile(char.IsDigit).ToArray()), out var mbps) && mbps > 20,
             _ => false
         };
 
