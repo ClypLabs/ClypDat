@@ -1262,22 +1262,22 @@
                     </ListBox.ItemTemplate>
                   </ListBox>
 
-                  <Grid ColumnDefinitions="252,144,144" ColumnSpacing="24" HorizontalAlignment="Left" IsVisible="{Binding IsCustomReplayQuality}">
+                  <Grid ColumnDefinitions="168,96,96" ColumnSpacing="16" HorizontalAlignment="Left" IsVisible="{Binding IsCustomReplayQuality}">
                     <StackPanel Spacing="3">
                       <TextBlock Text="Resolution" Foreground="#B8C7D8" FontSize="12" />
-                      <ComboBox Classes="settingsInput qualityInput" Width="252" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}">
+                      <ComboBox Classes="settingsInput qualityInput" Width="168" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}">
                         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Resolution}" /></DataTemplate></ComboBox.ItemTemplate>
                       </ComboBox>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Spacing="3">
                       <TextBlock Text="FPS" Foreground="#B8C7D8" FontSize="12" />
-                      <ComboBox Classes="settingsInput qualityInput" Width="144" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}">
+                      <ComboBox Classes="settingsInput qualityInput" Width="96" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}">
                         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding StringFormat={}{0}}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=FrameRate}" /></DataTemplate></ComboBox.ItemTemplate>
                       </ComboBox>
                     </StackPanel>
                     <StackPanel Grid.Column="2" Spacing="3">
                       <TextBlock Text="Bitrate" Foreground="#B8C7D8" FontSize="12" />
-                      <ComboBox Classes="settingsInput qualityInput" Width="144" ItemsSource="{Binding ReplayBitrateOptions}" SelectedItem="{Binding SelectedReplayBitrateOption}">
+                      <ComboBox Classes="settingsInput qualityInput" Width="96" ItemsSource="{Binding ReplayBitrateOptions}" SelectedItem="{Binding SelectedReplayBitrateOption}">
                         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Bitrate}" /></DataTemplate></ComboBox.ItemTemplate>
                       </ComboBox>
                     </StackPanel>
