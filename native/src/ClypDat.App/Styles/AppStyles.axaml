@@ -1086,7 +1086,7 @@
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected">
     <Setter Property="Background" Value="#303840" />
-    <Setter Property="BorderBrush" Value="#FFFFFF" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected:pointerover">
@@ -1094,7 +1094,7 @@
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="#303840" />
-    <Setter Property="BorderBrush" Value="#FFFFFF" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="#39434C" />
