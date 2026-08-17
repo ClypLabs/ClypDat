@@ -885,49 +885,6 @@
     <Setter Property="FontSize" Value="14" />
     <Setter Property="MinHeight" Value="42" />
   </Style>
-  <Style Selector="ComboBox.qualityInput">
-    <Setter Property="Background" Value="#0D0D0D" />
-    <Setter Property="Foreground" Value="#F2F2F2" />
-    <Setter Property="BorderBrush" Value="#4A4A4A" />
-    <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="8" />
-    <Setter Property="Padding" Value="16,10" />
-    <Setter Property="FontSize" Value="18" />
-    <Setter Property="MinHeight" Value="56" />
-  </Style>
-  <Style Selector="ComboBox.qualityInput /template/ Border#PART_BorderElement">
-    <Setter Property="Background" Value="#0D0D0D" />
-    <Setter Property="BorderBrush" Value="#4A4A4A" />
-    <Setter Property="BorderThickness" Value="1" />
-  </Style>
-  <Style Selector="ComboBox.qualityInput:pointerover /template/ Border#PART_BorderElement">
-    <Setter Property="Background" Value="#141414" />
-    <Setter Property="BorderBrush" Value="#666666" />
-  </Style>
-  <Style Selector="ComboBox.qualityInput:focus /template/ Border#PART_BorderElement">
-    <Setter Property="Background" Value="#0D0D0D" />
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
-  </Style>
-  <Style Selector="ComboBox.qualityInput /template/ Border#PopupBorder">
-    <Setter Property="Background" Value="#0D0D0D" />
-    <Setter Property="BorderBrush" Value="#4A4A4A" />
-    <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="8" />
-    <Setter Property="Padding" Value="6" />
-  </Style>
-  <Style Selector="ComboBox.qualityInput ComboBoxItem">
-    <Setter Property="Foreground" Value="#F2F2F2" />
-    <Setter Property="FontSize" Value="18" />
-    <Setter Property="Padding" Value="12,10" />
-  </Style>
-  <Style Selector="ComboBox.qualityInput ComboBoxItem:pointerover">
-    <Setter Property="Background" Value="#252525" />
-    <Setter Property="Foreground" Value="#FFFFFF" />
-  </Style>
-  <Style Selector="ComboBox.qualityInput ComboBoxItem:selected">
-    <Setter Property="Background" Value="#3A3A3A" />
-    <Setter Property="Foreground" Value="#FFFFFF" />
-  </Style>
   <!-- The app's search boxes borrow settingsInput's behaviour but not its
        proportions. A settings field is a 42px form control on a page of form
        controls; the same thing used as a search box reads as a form pasted over
