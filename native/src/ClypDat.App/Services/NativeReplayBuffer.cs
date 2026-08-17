@@ -703,7 +703,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // Before any D3D work: a game that owns the GPU otherwise outranks
             // this process's own submissions, which is what turns an 8ms encode
             // into a 50ms one under load. Device priority is applied by worker.
-            device = CreateD3D11Device();
+            device = CreateD3D11Device(config.EncoderAdapter);
 
             var targetHandle = ResolveTargetWindow(config);
             var isMonitorMode = targetHandle == 0;
@@ -1915,7 +1915,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             duplication?.Dispose();
                             duplication = null;
 
-                            var newDevice = CreateD3D11Device();
+                            var newDevice = CreateD3D11Device(config.EncoderAdapter);
                             IDXGIOutputDuplication? newDuplication = null;
                             ID3D11Texture2D? newStaging = null;
                             try
@@ -4646,7 +4646,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         return value % 2 == 0 ? value : value + 1;
     }
 
-    private static ID3D11Device CreateD3D11Device()
+    private static ID3D11Device CreateD3D11Device(string? requestedAdapterName = null)
     {
         var levels = new[]
         {
@@ -4667,8 +4667,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // caches for its own ImmediateContext property (verified by reference
         // comparison), so the per-frame device.ImmediateContext calls elsewhere
         // are unaffected.
-        D3D11.D3D11CreateDevice(null, DriverType.Hardware, DeviceCreationFlags.BgraSupport, levels, out var device, out _, out Vortice.Direct3D11.ID3D11DeviceContext? createdContext).CheckError();
+        using var selectedAdapter = GraphicsAdapterService.Find(requestedAdapterName);
+        var adapterPointer = selectedAdapter?.NativePointer ?? IntPtr.Zero;
+        var driverType = selectedAdapter is null ? DriverType.Hardware : DriverType.Unknown;
+        D3D11.D3D11CreateDevice(adapterPointer, driverType, DeviceCreationFlags.BgraSupport, levels, out var device, out _, out Vortice.Direct3D11.ID3D11DeviceContext? createdContext).CheckError();
         createdContext?.Dispose();
+
+        if (!string.IsNullOrWhiteSpace(requestedAdapterName) && selectedAdapter is null)
+            AppLog.Info($"Native capture: requested GPU '{requestedAdapterName}' was unavailable; using Auto.");
 
         // Microsoft's own WGC samples explicitly mark the D3D11 device
         // multithread-protected when it's touched from both the capture

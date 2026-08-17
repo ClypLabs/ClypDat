@@ -48,6 +48,7 @@ public static class AppSettingsStore
             settings.ReplayEncoderMode = string.Equals(settings.ReplayEncoderMode, "CPU", StringComparison.OrdinalIgnoreCase)
                 ? "CPU"
                 : "GPU";
+            settings.ReplayGpuAdapterName ??= string.Empty;
             if (settings.ReplayEncoderMode == "CPU") settings.ReplayVideoCodec = "H.264";
             if (!string.Equals(settings.ReplayCaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase)) settings.ReplayCaptureSource = "Game";
             settings.ReplayDesktopMonitorDeviceName ??= string.Empty;
