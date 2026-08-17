@@ -1389,7 +1389,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsCustomReplayQuality));
             SaveSettings();
             UpdateReplayQualityRestartRequired();
-            OnPropertyChanged(nameof(ReplayQualityAboveDefault));
+            NotifyReplayQualityWarning();
         }
     }
 
@@ -1412,7 +1412,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 _selectedReplayQualityPreset = ReplayQualityPresets[^1];
                 SaveSettings();
                 UpdateReplayQualityRestartRequired();
-                OnPropertyChanged(nameof(ReplayQualityAboveDefault));
+            NotifyReplayQualityWarning();
                 OnPropertyChanged(nameof(SelectedReplayQualityPreset));
                 OnPropertyChanged(nameof(IsCustomReplayQuality));
             }
@@ -1432,7 +1432,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _selectedReplayQualityPreset = ReplayQualityPresets[^1];
             SaveSettings();
             UpdateReplayQualityRestartRequired();
-            OnPropertyChanged(nameof(ReplayQualityAboveDefault));
+            NotifyReplayQualityWarning();
             OnPropertyChanged(nameof(SelectedReplayQualityPreset));
             OnPropertyChanged(nameof(IsCustomReplayQuality));
         }
@@ -1452,7 +1452,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 _selectedReplayQualityPreset = value;
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(IsCustomReplayQuality));
-                OnPropertyChanged(nameof(ReplayQualityAboveDefault));
+                NotifyReplayQualityWarning();
                 return;
             }
 
@@ -1472,7 +1472,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(SelectedReplayBitrateOption));
             OnPropertyChanged(nameof(IsCustomReplayBitrate));
             OnPropertyChanged(nameof(IsCustomReplayQuality));
-            OnPropertyChanged(nameof(ReplayQualityAboveDefault));
+            NotifyReplayQualityWarning();
             SaveSettings();
             UpdateReplayQualityRestartRequired();
         }
@@ -1595,7 +1595,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 OnPropertyChanged(nameof(SelectedReplayQualityPreset));
                 OnPropertyChanged(nameof(IsCustomReplayQuality));
                 OnPropertyChanged(nameof(IsCustomReplayBitrate));
-                OnPropertyChanged(nameof(ReplayQualityAboveDefault));
+                NotifyReplayQualityWarning();
                 return;
             }
             if (!int.TryParse(value.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0], out var bitrate)) return;
@@ -1604,7 +1604,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged();
             OnPropertyChanged(nameof(ReplayBitrateMbps));
             OnPropertyChanged(nameof(IsCustomReplayBitrate));
-            OnPropertyChanged(nameof(ReplayQualityAboveDefault));
+            NotifyReplayQualityWarning();
             SaveSettings();
             UpdateReplayQualityRestartRequired();
         }
@@ -1647,16 +1647,34 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 OnPropertyChanged(nameof(IsCustomReplayBitrate));
                 OnPropertyChanged(nameof(SelectedReplayQualityPreset));
                 OnPropertyChanged(nameof(IsCustomReplayQuality));
-                OnPropertyChanged(nameof(ReplayQualityAboveDefault));
+                NotifyReplayQualityWarning();
             }
 
             SyncNumericBox(nameof(ReplayBitrateMbps), value, Settings.ReplayBitrateMbps);
         }
     }
 
+    private void NotifyReplayQualityWarning()
+    {
+        OnPropertyChanged(nameof(ReplayQualityAboveDefault));
+        OnPropertyChanged(nameof(ReplayQualityWarningSummary));
+    }
+
     public bool ReplayQualityAboveDefault =>
         IsCustomReplayQuality &&
         (Settings.ReplayMaxHeight > 1080 || Settings.ReplayFrameRate > 60 || Settings.ReplayBitrateMbps > 15);
+
+    public string ReplayQualityWarningSummary
+    {
+        get
+        {
+            var exceeded = new List<string>();
+            if (Settings.ReplayMaxHeight > 1080) exceeded.Add($"{Settings.ReplayMaxHeight}p resolution");
+            if (Settings.ReplayFrameRate > 60) exceeded.Add($"{Settings.ReplayFrameRate} FPS");
+            if (Settings.ReplayBitrateMbps > 15) exceeded.Add($"{Settings.ReplayBitrateMbps} Mbps bitrate");
+            return $"Your selected quality options exceed ClypDat's default: {string.Join(", ", exceeded)}.";
+        }
+    }
 
     // Past 1080p60 both backends cost something, but not the same something, so
     // one shared sentence was telling most users about a cost they were never

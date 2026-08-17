@@ -1287,7 +1287,7 @@
                     <StackPanel Spacing="3">
                       <TextBlock FontSize="11" TextWrapping="Wrap">
                         <Run Text="Performance note: " Foreground="#FF8B8B" FontWeight="Bold" />
-                        <Run Text="These settings are above ClypDat's default 1080p, 60 FPS, and 15 Mbps profile." Foreground="#B8C7D8" />
+                        <Run Text="{Binding ReplayQualityWarningSummary}" Foreground="#B8C7D8" />
                       </TextBlock>
                       <TextBlock Text="• Check capture headroom during gameplay; higher quality increases encoder workload." Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" />
                       <TextBlock Text="• Adaptive FPS may lower the live target when encoder health declines." Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" />
