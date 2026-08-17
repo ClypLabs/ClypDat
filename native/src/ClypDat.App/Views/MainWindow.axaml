@@ -1262,48 +1262,48 @@
                     </ListBox.ItemTemplate>
                   </ListBox>
 
-                  <Grid ColumnDefinitions="250,145,145" ColumnSpacing="12" IsVisible="{Binding IsCustomReplayQuality}">
+                  <Grid ColumnDefinitions="150,150,150" ColumnSpacing="12" HorizontalAlignment="Left" IsVisible="{Binding IsCustomReplayQuality}">
                     <StackPanel Spacing="3">
                       <TextBlock Text="Resolution" Foreground="#B8C7D8" FontSize="12" />
-                      <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}">
+                      <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}">
                         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
                       </ComboBox>
                       <TextBox Classes="settingsInput" Text="{Binding CustomReplayHeight}" PlaceholderText="1080" IsVisible="{Binding IsCustomReplayResolution}" />
                     </StackPanel>
                     <StackPanel Grid.Column="1" Spacing="3">
                       <TextBlock Text="FPS" Foreground="#B8C7D8" FontSize="12" />
-                      <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}">
+                      <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}">
                         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding StringFormat={}{0} FPS}" /></DataTemplate></ComboBox.ItemTemplate>
                       </ComboBox>
                     </StackPanel>
                     <StackPanel Grid.Column="2" Spacing="3">
                       <TextBlock Text="Bitrate" Foreground="#B8C7D8" FontSize="12" />
-                      <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayBitrateOptions}" SelectedItem="{Binding SelectedReplayBitrateOption}" />
-                      <TextBox Classes="settingsInput" Text="{Binding ReplayBitrateMbps}" PlaceholderText="15" IsVisible="{Binding IsCustomReplayBitrate}" />
+                      <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayBitrateOptions}" SelectedItem="{Binding SelectedReplayBitrateOption}" />
+                      <TextBox Classes="settingsInput" Width="150" Text="{Binding ReplayBitrateMbps}" PlaceholderText="15" IsVisible="{Binding IsCustomReplayBitrate}" />
                     </StackPanel>
                   </Grid>
 
                   <StackPanel Spacing="3">
-                    <TextBlock Text="{Binding ReplayQualityWarning}" Foreground="#E5A00D" FontSize="11" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding ReplayQualityWarning}" Foreground="#E5A00D" FontSize="11" TextWrapping="Wrap" IsVisible="{Binding ReplayQualityAboveDefault}" />
                     <TextBlock Text="Selected FPS is a target, not a guarantee. Actual clip FPS may vary with the game, capture source, encoder, and system load." Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" />
                   </StackPanel>
 
-                  <Grid ColumnDefinitions="210,210,210" ColumnSpacing="12">
+                  <Grid ColumnDefinitions="150,150,150" ColumnSpacing="12" HorizontalAlignment="Left">
                     <StackPanel Spacing="3">
                       <TextBlock Text="Video encoder" Foreground="#B8C7D8" FontSize="12" />
-                      <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayEncoderModes}" SelectedItem="{Binding SelectedReplayEncoderMode}">
+                      <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayEncoderModes}" SelectedItem="{Binding SelectedReplayEncoderMode}">
                         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
                       </ComboBox>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Spacing="3">
                       <TextBlock Text="Codec" Foreground="#B8C7D8" FontSize="12" />
-                      <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayVideoCodecs}" SelectedItem="{Binding SelectedReplayVideoCodec}" IsEnabled="{Binding !IsReplayEncoderCpu}">
+                      <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayVideoCodecs}" SelectedItem="{Binding SelectedReplayVideoCodec}" IsEnabled="{Binding !IsReplayEncoderCpu}">
                         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
                       </ComboBox>
                     </StackPanel>
                     <StackPanel Grid.Column="2" Spacing="3">
                       <TextBlock Text="Encoder preset" Foreground="#B8C7D8" FontSize="12" />
-                      <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayEncoderPresets}" SelectedItem="{Binding SelectedReplayEncoderPreset}">
+                      <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayEncoderPresets}" SelectedItem="{Binding SelectedReplayEncoderPreset}">
                         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
                       </ComboBox>
                     </StackPanel>
