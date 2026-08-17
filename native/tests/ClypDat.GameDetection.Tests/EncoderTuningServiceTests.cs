@@ -93,6 +93,35 @@ public sealed class EncoderTuningServiceTests
         Assert.Empty(changes);
     }
 
+    [Fact]
+    public void DisabledAdaptiveFpsDoesNotLowerTarget()
+    {
+        var service = new EncoderTuningService();
+        var changes = Changes(service);
+        service.BeginSession("P1", 120, 1080, enabled: false);
+
+        Feed(service, 30, 120, 61, 80, 120);
+
+        Assert.Empty(changes);
+    }
+
+    [Fact]
+    public void DisablingAfterReductionRestoresConfiguredTarget()
+    {
+        var service = new EncoderTuningService();
+        var changes = Changes(service);
+        service.BeginSession("P1", 120, 1080);
+
+        Feed(service, 30, 120, 61, 80, 120);
+        service.SetEnabled(false);
+
+        Assert.Equal(new[]
+        {
+            new EncoderFrameRateChange(120, 60),
+            new EncoderFrameRateChange(60, 120)
+        }, changes);
+    }
+
     private static List<EncoderFrameRateChange> Changes(EncoderTuningService service)
     {
         var changes = new List<EncoderFrameRateChange>();

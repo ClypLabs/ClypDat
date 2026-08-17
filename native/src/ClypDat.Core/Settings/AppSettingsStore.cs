@@ -18,7 +18,8 @@ public static class AppSettingsStore
             if (!File.Exists(SettingsPath)) return new AppSettings
             {
                 HasSeenOnboarding = false,
-                ReplayBitrateDefault15Applied = true
+                ReplayBitrateDefault15Applied = true,
+                ReplayH264DefaultApplied = true
             };
             var json = File.ReadAllText(SettingsPath);
             var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
@@ -34,7 +35,20 @@ public static class AppSettingsStore
             if (string.IsNullOrWhiteSpace(settings.ClipFileNameScheme)) settings.ClipFileNameScheme = "Standard";
             if (string.IsNullOrWhiteSpace(settings.CustomClipFileNameTemplate)) settings.CustomClipFileNameTemplate = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}";
             if (string.IsNullOrWhiteSpace(settings.ReplayEncoderPreset)) settings.ReplayEncoderPreset = "P4";
-            if (!string.Equals(settings.ReplayVideoCodec, "H.264", StringComparison.OrdinalIgnoreCase)) settings.ReplayVideoCodec = "Auto";
+            if (!settings.ReplayH264DefaultApplied)
+            {
+                if (string.Equals(settings.ReplayVideoCodec, "Auto", StringComparison.OrdinalIgnoreCase))
+                    settings.ReplayVideoCodec = "H.264";
+                settings.ReplayH264DefaultApplied = true;
+                Save(settings);
+            }
+            settings.ReplayVideoCodec = string.Equals(settings.ReplayVideoCodec, "AV1", StringComparison.OrdinalIgnoreCase)
+                ? "AV1"
+                : "H.264";
+            settings.ReplayEncoderMode = string.Equals(settings.ReplayEncoderMode, "CPU", StringComparison.OrdinalIgnoreCase)
+                ? "CPU"
+                : "GPU";
+            if (settings.ReplayEncoderMode == "CPU") settings.ReplayVideoCodec = "H.264";
             if (!string.Equals(settings.ReplayCaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase)) settings.ReplayCaptureSource = "Game";
             settings.ReplayDesktopMonitorDeviceName ??= string.Empty;
             // Clamped on both ends, not just guarded against <= 0 - a
@@ -43,8 +57,8 @@ public static class AppSettingsStore
             // existed) used to load as-is and show in the box indefinitely
             // while the encoder silently re-clamped it underneath, reading as
             // though the limit wasn't enforced at all.
-            settings.ReplayBitrateMbps = Math.Clamp(settings.ReplayBitrateMbps <= 0 ? 15 : settings.ReplayBitrateMbps, 5, 1000);
-            if (settings.ReplayFrameRate <= 0) settings.ReplayFrameRate = 60;
+            settings.ReplayBitrateMbps = Math.Clamp(settings.ReplayBitrateMbps <= 0 ? 15 : settings.ReplayBitrateMbps, 5, 100);
+            settings.ReplayFrameRate = Math.Clamp(settings.ReplayFrameRate <= 0 ? 60 : settings.ReplayFrameRate, 30, 144);
             // One-time switch-on: the floating hover bar is the default now,
             // but existing settings.json files already carry an explicit false
             // for it, so the changed property default alone would only reach

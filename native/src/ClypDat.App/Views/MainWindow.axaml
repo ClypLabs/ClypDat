@@ -1226,7 +1226,7 @@
                 </StackPanel>
               </Border>
 
-              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Replay length|Resolution|Frame rate|Capture quality|Recording}">
+              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Replay length|Recording}">
                 <StackPanel Spacing="18">
                   <TextBlock Text="RECORDING" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                   <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Replay length}">
@@ -1239,112 +1239,86 @@
                       </ListBox.ItemTemplate>
                     </ListBox>
                   </StackPanel>
-
-                  <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
-
-                  <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Resolution}">
-                    <TextBlock Text="Resolution" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                    <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}">
-                      <ListBox.ItemTemplate>
-                        <DataTemplate>
-                          <TextBlock Text="{Binding Label}" />
-                        </DataTemplate>
-                      </ListBox.ItemTemplate>
-                    </ListBox>
-                    <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="8" IsVisible="{Binding IsCustomReplayResolution}">
-                      <TextBlock Text="Custom height" Foreground="#B8C7D8" FontSize="12" VerticalAlignment="Center" />
-                      <TextBox Grid.Column="1" Classes="settingsInput" Width="110" Text="{Binding CustomReplayHeight}" PlaceholderText="1080" VerticalAlignment="Center" />
-                    </Grid>
-                  </StackPanel>
-
-                  <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
-
-                  <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Frame rate}">
-                    <TextBlock Text="Frame rate" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                    <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}">
-                      <ListBox.ItemTemplate>
-                        <DataTemplate>
-                          <TextBlock Text="{Binding StringFormat={}{0} fps}" />
-                        </DataTemplate>
-                      </ListBox.ItemTemplate>
-                    </ListBox>
-                    <TextBlock Text="{Binding ReplayQualityWarning}"
-                               Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap"
-                               opconv:SettingsHighlight.Query="{Binding SettingsSearchText}"
-                               IsVisible="{Binding ReplayQualityAboveDefault}" />
-                  </StackPanel>
-
-                  <!-- Card-level, not nested inside one of the sections above:
-                       it applies to whichever of resolution/frame rate/encoder
-                       was changed, so scoping it to a single section's search
-                       filter would hide it exactly when it's relevant. -->
-                  <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding ReplayQualityRestartRequired}">
-                    <TextBlock Text="Restarting the replay buffer to apply the new capture quality..." Foreground="#E5A00D" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" TextWrapping="Wrap" />
-                  </StackPanel>
                 </StackPanel>
               </Border>
 
-              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Codec|Encoder preset|Rate control|Quality|Bitrate|Encoding}">
-                <StackPanel Spacing="18">
-                  <TextBlock Text="ENCODING" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                  <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Codec}">
-                    <TextBlock Text="Replay codec" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                    <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayVideoCodecs}" SelectedItem="{Binding SelectedReplayVideoCodec}">
-                      <ListBox.ItemTemplate>
-                        <DataTemplate>
-                          <TextBlock Text="{Binding Label}" />
-                        </DataTemplate>
-                      </ListBox.ItemTemplate>
-                    </ListBox>
-                    <TextBlock Text="{Binding ReplayVideoCodecStatus}" Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
-                    <TextBlock Text="AV1 is selected only after a real hardware encode probe. Legacy Windows Capture remains H.264." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording quality|Resolution|Frame rate|FPS|Bitrate|Codec|Encoder|Quality|Encoding}">
+                <StackPanel Spacing="16">
+                  <TextBlock Text="RECORDING QUALITY" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                  <StackPanel Spacing="4">
+                    <TextBlock Text="Quality" Foreground="#B8C7D8" FontWeight="Bold" FontSize="17" />
+                    <TextBlock Text="Customize clip quality. Higher settings use more resources and storage. If capture struggles, choose a lower setting." Foreground="#93A6B8" FontSize="12" TextWrapping="Wrap" />
                   </StackPanel>
 
-                  <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
-                  <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Encoder preset}">
-                    <TextBlock Text="Encoder preset" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                    <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayEncoderPresets}" SelectedItem="{Binding SelectedReplayEncoderPreset}">
-                      <!-- Tip on the container rather than the TextBlock so the
-                           whole pill is hoverable, not just the two characters
-                           of text in the middle of it. ReflectionBinding because
-                           a Setter has no x:DataType to compile against - the
-                           compiled binding resolves against the window's own
-                           DataContext and can't see the item's Description. -->
-                      <ListBox.Styles>
-                        <Style Selector="ListBoxItem">
-                          <Setter Property="ToolTip.Tip" Value="{ReflectionBinding Description}" />
-                        </Style>
-                      </ListBox.Styles>
-                      <ListBox.ItemTemplate>
-                        <DataTemplate>
-                          <TextBlock Text="{Binding Label}" />
-                        </DataTemplate>
-                      </ListBox.ItemTemplate>
-                    </ListBox>
-                    <TextBlock Text="ClypDat backend only. P1 is fastest and lowest quality; higher presets spend more GPU time per frame for better compression. At high frame rates or when a game already uses most GPU time, slower presets can drop frames."
-                               Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap"
-                               opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                  </StackPanel>
+                  <ListBox Classes="qualityPresetCards" ItemsSource="{Binding ReplayQualityPresets}" SelectedItem="{Binding SelectedReplayQualityPreset}">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate>
+                        <StackPanel Spacing="5">
+                          <TextBlock Text="{Binding Label}" FontSize="16" FontWeight="Bold" />
+                          <TextBlock Text="{Binding Description}" Foreground="#B8C7D8" FontSize="12" TextWrapping="Wrap" />
+                          <TextBlock Text="{Binding Summary}" Foreground="#9CB0C4" FontSize="12" TextWrapping="Wrap" />
+                        </StackPanel>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
 
-                  <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
+                  <Grid ColumnDefinitions="*,*,*" ColumnSpacing="12" IsVisible="{Binding IsCustomReplayQuality}">
+                    <StackPanel Spacing="5">
+                      <TextBlock Text="Resolution" Foreground="#B8C7D8" FontSize="13" />
+                      <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}">
+                        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
+                      </ComboBox>
+                      <TextBox Classes="settingsInput" Text="{Binding CustomReplayHeight}" PlaceholderText="1080" IsVisible="{Binding IsCustomReplayResolution}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="5">
+                      <TextBlock Text="FPS" Foreground="#B8C7D8" FontSize="13" />
+                      <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}">
+                        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding StringFormat={}{0} FPS}" /></DataTemplate></ComboBox.ItemTemplate>
+                      </ComboBox>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Spacing="5">
+                      <TextBlock Text="Bitrate" Foreground="#B8C7D8" FontSize="13" />
+                      <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayBitrateOptions}" SelectedItem="{Binding SelectedReplayBitrateOption}" />
+                      <TextBox Classes="settingsInput" Text="{Binding ReplayBitrateMbps}" PlaceholderText="15" IsVisible="{Binding IsCustomReplayBitrate}" />
+                    </StackPanel>
+                  </Grid>
 
-                  <Border Height="1" Background="#1B242D" />
+                  <TextBlock Text="{Binding ReplayQualityWarning}" Foreground="#E5A00D" FontSize="12" TextWrapping="Wrap" />
+                  <TextBlock Text="Selected FPS is a target, not a guarantee. Actual clip FPS may vary with the game, capture source, encoder, and system load." Foreground="#93A6B8" FontSize="11" TextWrapping="Wrap" />
 
-                  <!-- Heading, then the field with its hint alongside - the
-                       same shape as the Custom resolution height input, and
-                       consistent with the pill sections above, which also put
-                       their heading on its own line. A Grid rather than a
-                       horizontal StackPanel so the hint has a bounded width to
-                       wrap inside instead of running off the card. -->
-                  <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Bitrate} ">
-                    <TextBlock Text="Bitrate (Mbps)" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                    <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayBitrateOptions}" SelectedItem="{Binding SelectedReplayBitrateOption}" />
-                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
-                       <TextBox Classes="settingsInput compactNumber" Width="72" Text="{Binding ReplayBitrateMbps}" PlaceholderText="15" IsVisible="{Binding IsCustomReplayBitrate}" />
-                       <TextBlock Grid.Column="1" Text="Custom bitrate: 5–1000 Mbps."
-                                  Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center"
-                                  IsVisible="{Binding IsCustomReplayBitrate}" />
-                    </Grid>
+                  <Grid ColumnDefinitions="*,*,*" ColumnSpacing="12">
+                    <StackPanel Spacing="5">
+                      <TextBlock Text="Video encoder" Foreground="#B8C7D8" FontSize="13" />
+                      <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayEncoderModes}" SelectedItem="{Binding SelectedReplayEncoderMode}">
+                        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
+                      </ComboBox>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="5">
+                      <TextBlock Text="Codec" Foreground="#B8C7D8" FontSize="13" />
+                      <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayVideoCodecs}" SelectedItem="{Binding SelectedReplayVideoCodec}" IsEnabled="{Binding !IsReplayEncoderCpu}">
+                        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
+                      </ComboBox>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Spacing="5">
+                      <TextBlock Text="Encoder preset" Foreground="#B8C7D8" FontSize="13" />
+                      <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayEncoderPresets}" SelectedItem="{Binding SelectedReplayEncoderPreset}">
+                        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
+                      </ComboBox>
+                    </StackPanel>
+                  </Grid>
+                  <TextBlock Text="{Binding ReplayEncoderModeStatus}" Foreground="#93A6B8" FontSize="11" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding ReplayVideoCodecStatus}" Foreground="#93A6B8" FontSize="11" TextWrapping="Wrap" />
+
+                  <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
+                    <StackPanel Spacing="3">
+                      <TextBlock Text="Automatically adjust FPS under load" Foreground="#B8C7D8" FontWeight="Bold" FontSize="13" />
+                      <TextBlock Text="Lower FPS after sustained encoder overload, then restore it after recovery." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding ReplayAdaptiveFrameRateEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                  </Grid>
+
+                  <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding ReplayQualityRestartRequired}">
+                    <TextBlock Text="Restart replay buffer to apply changed quality or encoder settings." Foreground="#E5A00D" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" TextWrapping="Wrap" />
                   </StackPanel>
                 </StackPanel>
               </Border>

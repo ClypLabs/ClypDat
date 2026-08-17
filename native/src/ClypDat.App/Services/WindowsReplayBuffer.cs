@@ -369,7 +369,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             IsFixedFramerate = true,
             Quality = 85,
             Bitrate = FixedBitrate(config),
-            Framerate = Math.Clamp(config.FrameRate, 15, 240)
+            Framerate = Math.Clamp(config.FrameRate, 30, 144)
         };
 
         return options;
@@ -382,7 +382,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
     private static int FixedBitrate(ReplayBufferConfig config)
     {
-        return Math.Clamp(config.BitrateMbps, 5, 1000) * 1_000_000;
+        return Math.Clamp(config.BitrateMbps, 5, 100) * 1_000_000;
     }
 
     private static ScreenSize CaptureOutputSize(ReplayBufferConfig config)
@@ -775,7 +775,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
     private static string[] BuildSoftwareVideoArgs(ReplayBufferConfig config)
     {
-        var bitrate = Math.Clamp(config.BitrateMbps, 5, 1000) * 1_000_000;
+        var bitrate = Math.Clamp(config.BitrateMbps, 5, 100) * 1_000_000;
         return new[]
         {
             "-c:v", "libx264", "-preset", "veryfast",
@@ -787,7 +787,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
     private static int MuxVideoBitrate(ReplayBufferConfig config)
     {
-        return Math.Clamp(config.BitrateMbps, 5, 1000) * 1_000_000;
+        return Math.Clamp(config.BitrateMbps, 5, 100) * 1_000_000;
     }
 
     private void RecoverRecorderAfterFailure()

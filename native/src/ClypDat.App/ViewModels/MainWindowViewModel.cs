@@ -99,7 +99,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private ProcessOption? _selectedProcessExclusion;
     private ReplayDurationPreset? _selectedReplayDurationPreset;
     private bool _customReplayResolutionSelected;
+    private bool _customReplayQualitySelected;
     private int _selectedReplayFrameRate;
+    private ReplayQualityPreset? _selectedReplayQualityPreset;
+    private ReplayEncoderModeOption? _selectedReplayEncoderMode;
     private ReplayBackendPreset? _selectedReplayBackend;
     private string _selectedReplayCaptureSource = "Game";
     private DesktopMonitorOption? _selectedDesktopMonitor;
@@ -112,6 +115,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _activeReplayEncoderSignature = string.Empty;
     private bool _replayQualityRestartRequired;
     private ReplayStorageHealth _replayStorageHealth = ReplayStorageHealth.Unknown;
+    private string _activeReplayEncoder = string.Empty;
+    private string _activeReplayAdapter = string.Empty;
     private string _selectedClipOverlayPosition = "Top Right";
     private string _selectedClipOverlayVolume = "Medium";
     private string _selectedClipFileNameScheme = ClipFileNaming.StandardScheme;
@@ -224,7 +229,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("2160p (4K)", 2160),
             new("Custom", -1)
         };
-        ReplayFrameRates = new ObservableCollection<int> { 30, 60, 90, 120, 144, 165, 240 };
+        ReplayQualityPresets = new ObservableCollection<ReplayQualityPreset>
+        {
+            new("Low Quality", "Lower resource use", "720p · 30 FPS · 10 Mbps", 720, 30, 10),
+            new("Standard", "Performance and fast sharing", "1080p · 60 FPS · 15 Mbps", 1080, 60, 15),
+            new("High Quality", "Higher detail, higher resource use", "1440p · 60 FPS · 40 Mbps", 1440, 60, 40),
+            new("Custom", "Customize your own settings", "Choose resolution, FPS, and bitrate", -1, 0, 0)
+        };
+        ReplayEncoderModes = new ObservableCollection<ReplayEncoderModeOption>
+        {
+            new("GPU", "Hardware encoding. Recommended for most systems."),
+            new("CPU", "Software H.264 encoding. Uses more CPU and may reduce game performance.")
+        };
+        ReplayFrameRates = new ObservableCollection<int> { 30, 60, 90, 120, 144 };
         ReplayEncoderPresets = new ObservableCollection<EncoderPresetOption>
         {
             new("P1", "Fastest. Cheapest on the GPU and the softest picture of the five. Worth dropping to only if capture is genuinely struggling."),
@@ -233,11 +250,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("P4", "Balanced, and the default. Noticeably better detail in motion than P1-P3, and comfortably within budget on most GPUs."),
             new("P5", "Highest quality here, and the most GPU time per frame. Best on a card with headroom to spare - watch for dropped frames if the game is already pushing it.")
         };
-        ReplayBitrateOptions = new ObservableCollection<string> { "10 Mbps", "15 Mbps", "20 Mbps", "40 Mbps", "60 Mbps", "80 Mbps", "120 Mbps", "Custom" };
+        ReplayBitrateOptions = new ObservableCollection<string> { "10 Mbps", "15 Mbps", "20 Mbps", "40 Mbps", "60 Mbps", "80 Mbps", "100 Mbps", "Custom" };
         ReplayVideoCodecs = new ObservableCollection<ReplayVideoCodecOption>
         {
-            new("Auto (AV1 preferred)", "Auto", "Uses hardware AV1 when available. Falls back to hardware H.264 before replay starts."),
-            new("H.264 (compatibility)", "H.264", "Uses H.264 hardware encoding for widest playback compatibility.")
+            new("H.264", "H.264", "Widest playback compatibility. Default codec."),
+            new("AV1 preferred", "AV1", "Uses hardware AV1 when available, then falls back to H.264.")
         };
         ExportCodecs = new ObservableCollection<ExportCodecOption>
         {
@@ -290,6 +307,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedReplayDurationPreset = ReplayDurationPresets.FirstOrDefault(preset => preset.Seconds == Settings.ReplayDurationSeconds) ??
                                        ReplayDurationPresets.First(preset => preset.Seconds == 60);
         _selectedReplayFrameRate = ReplayFrameRates.Contains(Settings.ReplayFrameRate) ? Settings.ReplayFrameRate : 60;
+        _selectedReplayEncoderMode = ReplayEncoderModes.FirstOrDefault(mode => string.Equals(mode.Value, Settings.ReplayEncoderMode, StringComparison.OrdinalIgnoreCase))
+                                     ?? ReplayEncoderModes.First(mode => mode.Value == "GPU");
+        _selectedReplayQualityPreset = ReplayQualityPresets.FirstOrDefault(preset => preset.Matches(Settings.ReplayMaxHeight, Settings.ReplayFrameRate, Settings.ReplayBitrateMbps));
+        _customReplayQualitySelected = _selectedReplayQualityPreset is null;
         _activeReplayMaxHeight = Settings.ReplayMaxHeight;
         _activeReplayFrameRate = Settings.ReplayFrameRate;
         _activeReplayEncoderSignature = EncoderSignature;
@@ -416,6 +437,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ProcessOption> GameCandidateProcesses { get; }
     public ObservableCollection<ReplayDurationPreset> ReplayDurationPresets { get; }
     public ObservableCollection<ResolutionOption> ReplayResolutions { get; }
+    public sealed record ReplayQualityPreset(string Label, string Description, string Summary, int Height, int FrameRate, int Bitrate)
+    {
+        public bool IsCustom => Height < 0;
+        public bool Matches(int height, int frameRate, int bitrate) => !IsCustom && Height == height && FrameRate == frameRate && Bitrate == bitrate;
+    }
+
+    public ObservableCollection<ReplayQualityPreset> ReplayQualityPresets { get; }
+    public sealed record ReplayEncoderModeOption(string Label, string Description)
+    {
+        public string Value => Label;
+    }
+
+    public ObservableCollection<ReplayEncoderModeOption> ReplayEncoderModes { get; }
     public ObservableCollection<int> ReplayFrameRates { get; }
     // Label is what's persisted and handed to NVENC; Description is the hover
     // text, since "P1".."P5" says nothing on its own about which way is faster.
@@ -1346,9 +1380,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 Settings.ReplayMaxHeight = value.Height;
             }
 
+            _customReplayQualitySelected = true;
+            _selectedReplayQualityPreset = ReplayQualityPresets[^1];
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsCustomReplayResolution));
             OnPropertyChanged(nameof(CustomReplayHeight));
+            OnPropertyChanged(nameof(SelectedReplayQualityPreset));
+            OnPropertyChanged(nameof(IsCustomReplayQuality));
             SaveSettings();
             UpdateReplayQualityRestartRequired();
             OnPropertyChanged(nameof(ReplayQualityAboveDefault));
@@ -1370,9 +1408,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (int.TryParse(value, out var height))
             {
                 Settings.ReplayMaxHeight = Math.Clamp(height, 480, 2160);
+                _customReplayQualitySelected = true;
+                _selectedReplayQualityPreset = ReplayQualityPresets[^1];
                 SaveSettings();
                 UpdateReplayQualityRestartRequired();
                 OnPropertyChanged(nameof(ReplayQualityAboveDefault));
+                OnPropertyChanged(nameof(SelectedReplayQualityPreset));
+                OnPropertyChanged(nameof(IsCustomReplayQuality));
             }
 
             SyncNumericBox(nameof(CustomReplayHeight), value, Settings.ReplayMaxHeight);
@@ -1385,10 +1427,110 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set
         {
             if (!SetProperty(ref _selectedReplayFrameRate, value)) return;
-            Settings.ReplayFrameRate = value;
+            Settings.ReplayFrameRate = Math.Clamp(value, 30, 144);
+            _customReplayQualitySelected = true;
+            _selectedReplayQualityPreset = ReplayQualityPresets[^1];
             SaveSettings();
             UpdateReplayQualityRestartRequired();
             OnPropertyChanged(nameof(ReplayQualityAboveDefault));
+            OnPropertyChanged(nameof(SelectedReplayQualityPreset));
+            OnPropertyChanged(nameof(IsCustomReplayQuality));
+        }
+    }
+
+    public ReplayQualityPreset? SelectedReplayQualityPreset
+    {
+        get => _customReplayQualitySelected
+            ? ReplayQualityPresets[^1]
+            : _selectedReplayQualityPreset ?? ReplayQualityPresets.First(preset => preset.Matches(Settings.ReplayMaxHeight, Settings.ReplayFrameRate, Settings.ReplayBitrateMbps));
+        set
+        {
+            if (value is null) return;
+            if (value.IsCustom)
+            {
+                _customReplayQualitySelected = true;
+                _selectedReplayQualityPreset = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsCustomReplayQuality));
+                return;
+            }
+
+            _customReplayQualitySelected = false;
+            _selectedReplayQualityPreset = value;
+            Settings.ReplayMaxHeight = value.Height;
+            Settings.ReplayFrameRate = value.FrameRate;
+            Settings.ReplayBitrateMbps = value.Bitrate;
+            _selectedReplayFrameRate = value.FrameRate;
+            _customReplayResolutionSelected = false;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(SelectedReplayResolution));
+            OnPropertyChanged(nameof(IsCustomReplayResolution));
+            OnPropertyChanged(nameof(CustomReplayHeight));
+            OnPropertyChanged(nameof(SelectedReplayFrameRate));
+            OnPropertyChanged(nameof(ReplayBitrateMbps));
+            OnPropertyChanged(nameof(SelectedReplayBitrateOption));
+            OnPropertyChanged(nameof(IsCustomReplayBitrate));
+            OnPropertyChanged(nameof(IsCustomReplayQuality));
+            OnPropertyChanged(nameof(ReplayQualityAboveDefault));
+            SaveSettings();
+            UpdateReplayQualityRestartRequired();
+        }
+    }
+
+    public bool IsCustomReplayQuality => SelectedReplayQualityPreset?.IsCustom == true;
+
+    public ReplayEncoderModeOption SelectedReplayEncoderMode
+    {
+        get => _selectedReplayEncoderMode ?? ReplayEncoderModes.First(mode => mode.Value == "GPU");
+        set
+        {
+            if (value is null || string.Equals(Settings.ReplayEncoderMode, value.Value, StringComparison.OrdinalIgnoreCase)) return;
+            Settings.ReplayEncoderMode = value.Value;
+            _selectedReplayEncoderMode = value;
+            if (string.Equals(value.Value, "CPU", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(Settings.ReplayVideoCodec, "AV1", StringComparison.OrdinalIgnoreCase))
+            {
+                Settings.ReplayVideoCodec = "H.264";
+                OnPropertyChanged(nameof(SelectedReplayVideoCodec));
+                OnPropertyChanged(nameof(ReplayVideoCodecStatus));
+            }
+
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsReplayEncoderCpu));
+            SaveSettings();
+            UpdateReplayQualityRestartRequired();
+        }
+    }
+
+    public bool IsReplayEncoderCpu => string.Equals(Settings.ReplayEncoderMode, "CPU", StringComparison.OrdinalIgnoreCase);
+
+    public string ReplayEncoderModeStatus
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(_activeReplayEncoder))
+            {
+                var fallback = string.Equals(_activeReplayEncoder, "libx264", StringComparison.OrdinalIgnoreCase) && !IsReplayEncoderCpu
+                    ? " CPU fallback active."
+                    : string.Empty;
+                return $"Active encoder: {_activeReplayEncoder}{(string.IsNullOrWhiteSpace(_activeReplayAdapter) ? string.Empty : $" on {_activeReplayAdapter}")}.{fallback}";
+            }
+
+            return IsReplayEncoderCpu
+                ? "CPU mode uses software H.264 encoding and more processor resources."
+                : "GPU mode selects the best available hardware encoder automatically, with CPU H.264 fallback.";
+        }
+    }
+
+    public bool ReplayAdaptiveFrameRateEnabled
+    {
+        get => Settings.ReplayAdaptiveFrameRateEnabled;
+        set
+        {
+            if (Settings.ReplayAdaptiveFrameRateEnabled == value) return;
+            Settings.ReplayAdaptiveFrameRateEnabled = value;
+            OnPropertyChanged();
+            SaveSettings();
         }
     }
 
@@ -1409,10 +1551,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReplayVideoCodecOption SelectedReplayVideoCodec
     {
         get => ReplayVideoCodecs.FirstOrDefault(codec => string.Equals(codec.Value, Settings.ReplayVideoCodec, StringComparison.OrdinalIgnoreCase))
-               ?? ReplayVideoCodecs.First(codec => codec.Value == "Auto");
+               ?? ReplayVideoCodecs.First(codec => codec.Value == "H.264");
         set
         {
             if (value is null || string.Equals(Settings.ReplayVideoCodec, value.Value, StringComparison.OrdinalIgnoreCase)) return;
+            if (IsReplayEncoderCpu && string.Equals(value.Value, "AV1", StringComparison.OrdinalIgnoreCase)) return;
             Settings.ReplayVideoCodec = value.Value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(ReplayVideoCodecStatus));
@@ -1427,13 +1570,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (string.Equals(Settings.ReplayBackend, "Legacy", StringComparison.OrdinalIgnoreCase))
                 return "Windows Capture uses H.264; AV1 applies to ClypDat capture.";
+            if (IsReplayEncoderCpu)
+                return "CPU mode uses software H.264.";
             if (string.Equals(Settings.ReplayVideoCodec, "H.264", StringComparison.OrdinalIgnoreCase))
-                return "H.264 override selected.";
+                return "H.264 selected. Hardware encoder chosen automatically.";
 
             if (!ExportEncoderProbe.Av1ProbeCompleted) return "Checking hardware AV1 support…";
             return ExportEncoderProbe.Av1Family is null
-                ? "Hardware AV1 unavailable. Auto will use H.264."
-                : "Hardware AV1 available. Auto will use AV1.";
+                ? "Hardware AV1 unavailable. H.264 fallback will be used."
+                : "Hardware AV1 preferred. H.264 fallback remains available.";
         }
     }
 
@@ -1444,12 +1589,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (string.Equals(value, "Custom", StringComparison.Ordinal))
             {
+                _customReplayQualitySelected = true;
+                _selectedReplayQualityPreset = ReplayQualityPresets[^1];
+                OnPropertyChanged(nameof(SelectedReplayQualityPreset));
+                OnPropertyChanged(nameof(IsCustomReplayQuality));
                 OnPropertyChanged(nameof(IsCustomReplayBitrate));
                 return;
             }
             if (!int.TryParse(value.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0], out var bitrate)) return;
             if (Settings.ReplayBitrateMbps == bitrate) return;
-            Settings.ReplayBitrateMbps = Math.Clamp(bitrate, 5, 1000);
+            Settings.ReplayBitrateMbps = Math.Clamp(bitrate, 5, 100);
             OnPropertyChanged();
             OnPropertyChanged(nameof(ReplayBitrateMbps));
             OnPropertyChanged(nameof(IsCustomReplayBitrate));
@@ -1486,18 +1635,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (int.TryParse(value, out var mbps))
             {
-                Settings.ReplayBitrateMbps = Math.Clamp(mbps, 5, 1000);
+                Settings.ReplayBitrateMbps = Math.Clamp(mbps, 5, 100);
+                _customReplayQualitySelected = true;
+                _selectedReplayQualityPreset = ReplayQualityPresets[^1];
                 SaveSettings();
                 UpdateReplayQualityRestartRequired();
                 OnPropertyChanged(nameof(SelectedReplayBitrateOption));
                 OnPropertyChanged(nameof(IsCustomReplayBitrate));
+                OnPropertyChanged(nameof(SelectedReplayQualityPreset));
+                OnPropertyChanged(nameof(IsCustomReplayQuality));
             }
 
             SyncNumericBox(nameof(ReplayBitrateMbps), value, Settings.ReplayBitrateMbps);
         }
     }
 
-    public bool ReplayQualityAboveDefault => Settings.ReplayMaxHeight > 1080 || Settings.ReplayFrameRate > 60;
+    public bool ReplayQualityAboveDefault => Settings.ReplayMaxHeight > 1080 || Settings.ReplayFrameRate > 60 || Settings.ReplayBitrateMbps > 15;
 
     // Past 1080p60 both backends cost something, but not the same something, so
     // one shared sentence was telling most users about a cost they were never
@@ -1509,13 +1662,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // engine (see the backend list), so it gets that same warning.
     public string ReplayQualityWarning =>
         string.Equals(Settings.ReplayBackend, "Legacy", StringComparison.OrdinalIgnoreCase)
-            ? "Above 1080p60, Windows Capture clips take noticeably longer to process (the clip preview can sit black for a while before it loads)."
-            : "Above 1080p60, ClypDat's capture engine uses noticeably more GPU for as long as the replay buffer is armed - every frame is scaled and encoded continuously, so the cost scales with both resolution and frame rate. It uses less while a demanding game is running, so the number you see idling on the desktop is higher than what it costs mid-game.";
+            ? "Higher quality uses more resources. Windows Capture may also take longer to process clips."
+            : "Higher resolution, frame rate, and bitrate use more GPU, CPU, memory, and storage while replay is armed.";
 
     // One string covering everything the running buffer baked in at start, so
     // the restart notice doesn't need a field per encoder setting.
     private string EncoderSignature =>
-        $"{Settings.ReplayVideoCodec}|{Settings.ReplayEncoderPreset}|{Settings.ReplayBitrateMbps}";
+        $"{Settings.ReplayVideoCodec}|{Settings.ReplayEncoderMode}|{Settings.ReplayEncoderPreset}|{Settings.ReplayBitrateMbps}";
 
     private void UpdateReplayQualityRestartRequired()
     {
@@ -1545,6 +1698,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _replayStorageHealth = health;
         OnPropertyChanged(nameof(ReplayStorageWarningVisible));
         OnPropertyChanged(nameof(ReplayStorageWarning));
+    }
+
+    public void UpdateReplayEncoderHealth(ReplayCaptureHealth health)
+    {
+        if (string.IsNullOrWhiteSpace(health.Encoder)) return;
+        _activeReplayEncoder = health.Encoder;
+        _activeReplayAdapter = health.AdapterDescription;
+        OnPropertyChanged(nameof(ReplayEncoderModeStatus));
+    }
+
+    public void ClearReplayEncoderHealth()
+    {
+        _activeReplayEncoder = string.Empty;
+        _activeReplayAdapter = string.Empty;
+        OnPropertyChanged(nameof(ReplayEncoderModeStatus));
     }
 
     public void MarkReplayBufferRestarted()
@@ -5147,6 +5315,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             EncoderPreset: ReplayEncoderPresetPolicy.Resolve(Settings.ReplayEncoderPreset),
             BitrateMbps: Settings.ReplayBitrateMbps,
             VideoCodec: Settings.ReplayVideoCodec,
+            EncoderMode: Settings.ReplayEncoderMode,
             CaptureSource: desktopCapture ? "Desktop" : "Game",
             CaptureMonitorDeviceName: desktopCapture ? desktopMonitor.DeviceName : string.Empty,
             CaptureCursor: desktopCapture && Settings.ReplayDesktopCaptureCursor,

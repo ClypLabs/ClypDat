@@ -114,7 +114,7 @@ public sealed class StorageProtectionService : IDisposable, IStoragePressureObse
 
     public StorageSaveEstimate EstimateSave(int bitrateMbps, TimeSpan duration)
     {
-        var final = (long)Math.Ceiling(Math.Clamp(bitrateMbps, 5, 1000) * 1_000_000d * Math.Max(0, duration.TotalSeconds) / 8d);
+        var final = (long)Math.Ceiling(Math.Clamp(bitrateMbps, 5, 100) * 1_000_000d * Math.Max(0, duration.TotalSeconds) / 8d);
         return new StorageSaveEstimate(final, checked(final * 3), checked(final * 3 + 2L * 1024 * 1024 * 1024));
     }
 

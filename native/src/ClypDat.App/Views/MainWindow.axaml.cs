@@ -305,6 +305,8 @@ public sealed partial class MainWindow : Window
                 {
                     if (e.PropertyName == nameof(MainWindowViewModel.AutoClippingEnabled)) UpdateAutoClipStates();
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayBufferEnabled)) _ = ApplyReplayBufferEnabledAsync();
+                    if (e.PropertyName == nameof(MainWindowViewModel.ReplayAdaptiveFrameRateEnabled))
+                        _encoderTuning.SetEnabled(ViewModel.ReplayAdaptiveFrameRateEnabled);
                     if (e.PropertyName is nameof(MainWindowViewModel.SelectedReplayCaptureSource)
                         or nameof(MainWindowViewModel.SelectedDesktopMonitor)
                         or nameof(MainWindowViewModel.ReplayDesktopCaptureCursor)
@@ -738,6 +740,7 @@ public sealed partial class MainWindow : Window
 
         _encoderTuning.OnHealth(health);
         ViewModel?.UpdateReplayStorageHealth(health.Storage);
+        ViewModel?.UpdateReplayEncoderHealth(health);
     }
 
     private void EncoderTuning_OnFrameRateChangeRequested(object? sender, EncoderFrameRateChange change)
@@ -2398,6 +2401,7 @@ public sealed partial class MainWindow : Window
             _activeReplayTargetIdentity = string.Empty;
             _activeReplayConfigSnapshot = null;
             _encoderTuning.EndSession();
+            ViewModel.ClearReplayEncoderHealth();
             ViewModel.IsReplayRecording = false;
             ViewModel.RecorderStatus = ReplayIdleStatus;
         }
@@ -2450,7 +2454,8 @@ public sealed partial class MainWindow : Window
             var activeConfig = _replayConfigSnapshot ?? throw new InvalidOperationException("Replay configuration unavailable after start.");
             _activeReplayConfigSnapshot = activeConfig;
             _activeReplayTargetIdentity = ReplayTargetIdentity(activeConfig);
-            _encoderTuning.BeginSession(activeConfig.EncoderPreset, activeConfig.FrameRate, activeConfig.MaxHeight);
+            _encoderTuning.BeginSession(activeConfig.EncoderPreset, activeConfig.FrameRate, activeConfig.MaxHeight,
+                ViewModel.Settings.ReplayAdaptiveFrameRateEnabled);
             // Fresh session, fresh list - but only for a GENUINELY new session
             // (a game was just detected). A quality restart is left open (not
             // cleared here either) so a Full Session VOD that finalizes minutes

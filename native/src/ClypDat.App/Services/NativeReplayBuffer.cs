@@ -181,7 +181,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     public void RequestFrameRate(int frameRate)
     {
         if (!_sessionActive) return;
-        Volatile.Write(ref _requestedFrameRate, Math.Clamp(frameRate, 15, 240));
+        Volatile.Write(ref _requestedFrameRate, Math.Clamp(frameRate, 30, 144));
     }
 
     public TimeSpan Duration { get; private set; } = TimeSpan.FromSeconds(60);
@@ -867,7 +867,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var lastForcedKeyframe = TimeSpan.Zero;
             var lastTargetRefresh = TimeSpan.Zero;
             var lastEncodedAt = TimeSpan.Zero;
-            var targetFrameInterval = TimeSpan.FromSeconds(1.0 / Math.Clamp(config.FrameRate, 15, 240));
+            var targetFrameInterval = TimeSpan.FromSeconds(1.0 / Math.Clamp(config.FrameRate, 30, 144));
             // Counts encoded frames (including duplicate/padding ones) so
             // frame->pts can be assigned an IDEAL, constant-rate timestamp
             // (index * exact interval) rather than real elapsed time - see
@@ -885,8 +885,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // across the change. time_base is microseconds (see the encoder
             // setup) and independent of frame rate, so nothing else moves.
             var nextPtsMicroseconds = 0.0;
-            var idealFrameIntervalMicroseconds = 1_000_000.0 / Math.Clamp(config.FrameRate, 15, 240);
-            var activeFrameRate = Math.Clamp(config.FrameRate, 15, 240);
+            var idealFrameIntervalMicroseconds = 1_000_000.0 / Math.Clamp(config.FrameRate, 30, 144);
+            var activeFrameRate = Math.Clamp(config.FrameRate, 30, 144);
             Volatile.Write(ref _requestedFrameRate, activeFrameRate);
             var cropSamplingBudget = new PresentSamplingBudget(activeFrameRate);
             // The real capture-moment timestamp FIFO (one per avcodec_send_frame
@@ -2877,8 +2877,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             InputHeight = (uint)captureHeight,
             OutputWidth = (uint)outputWidth,
             OutputHeight = (uint)outputHeight,
-            InputFrameRate = new Rational((uint)Math.Clamp(frameRate, 15, 240), 1),
-            OutputFrameRate = new Rational((uint)Math.Clamp(frameRate, 15, 240), 1),
+            InputFrameRate = new Rational((uint)Math.Clamp(frameRate, 30, 144), 1),
+            OutputFrameRate = new Rational((uint)Math.Clamp(frameRate, 30, 144), 1),
             // Capture runs continuously at the target frame rate, unlike a
             // one-off export. OptimalQuality can make the driver spend more
             // 3D time on every crop/scale/colour-conversion pass, competing
@@ -4106,7 +4106,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private static IEnumerable<string> EncoderCandidates(ReplayBufferConfig config)
         => ReplayVideoCodecPolicy.Candidates(
             config.VideoCodec,
-            ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.Auto ? ExportEncoderProbe.Av1Family : null);
+            ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.Av1 ? ExportEncoderProbe.Av1Family : null,
+            config.EncoderMode);
 
     // h264_nvenc's default preset does real per-frame rate-distortion search,
     // which measured a sustained ~59-60ms/frame (vs. ~0.5ms on p1) during
@@ -4142,7 +4143,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // costs roughly 125MB at 16Mbps and scales linearly from there. Only
     // Constant bitrate mode takes a user bitrate value now - Constant quality's
     // ceiling is always derived (see MaxBitrate below).
-    private static long FixedBitrate(ReplayBufferConfig config) => Math.Clamp(config.BitrateMbps, 5, 1000) * 1_000_000L;
+    private static long FixedBitrate(ReplayBufferConfig config) => Math.Clamp(config.BitrateMbps, 5, 100) * 1_000_000L;
 
     // "P3" -> "p3". Anything unrecognised falls back to the default rather than
     // being passed through to av_opt_set as-is.
@@ -4468,12 +4469,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         var encoderTimeBase = new AVRational { num = 1, den = 1_000_000 };
         timeBase = encoderTimeBase;
         encoderName = string.Empty;
-        var autoCodec = ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.Auto;
-        var av1Family = autoCodec ? ExportEncoderProbe.Av1Family : null;
-        if (autoCodec)
+        var av1Preferred = ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.Av1;
+        var av1Family = av1Preferred ? ExportEncoderProbe.Av1Family : null;
+        if (av1Preferred)
         {
             AppLog.Info(av1Family is null
-                ? "Native replay: AV1 preflight unavailable; trying H.264 candidates."
+                ? "Native replay: AV1 unavailable; trying H.264 candidates."
                 : $"Native replay: AV1 preflight passed for {av1Family}; trying AV1 before H.264 fallback.");
         }
 
@@ -4489,7 +4490,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             codecContext->width = width;
             codecContext->height = height;
             codecContext->time_base = encoderTimeBase;
-            codecContext->framerate = new AVRational { num = Math.Clamp(config.FrameRate, 15, 240), den = 1 };
+            codecContext->framerate = new AVRational { num = Math.Clamp(config.FrameRate, 30, 144), den = 1 };
             codecContext->pix_fmt = AVPixelFormat.AV_PIX_FMT_NV12;
             // Limited/studio range (16-235), matching what the scalers
             // (CreateScaler/CreateGpuScaler) now write, and tagged as such.
@@ -4600,7 +4601,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         {
                             encoderName = candidateName;
                             usingHardwareFrames = true;
-                            if (ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.Auto && candidateName.StartsWith("h264_", StringComparison.OrdinalIgnoreCase))
+                            if (ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.Av1 && candidateName.StartsWith("h264_", StringComparison.OrdinalIgnoreCase))
                                 AppLog.Info("Native replay: AV1 initialization failed; H.264 fallback selected.");
                             AppLog.Info($"Native encoder probe: {candidateName} opened with D3D11 zero-copy input (no per-frame GPU readback/upload).");
                             return hardwareContext;
@@ -4619,7 +4620,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 if (codecContext is null) continue;
 
                 encoderName = candidateName;
-                if (ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.Auto && candidateName.StartsWith("h264_", StringComparison.OrdinalIgnoreCase))
+                if (ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.Av1 && candidateName.StartsWith("h264_", StringComparison.OrdinalIgnoreCase))
                     AppLog.Info("Native replay: AV1 initialization failed; H.264 fallback selected.");
                 AppLog.Info($"Native encoder probe: {candidateName} opened successfully (lowPower={lowPower}).");
                 return codecContext;

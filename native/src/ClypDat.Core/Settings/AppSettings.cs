@@ -32,17 +32,22 @@ public sealed class AppSettings
     // resumes as soon as the game exits.
     public bool ReplayAutoSwitchToGameCapture { get; set; } = true;
     public int ReplayDurationSeconds { get; set; } = 60;
-    // Native replay engine prefers hardware AV1. H.264 remains available as an
-    // explicit compatibility override. WGC window capture uses its recorder
-    // library's codec path.
-    public string ReplayVideoCodec { get; set; } = "Auto";
+    // H.264 is default for widest playback compatibility. AV1Preferred uses
+    // hardware AV1 when available, then falls back through H.264.
+    public string ReplayVideoCodec { get; set; } = "H.264";
+    public string ReplayEncoderMode { get; set; } = "GPU";
+    // Sustained encoder overload may lower live target FPS, then restore it
+    // after recovery. Users can disable this protection.
+    public bool ReplayAdaptiveFrameRateEnabled { get; set; } = true;
+    // Existing settings files need one-time migration from old Auto default.
+    public bool ReplayH264DefaultApplied { get; set; }
     // Native engine encoder controls, surfaced directly in Settings rather
     // than hidden behind a coarse quality label.
     // NVENC speed/quality preset, "P1".."P5" - higher spends more GPU time per
     // frame for better compression. P1 is required by default because the
     // default 60 FPS capture must survive uncapped, VSync-off gameplay.
     public string ReplayEncoderPreset { get; set; } = "P1";
-    // Fixed CBR target for every replay backend. Persisted range: 5-1000 Mbps.
+    // Fixed CBR target for every replay backend. Persisted range: 5-100 Mbps.
     public int ReplayBitrateMbps { get; set; } = 15;
     // Existing installs that received the old 40 Mbps default are switched to
     // the current 15 Mbps default once; later user choices are preserved.

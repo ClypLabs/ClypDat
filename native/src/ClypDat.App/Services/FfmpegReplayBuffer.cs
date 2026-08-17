@@ -195,7 +195,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
             "-rtbufsize", "128M"
         };
 
-        var frameRate = Math.Clamp(config.FrameRate, 15, 60).ToString();
+        var frameRate = Math.Clamp(config.FrameRate, 30, 144).ToString();
         var size = $"{Math.Max(320, config.CaptureWidth)}x{Math.Max(240, config.CaptureHeight)}";
         if (backend == CaptureBackend.Ddagrab)
         {
@@ -256,7 +256,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         var height = Math.Clamp(config.MaxHeight, 480, 1440);
         var width = Math.Min(3840, MakeEven((int)Math.Round(height * 16 / 9d)));
         var scale = $"scale=w={width}:h={height}:force_original_aspect_ratio=decrease:force_divisible_by=2";
-        var bitrate = Math.Clamp(config.BitrateMbps, 5, 1000) * 1_000_000;
+        var bitrate = Math.Clamp(config.BitrateMbps, 5, 100) * 1_000_000;
         var rate = new[] { "-b:v", bitrate.ToString(), "-maxrate", bitrate.ToString(), "-bufsize", bitrate.ToString() };
         // NVENC -> AMD AMF -> Intel QSV -> CPU, the same ladder the native
         // capture engine walks (NativeReplayBuffer.EncoderCandidates). Only
@@ -812,7 +812,8 @@ public sealed record ReplayBufferConfig(
     string CustomClipFileNameTemplate = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}",
     string LibraryFolder = "",
     // Native engine encoder controls - see AppSettings for what each means.
-    string VideoCodec = "Auto",
+    string VideoCodec = "H.264",
+    string EncoderMode = "GPU",
     string EncoderPreset = "P4",
     int BitrateMbps = 15,
     string CaptureSource = "Game",

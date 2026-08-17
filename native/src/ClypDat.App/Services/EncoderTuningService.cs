@@ -9,7 +9,7 @@ public sealed class EncoderTuningService
     public event EventHandler<EncoderResolutionChange>? ResolutionChangeRequested;
 #pragma warning restore CS0067
 
-    private static readonly int[] FrameRateLadder = { 240, 165, 144, 120, 90, 60, 30 };
+    private static readonly int[] FrameRateLadder = { 144, 120, 90, 60, 30 };
     private static readonly TimeSpan Warmup = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan Cooldown = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan RestoreAfterClean = TimeSpan.FromMinutes(10);
@@ -32,8 +32,10 @@ public sealed class EncoderTuningService
     private string _configuredPreset = string.Empty;
     private int _samplesSeen;
     private int _severeSamplesSeen;
+    private bool _enabled = true;
+    private DateTime _enabledSinceUtc = DateTime.MinValue;
 
-    public void BeginSession(string userPreset, int configuredFrameRate, int configuredHeight)
+    public void BeginSession(string userPreset, int configuredFrameRate, int configuredHeight, bool enabled = true)
     {
         _sessionStartUtc = DateTime.UtcNow;
         _lastDecisionUtc = DateTime.MinValue;
@@ -42,12 +44,35 @@ public sealed class EncoderTuningService
         _recentSevere.Clear();
         _recentOutputs.Clear();
         _configuredPreset = userPreset;
-        _configuredFrameRate = Math.Clamp(configuredFrameRate, 30, 240);
+        _configuredFrameRate = Math.Clamp(configuredFrameRate, 30, 144);
         _activeFrameRate = _configuredFrameRate;
+        _enabled = enabled;
+        _enabledSinceUtc = enabled ? _sessionStartUtc : DateTime.MaxValue;
         _configuredHeight = configuredHeight;
         _samplesSeen = 0;
         _severeSamplesSeen = 0;
         AppLog.Info($"Encoder tuning: monitoring {_configuredPreset}, {_configuredFrameRate} fps, {_configuredHeight}p.");
+    }
+
+    public void SetEnabled(bool enabled)
+    {
+        if (_enabled == enabled) return;
+        _enabled = enabled;
+        _enabledSinceUtc = enabled ? DateTime.UtcNow : DateTime.MaxValue;
+        _recentSevere.Clear();
+        _recentOutputs.Clear();
+        _cleanSinceUtc = null;
+        _peakQueueSinceClean = 0;
+
+        if (!enabled && _sessionStartUtc != DateTime.MinValue && _activeFrameRate != _configuredFrameRate)
+        {
+            var previous = _activeFrameRate;
+            _activeFrameRate = _configuredFrameRate;
+            AppLog.Info($"Encoder tuning: automatic FPS adjustment disabled; restoring {previous} -> {_configuredFrameRate} fps.");
+            FrameRateChangeRequested?.Invoke(this, new EncoderFrameRateChange(previous, _configuredFrameRate));
+        }
+
+        AppLog.Info($"Encoder tuning: automatic FPS adjustment {(enabled ? "enabled" : "disabled")}.");
     }
 
     public void EndSession()
@@ -63,12 +88,14 @@ public sealed class EncoderTuningService
     public void OnHealth(ReplayCaptureHealth health)
     {
         if (_sessionStartUtc == DateTime.MinValue) return;
+        if (!_enabled) return;
         if (health.EncodeQueueCapacity <= 0 || string.IsNullOrEmpty(health.EncoderPreset)) return;
         if (health.State is not (ReplayCaptureState.Healthy or ReplayCaptureState.Degraded)) return;
         if (health.DegradeReason is ReplayDegradeReason.CaptureStall || health.SaveInProgress) return;
 
         var now = health.UpdatedUtc;
         if (now - _sessionStartUtc < Warmup) return;
+        if (_enabledSinceUtc != DateTime.MinValue && now - _enabledSinceUtc < Warmup) return;
         if (health.TargetFrameRate <= 0 || health.OutputFrameRate <= 0) return;
 
         var queueFraction = (double)health.QueueDepth / health.EncodeQueueCapacity;
