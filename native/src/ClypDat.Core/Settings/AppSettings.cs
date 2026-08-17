@@ -43,7 +43,7 @@ public sealed class AppSettings
     public bool ReplayH264DefaultApplied { get; set; }
     // Native engine encoder controls, surfaced directly in Settings rather
     // than hidden behind a coarse quality label.
-    // NVENC speed/quality preset, "P1".."P5" - higher spends more GPU time per
+    // NVENC speed/quality preset, "P1".."P3" - higher spends more GPU time per
     // frame for better compression. P1 is required by default because the
     // default 60 FPS capture must survive uncapped, VSync-off gameplay.
     public string ReplayEncoderPreset { get; set; } = "P1";
@@ -60,6 +60,7 @@ public sealed class AppSettings
     public bool StartReplayOnLaunch { get; set; }
     public bool LaunchOnWindowsStartup { get; set; }
     public bool StartMinimizedToTray { get; set; }
+    public bool AutomaticallyFocusOnGameExit { get; set; }
     // Windows process priority for ClypDat's in-process capture backends.
     // Normal by default: High lets capture win CPU against the game, but it
     // also lets the save/hydration pipeline outrank the game and the desktop

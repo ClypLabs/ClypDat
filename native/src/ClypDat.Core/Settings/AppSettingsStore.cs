@@ -34,7 +34,8 @@ public static class AppSettingsStore
             settings.GameAudioExcludedProcesses ??= new List<string>();
             if (string.IsNullOrWhiteSpace(settings.ClipFileNameScheme)) settings.ClipFileNameScheme = "Standard";
             if (string.IsNullOrWhiteSpace(settings.CustomClipFileNameTemplate)) settings.CustomClipFileNameTemplate = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}";
-            if (string.IsNullOrWhiteSpace(settings.ReplayEncoderPreset)) settings.ReplayEncoderPreset = "P4";
+            var replayEncoderPreset = settings.ReplayEncoderPreset?.ToUpperInvariant();
+            settings.ReplayEncoderPreset = replayEncoderPreset is "P1" or "P2" or "P3" ? replayEncoderPreset : "P1";
             if (!settings.ReplayH264DefaultApplied)
             {
                 if (string.Equals(settings.ReplayVideoCodec, "Auto", StringComparison.OrdinalIgnoreCase))

@@ -9,7 +9,7 @@ public static class ReplayEncoderPresetPolicy
 
     private static string Normalize(string? preset) => preset?.ToUpperInvariant() switch
     {
-        "P1" or "P2" or "P3" or "P4" or "P5" => preset.ToUpperInvariant(),
-        _ => "P4"
+        "P1" or "P2" or "P3" => preset.ToUpperInvariant(),
+        _ => "P1"
     };
 }

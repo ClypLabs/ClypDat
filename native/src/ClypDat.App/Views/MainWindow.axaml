@@ -145,7 +145,7 @@
                       <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}" HorizontalAlignment="Stretch">
                         <ComboBox.ItemTemplate>
                           <DataTemplate>
-                            <TextBlock Text="{Binding Label}" />
+                            <TextBlock Text="{Binding Label}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Resolution}" />
                           </DataTemplate>
                         </ComboBox.ItemTemplate>
                       </ComboBox>
@@ -156,7 +156,7 @@
                       <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}" HorizontalAlignment="Stretch">
                         <ComboBox.ItemTemplate>
                           <DataTemplate>
-                            <TextBlock Text="{Binding StringFormat={}{0} fps}" />
+                            <TextBlock Text="{Binding StringFormat={}{0} fps}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=FrameRate}" />
                           </DataTemplate>
                         </ComboBox.ItemTemplate>
                       </ComboBox>
@@ -165,7 +165,9 @@
 
                   <StackPanel Spacing="4" Margin="0,0,0,8">
                     <TextBlock Classes="flyoutLabel" Text="BITRATE" />
-                    <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayBitrateOptions}" SelectedItem="{Binding SelectedReplayBitrateOption}" HorizontalAlignment="Stretch" />
+                    <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayBitrateOptions}" SelectedItem="{Binding SelectedReplayBitrateOption}" HorizontalAlignment="Stretch">
+                      <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Bitrate}" /></DataTemplate></ComboBox.ItemTemplate>
+                    </ComboBox>
                     <TextBox Classes="settingsInput" Text="{Binding ReplayBitrateMbps}" PlaceholderText="15" IsVisible="{Binding IsCustomReplayBitrate}" HorizontalAlignment="Stretch" />
                   </StackPanel>
 
@@ -1266,19 +1268,21 @@
                     <StackPanel Spacing="3">
                       <TextBlock Text="Resolution" Foreground="#B8C7D8" FontSize="12" />
                       <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}">
-                        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
+                        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Resolution}" /></DataTemplate></ComboBox.ItemTemplate>
                       </ComboBox>
                       <TextBox Classes="settingsInput" Text="{Binding CustomReplayHeight}" PlaceholderText="1080" IsVisible="{Binding IsCustomReplayResolution}" />
                     </StackPanel>
                     <StackPanel Grid.Column="1" Spacing="3">
                       <TextBlock Text="FPS" Foreground="#B8C7D8" FontSize="12" />
                       <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}">
-                        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding StringFormat={}{0} FPS}" /></DataTemplate></ComboBox.ItemTemplate>
+                        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding StringFormat={}{0} FPS}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=FrameRate}" /></DataTemplate></ComboBox.ItemTemplate>
                       </ComboBox>
                     </StackPanel>
                     <StackPanel Grid.Column="2" Spacing="3">
                       <TextBlock Text="Bitrate" Foreground="#B8C7D8" FontSize="12" />
-                      <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayBitrateOptions}" SelectedItem="{Binding SelectedReplayBitrateOption}" />
+                      <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayBitrateOptions}" SelectedItem="{Binding SelectedReplayBitrateOption}">
+                        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Bitrate}" /></DataTemplate></ComboBox.ItemTemplate>
+                      </ComboBox>
                       <TextBox Classes="settingsInput" Width="150" Text="{Binding ReplayBitrateMbps}" PlaceholderText="15" IsVisible="{Binding IsCustomReplayBitrate}" />
                     </StackPanel>
                   </Grid>
@@ -1297,7 +1301,7 @@
 
                   <Grid ColumnDefinitions="150,150,150" ColumnSpacing="12" HorizontalAlignment="Left">
                     <StackPanel Spacing="3">
-                      <TextBlock Text="Video encoder" Foreground="#B8C7D8" FontSize="12" />
+                      <TextBlock Text="Video Encoder" Foreground="#B8C7D8" FontSize="12" />
                       <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayEncoderModes}" SelectedItem="{Binding SelectedReplayEncoderMode}">
                         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
                       </ComboBox>
@@ -1309,7 +1313,7 @@
                       </ComboBox>
                     </StackPanel>
                     <StackPanel Grid.Column="2" Spacing="3">
-                      <TextBlock Text="Encoder preset" Foreground="#B8C7D8" FontSize="12" />
+                      <TextBlock Text="Encoder Preset" Foreground="#B8C7D8" FontSize="12" />
                       <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayEncoderPresets}" SelectedItem="{Binding SelectedReplayEncoderPreset}">
                         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
                       </ComboBox>
@@ -1540,7 +1544,7 @@
                 <TextBlock Text="Startup behavior, layout, and clip filenames." Foreground="#93A6B8" FontSize="14" TextWrapping="Wrap" />
               </StackPanel>
 
-              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Launch ClypDat on Windows boot|Start minimized on boot|Process priority|Startup'}">
+              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Launch ClypDat on Windows boot|Start minimized on boot|Process priority|Automatically Focus ClypDat|Game exit|Startup'}">
                 <StackPanel Spacing="18">
                   <TextBlock Text="STARTUP" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" />
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Launch ClypDat on Windows boot|Startup}">
@@ -1549,6 +1553,14 @@
                       <TextBlock Text="Starts ClypDat automatically when you sign in to Windows." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding LaunchOnWindowsStartup}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                  </Grid>
+                  <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
+                  <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Automatically Focus ClypDat|Game exit}">
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="Automatically Focus ClypDat" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                      <TextBlock Text="Automatically show ClypDat when you exit your game." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutomaticallyFocusOnGameExit}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
                   <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Start minimized on boot|Startup}">

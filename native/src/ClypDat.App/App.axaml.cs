@@ -220,6 +220,8 @@ public sealed partial class App : Application
     // window directly.
     public void ShowMainWindowFromExternalRequest() => Avalonia.Threading.Dispatcher.UIThread.Post(RestoreMainWindow);
 
+    public void FocusMainWindow() => RestoreMainWindow();
+
     private void RestoreMainWindow()
     {
         if (_mainWindow is null) return;

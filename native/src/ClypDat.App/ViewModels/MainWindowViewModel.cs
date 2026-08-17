@@ -244,11 +244,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ReplayFrameRates = new ObservableCollection<int> { 30, 60, 90, 120, 144 };
         ReplayEncoderPresets = new ObservableCollection<EncoderPresetOption>
         {
-            new("P1", "Fastest. Cheapest on the GPU and the softest picture of the five. Worth dropping to only if capture is genuinely struggling."),
+            new("P1", "Fastest. Cheapest on the GPU and the softest picture of the three. Worth dropping to only if capture is genuinely struggling."),
             new("P2", "Very fast. A visible step up from P1 for very little extra GPU time."),
-            new("P3", "Fast. Sits between P2 and the default without much cost either way."),
-            new("P4", "Balanced, and the default. Noticeably better detail in motion than P1-P3, and comfortably within budget on most GPUs."),
-            new("P5", "Highest quality here, and the most GPU time per frame. Best on a card with headroom to spare - watch for dropped frames if the game is already pushing it.")
+            new("P3", "Highest quality here. Best on a card with headroom to spare - watch for dropped frames if the game is already pushing it.")
         };
         ReplayBitrateOptions = new ObservableCollection<string> { "10 Mbps", "15 Mbps", "20 Mbps", "40 Mbps", "60 Mbps", "80 Mbps", "100 Mbps", "Custom" };
         ReplayVideoCodecs = new ObservableCollection<ReplayVideoCodecOption>
@@ -452,7 +450,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ReplayEncoderModeOption> ReplayEncoderModes { get; }
     public ObservableCollection<int> ReplayFrameRates { get; }
     // Label is what's persisted and handed to NVENC; Description is the hover
-    // text, since "P1".."P5" says nothing on its own about which way is faster.
+    // text, since "P1".."P3" says nothing on its own about which way is faster.
     public sealed record EncoderPresetOption(string Label, string Description);
 
     public ObservableCollection<EncoderPresetOption> ReplayEncoderPresets { get; }
@@ -1538,7 +1536,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public EncoderPresetOption SelectedReplayEncoderPreset
     {
         get => ReplayEncoderPresets.FirstOrDefault(preset => preset.Label == Settings.ReplayEncoderPreset)
-               ?? ReplayEncoderPresets.First(preset => preset.Label == "P4");
+               ?? ReplayEncoderPresets.First(preset => preset.Label == "P1");
         set
         {
             if (value is null || Settings.ReplayEncoderPreset == value.Label) return;
@@ -5194,6 +5192,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             CaptureDevices: _audioDevices.GetCaptureDevices().ToArray()));
 
         await Dispatcher.UIThread.InvokeAsync(() => ApplyAudioDeviceSnapshot(snapshot));
+    }
+
+    public bool AutomaticallyFocusOnGameExit
+    {
+        get => Settings.AutomaticallyFocusOnGameExit;
+        set
+        {
+            if (Settings.AutomaticallyFocusOnGameExit == value) return;
+            Settings.AutomaticallyFocusOnGameExit = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
     }
 
     private void ApplyAudioDeviceSnapshot((AudioDeviceOption[] RenderDevices, string? DefaultMicrophoneName, AudioDeviceOption[] CaptureDevices) snapshot)

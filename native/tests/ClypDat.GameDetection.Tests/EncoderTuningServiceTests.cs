@@ -26,7 +26,7 @@ public sealed class EncoderTuningServiceTests
     {
         var service = new EncoderTuningService();
         var changes = Changes(service);
-        service.BeginSession("P4", 120, 1080);
+        service.BeginSession("P3", 120, 1080);
 
         Feed(service, 30, 120, 61, 80, 120);
         Feed(service, 60, 120, 35, 80, 120);

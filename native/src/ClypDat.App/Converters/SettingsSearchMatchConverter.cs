@@ -34,7 +34,7 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         // survive the nav filter or the page it lives on never appears.
         ["General"] = new[]
         {
-            "Startup", "Launch ClypDat on Windows boot", "Start minimized on boot", "Process priority",
+            "Startup", "Launch ClypDat on Windows boot", "Start minimized on boot", "Process priority", "Automatically Focus ClypDat", "Game exit",
             "Layout", "Show status panel",
             "Playback Paused indicator", "Scale clips with window size", "Hoverbar",
             "Combine sidebar filters", "Clip Filenames", "Template", "Rename all"
@@ -52,7 +52,7 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         ["Replay Buffer"] = new[]
         {
             "Hotkey", "Save hotkey", "Recording", "Replay length", "Resolution", "Frame rate",
-            "Encoding", "Encoder preset", "Rate control", "Quality", "Bitrate", "Capture backend",
+            "Encoding", "Encoder Preset", "Rate control", "Quality", "Bitrate", "Capture backend",
             "Full session recording", "Destination folder", "Session codec",
             "Finalize in background", "Storage limit", "Custom limit"
         },

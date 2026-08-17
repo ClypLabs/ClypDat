@@ -542,9 +542,13 @@ public sealed partial class MainWindow : Window
         }
 
         if (ViewModel is null) return;
+        var previousDetection = ViewModel.ActiveGameDetection;
         ViewModel.ActiveGameDetection = detection;
         ViewModel.ActiveGame = detection.DisplayName;
         ViewModel.SetGameActiveForTimelineHydration(detection.IsDetected);
+
+        if (previousDetection.IsDetected && !detection.IsDetected && ViewModel.AutomaticallyFocusOnGameExit)
+            (Application.Current as App)?.FocusMainWindow();
 
         // Cheap per-window resolution now (see ForegroundGameDetector), but no
         // reason to poll as fast while nothing is running - back off to 3s with
