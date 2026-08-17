@@ -1262,10 +1262,10 @@
                     </ListBox.ItemTemplate>
                   </ListBox>
 
-                  <Grid ColumnDefinitions="200,96,96" ColumnSpacing="12" HorizontalAlignment="Left" IsVisible="{Binding IsCustomReplayQuality}">
+                  <Grid ColumnDefinitions="180,96,96" ColumnSpacing="12" HorizontalAlignment="Left" IsVisible="{Binding IsCustomReplayQuality}">
                     <StackPanel Spacing="3">
                       <TextBlock Text="Resolution" Foreground="#B8C7D8" FontSize="12" />
-                      <ComboBox Classes="settingsInput" Width="200" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}">
+                      <ComboBox Classes="settingsInput" Width="180" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}">
                         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Resolution}" /></DataTemplate></ComboBox.ItemTemplate>
                       </ComboBox>
                     </StackPanel>

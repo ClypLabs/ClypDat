@@ -219,8 +219,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
         ReplayResolutions = new ObservableCollection<ResolutionOption>
         {
-            new("Medium (480p)", 480),
-            new("High (720p)", 720),
+            new("Low (480p)", 480),
+            new("Medium (720p)", 720),
             new("Full HD (1080p)", 1080),
             new("QHD 2K (1440p)", 1440),
             new("UHD 4K (2160p)", 2160)
