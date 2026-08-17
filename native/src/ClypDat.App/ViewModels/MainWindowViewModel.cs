@@ -233,7 +233,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             new("Low Quality", "Lower resource use", "720p · 30 FPS · 10 Mbps", 720, 30, 10),
             new("Standard", "Performance and fast sharing", "1080p · 60 FPS · 15 Mbps", 1080, 60, 15),
-            new("High Quality", "Higher detail, higher resource use", "1440p · 60 FPS · 40 Mbps", 1440, 60, 40),
+            new("High Quality", "Higher detail, higher resource use", "1440p · 60 FPS · 20 Mbps", 1440, 60, 20),
             new("Custom", "Customize your own settings", "Choose resolution, FPS, and bitrate", -1, 0, 0)
         };
         ReplayEncoderModes = new ObservableCollection<ReplayEncoderModeOption>

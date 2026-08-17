@@ -1068,10 +1068,10 @@
     </Setter>
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem">
-    <Setter Property="Width" Value="190" />
-    <Setter Property="MinHeight" Value="104" />
-    <Setter Property="Margin" Value="0,0,10,10" />
-    <Setter Property="Padding" Value="16" />
+    <Setter Property="Width" Value="250" />
+    <Setter Property="MinHeight" Value="88" />
+    <Setter Property="Margin" Value="0,0,10,8" />
+    <Setter Property="Padding" Value="14" />
     <Setter Property="Background" Value="#141D24" />
     <Setter Property="Foreground" Value="#D2DEEC" />
     <Setter Property="BorderBrush" Value="#2C3B48" />
@@ -1079,6 +1079,7 @@
     <Setter Property="CornerRadius" Value="9" />
     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
     <Setter Property="VerticalContentAlignment" Value="Stretch" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:pointerover">
     <Setter Property="Background" Value="#22303D" />
@@ -1089,6 +1090,13 @@
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected:pointerover">
+    <Setter Property="Background" Value="#39434C" />
+  </Style>
+  <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#303840" />
+    <Setter Property="BorderBrush" Value="#FFFFFF" />
+  </Style>
+  <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="#39434C" />
   </Style>
   <Style Selector="Button.autoClipCardHeader">
