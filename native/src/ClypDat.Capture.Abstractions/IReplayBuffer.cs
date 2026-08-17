@@ -106,6 +106,7 @@ public sealed record ReplaySaveCompleted(string Path, string? Title, DateTime Co
 public interface IReplayCaptureWorkerEvents
 {
     event EventHandler? RecordingStateChanged;
+    event EventHandler? SaveStarted;
     event EventHandler<ReplaySaveCompleted>? SaveCompleted;
 }
 

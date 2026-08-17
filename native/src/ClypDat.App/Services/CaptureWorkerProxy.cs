@@ -27,6 +27,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     public event EventHandler? RecordingStopped;
     public event EventHandler? RecordingStateChanged;
     public event EventHandler<ReplayCaptureHealth>? HealthChanged;
+    public event EventHandler? SaveStarted;
     public event EventHandler<ReplaySaveCompleted>? SaveCompleted;
     public ReplayCaptureHealth GetHealthSnapshot() => _health;
     public bool LastSaveVideoWasFrozen => false;
@@ -227,6 +228,9 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
                             RecordingStateChanged?.Invoke(this, EventArgs.Empty);
                             RecordingStopped?.Invoke(this, EventArgs.Empty);
                         });
+                        break;
+                    case "save-started":
+                        Dispatcher.UIThread.Post(() => SaveStarted?.Invoke(this, EventArgs.Empty));
                         break;
                     case "save-completed":
                         var completed = message.Payload.Deserialize<CaptureWorkerSaveResult>();

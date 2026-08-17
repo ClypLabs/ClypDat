@@ -430,6 +430,7 @@ public sealed partial class MainWindow : Window
             if (_replayBuffer is IReplayCaptureWorkerEvents workerEvents)
             {
                 workerEvents.RecordingStateChanged -= Worker_RecordingStateChanged;
+                workerEvents.SaveStarted -= Worker_SaveStarted;
                 workerEvents.SaveCompleted -= Worker_SaveCompleted;
             }
             _replayBuffer?.Dispose();
@@ -682,6 +683,7 @@ public sealed partial class MainWindow : Window
         if (buffer is IReplayCaptureWorkerEvents workerEvents)
         {
             workerEvents.RecordingStateChanged += Worker_RecordingStateChanged;
+            workerEvents.SaveStarted += Worker_SaveStarted;
             workerEvents.SaveCompleted += Worker_SaveCompleted;
         }
     }
@@ -695,6 +697,23 @@ public sealed partial class MainWindow : Window
             ViewModel.IsReplayRecording = buffer.IsRecording;
             if (!buffer.IsRecording) UpdateRecorderStatusFromState();
         });
+    }
+
+    private void Worker_SaveStarted(object? sender, EventArgs args)
+    {
+        if (sender is not IReplayBuffer buffer) return;
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => Worker_SaveStarted(sender, args));
+            return;
+        }
+
+        if (!ReferenceEquals(_replayBuffer, buffer) || ViewModel is null) return;
+        // UI-owned saves already show this immediately before calling the
+        // worker. The event is for global-hotkey saves that originate inside
+        // the worker, so do not restart the toast for the former.
+        if (ViewModel.IsSavingReplayClip) return;
+        ShowClipNotification("Saving clip…", playSound: false);
     }
 
     private void Worker_SaveCompleted(object? sender, ReplaySaveCompleted completed)
@@ -775,6 +794,7 @@ public sealed partial class MainWindow : Window
         if (_replayBuffer is IReplayCaptureWorkerEvents oldWorkerEvents)
         {
             oldWorkerEvents.RecordingStateChanged -= Worker_RecordingStateChanged;
+            oldWorkerEvents.SaveStarted -= Worker_SaveStarted;
             oldWorkerEvents.SaveCompleted -= Worker_SaveCompleted;
         }
         _replayBuffer.Dispose();
