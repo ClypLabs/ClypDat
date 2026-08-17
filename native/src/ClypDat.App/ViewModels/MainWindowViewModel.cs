@@ -1595,6 +1595,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 OnPropertyChanged(nameof(SelectedReplayQualityPreset));
                 OnPropertyChanged(nameof(IsCustomReplayQuality));
                 OnPropertyChanged(nameof(IsCustomReplayBitrate));
+                OnPropertyChanged(nameof(ReplayQualityAboveDefault));
                 return;
             }
             if (!int.TryParse(value.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0], out var bitrate)) return;
@@ -1603,6 +1604,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged();
             OnPropertyChanged(nameof(ReplayBitrateMbps));
             OnPropertyChanged(nameof(IsCustomReplayBitrate));
+            OnPropertyChanged(nameof(ReplayQualityAboveDefault));
             SaveSettings();
             UpdateReplayQualityRestartRequired();
         }
@@ -1645,6 +1647,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 OnPropertyChanged(nameof(IsCustomReplayBitrate));
                 OnPropertyChanged(nameof(SelectedReplayQualityPreset));
                 OnPropertyChanged(nameof(IsCustomReplayQuality));
+                OnPropertyChanged(nameof(ReplayQualityAboveDefault));
             }
 
             SyncNumericBox(nameof(ReplayBitrateMbps), value, Settings.ReplayBitrateMbps);
