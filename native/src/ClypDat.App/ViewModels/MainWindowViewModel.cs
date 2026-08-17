@@ -98,7 +98,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private ProcessOption? _selectedChatProcess;
     private ProcessOption? _selectedProcessExclusion;
     private ReplayDurationPreset? _selectedReplayDurationPreset;
-    private bool _customReplayResolutionSelected;
     private bool _customReplayQualitySelected;
     private int _selectedReplayFrameRate;
     private ReplayQualityPreset? _selectedReplayQualityPreset;
@@ -218,16 +217,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("4 Minutes", 240),
             new("5 Minutes", 300)
         };
-        // Height=-1 is the "Custom" sentinel: the actual number comes from the
-        // CustomReplayHeight text field shown while it's selected. Same
-        // convention as FullSessionQuotaOptions/CustomFullSessionQuotaGb.
         ReplayResolutions = new ObservableCollection<ResolutionOption>
         {
-            new("720p", 720),
-            new("1080p", 1080),
-            new("1440p", 1440),
-            new("2160p (4K)", 2160),
-            new("Custom", -1)
+            new("Medium (480p)", 480),
+            new("High (720p)", 720),
+            new("Full HD (1080p)", 1080),
+            new("QHD 2K (1440p)", 1440),
+            new("UHD 4K (2160p)", 2160)
         };
         ReplayQualityPresets = new ObservableCollection<ReplayQualityPreset>
         {
@@ -248,11 +244,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("P2", "Very fast. A visible step up from P1 for very little extra GPU time."),
             new("P3", "Highest quality here. Best on a card with headroom to spare - watch for dropped frames if the game is already pushing it.")
         };
-        ReplayBitrateOptions = new ObservableCollection<string> { "10 Mbps", "15 Mbps", "20 Mbps", "40 Mbps", "60 Mbps", "80 Mbps", "100 Mbps", "Custom" };
+        ReplayBitrateOptions = new ObservableCollection<string>
+        {
+            "3M", "5M", "7M", "10M", "15M", "20M",
+            "25M", "30M", "50M", "70M", "100M"
+        };
         ReplayVideoCodecs = new ObservableCollection<ReplayVideoCodecOption>
         {
             new("H.264", "H.264", "Widest playback compatibility. Default codec."),
-            new("AV1 preferred", "AV1", "Uses hardware AV1 when available, then falls back to H.264.")
+            new("AV1", "AV1", "Uses hardware AV1 when available, then falls back to H.264.")
         };
         ExportCodecs = new ObservableCollection<ExportCodecOption>
         {
@@ -305,6 +305,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedReplayDurationPreset = ReplayDurationPresets.FirstOrDefault(preset => preset.Seconds == Settings.ReplayDurationSeconds) ??
                                        ReplayDurationPresets.First(preset => preset.Seconds == 60);
         _selectedReplayFrameRate = ReplayFrameRates.Contains(Settings.ReplayFrameRate) ? Settings.ReplayFrameRate : 60;
+        if (!ReplayResolutions.Any(option => option.Height == Settings.ReplayMaxHeight))
+        {
+            Settings.ReplayMaxHeight = 1080;
+        }
+        if (!ReplayBitrateOptions.Contains($"{Settings.ReplayBitrateMbps}M", StringComparer.Ordinal))
+        {
+            Settings.ReplayBitrateMbps = 15;
+        }
         _selectedReplayEncoderMode = ReplayEncoderModes.FirstOrDefault(mode => string.Equals(mode.Value, Settings.ReplayEncoderMode, StringComparison.OrdinalIgnoreCase))
                                      ?? ReplayEncoderModes.First(mode => mode.Value == "GPU");
         _selectedReplayQualityPreset = ReplayQualityPresets.FirstOrDefault(preset => preset.Matches(Settings.ReplayMaxHeight, Settings.ReplayFrameRate, Settings.ReplayBitrateMbps));
@@ -1361,61 +1369,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ResolutionOption SelectedReplayResolution
     {
-        get
-        {
-            if (IsCustomReplayResolution) return ReplayResolutions[^1];
-            return ReplayResolutions.FirstOrDefault(option => option.Height == Settings.ReplayMaxHeight) ?? ReplayResolutions.First(option => option.Height == 1080);
-        }
+        get => ReplayResolutions.FirstOrDefault(option => option.Height == Settings.ReplayMaxHeight) ?? ReplayResolutions.First(option => option.Height == 1080);
         set
         {
-            if (value.Height < 0)
-            {
-                _customReplayResolutionSelected = true;
-            }
-            else
-            {
-                _customReplayResolutionSelected = false;
-                Settings.ReplayMaxHeight = value.Height;
-            }
+            Settings.ReplayMaxHeight = value.Height;
 
             _customReplayQualitySelected = true;
             _selectedReplayQualityPreset = ReplayQualityPresets[^1];
             OnPropertyChanged();
-            OnPropertyChanged(nameof(IsCustomReplayResolution));
-            OnPropertyChanged(nameof(CustomReplayHeight));
             OnPropertyChanged(nameof(SelectedReplayQualityPreset));
             OnPropertyChanged(nameof(IsCustomReplayQuality));
             SaveSettings();
             UpdateReplayQualityRestartRequired();
             NotifyReplayQualityWarning();
-        }
-    }
-
-    // Custom is active when explicitly picked, or when the saved value isn't
-    // one of the presets (a previously-entered custom height surviving a
-    // restart) - same convention as IsCustomFullSessionQuota.
-    public bool IsCustomReplayResolution =>
-        _customReplayResolutionSelected ||
-        ReplayResolutions.All(option => option.Height != Settings.ReplayMaxHeight);
-
-    public string CustomReplayHeight
-    {
-        get => Settings.ReplayMaxHeight.ToString();
-        set
-        {
-            if (int.TryParse(value, out var height))
-            {
-                Settings.ReplayMaxHeight = Math.Clamp(height, 480, 2160);
-                _customReplayQualitySelected = true;
-                _selectedReplayQualityPreset = ReplayQualityPresets[^1];
-                SaveSettings();
-                UpdateReplayQualityRestartRequired();
-            NotifyReplayQualityWarning();
-                OnPropertyChanged(nameof(SelectedReplayQualityPreset));
-                OnPropertyChanged(nameof(IsCustomReplayQuality));
-            }
-
-            SyncNumericBox(nameof(CustomReplayHeight), value, Settings.ReplayMaxHeight);
         }
     }
 
@@ -1460,15 +1426,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Settings.ReplayFrameRate = value.FrameRate;
             Settings.ReplayBitrateMbps = value.Bitrate;
             _selectedReplayFrameRate = value.FrameRate;
-            _customReplayResolutionSelected = false;
             OnPropertyChanged();
             OnPropertyChanged(nameof(SelectedReplayResolution));
-            OnPropertyChanged(nameof(IsCustomReplayResolution));
-            OnPropertyChanged(nameof(CustomReplayHeight));
             OnPropertyChanged(nameof(SelectedReplayFrameRate));
-            OnPropertyChanged(nameof(ReplayBitrateMbps));
             OnPropertyChanged(nameof(SelectedReplayBitrateOption));
-            OnPropertyChanged(nameof(IsCustomReplayBitrate));
             OnPropertyChanged(nameof(IsCustomReplayQuality));
             NotifyReplayQualityWarning();
             SaveSettings();
@@ -1577,47 +1538,30 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (!ExportEncoderProbe.Av1ProbeCompleted) return "Checking hardware AV1 support…";
             return ExportEncoderProbe.Av1Family is null
                 ? "Hardware AV1 unavailable. H.264 fallback will be used."
-                : "Hardware AV1 preferred. H.264 fallback remains available.";
+                : "Hardware AV1 selected. H.264 fallback remains available.";
         }
     }
 
     public string SelectedReplayBitrateOption
     {
-        get => ReplayBitrateOptions.FirstOrDefault(option => option.StartsWith(Settings.ReplayBitrateMbps.ToString(), StringComparison.Ordinal)) ?? "Custom";
+        get => ReplayBitrateOptions.FirstOrDefault(option => string.Equals(option, $"{Settings.ReplayBitrateMbps}M", StringComparison.Ordinal)) ?? "15M";
         set
         {
-            if (string.Equals(value, "Custom", StringComparison.Ordinal))
-            {
-                _customReplayQualitySelected = true;
-                _selectedReplayQualityPreset = ReplayQualityPresets[^1];
-                OnPropertyChanged(nameof(SelectedReplayQualityPreset));
-                OnPropertyChanged(nameof(IsCustomReplayQuality));
-                OnPropertyChanged(nameof(IsCustomReplayBitrate));
-                NotifyReplayQualityWarning();
-                return;
-            }
-            if (!int.TryParse(value.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0], out var bitrate)) return;
+            if (!int.TryParse(value.TrimEnd('M'), out var bitrate)) return;
             if (Settings.ReplayBitrateMbps == bitrate) return;
-            Settings.ReplayBitrateMbps = Math.Clamp(bitrate, 5, 100);
+            Settings.ReplayBitrateMbps = Math.Clamp(bitrate, 3, 100);
+            _customReplayQualitySelected = true;
+            _selectedReplayQualityPreset = ReplayQualityPresets[^1];
             OnPropertyChanged();
-            OnPropertyChanged(nameof(ReplayBitrateMbps));
-            OnPropertyChanged(nameof(IsCustomReplayBitrate));
+            OnPropertyChanged(nameof(SelectedReplayQualityPreset));
+            OnPropertyChanged(nameof(IsCustomReplayQuality));
             NotifyReplayQualityWarning();
             SaveSettings();
             UpdateReplayQualityRestartRequired();
         }
     }
 
-    public bool IsCustomReplayBitrate => string.Equals(SelectedReplayBitrateOption, "Custom", StringComparison.Ordinal);
-
-    // A TextBox binding ignores a PropertyChanged raised while it is itself
-    // mid source-update, so a clamped or rejected value stayed on screen as
-    // whatever was typed. The stored setting was right, but the box showed
-    // (say) 60 for a value clamped to 51, which reads as though the limit
-    // isn't enforced at all. Posting the notification lets the binding's own
-    // update finish first, so the box then snaps back to what was actually
-    // stored. Only posted when the text really differs - re-notifying on every
-    // keystroke would fight the caret.
+    // Keep numeric TextBox bindings in sync after clamping or rejecting input.
     private void SyncNumericBox(string propertyName, string typed, int stored)
     {
         if (string.Equals(typed, stored.ToString(), StringComparison.Ordinal))
@@ -1627,29 +1571,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         Dispatcher.UIThread.Post(() => OnPropertyChanged(propertyName));
-    }
-
-    public string ReplayBitrateMbps
-    {
-        get => Settings.ReplayBitrateMbps.ToString();
-        set
-        {
-            if (int.TryParse(value, out var mbps))
-            {
-                Settings.ReplayBitrateMbps = Math.Clamp(mbps, 5, 100);
-                _customReplayQualitySelected = true;
-                _selectedReplayQualityPreset = ReplayQualityPresets[^1];
-                SaveSettings();
-                UpdateReplayQualityRestartRequired();
-                OnPropertyChanged(nameof(SelectedReplayBitrateOption));
-                OnPropertyChanged(nameof(IsCustomReplayBitrate));
-                OnPropertyChanged(nameof(SelectedReplayQualityPreset));
-                OnPropertyChanged(nameof(IsCustomReplayQuality));
-                NotifyReplayQualityWarning();
-            }
-
-            SyncNumericBox(nameof(ReplayBitrateMbps), value, Settings.ReplayBitrateMbps);
-        }
     }
 
     private void NotifyReplayQualityWarning()
