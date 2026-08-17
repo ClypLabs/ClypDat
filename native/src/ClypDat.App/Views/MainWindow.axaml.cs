@@ -711,6 +711,12 @@ public sealed partial class MainWindow : Window
 
     private void EncoderTuning_OnHealthChanged(object? sender, ReplayCaptureHealth health)
     {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => EncoderTuning_OnHealthChanged(sender, health));
+            return;
+        }
+
         _encoderTuning.OnHealth(health);
         ViewModel?.UpdateReplayStorageHealth(health.Storage);
     }
