@@ -36,8 +36,6 @@ public sealed class AppSettings
     // hardware AV1 when available, then falls back through H.264.
     public string ReplayVideoCodec { get; set; } = "H.264";
     public string ReplayEncoderMode { get; set; } = "GPU";
-    // Empty means Auto: use the system's default/high-performance DXGI adapter.
-    public string ReplayGpuAdapterName { get; set; } = string.Empty;
     // Sustained encoder overload may lower live target FPS, then restore it
     // after recovery. Users can disable this protection.
     public bool ReplayAdaptiveFrameRateEnabled { get; set; } = true;

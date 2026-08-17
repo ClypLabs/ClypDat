@@ -814,7 +814,6 @@ public sealed record ReplayBufferConfig(
     // Native engine encoder controls - see AppSettings for what each means.
     string VideoCodec = "H.264",
     string EncoderMode = "GPU",
-    string EncoderAdapter = "",
     string EncoderPreset = "P4",
     int BitrateMbps = 15,
     string CaptureSource = "Game",

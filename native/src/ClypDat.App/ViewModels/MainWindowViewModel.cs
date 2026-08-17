@@ -103,7 +103,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _selectedReplayFrameRate;
     private ReplayQualityPreset? _selectedReplayQualityPreset;
     private ReplayEncoderModeOption? _selectedReplayEncoderMode;
-    private GraphicsAdapterOption? _selectedReplayGpuAdapter;
     private ReplayBackendPreset? _selectedReplayBackend;
     private string _selectedReplayCaptureSource = "Game";
     private DesktopMonitorOption? _selectedDesktopMonitor;
@@ -242,7 +241,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("GPU", "Hardware encoding. Recommended for most systems."),
             new("CPU", "Software H.264 encoding. Uses more CPU and may reduce game performance.")
         };
-        ReplayGpuAdapters = new ObservableCollection<GraphicsAdapterOption>(GraphicsAdapterService.Enumerate());
         ReplayFrameRates = new ObservableCollection<int> { 30, 60, 90, 120, 144 };
         ReplayEncoderPresets = new ObservableCollection<EncoderPresetOption>
         {
@@ -311,8 +309,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedReplayFrameRate = ReplayFrameRates.Contains(Settings.ReplayFrameRate) ? Settings.ReplayFrameRate : 60;
         _selectedReplayEncoderMode = ReplayEncoderModes.FirstOrDefault(mode => string.Equals(mode.Value, Settings.ReplayEncoderMode, StringComparison.OrdinalIgnoreCase))
                                      ?? ReplayEncoderModes.First(mode => mode.Value == "GPU");
-        _selectedReplayGpuAdapter = ReplayGpuAdapters.FirstOrDefault(adapter => string.Equals(adapter.Value, Settings.ReplayGpuAdapterName, StringComparison.OrdinalIgnoreCase))
-                                    ?? ReplayGpuAdapters.First(adapter => adapter.IsAuto);
         _selectedReplayQualityPreset = ReplayQualityPresets.FirstOrDefault(preset => preset.Matches(Settings.ReplayMaxHeight, Settings.ReplayFrameRate, Settings.ReplayBitrateMbps));
         _customReplayQualitySelected = _selectedReplayQualityPreset is null;
         _activeReplayMaxHeight = Settings.ReplayMaxHeight;
@@ -454,7 +450,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public ObservableCollection<ReplayEncoderModeOption> ReplayEncoderModes { get; }
-    public ObservableCollection<GraphicsAdapterOption> ReplayGpuAdapters { get; }
     public ObservableCollection<int> ReplayFrameRates { get; }
     // Label is what's persisted and handed to NVENC; Description is the hover
     // text, since "P1".."P5" says nothing on its own about which way is faster.
@@ -1503,30 +1498,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsReplayEncoderCpu));
-            OnPropertyChanged(nameof(IsReplayGpuAdapterVisible));
-            OnPropertyChanged(nameof(ReplayEncoderModeStatus));
             SaveSettings();
             UpdateReplayQualityRestartRequired();
         }
     }
 
     public bool IsReplayEncoderCpu => string.Equals(Settings.ReplayEncoderMode, "CPU", StringComparison.OrdinalIgnoreCase);
-    public bool IsReplayGpuAdapterVisible => !IsReplayEncoderCpu;
-
-    public GraphicsAdapterOption SelectedReplayGpuAdapter
-    {
-        get => _selectedReplayGpuAdapter ?? ReplayGpuAdapters.First(adapter => adapter.IsAuto);
-        set
-        {
-            if (value is null || string.Equals(Settings.ReplayGpuAdapterName, value.Value, StringComparison.OrdinalIgnoreCase)) return;
-            Settings.ReplayGpuAdapterName = value.Value;
-            _selectedReplayGpuAdapter = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(ReplayEncoderModeStatus));
-            SaveSettings();
-            UpdateReplayQualityRestartRequired();
-        }
-    }
 
     public string ReplayEncoderModeStatus
     {
@@ -1542,7 +1519,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             return IsReplayEncoderCpu
                 ? "CPU mode uses software H.264 encoding and more processor resources."
-                : $"GPU mode uses {SelectedReplayGpuAdapter.Label}; Auto selects the best available adapter, with CPU H.264 fallback.";
+                : "GPU mode selects the best available hardware encoder automatically, with CPU H.264 fallback.";
         }
     }
 
@@ -1715,7 +1692,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // One string covering everything the running buffer baked in at start, so
     // the restart notice doesn't need a field per encoder setting.
     private string EncoderSignature =>
-        $"{Settings.ReplayVideoCodec}|{Settings.ReplayEncoderMode}|{Settings.ReplayGpuAdapterName}|{Settings.ReplayEncoderPreset}|{Settings.ReplayBitrateMbps}";
+        $"{Settings.ReplayVideoCodec}|{Settings.ReplayEncoderMode}|{Settings.ReplayEncoderPreset}|{Settings.ReplayBitrateMbps}";
 
     private void UpdateReplayQualityRestartRequired()
     {
@@ -5363,7 +5340,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             BitrateMbps: Settings.ReplayBitrateMbps,
             VideoCodec: Settings.ReplayVideoCodec,
             EncoderMode: Settings.ReplayEncoderMode,
-            EncoderAdapter: Settings.ReplayGpuAdapterName,
             CaptureSource: desktopCapture ? "Desktop" : "Game",
             CaptureMonitorDeviceName: desktopCapture ? desktopMonitor.DeviceName : string.Empty,
             CaptureCursor: desktopCapture && Settings.ReplayDesktopCaptureCursor,
