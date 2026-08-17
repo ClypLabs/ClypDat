@@ -1656,7 +1656,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool ReplayQualityAboveDefault =>
         IsCustomReplayQuality &&
-        (Settings.ReplayMaxHeight >= 1440 || Settings.ReplayFrameRate >= 120 || Settings.ReplayBitrateMbps >= 40);
+        (Settings.ReplayMaxHeight > 1080 || Settings.ReplayFrameRate > 60 || Settings.ReplayBitrateMbps > 15);
 
     // Past 1080p60 both backends cost something, but not the same something, so
     // one shared sentence was telling most users about a cost they were never

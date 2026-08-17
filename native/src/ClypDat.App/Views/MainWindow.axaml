@@ -1283,10 +1283,17 @@
                     </StackPanel>
                   </Grid>
 
-                  <StackPanel Spacing="3">
-                    <TextBlock Text="{Binding ReplayQualityWarning}" Foreground="#E5A00D" FontSize="11" TextWrapping="Wrap" IsVisible="{Binding ReplayQualityAboveDefault}" />
-                    <TextBlock Text="Selected FPS is a target, not a guarantee. Actual clip FPS may vary with the game, capture source, encoder, and system load." Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" />
-                  </StackPanel>
+                  <Border Background="#0D151C" BorderBrush="#263544" BorderThickness="1" CornerRadius="8" Padding="12,9" IsVisible="{Binding ReplayQualityAboveDefault}">
+                    <StackPanel Spacing="3">
+                      <TextBlock FontSize="11" TextWrapping="Wrap">
+                        <Run Text="Hey, psst! " Foreground="#FF8B8B" FontWeight="Bold" />
+                        <Run Text="Your selected quality options exceed ClypDat's default 1080p, 60 FPS, and 15 Mbps." Foreground="#B8C7D8" />
+                      </TextBlock>
+                      <TextBlock Text="• Higher settings may make clips choppy if your system has limited headroom." Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" />
+                      <TextBlock Text="• Automatic FPS adjustment can lower FPS during sustained encoder load." Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" />
+                      <TextBlock Text="• Higher settings do not always mean better clips; smooth 1080p is better than choppy 1440p." Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" />
+                    </StackPanel>
+                  </Border>
 
                   <Grid ColumnDefinitions="150,150,150" ColumnSpacing="12" HorizontalAlignment="Left">
                     <StackPanel Spacing="3">
