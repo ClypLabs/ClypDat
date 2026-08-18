@@ -54,6 +54,7 @@ builder-debug.yml
 builder-effective-config.yaml
 AGENTS.md
 CLAUDE.md
+.gitlab-ci.yml
 
 # dotnet.ps1 and global.json are NOT ignored on purpose: .github/workflows/release.yml
 # runs ".\dotnet.ps1 --info" to bootstrap the pinned SDK, and global.json is what pins
