@@ -1182,7 +1182,7 @@
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="9" />
     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-    <Setter Property="VerticalContentAlignment" Value="Top" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
     <Setter Property="HorizontalAlignment" Value="Stretch" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:pointerover">

@@ -10,8 +10,8 @@
         Title="ClypDat"
         Width="1180"
         Height="780"
-        MinWidth="1024"
-        MinHeight="640"
+        MinWidth="1180"
+        MinHeight="780"
         Background="#0D1116"
         Icon="/Assets/clypdat-icon.ico"
         WindowDecorations="BorderOnly"
@@ -1294,7 +1294,7 @@
                   <ListBox Classes="qualityPresetCards" ItemsSource="{Binding ReplayQualityPresets}" SelectedItem="{Binding SelectedReplayQualityPreset}">
                     <ListBox.ItemTemplate>
                       <DataTemplate>
-                        <StackPanel Spacing="3" HorizontalAlignment="Left" VerticalAlignment="Top">
+                        <StackPanel Spacing="3" HorizontalAlignment="Left" VerticalAlignment="Center">
                           <TextBlock Text="{Binding Label}" FontSize="15" FontWeight="Bold" />
                           <TextBlock Text="{Binding Description}" Foreground="#B8C7D8" FontSize="11" TextWrapping="Wrap" />
                           <TextBlock Text="{Binding Summary}" Foreground="#9CB0C4" FontSize="11" TextWrapping="Wrap" />
