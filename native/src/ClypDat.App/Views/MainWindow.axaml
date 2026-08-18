@@ -131,13 +131,14 @@
                               </ComboBox.ItemTemplate>
                             </ComboBox>
                           </StackPanel>
-                          <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                          <Grid ColumnDefinitions="*,Auto,*" ColumnSpacing="12">
                             <Grid Grid.Column="0" ColumnDefinitions="*,Auto" ColumnSpacing="8">
                               <TextBlock Text="Capture cursor" Foreground="#B8C7D8" VerticalAlignment="Center" ToolTip.Tip="Include the mouse cursor in desktop capture" />
                               <ToggleSwitch Grid.Column="1" IsChecked="{Binding ReplayDesktopCaptureCursor}" OnContent="{x:Null}" OffContent="{x:Null}" ToolTip.Tip="Include the mouse cursor in desktop capture" />
                             </Grid>
-                            <Grid Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                              <TextBlock Text="Auto-switch to games" Foreground="#B8C7D8" VerticalAlignment="Center" ToolTip.Tip="Switch to Game Capture when a game is detected" />
+                            <Border Grid.Column="1" Width="1" Background="#304352" Margin="0,2" VerticalAlignment="Stretch" />
+                            <Grid Grid.Column="2" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                              <TextBlock Text="Switch to games" Foreground="#B8C7D8" VerticalAlignment="Center" ToolTip.Tip="Switch to Game Capture when a game is detected" />
                               <ToggleSwitch Grid.Column="1" IsChecked="{Binding ReplayAutoSwitchToGameCapture}" OnContent="{x:Null}" OffContent="{x:Null}" ToolTip.Tip="Switch to Game Capture when a game is detected" />
                             </Grid>
                           </Grid>
