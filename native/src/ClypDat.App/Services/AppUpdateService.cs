@@ -39,8 +39,8 @@ public static class AppUpdateService
 
     // Mirror on the marketing site, serving the same JSON shape from Cloudflare
     // R2. Exists so installs and updates survive GitHub being unreachable -
-    // an outage, or the account being flagged. It is strictly a fallback: while
-    // GitHub answers, nothing below ever touches it.
+    // an outage, or the account being flagged. It remains a final safety net
+    // after the direct GitHub and GitLab sources.
     private const string MirrorHost = "www.clypdat.xyz";
     private const string MirrorApexHost = "clypdat.xyz";
     private const string MirrorLatestReleaseUrl = $"https://{MirrorHost}/api/releases/latest";
@@ -53,7 +53,9 @@ public static class AppUpdateService
         Environment.GetCommandLineArgs().Any(argument =>
             argument.Equals("--force-mirror", StringComparison.OrdinalIgnoreCase));
 
-    // Ordered source list. GitHub primary, GitLab fallback, mirror last.
+    // Ordered source list. GitHub primary, GitLab fallback, mirror last. All
+    // sources are checked so a newer GitLab release is found when GitHub is
+    // reachable but its release workflow failed.
     private static IEnumerable<ReleaseSource> LatestReleaseSources =>
         ForceMirror
             ? [new(MirrorLatestReleaseUrl, ReleaseSourceKind.Mirror)]
@@ -81,7 +83,7 @@ public static class AppUpdateService
     // every one of those requests was re-fetching identical bytes - 10KB for
     // releases/latest, and 126KB for the full release list behind the notes.
     //
-    // Two entries at most, both small, held for the process lifetime. Static
+    // Six entries at most, all small, held for the process lifetime. Static
     // because CreateClient builds a fresh HttpClient per call, so there is no
     // longer-lived object to hang this off.
     //
@@ -96,10 +98,9 @@ public static class AppUpdateService
     // failed outright, so callers keep their existing failure behaviour rather
     // than parsing an empty string.
     //
-    // ShouldFailOver says whether the next source is worth trying. Transport
-    // faults, 5xx, and the rate-limit statuses all qualify: a user behind CGNAT
-    // can exhaust the 60/hour unauthenticated budget while GitHub itself is
-    // perfectly healthy, and the mirror is the way out.
+    // ShouldFailOver says whether a source failure should be logged as an
+    // unavailable source. Every source is still queried because a later source
+    // may contain a newer release even when an earlier source answers.
     //
     // 404 qualifies too. It reads like a definitive "no release exists", but a
     // flagged repository is served as 404 to anonymous callers while still
@@ -144,14 +145,15 @@ public static class AppUpdateService
         System.Net.HttpStatusCode.RequestTimeout or
         >= System.Net.HttpStatusCode.InternalServerError;
 
-    // Walks source list in order, stopping at first usable response. GitLab's
-    // release schema is normalized to ReleaseResponse before callers inspect it.
-    private static async Task<T?> GetJsonWithFallbackAsync<T>(
+    // Queries every source in order. GitLab's release schema is normalized to
+    // ReleaseResponse before callers inspect it.
+    private static async Task<IReadOnlyList<T>> GetJsonFromAllSourcesAsync<T>(
         HttpClient client,
         IEnumerable<ReleaseSource> sources,
         Func<string, ReleaseSourceKind, T?> parser,
         CancellationToken cancellationToken) where T : class
     {
+        var results = new List<T>();
         string? lastFailed = null;
         foreach (var source in sources)
         {
@@ -163,8 +165,13 @@ public static class AppUpdateService
                     var parsed = parser(body, source.Kind);
                     if (parsed is not null)
                     {
-                        if (lastFailed is not null) AppLog.Info($"Update source {lastFailed} unavailable; used {source.Url} instead.");
-                        return parsed;
+                        if (lastFailed is not null)
+                        {
+                            AppLog.Info($"Update source {lastFailed} unavailable; also checked {source.Url}.");
+                            lastFailed = null;
+                        }
+
+                        results.Add(parsed);
                     }
                 }
                 catch (JsonException)
@@ -173,30 +180,40 @@ public static class AppUpdateService
                 }
             }
 
-            if (body is null && !shouldFailOver) return null;
-            lastFailed = source.Url;
+            if (body is null && shouldFailOver) lastFailed = source.Url;
         }
 
-        return null;
+        return results;
     }
 
     public static async Task<AppUpdateInfo?> CheckAsync(CancellationToken cancellationToken = default)
     {
         using var client = CreateClient();
-        var release = await GetJsonWithFallbackAsync(client, LatestReleaseSources, ParseRelease, cancellationToken);
-        if (release is null || release.Draft || release.Prerelease || !TryParseVersion(release.TagName, out var latest) || latest <= CurrentVersion)
+        var releases = await GetJsonFromAllSourcesAsync(client, LatestReleaseSources, ParseRelease, cancellationToken);
+        var candidates = new List<(ReleaseResponse Release, Version Version)>();
+        foreach (var release in releases)
+        {
+            if (release.Draft || release.Prerelease || !TryParseVersion(release.TagName, out var version) || version <= CurrentVersion)
+            {
+                continue;
+            }
+
+            var asset = release.Assets.FirstOrDefault(item => item.Name.Equals(ExpectedAssetName, StringComparison.OrdinalIgnoreCase));
+            if (asset is not null && IsTrustedReleaseAssetUrl(asset.DownloadUrl))
+            {
+                candidates.Add((release, version));
+            }
+        }
+
+        var selected = candidates.OrderByDescending(item => item.Version).FirstOrDefault();
+        if (selected.Release is null)
         {
             return null;
         }
 
-        var asset = release.Assets.FirstOrDefault(item => item.Name.Equals(ExpectedAssetName, StringComparison.OrdinalIgnoreCase));
-        if (asset is null || !IsTrustedReleaseAssetUrl(asset.DownloadUrl))
-        {
-            return null;
-        }
-
-        var (whatsNew, fixes) = await LoadReleaseNotesAsync(client, latest, cancellationToken);
-        return new AppUpdateInfo(CurrentVersion, latest, release.TagName, asset.DownloadUrl, whatsNew, fixes, ParseSha256Digest(asset.Digest));
+        var selectedAsset = selected.Release.Assets.First(item => item.Name.Equals(ExpectedAssetName, StringComparison.OrdinalIgnoreCase));
+        var (whatsNew, fixes) = await LoadReleaseNotesAsync(client, selected.Version, cancellationToken);
+        return new AppUpdateInfo(CurrentVersion, selected.Version, selected.Release.TagName, selectedAsset.DownloadUrl, whatsNew, fixes, ParseSha256Digest(selectedAsset.Digest));
     }
 
     public static async Task DownloadAndRestartAsync(AppUpdateInfo update, IProgress<UpdateDownloadProgress>? progress = null, CancellationToken cancellationToken = default)
@@ -274,7 +291,7 @@ public static class AppUpdateService
         try
         {
             using var client = CreateClient();
-            var releases = await GetJsonWithFallbackAsync(client, ReleaseListSources, ParseReleaseList, cancellationToken) ?? [];
+            var releases = DistinctReleases(await GetJsonFromAllSourcesAsync(client, ReleaseListSources, ParseReleaseList, cancellationToken));
             // Version equality would fail here: a "v0.1.8" tag parses to a
             // 3-field Version (Revision=-1), but the assembly's CurrentVersion
             // is always 4-field (Revision=0) - compare only the 3 fields the
@@ -294,7 +311,7 @@ public static class AppUpdateService
     {
         try
         {
-            var releases = await GetJsonWithFallbackAsync(client, ReleaseListSources, ParseReleaseList, cancellationToken) ?? [];
+            var releases = DistinctReleases(await GetJsonFromAllSourcesAsync(client, ReleaseListSources, ParseReleaseList, cancellationToken));
             var whatsNew = new List<string>();
             var fixes = new List<string>();
             foreach (var item in releases
@@ -490,6 +507,13 @@ public static class AppUpdateService
         var releases = JsonSerializer.Deserialize<GitLabReleaseResponse[]>(json);
         return releases?.Select(NormalizeGitLabRelease).Where(release => release is not null).Select(release => release!).ToArray();
     }
+
+    private static ReleaseResponse[] DistinctReleases(IEnumerable<ReleaseResponse[]> releaseLists) =>
+        releaseLists
+            .SelectMany(releases => releases)
+            .GroupBy(release => release.TagName, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
 
     private static ReleaseResponse? NormalizeGitLabRelease(GitLabReleaseResponse? release)
     {
