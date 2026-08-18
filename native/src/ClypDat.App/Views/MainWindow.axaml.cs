@@ -2287,6 +2287,11 @@ public sealed partial class MainWindow : Window
         await ViewModel.RefreshOpenProcessesAsync();
     }
 
+    private void ApplyReplayBitrateRecommendationButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel?.ApplyReplayBitrateRecommendation();
+    }
+
     // Idle (not-recording) status text. With the buffer switched off it has
     // to say so - "Replay Armed" while the master switch is off would be a
     // flat lie about whether anything is being captured.

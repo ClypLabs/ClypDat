@@ -730,6 +730,18 @@
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="TextWrapping" Value="Wrap" />
   </Style>
+  <Style Selector="TextBlock.replayBitrateRecommendation">
+    <Setter Property="Foreground" Value="#7F98B0" />
+    <Setter Property="FontSize" Value="10" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.replayBitrateRecommendationButton">
+    <Setter Property="Foreground" Value="#9FC2E5" />
+    <Setter Property="FontSize" Value="10" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
   <Style Selector="StackPanel.replayFlyout TextBlock.replayFlyoutCardTitle">
     <Setter Property="Foreground" Value="#DCE8F4" />
     <Setter Property="FontSize" Value="13" />

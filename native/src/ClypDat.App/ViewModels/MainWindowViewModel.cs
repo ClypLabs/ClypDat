@@ -99,6 +99,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private ProcessOption? _selectedProcessExclusion;
     private ReplayDurationPreset? _selectedReplayDurationPreset;
     private bool _customReplayQualitySelected;
+    private bool _replayBitrateFollowsRecommendation;
     private int _selectedReplayFrameRate;
     private ReplayQualityPreset? _selectedReplayQualityPreset;
     private ReplayEncoderModeOption? _selectedReplayEncoderMode;
@@ -313,6 +314,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             Settings.ReplayBitrateMbps = 15;
         }
+        _replayBitrateFollowsRecommendation = Settings.ReplayBitrateMbps == GetReplayBitrateRecommendation().AutomaticMbps;
         _selectedReplayEncoderMode = ReplayEncoderModes.FirstOrDefault(mode => string.Equals(mode.Value, Settings.ReplayEncoderMode, StringComparison.OrdinalIgnoreCase))
                                      ?? ReplayEncoderModes.First(mode => mode.Value == "GPU");
         _selectedReplayQualityPreset = ReplayQualityPresets.FirstOrDefault(preset => preset.Matches(Settings.ReplayMaxHeight, Settings.ReplayFrameRate, Settings.ReplayBitrateMbps));
@@ -443,6 +445,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ProcessOption> GameCandidateProcesses { get; }
     public ObservableCollection<ReplayDurationPreset> ReplayDurationPresets { get; }
     public ObservableCollection<ResolutionOption> ReplayResolutions { get; }
+    private readonly record struct ReplayBitrateRecommendation(int MinimumMbps, int MaximumMbps)
+    {
+        public int AutomaticMbps => MinimumMbps;
+        public string RangeText => MinimumMbps == MaximumMbps
+            ? $"{MinimumMbps}M"
+            : $"{MinimumMbps}–{MaximumMbps}M";
+    }
+
     public sealed record ReplayQualityPreset(string Label, string Description, string Summary, int Height, int FrameRate, int Bitrate)
     {
         public bool IsCustom => Height < 0;
@@ -1367,18 +1377,89 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private ReplayBitrateRecommendation GetReplayBitrateRecommendation()
+    {
+        var isAv1 = string.Equals(Settings.ReplayVideoCodec, "AV1", StringComparison.OrdinalIgnoreCase);
+        return Settings.ReplayMaxHeight switch
+        {
+            <= 480 => new ReplayBitrateRecommendation(5, 5),
+            <= 720 => isAv1 ? new ReplayBitrateRecommendation(7, 7) : new ReplayBitrateRecommendation(10, 10),
+            <= 1080 => isAv1 ? new ReplayBitrateRecommendation(7, 10) : new ReplayBitrateRecommendation(15, 20),
+            <= 1440 => isAv1 ? new ReplayBitrateRecommendation(10, 20) : new ReplayBitrateRecommendation(20, 30),
+            _ => isAv1 ? new ReplayBitrateRecommendation(20, 35) : new ReplayBitrateRecommendation(50, 70)
+        };
+    }
+
+    public string ReplayBitrateRecommendationText
+    {
+        get
+        {
+            var recommendation = GetReplayBitrateRecommendation();
+            var codec = IsReplayEncoderCpu ? "H.264" : SelectedReplayVideoCodec.Label;
+            return $"Recommended for {codec} at {Settings.ReplayMaxHeight}p: {recommendation.RangeText}";
+        }
+    }
+
+    public bool ReplayBitrateRecommendationNeedsApply =>
+        Settings.ReplayBitrateMbps != GetReplayBitrateRecommendation().AutomaticMbps;
+
+    public string ReplayBitrateRecommendationActionText =>
+        $"Use {GetReplayBitrateRecommendation().AutomaticMbps}M";
+
+    public void ApplyReplayBitrateRecommendation()
+    {
+        var recommendation = GetReplayBitrateRecommendation();
+        var changed = Settings.ReplayBitrateMbps != recommendation.AutomaticMbps;
+        Settings.ReplayBitrateMbps = recommendation.AutomaticMbps;
+        _replayBitrateFollowsRecommendation = true;
+        _customReplayQualitySelected = true;
+        _selectedReplayQualityPreset = ReplayQualityPresets[^1];
+
+        if (changed)
+        {
+            OnPropertyChanged(nameof(SelectedReplayBitrateOption));
+            OnPropertyChanged(nameof(SelectedReplayQualityPreset));
+            OnPropertyChanged(nameof(IsCustomReplayQuality));
+            NotifyReplayQualityWarning();
+            UpdateReplayQualityRestartRequired();
+        }
+
+        NotifyReplayBitrateRecommendation();
+        SaveSettings();
+    }
+
+    private void ApplyAutomaticReplayBitrate()
+    {
+        Settings.ReplayBitrateMbps = GetReplayBitrateRecommendation().AutomaticMbps;
+        _replayBitrateFollowsRecommendation = true;
+    }
+
+    private void NotifyReplayBitrateRecommendation()
+    {
+        OnPropertyChanged(nameof(ReplayBitrateRecommendationText));
+        OnPropertyChanged(nameof(ReplayBitrateRecommendationNeedsApply));
+        OnPropertyChanged(nameof(ReplayBitrateRecommendationActionText));
+    }
+
     public ResolutionOption SelectedReplayResolution
     {
         get => ReplayResolutions.FirstOrDefault(option => option.Height == Settings.ReplayMaxHeight) ?? ReplayResolutions.First(option => option.Height == 1080);
         set
         {
+            var followsRecommendation = _replayBitrateFollowsRecommendation;
             Settings.ReplayMaxHeight = value.Height;
 
             _customReplayQualitySelected = true;
             _selectedReplayQualityPreset = ReplayQualityPresets[^1];
+            if (followsRecommendation)
+            {
+                ApplyAutomaticReplayBitrate();
+                OnPropertyChanged(nameof(SelectedReplayBitrateOption));
+            }
             OnPropertyChanged();
             OnPropertyChanged(nameof(SelectedReplayQualityPreset));
             OnPropertyChanged(nameof(IsCustomReplayQuality));
+            NotifyReplayBitrateRecommendation();
             SaveSettings();
             UpdateReplayQualityRestartRequired();
             NotifyReplayQualityWarning();
@@ -1421,6 +1502,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
 
             _customReplayQualitySelected = false;
+            _replayBitrateFollowsRecommendation = false;
             _selectedReplayQualityPreset = value;
             Settings.ReplayMaxHeight = value.Height;
             Settings.ReplayFrameRate = value.FrameRate;
@@ -1431,6 +1513,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(SelectedReplayFrameRate));
             OnPropertyChanged(nameof(SelectedReplayBitrateOption));
             OnPropertyChanged(nameof(IsCustomReplayQuality));
+            NotifyReplayBitrateRecommendation();
             NotifyReplayQualityWarning();
             SaveSettings();
             UpdateReplayQualityRestartRequired();
@@ -1445,18 +1528,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set
         {
             if (value is null || string.Equals(Settings.ReplayEncoderMode, value.Value, StringComparison.OrdinalIgnoreCase)) return;
+            var followsRecommendation = _replayBitrateFollowsRecommendation;
             Settings.ReplayEncoderMode = value.Value;
             _selectedReplayEncoderMode = value;
             if (string.Equals(value.Value, "CPU", StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(Settings.ReplayVideoCodec, "AV1", StringComparison.OrdinalIgnoreCase))
             {
                 Settings.ReplayVideoCodec = "H.264";
+                if (followsRecommendation)
+                {
+                    ApplyAutomaticReplayBitrate();
+                    OnPropertyChanged(nameof(SelectedReplayBitrateOption));
+                }
                 OnPropertyChanged(nameof(SelectedReplayVideoCodec));
                 OnPropertyChanged(nameof(ReplayVideoCodecStatus));
             }
 
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsReplayEncoderCpu));
+            NotifyReplayBitrateRecommendation();
             SaveSettings();
             UpdateReplayQualityRestartRequired();
         }
@@ -1516,9 +1606,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (value is null || string.Equals(Settings.ReplayVideoCodec, value.Value, StringComparison.OrdinalIgnoreCase)) return;
             if (IsReplayEncoderCpu && string.Equals(value.Value, "AV1", StringComparison.OrdinalIgnoreCase)) return;
+            var followsRecommendation = _replayBitrateFollowsRecommendation;
             Settings.ReplayVideoCodec = value.Value;
+            if (followsRecommendation)
+            {
+                ApplyAutomaticReplayBitrate();
+                OnPropertyChanged(nameof(SelectedReplayBitrateOption));
+            }
             OnPropertyChanged();
             OnPropertyChanged(nameof(ReplayVideoCodecStatus));
+            NotifyReplayBitrateRecommendation();
             SaveSettings();
             UpdateReplayQualityRestartRequired();
         }
@@ -1548,13 +1645,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set
         {
             if (!int.TryParse(value.TrimEnd('M'), out var bitrate)) return;
-            if (Settings.ReplayBitrateMbps == bitrate) return;
-            Settings.ReplayBitrateMbps = Math.Clamp(bitrate, 3, 100);
+            var clampedBitrate = Math.Clamp(bitrate, 3, 100);
+            var recommendation = GetReplayBitrateRecommendation();
+            var changed = Settings.ReplayBitrateMbps != clampedBitrate;
+            Settings.ReplayBitrateMbps = clampedBitrate;
+            _replayBitrateFollowsRecommendation = clampedBitrate == recommendation.AutomaticMbps;
             _customReplayQualitySelected = true;
             _selectedReplayQualityPreset = ReplayQualityPresets[^1];
-            OnPropertyChanged();
+            if (changed) OnPropertyChanged();
             OnPropertyChanged(nameof(SelectedReplayQualityPreset));
             OnPropertyChanged(nameof(IsCustomReplayQuality));
+            NotifyReplayBitrateRecommendation();
             NotifyReplayQualityWarning();
             SaveSettings();
             UpdateReplayQualityRestartRequired();

@@ -183,6 +183,14 @@
                             </ComboBox>
                           </StackPanel>
                         </Grid>
+                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,2,0,0">
+                          <TextBlock Classes="replayBitrateRecommendation" Text="{Binding ReplayBitrateRecommendationText}" />
+                          <Button Classes="linkButton replayBitrateRecommendationButton"
+                                  Content="{Binding ReplayBitrateRecommendationActionText}"
+                                  IsVisible="{Binding ReplayBitrateRecommendationNeedsApply}"
+                                  Click="ApplyReplayBitrateRecommendationButton_OnClick"
+                                  Padding="0" />
+                        </StackPanel>
                         <Border Classes="replayFlyoutRestartNotice" IsVisible="{Binding ReplayQualityRestartRequired}">
                           <TextBlock Text="Restarting the buffer to apply the new quality..." Classes="replayFlyoutWarning" />
                         </Border>
@@ -1316,6 +1324,15 @@
                       </ComboBox>
                     </StackPanel>
                   </Grid>
+
+                  <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsCustomReplayQuality}">
+                    <TextBlock Classes="replayBitrateRecommendation" Text="{Binding ReplayBitrateRecommendationText}" />
+                    <Button Classes="linkButton replayBitrateRecommendationButton"
+                            Content="{Binding ReplayBitrateRecommendationActionText}"
+                            IsVisible="{Binding ReplayBitrateRecommendationNeedsApply}"
+                            Click="ApplyReplayBitrateRecommendationButton_OnClick"
+                            Padding="0" />
+                  </StackPanel>
 
                   <Border Background="#0D151C" BorderBrush="#263544" BorderThickness="1" CornerRadius="8" Padding="14,11" IsVisible="{Binding ReplayQualityAboveDefault}">
                     <StackPanel Spacing="4">
