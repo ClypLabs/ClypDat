@@ -1294,7 +1294,7 @@
                   <ListBox Classes="qualityPresetCards" ItemsSource="{Binding ReplayQualityPresets}" SelectedItem="{Binding SelectedReplayQualityPreset}">
                     <ListBox.ItemTemplate>
                       <DataTemplate>
-                        <StackPanel Spacing="3">
+                        <StackPanel Spacing="3" HorizontalAlignment="Left" VerticalAlignment="Top">
                           <TextBlock Text="{Binding Label}" FontSize="15" FontWeight="Bold" />
                           <TextBlock Text="{Binding Description}" Foreground="#B8C7D8" FontSize="11" TextWrapping="Wrap" />
                           <TextBlock Text="{Binding Summary}" Foreground="#9CB0C4" FontSize="11" TextWrapping="Wrap" />

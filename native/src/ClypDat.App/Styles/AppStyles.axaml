@@ -1168,12 +1168,11 @@
     <Setter Property="Padding" Value="0" />
     <Setter Property="ItemsPanel">
       <ItemsPanelTemplate>
-        <WrapPanel Orientation="Horizontal" />
+        <UniformGrid Columns="4" />
       </ItemsPanelTemplate>
     </Setter>
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem">
-    <Setter Property="Width" Value="250" />
     <Setter Property="MinHeight" Value="88" />
     <Setter Property="Margin" Value="0,0,10,8" />
     <Setter Property="Padding" Value="14" />
@@ -1183,8 +1182,8 @@
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="9" />
     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-    <Setter Property="VerticalContentAlignment" Value="Center" />
-    <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="VerticalContentAlignment" Value="Top" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:pointerover">
     <Setter Property="Background" Value="#22303D" />
