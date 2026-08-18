@@ -228,10 +228,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
         ReplayQualityPresets = new ObservableCollection<ReplayQualityPreset>
         {
-            new("Low Quality", "Lower end PCs & faster uploads", "480p · 30 FPS", 480, 30, 5),
-            new("Standard", "Performance & fast sharing", "720p · 60 FPS", 720, 60, 10),
-            new("High Quality", "Higher quality & slower uploads", "1080p · 60 FPS", 1080, 60, 15),
-            new("Custom", "Customize your own settings", "Choose resolution, FPS, and bitrate", -1, 0, 0)
+            new("Low Quality", "Efficient capture for lighter systems", "480p · 30 FPS · 5 Mbps", 480, 30, 5),
+            new("Standard", "Balanced detail and performance", "720p · 60 FPS · 10 Mbps", 720, 60, 10),
+            new("High Quality", "Sharper video at higher resource cost", "1080p · 60 FPS · 15 Mbps", 1080, 60, 15),
+            new("Custom", "Set each recording option yourself", "Choose resolution, FPS, and bitrate", -1, 0, 0)
         };
         ReplayEncoderModes = new ObservableCollection<ReplayEncoderModeOption>
         {
