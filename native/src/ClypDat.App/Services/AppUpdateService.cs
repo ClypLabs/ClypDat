@@ -13,8 +13,8 @@ public sealed record AppUpdateInfo(
     string DownloadUrl,
     IReadOnlyList<string> WhatsNew,
     IReadOnlyList<string> Fixes,
-    // Lowercase hex SHA-256 of the asset as GitHub computed it, or empty when
-    // the API didn't report one (older releases predate the field).
+    // Lowercase hex SHA-256 of the asset as reported by the release API, or
+    // empty when the API didn't report one.
     string Sha256 = "");
 
 public sealed record UpdateDownloadProgress(string Status, double? Percentage, double? BytesPerSecond = null);
@@ -28,6 +28,14 @@ public static class AppUpdateService
     private const string UpstreamRepository = "ClypDat";
     private const string LatestReleaseUrl = $"https://api.github.com/repos/{UpstreamOwner}/{UpstreamRepository}/releases/latest";
     private const string ReleasesUrl = $"https://api.github.com/repos/{UpstreamOwner}/{UpstreamRepository}/releases?per_page=100";
+
+    // GitLab is a direct fallback for release metadata and installer assets.
+    // Keep this project path aligned with the GitLab mirror repository.
+    private const string GitLabProjectPath = "clypdat-group1/ClypDat-App";
+    private const string GitLabProjectId = "clypdat-group1%2FClypDat-App";
+    private const string GitLabHost = "gitlab.com";
+    private const string GitLabLatestReleaseUrl = $"https://{GitLabHost}/api/v4/projects/{GitLabProjectId}/releases/permalink/latest";
+    private const string GitLabReleasesUrl = $"https://{GitLabHost}/api/v4/projects/{GitLabProjectId}/releases?per_page=100";
 
     // Mirror on the marketing site, serving the same JSON shape from Cloudflare
     // R2. Exists so installs and updates survive GitHub being unreachable -
@@ -45,12 +53,24 @@ public static class AppUpdateService
         Environment.GetCommandLineArgs().Any(argument =>
             argument.Equals("--force-mirror", StringComparison.OrdinalIgnoreCase));
 
-    // Ordered source list. GitHub first, always.
-    private static IEnumerable<string> LatestReleaseSources =>
-        ForceMirror ? [MirrorLatestReleaseUrl] : [LatestReleaseUrl, MirrorLatestReleaseUrl];
+    // Ordered source list. GitHub primary, GitLab fallback, mirror last.
+    private static IEnumerable<ReleaseSource> LatestReleaseSources =>
+        ForceMirror
+            ? [new(MirrorLatestReleaseUrl, ReleaseSourceKind.Mirror)]
+            : [
+                new(LatestReleaseUrl, ReleaseSourceKind.GitHub),
+                new(GitLabLatestReleaseUrl, ReleaseSourceKind.GitLab),
+                new(MirrorLatestReleaseUrl, ReleaseSourceKind.Mirror),
+            ];
 
-    private static IEnumerable<string> ReleaseListSources =>
-        ForceMirror ? [MirrorReleasesUrl] : [ReleasesUrl, MirrorReleasesUrl];
+    private static IEnumerable<ReleaseSource> ReleaseListSources =>
+        ForceMirror
+            ? [new(MirrorReleasesUrl, ReleaseSourceKind.Mirror)]
+            : [
+                new(ReleasesUrl, ReleaseSourceKind.GitHub),
+                new(GitLabReleasesUrl, ReleaseSourceKind.GitLab),
+                new(MirrorReleasesUrl, ReleaseSourceKind.Mirror),
+            ];
 
     public static Version CurrentVersion => Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0);
 
@@ -124,21 +144,37 @@ public static class AppUpdateService
         System.Net.HttpStatusCode.RequestTimeout or
         >= System.Net.HttpStatusCode.InternalServerError;
 
-    // Walks the source list in order, stopping at the first usable body.
-    private static async Task<string?> GetJsonWithFallbackAsync(HttpClient client, IEnumerable<string> sources, CancellationToken cancellationToken)
+    // Walks source list in order, stopping at first usable response. GitLab's
+    // release schema is normalized to ReleaseResponse before callers inspect it.
+    private static async Task<T?> GetJsonWithFallbackAsync<T>(
+        HttpClient client,
+        IEnumerable<ReleaseSource> sources,
+        Func<string, ReleaseSourceKind, T?> parser,
+        CancellationToken cancellationToken) where T : class
     {
         string? lastFailed = null;
-        foreach (var url in sources)
+        foreach (var source in sources)
         {
-            var (body, shouldFailOver) = await GetJsonAsync(client, url, cancellationToken);
+            var (body, shouldFailOver) = await GetJsonAsync(client, source.Url, cancellationToken);
             if (body is not null)
             {
-                if (lastFailed is not null) AppLog.Info($"Update source {lastFailed} unavailable; used {url} instead.");
-                return body;
+                try
+                {
+                    var parsed = parser(body, source.Kind);
+                    if (parsed is not null)
+                    {
+                        if (lastFailed is not null) AppLog.Info($"Update source {lastFailed} unavailable; used {source.Url} instead.");
+                        return parsed;
+                    }
+                }
+                catch (JsonException)
+                {
+                    // Treat a malformed response like an unavailable source.
+                }
             }
 
-            if (!shouldFailOver) return null;
-            lastFailed = url;
+            if (body is null && !shouldFailOver) return null;
+            lastFailed = source.Url;
         }
 
         return null;
@@ -147,9 +183,7 @@ public static class AppUpdateService
     public static async Task<AppUpdateInfo?> CheckAsync(CancellationToken cancellationToken = default)
     {
         using var client = CreateClient();
-        var json = await GetJsonWithFallbackAsync(client, LatestReleaseSources, cancellationToken);
-        if (json is null) return null;
-        var release = JsonSerializer.Deserialize<ReleaseResponse>(json);
+        var release = await GetJsonWithFallbackAsync(client, LatestReleaseSources, ParseRelease, cancellationToken);
         if (release is null || release.Draft || release.Prerelease || !TryParseVersion(release.TagName, out var latest) || latest <= CurrentVersion)
         {
             return null;
@@ -240,8 +274,7 @@ public static class AppUpdateService
         try
         {
             using var client = CreateClient();
-            var json = await GetJsonWithFallbackAsync(client, ReleaseListSources, cancellationToken);
-            var releases = (json is null ? null : JsonSerializer.Deserialize<ReleaseResponse[]>(json)) ?? [];
+            var releases = await GetJsonWithFallbackAsync(client, ReleaseListSources, ParseReleaseList, cancellationToken) ?? [];
             // Version equality would fail here: a "v0.1.8" tag parses to a
             // 3-field Version (Revision=-1), but the assembly's CurrentVersion
             // is always 4-field (Revision=0) - compare only the 3 fields the
@@ -261,8 +294,7 @@ public static class AppUpdateService
     {
         try
         {
-            var json = await GetJsonWithFallbackAsync(client, ReleaseListSources, cancellationToken);
-            var releases = (json is null ? null : JsonSerializer.Deserialize<ReleaseResponse[]>(json)) ?? [];
+            var releases = await GetJsonWithFallbackAsync(client, ReleaseListSources, ParseReleaseList, cancellationToken) ?? [];
             var whatsNew = new List<string>();
             var fixes = new List<string>();
             foreach (var item in releases
@@ -343,6 +375,11 @@ public static class AppUpdateService
             return uri.AbsolutePath.StartsWith($"/{UpstreamOwner}/{UpstreamRepository}/releases/download/", StringComparison.OrdinalIgnoreCase);
         }
 
+        if (string.Equals(uri.Host, GitLabHost, StringComparison.OrdinalIgnoreCase))
+        {
+            return uri.AbsolutePath.StartsWith($"/{GitLabProjectPath}/-/releases/", StringComparison.OrdinalIgnoreCase);
+        }
+
         // Mirror. The site redirects /download/<asset> to R2; the redirect
         // target is never checked against this list, so the trust placed here
         // extends to whoever controls the site and the bucket. Apex is accepted
@@ -366,8 +403,8 @@ public static class AppUpdateService
         }
     }
 
-    // GitHub reports asset digests as "sha256:<hex>". Anything else (or a
-    // missing value) is treated as "no digest available" rather than trusted.
+    // Release APIs report asset digests as "sha256:<hex>". Anything else (or
+    // a missing value) is treated as "no digest available" rather than trusted.
     internal static string ParseSha256Digest(string? digest)
     {
         const string prefix = "sha256:";
@@ -413,8 +450,58 @@ public static class AppUpdateService
         [property: JsonPropertyName("draft")] bool Draft,
         [property: JsonPropertyName("prerelease")] bool Prerelease);
 
+    private enum ReleaseSourceKind
+    {
+        GitHub,
+        GitLab,
+        Mirror,
+    }
+
+    private sealed record ReleaseSource(string Url, ReleaseSourceKind Kind);
+
+    private sealed record GitLabReleaseResponse(
+        [property: JsonPropertyName("tag_name")] string? TagName,
+        [property: JsonPropertyName("description")] string? Description,
+        [property: JsonPropertyName("upcoming_release")] bool UpcomingRelease,
+        [property: JsonPropertyName("assets")] GitLabReleaseAssets? Assets);
+
+    private sealed record GitLabReleaseAssets(
+        [property: JsonPropertyName("links")] GitLabReleaseAsset[]? Links);
+
+    private sealed record GitLabReleaseAsset(
+        [property: JsonPropertyName("name")] string? Name,
+        [property: JsonPropertyName("url")] string? Url,
+        [property: JsonPropertyName("direct_asset_url")] string? DirectAssetUrl,
+        [property: JsonPropertyName("digest")] string? Digest = null);
+
     private sealed record ReleaseAsset(
         [property: JsonPropertyName("name")] string Name,
         [property: JsonPropertyName("browser_download_url")] string DownloadUrl,
         [property: JsonPropertyName("digest")] string? Digest = null);
+
+    private static ReleaseResponse? ParseRelease(string json, ReleaseSourceKind sourceKind) => sourceKind == ReleaseSourceKind.GitLab
+        ? NormalizeGitLabRelease(JsonSerializer.Deserialize<GitLabReleaseResponse>(json))
+        : JsonSerializer.Deserialize<ReleaseResponse>(json);
+
+    private static ReleaseResponse[]? ParseReleaseList(string json, ReleaseSourceKind sourceKind)
+    {
+        if (sourceKind != ReleaseSourceKind.GitLab) return JsonSerializer.Deserialize<ReleaseResponse[]>(json);
+
+        var releases = JsonSerializer.Deserialize<GitLabReleaseResponse[]>(json);
+        return releases?.Select(NormalizeGitLabRelease).Where(release => release is not null).Select(release => release!).ToArray();
+    }
+
+    private static ReleaseResponse? NormalizeGitLabRelease(GitLabReleaseResponse? release)
+    {
+        if (release is null || string.IsNullOrWhiteSpace(release.TagName)) return null;
+
+        var assets = (release.Assets?.Links ?? [])
+            .Select(link => new ReleaseAsset(
+                link.Name ?? string.Empty,
+                string.IsNullOrWhiteSpace(link.DirectAssetUrl) ? link.Url ?? string.Empty : link.DirectAssetUrl,
+                link.Digest))
+            .ToArray();
+
+        return new ReleaseResponse(release.TagName, assets, release.Description, release.UpcomingRelease, false);
+    }
 }
