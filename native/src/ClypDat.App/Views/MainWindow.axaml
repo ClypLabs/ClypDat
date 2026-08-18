@@ -69,131 +69,149 @@
                    border instead, same reasoning as the storage flyout's
                    horizontal one. -->
               <Flyout Placement="BottomEdgeAlignedLeft" VerticalOffset="7">
-                <!-- Monitor and microphone names can run long, so they keep
-                     the full width. Backend uses ellipsis in its paired row. -->
-                <ScrollViewer Width="420" MaxHeight="680" VerticalScrollBarVisibility="Auto">
-                <StackPanel Classes="replayFlyout" Spacing="0" Margin="2,0,10,2">
-                  <!-- Title and master switch share a row so the switch lands
-                       at the top-right corner of the flyout, where a panel's
-                       on/off control is looked for. Everything below stays
-                       usable while it's off - changing length/quality with
-                       the buffer parked is a normal thing to want. -->
-                  <Grid ColumnDefinitions="*,Auto" Margin="0,2,0,8" ColumnSpacing="10">
-                    <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
-                      <TextBlock Text="Replay Buffer" Foreground="#EDF4FB" FontWeight="Bold" FontSize="15" />
-                  <TextBlock Text="{Binding ReplayBufferStateSummary}"
-                                 Foreground="#7C8EA3" FontSize="11.5" TextWrapping="Wrap" LineHeight="16" />
-                      <TextBlock Text="{Binding ReplayStorageWarning}" Foreground="#E5A00D" FontSize="11" TextWrapping="Wrap" IsVisible="{Binding ReplayStorageWarningVisible}" />
-                    </StackPanel>
-                    <ToggleSwitch Grid.Column="1"
-                                  IsChecked="{Binding ReplayBufferEnabled}"
-                                  OnContent="{x:Null}" OffContent="{x:Null}"
-                                  VerticalAlignment="Center"
-                                  ToolTip.Tip="Turn the replay buffer on or off" />
-                  </Grid>
-
-                  <Border Height="1" Background="#22303A" Margin="0,0,0,8" />
-
-                  <StackPanel Spacing="4" Margin="0,0,0,8">
-                    <TextBlock Classes="flyoutLabel" Text="CAPTURE SOURCE" />
-                    <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayCaptureSources}" SelectedItem="{Binding SelectedReplayCaptureSource}" HorizontalAlignment="Stretch" />
-                  </StackPanel>
-
-                  <StackPanel Spacing="4" Margin="0,0,0,8" IsVisible="{Binding IsDesktopCapture}">
-                    <TextBlock Classes="flyoutLabel" Text="MONITOR" />
-                    <ComboBox Classes="settingsInput" ItemsSource="{Binding DesktopMonitors}" SelectedItem="{Binding SelectedDesktopMonitor}" HorizontalAlignment="Stretch">
-                      <ComboBox.ItemTemplate>
-                        <DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate>
-                      </ComboBox.ItemTemplate>
-                    </ComboBox>
-                    <Grid ColumnDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="6" Margin="0,2,0,0">
-                      <TextBlock Text="Cursor" Foreground="#B8C7D8" VerticalAlignment="Center" ToolTip.Tip="Include the mouse cursor in desktop capture" />
-                      <ToggleSwitch Grid.Column="1" IsChecked="{Binding ReplayDesktopCaptureCursor}" OnContent="{x:Null}" OffContent="{x:Null}" ToolTip.Tip="Include the mouse cursor in desktop capture" />
-                      <TextBlock Grid.Column="2" Text="Auto-switch to games" Foreground="#B8C7D8" VerticalAlignment="Center" Margin="10,0,0,0" ToolTip.Tip="Switch to Game Capture when a game is detected" />
-                      <ToggleSwitch Grid.Column="3" IsChecked="{Binding ReplayAutoSwitchToGameCapture}" OnContent="{x:Null}" OffContent="{x:Null}" ToolTip.Tip="Switch to Game Capture when a game is detected" />
+                <ScrollViewer Width="440" MaxHeight="680" VerticalScrollBarVisibility="Auto">
+                  <StackPanel Classes="replayFlyout" Spacing="0" Margin="2,0,10,2">
+                    <Grid ColumnDefinitions="*,Auto" Margin="2,2,2,12" ColumnSpacing="12">
+                      <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                        <TextBlock Text="Replay Buffer" Foreground="#EDF4FB" FontWeight="Bold" FontSize="16" />
+                        <TextBlock Text="{Binding ReplayBufferStateSummary}" Foreground="#8C9CAF" FontSize="11.5" TextWrapping="Wrap" LineHeight="16" />
+                        <TextBlock Text="{Binding ReplayStorageWarning}" Classes="replayFlyoutWarning" IsVisible="{Binding ReplayStorageWarningVisible}" />
+                      </StackPanel>
+                      <ToggleSwitch Grid.Column="1"
+                                    IsChecked="{Binding ReplayBufferEnabled}"
+                                    OnContent="{x:Null}" OffContent="{x:Null}"
+                                    VerticalAlignment="Center"
+                                    ToolTip.Tip="Turn the replay buffer on or off" />
                     </Grid>
-                  </StackPanel>
 
-                  <Grid ColumnDefinitions="*,12,*" Margin="0,0,0,8">
-                    <StackPanel Grid.Column="0" Spacing="4">
-                      <TextBlock Classes="flyoutLabel" Text="CAPTURE BACKEND" />
-                      <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayBackends}" SelectedItem="{Binding SelectedReplayBackend}" HorizontalAlignment="Stretch">
-                        <ComboBox.ItemTemplate>
-                          <DataTemplate>
-                            <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
-                          </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                      </ComboBox>
-                    </StackPanel>
-                    <StackPanel Grid.Column="2" Spacing="4">
-                      <TextBlock Classes="flyoutLabel" Text="LENGTH" />
-                      <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}" HorizontalAlignment="Stretch">
-                        <ComboBox.ItemTemplate>
-                          <DataTemplate>
-                            <TextBlock Text="{Binding Label}" />
-                          </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                      </ComboBox>
-                    </StackPanel>
-                  </Grid>
+                    <Border Classes="replayFlyoutCard">
+                      <StackPanel Spacing="10">
+                        <TextBlock Classes="replayFlyoutCardTitle" Text="Capture" />
+                        <StackPanel Spacing="4">
+                          <TextBlock Classes="flyoutLabel" Text="Capture source" />
+                          <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayCaptureSources}" SelectedItem="{Binding SelectedReplayCaptureSource}" HorizontalAlignment="Stretch">
+                            <ComboBox.ItemTemplate>
+                              <DataTemplate>
+                                <TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding}" />
+                              </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                          </ComboBox>
+                        </StackPanel>
 
-                  <!-- Resolution and frame rate are one quality decision, so
-                       they share a row and both drive restart notice below. -->
-                  <Grid ColumnDefinitions="*,12,*" Margin="0,0,0,8">
-                    <StackPanel Grid.Column="0" Spacing="4">
-                      <TextBlock Classes="flyoutLabel" Text="RESOLUTION" />
-                      <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}" HorizontalAlignment="Stretch">
-                        <ComboBox.ItemTemplate>
-                          <DataTemplate>
-                            <TextBlock Text="{Binding Label}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Resolution}" />
-                          </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                      </ComboBox>
-                    </StackPanel>
-                    <StackPanel Grid.Column="2" Spacing="4">
-                      <TextBlock Classes="flyoutLabel" Text="FRAME RATE" />
-                      <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}" HorizontalAlignment="Stretch">
-                        <ComboBox.ItemTemplate>
-                          <DataTemplate>
-                            <TextBlock Text="{Binding StringFormat={}{0} fps}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=FrameRate}" />
-                          </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                      </ComboBox>
-                    </StackPanel>
-                  </Grid>
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                          <StackPanel Grid.Column="0" Spacing="4">
+                            <TextBlock Classes="flyoutLabel" Text="Capture backend" />
+                            <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayBackends}" SelectedItem="{Binding SelectedReplayBackend}" HorizontalAlignment="Stretch">
+                              <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                  <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Label}" />
+                                </DataTemplate>
+                              </ComboBox.ItemTemplate>
+                            </ComboBox>
+                          </StackPanel>
+                          <StackPanel Grid.Column="1" Spacing="4">
+                            <TextBlock Classes="flyoutLabel" Text="Length" />
+                            <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}" HorizontalAlignment="Stretch">
+                              <ComboBox.ItemTemplate>
+                                <DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate>
+                              </ComboBox.ItemTemplate>
+                            </ComboBox>
+                          </StackPanel>
+                        </Grid>
 
-                  <StackPanel Spacing="4" Margin="0,0,0,8">
-                    <TextBlock Classes="flyoutLabel" Text="BITRATE" />
-                    <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayBitrateOptions}" SelectedItem="{Binding SelectedReplayBitrateOption}" HorizontalAlignment="Stretch">
-                      <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Bitrate}" /></DataTemplate></ComboBox.ItemTemplate>
-                    </ComboBox>
-                  </StackPanel>
+                        <StackPanel Spacing="8" IsVisible="{Binding IsDesktopCapture}">
+                          <StackPanel Spacing="4">
+                            <TextBlock Classes="flyoutLabel" Text="Monitor" />
+                            <ComboBox Classes="settingsInput" ItemsSource="{Binding DesktopMonitors}" SelectedItem="{Binding SelectedDesktopMonitor}" HorizontalAlignment="Stretch">
+                              <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                  <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Label}" />
+                                </DataTemplate>
+                              </ComboBox.ItemTemplate>
+                            </ComboBox>
+                          </StackPanel>
+                          <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                            <Grid Grid.Column="0" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                              <TextBlock Text="Capture cursor" Foreground="#B8C7D8" VerticalAlignment="Center" ToolTip.Tip="Include the mouse cursor in desktop capture" />
+                              <ToggleSwitch Grid.Column="1" IsChecked="{Binding ReplayDesktopCaptureCursor}" OnContent="{x:Null}" OffContent="{x:Null}" ToolTip.Tip="Include the mouse cursor in desktop capture" />
+                            </Grid>
+                            <Grid Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                              <TextBlock Text="Auto-switch to games" Foreground="#B8C7D8" VerticalAlignment="Center" ToolTip.Tip="Switch to Game Capture when a game is detected" />
+                              <ToggleSwitch Grid.Column="1" IsChecked="{Binding ReplayAutoSwitchToGameCapture}" OnContent="{x:Null}" OffContent="{x:Null}" ToolTip.Tip="Switch to Game Capture when a game is detected" />
+                            </Grid>
+                          </Grid>
+                        </StackPanel>
+                      </StackPanel>
+                    </Border>
 
-                  <StackPanel Spacing="4" Margin="0,0,0,8">
-                    <TextBlock Classes="flyoutLabel" Text="MICROPHONE" />
-                    <ComboBox Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" HorizontalAlignment="Stretch" />
-                  </StackPanel>
+                    <Border Classes="replayFlyoutCard">
+                      <StackPanel Spacing="10">
+                        <TextBlock Classes="replayFlyoutCardTitle" Text="Quality" />
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                          <StackPanel Grid.Column="0" Spacing="4">
+                            <TextBlock Classes="flyoutLabel" Text="Resolution" />
+                            <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}" HorizontalAlignment="Stretch">
+                              <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                  <TextBlock Text="{Binding Label}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Resolution}" />
+                                </DataTemplate>
+                              </ComboBox.ItemTemplate>
+                            </ComboBox>
+                          </StackPanel>
+                          <StackPanel Grid.Column="1" Spacing="4">
+                            <TextBlock Classes="flyoutLabel" Text="Frame rate" />
+                            <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}" HorizontalAlignment="Stretch">
+                              <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                  <TextBlock Text="{Binding StringFormat={}{0} fps}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=FrameRate}" />
+                                </DataTemplate>
+                              </ComboBox.ItemTemplate>
+                            </ComboBox>
+                          </StackPanel>
+                        </Grid>
+                        <StackPanel Spacing="4">
+                          <TextBlock Classes="flyoutLabel" Text="Bitrate" />
+                          <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayBitrateOptions}" SelectedItem="{Binding SelectedReplayBitrateOption}" HorizontalAlignment="Stretch">
+                            <ComboBox.ItemTemplate>
+                              <DataTemplate><TextBlock Text="{Binding}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Bitrate}" /></DataTemplate>
+                            </ComboBox.ItemTemplate>
+                          </ComboBox>
+                        </StackPanel>
+                        <Border Classes="replayFlyoutRestartNotice" IsVisible="{Binding ReplayQualityRestartRequired}">
+                          <TextBlock Text="Restarting the buffer to apply the new quality..." Classes="replayFlyoutWarning" />
+                        </Border>
+                      </StackPanel>
+                    </Border>
 
-                  <StackPanel Spacing="4" Margin="0,0,0,8">
-                    <TextBlock Classes="flyoutLabel" Text="SAVE HOTKEY" />
-                    <Button Classes="replayFlyoutInput" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
-                      <TextBlock Text="{Binding HotkeyDisplay}" TextAlignment="Center" HorizontalAlignment="Stretch" VerticalAlignment="Center" />
+                    <Border Classes="replayFlyoutCard">
+                      <StackPanel Spacing="10">
+                        <TextBlock Classes="replayFlyoutCardTitle" Text="Audio &amp; Controls" />
+                        <StackPanel Spacing="4">
+                          <TextBlock Classes="flyoutLabel" Text="Microphone" />
+                          <ComboBox Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" HorizontalAlignment="Stretch">
+                            <ComboBox.ItemTemplate>
+                              <DataTemplate>
+                                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" />
+                              </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                          </ComboBox>
+                        </StackPanel>
+                        <StackPanel Spacing="4">
+                          <TextBlock Classes="flyoutLabel" Text="Save hotkey" />
+                          <Button Classes="replayFlyoutInput hotkeyKeycap" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Left" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+                            <TextBlock Text="{Binding HotkeyDisplay}" TextAlignment="Center" VerticalAlignment="Center" />
+                          </Button>
+                        </StackPanel>
+                      </StackPanel>
+                    </Border>
+
+                    <Button Classes="linkButton replayFlyoutSettingsLink" Click="OpenReplaySettingsButton_OnClick" HorizontalAlignment="Right" Padding="0" Margin="0,2,2,0">
+                      <StackPanel Orientation="Horizontal" Spacing="5">
+                        <TextBlock Text="Open Replay Buffer settings" />
+                        <TextBlock Text="›" FontSize="16" VerticalAlignment="Center" />
+                      </StackPanel>
                     </Button>
                   </StackPanel>
-
-                  <!-- Frame rate only takes effect on a fresh buffer, so a
-                       change here triggers an automatic restart shortly
-                       after - this just reflects that it's in progress. -->
-                  <Border Background="#1B2430" BorderBrush="#2C3B48" BorderThickness="1" CornerRadius="7"
-                          Padding="10,8" Margin="0,0,0,8" IsVisible="{Binding ReplayQualityRestartRequired}">
-                    <TextBlock Text="Restarting the buffer to apply the new quality..." Foreground="#E5A00D"
-                               FontSize="11.5" FontWeight="Bold" TextWrapping="Wrap" VerticalAlignment="Center" />
-                  </Border>
-
-                  <Border Height="1" Background="#22303A" Margin="0,0,0,6" />
-
-                  <Button Classes="linkButton" Content="More Replay Buffer settings" Click="OpenReplaySettingsButton_OnClick" HorizontalAlignment="Left" Padding="0" Margin="0,0,0,2" />
-                </StackPanel>
                 </ScrollViewer>
               </Flyout>
             </Button.Flyout>

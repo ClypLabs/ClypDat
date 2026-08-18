@@ -582,15 +582,6 @@
   <Style Selector="ContextMenu.clipContextMenu">
     <Setter Property="MinWidth" Value="0" />
   </Style>
-  <!-- Small-caps field labels inside the Replay Buffer flyout - reads as a
-       settings panel rather than a stack of sentence-case captions. -->
-  <Style Selector="TextBlock.flyoutLabel">
-    <Setter Property="Foreground" Value="#7C8EA3" />
-    <Setter Property="FontSize" Value="10.5" />
-    <Setter Property="FontWeight" Value="Bold" />
-    <Setter Property="LetterSpacing" Value="0.8" />
-  </Style>
-
   <!-- Tooltips had no styling at all, so they rendered in Fluent's default
        chrome - pale, square-cornered and a size larger than anything around
        them, which read as borrowed from another app. Same surface/border/
@@ -694,24 +685,88 @@
     <Setter Property="Background" Value="#263544" />
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
-  <!-- Compact controls are scoped to the Replay Buffer flyout. -->
+  <!-- Replay Buffer flyout: quiet cards, sentence-case labels, and compact
+       controls keep this small surface readable without changing the full
+       settings page's control language. -->
   <Style Selector="StackPanel.replayFlyout TextBlock.flyoutLabel">
-    <Setter Property="FontSize" Value="10" />
+    <Setter Property="Foreground" Value="#8C9CAF" />
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="LetterSpacing" Value="0" />
+  </Style>
+  <Style Selector="StackPanel.replayFlyout TextBlock.replayFlyoutWarning">
+    <Setter Property="Foreground" Value="#E5A00D" />
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+  <Style Selector="StackPanel.replayFlyout TextBlock.replayFlyoutCardTitle">
+    <Setter Property="Foreground" Value="#DCE8F4" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+  <Style Selector="StackPanel.replayFlyout Border.replayFlyoutCard">
+    <Setter Property="Background" Value="#15212B" />
+    <Setter Property="BorderBrush" Value="#263846" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Padding" Value="14" />
+    <Setter Property="Margin" Value="0,0,0,10" />
+  </Style>
+  <Style Selector="StackPanel.replayFlyout Border.replayFlyoutRestartNotice">
+    <Setter Property="Background" Value="#211F1A" />
+    <Setter Property="BorderBrush" Value="#5A4824" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Padding" Value="10,8" />
   </Style>
   <Style Selector="StackPanel.replayFlyout ComboBox.settingsInput">
-    <Setter Property="MinHeight" Value="35" />
+    <Setter Property="Background" Value="#1B2934" />
+    <Setter Property="Foreground" Value="#D8E4F2" />
+    <Setter Property="BorderBrush" Value="#304352" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="MinHeight" Value="36" />
     <Setter Property="FontSize" Value="13" />
-    <Setter Property="Padding" Value="8,4" />
+    <Setter Property="Padding" Value="9,5" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
   </Style>
-  <Style Selector="StackPanel.replayFlyout TextBox.settingsInput">
-    <Setter Property="MinHeight" Value="35" />
-    <Setter Property="FontSize" Value="13" />
-    <Setter Property="Padding" Value="8,4" />
+  <Style Selector="StackPanel.replayFlyout ComboBox.settingsInput:focus">
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
   </Style>
-  <Style Selector="Button.replayFlyoutInput">
-    <Setter Property="MinHeight" Value="35" />
+  <Style Selector="StackPanel.replayFlyout ComboBox.settingsInput:pointerover">
+    <Setter Property="Background" Value="#223341" />
+    <Setter Property="BorderBrush" Value="#405668" />
+  </Style>
+  <Style Selector="StackPanel.replayFlyout Button.replayFlyoutInput">
+    <Setter Property="Background" Value="#1B2934" />
+    <Setter Property="Foreground" Value="#D8E4F2" />
+    <Setter Property="BorderBrush" Value="#304352" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="MinHeight" Value="36" />
     <Setter Property="FontSize" Value="13" />
-    <Setter Property="Padding" Value="8,4" />
+    <Setter Property="Padding" Value="9,5" />
+  </Style>
+  <Style Selector="StackPanel.replayFlyout Button.replayFlyoutInput:pointerover">
+    <Setter Property="Background" Value="#223341" />
+    <Setter Property="BorderBrush" Value="#405668" />
+  </Style>
+  <Style Selector="StackPanel.replayFlyout Button.replayFlyoutInput:focus">
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+  </Style>
+  <Style Selector="StackPanel.replayFlyout Button.hotkeyKeycap">
+    <Setter Property="Background" Value="#111C25" />
+    <Setter Property="BorderBrush" Value="#42586B" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="MinWidth" Value="112" />
+    <Setter Property="Padding" Value="12,5" />
+  </Style>
+  <Style Selector="StackPanel.replayFlyout Button.replayFlyoutSettingsLink">
+    <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
   <!-- Small setting groups used by first-run setup. The low-contrast card
        separates choices without turning the walkthrough into a settings page. -->
