@@ -68,24 +68,25 @@
                    bar. The offset drops it to just under the header's bottom
                    border instead, same reasoning as the storage flyout's
                    horizontal one. -->
-              <Flyout Placement="BottomEdgeAlignedLeft" VerticalOffset="7">
-                <ScrollViewer Width="440" MaxHeight="680" VerticalScrollBarVisibility="Auto">
-                  <StackPanel Classes="replayFlyout" Spacing="0" Margin="2,0,10,2">
-                    <Grid ColumnDefinitions="*,Auto" Margin="2,2,2,12" ColumnSpacing="12">
-                      <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
-                        <TextBlock Text="Replay Buffer" Foreground="#EDF4FB" FontWeight="Bold" FontSize="16" />
-                        <TextBlock Text="{Binding ReplayBufferStateSummary}" Foreground="#8C9CAF" FontSize="11.5" TextWrapping="Wrap" LineHeight="16" />
-                        <TextBlock Text="{Binding ReplayStorageWarning}" Classes="replayFlyoutWarning" IsVisible="{Binding ReplayStorageWarningVisible}" />
-                      </StackPanel>
-                      <ToggleSwitch Grid.Column="1"
-                                    IsChecked="{Binding ReplayBufferEnabled}"
-                                    OnContent="{x:Null}" OffContent="{x:Null}"
-                                    VerticalAlignment="Center"
-                                    ToolTip.Tip="Turn the replay buffer on or off" />
-                    </Grid>
+              <Flyout Placement="BottomEdgeAlignedLeft" VerticalOffset="7" FlyoutPresenterClasses="replayFlyoutPresenter">
+                <StackPanel Classes="replayFlyout" Spacing="0">
+                    <Border Classes="replayFlyoutHeader">
+                      <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                        <Border Grid.Column="0" Classes="replayFlyoutHeaderAccent" VerticalAlignment="Stretch" />
+                        <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
+                          <TextBlock Text="Replay Buffer" Classes="replayFlyoutHeaderTitle" />
+                          <TextBlock Text="{Binding ReplayBufferStateSummary}" Classes="replayFlyoutState" />
+                          <TextBlock Text="{Binding ReplayStorageWarning}" Classes="replayFlyoutWarning" IsVisible="{Binding ReplayStorageWarningVisible}" />
+                        </StackPanel>
+                        <ToggleSwitch Grid.Column="2" IsChecked="{Binding ReplayBufferEnabled}"
+                                      OnContent="{x:Null}" OffContent="{x:Null}"
+                                      VerticalAlignment="Center"
+                                      ToolTip.Tip="Turn the replay buffer on or off" />
+                      </Grid>
+                    </Border>
 
                     <Border Classes="replayFlyoutCard">
-                      <StackPanel Spacing="10">
+                      <StackPanel Spacing="8">
                         <TextBlock Classes="replayFlyoutCardTitle" Text="Capture" />
                         <StackPanel Spacing="4">
                           <TextBlock Classes="flyoutLabel" Text="Capture source" />
@@ -145,15 +146,20 @@
                     </Border>
 
                     <Border Classes="replayFlyoutCard">
-                      <StackPanel Spacing="10">
+                      <StackPanel Spacing="8">
                         <TextBlock Classes="replayFlyoutCardTitle" Text="Quality" />
-                        <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                        <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
                           <StackPanel Grid.Column="0" Spacing="4">
                             <TextBlock Classes="flyoutLabel" Text="Resolution" />
                             <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}" HorizontalAlignment="Stretch">
+                              <ComboBox.SelectionBoxItemTemplate>
+                                <DataTemplate>
+                                  <TextBlock Text="{Binding Height, StringFormat={}{0}p}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Resolution}" />
+                                </DataTemplate>
+                              </ComboBox.SelectionBoxItemTemplate>
                               <ComboBox.ItemTemplate>
                                 <DataTemplate>
-                                  <TextBlock Text="{Binding Label}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Resolution}" />
+                                  <TextBlock Text="{Binding Height, StringFormat={}{0}p}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Resolution}" />
                                 </DataTemplate>
                               </ComboBox.ItemTemplate>
                             </ComboBox>
@@ -168,15 +174,15 @@
                               </ComboBox.ItemTemplate>
                             </ComboBox>
                           </StackPanel>
+                          <StackPanel Grid.Column="2" Spacing="4">
+                            <TextBlock Classes="flyoutLabel" Text="Bitrate" />
+                            <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayBitrateOptions}" SelectedItem="{Binding SelectedReplayBitrateOption}" HorizontalAlignment="Stretch">
+                              <ComboBox.ItemTemplate>
+                                <DataTemplate><TextBlock Text="{Binding}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Bitrate}" /></DataTemplate>
+                              </ComboBox.ItemTemplate>
+                            </ComboBox>
+                          </StackPanel>
                         </Grid>
-                        <StackPanel Spacing="4">
-                          <TextBlock Classes="flyoutLabel" Text="Bitrate" />
-                          <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayBitrateOptions}" SelectedItem="{Binding SelectedReplayBitrateOption}" HorizontalAlignment="Stretch">
-                            <ComboBox.ItemTemplate>
-                              <DataTemplate><TextBlock Text="{Binding}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Bitrate}" /></DataTemplate>
-                            </ComboBox.ItemTemplate>
-                          </ComboBox>
-                        </StackPanel>
                         <Border Classes="replayFlyoutRestartNotice" IsVisible="{Binding ReplayQualityRestartRequired}">
                           <TextBlock Text="Restarting the buffer to apply the new quality..." Classes="replayFlyoutWarning" />
                         </Border>
@@ -184,35 +190,36 @@
                     </Border>
 
                     <Border Classes="replayFlyoutCard">
-                      <StackPanel Spacing="10">
+                      <StackPanel Spacing="8">
                         <TextBlock Classes="replayFlyoutCardTitle" Text="Audio &amp; Controls" />
-                        <StackPanel Spacing="4">
-                          <TextBlock Classes="flyoutLabel" Text="Microphone" />
-                          <ComboBox Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" HorizontalAlignment="Stretch">
-                            <ComboBox.ItemTemplate>
-                              <DataTemplate>
-                                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" />
-                              </DataTemplate>
-                            </ComboBox.ItemTemplate>
-                          </ComboBox>
-                        </StackPanel>
-                        <StackPanel Spacing="4">
-                          <TextBlock Classes="flyoutLabel" Text="Save hotkey" />
-                          <Button Classes="replayFlyoutInput hotkeyKeycap" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Left" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
-                            <TextBlock Text="{Binding HotkeyDisplay}" TextAlignment="Center" VerticalAlignment="Center" />
-                          </Button>
-                        </StackPanel>
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                          <StackPanel Grid.Column="0" Spacing="4">
+                            <TextBlock Classes="flyoutLabel" Text="Microphone" />
+                            <ComboBox Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" HorizontalAlignment="Stretch">
+                              <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                  <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" />
+                                </DataTemplate>
+                              </ComboBox.ItemTemplate>
+                            </ComboBox>
+                          </StackPanel>
+                          <StackPanel Grid.Column="1" Spacing="4">
+                            <TextBlock Classes="flyoutLabel" Text="Save hotkey" />
+                            <Button Classes="replayFlyoutInput hotkeyKeycap" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Left" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+                              <TextBlock Text="{Binding HotkeyDisplay}" TextAlignment="Center" VerticalAlignment="Center" />
+                            </Button>
+                          </StackPanel>
+                        </Grid>
                       </StackPanel>
                     </Border>
 
-                    <Button Classes="linkButton replayFlyoutSettingsLink" Click="OpenReplaySettingsButton_OnClick" HorizontalAlignment="Right" Padding="0" Margin="0,2,2,0">
+                    <Button Classes="linkButton replayFlyoutSettingsLink" Click="OpenReplaySettingsButton_OnClick" HorizontalAlignment="Right" Padding="8,6" Margin="0,0,2,0">
                       <StackPanel Orientation="Horizontal" Spacing="5">
                         <TextBlock Text="Open Replay Buffer settings" />
-                        <TextBlock Text="›" FontSize="16" VerticalAlignment="Center" />
+                        <TextBlock Text="›" FontSize="16" VerticalAlignment="Center" Margin="0,-4,0,0" />
                       </StackPanel>
                     </Button>
                   </StackPanel>
-                </ScrollViewer>
               </Flyout>
             </Button.Flyout>
           </Button>
@@ -973,12 +980,21 @@
                             <Border Grid.Row="1" Background="#1E2A35">
                                 <Grid ColumnDefinitions="*,Auto" Margin="16,13,16,13">
                                 <StackPanel Grid.Column="0" Spacing="6">
-                                <TextBlock Text="{Binding TileTopLabel}"
-                                           Foreground="#8C98A7"
-                                           FontSize="12"
-                                           FontWeight="Bold"
-                                           TextTrimming="CharacterEllipsis"
-                                           ToolTip.Tip="{Binding TileTopLabel}" />
+                                 <Border Classes="clipGameFilter"
+                                         BorderThickness="1"
+                                         CornerRadius="5"
+                                         Padding="5,1"
+                                         Margin="-6,-2"
+                                         HorizontalAlignment="Left"
+                                         Cursor="Hand"
+                                         ToolTip.Tip="Filter by this game"
+                                         PointerPressed="ClipGame_OnPointerPressed">
+                                   <TextBlock Text="{Binding TileTopLabel}"
+                                              Foreground="#8C98A7"
+                                              FontSize="12"
+                                              FontWeight="Bold"
+                                              TextTrimming="CharacterEllipsis" />
+                                 </Border>
                                 <!-- No pencil icon - hovering the title itself
                                      is the affordance (underline, see
                                      TextBlock.editableTitle in AppStyles.axaml)

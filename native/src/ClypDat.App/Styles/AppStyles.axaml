@@ -615,6 +615,11 @@
     <Setter Property="Padding" Value="6" />
     <Setter Property="MinWidth" Value="160" />
   </Style>
+  <Style Selector="FlyoutPresenter.replayFlyoutPresenter">
+    <Setter Property="Width" Value="440" />
+    <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+    <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Disabled" />
+  </Style>
   <Style Selector="MenuItem">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="#B8C7D8" />
@@ -694,6 +699,31 @@
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="LetterSpacing" Value="0" />
   </Style>
+  <Style Selector="StackPanel.replayFlyout Border.replayFlyoutHeader">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+    <Setter Property="BorderBrush" Value="#263846" />
+    <Setter Property="CornerRadius" Value="0" />
+    <Setter Property="Padding" Value="0,4,0,10" />
+    <Setter Property="Margin" Value="2,2,2,8" />
+  </Style>
+  <Style Selector="StackPanel.replayFlyout Border.replayFlyoutHeaderAccent">
+    <Setter Property="Background" Value="#2E6F98" />
+    <Setter Property="CornerRadius" Value="2" />
+    <Setter Property="Width" Value="3" />
+    <Setter Property="MinHeight" Value="36" />
+  </Style>
+  <Style Selector="StackPanel.replayFlyout TextBlock.replayFlyoutHeaderTitle">
+    <Setter Property="Foreground" Value="#F1F6FC" />
+    <Setter Property="FontSize" Value="16" />
+    <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+  <Style Selector="StackPanel.replayFlyout TextBlock.replayFlyoutState">
+    <Setter Property="Foreground" Value="#9CB8D5" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="LineHeight" Value="17" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
   <Style Selector="StackPanel.replayFlyout TextBlock.replayFlyoutWarning">
     <Setter Property="Foreground" Value="#E5A00D" />
     <Setter Property="FontSize" Value="11" />
@@ -710,15 +740,15 @@
     <Setter Property="BorderBrush" Value="#263846" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="12" />
-    <Setter Property="Padding" Value="14" />
-    <Setter Property="Margin" Value="0,0,0,10" />
+    <Setter Property="Padding" Value="12" />
+    <Setter Property="Margin" Value="0,0,0,8" />
   </Style>
   <Style Selector="StackPanel.replayFlyout Border.replayFlyoutRestartNotice">
     <Setter Property="Background" Value="#211F1A" />
     <Setter Property="BorderBrush" Value="#5A4824" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
-    <Setter Property="Padding" Value="10,8" />
+    <Setter Property="Padding" Value="8,6" />
   </Style>
   <Style Selector="StackPanel.replayFlyout ComboBox.settingsInput">
     <Setter Property="Background" Value="#1B2934" />
@@ -726,9 +756,9 @@
     <Setter Property="BorderBrush" Value="#304352" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
-    <Setter Property="MinHeight" Value="36" />
+    <Setter Property="MinHeight" Value="34" />
     <Setter Property="FontSize" Value="13" />
-    <Setter Property="Padding" Value="9,5" />
+    <Setter Property="Padding" Value="8,4" />
     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
   </Style>
   <Style Selector="StackPanel.replayFlyout ComboBox.settingsInput:focus">
@@ -744,9 +774,9 @@
     <Setter Property="BorderBrush" Value="#304352" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
-    <Setter Property="MinHeight" Value="36" />
+    <Setter Property="MinHeight" Value="34" />
     <Setter Property="FontSize" Value="13" />
-    <Setter Property="Padding" Value="9,5" />
+    <Setter Property="Padding" Value="8,4" />
   </Style>
   <Style Selector="StackPanel.replayFlyout Button.replayFlyoutInput:pointerover">
     <Setter Property="Background" Value="#223341" />
@@ -760,6 +790,7 @@
     <Setter Property="BorderBrush" Value="#42586B" />
     <Setter Property="CornerRadius" Value="8" />
     <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="Height" Value="42" />
     <Setter Property="MinWidth" Value="112" />
     <Setter Property="Padding" Value="12,5" />
   </Style>
@@ -1049,6 +1080,13 @@
   <Style Selector="TextBlock.editableTitle:pointerover">
     <Setter Property="TextDecorations" Value="Underline" />
     <Setter Property="Foreground" Value="#FFFFFF" />
+  </Style>
+  <Style Selector="Border.clipGameFilter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+  </Style>
+  <Style Selector="Border.clipGameFilter:pointerover">
+    <Setter Property="Background" Value="#2A3640" />
   </Style>
   <Style Selector="Border.settingsCard">
     <Setter Property="Background" Value="#141D24" />

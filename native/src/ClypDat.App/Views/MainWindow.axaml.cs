@@ -3694,6 +3694,18 @@ public sealed partial class MainWindow : Window
         await OpenClipCardAsync(clip);
     }
 
+    private void ClipGame_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is not Control { DataContext: ClipCardViewModel clip } gameBlock ||
+            !e.GetCurrentPoint(gameBlock).Properties.IsLeftButtonPressed ||
+            ViewModel is null) return;
+
+        e.Handled = true;
+        _clipHoverPreview.Stop("game filter selected");
+        ViewModel.SelectGameSection(clip.GameFilterKey);
+        ResetLibraryFilterScroll();
+    }
+
     private ContextMenu? _clipContextMenu;
 
     private void ClipCard_OnContextRequested(object? sender, ContextRequestedEventArgs e)
@@ -3764,7 +3776,8 @@ public sealed partial class MainWindow : Window
         for (var visual = source as Visual; visual is not null && !ReferenceEquals(visual, cardRoot); visual = visual.GetVisualParent())
         {
             if (visual is CheckBox or Button or PathIcon or TextBox) return true;
-            if (visual is TextBlock { Classes: var classes } && classes.Contains("editableTitle")) return true;
+            if (visual is TextBlock { Classes: var textClasses } && textClasses.Contains("editableTitle")) return true;
+            if (visual is Border { Classes: var borderClasses } && borderClasses.Contains("clipGameFilter")) return true;
         }
 
         return false;
