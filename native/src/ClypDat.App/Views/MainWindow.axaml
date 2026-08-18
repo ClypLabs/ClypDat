@@ -188,8 +188,7 @@
                           <Button Classes="linkButton replayBitrateRecommendationButton"
                                   Content="{Binding ReplayBitrateRecommendationActionText}"
                                   IsVisible="{Binding ReplayBitrateRecommendationNeedsApply}"
-                                  Click="ApplyReplayBitrateRecommendationButton_OnClick"
-                                  Padding="0" />
+                                  Click="ApplyReplayBitrateRecommendationButton_OnClick" />
                         </StackPanel>
                         <Border Classes="replayFlyoutRestartNotice" IsVisible="{Binding ReplayQualityRestartRequired}">
                           <TextBlock Text="Restarting the buffer to apply the new quality..." Classes="replayFlyoutWarning" />
@@ -1330,8 +1329,7 @@
                     <Button Classes="linkButton replayBitrateRecommendationButton"
                             Content="{Binding ReplayBitrateRecommendationActionText}"
                             IsVisible="{Binding ReplayBitrateRecommendationNeedsApply}"
-                            Click="ApplyReplayBitrateRecommendationButton_OnClick"
-                            Padding="0" />
+                            Click="ApplyReplayBitrateRecommendationButton_OnClick" />
                   </StackPanel>
 
                   <Border Background="#0D151C" BorderBrush="#263544" BorderThickness="1" CornerRadius="8" Padding="14,11" IsVisible="{Binding ReplayQualityAboveDefault}">
