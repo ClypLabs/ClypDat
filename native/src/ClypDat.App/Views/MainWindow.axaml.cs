@@ -4130,9 +4130,10 @@ public sealed partial class MainWindow : Window
         // the card. An explicit Width pins the TextBox's DesiredSize
         // outright regardless of content, matching the same CardWidth-minus-
         // reserve budget SubtractDoubleConverter gives the static title
-        // TextBlock (see MainWindow.axaml), so the card can't inflate while
-        // editing.
-        var titleWidth = Math.Max(80, (ViewModel?.CardWidth ?? 220) - 32);
+        // TextBlock (see MainWindow.axaml), plus the 8px grid gap and the
+        // 40px share button in the adjacent column. This keeps the editor
+        // clear of the share button while editing.
+        var titleWidth = Math.Max(80, (ViewModel?.CardWidth ?? 220) - 80);
 
         var editBox = new TextBox
         {
@@ -4182,7 +4183,7 @@ public sealed partial class MainWindow : Window
         void SyncWidthToCard(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
         {
             if (args.PropertyName != nameof(MainWindowViewModel.CardWidth) || ViewModel is null) return;
-            editBox.Width = Math.Max(80, ViewModel.CardWidth - 32);
+            editBox.Width = Math.Max(80, ViewModel.CardWidth - 80);
         }
 
         if (ViewModel is not null) ViewModel.PropertyChanged += SyncWidthToCard;
