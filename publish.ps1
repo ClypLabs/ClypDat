@@ -109,6 +109,11 @@ function Ensure-StableAvaloniaPackages {
         }
         $worktreeAdded = $true
 
+        & git -C $worktreeRoot submodule update --init --recursive
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not initialize Avalonia submodules in the temporary worktree."
+        }
+
         $packageProject = Join-Path $worktreeRoot 'build\ClypDat.Win32Packages.proj'
         if (-not (Test-Path -LiteralPath $packageProject -PathType Leaf)) {
             throw "Pinned Avalonia commit $stableCommit does not contain the ClypDat package target."
