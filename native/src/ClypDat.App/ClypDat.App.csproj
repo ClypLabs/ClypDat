@@ -66,10 +66,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="12.1.1" />
-    <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
-    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.1" />
+    <!-- These packages are built from the ClypDat Avalonia fork. Keep every
+         Avalonia package on the same forked version so NuGet cannot mix the
+         fork with the official Avalonia packages. -->
+    <PackageReference Include="Avalonia" Version="12.2.999" />
+    <PackageReference Include="Avalonia.Generators" Version="12.2.999" PrivateAssets="all" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.2.999" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.2.999" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.2.999" />
     <PackageReference Include="LibVLCSharp.Avalonia" Version="3.10.0" />
     <PackageReference Include="NAudio" Version="2.2.1" />
     <!-- .Core (not the full Microsoft.Data.Sqlite) so it doesn't drag in
@@ -84,7 +88,8 @@
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
     <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
     <PackageReference Include="FFmpeg.AutoGen" Version="8.1.0" />
-    <!-- Pinned directly to Avalonia 12.1.1's required version. No direct usage. -->
+    <!-- Pinned directly to the forked Avalonia version's required version.
+         No direct usage. -->
     <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.1" />
   </ItemGroup>
 
