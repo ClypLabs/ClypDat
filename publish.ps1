@@ -62,6 +62,40 @@ function Restore-GitPosition {
     }
 }
 
+function Remove-AvaloniaWorktree {
+    param(
+        [Parameter(Mandatory)]
+        [string]$AvaloniaRoot,
+
+        [Parameter(Mandatory)]
+        [string]$WorktreeRoot
+    )
+
+    $fullWorktreeRoot = [IO.Path]::GetFullPath($WorktreeRoot)
+    $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+    $worktreeName = [IO.Path]::GetFileName($fullWorktreeRoot)
+    if (-not $fullWorktreeRoot.StartsWith("$tempRoot\", [StringComparison]::OrdinalIgnoreCase) -or
+        -not $worktreeName.StartsWith('ca-', [StringComparison]::OrdinalIgnoreCase)) {
+        Write-Warning "Refusing to remove unexpected Avalonia worktree path: $fullWorktreeRoot"
+        return
+    }
+
+    & git -C $AvaloniaRoot worktree remove --force $fullWorktreeRoot 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0 -and -not (Test-Path -LiteralPath $fullWorktreeRoot)) {
+        return
+    }
+
+    & git -C $AvaloniaRoot worktree prune 2>&1 | Out-Null
+    if (Test-Path -LiteralPath $fullWorktreeRoot) {
+        try {
+            [IO.Directory]::Delete("\\?\$fullWorktreeRoot", $true)
+        }
+        catch {
+            Write-Warning "Could not remove temporary Avalonia worktree ${fullWorktreeRoot}: $($_.Exception.Message)"
+        }
+    }
+}
+
 function Ensure-StableAvaloniaPackages {
     $avaloniaRoot = Join-Path (Split-Path $repoRoot -Parent) 'clypdat-avalonia'
     $packageOutput = Join-Path $avaloniaRoot 'artifacts\nuget'
@@ -92,7 +126,7 @@ function Ensure-StableAvaloniaPackages {
     }
 
     Write-Host "Stable Avalonia packages are missing; fetching pinned commit $stableCommit and building version $stableVersion."
-    $worktreeRoot = Join-Path ([IO.Path]::GetTempPath()) ('clypdat-avalonia-' + [Guid]::NewGuid().ToString('N'))
+    $worktreeRoot = Join-Path ([IO.Path]::GetTempPath()) ('ca-' + [Guid]::NewGuid().ToString('N').Substring(0, 12))
     $worktreeAdded = $false
     try {
         & git -C $avaloniaRoot rev-parse --verify "$stableCommit^{commit}" 2>$null | Out-Null
@@ -132,7 +166,7 @@ function Ensure-StableAvaloniaPackages {
     }
     finally {
         if ($worktreeAdded) {
-            & git -C $avaloniaRoot worktree remove --force $worktreeRoot | Out-Null
+            Remove-AvaloniaWorktree -AvaloniaRoot $avaloniaRoot -WorktreeRoot $worktreeRoot
         }
     }
 
