@@ -29,7 +29,7 @@ if (-not $msbuildExecutable) {
 $requiredAvaloniaPackageIds = @(
     'Avalonia', 'Avalonia.Base', 'Avalonia.Controls', 'Avalonia.DesignerSupport',
     'Avalonia.Desktop', 'Avalonia.Dialogs', 'Avalonia.Fonts.Inter',
-    'Avalonia.FreeDesktop', 'Avalonia.FreeDesktop.AtSpi', 'Avalonia.HarfBuzz',
+    'Avalonia.FreeDesktop', 'Avalonia.FreeDesktop.AtSpi', 'Avalonia.Generators', 'Avalonia.HarfBuzz',
     'Avalonia.Markup', 'Avalonia.Markup.Xaml', 'Avalonia.Metal', 'Avalonia.MicroCom',
     'Avalonia.Native', 'Avalonia.OpenGL', 'Avalonia.Remote.Protocol', 'Avalonia.Skia',
     'Avalonia.Themes.Fluent', 'Avalonia.Vulkan', 'Avalonia.Win32',
