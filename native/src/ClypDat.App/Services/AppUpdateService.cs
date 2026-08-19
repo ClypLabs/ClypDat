@@ -218,7 +218,7 @@ public static class AppUpdateService
 
     public static async Task DownloadAndRestartAsync(AppUpdateInfo update, IProgress<UpdateDownloadProgress>? progress = null, CancellationToken cancellationToken = default)
     {
-        var updateRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClypDat", "updates");
+        var updateRoot = Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "updates");
         Directory.CreateDirectory(updateRoot);
         var setupPath = Path.Combine(updateRoot, $"ClypDat-Setup-{update.LatestVersion}.exe");
 

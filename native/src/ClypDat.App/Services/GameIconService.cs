@@ -22,10 +22,7 @@ namespace ClypDat.App.Services;
 /// </summary>
 public static class GameIconService
 {
-    private static readonly string CacheFolder = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "ClypDat",
-        "game-icons");
+    private static readonly string CacheFolder = Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "game-icons");
 
     // Extraction is best-effort and never worth repeating in a session once
     // it has failed (protected process, no icon resource, access denied).

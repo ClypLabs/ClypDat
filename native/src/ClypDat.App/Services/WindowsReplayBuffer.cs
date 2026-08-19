@@ -43,10 +43,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
     public WindowsReplayBuffer(Func<ReplayBufferConfig> configProvider)
     {
         _configProvider = configProvider;
-        _bufferFolder = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ClypDat",
-            "windows-replay-buffer");
+        _bufferFolder = Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "windows-replay-buffer");
         _audio = new AudioCapturePipeline(_bufferFolder);
     }
 

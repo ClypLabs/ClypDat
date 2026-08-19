@@ -38,7 +38,7 @@ public sealed class ForegroundGameDetector
     public ForegroundGameDetector()
     {
         var local = LoadRules(Path.Combine(AppContext.BaseDirectory, "game-catalog.json"))
-            .Concat(LoadRules(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClypDat", "game-catalog.json")));
+            .Concat(LoadRules(Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "game-catalog.json")));
         _catalog = BuildCatalog(local.Concat(RemoteGameCatalogService.LoadCached()));
     }
 
@@ -48,7 +48,7 @@ public sealed class ForegroundGameDetector
     public void ApplyRemoteCatalog(IEnumerable<GameCatalogEntry> entries)
     {
         var local = LoadRules(Path.Combine(AppContext.BaseDirectory, "game-catalog.json"))
-            .Concat(LoadRules(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClypDat", "game-catalog.json")));
+            .Concat(LoadRules(Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "game-catalog.json")));
         _catalog = BuildCatalog(local.Concat(entries));
         Interlocked.Increment(ref _catalogGeneration);
         _windowCache.Clear();

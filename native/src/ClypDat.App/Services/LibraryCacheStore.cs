@@ -22,10 +22,7 @@ internal sealed class LibraryCacheStore
 
     internal LibraryCacheStore(string? databasePath)
     {
-        _databasePath = databasePath ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ClypDat",
-            "library-cache.db");
+        _databasePath = databasePath ?? Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "library-cache.db");
     }
 
     public IReadOnlyList<CachedClipState> Load(string libraryRoot)

@@ -17,10 +17,7 @@ namespace ClypDat.App.Services;
 // touches the disk or waits on another thread's write.
 public static class AppLog
 {
-    public static string LogFolder { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "ClypDat",
-        "logs");
+    public static string LogFolder { get; } = Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "logs");
 
     private sealed record PendingLine(string Path, string Line, bool Droppable);
 

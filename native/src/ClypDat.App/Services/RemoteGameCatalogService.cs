@@ -7,7 +7,7 @@ public static class RemoteGameCatalogService
     private const string CatalogUrl = "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-catalog.json";
     private const string CacheFileName = "remote-game-catalog.json";
     private static readonly TimeSpan RefreshInterval = TimeSpan.FromHours(24);
-    private static string CachePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClypDat", CacheFileName);
+    private static string CachePath => Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, CacheFileName);
 
     public static IReadOnlyList<GameCatalogEntry> LoadCached()
     {

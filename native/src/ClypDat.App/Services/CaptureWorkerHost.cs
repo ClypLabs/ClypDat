@@ -278,7 +278,7 @@ internal sealed record CaptureWorkerSaveRequest(string OutputFolder, string? Tit
 internal static class CaptureWorkerLog
 {
     private static readonly object Sync = new();
-    private static string Path => System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClypDat", "capture-worker.log");
+    private static string Path => System.IO.Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "capture-worker.log");
     public static void Error(string message, Exception? error = null)
     {
         try

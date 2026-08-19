@@ -26,9 +26,7 @@ public static class RemoteGameIconsService
     // leaving the curated list permanently empty.
     private static readonly JsonSerializerOptions DocumentOptions = new() { PropertyNameCaseInsensitive = true };
 
-    private static string CachePath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "ClypDat", CacheFileName);
+    private static string CachePath => Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, CacheFileName);
 
     private static Dictionary<string, string>? _memoryCache;
     private static Dictionary<string, int>? _appIdMemoryCache;

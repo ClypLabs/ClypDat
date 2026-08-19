@@ -1,0 +1,127 @@
+name: ClypDat Dev channel
+
+on:
+  workflow_dispatch:
+    inputs:
+      avalonia_commit:
+        description: Avalonia fork commit that produced the package artifact
+        required: true
+        type: string
+      package_version:
+        description: Exact Avalonia package-set version
+        required: true
+        type: string
+      avalonia_run_id:
+        description: Avalonia Actions run ID containing the immutable artifact
+        required: true
+        type: string
+      artifact_name:
+        description: Immutable Avalonia artifact name
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clypdat-dev-channel
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download exact Avalonia package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: avalonia-artifact
+          repository: ClypDat/clypdat-avalonia
+          run-id: ${{ inputs.avalonia_run_id }}
+          github-token: ${{ secrets.AVALONIA_ACTIONS_READ_TOKEN }}
+
+      - name: Verify package manifest and package version
+        shell: pwsh
+        run: |
+          Expand-Archive -LiteralPath (Get-ChildItem avalonia-artifact -Filter *.zip | Select-Object -First 1).FullName -DestinationPath avalonia-packages
+          $manifest = Get-Content avalonia-packages/manifest.json -Raw | ConvertFrom-Json
+          if ($manifest.commit -ne "${{ inputs.avalonia_commit }}") { throw "Avalonia artifact commit mismatch." }
+          if ($manifest.packageVersion -ne "${{ inputs.package_version }}") { throw "Avalonia artifact package version mismatch." }
+          foreach ($package in $manifest.packages) {
+            $path = Join-Path avalonia-packages $package.name
+            if (-not (Test-Path $path)) { throw "Missing package $($package.name)." }
+            if ((Get-Item $path).Length -ne $package.size) { throw "Package size mismatch for $($package.name)." }
+            if ((Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $package.sha256) { throw "Package hash mismatch for $($package.name)." }
+          }
+
+      - name: Bootstrap repo-local .NET SDK
+        shell: pwsh
+        run: .\dotnet.ps1 --info
+
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis -y --no-progress
+
+      - name: Build and test current ClypDat master
+        shell: pwsh
+        run: |
+          .\dotnet.ps1 restore native\src\ClypDat.App\ClypDat.App.csproj --configfile NuGet.Dev.Config -r win-x64 -p:ClypDatAvaloniaPackageVersion=${{ inputs.package_version }}
+          .\dotnet.ps1 test native\tests\ClypDat.DevChannel.Tests\ClypDat.DevChannel.Tests.csproj -c Release --no-restore
+          .\dotnet.ps1 build native\src\ClypDat.App\ClypDat.App.csproj -c Release -r win-x64 --no-restore -p:Platform=x64 -p:ClypDatChannel=Dev -p:ClypDatAvaloniaPackageVersion=${{ inputs.package_version }}
+
+      - name: Publish self-contained Dev application
+        id: publish
+        shell: pwsh
+        run: |
+          $clypdat = (git rev-parse HEAD).Trim()
+          $avalonia = "${{ inputs.avalonia_commit }}"
+          $buildId = "$clypdat-$($avalonia.Substring(0, 7))"
+          $payload = Join-Path $pwd "dev-payload\$buildId"
+          New-Item -ItemType Directory -Force $payload | Out-Null
+          .\dotnet.ps1 publish native\src\ClypDat.App\ClypDat.App.csproj -c Release -r win-x64 --self-contained true -p:Platform=x64 -p:ClypDatChannel=Dev -p:ClypDatAvaloniaPackageVersion=${{ inputs.package_version }} -o $payload --nologo
+          .\eng\Test-SelfContainedPublish.ps1 -PublishDirectory $payload
+          "build_id=$buildId" >> $env:GITHUB_OUTPUT
+          "clypdat_commit=$clypdat" >> $env:GITHUB_OUTPUT
+          "avalonia_commit=$avalonia" >> $env:GITHUB_OUTPUT
+
+      - name: Create signed manifest and Dev installer payload
+        shell: pwsh
+        env:
+          CLYPDAT_DEV_SIGNING_PRIVATE_KEY: ${{ secrets.CLYPDAT_DEV_SIGNING_PRIVATE_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CLYPDAT_DEV_SIGNING_PRIVATE_KEY)) { throw "CLYPDAT_DEV_SIGNING_PRIVATE_KEY is not configured." }
+          $buildId = "${{ steps.publish.outputs.build_id }}"
+          $payload = Join-Path $pwd "dev-payload\$buildId"
+          Compress-Archive -Path "$payload\*" -DestinationPath ClypDat-Dev.zip
+          $archive = Get-Item ClypDat-Dev.zip
+          $hash = (Get-FileHash $archive.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $manifest = [ordered]@{
+            schema = 1; buildId = $buildId; clypDatCommit = "${{ steps.publish.outputs.clypdat_commit }}"; avaloniaCommit = "${{ steps.publish.outputs.avalonia_commit }}";
+            avaloniaPackageVersion = "${{ inputs.package_version }}"; buildIdSource = $buildId; buildNumber = [long]$env:GITHUB_RUN_NUMBER;
+            archiveSize = $archive.Length; archiveSha256 = $hash; createdUtc = [DateTimeOffset]::UtcNow.ToString("O")
+          }
+          $manifestBytes = [Text.Encoding]::UTF8.GetBytes(($manifest | ConvertTo-Json -Depth 4 -Compress))
+          [IO.File]::WriteAllBytes("ClypDat-Dev.manifest.json", $manifestBytes)
+          $rsa = [Security.Cryptography.RSA]::Create(); $rsa.ImportFromPem($env:CLYPDAT_DEV_SIGNING_PRIVATE_KEY)
+          $signature = $rsa.SignData($manifestBytes, [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pss)
+          [IO.File]::WriteAllText("ClypDat-Dev.manifest.sig", [Convert]::ToBase64String($signature), [Text.Encoding]::UTF8)
+          $launcher = Join-Path $pwd "dev-launcher"
+          .\dotnet.ps1 publish native\src\ClypDat.DevLauncher\ClypDat.DevLauncher.csproj -c Release -r win-x64 --self-contained true -o $launcher --nologo
+          $installerSource = Join-Path $pwd "dev-installer"
+          New-Item -ItemType Directory -Force "$installerSource\versions\$buildId" | Out-Null
+          Copy-Item "$launcher\ClypDat-Dev.exe" $installerSource
+          Copy-Item "$payload\*" "$installerSource\versions\$buildId" -Recurse -Force
+          Copy-Item "installer\License.txt" $installerSource
+          & "C:\Program Files (x86)\NSIS\makensis.exe" /DCLYPDAT_VERSION=0.0.0 /DCLYPDAT_BUILD_ID=$buildId /DCLYPDAT_SOURCE_DIR=$installerSource /DCLYPDAT_OUTPUT_FILE=$pwd\ClypDat-Dev-Setup.exe installer\ClypDat.Dev.nsi
+
+      - name: Publish moving signed Dev prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release view dev-channel 2>$null
+          if ($LASTEXITCODE -ne 0) { gh release create dev-channel --prerelease --title "ClypDat Dev channel" --notes "Automated signed Dev builds." }
+          gh release upload dev-channel ClypDat-Dev.zip ClypDat-Dev.manifest.json ClypDat-Dev.manifest.sig ClypDat-Dev-Setup.exe --clobber
+          gh release edit dev-channel --target "${{ github.sha }}" --prerelease --title "ClypDat Dev channel"

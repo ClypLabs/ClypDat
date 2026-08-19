@@ -58,9 +58,7 @@ public static class StorageJanitor
             _cleanupQueued = false;
         }
 
-        var root = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ClypDat");
+        var root = ClypDat.Core.Settings.AppDataPaths.Root;
         try
         {
             foreach (var folder in ScratchFolders)

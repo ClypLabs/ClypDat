@@ -95,6 +95,11 @@ public sealed partial class App : Application
         }
 
         base.OnFrameworkInitializationCompleted();
+        if (DevChannelMode.Enabled)
+        {
+            Dispatcher.UIThread.Post(DevHealthSignal.SignalIfRequested, DispatcherPriority.ApplicationIdle);
+            DevUpdateService.StartBackgroundCheck();
+        }
     }
 
     // Without this, ANY unhandled exception on the UI thread - a timer tick,

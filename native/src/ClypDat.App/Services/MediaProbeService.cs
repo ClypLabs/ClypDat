@@ -21,10 +21,7 @@ public sealed class MediaProbeService
         // resolution), so "media-cache" is the honest name going forward.
         // Old "thumbnails" folders from prior versions are just left behind;
         // it's disposable cache data, not worth a migration.
-        _cacheFolder = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ClypDat",
-            "media-cache");
+        _cacheFolder = Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "media-cache");
         Directory.CreateDirectory(_cacheFolder);
         // Delayed, not fired immediately: this constructor runs during cold
         // boot alongside the library cache load, thumbnail File.Exists

@@ -26,15 +26,8 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
     public FfmpegReplayBuffer(Func<ReplayBufferConfig> configProvider)
     {
         _configProvider = configProvider;
-        _bufferFolder = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ClypDat",
-            "replay-buffer");
-        _logPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ClypDat",
-            "logs",
-            "replay-buffer.log");
+        _bufferFolder = Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "replay-buffer");
+        _logPath = Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "logs", "replay-buffer.log");
         _pidPath = Path.Combine(_bufferFolder, "ffmpeg.pid");
         CleanupStaleReplayProcess();
     }

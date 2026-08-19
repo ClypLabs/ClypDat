@@ -6,10 +6,7 @@ public static class AppSettingsStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
-    public static string SettingsPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "ClypDat",
-        "settings.json");
+    public static string SettingsPath => Path.Combine(AppDataPaths.Root, "settings.json");
 
     public static AppSettings Load()
     {

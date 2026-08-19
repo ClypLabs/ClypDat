@@ -23,6 +23,7 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        DevChannelMode.ConfigureDataRoot();
         // Release packaging calls this after publish. Reaching Main proves the
         // app host loaded ClypDat with its bundled runtime before any user data,
         // capture devices, or UI initialization can have side effects.
@@ -113,6 +114,7 @@ internal static class Program
     // a fresh install rather than crashing.
     private static void MigrateFromLegacyEveInstall()
     {
+        if (DevChannelMode.Enabled) return;
         try
         {
             var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);

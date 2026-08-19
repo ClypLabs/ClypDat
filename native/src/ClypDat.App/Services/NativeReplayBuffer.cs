@@ -159,10 +159,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     public NativeReplayBuffer(Func<ReplayBufferConfig> configProvider)
     {
         _configProvider = configProvider;
-        _bufferFolder = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ClypDat",
-            "native-replay-buffer");
+        _bufferFolder = Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "native-replay-buffer");
         _audio = new AudioCapturePipeline(_bufferFolder);
     }
 
