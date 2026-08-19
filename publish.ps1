@@ -10,7 +10,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = $PSScriptRoot
 $nativeRoot = Join-Path $repoRoot 'native'
 $appProject = Join-Path $nativeRoot 'src\ClypDat.App\ClypDat.App.csproj'
-$installDirectory = Join-Path $env:LOCALAPPDATA 'Programs\ClypDat'
+$installDirectory = Join-Path $env:LOCALAPPDATA 'ClypDat.LocalBuild'
 $dotnetExecutable = & (Join-Path $repoRoot 'eng\Ensure-DotNet.ps1')
 $selfContainedVerifier = Join-Path $repoRoot 'eng\Test-SelfContainedPublish.ps1'
 $globalJson = Get-Content -LiteralPath (Join-Path $repoRoot 'global.json') -Raw | ConvertFrom-Json
@@ -203,6 +203,62 @@ function Remove-IncompleteAvaloniaPackageCache {
     if ((Test-Path -LiteralPath $avaloniaPackagePath) -and -not (Test-Path -LiteralPath $buildTaskPath -PathType Leaf)) {
         Write-Host "Removing incomplete cached Avalonia package: $avaloniaPackagePath"
         Remove-Item -LiteralPath $avaloniaPackagePath -Recurse -Force
+    }
+}
+
+function Stop-InstalledClypDatProcesses {
+    param([Parameter(Mandatory)][string]$InstallDirectory)
+
+    $installPathPrefix = "$([IO.Path]::GetFullPath($InstallDirectory).TrimEnd('\'))\"
+    $processIds = [Collections.Generic.HashSet[int]]::new()
+
+    # ExecutablePath can be unavailable for a process owned by another session.
+    # Include the application name so an old local build cannot keep its files open.
+    foreach ($process in @(Get-CimInstance Win32_Process | Where-Object {
+        $_.ExecutablePath -and $_.ExecutablePath.StartsWith($installPathPrefix, [StringComparison]::OrdinalIgnoreCase)
+    })) {
+        [void]$processIds.Add([int]$process.ProcessId)
+    }
+    foreach ($process in @(Get-Process -Name 'ClypDat' -ErrorAction SilentlyContinue)) {
+        [void]$processIds.Add([int]$process.Id)
+    }
+
+    foreach ($processId in $processIds) {
+        Write-Host "Stopping ClypDat process (PID $processId)"
+        Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+    }
+
+    if ($processIds.Count -eq 0) {
+        return
+    }
+
+    $deadline = (Get-Date).AddSeconds(10)
+    do {
+        $remaining = @($processIds | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
+        if ($remaining.Count -eq 0) {
+            return
+        }
+        Start-Sleep -Milliseconds 200
+    } while ((Get-Date) -lt $deadline)
+
+    throw "ClypDat process(es) did not exit: $($remaining -join ', ')."
+}
+
+function Test-DirectoryCreateAccess {
+    param([Parameter(Mandatory)][string]$Directory)
+
+    $probeDirectory = Join-Path $Directory ('.clypdat-write-test-' + [Guid]::NewGuid().ToString('N'))
+    try {
+        New-Item -ItemType Directory -Path $probeDirectory -ErrorAction Stop | Out-Null
+        return $true
+    }
+    catch {
+        return $false
+    }
+    finally {
+        if (Test-Path -LiteralPath $probeDirectory) {
+            Remove-Item -LiteralPath $probeDirectory -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -466,22 +522,44 @@ try {
 
     Ensure-StableAvaloniaPackages
 
-    New-Item -ItemType Directory -Path $installDirectory -Force | Out-Null
-    $installPathPrefix = "$([IO.Path]::GetFullPath($installDirectory).TrimEnd('\'))\"
-    $processesToStop = @(Get-CimInstance Win32_Process | Where-Object {
-        $_.ExecutablePath -and $_.ExecutablePath.StartsWith($installPathPrefix, [StringComparison]::OrdinalIgnoreCase)
-    })
-    foreach ($process in $processesToStop) {
-        Write-Host "Stopping process $($process.Name) (PID $($process.ProcessId))"
-        Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+    $installParent = Split-Path -Parent $installDirectory
+    New-Item -ItemType Directory -Path $installParent -Force | Out-Null
+    if (-not (Test-DirectoryCreateAccess -Directory $installParent)) {
+        throw "Cannot create local publish files under $installParent."
     }
+    $publishStagingDirectory = Join-Path ([IO.Path]::GetTempPath()) ('ClypDat.publish-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $publishStagingDirectory -Force | Out-Null
 
-    & $dotnetExecutable publish $appProject -c Release -r win-x64 --self-contained true -p:Platform=x64 -o $installDirectory
+    Write-Host "Publishing to staging directory: $publishStagingDirectory"
+    & $dotnetExecutable publish $appProject -c Release -r win-x64 --self-contained true -p:Platform=x64 -o $publishStagingDirectory
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish failed with exit code $LASTEXITCODE."
     }
 
-    & $selfContainedVerifier -PublishDirectory $installDirectory
+    & $selfContainedVerifier -PublishDirectory $publishStagingDirectory
+
+    Stop-InstalledClypDatProcesses -InstallDirectory $installDirectory
+
+    $previousInstallDirectory = $null
+    if (Test-Path -LiteralPath $installDirectory) {
+        $previousInstallDirectory = Join-Path $installParent ('.ClypDat.previous-' + [Guid]::NewGuid().ToString('N'))
+        Write-Host 'Replacing previous local ClypDat installation.'
+        Move-Item -LiteralPath $installDirectory -Destination $previousInstallDirectory
+    }
+
+    try {
+        Move-Item -LiteralPath $publishStagingDirectory -Destination $installDirectory
+    }
+    catch {
+        if ($previousInstallDirectory -and (Test-Path -LiteralPath $previousInstallDirectory) -and -not (Test-Path -LiteralPath $installDirectory)) {
+            Move-Item -LiteralPath $previousInstallDirectory -Destination $installDirectory
+        }
+        throw
+    }
+
+    if ($previousInstallDirectory -and (Test-Path -LiteralPath $previousInstallDirectory)) {
+        Remove-Item -LiteralPath $previousInstallDirectory -Recurse -Force
+    }
 
     $installedExe = Join-Path $installDirectory 'ClypDat.exe'
     Write-Host "Installed local build to: $installedExe"
