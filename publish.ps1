@@ -13,6 +13,19 @@ $appProject = Join-Path $nativeRoot 'src\ClypDat.App\ClypDat.App.csproj'
 $installDirectory = Join-Path $env:LOCALAPPDATA 'Programs\ClypDat'
 $dotnetExecutable = & (Join-Path $repoRoot 'eng\Ensure-DotNet.ps1')
 $selfContainedVerifier = Join-Path $repoRoot 'eng\Test-SelfContainedPublish.ps1'
+$globalJson = Get-Content -LiteralPath (Join-Path $repoRoot 'global.json') -Raw | ConvertFrom-Json
+$sdkVersion = $globalJson.sdk.version
+$localMsBuild = Join-Path (Split-Path $dotnetExecutable -Parent) "sdk\$sdkVersion\MSBuild.exe"
+$systemMsBuild = Join-Path ${env:ProgramFiles} "dotnet\sdk\$sdkVersion\MSBuild.exe"
+$msbuildExecutable = @($localMsBuild, $systemMsBuild) |
+    Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+    Select-Object -First 1
+if (-not $msbuildExecutable) {
+    $msbuildExecutable = (Get-Command msbuild.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+}
+if (-not $msbuildExecutable) {
+    $msbuildExecutable = $dotnetExecutable
+}
 $requiredAvaloniaPackageIds = @(
     'Avalonia', 'Avalonia.Base', 'Avalonia.Controls', 'Avalonia.DesignerSupport',
     'Avalonia.Desktop', 'Avalonia.Dialogs', 'Avalonia.Fonts.Inter',
@@ -91,12 +104,12 @@ function Remove-AvaloniaWorktree {
         return
     }
 
-    & git -C $AvaloniaRoot worktree remove --force $fullWorktreeRoot 2>&1 | Out-Null
+    & git -C $AvaloniaRoot worktree remove --force $fullWorktreeRoot 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0 -and -not (Test-Path -LiteralPath $fullWorktreeRoot)) {
         return
     }
 
-    & git -C $AvaloniaRoot worktree prune 2>&1 | Out-Null
+    & git -C $AvaloniaRoot worktree prune 2>$null | Out-Null
     if (Test-Path -LiteralPath $fullWorktreeRoot) {
         try {
             [IO.Directory]::Delete("\\?\$fullWorktreeRoot", $true)
@@ -346,9 +359,20 @@ function Ensure-StableAvaloniaPackages {
 
         Push-Location $worktreeRoot
         try {
-            & $dotnetExecutable msbuild $packageProject /t:Pack "/p:ClypDatPackageVersion=$stableVersion" "/p:ClypDatPackageOutput=$stagingFullPath" /nologo
-            if ($LASTEXITCODE -ne 0) {
-                throw "Avalonia package build failed with exit code $LASTEXITCODE."
+            if ($msbuildExecutable -ne $dotnetExecutable) {
+                Write-Host "Using MSBuild executable $msbuildExecutable for Avalonia package tasks."
+            }
+            $previousDotNetHostPath = $env:DOTNET_HOST_PATH
+            $env:DOTNET_HOST_PATH = $dotnetExecutable
+            try {
+                & $msbuildExecutable $packageProject /t:Pack "/p:ClypDatPackageVersion=$stableVersion" "/p:ClypDatPackageOutput=$stagingFullPath" /nologo
+                $packageBuildExitCode = $LASTEXITCODE
+            }
+            finally {
+                $env:DOTNET_HOST_PATH = $previousDotNetHostPath
+            }
+            if ($packageBuildExitCode -ne 0) {
+                throw "Avalonia package build failed with exit code $packageBuildExitCode."
             }
         }
         finally {
