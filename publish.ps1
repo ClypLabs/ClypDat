@@ -129,7 +129,7 @@ function Ensure-StableAvaloniaPackages {
     $worktreeRoot = Join-Path ([IO.Path]::GetTempPath()) ('ca-' + [Guid]::NewGuid().ToString('N').Substring(0, 12))
     $worktreeAdded = $false
     try {
-        & git -C $avaloniaRoot rev-parse --verify "$stableCommit^{commit}" 2>$null | Out-Null
+        $resolvedCommit = & git -C $avaloniaRoot rev-parse --verify "$stableCommit^{commit}" 2>$null
         if ($LASTEXITCODE -ne 0) {
             & git -C $avaloniaRoot fetch --no-tags origin main
             if ($LASTEXITCODE -ne 0) {
@@ -137,9 +137,15 @@ function Ensure-StableAvaloniaPackages {
             }
         }
 
-        & git -C $avaloniaRoot worktree add --detach $worktreeRoot $stableCommit
+        $resolvedCommit = & git -C $avaloniaRoot rev-parse --verify "$stableCommit^{commit}" 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $resolvedCommit) {
+            throw "Pinned Avalonia commit $stableCommit could not be resolved after fetching origin/main. Verify the commit exists in the fork."
+        }
+        $resolvedCommit = ($resolvedCommit | Select-Object -First 1).Trim()
+
+        & git -C $avaloniaRoot worktree add --detach $worktreeRoot $resolvedCommit
         if ($LASTEXITCODE -ne 0) {
-            throw "Could not create a temporary Avalonia worktree at $worktreeRoot."
+            throw "Could not create a temporary Avalonia worktree at $worktreeRoot for commit $resolvedCommit."
         }
         $worktreeAdded = $true
 
