@@ -65,7 +65,6 @@ function Restore-GitPosition {
 function Ensure-StableAvaloniaPackages {
     $avaloniaRoot = Join-Path (Split-Path $repoRoot -Parent) 'clypdat-avalonia'
     $packageOutput = Join-Path $avaloniaRoot 'artifacts\nuget'
-    $packageProject = Join-Path $avaloniaRoot 'build\ClypDat.Win32Packages.proj'
     $pinFile = Join-Path $repoRoot 'eng\AvaloniaPin.props'
 
     if (-not (Test-Path -LiteralPath $pinFile -PathType Leaf)) {
@@ -73,7 +72,11 @@ function Ensure-StableAvaloniaPackages {
     }
 
     $pin = [xml](Get-Content -LiteralPath $pinFile -Raw)
+    $stableCommit = $pin.SelectSingleNode('//ClypDatAvaloniaStableCommit').InnerText
     $stableVersion = $pin.SelectSingleNode('//ClypDatAvaloniaStablePackageVersion').InnerText
+    if ([string]::IsNullOrWhiteSpace($stableCommit)) {
+        throw 'The stable Avalonia commit is missing from eng/AvaloniaPin.props.'
+    }
     if ([string]::IsNullOrWhiteSpace($stableVersion)) {
         throw 'The stable Avalonia package version is missing from eng/AvaloniaPin.props.'
     }
@@ -84,20 +87,48 @@ function Ensure-StableAvaloniaPackages {
         return
     }
 
-    if (-not (Test-Path -LiteralPath $packageProject -PathType Leaf)) {
-        throw "The sibling Avalonia fork is missing its package target: $packageProject"
+    if (-not (Test-Path -LiteralPath (Join-Path $avaloniaRoot '.git'))) {
+        throw "The sibling Avalonia fork was not found at: $avaloniaRoot"
     }
 
-    Write-Host "Stable Avalonia packages are missing; building version $stableVersion from the sibling fork."
-    Push-Location $avaloniaRoot
+    Write-Host "Stable Avalonia packages are missing; fetching pinned commit $stableCommit and building version $stableVersion."
+    $worktreeRoot = Join-Path ([IO.Path]::GetTempPath()) ('clypdat-avalonia-' + [Guid]::NewGuid().ToString('N'))
+    $worktreeAdded = $false
     try {
-        & $dotnetExecutable msbuild $packageProject /t:Pack "/p:ClypDatPackageVersion=$stableVersion" "/p:ClypDatPackageOutput=$packageOutput" /nologo
+        & git -C $avaloniaRoot rev-parse --verify "$stableCommit^{commit}" 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) {
-            throw "Avalonia package build failed with exit code $LASTEXITCODE."
+            & git -C $avaloniaRoot fetch --no-tags origin main
+            if ($LASTEXITCODE -ne 0) {
+                throw "Could not fetch the pinned Avalonia commit $stableCommit."
+            }
+        }
+
+        & git -C $avaloniaRoot worktree add --detach $worktreeRoot $stableCommit
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not create a temporary Avalonia worktree at $worktreeRoot."
+        }
+        $worktreeAdded = $true
+
+        $packageProject = Join-Path $worktreeRoot 'build\ClypDat.Win32Packages.proj'
+        if (-not (Test-Path -LiteralPath $packageProject -PathType Leaf)) {
+            throw "Pinned Avalonia commit $stableCommit does not contain the ClypDat package target."
+        }
+
+        Push-Location $worktreeRoot
+        try {
+            & $dotnetExecutable msbuild $packageProject /t:Pack "/p:ClypDatPackageVersion=$stableVersion" "/p:ClypDatPackageOutput=$packageOutput" /nologo
+            if ($LASTEXITCODE -ne 0) {
+                throw "Avalonia package build failed with exit code $LASTEXITCODE."
+            }
+        }
+        finally {
+            Pop-Location
         }
     }
     finally {
-        Pop-Location
+        if ($worktreeAdded) {
+            & git -C $avaloniaRoot worktree remove --force $worktreeRoot | Out-Null
+        }
     }
 
     $missing = @($requiredPackages | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) })
