@@ -130,6 +130,69 @@ function Read-AvaloniaNuspec {
     }
 }
 
+function Add-AvaloniaBuildTaskFiles {
+    param(
+        [Parameter(Mandatory)][string]$PackagePath,
+        [Parameter(Mandatory)][string]$BuildOutput
+    )
+
+    $taskFiles = @(Get-ChildItem -LiteralPath $BuildOutput -File)
+    if ($taskFiles.Count -eq 0) {
+        throw "Avalonia build task output is empty: $BuildOutput"
+    }
+
+    $archive = [IO.Compression.ZipFile]::Open($PackagePath, [IO.Compression.ZipArchiveMode]::Update)
+    try {
+        foreach ($taskFile in $taskFiles) {
+            $entryName = "tools/netstandard2.0/$($taskFile.Name)"
+            foreach ($existingEntry in @($archive.Entries | Where-Object { $_.FullName -eq $entryName })) {
+                $existingEntry.Delete()
+            }
+
+            $entry = $archive.CreateEntry($entryName, [IO.Compression.CompressionLevel]::Optimal)
+            $input = [IO.File]::OpenRead($taskFile.FullName)
+            $output = $entry.Open()
+            try {
+                $input.CopyTo($output)
+            }
+            finally {
+                $output.Dispose()
+                $input.Dispose()
+            }
+        }
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
+function Get-NuGetGlobalPackagesPath {
+    $lines = @(& $dotnetExecutable nuget locals global-packages --list)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not determine the NuGet global packages path."
+    }
+
+    $line = $lines | Where-Object { $_ -match '^\s*global-packages:\s*(.+?)\s*$' } | Select-Object -First 1
+    if (-not $line) {
+        throw 'The dotnet CLI did not report a global packages path.'
+    }
+
+    $null = $line -match '^\s*global-packages:\s*(.+?)\s*$'
+    return [IO.Path]::GetFullPath($Matches[1].Trim())
+}
+
+function Remove-IncompleteAvaloniaPackageCache {
+    param([Parameter(Mandatory)][string]$PackageVersion)
+
+    $globalPackagesPath = Get-NuGetGlobalPackagesPath
+    $avaloniaPackagePath = Join-Path $globalPackagesPath (Join-Path 'avalonia' $PackageVersion.ToLowerInvariant())
+    $buildTaskPath = Join-Path $avaloniaPackagePath 'tools\netstandard2.0\Avalonia.Build.Tasks.dll'
+    if ((Test-Path -LiteralPath $avaloniaPackagePath) -and -not (Test-Path -LiteralPath $buildTaskPath -PathType Leaf)) {
+        Write-Host "Removing incomplete cached Avalonia package: $avaloniaPackagePath"
+        Remove-Item -LiteralPath $avaloniaPackagePath -Recurse -Force
+    }
+}
+
 function Test-AvaloniaPackageSet {
     param(
         [Parameter(Mandatory)][string]$PackageOutput,
@@ -144,6 +207,18 @@ function Test-AvaloniaPackageSet {
         $actualNames = @($packageFiles.Name | Sort-Object)
         if (($actualNames -join '|') -ne ($expectedNames -join '|')) {
             return $false
+        }
+
+        $avaloniaPackagePath = Join-Path $PackageOutput "Avalonia.$PackageVersion.nupkg"
+        $archive = [IO.Compression.ZipFile]::OpenRead($avaloniaPackagePath)
+        try {
+            $buildTaskEntry = @($archive.Entries | Where-Object { $_.FullName -eq 'tools/netstandard2.0/Avalonia.Build.Tasks.dll' })
+            if ($buildTaskEntry.Count -ne 1) {
+                return $false
+            }
+        }
+        finally {
+            $archive.Dispose()
         }
 
         $packageIds = @{}
@@ -280,6 +355,15 @@ function Ensure-StableAvaloniaPackages {
             Pop-Location
         }
 
+        $buildTasksProject = Join-Path $worktreeRoot 'src\Avalonia.Build.Tasks\Avalonia.Build.Tasks.csproj'
+        $buildTasksOutput = Join-Path $worktreeRoot 'src\Avalonia.Build.Tasks\bin\Release\netstandard2.0'
+        & $dotnetExecutable build $buildTasksProject -c Release -f netstandard2.0 --no-restore /nologo
+        if ($LASTEXITCODE -ne 0) {
+            throw "Avalonia build task compilation failed with exit code $LASTEXITCODE."
+        }
+
+        Add-AvaloniaBuildTaskFiles -PackagePath (Join-Path $stagingFullPath "Avalonia.$stableVersion.nupkg") -BuildOutput $buildTasksOutput
+
         if (-not (Test-AvaloniaPackageSet -PackageOutput $stagingFullPath -PackageVersion $stableVersion)) {
             throw 'Avalonia package build did not produce the exact desktop package closure.'
         }
@@ -305,6 +389,8 @@ function Ensure-StableAvaloniaPackages {
             Remove-AvaloniaWorktree -AvaloniaRoot $avaloniaRoot -WorktreeRoot $worktreeRoot
         }
     }
+
+    Remove-IncompleteAvaloniaPackageCache -PackageVersion $stableVersion
 
     if (-not (Test-AvaloniaPackageSet -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $resolvedCommit -RequireStamp)) {
         throw 'Avalonia package build completed but its stamped package closure could not be verified.'
