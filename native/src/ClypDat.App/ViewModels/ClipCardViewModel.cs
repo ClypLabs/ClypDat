@@ -178,17 +178,21 @@ public sealed class ClipCardViewModel : ViewModelBase
     // once it's old enough that "X ago" stops being useful at a glance.
     public string RelativeDateLabel
     {
-        get
-        {
-            var age = DateTimeOffset.Now - CreatedAt;
-            if (age < TimeSpan.Zero) age = TimeSpan.Zero;
-            if (age.TotalMinutes < 1) return "Just now";
-            if (age.TotalMinutes < 60) return $"{(int)age.TotalMinutes} min{((int)age.TotalMinutes == 1 ? "" : "s")} ago";
-            if (age.TotalHours < 24) return $"{(int)age.TotalHours} hour{((int)age.TotalHours == 1 ? "" : "s")} ago";
-            if (age.TotalDays < 30) return $"{(int)age.TotalDays} day{((int)age.TotalDays == 1 ? "" : "s")} ago";
-            return CreatedAt.ToString("MMM d, yyyy");
-        }
+        get => FormatRelativeDate(CreatedAt, DateTimeOffset.Now);
     }
+
+    internal static string FormatRelativeDate(DateTimeOffset createdAt, DateTimeOffset now)
+    {
+        var age = now - createdAt;
+        if (age < TimeSpan.Zero) age = TimeSpan.Zero;
+        if (age.TotalMinutes < 1) return "Just now";
+        if (age.TotalMinutes < 60) return $"{(int)age.TotalMinutes} min{((int)age.TotalMinutes == 1 ? "" : "s")} ago";
+        if (age.TotalHours < 24) return $"{(int)age.TotalHours} hour{((int)age.TotalHours == 1 ? "" : "s")} ago";
+        if (age.TotalDays < 30) return $"{(int)age.TotalDays} day{((int)age.TotalDays == 1 ? "" : "s")} ago";
+        return createdAt.ToString("MMM d, yyyy");
+    }
+
+    internal void RefreshRelativeDateLabel() => OnPropertyChanged(nameof(RelativeDateLabel));
     // If the clip has saved trim edits, show the trimmed length (what export
     // would actually produce) instead of the raw file's duration - with a
     // pencil indicator next to it so it's clear the number isn't the file's

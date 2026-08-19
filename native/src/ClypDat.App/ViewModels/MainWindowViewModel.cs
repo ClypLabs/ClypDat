@@ -43,6 +43,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly DispatcherTimer _libraryRefreshDebounce;
     private readonly DispatcherTimer _clipNotReadyMessageTimer;
     private readonly DispatcherTimer _libraryCacheWriteTimer;
+    private readonly DispatcherTimer _relativeDateRefreshTimer;
     private CancellationTokenSource? _cachedLibraryRestoreCts;
     private bool _isRestoringCachedLibrary;
     private bool _isInitialLibraryLoadComplete;
@@ -385,6 +386,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
         _libraryCacheWriteTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _libraryCacheWriteTimer.Tick += (_, _) => WriteLibraryCacheIfDirty();
+        _relativeDateRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
+        _relativeDateRefreshTimer.Tick += (_, _) =>
+        {
+            foreach (var clip in AllClips) clip.RefreshRelativeDateLabel();
+        };
+        _relativeDateRefreshTimer.Start();
         InitialLibraryLoadTask = StartInitialLibraryLoadAsync();
     }
 
@@ -4420,6 +4427,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _waveformCts = null;
         _libraryRefreshDebounce.Stop();
         _libraryCacheWriteTimer.Stop();
+        _relativeDateRefreshTimer.Stop();
         if (_libraryCacheDirty)
         {
             _libraryCacheDirty = false;

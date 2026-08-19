@@ -680,6 +680,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // times a second, and disposing a wrapper would Release a reference the
         // pool owns - so these are cached for the session and never disposed.
         var hardwarePoolTextures = new Dictionary<nint, ID3D11Texture2D>();
+        // AMF may retain a system-memory surface after avcodec_send_frame
+        // returns. Keep one reference to the last submitted software buffer so
+        // the next real capture forces FFmpeg copy-on-write instead of AMF
+        // seeing changed pixels through the same host pointer.
+        AVFrame* amfSoftwareFrameGuard = null;
+        var requiresDistinctAmfSoftwareFrame = false;
         // Encoders retired by a mid-session swap (see EncodeJob). Freed only
         // after the encode thread has joined - it may still be inside one.
         var retiredCodecContexts = new List<nint>();
@@ -807,6 +813,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             _videoCodecId = codecContext->codec_id;
 
             if (!hardwareFramesActive) ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
+            requiresDistinctAmfSoftwareFrame = !hardwareFramesActive && encoderName.Contains("amf", StringComparison.OrdinalIgnoreCase);
 
             if (InitFullSessionWriter(config, codecContext, out fullSessionFormatContext, out fullSessionStream, out fullSessionTempVideoPath, out fullSessionFinalOutputPath))
             {
@@ -1748,7 +1755,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 }
                                 else
                                 {
-                                    ffmpeg.av_frame_make_writable(frame);
+                                    PrepareSoftwareFrameForWrite();
                                     stageStopwatch.Restart();
                                     using (var desktopTexture = desktopResource.QueryInterface<ID3D11Texture2D>())
                                     {
@@ -1780,6 +1787,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                         device.ImmediateContext.Unmap(staging, 0);
                                     }
                                     scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
+                                    RetainAmfSoftwareFrame();
                                     contentAdvanced = true;
                                 }
 
@@ -2020,6 +2028,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
                                 var replacement = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, out _, out var rebuiltEncoderName, out var rebuiltHardware);
                                 if (!rebuiltHardware) ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
+                                requiresDistinctAmfSoftwareFrame = !rebuiltHardware && rebuiltEncoderName.Contains("amf", StringComparison.OrdinalIgnoreCase);
 
                                 var swapped = new ManualResetEventSlim(false);
                                 encodeQueue!.Add(new EncodeJob(0, DateTime.UtcNow, (nint)replacement, swapped));
@@ -2360,7 +2369,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // mapped pointer is only valid while it is held.
                         try
                         {
-                            ffmpeg.av_frame_make_writable(frame);
+                            PrepareSoftwareFrameForWrite();
                             CopyNv12PlanesToFrame(mapped, outputWidth, outputHeight, frame);
                             if (cursorOutputX != int.MinValue)
                             {
@@ -2373,6 +2382,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             Monitor.Exit(gpuLock);
                         }
 
+                        RetainAmfSoftwareFrame();
                         break;
                     }
                     scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
@@ -2401,12 +2411,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 // capture freeze this whole diagnostic trail was chasing:
                 // avgEncodeMs spiking 20x+ with frames backing up hundreds
                 // deep). av_frame_clone is a cheap ref-counted handle, not a
-                // pixel copy - av_frame_make_writable up above already treats
-                // "something else still references this buffer" as
-                // copy-on-write, so the encode thread holding this clone a
-                // while longer just means the NEXT capture-thread frame gets
-                // a fresh buffer instead of racing this one, exactly the
-                // mechanism that comment already relies on.
+                // pixel copy. AMF's system-memory path additionally keeps a
+                // guard reference so the next real capture always gets a
+                // fresh backing buffer before AMF can cache the old pointer.
                 // Diagnostic only (see lastFrameContentCapturedUtc's declaration) -
                 // how old frame->data's content already was at the moment this
                 // output tick decided to encode it.
@@ -2442,6 +2449,40 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     framesEncodedSinceLog++;
                 }
                 encodeMs += stageStopwatch.Elapsed.TotalMilliseconds;
+            }
+
+            void PrepareSoftwareFrameForWrite()
+            {
+                if (ffmpeg.av_frame_make_writable(frame) < 0)
+                {
+                    AppLog.Error("Native capture: failed to make software frame writable.");
+                    return;
+                }
+
+                if (amfSoftwareFrameGuard is not null)
+                {
+                    var staleGuard = amfSoftwareFrameGuard;
+                    amfSoftwareFrameGuard = null;
+                    ffmpeg.av_frame_free(&staleGuard);
+                }
+            }
+
+            void RetainAmfSoftwareFrame()
+            {
+                if (!requiresDistinctAmfSoftwareFrame) return;
+                var retained = ffmpeg.av_frame_clone(frame);
+                if (retained is null)
+                {
+                    AppLog.Error("Native capture: failed to retain AMF software frame backing.");
+                    return;
+                }
+
+                if (amfSoftwareFrameGuard is not null)
+                {
+                    var staleGuard = amfSoftwareFrameGuard;
+                    ffmpeg.av_frame_free(&staleGuard);
+                }
+                amfSoftwareFrameGuard = retained;
             }
 
             // Pacing/encode gate - runs on its own clock regardless of whether
@@ -2635,6 +2676,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             }
             encodeQueue?.Dispose();
 
+            if (amfSoftwareFrameGuard is not null) { var staleGuard = amfSoftwareFrameGuard; ffmpeg.av_frame_free(&staleGuard); amfSoftwareFrameGuard = null; }
             if (frame is not null) { var f = frame; ffmpeg.av_frame_free(&f); }
             if (packet is not null) { var p = packet; ffmpeg.av_packet_free(&p); }
             if (swsContext is not null) ffmpeg.sws_freeContext(swsContext);

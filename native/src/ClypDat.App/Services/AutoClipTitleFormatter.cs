@@ -18,44 +18,16 @@ public static class AutoClipTitleFormatter
         ["turret"] = "🏰", ["inhibitor"] = "🏰"
     };
 
-    private static readonly HashSet<string> Milestones = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "2k", "3k", "4k", "ace", "double", "triple", "ultra", "rampage", "quadra", "penta"
-    };
-
     public static string Format(string gameId, IReadOnlyCollection<AutoClipEvent> events, string? suffix = null)
     {
         if (events.Count == 0) return string.Empty;
-        var grouped = events.GroupBy(item => item.Id, StringComparer.OrdinalIgnoreCase)
-            .Select(group => new EventCount(group.First(), group.Count()))
-            .ToList();
-        var primary = grouped.Where(item => Milestones.Contains(item.Event.Id))
-            .OrderByDescending(item => item.Event.Priority).ThenBy(item => item.Event.OccurredUtc).FirstOrDefault();
-
-        string title;
-        if (primary is not null)
-        {
-            var companions = grouped.Where(item => !ReferenceEquals(item, primary))
-                // Medal's current CS2 streak titles omit lower kills/headshots.
-                .Where(item => !string.Equals(gameId, "cs2", StringComparison.OrdinalIgnoreCase) ||
-                               (item.Event.Id is not "kill" and not "headshot"))
-                .OrderByDescending(item => item.Event.Priority).ThenBy(item => item.Event.OccurredUtc)
-                .Select(PlainLabel);
-            title = $"{Prefix(primary.Event.Id)}{primary.Event.Label}";
-            var tail = string.Join(", ", companions);
-            if (!string.IsNullOrWhiteSpace(tail)) title += $", {tail}";
-        }
-        else
-        {
-            title = string.Join(" ", grouped.OrderBy(item => SortOrder(item.Event.Id)).ThenBy(item => item.Event.OccurredUtc)
-                .Select(item => $"{Prefix(item.Event.Id)}{PlainLabel(item)}"));
-        }
+        var primary = events.OrderByDescending(item => item.Priority)
+            .ThenBy(item => item.OccurredUtc)
+            .First();
+        var title = $"{Prefix(primary.Id)}{primary.Label}";
 
         return string.IsNullOrWhiteSpace(suffix) ? title : $"{title} - {suffix}";
     }
 
     public static string Prefix(string eventId) => Prefixes.TryGetValue(eventId, out var prefix) ? prefix : string.Empty;
-    private static string PlainLabel(EventCount item) => item.Count > 1 ? $"{item.Event.Label} x{item.Count}" : item.Event.Label;
-    private static int SortOrder(string id) => id.ToLowerInvariant() switch { "headshot" => 0, "kill" => 1, "death" => 2, "assist" => 3, _ => 4 };
-    private sealed record EventCount(AutoClipEvent Event, int Count);
 }

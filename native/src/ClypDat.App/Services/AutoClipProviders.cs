@@ -89,7 +89,7 @@ public sealed class DotaGsiListener : IDisposable
                     {
                         _pendingLabel = label;
                         _lastPlayEventUtc = now;
-                        _pendingEvents.Add(new AutoClipEvent(id, label, now, chainCount));
+                        _pendingEvents.Add(new AutoClipEvent(id, label, now, KillPriority(chainCount)));
                         AutoClipPending?.Invoke(this, $"Auto clip started — {label} detected, waiting for the play to finish.");
                     }
                     else if (_pendingLabel is not null && IsEnabled(settings, "kill"))
@@ -135,7 +135,7 @@ public sealed class DotaGsiListener : IDisposable
         var label = _pendingLabel; var start = _killTimes[0] - Padding; var end = _lastKillUtc + Padding;
         var eventId = label switch { "Kill" => "kill", "Double Kill" => "double", "Triple Kill" => "triple", "Ultra Kill" => "ultra", _ => "rampage" };
         IReadOnlyCollection<AutoClipEvent> events = _pendingEvents.Count == 0
-            ? new[] { new AutoClipEvent(eventId, label, _lastKillUtc, _killTimes.Count) }
+            ? new[] { new AutoClipEvent(eventId, label, _lastKillUtc, KillPriority(_killTimes.Count)) }
             : _pendingEvents;
         end = _lastPlayEventUtc > DateTime.MinValue ? _lastPlayEventUtc + Padding : end;
         AutoClipReady?.Invoke(this, new AutoClipRequest("dota2", "Dota 2", eventId, label, AutoClipTitleFormatter.Format("dota2", events), start, end, _killTimes.Count));
@@ -144,6 +144,7 @@ public sealed class DotaGsiListener : IDisposable
     private void Fire(string id, string label, DateTime now) { AutoClipPending?.Invoke(this, $"Auto clip started — {label} detected, finishing the clip."); var events = new[] { new AutoClipEvent(id, label, now) }; AutoClipReady?.Invoke(this, new AutoClipRequest("dota2", "Dota 2", id, label, AutoClipTitleFormatter.Format("dota2", events), now - Padding, now + Padding)); }
     private void Sync(int? kills, int? deaths, int? assists) { if (kills.HasValue) _kills = kills.Value; if (deaths.HasValue) _deaths = deaths.Value; if (assists.HasValue) _assists = assists.Value; }
     private static bool IsEnabled(AutoClipGameSettings settings, string id) => settings.Events.TryGetValue(id, out var enabled) && enabled;
+    private static int KillPriority(int chainCount) => chainCount switch { 1 => 10, 2 => 20, 3 => 30, 4 => 40, _ => 50 };
     private static int? GetInt(JsonElement parent, string name) => parent.TryGetProperty(name, out var element) && element.TryGetInt32(out var value) ? value : null;
     private static bool ContainsAegis(JsonElement root) => root.GetRawText().Contains("item_aegis", StringComparison.OrdinalIgnoreCase);
     public void Dispose() => Stop();

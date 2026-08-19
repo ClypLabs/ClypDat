@@ -7,6 +7,27 @@ namespace ClypDat.GameDetection.Tests;
 public sealed class LibraryClipDateTests
 {
     [Theory]
+    [InlineData(0, "Just now")]
+    [InlineData(1, "1 min ago")]
+    [InlineData(59, "59 mins ago")]
+    [InlineData(60, "1 hour ago")]
+    [InlineData(1439, "23 hours ago")]
+    [InlineData(1440, "1 day ago")]
+    [InlineData(29 * 1440, "29 days ago")]
+    public void RelativeDateFormatter_UsesLiveAge(int minutes, string expected)
+    {
+        var now = new DateTimeOffset(2026, 8, 19, 12, 0, 0, TimeSpan.Zero);
+        Assert.Equal(expected, ClipCardViewModel.FormatRelativeDate(now.AddMinutes(-minutes), now));
+    }
+
+    [Fact]
+    public void RelativeDateFormatter_UsesAbsoluteDateAfterThirtyDays()
+    {
+        var now = new DateTimeOffset(2026, 8, 19, 12, 0, 0, TimeSpan.Zero);
+        Assert.Equal(now.AddDays(-30).ToString("MMM d, yyyy"), ClipCardViewModel.FormatRelativeDate(now.AddDays(-30), now));
+    }
+
+    [Theory]
     [InlineData("FortniteClient-Win64-Shipping", "Fortnite")]
     [InlineData("FortniteClient-Win64-Shipping (Trimmed)", "Fortnite")]
     [InlineData("DESKTOPCAPTURE", "Desktop Capture")]

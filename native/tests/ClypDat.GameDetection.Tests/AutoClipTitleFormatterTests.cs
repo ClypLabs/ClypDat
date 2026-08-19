@@ -6,7 +6,7 @@ namespace ClypDat.GameDetection.Tests;
 public sealed class AutoClipTitleFormatterTests
 {
     [Fact]
-    public void Cs2MilestoneUsesMedalTitleShape()
+    public void HighestPriorityEventIsSoleTitle()
     {
         var at = new DateTime(2026, 7, 31, 12, 0, 0, DateTimeKind.Utc);
         var title = AutoClipTitleFormatter.Format("cs2", new[]
@@ -18,11 +18,11 @@ public sealed class AutoClipTitleFormatterTests
             new AutoClipEvent("assist", "Assist", at.AddSeconds(6))
         }, "Ancient");
 
-        Assert.Equal("✌\u200D2K, Death, Assist - Ancient", title);
+        Assert.Equal("✌\u200D2K - Ancient", title);
     }
 
     [Fact]
-    public void NonMilestoneCountsRepeatedEvents()
+    public void RepeatedEventsStillProduceOneTitle()
     {
         var at = DateTime.UnixEpoch;
         var title = AutoClipTitleFormatter.Format("cs2", new[]
@@ -32,7 +32,35 @@ public sealed class AutoClipTitleFormatterTests
             new AutoClipEvent("death", "Death", at.AddSeconds(2))
         });
 
-        Assert.Equal("🎯Headshot x2 💀Death", title);
+        Assert.Equal("🎯Headshot", title);
+    }
+
+    [Fact]
+    public void HighestPriorityWinsAcrossDifferentGames()
+    {
+        var at = DateTime.UnixEpoch;
+        var title = AutoClipTitleFormatter.Format("league", new[]
+        {
+            new AutoClipEvent("kill", "Enemy Slain", at, 10),
+            new AutoClipEvent("triple", "Triple Kill", at.AddSeconds(1), 30),
+            new AutoClipEvent("ace", "Ace", at.AddSeconds(2), 45),
+            new AutoClipEvent("assist", "Assist", at.AddSeconds(3))
+        }, "Summoner's Rift");
+
+        Assert.Equal("👑Ace - Summoner's Rift", title);
+    }
+
+    [Fact]
+    public void EqualPriorityUsesEarliestEvent()
+    {
+        var at = DateTime.UnixEpoch;
+        var title = AutoClipTitleFormatter.Format("dota2", new[]
+        {
+            new AutoClipEvent("assist", "Assist", at.AddSeconds(2), 0),
+            new AutoClipEvent("death", "Death", at, 0)
+        });
+
+        Assert.Equal("💀Death", title);
     }
 
     [Theory]
