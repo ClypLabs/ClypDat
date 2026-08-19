@@ -62,6 +62,50 @@ function Restore-GitPosition {
     }
 }
 
+function Ensure-StableAvaloniaPackages {
+    $avaloniaRoot = Join-Path (Split-Path $repoRoot -Parent) 'clypdat-avalonia'
+    $packageOutput = Join-Path $avaloniaRoot 'artifacts\nuget'
+    $packageProject = Join-Path $avaloniaRoot 'build\ClypDat.Win32Packages.proj'
+    $pinFile = Join-Path $repoRoot 'eng\AvaloniaPin.props'
+
+    if (-not (Test-Path -LiteralPath $pinFile -PathType Leaf)) {
+        throw "Avalonia pin file was not found: $pinFile"
+    }
+
+    $pin = [xml](Get-Content -LiteralPath $pinFile -Raw)
+    $stableVersion = $pin.SelectSingleNode('//ClypDatAvaloniaStablePackageVersion').InnerText
+    if ([string]::IsNullOrWhiteSpace($stableVersion)) {
+        throw 'The stable Avalonia package version is missing from eng/AvaloniaPin.props.'
+    }
+
+    $requiredPackages = @('Avalonia', 'Avalonia.Desktop', 'Avalonia.Themes.Fluent', 'Avalonia.Fonts.Inter') |
+        ForEach-Object { Join-Path $packageOutput "$_.$stableVersion.nupkg" }
+    if (@($requiredPackages | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) }).Count -eq 0) {
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $packageProject -PathType Leaf)) {
+        throw "The sibling Avalonia fork is missing its package target: $packageProject"
+    }
+
+    Write-Host "Stable Avalonia packages are missing; building version $stableVersion from the sibling fork."
+    Push-Location $avaloniaRoot
+    try {
+        & $dotnetExecutable msbuild $packageProject /t:Pack "/p:ClypDatPackageVersion=$stableVersion" "/p:ClypDatPackageOutput=$packageOutput" /nologo
+        if ($LASTEXITCODE -ne 0) {
+            throw "Avalonia package build failed with exit code $LASTEXITCODE."
+        }
+    }
+    finally {
+        Pop-Location
+    }
+
+    $missing = @($requiredPackages | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) })
+    if ($missing.Count -gt 0) {
+        throw "Avalonia package build completed without the required packages: $($missing -join ', ')"
+    }
+}
+
 Push-Location $repoRoot
 $originalGitPosition = $null
 $restoreGitPosition = $false
@@ -104,6 +148,8 @@ try {
             $restoreGitPosition = $true
         }
     }
+
+    Ensure-StableAvaloniaPackages
 
     New-Item -ItemType Directory -Path $installDirectory -Force | Out-Null
     $installPathPrefix = "$([IO.Path]::GetFullPath($installDirectory).TrimEnd('\'))\"
