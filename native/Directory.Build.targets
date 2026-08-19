@@ -1,0 +1,8 @@
+<Project>
+  <!-- ClypDat does not participate in Avalonia's optional build-time
+       telemetry. Keep this opt-out scoped to the native app build; it has no
+       effect on the packaged Avalonia sources or application runtime. -->
+  <PropertyGroup>
+    <UsedAvaloniaProducts Condition="'$(ClypDatDisableAvaloniaTelemetry)' != 'false'"></UsedAvaloniaProducts>
+  </PropertyGroup>
+</Project>

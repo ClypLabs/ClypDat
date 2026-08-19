@@ -13,6 +13,17 @@ $appProject = Join-Path $nativeRoot 'src\ClypDat.App\ClypDat.App.csproj'
 $installDirectory = Join-Path $env:LOCALAPPDATA 'Programs\ClypDat'
 $dotnetExecutable = & (Join-Path $repoRoot 'eng\Ensure-DotNet.ps1')
 $selfContainedVerifier = Join-Path $repoRoot 'eng\Test-SelfContainedPublish.ps1'
+$requiredAvaloniaPackageIds = @(
+    'Avalonia', 'Avalonia.Base', 'Avalonia.Controls', 'Avalonia.DesignerSupport',
+    'Avalonia.Desktop', 'Avalonia.Dialogs', 'Avalonia.Fonts.Inter',
+    'Avalonia.FreeDesktop', 'Avalonia.FreeDesktop.AtSpi', 'Avalonia.HarfBuzz',
+    'Avalonia.Markup', 'Avalonia.Markup.Xaml', 'Avalonia.Metal', 'Avalonia.MicroCom',
+    'Avalonia.Native', 'Avalonia.OpenGL', 'Avalonia.Remote.Protocol', 'Avalonia.Skia',
+    'Avalonia.Themes.Fluent', 'Avalonia.Vulkan', 'Avalonia.Win32',
+    'Avalonia.Win32.Automation', 'Avalonia.X11'
+)
+
+Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 function Invoke-Git {
     param(
@@ -96,9 +107,99 @@ function Remove-AvaloniaWorktree {
     }
 }
 
+function Read-AvaloniaNuspec {
+    param([Parameter(Mandatory)][string]$PackagePath)
+
+    $archive = [IO.Compression.ZipFile]::OpenRead($PackagePath)
+    try {
+        $nuspec = @($archive.Entries | Where-Object { $_.FullName -like '*.nuspec' }) | Select-Object -First 1
+        if ($null -eq $nuspec) {
+            throw "Package has no nuspec: $PackagePath"
+        }
+
+        $reader = [IO.StreamReader]::new($nuspec.Open())
+        try {
+            return ([xml]$reader.ReadToEnd()).package.metadata
+        }
+        finally {
+            $reader.Dispose()
+        }
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
+function Test-AvaloniaPackageSet {
+    param(
+        [Parameter(Mandatory)][string]$PackageOutput,
+        [Parameter(Mandatory)][string]$PackageVersion,
+        [string]$ExpectedCommit,
+        [switch]$RequireStamp
+    )
+
+    try {
+        $packageFiles = @(Get-ChildItem -LiteralPath $PackageOutput -Filter '*.nupkg' -File)
+        $expectedNames = @($requiredAvaloniaPackageIds | ForEach-Object { "$_.$PackageVersion.nupkg" } | Sort-Object)
+        $actualNames = @($packageFiles.Name | Sort-Object)
+        if (($actualNames -join '|') -ne ($expectedNames -join '|')) {
+            return $false
+        }
+
+        $packageIds = @{}
+        foreach ($packageFile in $packageFiles) {
+            $metadata = Read-AvaloniaNuspec -PackagePath $packageFile.FullName
+            if ($metadata.version -ne $PackageVersion -or $metadata.id -notin $requiredAvaloniaPackageIds) {
+                return $false
+            }
+
+            $packageIds[$metadata.id] = $true
+            foreach ($dependency in (@($metadata.dependencies.group.dependency) + @($metadata.dependencies.dependency))) {
+                if ($dependency.id -like 'Avalonia*' -and $dependency.version -eq $PackageVersion) {
+                    $dependencyPath = Join-Path $PackageOutput "$($dependency.id).$PackageVersion.nupkg"
+                    if (-not (Test-Path -LiteralPath $dependencyPath -PathType Leaf)) {
+                        return $false
+                    }
+                }
+            }
+        }
+
+        foreach ($packageId in $requiredAvaloniaPackageIds) {
+            if (-not $packageIds.ContainsKey($packageId)) {
+                return $false
+            }
+        }
+
+        if ($RequireStamp) {
+            $stampPath = Join-Path $PackageOutput 'clypdat-package-stamp.json'
+            if (-not (Test-Path -LiteralPath $stampPath -PathType Leaf)) {
+                return $false
+            }
+
+            $stamp = Get-Content -LiteralPath $stampPath -Raw | ConvertFrom-Json
+            if ($stamp.schema -ne 1 -or $stamp.commit -ne $ExpectedCommit -or $stamp.packageVersion -ne $PackageVersion) {
+                return $false
+            }
+
+            $stampPackages = @($stamp.packages | Sort-Object)
+            $expectedIds = @($requiredAvaloniaPackageIds | Sort-Object)
+            if (($stampPackages -join '|') -ne ($expectedIds -join '|')) {
+                return $false
+            }
+        }
+
+        return $true
+    }
+    catch {
+        Write-Verbose "Avalonia package validation failed: $($_.Exception.Message)"
+        return $false
+    }
+}
+
 function Ensure-StableAvaloniaPackages {
     $avaloniaRoot = Join-Path (Split-Path $repoRoot -Parent) 'clypdat-avalonia'
     $packageOutput = Join-Path $avaloniaRoot 'artifacts\nuget'
+    $packageStaging = Join-Path $avaloniaRoot 'artifacts\clypdat-package-staging'
     $pinFile = Join-Path $repoRoot 'eng\AvaloniaPin.props'
 
     if (-not (Test-Path -LiteralPath $pinFile -PathType Leaf)) {
@@ -115,9 +216,8 @@ function Ensure-StableAvaloniaPackages {
         throw 'The stable Avalonia package version is missing from eng/AvaloniaPin.props.'
     }
 
-    $requiredPackages = @('Avalonia', 'Avalonia.Desktop', 'Avalonia.Themes.Fluent', 'Avalonia.Fonts.Inter') |
-        ForEach-Object { Join-Path $packageOutput "$_.$stableVersion.nupkg" }
-    if (@($requiredPackages | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) }).Count -eq 0) {
+    if (Test-AvaloniaPackageSet -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $stableCommit -RequireStamp) {
+        Write-Host "Using stamped Avalonia package set for commit $stableCommit."
         return
     }
 
@@ -125,7 +225,7 @@ function Ensure-StableAvaloniaPackages {
         throw "The sibling Avalonia fork was not found at: $avaloniaRoot"
     }
 
-    Write-Host "Stable Avalonia packages are missing; fetching pinned commit $stableCommit and building version $stableVersion."
+    Write-Host "Stable Avalonia package stamp is missing or stale; fetching pinned commit $stableCommit and building version $stableVersion."
     $worktreeRoot = Join-Path ([IO.Path]::GetTempPath()) ('ca-' + [Guid]::NewGuid().ToString('N').Substring(0, 12))
     $worktreeAdded = $false
     try {
@@ -159,9 +259,19 @@ function Ensure-StableAvaloniaPackages {
             throw "Pinned Avalonia commit $stableCommit does not contain the ClypDat package target."
         }
 
+        $stagingFullPath = [IO.Path]::GetFullPath($packageStaging)
+        $avaloniaFullPath = [IO.Path]::GetFullPath($avaloniaRoot).TrimEnd('\') + '\'
+        if (-not $stagingFullPath.StartsWith($avaloniaFullPath, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to use unexpected Avalonia package staging path: $stagingFullPath"
+        }
+        if (Test-Path -LiteralPath $stagingFullPath) {
+            Remove-Item -LiteralPath $stagingFullPath -Recurse -Force
+        }
+        New-Item -ItemType Directory -Path $stagingFullPath -Force | Out-Null
+
         Push-Location $worktreeRoot
         try {
-            & $dotnetExecutable msbuild $packageProject /t:Pack "/p:ClypDatPackageVersion=$stableVersion" "/p:ClypDatPackageOutput=$packageOutput" /nologo
+            & $dotnetExecutable msbuild $packageProject /t:Pack "/p:ClypDatPackageVersion=$stableVersion" "/p:ClypDatPackageOutput=$stagingFullPath" /nologo
             if ($LASTEXITCODE -ne 0) {
                 throw "Avalonia package build failed with exit code $LASTEXITCODE."
             }
@@ -169,6 +279,26 @@ function Ensure-StableAvaloniaPackages {
         finally {
             Pop-Location
         }
+
+        if (-not (Test-AvaloniaPackageSet -PackageOutput $stagingFullPath -PackageVersion $stableVersion)) {
+            throw 'Avalonia package build did not produce the exact desktop package closure.'
+        }
+
+        $outputFullPath = [IO.Path]::GetFullPath($packageOutput)
+        if (-not $outputFullPath.StartsWith($avaloniaFullPath, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to replace unexpected Avalonia package output path: $outputFullPath"
+        }
+        if (Test-Path -LiteralPath $outputFullPath) {
+            Remove-Item -LiteralPath $outputFullPath -Recurse -Force
+        }
+        Move-Item -LiteralPath $stagingFullPath -Destination $outputFullPath
+
+        [ordered]@{
+            schema = 1
+            commit = $resolvedCommit
+            packageVersion = $stableVersion
+            packages = @($requiredAvaloniaPackageIds | Sort-Object)
+        } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $outputFullPath 'clypdat-package-stamp.json') -Encoding utf8
     }
     finally {
         if ($worktreeAdded) {
@@ -176,9 +306,8 @@ function Ensure-StableAvaloniaPackages {
         }
     }
 
-    $missing = @($requiredPackages | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) })
-    if ($missing.Count -gt 0) {
-        throw "Avalonia package build completed without the required packages: $($missing -join ', ')"
+    if (-not (Test-AvaloniaPackageSet -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $resolvedCommit -RequireStamp)) {
+        throw 'Avalonia package build completed but its stamped package closure could not be verified.'
     }
 }
 
