@@ -581,6 +581,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         ID3D11Device? device = null;
         ID3D11Texture2D? staging = null;
         IDXGIOutputDuplication? duplication = null;
+        WindowGraphicsCaptureSource? wgcCapture = null;
         // GPU-side downscale path (see TrySetupGpuScale) - only actually used
         // when useGpuScale ends up true; `staging`/swsContext above always
         // still get created too so there's a guaranteed-working fallback if
@@ -705,6 +706,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // MMCSS is what keeps this thread scheduled while a game owns every
         // core - see MmcssScope.Capture.
         using var captureMmcss = MmcssScope.Capture("native capture loop");
+        var gpuLock = new object();
 
         try
         {
@@ -720,9 +722,29 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // once-a-second target recheck in the loop for why the window handle
             // alone is the wrong thing to compare against.
             var targetMonitor = ResolveTargetMonitor(targetHandle, config);
-            duplication = CreateDuplicationFor(device, targetHandle, config, out var desktopBounds);
+            Vortice.RawRect desktopBounds;
+            if (!isMonitorMode)
+            {
+                try
+                {
+                    wgcCapture = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor);
+                    var size = wgcCapture.ContentSize;
+                    desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
+                    AppLog.Info($"Native capture: using Windows.Graphics.Capture for game window 0x{targetHandle:X}.");
+                }
+                catch (Exception error)
+                {
+                    AppLog.Error("Native capture: WGC initialization failed; falling back to DXGI with privacy freeze.", error);
+                    wgcCapture?.Dispose();
+                    wgcCapture = null;
+                    duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds);
+                }
+            }
+            else duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds);
 
-            var (captureWidth, captureHeight) = isMonitorMode
+            var (captureWidth, captureHeight) = wgcCapture is not null
+                ? wgcCapture.ContentSize
+                : isMonitorMode
                 ? (desktopBounds.Right - desktopBounds.Left, desktopBounds.Bottom - desktopBounds.Top)
                 : GetInitialCropSize(targetHandle, desktopBounds);
 
@@ -802,15 +824,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 }
             }
 
-            // Zero-copy requires GPU scale. Cursor-enabled capture also requires
-            // GPU cursor composition so NVENC never sees a CPU round trip.
-            if (useGpuScale && (!config.CaptureCursor || gpuCursorAvailable))
-            {
-                (hwDeviceRef, hwFramesRef) = TryCreateD3D11EncodeFrames(
-                    device, outputWidth, outputHeight, encodeQueueCapacity + HardwareFramePoolHeadroom);
-            }
-
-            codecContext = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, out var codecTimeBase, out var encoderName, out var hardwareFramesActive);
+            // Hardware encoders use the bounded system-memory NV12 transport.
+            // Dynamic D3D11 texture registration was slower than this staging path.
+            codecContext = CreateEncoder(config, outputWidth, outputHeight, 0, out var codecTimeBase, out var encoderName, out var hardwareFramesActive);
             _timeBase = codecTimeBase;
             _videoCodecId = codecContext->codec_id;
 
@@ -861,8 +877,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
             var adapterDescription = DescribeAdapter(device);
             var videoCodec = encoderName.StartsWith("av1_", StringComparison.OrdinalIgnoreCase) ? "AV1" : "H.264";
-            AppLog.Info($"Native capture started (DXGI Desktop Duplication): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, codec={videoCodec}, encoder={encoderName}, encodePath={(hardwareFramesActive ? "D3D11 zero-copy" : "system-memory")}, cursorPath={(hardwareFramesActive && gpuCursorAvailable ? "GPU" : (config.CaptureCursor ? "CPU" : "off"))}, queue={encodeQueueCapacity} frames, adapter={adapterDescription}, profile={config.EncoderProfile}, frameTiming={ReplayFrameTimingPolicy.Normalize(config.FrameRateMode)}, configFrameRate={config.FrameRate}.");
-            SetHealth(new ReplayCaptureHealth("Native", "Desktop Duplication", ReplayCaptureState.Healthy,
+            var captureMode = wgcCapture is null ? "Desktop Duplication" : "Windows Graphics Capture";
+            AppLog.Info($"Native capture started ({captureMode}): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, codec={videoCodec}, encoder={encoderName}, encodePath=system-memory, cursorPath={(config.CaptureCursor ? "CPU" : "off")}, queue={encodeQueueCapacity} frames, adapter={adapterDescription}, profile={config.EncoderProfile}, frameTiming={ReplayFrameTimingPolicy.Normalize(config.FrameRateMode)}, configFrameRate={config.FrameRate}.");
+            SetHealth(new ReplayCaptureHealth("Native", captureMode, ReplayCaptureState.Healthy,
                 config.FrameRate, 0, 0, 0, 0, 0, 0, encoderName, "Default adapter", string.Empty, DateTime.UtcNow)
             {
                 AdapterDescription = adapterDescription,
@@ -973,9 +990,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // duplication recreate waits to be picked up.
             var acquireTimeoutMs = acquireTimeoutForcedMs > 0 ? (uint)acquireTimeoutForcedMs : 200u;
             if (acquireTimeoutForcedMs > 0) AppLog.Info($"Native capture: acquire timeout forced to {acquireTimeoutMs}ms.");
-            // Serializes every D3D11 immediate/video context touch across the
-            // acquire loop and the pacing tick - see pacingThread below.
-            var gpuLock = new object();
             var lastDiagLog = TimeSpan.Zero;
             var lastRingTrim = TimeSpan.Zero;
             var framesSeen = 0;
@@ -1241,7 +1255,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // back in. It remains useful telemetry, but a low rate with
                     // an empty queue is a pacing/source shortfall, not encoder
                     // overload and must not trigger quality advice.
-                    var outputFrameRate = framesEncodedSinceLog / diagElapsed;
+                    // The encoder's returned packets are the actual output;
+                    // queued AVFrames can still be delayed or rejected.
+                    var outputFrameRate = packetsOutSinceLog / diagElapsed;
                     var encoderPressure = droppedSinceLog > 0 || encodeQueue.Count * 4 >= encodeQueueCapacity * 3;
                     var outputShortfall = hasCapturedRealFrame && outputFrameRate < activeFrameRate * 0.9;
                     var overloaded = encoderPressure;
@@ -1263,10 +1279,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         const string recoveryGuidance = "Automatic hardware profile is already active; reduce capture resolution or frame rate.";
                         AppLog.Info($"Native capture: overload - dropped {droppedSinceLog} frame(s) in the last {diagElapsed:0.0}s, queue {encodeQueue.Count}/{encodeQueueCapacity}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.0}, avgScaleMs={scaleMs / n:0.0}. {recoveryGuidance}");
                     }
-                    SetHealth(new ReplayCaptureHealth("Native", "Desktop Duplication",
+                    var activeCaptureMode = wgcCapture is null ? "Desktop Duplication" : "Windows Graphics Capture";
+                    SetHealth(new ReplayCaptureHealth("Native", activeCaptureMode,
                         overloaded || isStalled ? ReplayCaptureState.Degraded : ReplayCaptureState.Healthy,
                         activeFrameRate, framesSeenSinceLog / diagElapsed, framesProcessedSinceLog / diagElapsed,
-                        outputFrameRate, Math.Max(0, framesEncodedSinceLog - framesProcessedSinceLog), droppedSinceLog, encodeQueue.Count,
+                        outputFrameRate, Math.Max(0, packetsOutSinceLog - framesProcessedSinceLog), droppedSinceLog, encodeQueue.Count,
                         encoderName, "Default adapter",
                         isStalled ? "Capture stalled - no new frames from the display. Recovering." :
                         overloaded ? "Capture overload. Output may fall below target FPS." :
@@ -1330,35 +1347,34 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         targetHandle = freshHandle;
                         isMonitorMode = targetHandle == 0;
 
-                        // Duplication is per-OUTPUT, not per-window: the window is
-                        // followed by cropping each frame, so a new target on the
-                        // same monitor needs nothing rebuilt here. This used to tear
-                        // down and recreate on every target change regardless, and a
-                        // recreate is precisely where things go wrong - DuplicateOutput
-                        // returns E_ACCESSDENIED whenever the secure desktop is up or
-                        // another process holds the output (one session logged 460 of
-                        // those in 45 seconds), and every rebuild is another chance to
-                        // land in a duplication that never delivers again. Game
-                        // detection flapping between a launcher and the game, or the
-                        // game closing and falling back to monitor mode, all resolve
-                        // to the same monitor and are now free.
                         var freshMonitor = ResolveTargetMonitor(targetHandle, config);
-                        if (freshMonitor != targetMonitor || duplication is null)
+                        if (wgcCapture is not null || freshMonitor != targetMonitor || duplication is null)
                         {
                             targetMonitor = freshMonitor;
+                            wgcCapture?.Dispose();
+                            wgcCapture = null;
                             duplication?.Dispose();
-                            // Null out before the recreate attempt - if it throws, `duplication`
-                            // must not be left pointing at the just-disposed object, or the next
-                            // AcquireNextFrame call below crashes the whole loop with an NRE
-                            // instead of just retrying (see the null-guard above the acquire call).
                             duplication = null;
-                            try
+                            if (!isMonitorMode)
                             {
-                                duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds);
+                                try
+                                {
+                                    wgcCapture = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor);
+                                    var size = wgcCapture.ContentSize;
+                                    desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
+                                    AppLog.Info($"Native capture: WGC source replaced for game window 0x{targetHandle:X}.");
+                                }
+                                catch (Exception error)
+                                {
+                                    AppLog.Error("Native capture: WGC replacement failed; using DXGI fallback with privacy freeze.", error);
+                                    wgcCapture?.Dispose();
+                                    wgcCapture = null;
+                                }
                             }
-                            catch (Exception error)
+                            if (wgcCapture is null)
                             {
-                                AppLog.Error("Native capture: failed to switch DXGI duplication target.", error);
+                                try { duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds); }
+                                catch (Exception error) { AppLog.Error("Native capture: failed to switch DXGI duplication target.", error); }
                             }
                         }
 
@@ -1421,7 +1437,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 // which previously crashed the whole capture session on any
                 // transient DuplicateOutput failure (e.g. a fullscreen-exclusive
                 // transition briefly denying access).
-                if (duplication is null)
+                if (wgcCapture is null && duplication is null)
                 {
                     Thread.Sleep(50);
                     try
@@ -1436,12 +1452,34 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     continue;
                 }
 
-                var acquireResult = duplication.AcquireNextFrame(acquireTimeoutMs, out var frameInfo, out var desktopResource);
+                var usingWgc = wgcCapture is not null;
+                var frameInfo = new OutduplFrameInfo();
+                var acquireResultCode = ResultCode.WaitTimeout.Code;
+                ID3D11Resource? desktopResource;
+                if (usingWgc)
+                {
+                    desktopResource = wgcCapture!.TryGetLatestTexture(out var latestTexture) ? latestTexture : null;
+                    if (desktopResource is null && !string.IsNullOrWhiteSpace(wgcCapture.Failure))
+                    {
+                        AppLog.Info($"Native capture: WGC source closed ({wgcCapture.Failure}); switching to DXGI fallback with privacy freeze.");
+                        wgcCapture.Dispose();
+                        wgcCapture = null;
+                        try { duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds); }
+                        catch (Exception error) { AppLog.Error("Native capture: DXGI fallback after WGC closure failed.", error); }
+                    }
+                }
+                else
+                {
+                    var acquireResult = duplication!.AcquireNextFrame(acquireTimeoutMs, out frameInfo, out var dxgiResource);
+                    acquireResultCode = acquireResult.Code;
+                    desktopResource = acquireResult.Success ? dxgiResource : null;
+                    if (!acquireResult.Success) dxgiResource?.Dispose();
+                }
                 waitMs += stageStopwatch.Elapsed.TotalMilliseconds;
 
-                var occluded = !isMonitorMode && !IsWindowForegroundAndVisible(targetHandle);
+                var occluded = !isMonitorMode && !usingWgc && !IsWindowForegroundAndVisible(targetHandle);
 
-                if (acquireResult.Success)
+                if (desktopResource is not null)
                 {
                     consecutiveAcquireFailures = 0;
                     // LastPresentTime is 0 when the desktop IMAGE itself hasn't
@@ -1451,10 +1489,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // treated as fresh content: cropped, GPU-scaled, and burning a
                     // pacing-gate slot on byte-identical data instead of the next
                     // genuinely new frame.
-                    if (frameInfo.LastPresentTime == 0)
+                    if (!usingWgc && frameInfo.LastPresentTime == 0)
                     {
                         zeroPresentSkips++;
-                        duplication.ReleaseFrame();
+                        duplication!.ReleaseFrame();
                         desktopResource.Dispose();
                     }
                     else
@@ -1499,7 +1537,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
                             stageStopwatch.Restart();
                             int cropLeft = 0, cropTop = 0, cropWidth = captureWidth, cropHeight = captureHeight;
-                            if (isMonitorMode)
+                            if (usingWgc)
+                            {
+                                (cropWidth, cropHeight) = wgcCapture!.ContentSize;
+                            }
+                            else if (isMonitorMode)
                             {
                                 cropWidth = desktopBounds.Right - desktopBounds.Left;
                                 cropHeight = desktopBounds.Bottom - desktopBounds.Top;
@@ -1834,7 +1876,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         finally
                         {
                             Monitor.Exit(gpuLock);
-                            duplication.ReleaseFrame();
+                            if (!usingWgc) duplication!.ReleaseFrame();
                             desktopResource.Dispose();
                         }
                     }
@@ -1842,7 +1884,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 else
                 {
                     desktopResource?.Dispose();
-                    if (acquireResult.Code == ResultCode.AccessLost.Code)
+                    if (!usingWgc && acquireResultCode == ResultCode.AccessLost.Code)
                     {
                         AppLog.Info("Native capture: DXGI duplication access lost, recreating.");
                         duplication.Dispose();
@@ -1857,7 +1899,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             Thread.Sleep(200);
                         }
                     }
-                    else if (acquireResult.Code != ResultCode.WaitTimeout.Code)
+                    else if (!usingWgc && acquireResultCode != ResultCode.WaitTimeout.Code)
                     {
                         // Transient failure (e.g. desktop switch) - brief backoff, retry.
                         // Counted and logged, because "transient" turned out to be
@@ -1869,7 +1911,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         if (stopwatch.Elapsed - lastAcquireFailureLog >= TimeSpan.FromSeconds(5))
                         {
                             lastAcquireFailureLog = stopwatch.Elapsed;
-                            AppLog.Info($"Native capture: AcquireNextFrame failed with 0x{acquireResult.Code:X8} ({consecutiveAcquireFailures} in a row).");
+                            AppLog.Info($"Native capture: AcquireNextFrame failed with 0x{acquireResultCode:X8} ({consecutiveAcquireFailures} in a row).");
                         }
                         Thread.Sleep(50);
                     }
@@ -1886,7 +1928,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 // The second is a soft signal, since a genuinely static screen
                 // looks identical from here, so it only ever costs a duplication
                 // recreate - a few milliseconds, and harmless if it wasn't needed.
-                if (hasCapturedRealFrame && !occluded &&
+                // A quiet WGC source is expected for a covered/minimized game.
+                // Preserve its session and the output cadence; callback failures
+                // explicitly trigger the DXGI fallback above.
+                if (wgcCapture is null && hasCapturedRealFrame && !occluded &&
                     (consecutiveAcquireFailures >= acquireFailureRecreateThreshold ||
                      stopwatch.Elapsed - lastRealFrameElapsed >= stallRecreateAfter) &&
                     stopwatch.Elapsed - lastRecoveryAttempt >= recoveryRetryInterval)
@@ -2084,7 +2129,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // The recreate above can leave `duplication` null on failure;
                     // the null-guard at the top of the loop retries it, and
                     // dereferencing it below would crash the whole session.
-                    if (duplication is null) continue;
+                    if (wgcCapture is null && duplication is null) continue;
                 }
 
                 if (occluded != isPaused)
@@ -2557,39 +2602,27 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 {
                     var now = stopwatch.Elapsed;
                     var hasFreshContent = Interlocked.Exchange(ref freshContentSinceLastEncode, 0) != 0;
-                    // Do not advance VFR's deadline without a real input frame:
-                    // an idle source needs `lastEncodedAt` to remain where it was
-                    // so the sparse one-second heartbeat below can hold the last
-                    // image for the correct duration.
-                    var dueForFreshFrame = hasFreshContent && ReplayFrameTimingPolicy.TryAdvanceVariableDeadline(
+                    // Keep selected-rate cadence through a source gap. Fresh
+                    // frames retain their real timestamps; duplicates only fill
+                    // the interval where the source supplied nothing new.
+                    var dueForTick = ReplayFrameTimingPolicy.TryAdvanceVariableDeadline(
                         now, targetFrameInterval, ref lastEncodedAt);
 
-                    if (hasFreshContent && dueForFreshFrame)
+                    if (dueForTick)
                     {
-                        // Medal-style pacing: the selected frame rate caps
-                        // capture work, but the file timeline comes from the
-                        // actual capture clock rather than an invented grid.
-                        // The selected-FPS deadline advanced above instead of
-                        // being reset to `now`, otherwise a late scheduler wake
-                        // makes every subsequent VFR frame late as well.
-                        frame->pts = ReplayFrameTimingPolicy.RealPtsMicroseconds(now, lastVariablePtsMicroseconds);
+                        var realPts = ReplayFrameTimingPolicy.RealPtsMicroseconds(now, lastVariablePtsMicroseconds);
+                        var gapPts = lastVariablePtsMicroseconds < 0
+                            ? realPts
+                            : lastVariablePtsMicroseconds + (long)Math.Round(idealFrameIntervalMicroseconds);
+                        frame->pts = hasFreshContent ? realPts : gapPts;
                         lastVariablePtsMicroseconds = frame->pts;
                         EncodeScheduledFrame();
                     }
-                    else
+                    else if (hasFreshContent)
                     {
-                        // Keep a genuinely new frame pending until the cap
-                        // permits it. A quiet/occluded source still receives
-                        // a sparse duplicate heartbeat so clips and VODs hold
-                        // their last frame for the correct wall duration.
-                        if (hasFreshContent) Volatile.Write(ref freshContentSinceLastEncode, 1);
-                        if (!hasFreshContent && now - lastEncodedAt >= TimeSpan.FromSeconds(1))
-                        {
-                            lastEncodedAt = now;
-                            frame->pts = ReplayFrameTimingPolicy.RealPtsMicroseconds(now, lastVariablePtsMicroseconds);
-                            lastVariablePtsMicroseconds = frame->pts;
-                            EncodeScheduledFrame();
-                        }
+                        // The cap has not reached its next tick yet; retain the
+                        // source update for that tick instead of losing it.
+                        Volatile.Write(ref freshContentSinceLastEncode, 1);
                     }
                 }
                 else if (hasCapturedRealFrame)
@@ -2661,12 +2694,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // the configured rate. Measured at 15-67 pads skipped per 2s
                     // window, which is where a capture logging a clean 120
                     // frames per 2s still saved clips reading 49fps.
-                    if (Volatile.Read(ref freshContentSinceLastEncode) == 0 && encodeQueue.Count + 2 >= encodeQueueCapacity)
-                    {
-                        padsSkippedSinceLog++;
-                        continue;
-                    }
-
                     EncodeScheduledFrame();
                     Volatile.Write(ref freshContentSinceLastEncode, 0);
                 }
@@ -2826,6 +2853,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // pointers the pool owns and hold no reference of their own.
             hardwarePoolTextures.Clear();
             ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
+            wgcCapture?.Dispose();
             duplication?.Dispose();
             staging?.Dispose();
             foreach (var view in desktopInputViews.Values) view.Dispose();
@@ -4246,6 +4274,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             TrySet("preset", "p1");
             if (profile is not null) TrySet("profile", profile);
             TrySet("tune", "ll");
+            TrySet("zerolatency", "1");
             TrySet("surfaces", ReplayEncoderProfilePolicy.NvencSurfaces(config.FrameRate).ToString(CultureInfo.InvariantCulture));
             // This is a replay buffer, not a live stream. NVENC's zerolatency
             // option forces a packet out for every submitted frame; when the

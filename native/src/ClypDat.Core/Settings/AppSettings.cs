@@ -42,7 +42,9 @@ public sealed class AppSettings
     // VFR follows the capture clock and avoids spending encoder work on
     // duplicate frames. CFR remains available for applications that require
     // a fixed frame grid.
-    public string ReplayFrameRateMode { get; set; } = "VFR";
+    // New configurations use exact CFR. Existing explicit VFR values remain
+    // intact when deserialized.
+    public string ReplayFrameRateMode { get; set; } = "CFR";
     // Existing settings files need one-time migration from old Auto default.
     public bool ReplayH264DefaultApplied { get; set; }
     // Fixed CBR target for every replay backend. Persisted range: 5-100 Mbps.

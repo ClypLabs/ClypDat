@@ -6,10 +6,10 @@ namespace ClypDat.GameDetection.Tests;
 public sealed class ReplayFrameTimingPolicyTests
 {
     [Theory]
-    [InlineData(null, ReplayFrameTimingPolicy.Variable)]
+    [InlineData(null, ReplayFrameTimingPolicy.Constant)]
     [InlineData("vfr", ReplayFrameTimingPolicy.Variable)]
     [InlineData("CFR", ReplayFrameTimingPolicy.Constant)]
-    [InlineData("anything else", ReplayFrameTimingPolicy.Variable)]
+    [InlineData("anything else", ReplayFrameTimingPolicy.Constant)]
     public void NormalizesPersistedTimingMode(string? value, string expected)
     {
         Assert.Equal(expected, ReplayFrameTimingPolicy.Normalize(value));
@@ -61,5 +61,23 @@ public sealed class ReplayFrameTimingPolicyTests
 
         Assert.True(ReplayFrameTimingPolicy.TryAdvanceVariableDeadline(TimeSpan.FromMilliseconds(100), interval, ref deadline));
         Assert.Equal(TimeSpan.FromTicks(interval.Ticks * 6), deadline);
+    }
+
+    [Theory]
+    [InlineData(30)]
+    [InlineData(60)]
+    [InlineData(90)]
+    [InlineData(120)]
+    [InlineData(144)]
+    public void SourceGapPadsAtSelectedRate(int frameRate)
+    {
+        var interval = 1_000_000.0 / frameRate;
+        long lastPts = 0;
+        for (var index = 0; index < frameRate; index++)
+        {
+            var paddedPts = lastPts + (long)Math.Round(interval);
+            Assert.InRange(Math.Abs(paddedPts - (long)Math.Round((index + 1) * interval)), 0, 1);
+            lastPts = paddedPts;
+        }
     }
 }

@@ -16,7 +16,7 @@ public static class ReplayFrameTimingPolicy
     private static readonly TimeSpan VariableDeadlineLead = TimeSpan.FromMilliseconds(0.75);
 
     public static string Normalize(string? value) =>
-        string.Equals(value, Constant, StringComparison.OrdinalIgnoreCase) ? Constant : Variable;
+        string.Equals(value, Variable, StringComparison.OrdinalIgnoreCase) ? Variable : Constant;
 
     public static bool IsVariable(string? value) =>
         string.Equals(Normalize(value), Variable, StringComparison.Ordinal);

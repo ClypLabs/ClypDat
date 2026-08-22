@@ -810,7 +810,7 @@ public sealed record ReplayBufferConfig(
     string EncoderMode = "GPU",
     string EncoderProfile = "Automatic",
     int BitrateMbps = 15,
-    string FrameRateMode = "VFR",
+    string FrameRateMode = "CFR",
     string CaptureSource = "Game",
     string CaptureMonitorDeviceName = "",
     bool CaptureCursor = false,
