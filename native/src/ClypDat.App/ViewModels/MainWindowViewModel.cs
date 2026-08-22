@@ -540,7 +540,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 var total = _startupLibraryStates.Count;
                 var remaining = Math.Max(0, total - _loadedStartupClipCount);
-                return $"Clyps ({total:N0}) ({remaining:N0} left to load)";
+                return $"Clips ({total:N0}) ({remaining:N0} left to load)";
             }
             if (!IsInitialLibraryLoadComplete) return "Loading library";
             var parts = new List<string>();
@@ -555,7 +555,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // Count is of what's actually on screen, so it follows the filter
             // rather than always reporting the whole library.
             var shown = AllClips.Count(clip => clip.IsVisibleInLibrary);
-            var name = parts.Count == 0 ? "Clyps" : string.Join(" - ", parts);
+            var name = parts.Count == 0 ? "Clips" : string.Join(" - ", parts);
             return $"{name} ({shown})";
         }
     }
@@ -564,8 +564,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // has no business in a heading.
     private static string ClipTypeTitle(string key) => key switch
     {
-        ClipTypeManual => "Manual Clyps",
-        ClipTypeAutoClip => "Auto-Clyps",
+        ClipTypeManual => "Manual Clips",
+        ClipTypeAutoClip => "Auto-Clips",
         ClipTypeVod => "Full Session / VODs",
         ClipTypeImported => "Imported",
         _ => key
@@ -6564,8 +6564,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var removedAnyClipTypeFilter = !hasImports && _activeClipTypeFilters.Remove(ClipTypeImported);
 
         ClipTypeFilterOptions.Clear();
-        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeManual, $"Manual Clyps ({manualCount})", _activeClipTypeFilters.Contains(ClipTypeManual), OnClipTypeFilterOptionChanged));
-        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeAutoClip, $"Auto-Clyps ({autoClipCount})", _activeClipTypeFilters.Contains(ClipTypeAutoClip), OnClipTypeFilterOptionChanged));
+        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeManual, $"Manual Clips ({manualCount})", _activeClipTypeFilters.Contains(ClipTypeManual), OnClipTypeFilterOptionChanged));
+        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeAutoClip, $"Auto-Clips ({autoClipCount})", _activeClipTypeFilters.Contains(ClipTypeAutoClip), OnClipTypeFilterOptionChanged));
         ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeVod, $"Full Session / VODs ({vodCount})", _activeClipTypeFilters.Contains(ClipTypeVod), OnClipTypeFilterOptionChanged));
         if (hasImports)
         {
@@ -6614,8 +6614,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var hasImports = importedCount > 0;
         if (!hasImports) _activeClipTypeFilters.Remove(ClipTypeImported);
         ClipTypeFilterOptions.Clear();
-        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeManual, $"Manual Clyps ({manualCount})", _activeClipTypeFilters.Contains(ClipTypeManual), OnClipTypeFilterOptionChanged));
-        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeAutoClip, $"Auto-Clyps ({autoClipCount})", _activeClipTypeFilters.Contains(ClipTypeAutoClip), OnClipTypeFilterOptionChanged));
+        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeManual, $"Manual Clips ({manualCount})", _activeClipTypeFilters.Contains(ClipTypeManual), OnClipTypeFilterOptionChanged));
+        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeAutoClip, $"Auto-Clips ({autoClipCount})", _activeClipTypeFilters.Contains(ClipTypeAutoClip), OnClipTypeFilterOptionChanged));
         ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeVod, $"Full Session / VODs ({vodCount})", _activeClipTypeFilters.Contains(ClipTypeVod), OnClipTypeFilterOptionChanged));
         if (hasImports)
         {

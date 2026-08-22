@@ -719,7 +719,7 @@ public sealed partial class MainWindow : Window
         // worker. The event is for global-hotkey saves that originate inside
         // the worker, so do not restart the toast for the former.
         if (ViewModel.IsSavingReplayClip) return;
-        ShowClipNotification("Clyp Saving…", playSound: false);
+        ShowClipNotification("Clip Saving…", playSound: false);
     }
 
     private void Worker_SaveCompleted(object? sender, ReplaySaveCompleted completed)
@@ -2572,7 +2572,7 @@ public sealed partial class MainWindow : Window
                 {
                     var wait = clipWindow.EndUtc - MonotonicClock.UtcNow;
                     if (wait > TimeSpan.Zero) await Task.Delay(wait);
-                    ShowClipNotification($"Saving {autoClipLabel} Clyp…", playSound: false);
+                    ShowClipNotification($"Saving {autoClipLabel} Clip…", playSound: false);
                 }
                 else
                 {
@@ -2583,7 +2583,7 @@ public sealed partial class MainWindow : Window
                     // the whole time it was working. Auto-clips already got this
                     // via the branch above; manual presses just never had the
                     // equivalent.
-                    ShowClipNotification("Clyp Saving…", playSound: false);
+                    ShowClipNotification("Clip Saving…", playSound: false);
                 }
 
                 var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder, titleOverride: autoClipLabel, clipWindow: clipWindow));
@@ -2594,7 +2594,7 @@ public sealed partial class MainWindow : Window
                 // say so now rather than let it be discovered on playback later.
                 if (_replayBuffer.LastSaveVideoWasFrozen)
                 {
-                    ShowClipNotification("Clyp Saved - video was frozen", playSound: true);
+                    ShowClipNotification("Clip Saved - video was frozen", playSound: true);
                 }
                 else
                 {
@@ -2624,7 +2624,7 @@ public sealed partial class MainWindow : Window
             {
                 AppLog.Error("Replay clip save failed", error);
                 if (isAutoClip) ShowAutoClipFailedNotification();
-                if (!isAutoClip) await ShowMessageAsync("Clyp Failed", error.Message);
+                if (!isAutoClip) await ShowMessageAsync("Clip Failed", error.Message);
             }
         }
         finally
@@ -2652,7 +2652,7 @@ public sealed partial class MainWindow : Window
 
     private void ShowClipSavedNotification()
     {
-        ShowClipNotification("Clyp Saved", playSound: true);
+        ShowClipNotification("Clip Saved", playSound: true);
     }
 
     private void ShowClipNotification(string text, bool playSound)
@@ -3126,7 +3126,7 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null || !ViewModel.Settings.EnableAutoClipFailedOverlay) return;
         try
         {
-            ShowClipSavedOverlay(ViewModel.Settings.ClipOverlayPosition, "Auto Clyp Failed", playSound: false);
+            ShowClipSavedOverlay(ViewModel.Settings.ClipOverlayPosition, "Auto Clip Failed", playSound: false);
         }
         catch (Exception error)
         {
