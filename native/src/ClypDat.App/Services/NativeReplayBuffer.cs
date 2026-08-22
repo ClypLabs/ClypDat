@@ -385,7 +385,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 var stageTimer = System.Diagnostics.Stopwatch.StartNew();
                 var previousPriority = Thread.CurrentThread.Priority;
                 Thread.CurrentThread.Priority = ThreadPriority.BelowNormal;
-                try { RemuxWindowToMp4(window, tempVideoPath); }
+                try { RemuxWindowToMp4(window, tempVideoPath, requestedEndUtc, ReplayFrameTimingPolicy.IsVariable(config.FrameRateMode)); }
                 finally { Thread.CurrentThread.Priority = previousPriority; }
                 return stageTimer.ElapsedMilliseconds;
             }, cancellationToken);
@@ -394,7 +394,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // real keyframe - no offset/trim needed here the way WindowsReplayBuffer's
             // keyframe-seek fallback requires.
             var windowStartUtc = window[0].WallClockUtc;
-            var windowDurationSeconds = Math.Max(1, (window[^1].WallClockUtc - windowStartUtc).TotalSeconds);
+            var windowDurationSeconds = Math.Max(1, (requestedEndUtc - windowStartUtc).TotalSeconds);
 
             // Diagnostic only (see audio-desync investigation) - video's own
             // internal duration comes from Stopwatch-based PTS (monotonic,
@@ -404,7 +404,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // track gets built to a different total length than the video
             // actually has, which wouldn't just be a start offset - it'd get
             // worse toward the end of the clip.
-            var videoDurationSeconds = (window[^1].PtsMs - window[0].PtsMs) / 1_000_000.0;
+            var finalPacketDurationMicroseconds = ReplayFrameTimingPolicy.IsVariable(config.FrameRateMode)
+                ? Math.Max(1, (long)Math.Round((requestedEndUtc - window[^1].WallClockUtc).TotalMilliseconds * 1_000))
+                : window.Length > 1
+                    ? Math.Max(1, window[^1].PtsMs - window[^2].PtsMs)
+                    : Math.Max(1, 1_000_000L / Math.Clamp(config.FrameRate, 30, 144));
+            var videoDurationSeconds = (window[^1].PtsMs - window[0].PtsMs + finalPacketDurationMicroseconds) / 1_000_000.0;
             AppLog.Debug($"Native replay audio/video duration check: videoDurationSeconds={videoDurationSeconds:0.000}, audioWindowDurationSeconds={windowDurationSeconds:0.000}, deltaMs={(windowDurationSeconds - videoDurationSeconds) * 1000:0.0}, packetCount={window.Length}.");
 
             // A capture stall (the loop goes an extended stretch without
@@ -778,11 +783,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             }
 
             // Queue depth is decided before the encoder, because the D3D11 frame
-            // pool has to cover it: every queued frame holds a VRAM surface.
-            // Keep one second of bounded work. Replay capture is not a live
-            // preview: spending bounded VRAM here absorbs short game spikes and
-            // prevents them becoming timestamp holes.
-            var encodeQueueCapacity = Math.Clamp(config.FrameRate, 8, 120);
+            // Every queued hardware frame holds a VRAM surface. Replay capture
+            // wants the newest game frame, not a second of stale work, so bound
+            // the queue to roughly 125ms at every supported target rate.
+            var encodeQueueCapacity = ReplayFrameTimingPolicy.EncodeQueueCapacity(config.FrameRate);
 
             if (useGpuScale && config.CaptureCursor)
             {
@@ -838,6 +842,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             packet = ffmpeg.av_packet_alloc();
 
             encodeQueue = new BlockingCollection<EncodeJob>(boundedCapacity: encodeQueueCapacity);
+            var encodeQueueGate = new object();
             // Pointer locals can't be captured by a lambda closure directly - cross
             // the thread boundary as nint instead, cast back inside EncodeLoop.
             var encodeCodecContextPtr = (nint)codecContext;
@@ -855,13 +860,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
             var adapterDescription = DescribeAdapter(device);
             var videoCodec = encoderName.StartsWith("av1_", StringComparison.OrdinalIgnoreCase) ? "AV1" : "H.264";
-            AppLog.Info($"Native capture started (DXGI Desktop Duplication): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, codec={videoCodec}, encoder={encoderName}, encodePath={(hardwareFramesActive ? "D3D11 zero-copy" : "system-memory")}, cursorPath={(hardwareFramesActive && gpuCursorAvailable ? "GPU" : (config.CaptureCursor ? "CPU" : "off"))}, queue={encodeQueueCapacity} frames, adapter={adapterDescription}, preset={config.EncoderPreset}, configFrameRate={config.FrameRate}.");
+            AppLog.Info($"Native capture started (DXGI Desktop Duplication): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, codec={videoCodec}, encoder={encoderName}, encodePath={(hardwareFramesActive ? "D3D11 zero-copy" : "system-memory")}, cursorPath={(hardwareFramesActive && gpuCursorAvailable ? "GPU" : (config.CaptureCursor ? "CPU" : "off"))}, queue={encodeQueueCapacity} frames, adapter={adapterDescription}, preset={config.EncoderPreset}, frameTiming={ReplayFrameTimingPolicy.Normalize(config.FrameRateMode)}, configFrameRate={config.FrameRate}.");
             SetHealth(new ReplayCaptureHealth("Native", "Desktop Duplication", ReplayCaptureState.Healthy,
                 config.FrameRate, 0, 0, 0, 0, 0, 0, encoderName, "Default adapter", string.Empty, DateTime.UtcNow)
             {
                 AdapterDescription = adapterDescription,
                 EncoderPreset = config.EncoderPreset,
-                EncodeQueueCapacity = encodeQueueCapacity
+                EncodeQueueCapacity = encodeQueueCapacity,
+                FrameRateMode = ReplayFrameTimingPolicy.Normalize(config.FrameRateMode)
             });
             ready.TrySetResult();
 
@@ -872,6 +878,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var lastTargetRefresh = TimeSpan.Zero;
             var lastEncodedAt = TimeSpan.Zero;
             var targetFrameInterval = TimeSpan.FromSeconds(1.0 / Math.Clamp(config.FrameRate, 30, 144));
+            var variableFrameTiming = ReplayFrameTimingPolicy.IsVariable(config.FrameRateMode);
             // Counts encoded frames (including duplicate/padding ones) so
             // frame->pts can be assigned an IDEAL, constant-rate timestamp
             // (index * exact interval) rather than real elapsed time - see
@@ -889,6 +896,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // across the change. time_base is microseconds (see the encoder
             // setup) and independent of frame rate, so nothing else moves.
             var nextPtsMicroseconds = 0.0;
+            long lastVariablePtsMicroseconds = -1;
             var idealFrameIntervalMicroseconds = 1_000_000.0 / Math.Clamp(config.FrameRate, 30, 144);
             var activeFrameRate = Math.Clamp(config.FrameRate, 30, 144);
             Volatile.Write(ref _requestedFrameRate, activeFrameRate);
@@ -1061,7 +1069,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // Whether anything new has reached frame->data since the last frame
             // was handed to the encoder. False means the next scheduled frame
             // would be a pure duplicate - see the pacing gate below.
-            var freshContentSinceLastEncode = false;
+            var freshContentSinceLastEncode = 0;
             var padsSkippedSinceLog = 0;
 
             // Watchdog state for a duplication that stops delivering frames
@@ -1278,6 +1286,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         AdapterDescription = adapterDescription,
                         EncoderPreset = config.EncoderPreset,
                         EncodeQueueCapacity = encodeQueueCapacity,
+                        FrameRateMode = ReplayFrameTimingPolicy.Normalize(config.FrameRateMode),
                         // See ReplayCaptureHealth.SaveInProgress. A save backs
                         // the queue up for a second or two by design; it is not
                         // evidence the settings are unsustainable.
@@ -1818,7 +1827,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 // Also set on a skipped crop copy, which is correct: a
                                 // skip only happens when croppedTexture already holds
                                 // unconsumed content, so the next tick is not a pad.
-                                freshContentSinceLastEncode = true;
+                                Volatile.Write(ref freshContentSinceLastEncode, 1);
                             }
                             // else: occluded - frame->data still holds the last successfully
                             // scaled content, re-encoded unchanged below (visual freeze).
@@ -2028,7 +2037,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 requiresDistinctAmfSoftwareFrame = !rebuiltHardware && rebuiltEncoderName.Contains("amf", StringComparison.OrdinalIgnoreCase);
 
                                 var swapped = new ManualResetEventSlim(false);
-                                encodeQueue!.Add(new EncodeJob(0, DateTime.UtcNow, (nint)replacement, swapped));
+                                lock (encodeQueueGate)
+                                {
+                                    encodeQueue!.Add(new EncodeJob(0, DateTime.UtcNow, (nint)replacement, swapped));
+                                }
                                 // Bounded: if the encode thread were wedged, waiting
                                 // forever here would take the capture thread down with
                                 // it. The old context is retired either way - it is
@@ -2145,6 +2157,47 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // since the fixed-rate and adaptive-rate branches only differ in
             // WHEN/how they decide to call this, not in what encoding a
             // scheduled frame actually does.
+            // Enqueue the latest capture work without letting a temporary
+            // encoder stall turn into visible, seconds-old video. Control jobs
+            // are never evicted: they switch encoders after a device rebuild.
+            bool QueueLatestFrame(nint framePointer)
+            {
+                var queue = encodeQueue!;
+                var job = new EncodeJob(framePointer, MonotonicClock.UtcNow);
+                lock (encodeQueueGate)
+                {
+                    if (queue.IsAddingCompleted)
+                    {
+                        FreeEncodeFrame(framePointer);
+                        return false;
+                    }
+
+                    if (queue.TryAdd(job)) return true;
+
+                    if (queue.TryTake(out var stale))
+                    {
+                        if (stale.FramePtr == 0)
+                        {
+                            // A pending device-rebuild switch must remain in
+                            // order ahead of normal video work.
+                            queue.Add(stale);
+                        }
+                        else
+                        {
+                            FreeEncodeFrame(stale.FramePtr);
+                            Interlocked.Increment(ref _encodeDroppedCount);
+                            Interlocked.Increment(ref _totalDroppedFrames);
+                            if (queue.TryAdd(job)) return true;
+                        }
+                    }
+                }
+
+                FreeEncodeFrame(framePointer);
+                Interlocked.Increment(ref _encodeDroppedCount);
+                Interlocked.Increment(ref _totalDroppedFrames);
+                return false;
+            }
+
             // Zero-copy twin of EncodeScheduledFrame below: the scaled NV12
             // surface goes straight into one of the encoder's own D3D11
             // pool textures and that texture is what gets queued. No
@@ -2269,14 +2322,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     Interlocked.Increment(ref _encodeDroppedCount);
                     Interlocked.Increment(ref _totalDroppedFrames);
                 }
-                else if (!encodeQueue!.TryAdd(new EncodeJob((nint)outgoing, MonotonicClock.UtcNow)))
-                {
-                    var droppedFrame = outgoing;
-                    ffmpeg.av_frame_free(&droppedFrame);
-                    Interlocked.Increment(ref _encodeDroppedCount);
-                    Interlocked.Increment(ref _totalDroppedFrames);
-                }
-                else
+                else if (QueueLatestFrame((nint)outgoing))
                 {
                     framesEncoded++;
                     framesEncodedSinceLog++;
@@ -2427,17 +2473,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     Interlocked.Increment(ref _encodeDroppedCount);
                     Interlocked.Increment(ref _totalDroppedFrames);
                 }
-                else if (!encodeQueue.TryAdd(new EncodeJob((nint)clonedFrame, MonotonicClock.UtcNow)))
-                {
-                    // Queue's genuinely full - the encoder can't keep pace even
-                    // decoupled, not just a transient stall. Drop rather than
-                    // block (defeats the whole point) or grow unbounded.
-                    var droppedFrame = clonedFrame;
-                    ffmpeg.av_frame_free(&droppedFrame);
-                    Interlocked.Increment(ref _encodeDroppedCount);
-                    Interlocked.Increment(ref _totalDroppedFrames);
-                }
-                else
+                else if (QueueLatestFrame((nint)clonedFrame))
                 {
                     // PTS advances above once per scheduled frame. It must not
                     // advance again here: doing both doubles every successful
@@ -2518,7 +2554,39 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // FillFrameBlack placeholder into the ring buffer/full
             void RunPacingTick()
             {
-                if (hasCapturedRealFrame)
+                if (hasCapturedRealFrame && variableFrameTiming)
+                {
+                    var now = stopwatch.Elapsed;
+                    var hasFreshContent = Interlocked.Exchange(ref freshContentSinceLastEncode, 0) != 0;
+                    var dueForFreshFrame = now - lastEncodedAt >= targetFrameInterval;
+
+                    if (hasFreshContent && dueForFreshFrame)
+                    {
+                        // Medal-style pacing: the selected frame rate caps
+                        // capture work, but the file timeline comes from the
+                        // actual capture clock rather than an invented grid.
+                        lastEncodedAt = now;
+                        frame->pts = ReplayFrameTimingPolicy.RealPtsMicroseconds(now, lastVariablePtsMicroseconds);
+                        lastVariablePtsMicroseconds = frame->pts;
+                        EncodeScheduledFrame();
+                    }
+                    else
+                    {
+                        // Keep a genuinely new frame pending until the cap
+                        // permits it. A quiet/occluded source still receives
+                        // a sparse duplicate heartbeat so clips and VODs hold
+                        // their last frame for the correct wall duration.
+                        if (hasFreshContent) Volatile.Write(ref freshContentSinceLastEncode, 1);
+                        if (!hasFreshContent && now - lastEncodedAt >= TimeSpan.FromSeconds(1))
+                        {
+                            lastEncodedAt = now;
+                            frame->pts = ReplayFrameTimingPolicy.RealPtsMicroseconds(now, lastVariablePtsMicroseconds);
+                            lastVariablePtsMicroseconds = frame->pts;
+                            EncodeScheduledFrame();
+                        }
+                    }
+                }
+                else if (hasCapturedRealFrame)
                 {
                 // At most 250 ms of duplicate work after a stall. Longer bursts
                 // refill a saturated queue with stale copies and make recovery
@@ -2587,14 +2655,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // the configured rate. Measured at 15-67 pads skipped per 2s
                     // window, which is where a capture logging a clean 120
                     // frames per 2s still saved clips reading 49fps.
-                    if (!freshContentSinceLastEncode && encodeQueue.Count + 2 >= encodeQueueCapacity)
+                    if (Volatile.Read(ref freshContentSinceLastEncode) == 0 && encodeQueue.Count + 2 >= encodeQueueCapacity)
                     {
                         padsSkippedSinceLog++;
                         continue;
                     }
 
                     EncodeScheduledFrame();
-                    freshContentSinceLastEncode = false;
+                    Volatile.Write(ref freshContentSinceLastEncode, 0);
                 }
                 }
 
@@ -4046,7 +4114,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
     }
 
-    private unsafe void RemuxWindowToMp4(RingPacket[] window, string outputPath)
+    private unsafe void RemuxWindowToMp4(RingPacket[] window, string outputPath, DateTime requestedEndUtc, bool variableFrameTiming)
     {
         AVFormatContext* formatContext = null;
         try
@@ -4098,16 +4166,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     ffmpeg.av_new_packet(packet, ringPacket.Length);
                     Marshal.Copy(ringPacket.Data, 0, (IntPtr)packet->data, ringPacket.Length);
                     packet->pts = packet->dts = ringPacket.PtsMs - basePts;
-                    // Explicit, because the timeline is no longer a uniform grid:
-                    // the pacing gate suppresses duplicate frames, so consecutive
-                    // packets can be more than one frame interval apart. The muxer
-                    // infers each sample's duration from the NEXT packet's DTS,
-                    // which leaves the final sample of the window with none at all -
-                    // invisible at a constant frame rate, not invisible now. The
-                    // last packet reuses the previous gap for want of a successor.
+                    // Explicit, because variable-frame-rate packets can be far
+                    // apart. The final VFR packet holds its image until the
+                    // requested save moment; CFR retains its preceding cadence.
                     packet->duration = i + 1 < window.Length
                         ? window[i + 1].PtsMs - ringPacket.PtsMs
-                        : lastPacketDuration;
+                        : variableFrameTiming
+                            ? Math.Max(1, (long)Math.Round((requestedEndUtc - ringPacket.WallClockUtc).TotalMilliseconds * 1_000))
+                            : Math.Max(1, lastPacketDuration);
                     lastPacketDuration = packet->duration;
                     packet->stream_index = stream->index;
                     if (ringPacket.IsKeyframe) packet->flags |= ffmpeg.AV_PKT_FLAG_KEY;

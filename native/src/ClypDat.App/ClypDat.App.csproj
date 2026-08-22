@@ -78,7 +78,6 @@
          Avalonia package on the same forked version so NuGet cannot mix the
          fork with the official Avalonia packages. -->
     <PackageReference Include="Avalonia" Version="$(ClypDatAvaloniaPackageVersion)" />
-    <PackageReference Include="Avalonia.Generators" Version="$(ClypDatAvaloniaPackageVersion)" PrivateAssets="all" />
     <PackageReference Include="Avalonia.Desktop" Version="$(ClypDatAvaloniaPackageVersion)" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="$(ClypDatAvaloniaPackageVersion)" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="$(ClypDatAvaloniaPackageVersion)" />

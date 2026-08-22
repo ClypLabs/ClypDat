@@ -39,6 +39,10 @@ public sealed class AppSettings
     // Sustained encoder overload may lower live target FPS, then restore it
     // after recovery. Users can disable this protection.
     public bool ReplayAdaptiveFrameRateEnabled { get; set; } = true;
+    // VFR follows the capture clock and avoids spending encoder work on
+    // duplicate frames. CFR remains available for applications that require
+    // a fixed frame grid.
+    public string ReplayFrameRateMode { get; set; } = "VFR";
     // Existing settings files need one-time migration from old Auto default.
     public bool ReplayH264DefaultApplied { get; set; }
     // Native engine encoder controls, surfaced directly in Settings rather

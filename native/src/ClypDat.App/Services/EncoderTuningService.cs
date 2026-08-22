@@ -15,7 +15,11 @@ public sealed class EncoderTuningService
     private static readonly TimeSpan RestoreAfterClean = TimeSpan.FromMinutes(10);
     private const int WindowSize = 15;
     private const int DemoteThreshold = 8;
-    private const double SevereOutputFraction = 0.7;
+    // A 60 fps capture producing 44 fps with a backed-up queue is already
+    // sustained encoder overload, not a harmless near-target wobble. VFR
+    // avoids padding source-limited captures, while this guard still protects
+    // the genuinely overloaded encoder path.
+    private const double SevereOutputFraction = 0.9;
     private const double HealthyOutputFraction = 0.95;
     private const double SevereQueueFraction = 0.5;
     private const double HealthyQueueFraction = 0.25;

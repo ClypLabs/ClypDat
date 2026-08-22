@@ -57,6 +57,9 @@ public static class AppSettingsStore
             // though the limit wasn't enforced at all.
             settings.ReplayBitrateMbps = Math.Clamp(settings.ReplayBitrateMbps <= 0 ? 15 : settings.ReplayBitrateMbps, 5, 100);
             settings.ReplayFrameRate = Math.Clamp(settings.ReplayFrameRate <= 0 ? 60 : settings.ReplayFrameRate, 30, 144);
+            settings.ReplayFrameRateMode = string.Equals(settings.ReplayFrameRateMode, "CFR", StringComparison.OrdinalIgnoreCase)
+                ? "CFR"
+                : "VFR";
             // One-time switch-on: the floating hover bar is the default now,
             // but existing settings.json files already carry an explicit false
             // for it, so the changed property default alone would only reach

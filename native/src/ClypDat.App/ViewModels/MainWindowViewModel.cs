@@ -118,6 +118,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private ReplayStorageHealth _replayStorageHealth = ReplayStorageHealth.Unknown;
     private string _activeReplayEncoder = string.Empty;
     private string _activeReplayAdapter = string.Empty;
+    private string _activeReplayFrameTimingMode = ReplayFrameTimingPolicy.Variable;
+    private int _activeReplayTargetFrameRate;
+    private double _activeReplayOutputFrameRate;
     private string _selectedClipOverlayPosition = "Top Right";
     private string _selectedClipOverlayVolume = "Medium";
     private string _selectedClipFileNameScheme = ClipFileNaming.StandardScheme;
@@ -240,6 +243,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("CPU", "Software H.264 encoding. Uses more CPU and may reduce game performance.")
         };
         ReplayFrameRates = new ObservableCollection<int> { 30, 60, 90, 120, 144 };
+        ReplayFrameTimingModes = new ObservableCollection<ReplayFrameTimingOption>
+        {
+            new("Variable (Recommended)", ReplayFrameTimingPolicy.Variable,
+                "Records genuine frame timing up to the selected FPS and avoids duplicate encoder work."),
+            new("Constant", ReplayFrameTimingPolicy.Constant,
+                "Pads duplicate frames to keep an exact fixed frame-rate timeline.")
+        };
         ReplayEncoderPresets = new ObservableCollection<EncoderPresetOption>
         {
             new("P1", "Fastest. Cheapest on the GPU and the softest picture of the three. Worth dropping to only if capture is genuinely struggling."),
@@ -307,6 +317,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedReplayDurationPreset = ReplayDurationPresets.FirstOrDefault(preset => preset.Seconds == Settings.ReplayDurationSeconds) ??
                                        ReplayDurationPresets.First(preset => preset.Seconds == 60);
         _selectedReplayFrameRate = ReplayFrameRates.Contains(Settings.ReplayFrameRate) ? Settings.ReplayFrameRate : 60;
+        Settings.ReplayFrameRateMode = ReplayFrameTimingPolicy.Normalize(Settings.ReplayFrameRateMode);
         if (!ReplayResolutions.Any(option => option.Height == Settings.ReplayMaxHeight))
         {
             Settings.ReplayMaxHeight = 1080;
@@ -474,6 +485,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ObservableCollection<ReplayEncoderModeOption> ReplayEncoderModes { get; }
     public ObservableCollection<int> ReplayFrameRates { get; }
+    public sealed record ReplayFrameTimingOption(string Label, string Value, string Description);
+    public ObservableCollection<ReplayFrameTimingOption> ReplayFrameTimingModes { get; }
     // Label is what's persisted and handed to NVENC; Description is the hover
     // text, since "P1".."P3" says nothing on its own about which way is faster.
     public sealed record EncoderPresetOption(string Label, string Description);
@@ -1591,6 +1604,35 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public ReplayFrameTimingOption SelectedReplayFrameTiming
+    {
+        get => ReplayFrameTimingModes.FirstOrDefault(mode =>
+                   string.Equals(mode.Value, Settings.ReplayFrameRateMode, StringComparison.OrdinalIgnoreCase))
+               ?? ReplayFrameTimingModes.First(mode => mode.Value == ReplayFrameTimingPolicy.Variable);
+        set
+        {
+            if (value is null || string.Equals(Settings.ReplayFrameRateMode, value.Value, StringComparison.OrdinalIgnoreCase)) return;
+            Settings.ReplayFrameRateMode = value.Value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ReplayFrameTimingStatus));
+            SaveSettings();
+            UpdateReplayQualityRestartRequired();
+        }
+    }
+
+    public string ReplayFrameTimingStatus
+    {
+        get
+        {
+            var configured = SelectedReplayFrameTiming;
+            if (_activeReplayTargetFrameRate <= 0) return configured.Description;
+            var mode = string.Equals(_activeReplayFrameTimingMode, ReplayFrameTimingPolicy.Constant, StringComparison.Ordinal)
+                ? "Constant timing"
+                : "Variable timing";
+            return $"{mode}: target {_activeReplayTargetFrameRate} fps; currently {_activeReplayOutputFrameRate:0.0} fps.";
+        }
+    }
+
     public EncoderPresetOption SelectedReplayEncoderPreset
     {
         get => ReplayEncoderPresets.FirstOrDefault(preset => preset.Label == Settings.ReplayEncoderPreset)
@@ -1719,7 +1761,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // One string covering everything the running buffer baked in at start, so
     // the restart notice doesn't need a field per encoder setting.
     private string EncoderSignature =>
-        $"{Settings.ReplayVideoCodec}|{Settings.ReplayEncoderMode}|{Settings.ReplayEncoderPreset}|{Settings.ReplayBitrateMbps}";
+        $"{Settings.ReplayVideoCodec}|{Settings.ReplayEncoderMode}|{Settings.ReplayEncoderPreset}|{Settings.ReplayBitrateMbps}|{Settings.ReplayFrameRateMode}";
 
     private void UpdateReplayQualityRestartRequired()
     {
@@ -1756,14 +1798,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (string.IsNullOrWhiteSpace(health.Encoder)) return;
         _activeReplayEncoder = health.Encoder;
         _activeReplayAdapter = health.AdapterDescription;
+        _activeReplayFrameTimingMode = ReplayFrameTimingPolicy.Normalize(health.FrameRateMode);
+        _activeReplayTargetFrameRate = health.TargetFrameRate;
+        _activeReplayOutputFrameRate = health.OutputFrameRate;
         OnPropertyChanged(nameof(ReplayEncoderModeStatus));
+        OnPropertyChanged(nameof(ReplayFrameTimingStatus));
     }
 
     public void ClearReplayEncoderHealth()
     {
         _activeReplayEncoder = string.Empty;
         _activeReplayAdapter = string.Empty;
+        _activeReplayTargetFrameRate = 0;
+        _activeReplayOutputFrameRate = 0;
+        _activeReplayFrameTimingMode = ReplayFrameTimingPolicy.Normalize(Settings.ReplayFrameRateMode);
         OnPropertyChanged(nameof(ReplayEncoderModeStatus));
+        OnPropertyChanged(nameof(ReplayFrameTimingStatus));
     }
 
     public void MarkReplayBufferRestarted()
@@ -5380,6 +5430,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             BitrateMbps: Settings.ReplayBitrateMbps,
             VideoCodec: Settings.ReplayVideoCodec,
             EncoderMode: Settings.ReplayEncoderMode,
+            FrameRateMode: ReplayFrameTimingPolicy.Normalize(Settings.ReplayFrameRateMode),
             CaptureSource: desktopCapture ? "Desktop" : "Game",
             CaptureMonitorDeviceName: desktopCapture ? desktopMonitor.DeviceName : string.Empty,
             CaptureCursor: desktopCapture && Settings.ReplayDesktopCaptureCursor,

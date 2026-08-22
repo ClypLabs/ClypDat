@@ -22,6 +22,18 @@ public sealed class EncoderTuningServiceTests
     }
 
     [Fact]
+    public void Lowers60FpsTo30WhenEncoderSustainsOnly44Fps()
+    {
+        var service = new EncoderTuningService();
+        var changes = Changes(service);
+        service.BeginSession("P2", 60, 1080);
+
+        Feed(service, 30, targetFrameRate: 60, outputFrameRate: 44, queueDepth: 7, queueCapacity: 8);
+
+        Assert.Equal(new EncoderFrameRateChange(60, 30), Assert.Single(changes));
+    }
+
+    [Fact]
     public void CanReduceAgainAfterCooldownWhenOverloadContinues()
     {
         var service = new EncoderTuningService();

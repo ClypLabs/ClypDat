@@ -81,6 +81,9 @@ public sealed record ReplayCaptureHealth(
     // (which the user may have changed since this buffer started).
     public string EncoderPreset { get; init; } = string.Empty;
     public int EncodeQueueCapacity { get; init; }
+    // Whether this session emits real capture timing (VFR) or a duplicate-
+    // padded fixed-rate timeline (CFR).
+    public string FrameRateMode { get; init; } = string.Empty;
     // Whether a clip save was running while this sample was taken. A save runs
     // ffmpeg to build audio tracks and mux the result, which is a real but
     // brief and entirely self-inflicted load - the encode queue can back right
