@@ -33,13 +33,13 @@ public sealed class EncoderTuningService
     private int _configuredFrameRate;
     private int _activeFrameRate;
     private int _configuredHeight;
-    private string _configuredPreset = string.Empty;
+    private string _configuredProfile = string.Empty;
     private int _samplesSeen;
     private int _severeSamplesSeen;
     private bool _enabled = true;
     private DateTime _enabledSinceUtc = DateTime.MinValue;
 
-    public void BeginSession(string userPreset, int configuredFrameRate, int configuredHeight, bool enabled = true)
+    public void BeginSession(string encoderProfile, int configuredFrameRate, int configuredHeight, bool enabled = true)
     {
         _sessionStartUtc = DateTime.UtcNow;
         _lastDecisionUtc = DateTime.MinValue;
@@ -47,7 +47,7 @@ public sealed class EncoderTuningService
         _peakQueueSinceClean = 0;
         _recentSevere.Clear();
         _recentOutputs.Clear();
-        _configuredPreset = userPreset;
+        _configuredProfile = encoderProfile;
         _configuredFrameRate = Math.Clamp(configuredFrameRate, 30, 144);
         _activeFrameRate = _configuredFrameRate;
         _enabled = enabled;
@@ -55,7 +55,7 @@ public sealed class EncoderTuningService
         _configuredHeight = configuredHeight;
         _samplesSeen = 0;
         _severeSamplesSeen = 0;
-        AppLog.Info($"Encoder tuning: monitoring {_configuredPreset}, {_configuredFrameRate} fps, {_configuredHeight}p.");
+        AppLog.Info($"Encoder tuning: monitoring {_configuredProfile}, {_configuredFrameRate} fps, {_configuredHeight}p.");
     }
 
     public void SetEnabled(bool enabled)
@@ -93,7 +93,7 @@ public sealed class EncoderTuningService
     {
         if (_sessionStartUtc == DateTime.MinValue) return;
         if (!_enabled) return;
-        if (health.EncodeQueueCapacity <= 0 || string.IsNullOrEmpty(health.EncoderPreset)) return;
+        if (health.EncodeQueueCapacity <= 0 || string.IsNullOrEmpty(health.EncoderProfile)) return;
         if (health.State is not (ReplayCaptureState.Healthy or ReplayCaptureState.Degraded)) return;
         if (health.DegradeReason is ReplayDegradeReason.CaptureStall || health.SaveInProgress) return;
 

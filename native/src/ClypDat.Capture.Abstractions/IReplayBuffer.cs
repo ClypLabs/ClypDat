@@ -76,10 +76,9 @@ public sealed record ReplayCaptureHealth(
     // What the encoder is actually running on, e.g. "NVIDIA GeForce RTX 4070 Ti".
     // Adapter above is the capture path's own label, not the hardware's name.
     public string AdapterDescription { get; init; } = string.Empty;
-    // Encoder settings in force for this session, so a consumer can attribute
-    // an overload to the preset that caused it without reaching into settings
-    // (which the user may have changed since this buffer started).
-    public string EncoderPreset { get; init; } = string.Empty;
+    // Encoder profile in force for this session. It is fixed when capture starts,
+    // so consumers do not have to reach into settings that may have changed since.
+    public string EncoderProfile { get; init; } = string.Empty;
     public int EncodeQueueCapacity { get; init; }
     // Whether this session emits real capture timing (VFR) or a duplicate-
     // padded fixed-rate timeline (CFR).

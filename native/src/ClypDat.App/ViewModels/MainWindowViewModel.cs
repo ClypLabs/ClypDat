@@ -250,12 +250,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("Constant", ReplayFrameTimingPolicy.Constant,
                 "Pads duplicate frames to keep an exact fixed frame-rate timeline.")
         };
-        ReplayEncoderPresets = new ObservableCollection<EncoderPresetOption>
-        {
-            new("P1", "Fastest. Cheapest on the GPU and the softest picture of the three. Worth dropping to only if capture is genuinely struggling."),
-            new("P2", "Very fast. A visible step up from P1 for very little extra GPU time."),
-            new("P3", "Highest quality here. Best on a card with headroom to spare - watch for dropped frames if the game is already pushing it.")
-        };
         ReplayBitrateOptions = new ObservableCollection<string>
         {
             "3M", "5M", "7M", "10M", "15M", "20M",
@@ -487,11 +481,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<int> ReplayFrameRates { get; }
     public sealed record ReplayFrameTimingOption(string Label, string Value, string Description);
     public ObservableCollection<ReplayFrameTimingOption> ReplayFrameTimingModes { get; }
-    // Label is what's persisted and handed to NVENC; Description is the hover
-    // text, since "P1".."P3" says nothing on its own about which way is faster.
-    public sealed record EncoderPresetOption(string Label, string Description);
-
-    public ObservableCollection<EncoderPresetOption> ReplayEncoderPresets { get; }
     public ObservableCollection<string> ReplayBitrateOptions { get; }
     public sealed record ReplayVideoCodecOption(string Label, string Value, string Description);
     public ObservableCollection<ReplayVideoCodecOption> ReplayVideoCodecs { get; }
@@ -1633,20 +1622,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public EncoderPresetOption SelectedReplayEncoderPreset
-    {
-        get => ReplayEncoderPresets.FirstOrDefault(preset => preset.Label == Settings.ReplayEncoderPreset)
-               ?? ReplayEncoderPresets.First(preset => preset.Label == "P1");
-        set
-        {
-            if (value is null || Settings.ReplayEncoderPreset == value.Label) return;
-            Settings.ReplayEncoderPreset = value.Label;
-            OnPropertyChanged();
-            SaveSettings();
-            UpdateReplayQualityRestartRequired();
-        }
-    }
-
     public ReplayVideoCodecOption SelectedReplayVideoCodec
     {
         get => ReplayVideoCodecs.FirstOrDefault(codec => string.Equals(codec.Value, Settings.ReplayVideoCodec, StringComparison.OrdinalIgnoreCase))
@@ -1761,7 +1736,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // One string covering everything the running buffer baked in at start, so
     // the restart notice doesn't need a field per encoder setting.
     private string EncoderSignature =>
-        $"{Settings.ReplayVideoCodec}|{Settings.ReplayEncoderMode}|{Settings.ReplayEncoderPreset}|{Settings.ReplayBitrateMbps}|{Settings.ReplayFrameRateMode}";
+        $"{Settings.ReplayVideoCodec}|{Settings.ReplayEncoderMode}|{Settings.ReplayBitrateMbps}|{Settings.ReplayFrameRateMode}";
 
     private void UpdateReplayQualityRestartRequired()
     {
@@ -5426,7 +5401,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ClipFileNameScheme: Settings.ClipFileNameScheme,
             CustomClipFileNameTemplate: Settings.CustomClipFileNameTemplate,
             LibraryFolder: Settings.LibraryFolder,
-            EncoderPreset: ReplayEncoderPresetPolicy.Resolve(Settings.ReplayEncoderPreset),
+            EncoderProfile: ReplayEncoderProfilePolicy.Resolve(),
             BitrateMbps: Settings.ReplayBitrateMbps,
             VideoCodec: Settings.ReplayVideoCodec,
             EncoderMode: Settings.ReplayEncoderMode,

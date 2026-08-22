@@ -1345,7 +1345,7 @@
                     </StackPanel>
                   </Border>
 
-                  <Grid ColumnDefinitions="150,150,150" ColumnSpacing="12" HorizontalAlignment="Left">
+                  <Grid ColumnDefinitions="150,150" ColumnSpacing="12" HorizontalAlignment="Left">
                     <StackPanel Spacing="3">
                       <TextBlock Text="Video Encoder" Foreground="#B8C7D8" FontSize="12" />
                       <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayEncoderModes}" SelectedItem="{Binding SelectedReplayEncoderMode}">
@@ -1358,16 +1358,11 @@
                         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
                       </ComboBox>
                     </StackPanel>
-                    <StackPanel Grid.Column="2" Spacing="3">
-                      <TextBlock Text="Encoder Preset" Foreground="#B8C7D8" FontSize="12" />
-                      <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayEncoderPresets}" SelectedItem="{Binding SelectedReplayEncoderPreset}">
-                        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
-                      </ComboBox>
-                    </StackPanel>
                   </Grid>
                   <StackPanel Spacing="2">
                     <TextBlock Text="{Binding ReplayEncoderModeStatus}" Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" />
                     <TextBlock Text="{Binding ReplayVideoCodecStatus}" Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" />
+                    <TextBlock Text="Automatic encoder profile: chooses the fastest stable configuration for the available NVIDIA, AMD, Intel, or CPU encoder." Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" />
                   </StackPanel>
 
                   <Grid ColumnDefinitions="150,*" ColumnSpacing="12">

@@ -1,6 +1,7 @@
 ﻿using ClypDat.Capture.Abstractions;
 using FFmpeg.AutoGen;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text.Json;
@@ -860,12 +861,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
             var adapterDescription = DescribeAdapter(device);
             var videoCodec = encoderName.StartsWith("av1_", StringComparison.OrdinalIgnoreCase) ? "AV1" : "H.264";
-            AppLog.Info($"Native capture started (DXGI Desktop Duplication): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, codec={videoCodec}, encoder={encoderName}, encodePath={(hardwareFramesActive ? "D3D11 zero-copy" : "system-memory")}, cursorPath={(hardwareFramesActive && gpuCursorAvailable ? "GPU" : (config.CaptureCursor ? "CPU" : "off"))}, queue={encodeQueueCapacity} frames, adapter={adapterDescription}, preset={config.EncoderPreset}, frameTiming={ReplayFrameTimingPolicy.Normalize(config.FrameRateMode)}, configFrameRate={config.FrameRate}.");
+            AppLog.Info($"Native capture started (DXGI Desktop Duplication): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, codec={videoCodec}, encoder={encoderName}, encodePath={(hardwareFramesActive ? "D3D11 zero-copy" : "system-memory")}, cursorPath={(hardwareFramesActive && gpuCursorAvailable ? "GPU" : (config.CaptureCursor ? "CPU" : "off"))}, queue={encodeQueueCapacity} frames, adapter={adapterDescription}, profile={config.EncoderProfile}, frameTiming={ReplayFrameTimingPolicy.Normalize(config.FrameRateMode)}, configFrameRate={config.FrameRate}.");
             SetHealth(new ReplayCaptureHealth("Native", "Desktop Duplication", ReplayCaptureState.Healthy,
                 config.FrameRate, 0, 0, 0, 0, 0, 0, encoderName, "Default adapter", string.Empty, DateTime.UtcNow)
             {
                 AdapterDescription = adapterDescription,
-                EncoderPreset = config.EncoderPreset,
+                EncoderProfile = config.EncoderProfile,
                 EncodeQueueCapacity = encodeQueueCapacity,
                 FrameRateMode = ReplayFrameTimingPolicy.Normalize(config.FrameRateMode)
             });
@@ -1259,9 +1260,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // send without needing a full diagnostics export - the
                         // debug log is 1-8MB/day and isn't something to ask for
                         // first when triaging "clips are choppy."
-                        var recoveryGuidance = string.Equals(config.EncoderPreset, "P1", StringComparison.OrdinalIgnoreCase)
-                            ? "P1 is already active; reduce capture resolution or frame rate."
-                            : "Try a faster Encoder preset in Settings.";
+                        const string recoveryGuidance = "Automatic hardware profile is already active; reduce capture resolution or frame rate.";
                         AppLog.Info($"Native capture: overload - dropped {droppedSinceLog} frame(s) in the last {diagElapsed:0.0}s, queue {encodeQueue.Count}/{encodeQueueCapacity}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.0}, avgScaleMs={scaleMs / n:0.0}. {recoveryGuidance}");
                     }
                     SetHealth(new ReplayCaptureHealth("Native", "Desktop Duplication",
@@ -1284,7 +1283,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             : overloaded ? ReplayDegradeReason.EncoderOverload
                             : ReplayDegradeReason.None,
                         AdapterDescription = adapterDescription,
-                        EncoderPreset = config.EncoderPreset,
+                        EncoderProfile = config.EncoderProfile,
                         EncodeQueueCapacity = encodeQueueCapacity,
                         FrameRateMode = ReplayFrameTimingPolicy.Normalize(config.FrameRateMode),
                         // See ReplayCaptureHealth.SaveInProgress. A save backs
@@ -4214,49 +4213,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.Av1 ? ExportEncoderProbe.Av1Family : null,
             config.EncoderMode);
 
-    // h264_nvenc's default preset does real per-frame rate-distortion search,
-    // which measured a sustained ~59-60ms/frame (vs. ~0.5ms on p1) during
-    // actual Dead by Daylight matches specifically, where the same GPU is also
-    // under its heaviest rendering load of the whole session - that 100x
-    // per-frame cost, back when encode still ran inline on CaptureLoop's own
-    // thread, turned "GPU is busy" into sustained near-1fps capture for
-    // minutes at a time. p1 was the fix at the time, at the cost of visible
-    // motion-compression artifacts under fast camera movement (looks like
-    // dropped frames even though every frame is present and correctly timed -
-    // confirmed via ffprobe on an actual saved clip: exact expected frame
-    // count, zero duplicates, dead-even PTS spacing). Now that encode runs on
-    // its own thread (see EncodeLoop) decoupled from AcquireNextFrame, a
-    // slower preset can no longer stall AcquireNextFrame itself - but it can
-    // still cost real content: p4 measured avgEncodeMs of 16-28ms/frame under
-    // real sustained gameplay load (vs. a target budget well under that),
-    // which filled EncodeLoop's queue to its cap and started genuinely
-    // dropping frames (confirmed via droppedFrames actually incrementing in
-    // Native capture diag, e.g. 110 dropped in one 2s window) - real missing
-    // content, not just a compression-quality artifact. p2 is the compromise
-    // between p1's motion-compression softness and p4's encode cost. Watch
-    // queueDepth/droppedFrames after any future preset change - that pair is
-    // the actual signal for whether a preset is sustainable under real load,
-    // not just a quick idle-desktop test. Applied to priv_data before
-    // avcodec_open2 - these are encoder-specific options, not real
-    // AVCodecContext fields, so they have to land before open, not after.
-    // Best-effort: an unsupported option name just logs and moves on instead
-    // of failing the whole encoder open, since exact option support varies by
-    // ffmpeg build/driver version.
-    // The encoder settings come straight from user input now, so they're
-    // clamped here rather than trusted. Bitrate doubles as the ring buffer's
-    // memory bound: the buffer lives entirely in RAM, so a 60s 1080p60 buffer
-    // costs roughly 125MB at 16Mbps and scales linearly from there. Only
-    // Constant bitrate mode takes a user bitrate value now - Constant quality's
-    // ceiling is always derived (see MaxBitrate below).
+    // Encoder-specific options are applied to priv_data before avcodec_open2.
+    // A failed optional setting is logged and skipped so an older driver/build
+    // remains usable. Bitrate also bounds the in-memory packet ring, so its
+    // persisted 5-100 Mbps range is clamped here rather than trusted.
     private static long FixedBitrate(ReplayBufferConfig config) => Math.Clamp(config.BitrateMbps, 5, 100) * 1_000_000L;
-
-    // "P3" -> "p3". Anything unrecognised falls back to the default rather than
-    // being passed through to av_opt_set as-is.
-    private static string NvencPreset(ReplayBufferConfig config) => config.EncoderPreset?.ToLowerInvariant() switch
-    {
-        "p1" or "p2" or "p3" or "p4" or "p5" => config.EncoderPreset!.ToLowerInvariant(),
-        _ => "p4"
-    };
 
     private static unsafe void ApplyLowLatencyEncoderOptions(AVCodecContext* codecContext, string candidateName, ReplayBufferConfig config, bool lowPower = false)
     {
@@ -4267,6 +4228,27 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             {
                 AppLog.Info($"Native encoder probe: {candidateName} option {name}={value} not supported (error {result}), skipping.");
             }
+        }
+
+        void ApplyAutomaticNvencOptions(string? profile)
+        {
+            // Medal exposes automatic GPU selection, not raw NVENC P1-P7
+            // controls. Use one replay profile that favors sustainable capture
+            // throughput, then keep enough surfaces in flight that send_frame
+            // does not serialize behind the previous hardware submission.
+            TrySet("preset", "p1");
+            if (profile is not null) TrySet("profile", profile);
+            TrySet("tune", "ll");
+            TrySet("zerolatency", "1");
+            TrySet("surfaces", ReplayEncoderProfilePolicy.NvencSurfaces(config.FrameRate).ToString(CultureInfo.InvariantCulture));
+            // AQ and lookahead optimize compression efficiency at the cost of
+            // additional per-frame GPU work. The recorder prefers fresh frames
+            // while a game is saturating the GPU; bitrate remains user-selected.
+            TrySet("spatial-aq", "0");
+            TrySet("temporal-aq", "0");
+            TrySet("rc-lookahead", "0");
+            TrySet("rc", "cbr");
+            TrySet("forced-idr", "1");
         }
 
         // Every saved clip is cut out of the ring buffer starting at a packet
@@ -4284,49 +4266,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         switch (candidateName)
         {
             case "h264_nvenc":
-                // User-selectable now (Settings -> Encoder), defaulting to p4.
-                // p1 was the old hardcoded value, chosen back when encode ran
-                // inline on the capture thread and gave GPU rendering priority
-                // during VSync-off/VRR bursts; encode has since moved to its own
-                // thread (see EncodeLoop) and real logs measure it at ~0.5ms
-                // against a 16.67ms frame budget, so there is margin to spend on
-                // motion quality. The historical warning in the comment above
-                // still applies at the top of the range: watch
-                // droppedFrames/queueDepth under sustained heavy GPU load.
-                TrySet("preset", NvencPreset(config));
-                // Main is NVENC's default profile and disables the 8x8
-                // transform - a free efficiency loss on precisely the detailed
-                // content that was coming out soft.
-                TrySet("profile", "high");
-                // Spend bits by local complexity rather than uniformly, so flat
-                // regions stop stealing budget from detailed ones.
-                TrySet("spatial-aq", "1");
-                // "hq", NOT "ll". Low-latency tuning pins NVENC's VBV buffer to
-                // roughly a single frame's worth of bits, which hard-caps EVERY
-                // frame at bitrate/fps (~34KB at 1080p60) no matter how much
-                // motion it actually contains - a fast-panning gameplay frame
-                // needs several times that, so it gets crushed to fit and comes
-                // out soft and blocky while the file's AVERAGE bitrate still
-                // reads a healthy ~17Mbps. That constraint buys nothing here:
-                // this is a ring buffer being written to memory, not a live
-                // stream with a latency budget. "hq" lets the encoder spend bits
-                // where the content actually needs them, at the same average
-                // bitrate and so the same file size and ring-buffer footprint.
-                TrySet("tune", "hq");
-                TrySet("rc", "cbr");
-                TrySet("forced-idr", "1");
+                ApplyAutomaticNvencOptions("high");
                 break;
             case "av1_nvenc":
-                TrySet("preset", NvencPreset(config));
-                TrySet("spatial-aq", "1");
-                TrySet("tune", "hq");
-                TrySet("rc", "cbr");
-                TrySet("forced-idr", "1");
+                ApplyAutomaticNvencOptions(null);
                 break;
-            // AMF/QSV keep their existing usage/preset strings: there's no AMD
-            // or Intel hardware here to confirm a change doesn't cost frames,
-            // and these paths are untested. They still pick up the context-level
-            // improvements (profile, colour tagging, VBV, rc_max_rate) for free.
+            // The automatic profile chooses the fastest established settings for
+            // every hardware family. EncoderCandidates still falls through
+            // NVIDIA -> AMD -> Intel -> CPU when a device is unavailable.
             case "h264_amf":
                 TrySet("usage", "ultralowlatency");
                 TrySet("quality", "speed");
@@ -4374,7 +4321,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             case "libx264":
                 TrySet("preset", "ultrafast");
                 TrySet("tune", "zerolatency");
-                TrySet("bitrate", FixedBitrate(config).ToString());
+                TrySet("bitrate", FixedBitrate(config).ToString(CultureInfo.InvariantCulture));
                 break;
         }
     }

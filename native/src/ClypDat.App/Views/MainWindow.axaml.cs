@@ -2463,7 +2463,7 @@ public sealed partial class MainWindow : Window
             var activeConfig = _replayConfigSnapshot ?? throw new InvalidOperationException("Replay configuration unavailable after start.");
             _activeReplayConfigSnapshot = activeConfig;
             _activeReplayTargetIdentity = ReplayTargetIdentity(activeConfig);
-            _encoderTuning.BeginSession(activeConfig.EncoderPreset, activeConfig.FrameRate, activeConfig.MaxHeight,
+            _encoderTuning.BeginSession(activeConfig.EncoderProfile, activeConfig.FrameRate, activeConfig.MaxHeight,
                 ViewModel.Settings.ReplayAdaptiveFrameRateEnabled);
             // Fresh session, fresh list - but only for a GENUINELY new session
             // (a game was just detected). A quality restart is left open (not

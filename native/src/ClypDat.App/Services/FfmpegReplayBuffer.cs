@@ -804,10 +804,11 @@ public sealed record ReplayBufferConfig(
     string ClipFileNameScheme = "Standard",
     string CustomClipFileNameTemplate = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}",
     string LibraryFolder = "",
-    // Native engine encoder controls - see AppSettings for what each means.
+    // Native engine encoder controls. The hardware configuration is selected
+    // automatically for the selected codec and available encoder.
     string VideoCodec = "H.264",
     string EncoderMode = "GPU",
-    string EncoderPreset = "P1",
+    string EncoderProfile = "Automatic",
     int BitrateMbps = 15,
     string FrameRateMode = "VFR",
     string CaptureSource = "Game",

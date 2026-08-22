@@ -13,7 +13,7 @@ public sealed class EncoderTuningServiceTests
     {
         var service = new EncoderTuningService();
         var changes = Changes(service);
-        service.BeginSession("P1", 120, 1440);
+        service.BeginSession(ReplayEncoderProfilePolicy.Automatic, 120, 1440);
 
         Feed(service, 30, targetFrameRate: 120, outputFrameRate: 61, queueDepth: 80, queueCapacity: 120);
 
@@ -26,7 +26,7 @@ public sealed class EncoderTuningServiceTests
     {
         var service = new EncoderTuningService();
         var changes = Changes(service);
-        service.BeginSession("P2", 60, 1080);
+        service.BeginSession(ReplayEncoderProfilePolicy.Automatic, 60, 1080);
 
         Feed(service, 30, targetFrameRate: 60, outputFrameRate: 44, queueDepth: 7, queueCapacity: 8);
 
@@ -38,7 +38,7 @@ public sealed class EncoderTuningServiceTests
     {
         var service = new EncoderTuningService();
         var changes = Changes(service);
-        service.BeginSession("P3", 120, 1080);
+        service.BeginSession(ReplayEncoderProfilePolicy.Automatic, 120, 1080);
 
         Feed(service, 30, 120, 61, 80, 120);
         Feed(service, 60, 120, 35, 80, 120);
@@ -55,7 +55,7 @@ public sealed class EncoderTuningServiceTests
     {
         var service = new EncoderTuningService();
         var changes = Changes(service);
-        service.BeginSession("P1", 120, 1440);
+        service.BeginSession(ReplayEncoderProfilePolicy.Automatic, 120, 1440);
 
         Feed(service, 30, 120, 61, 80, 120);
         Feed(service, 310, 120, 120, 0, 120, ReplayDegradeReason.None, ReplayCaptureState.Healthy, startUtc: DateTime.UtcNow.AddMinutes(2));
@@ -72,7 +72,7 @@ public sealed class EncoderTuningServiceTests
     {
         var service = new EncoderTuningService();
         var changes = Changes(service);
-        service.BeginSession("P1", 30, 1080);
+        service.BeginSession(ReplayEncoderProfilePolicy.Automatic, 30, 1080);
 
         Feed(service, 300, 30, 10, 30, 30);
 
@@ -84,7 +84,7 @@ public sealed class EncoderTuningServiceTests
     {
         var service = new EncoderTuningService();
         var changes = Changes(service);
-        service.BeginSession("P1", 120, 1080);
+        service.BeginSession(ReplayEncoderProfilePolicy.Automatic, 120, 1080);
 
         Feed(service, 30, 120, 10, 80, 120, ReplayDegradeReason.CaptureStall);
         Feed(service, 30, 120, 10, 80, 120, ReplayDegradeReason.EncoderOverload, ReplayCaptureState.Degraded, saveInProgress: true);
@@ -98,7 +98,7 @@ public sealed class EncoderTuningServiceTests
         var service = new EncoderTuningService();
         var changes = new List<EncoderResolutionChange>();
         service.ResolutionChangeRequested += (_, change) => changes.Add(change);
-        service.BeginSession("P1", 120, 1080);
+        service.BeginSession(ReplayEncoderProfilePolicy.Automatic, 120, 1080);
 
         Feed(service, 30, 120, 61, 80, 120);
 
@@ -110,7 +110,7 @@ public sealed class EncoderTuningServiceTests
     {
         var service = new EncoderTuningService();
         var changes = Changes(service);
-        service.BeginSession("P1", 120, 1080, enabled: false);
+        service.BeginSession(ReplayEncoderProfilePolicy.Automatic, 120, 1080, enabled: false);
 
         Feed(service, 30, 120, 61, 80, 120);
 
@@ -122,7 +122,7 @@ public sealed class EncoderTuningServiceTests
     {
         var service = new EncoderTuningService();
         var changes = Changes(service);
-        service.BeginSession("P1", 120, 1080);
+        service.BeginSession(ReplayEncoderProfilePolicy.Automatic, 120, 1080);
 
         Feed(service, 30, 120, 61, 80, 120);
         service.SetEnabled(false);
@@ -188,7 +188,7 @@ public sealed class EncoderTuningServiceTests
             updatedUtc)
         {
             EncodeQueueCapacity = queueCapacity,
-            EncoderPreset = "P1",
+            EncoderProfile = ReplayEncoderProfilePolicy.Automatic,
             DegradeReason = reason,
             AdapterDescription = "Intel(R) Iris(R) Xe Graphics",
             SaveInProgress = saveInProgress

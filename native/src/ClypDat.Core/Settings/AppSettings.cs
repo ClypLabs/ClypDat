@@ -45,12 +45,6 @@ public sealed class AppSettings
     public string ReplayFrameRateMode { get; set; } = "VFR";
     // Existing settings files need one-time migration from old Auto default.
     public bool ReplayH264DefaultApplied { get; set; }
-    // Native engine encoder controls, surfaced directly in Settings rather
-    // than hidden behind a coarse quality label.
-    // NVENC speed/quality preset, "P1".."P3" - higher spends more GPU time per
-    // frame for better compression. P1 is required by default because the
-    // default 60 FPS capture must survive uncapped, VSync-off gameplay.
-    public string ReplayEncoderPreset { get; set; } = "P1";
     // Fixed CBR target for every replay backend. Persisted range: 5-100 Mbps.
     public int ReplayBitrateMbps { get; set; } = 15;
     // Existing installs that received the old 40 Mbps default are switched to
