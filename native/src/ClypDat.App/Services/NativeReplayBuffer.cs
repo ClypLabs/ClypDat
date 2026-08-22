@@ -2557,14 +2557,21 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 {
                     var now = stopwatch.Elapsed;
                     var hasFreshContent = Interlocked.Exchange(ref freshContentSinceLastEncode, 0) != 0;
-                    var dueForFreshFrame = now - lastEncodedAt >= targetFrameInterval;
+                    // Do not advance VFR's deadline without a real input frame:
+                    // an idle source needs `lastEncodedAt` to remain where it was
+                    // so the sparse one-second heartbeat below can hold the last
+                    // image for the correct duration.
+                    var dueForFreshFrame = hasFreshContent && ReplayFrameTimingPolicy.TryAdvanceVariableDeadline(
+                        now, targetFrameInterval, ref lastEncodedAt);
 
                     if (hasFreshContent && dueForFreshFrame)
                     {
                         // Medal-style pacing: the selected frame rate caps
                         // capture work, but the file timeline comes from the
                         // actual capture clock rather than an invented grid.
-                        lastEncodedAt = now;
+                        // The selected-FPS deadline advanced above instead of
+                        // being reset to `now`, otherwise a late scheduler wake
+                        // makes every subsequent VFR frame late as well.
                         frame->pts = ReplayFrameTimingPolicy.RealPtsMicroseconds(now, lastVariablePtsMicroseconds);
                         lastVariablePtsMicroseconds = frame->pts;
                         EncodeScheduledFrame();

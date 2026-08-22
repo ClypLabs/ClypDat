@@ -37,4 +37,29 @@ public sealed class ReplayFrameTimingPolicyTests
         Assert.Equal(33_900, next);
         Assert.Equal(next + 1, clamped);
     }
+
+    [Fact]
+    public void VariableDeadlineStaysOnTheSelectedTimelineDespiteTimerJitter()
+    {
+        var interval = TimeSpan.FromSeconds(1.0 / 60);
+        var deadline = TimeSpan.Zero;
+
+        Assert.True(ReplayFrameTimingPolicy.TryAdvanceVariableDeadline(TimeSpan.FromMilliseconds(16.2), interval, ref deadline));
+        Assert.Equal(interval, deadline);
+
+        // This is slightly before the nominal 33.333ms deadline. The tolerance
+        // prevents a normal Windows timer wake-up from skipping the whole slot.
+        Assert.True(ReplayFrameTimingPolicy.TryAdvanceVariableDeadline(TimeSpan.FromMilliseconds(32.9), interval, ref deadline));
+        Assert.Equal(TimeSpan.FromTicks(interval.Ticks * 2), deadline);
+    }
+
+    [Fact]
+    public void VariableDeadlineCoalescesLongGapsWithoutBurstingDuplicateFrames()
+    {
+        var interval = TimeSpan.FromSeconds(1.0 / 60);
+        var deadline = TimeSpan.Zero;
+
+        Assert.True(ReplayFrameTimingPolicy.TryAdvanceVariableDeadline(TimeSpan.FromMilliseconds(100), interval, ref deadline));
+        Assert.Equal(TimeSpan.FromTicks(interval.Ticks * 6), deadline);
+    }
 }
