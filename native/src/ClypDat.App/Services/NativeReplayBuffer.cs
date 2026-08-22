@@ -4246,8 +4246,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             TrySet("preset", "p1");
             if (profile is not null) TrySet("profile", profile);
             TrySet("tune", "ll");
-            TrySet("zerolatency", "1");
             TrySet("surfaces", ReplayEncoderProfilePolicy.NvencSurfaces(config.FrameRate).ToString(CultureInfo.InvariantCulture));
+            // This is a replay buffer, not a live stream. NVENC's zerolatency
+            // option forces a packet out for every submitted frame; when the
+            // game is contending for the GPU, that turns avcodec_send_frame
+            // into a synchronous wait and collapses a 60fps capture to about
+            // 52fps. Leave the normal small hardware pipeline enabled instead:
+            // its few queued frames are invisible inside a 60-second buffer,
+            // while the capture thread can keep providing a full, even cadence.
             // AQ and lookahead optimize compression efficiency at the cost of
             // additional per-frame GPU work. The recorder prefers fresh frames
             // while a game is saturating the GPU; bitrate remains user-selected.
