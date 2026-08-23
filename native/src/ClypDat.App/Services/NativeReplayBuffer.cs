@@ -1472,8 +1472,26 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 {
                     var acquireResult = duplication!.AcquireNextFrame(acquireTimeoutMs, out frameInfo, out var dxgiResource);
                     acquireResultCode = acquireResult.Code;
-                    desktopResource = acquireResult.Success ? dxgiResource : null;
-                    if (!acquireResult.Success) dxgiResource?.Dispose();
+                    if (acquireResult.Success && dxgiResource is not null)
+                    {
+                        // Desktop duplication exposes IDXGIResource, but the copy
+                        // path below is D3D11-specific. Querying the same COM object
+                        // gives it the required wrapper and lets us release the DXGI
+                        // wrapper immediately rather than retaining two references.
+                        try
+                        {
+                            desktopResource = dxgiResource.QueryInterface<ID3D11Resource>();
+                        }
+                        finally
+                        {
+                            dxgiResource.Dispose();
+                        }
+                    }
+                    else
+                    {
+                        desktopResource = null;
+                        dxgiResource?.Dispose();
+                    }
                 }
                 waitMs += stageStopwatch.Elapsed.TotalMilliseconds;
 
