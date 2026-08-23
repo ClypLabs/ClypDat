@@ -16,14 +16,18 @@ public static class AppSettingsStore
             {
                 HasSeenOnboarding = false,
                 ReplayBitrateDefault15Applied = true,
-                ReplayH264DefaultApplied = true
+                ReplayH264DefaultApplied = true,
+                SettingsSchemaVersion = AppSettingsMigrations.CurrentSchemaVersion
             };
             var json = File.ReadAllText(SettingsPath);
             var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
-            MigrateReplayBitrate(json, settings);
+            var migrated = AppSettingsMigrations.Apply(settings);
+            var hasExplicitReplayBitrate = MigrateReplayBitrate(json, settings);
             if (!settings.ReplayBitrateDefault15Applied)
             {
-                if (settings.ReplayBitrateMbps == 40) settings.ReplayBitrateMbps = 15;
+                // An explicit bitrate is a user choice, including the old 40
+                // Mbps value. Only replace the former implicit default.
+                if (!hasExplicitReplayBitrate && settings.ReplayBitrateMbps == 40) settings.ReplayBitrateMbps = 15;
                 settings.ReplayBitrateDefault15Applied = true;
                 Save(settings);
             }
@@ -94,6 +98,7 @@ public static class AppSettingsStore
                 game.Events ??= new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
             }
             MigrateCs2AutoClip(settings);
+            if (migrated) Save(settings);
             return settings;
         }
         catch
@@ -102,7 +107,7 @@ public static class AppSettingsStore
         }
     }
 
-    private static void MigrateReplayBitrate(string json, AppSettings settings)
+    private static bool MigrateReplayBitrate(string json, AppSettings settings)
     {
         try
         {
@@ -111,7 +116,7 @@ public static class AppSettingsStore
             if (root.TryGetProperty("ReplayBitrateMbps", out var current) && current.TryGetInt32(out var currentValue))
             {
                 settings.ReplayBitrateMbps = currentValue;
-                return;
+                return true;
             }
 
             // Existing explicit CBR users retain their saved target. CQ and
@@ -124,15 +129,18 @@ public static class AppSettingsStore
                 && oldBitrate.TryGetInt32(out var oldValue))
             {
                 settings.ReplayBitrateMbps = oldValue;
+                return true;
             }
             else
             {
                 settings.ReplayBitrateMbps = 15;
+                return false;
             }
         }
         catch
         {
             settings.ReplayBitrateMbps = 15;
+            return false;
         }
     }
 

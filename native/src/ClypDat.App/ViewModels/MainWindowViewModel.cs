@@ -311,16 +311,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _ = RefreshAudioDevicesAsync();
         SelectedReplayDurationPreset = ReplayDurationPresets.FirstOrDefault(preset => preset.Seconds == Settings.ReplayDurationSeconds) ??
                                        ReplayDurationPresets.First(preset => preset.Seconds == 60);
-        _selectedReplayFrameRate = ReplayFrameRates.Contains(Settings.ReplayFrameRate) ? Settings.ReplayFrameRate : 60;
         Settings.ReplayFrameRateMode = ReplayFrameTimingPolicy.Normalize(Settings.ReplayFrameRateMode);
         if (!ReplayResolutions.Any(option => option.Height == Settings.ReplayMaxHeight))
         {
-            Settings.ReplayMaxHeight = 1080;
+            ReplayResolutions.Add(new ResolutionOption($"Custom ({Settings.ReplayMaxHeight}p)", Settings.ReplayMaxHeight));
         }
+        if (!ReplayFrameRates.Contains(Settings.ReplayFrameRate)) ReplayFrameRates.Add(Settings.ReplayFrameRate);
         if (!ReplayBitrateOptions.Contains($"{Settings.ReplayBitrateMbps}M", StringComparer.Ordinal))
         {
-            Settings.ReplayBitrateMbps = 15;
+            ReplayBitrateOptions.Add($"{Settings.ReplayBitrateMbps}M");
         }
+        _selectedReplayFrameRate = Settings.ReplayFrameRate;
         _replayBitrateFollowsRecommendation = Settings.ReplayBitrateMbps == GetReplayBitrateRecommendation().AutomaticMbps;
         _selectedReplayEncoderMode = ReplayEncoderModes.FirstOrDefault(mode => string.Equals(mode.Value, Settings.ReplayEncoderMode, StringComparison.OrdinalIgnoreCase))
                                      ?? ReplayEncoderModes.First(mode => mode.Value == "GPU");

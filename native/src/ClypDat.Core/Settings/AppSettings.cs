@@ -4,6 +4,9 @@ namespace ClypDat.Core.Settings;
 
 public sealed class AppSettings
 {
+    // Incremented only by AppSettingsMigrations. This makes settings changes
+    // explicit and lets upgrades preserve existing user selections.
+    public int SettingsSchemaVersion { get; set; }
     public string LibraryFolder { get; set; } = string.Empty;
     // Which Settings nav section was open last, so reopening Settings picks
     // up where the user left off instead of always landing on the same page.
