@@ -41,7 +41,14 @@ internal static class Program
             return;
         }
 
-        // Must run before anything else touches %LocalAppData%\ClypDat (AppLog,
+        if (UiPreviewMode.Enabled)
+        {
+            BuildAvaloniaApp()
+                .StartWithClassicDesktopLifetime(args);
+            return;
+        }
+
+        // Must run before anything else touches the product data folder (AppLog,
         // settings, caches) - one-time migration from the pre-rebrand "EVE" name.
         MigrateFromLegacyEveInstall();
 
@@ -49,7 +56,9 @@ internal static class Program
         // through Windows' own winsqlite3.dll instead of a bundled native
         // SQLite binary - see the SQLitePCLRaw.provider.winsqlite3 PackageReference
         // comment in ClypDat.App.csproj for why.
+#if !CLYPDAT_UI_PREVIEW
         raw.SetProvider(new SQLite3Provider_winsqlite3());
+#endif
 
         var singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out var createdNew);
         var restartRequested = args.Contains("--restart", StringComparer.OrdinalIgnoreCase);
@@ -97,7 +106,7 @@ internal static class Program
         // Off-thread, and only after the line above has put the bundled ffmpeg on
         // PATH for it to find. Doing it now means the first export already knows
         // which vendor's encoder works instead of blocking on the probe.
-        ExportEncoderProbe.Prewarm();
+        if (!UiPreviewMode.Enabled) ExportEncoderProbe.Prewarm();
 
         BuildAvaloniaApp()
             .StartWithClassicDesktopLifetime(args);

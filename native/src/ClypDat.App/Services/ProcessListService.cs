@@ -8,6 +8,8 @@ public static class ProcessListService
 {
     public static IReadOnlyList<ProcessOption> GetOpenExecutables()
     {
+        if (!OperatingSystem.IsWindows()) return Array.Empty<ProcessOption>();
+
         var windows = new List<ProcessOption>();
         EnumWindows((handle, _) =>
         {

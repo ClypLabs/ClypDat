@@ -61,8 +61,11 @@ public sealed partial class App : Application
             // guaranteed the click landed inside the warm-up window and waited
             // out the whole construction, which is exactly what the traces kept
             // showing ("engine ready at 9836ms", clicked at launch+13s).
-            var warmupDelay = minimized ? TimeSpan.FromSeconds(12) : TimeSpan.FromSeconds(1);
-            _ = Task.Delay(warmupDelay).ContinueWith(_ => PlaybackSession.WarmUp(), TaskScheduler.Default);
+            if (!UiPreviewMode.Enabled)
+            {
+                var warmupDelay = minimized ? TimeSpan.FromSeconds(12) : TimeSpan.FromSeconds(1);
+                _ = Task.Delay(warmupDelay).ContinueWith(_ => PlaybackSession.WarmUp(), TaskScheduler.Default);
+            }
             _mainWindow = new MainWindow
             {
                 DataContext = new MainWindowViewModel(),

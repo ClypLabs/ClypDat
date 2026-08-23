@@ -42,6 +42,10 @@ $avaloniaPackageInputPaths = @(
     'Directory.Packages.props', 'global.json', '.gitmodules'
 )
 
+$requiredAvaloniaAnalyzerEntries = @(
+    'analyzers/dotnet/cs/Avalonia.Generators.dll'
+)
+
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 function Invoke-Git {
@@ -185,6 +189,39 @@ function Add-AvaloniaBuildTaskFiles {
     }
 }
 
+function Add-AvaloniaPackageFile {
+    param(
+        [Parameter(Mandatory)][string]$PackagePath,
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$EntryName
+    )
+
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
+        throw "Avalonia package source file was not found: $SourcePath"
+    }
+
+    $archive = [IO.Compression.ZipFile]::Open($PackagePath, [IO.Compression.ZipArchiveMode]::Update)
+    try {
+        foreach ($existingEntry in @($archive.Entries | Where-Object { $_.FullName -eq $EntryName })) {
+            $existingEntry.Delete()
+        }
+
+        $entry = $archive.CreateEntry($EntryName, [IO.Compression.CompressionLevel]::Optimal)
+        $input = [IO.File]::OpenRead($SourcePath)
+        $output = $entry.Open()
+        try {
+            $input.CopyTo($output)
+        }
+        finally {
+            $output.Dispose()
+            $input.Dispose()
+        }
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
 function Get-NuGetGlobalPackagesPath {
     $lines = @(& $dotnetExecutable nuget locals global-packages --list)
     if ($LASTEXITCODE -ne 0) {
@@ -290,6 +327,12 @@ function Test-AvaloniaPackageSet {
             $buildTaskEntry = @($archive.Entries | Where-Object { $_.FullName -eq 'tools/netstandard2.0/Avalonia.Build.Tasks.dll' })
             if ($buildTaskEntry.Count -ne 1) {
                 return $false
+            }
+
+            foreach ($requiredAnalyzerEntry in $requiredAvaloniaAnalyzerEntries) {
+                if (@($archive.Entries | Where-Object { $_.FullName -eq $requiredAnalyzerEntry }).Count -ne 1) {
+                    return $false
+                }
             }
         }
         finally {
@@ -417,8 +460,10 @@ function Ensure-StableAvaloniaPackages {
     $buildCommit = $stableCommit
     $expectedPackageCommit = $stableCommit
     if ($UseLocalAvalonia) {
-        $localCommit = (& git -C $avaloniaRoot rev-parse --verify HEAD 2>$null | Select-Object -First 1)
-        if ($LASTEXITCODE -ne 0 -or -not $localCommit) {
+        $localCommitLines = @(& git -C $avaloniaRoot rev-parse --verify HEAD 2>$null)
+        $localCommitExitCode = $LASTEXITCODE
+        $localCommit = $localCommitLines | Select-Object -First 1
+        if ($localCommitExitCode -ne 0 -or -not $localCommit) {
             throw "Could not resolve the local Avalonia fork commit at: $avaloniaRoot"
         }
         $localCommit = $localCommit.Trim()
@@ -530,6 +575,18 @@ function Ensure-StableAvaloniaPackages {
         }
 
         Add-AvaloniaBuildTaskFiles -PackagePath (Join-Path $stagingFullPath "Avalonia.$stableVersion.nupkg") -BuildOutput $buildTasksOutput
+
+        $generatorProject = Join-Path $worktreeRoot 'src\tools\Avalonia.Generators\Avalonia.Generators.csproj'
+        $generatorOutput = Join-Path $worktreeRoot 'src\tools\Avalonia.Generators\bin\Release\netstandard2.0\Avalonia.Generators.dll'
+        & $dotnetExecutable build $generatorProject -c Release -f netstandard2.0 --no-restore /nologo
+        if ($LASTEXITCODE -ne 0) {
+            throw "Avalonia generator compilation failed with exit code $LASTEXITCODE."
+        }
+
+        Add-AvaloniaPackageFile `
+            -PackagePath (Join-Path $stagingFullPath "Avalonia.$stableVersion.nupkg") `
+            -SourcePath $generatorOutput `
+            -EntryName 'analyzers/dotnet/cs/Avalonia.Generators.dll'
 
         if (-not (Test-AvaloniaPackageSet -PackageOutput $stagingFullPath -PackageVersion $stableVersion)) {
             throw 'Avalonia package build did not produce the exact desktop package closure.'

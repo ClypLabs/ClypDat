@@ -15,6 +15,8 @@ public static class DesktopMonitorService
 
     public static IReadOnlyList<DesktopMonitorOption> GetMonitors()
     {
+        if (!OperatingSystem.IsWindows()) return new[] { DesktopMonitorOption.PrimaryFallback };
+
         var monitors = new List<DesktopMonitorOption>();
         EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (monitor, _, _, _) =>
         {

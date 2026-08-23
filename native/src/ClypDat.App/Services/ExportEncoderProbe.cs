@@ -26,14 +26,14 @@ public static class ExportEncoderProbe
     /// exports should go straight to the CPU encoder. Blocks on the first call if
     /// Prewarm's run has not finished yet.
     /// </summary>
-    public static string? Family => _probe.Value;
+    public static string? Family => UiPreviewMode.Enabled ? null : _probe.Value;
 
     /// <summary>
     /// Vendor suffix whose AV1 encoder passed an actual FFmpeg encode, or null
     /// when this machine cannot hardware-encode AV1. Blocks until prewarm ends.
     /// </summary>
-    public static string? Av1Family => _av1Probe.Value;
-    public static bool Av1ProbeCompleted => _av1Probe.IsValueCreated;
+    public static string? Av1Family => UiPreviewMode.Enabled ? null : _av1Probe.Value;
+    public static bool Av1ProbeCompleted => UiPreviewMode.Enabled || _av1Probe.IsValueCreated;
 
     // Same order capture uses, so a machine that somehow has two usable encoders
     // gets the same answer from both halves of the app.
@@ -48,6 +48,7 @@ public static class ExportEncoderProbe
     /// </summary>
     public static void Prewarm()
     {
+        if (UiPreviewMode.Enabled) return;
         Task.Run(() => _ = _probe.Value);
         Task.Run(() => _ = _av1Probe.Value);
     }

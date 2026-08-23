@@ -57,6 +57,28 @@
     <Version>0.0.0</Version>
   </PropertyGroup>
 
+  <!-- The preview target is deliberately UI-only. It makes the Avalonia
+       shell runnable on macOS while the capture backends remain Windows-only;
+       publish.ps1 and the normal Windows build do not use this property. -->
+  <PropertyGroup Condition="'$(ClypDatUiPreview)' == 'true'">
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <ApplicationIcon></ApplicationIcon>
+    <ApplicationManifest></ApplicationManifest>
+    <SupportedOSPlatformVersion></SupportedOSPlatformVersion>
+    <RuntimeIdentifiers>osx-arm64;osx-x64</RuntimeIdentifiers>
+    <PlatformTarget></PlatformTarget>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <DefineConstants>$(DefineConstants);CLYPDAT_UI_PREVIEW</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(ClypDatUiPreview)' == 'true'">
+    <Compile Remove="Services\CaptureInterop.cs" />
+    <Compile Remove="Services\HybridReplayBuffer.cs" />
+    <Compile Remove="Services\NativeReplayBuffer.cs" />
+    <Compile Remove="Services\WindowsReplayBuffer.cs" />
+  </ItemGroup>
+
   <!-- System.GC.ConserveMemory (0-9): how hard the GC works to hand freed
        memory back to the OS rather than holding it in reserve for future
        allocations - the actual knob behind "why does Task Manager still show
@@ -89,9 +111,9 @@
          fixed version available. winsqlite3 below points it at Windows'
          own SQLite (ships with Win10+, patched via Windows Update) instead. -->
     <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="8.0.11" />
-    <PackageReference Include="SQLitePCLRaw.provider.winsqlite3" Version="3.0.4" />
-    <PackageReference Include="ScreenRecorderLib" Version="6.6.0" />
-    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" GeneratePathProperty="true" />
+    <PackageReference Include="SQLitePCLRaw.provider.winsqlite3" Version="3.0.4" Condition="'$(ClypDatUiPreview)' != 'true'" />
+    <PackageReference Include="ScreenRecorderLib" Version="6.6.0" Condition="'$(ClypDatUiPreview)' != 'true'" />
+    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" GeneratePathProperty="true" Condition="'$(ClypDatUiPreview)' != 'true'" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
     <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
     <PackageReference Include="FFmpeg.AutoGen" Version="8.1.0" />
@@ -136,7 +158,7 @@
     </PropertyGroup>
   </Target>
 
-  <Target Name="CopyLibVlcRuntimeToPublish" AfterTargets="Publish">
+  <Target Name="CopyLibVlcRuntimeToPublish" AfterTargets="Publish" Condition="'$(ClypDatUiPreview)' != 'true'">
     <ItemGroup>
       <LibVlcRuntimeFiles Include="$(PkgVideoLAN_LibVLC_Windows)\build\x64\**\*" />
     </ItemGroup>

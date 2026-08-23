@@ -70,6 +70,8 @@ public sealed class ForegroundGameDetector
 
     public GameDetection Detect()
     {
+        if (!OperatingSystem.IsWindows()) return GameDetection.None;
+
         var all = ScanWindows();
         var foregroundHandle = GetForegroundWindow();
         var foreground = all.FirstOrDefault(game => game.WindowHandle == foregroundHandle);

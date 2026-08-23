@@ -7,13 +7,20 @@ public static class ReplayBufferFactory
 
     public static IReplayBuffer Create(Func<ReplayBufferConfig> configProvider)
     {
+#if CLYPDAT_UI_PREVIEW
+        return new UiPreviewReplayBuffer();
+#else
         if (!OperatingSystem.IsWindows()) return new FfmpegReplayBuffer(configProvider);
 
         return new CaptureWorkerProxy(configProvider);
+#endif
     }
 
     internal static IReplayBuffer CreateLocal(Func<ReplayBufferConfig> configProvider)
     {
+#if CLYPDAT_UI_PREVIEW
+        return new UiPreviewReplayBuffer();
+#else
         if (!OperatingSystem.IsWindows()) return new FfmpegReplayBuffer(configProvider);
 
         var backend = ResolveEffectiveBackend(configProvider());
@@ -36,6 +43,7 @@ public static class ReplayBufferFactory
 
         AppLog.Info("Replay backend selected: Legacy Windows.");
         return new WindowsReplayBuffer(configProvider);
+#endif
     }
 
     // Auto is intentionally preserved here. Create chooses HybridAuto so explicit
