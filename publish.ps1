@@ -517,6 +517,11 @@ function Ensure-StableAvaloniaPackages {
         $uiInputsChanged = -not $stampCommit -or
             (Test-AvaloniaPackageInputsChanged -AvaloniaRoot $avaloniaRoot -BaseCommit $stampCommit)
         if (-not $uiInputsChanged) {
+            # NuGet extracts a package version once and then trusts that folder.
+            # Repairing the source .nupkg is not enough when an earlier extract
+            # is missing the generator, so evict only that incomplete extract
+            # before deciding this is a usable cache hit.
+            Remove-IncompleteAvaloniaPackageCache -PackageVersion $stableVersion
             if (Test-AvaloniaPackageSet -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $stampCommit -RequireStamp) {
                 Write-Host "Using cached Avalonia packages; UI/package inputs unchanged since $stampCommit."
                 return
@@ -534,9 +539,12 @@ function Ensure-StableAvaloniaPackages {
         $buildCommit = $localCommit
         $expectedPackageCommit = $localCommit
     }
-    elseif (Test-AvaloniaPackageSet -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $stableCommit -RequireStamp) {
-        Write-Host "Using stamped Avalonia package set for commit $stableCommit."
-        return
+    else {
+        Remove-IncompleteAvaloniaPackageCache -PackageVersion $stableVersion
+        if (Test-AvaloniaPackageSet -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $stableCommit -RequireStamp) {
+            Write-Host "Using stamped Avalonia package set for commit $stableCommit."
+            return
+        }
     }
 
     if ($UseLocalAvalonia) {
