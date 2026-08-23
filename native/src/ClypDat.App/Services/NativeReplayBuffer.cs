@@ -1905,7 +1905,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     if (!usingWgc && acquireResultCode == ResultCode.AccessLost.Code)
                     {
                         AppLog.Info("Native capture: DXGI duplication access lost, recreating.");
-                        duplication.Dispose();
+                        duplication?.Dispose();
                         duplication = null;
                         try
                         {
