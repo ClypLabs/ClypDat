@@ -242,8 +242,12 @@ function Remove-IncompleteAvaloniaPackageCache {
 
     $globalPackagesPath = Get-NuGetGlobalPackagesPath
     $avaloniaPackagePath = Join-Path $globalPackagesPath (Join-Path 'avalonia' $PackageVersion.ToLowerInvariant())
-    $buildTaskPath = Join-Path $avaloniaPackagePath 'tools\netstandard2.0\Avalonia.Build.Tasks.dll'
-    if ((Test-Path -LiteralPath $avaloniaPackagePath) -and -not (Test-Path -LiteralPath $buildTaskPath -PathType Leaf)) {
+    $requiredFiles = @('tools\netstandard2.0\Avalonia.Build.Tasks.dll') +
+        @($requiredAvaloniaAnalyzerEntries | ForEach-Object { $_ -replace '/', '\\' })
+    $missingRequiredFile = $requiredFiles | Where-Object {
+        -not (Test-Path -LiteralPath (Join-Path $avaloniaPackagePath $_) -PathType Leaf)
+    } | Select-Object -First 1
+    if ((Test-Path -LiteralPath $avaloniaPackagePath) -and $missingRequiredFile) {
         Write-Host "Removing incomplete cached Avalonia package: $avaloniaPackagePath"
         Remove-Item -LiteralPath $avaloniaPackagePath -Recurse -Force
     }
@@ -310,7 +314,8 @@ function Test-AvaloniaPackageSet {
         [Parameter(Mandatory)][string]$PackageOutput,
         [Parameter(Mandatory)][string]$PackageVersion,
         [string]$ExpectedCommit,
-        [switch]$RequireStamp
+        [switch]$RequireStamp,
+        [switch]$SkipAnalyzerCheck
     )
 
     try {
@@ -329,9 +334,11 @@ function Test-AvaloniaPackageSet {
                 return $false
             }
 
-            foreach ($requiredAnalyzerEntry in $requiredAvaloniaAnalyzerEntries) {
-                if (@($archive.Entries | Where-Object { $_.FullName -eq $requiredAnalyzerEntry }).Count -ne 1) {
-                    return $false
+            if (-not $SkipAnalyzerCheck) {
+                foreach ($requiredAnalyzerEntry in $requiredAvaloniaAnalyzerEntries) {
+                    if (@($archive.Entries | Where-Object { $_.FullName -eq $requiredAnalyzerEntry }).Count -ne 1) {
+                        return $false
+                    }
                 }
             }
         }
@@ -431,6 +438,44 @@ function Test-AvaloniaPackageInputsChanged {
     return $committedExitCode -ne 0 -or $workingExitCode -ne 0 -or $workingChanges.Count -gt 0
 }
 
+function Repair-CachedAvaloniaAnalyzer {
+    param(
+        [Parameter(Mandatory)][string]$AvaloniaRoot,
+        [Parameter(Mandatory)][string]$PackageOutput,
+        [Parameter(Mandatory)][string]$PackageVersion,
+        [Parameter(Mandatory)][string]$ExpectedCommit
+    )
+
+    # A pre-generator package set is otherwise complete. Repair it in place
+    # rather than repacking every Avalonia project (which also invokes Bun).
+    if (-not (Test-AvaloniaPackageSet `
+            -PackageOutput $PackageOutput `
+            -PackageVersion $PackageVersion `
+            -ExpectedCommit $ExpectedCommit `
+            -RequireStamp `
+            -SkipAnalyzerCheck)) {
+        return $false
+    }
+
+    $generatorProject = Join-Path $AvaloniaRoot 'src\tools\Avalonia.Generators\Avalonia.Generators.csproj'
+    $generatorOutput = Join-Path $AvaloniaRoot 'src\tools\Avalonia.Generators\bin\Release\netstandard2.0\Avalonia.Generators.dll'
+    & $dotnetExecutable build $generatorProject -c Release -f netstandard2.0 --no-restore /nologo
+    if ($LASTEXITCODE -ne 0) {
+        throw "Avalonia generator compilation failed with exit code $LASTEXITCODE while repairing the cached package."
+    }
+
+    Add-AvaloniaPackageFile `
+        -PackagePath (Join-Path $PackageOutput "Avalonia.$PackageVersion.nupkg") `
+        -SourcePath $generatorOutput `
+        -EntryName 'analyzers/dotnet/cs/Avalonia.Generators.dll'
+
+    return Test-AvaloniaPackageSet `
+        -PackageOutput $PackageOutput `
+        -PackageVersion $PackageVersion `
+        -ExpectedCommit $ExpectedCommit `
+        -RequireStamp
+}
+
 function Ensure-StableAvaloniaPackages {
     param([switch]$UseLocalAvalonia)
 
@@ -469,11 +514,21 @@ function Ensure-StableAvaloniaPackages {
         $localCommit = $localCommit.Trim()
 
         $stampCommit = Get-AvaloniaPackageStampCommit -PackageOutput $packageOutput
-        if ($stampCommit -and
-            -not (Test-AvaloniaPackageInputsChanged -AvaloniaRoot $avaloniaRoot -BaseCommit $stampCommit) -and
-            (Test-AvaloniaPackageSet -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $stampCommit -RequireStamp)) {
-            Write-Host "Using cached Avalonia packages; UI/package inputs unchanged since $stampCommit."
-            return
+        $uiInputsChanged = -not $stampCommit -or
+            (Test-AvaloniaPackageInputsChanged -AvaloniaRoot $avaloniaRoot -BaseCommit $stampCommit)
+        if (-not $uiInputsChanged) {
+            if (Test-AvaloniaPackageSet -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $stampCommit -RequireStamp) {
+                Write-Host "Using cached Avalonia packages; UI/package inputs unchanged since $stampCommit."
+                return
+            }
+
+            if (Repair-CachedAvaloniaAnalyzer -AvaloniaRoot $avaloniaRoot -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $stampCommit) {
+                Write-Host 'Repaired the cached Avalonia generator; UI/package inputs were unchanged.'
+                Remove-IncompleteAvaloniaPackageCache -PackageVersion $stableVersion
+                return
+            }
+
+            throw 'The cached Avalonia package set is incomplete, but UI/package inputs are unchanged. Refusing to rebuild the full package set for an application-only publish.'
         }
 
         $buildCommit = $localCommit
