@@ -53,6 +53,10 @@ public sealed class AppSettings
     // the current 15 Mbps default once; later user choices are preserved.
     public bool ReplayBitrateDefault15Applied { get; set; }
     public int ReplayFrameRate { get; set; } = 60;
+    // CFR is the safe replay default: it preserves an exact timeline even
+    // while a game is Alt-Tabbed or background-throttled. Existing explicit
+    // values deserialize unchanged; absent values become this new default.
+    public string ReplayFramePacingMode { get; set; } = "CFR";
     public int ReplayMaxHeight { get; set; } = 1080;
     public string ReplayBackend { get; set; } = "Auto";
     public string ExportVideoCodec { get; set; } = "H.264";

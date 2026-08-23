@@ -815,7 +815,8 @@ public sealed record ReplayBufferConfig(
     string CaptureMonitorDeviceName = "",
     bool CaptureCursor = false,
     string ProcessPriority = "Normal",
-    string SaveReplayHotkey = "Ctrl+Shift+F9");
+    string SaveReplayHotkey = "Ctrl+Shift+F9",
+    string FramePacingMode = "CFR");
 
 internal sealed class AudioCaptureSession : IDisposable
 {
