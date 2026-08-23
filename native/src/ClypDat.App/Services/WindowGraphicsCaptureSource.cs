@@ -12,7 +12,9 @@ namespace ClypDat.App.Services;
 [SupportedOSPlatform("windows10.0.17763.0")]
 internal sealed class WindowGraphicsCaptureSource : IDisposable
 {
-    private const int FramePoolBufferCount = 3;
+    // Keep enough buffers for the callback to absorb short GPU scheduling
+    // hiccups without blocking WGC's producer.
+    private const int FramePoolBufferCount = 5;
     private readonly ID3D11Device _device;
     private readonly object _d3dLock;
     private readonly object _stateLock = new();
