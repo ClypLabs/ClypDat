@@ -722,25 +722,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // once-a-second target recheck in the loop for why the window handle
             // alone is the wrong thing to compare against.
             var targetMonitor = ResolveTargetMonitor(targetHandle, config);
-            Vortice.RawRect desktopBounds;
-            if (!isMonitorMode)
-            {
-                try
-                {
-                    wgcCapture = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor);
-                    var size = wgcCapture.ContentSize;
-                    desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
-                    AppLog.Info($"Native capture: using Windows.Graphics.Capture for game window 0x{targetHandle:X}.");
-                }
-                catch (Exception error)
-                {
-                    AppLog.Error("Native capture: WGC initialization failed; falling back to DXGI with privacy freeze.", error);
-                    wgcCapture?.Dispose();
-                    wgcCapture = null;
-                    duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds);
-                }
-            }
-            else duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds);
+            // WGC caps game-window delivery at roughly 40-46 FPS on this hardware,
+            // even when the game and encoder are both running much faster. Desktop
+            // Duplication exposes the actual presentation cadence and is cropped to
+            // the target window below; its foreground/visibility guard supplies the
+            // same privacy freeze as window capture without a capture border.
+            duplication = CreateDuplicationFor(device, targetHandle, config, out var desktopBounds);
 
             var (captureWidth, captureHeight) = wgcCapture is not null
                 ? wgcCapture.ContentSize
@@ -1348,34 +1335,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         isMonitorMode = targetHandle == 0;
 
                         var freshMonitor = ResolveTargetMonitor(targetHandle, config);
-                        if (wgcCapture is not null || freshMonitor != targetMonitor || duplication is null)
+                        if (freshMonitor != targetMonitor || duplication is null)
                         {
                             targetMonitor = freshMonitor;
                             wgcCapture?.Dispose();
                             wgcCapture = null;
                             duplication?.Dispose();
                             duplication = null;
-                            if (!isMonitorMode)
-                            {
-                                try
-                                {
-                                    wgcCapture = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor);
-                                    var size = wgcCapture.ContentSize;
-                                    desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
-                                    AppLog.Info($"Native capture: WGC source replaced for game window 0x{targetHandle:X}.");
-                                }
-                                catch (Exception error)
-                                {
-                                    AppLog.Error("Native capture: WGC replacement failed; using DXGI fallback with privacy freeze.", error);
-                                    wgcCapture?.Dispose();
-                                    wgcCapture = null;
-                                }
-                            }
-                            if (wgcCapture is null)
-                            {
-                                try { duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds); }
-                                catch (Exception error) { AppLog.Error("Native capture: failed to switch DXGI duplication target.", error); }
-                            }
+                            try { duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds); }
+                            catch (Exception error) { AppLog.Error("Native capture: failed to switch DXGI duplication target.", error); }
                         }
 
                         if (isPaused)
