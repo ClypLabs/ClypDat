@@ -36,6 +36,12 @@ $requiredAvaloniaPackageIds = @(
     'Avalonia.Win32.Automation', 'Avalonia.X11'
 )
 
+$avaloniaPackageInputPaths = @(
+    'src', 'packages', 'native', 'external', 'build',
+    'Directory.Build.props', 'Directory.Build.targets',
+    'Directory.Packages.props', 'global.json', '.gitmodules'
+)
+
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 function Invoke-Git {
@@ -340,7 +346,51 @@ function Test-AvaloniaPackageSet {
     }
 }
 
+function Get-AvaloniaPackageStampCommit {
+    param([Parameter(Mandatory)][string]$PackageOutput)
+
+    $stampPath = Join-Path $PackageOutput 'clypdat-package-stamp.json'
+    if (-not (Test-Path -LiteralPath $stampPath -PathType Leaf)) {
+        return $null
+    }
+
+    try {
+        $stamp = Get-Content -LiteralPath $stampPath -Raw | ConvertFrom-Json
+        if ($stamp.schema -ne 1 -or [string]::IsNullOrWhiteSpace($stamp.commit)) {
+            return $null
+        }
+        return $stamp.commit.Trim()
+    }
+    catch {
+        return $null
+    }
+}
+
+function Test-AvaloniaPackageInputsChanged {
+    param(
+        [Parameter(Mandatory)][string]$AvaloniaRoot,
+        [Parameter(Mandatory)][string]$BaseCommit
+    )
+
+    $null = & git -C $AvaloniaRoot diff --quiet "$BaseCommit" HEAD -- $avaloniaPackageInputPaths 2>$null
+    $committedExitCode = $LASTEXITCODE
+    if ($committedExitCode -gt 1) {
+        return $true
+    }
+
+    $null = & git -C $AvaloniaRoot diff --quiet HEAD -- $avaloniaPackageInputPaths 2>$null
+    $workingExitCode = $LASTEXITCODE
+    if ($workingExitCode -gt 1) {
+        return $true
+    }
+
+    $workingChanges = @(& git -C $AvaloniaRoot status --porcelain=v1 --untracked-files=all -- $avaloniaPackageInputPaths 2>$null)
+    return $committedExitCode -ne 0 -or $workingExitCode -ne 0 -or $workingChanges.Count -gt 0
+}
+
 function Ensure-StableAvaloniaPackages {
+    param([switch]$UseLocalAvalonia)
+
     $avaloniaRoot = Join-Path (Split-Path $repoRoot -Parent) 'clypdat-avalonia'
     $packageOutput = Join-Path $avaloniaRoot 'artifacts\nuget'
     $packageStaging = Join-Path $avaloniaRoot 'artifacts\clypdat-package-staging'
@@ -360,47 +410,84 @@ function Ensure-StableAvaloniaPackages {
         throw 'The stable Avalonia package version is missing from eng/AvaloniaPin.props.'
     }
 
-    if (Test-AvaloniaPackageSet -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $stableCommit -RequireStamp) {
-        Write-Host "Using stamped Avalonia package set for commit $stableCommit."
-        return
-    }
-
     if (-not (Test-Path -LiteralPath (Join-Path $avaloniaRoot '.git'))) {
         throw "The sibling Avalonia fork was not found at: $avaloniaRoot"
     }
 
-    Write-Host "Stable Avalonia package stamp is missing or stale; fetching pinned commit $stableCommit and building version $stableVersion."
+    $buildCommit = $stableCommit
+    $expectedPackageCommit = $stableCommit
+    if ($UseLocalAvalonia) {
+        $localCommit = (& git -C $avaloniaRoot rev-parse --verify HEAD 2>$null | Select-Object -First 1)
+        if ($LASTEXITCODE -ne 0 -or -not $localCommit) {
+            throw "Could not resolve the local Avalonia fork commit at: $avaloniaRoot"
+        }
+        $localCommit = $localCommit.Trim()
+
+        $stampCommit = Get-AvaloniaPackageStampCommit -PackageOutput $packageOutput
+        if ($stampCommit -and
+            -not (Test-AvaloniaPackageInputsChanged -AvaloniaRoot $avaloniaRoot -BaseCommit $stampCommit) -and
+            (Test-AvaloniaPackageSet -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $stampCommit -RequireStamp)) {
+            Write-Host "Using cached Avalonia packages; UI/package inputs unchanged since $stampCommit."
+            return
+        }
+
+        $buildCommit = $localCommit
+        $expectedPackageCommit = $localCommit
+    }
+    elseif (Test-AvaloniaPackageSet -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $stableCommit -RequireStamp) {
+        Write-Host "Using stamped Avalonia package set for commit $stableCommit."
+        return
+    }
+
+    if ($UseLocalAvalonia) {
+        Write-Host "Avalonia UI/package inputs changed; rebuilding package set from commit $buildCommit."
+    }
+    else {
+        Write-Host "Stable Avalonia package stamp is missing or stale; fetching pinned commit $stableCommit and building version $stableVersion."
+    }
     $worktreeRoot = Join-Path ([IO.Path]::GetTempPath()) ('ca-' + [Guid]::NewGuid().ToString('N').Substring(0, 12))
     $worktreeAdded = $false
     try {
-        $resolvedCommit = & git -C $avaloniaRoot rev-parse --verify "$stableCommit^{commit}" 2>$null
+        $resolvedCommit = & git -C $avaloniaRoot rev-parse --verify "$buildCommit^{commit}" 2>$null
         if ($LASTEXITCODE -ne 0) {
+            if ($UseLocalAvalonia) {
+                throw "Local Avalonia commit $buildCommit could not be resolved."
+            }
+
             & git -C $avaloniaRoot fetch --no-tags origin main
             if ($LASTEXITCODE -ne 0) {
                 throw "Could not fetch the pinned Avalonia commit $stableCommit."
             }
         }
 
-        $resolvedCommit = & git -C $avaloniaRoot rev-parse --verify "$stableCommit^{commit}" 2>$null
+        $resolvedCommit = & git -C $avaloniaRoot rev-parse --verify "$buildCommit^{commit}" 2>$null
         if ($LASTEXITCODE -ne 0 -or -not $resolvedCommit) {
-            throw "Pinned Avalonia commit $stableCommit could not be resolved after fetching origin/main. Verify the commit exists in the fork."
+            throw "Avalonia commit $buildCommit could not be resolved. Verify the commit exists in the fork."
         }
         $resolvedCommit = ($resolvedCommit | Select-Object -First 1).Trim()
 
-        & git -C $avaloniaRoot worktree add --detach $worktreeRoot $resolvedCommit
-        if ($LASTEXITCODE -ne 0) {
-            throw "Could not create a temporary Avalonia worktree at $worktreeRoot for commit $resolvedCommit."
+        $localSourceChanges = $UseLocalAvalonia -and
+            @(& git -C $avaloniaRoot status --porcelain=v1 --untracked-files=all -- $avaloniaPackageInputPaths 2>$null).Count -gt 0
+        if ($localSourceChanges) {
+            $worktreeRoot = $avaloniaRoot
+            Write-Host 'Building Avalonia from the current local worktree.'
         }
-        $worktreeAdded = $true
+        else {
+            & git -C $avaloniaRoot worktree add --detach $worktreeRoot $resolvedCommit
+            if ($LASTEXITCODE -ne 0) {
+                throw "Could not create a temporary Avalonia worktree at $worktreeRoot for commit $resolvedCommit."
+            }
+            $worktreeAdded = $true
 
-        & git -C $worktreeRoot submodule update --init --recursive
-        if ($LASTEXITCODE -ne 0) {
-            throw "Could not initialize Avalonia submodules in the temporary worktree."
+            & git -C $worktreeRoot submodule update --init --recursive
+            if ($LASTEXITCODE -ne 0) {
+                throw "Could not initialize Avalonia submodules in the temporary worktree."
+            }
         }
 
         $packageProject = Join-Path $worktreeRoot 'build\ClypDat.Win32Packages.proj'
         if (-not (Test-Path -LiteralPath $packageProject -PathType Leaf)) {
-            throw "Pinned Avalonia commit $stableCommit does not contain the ClypDat package target."
+            throw "Avalonia commit $buildCommit does not contain the ClypDat package target."
         }
 
         $stagingFullPath = [IO.Path]::GetFullPath($packageStaging)
@@ -472,7 +559,7 @@ function Ensure-StableAvaloniaPackages {
 
     Remove-IncompleteAvaloniaPackageCache -PackageVersion $stableVersion
 
-    if (-not (Test-AvaloniaPackageSet -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $resolvedCommit -RequireStamp)) {
+    if (-not (Test-AvaloniaPackageSet -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $expectedPackageCommit -RequireStamp)) {
         throw 'Avalonia package build completed but its stamped package closure could not be verified.'
     }
 }
@@ -520,7 +607,7 @@ try {
         }
     }
 
-    Ensure-StableAvaloniaPackages
+    Ensure-StableAvaloniaPackages -UseLocalAvalonia:($Target -eq 'local')
 
     $installParent = Split-Path -Parent $installDirectory
     New-Item -ItemType Directory -Path $installParent -Force | Out-Null
