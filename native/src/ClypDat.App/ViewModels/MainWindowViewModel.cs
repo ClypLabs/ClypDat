@@ -246,9 +246,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ReplayFrameRates = new ObservableCollection<int> { 30, 60, 90, 120, 144 };
         ReplayFrameTimingModes = new ObservableCollection<ReplayFrameTimingOption>
         {
-            new("CFR", ReplayFrameTimingPolicy.Constant,
+            new("CFR (Recommended)", ReplayFrameTimingPolicy.Constant,
                 "Recommended: Keeps an exact replay timeline by repeating the latest frame during source gaps."),
-            new("VFR", ReplayFrameTimingPolicy.Variable,
+            new("VFR (Advanced)", ReplayFrameTimingPolicy.Variable,
                 "Advanced: Preserves active-source timing and pads only source gaps.")
         };
         ReplayBitrateOptions = new ObservableCollection<string>

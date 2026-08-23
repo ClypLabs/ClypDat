@@ -1365,10 +1365,10 @@
                     <TextBlock Text="Automatic encoder profile: chooses the fastest stable configuration for the available NVIDIA, AMD, Intel, or CPU encoder." Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" />
                   </StackPanel>
 
-                  <Grid ColumnDefinitions="150,*" ColumnSpacing="12">
+                  <Grid ColumnDefinitions="220,*" ColumnSpacing="12">
                     <StackPanel Spacing="3">
                       <TextBlock Text="Frame Timing" Foreground="#B8C7D8" FontSize="12" />
-                      <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayFrameTimingModes}" SelectedItem="{Binding SelectedReplayFrameTiming}">
+                      <ComboBox Classes="settingsInput" Width="220" ItemsSource="{Binding ReplayFrameTimingModes}" SelectedItem="{Binding SelectedReplayFrameTiming}">
                         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
                       </ComboBox>
                     </StackPanel>
