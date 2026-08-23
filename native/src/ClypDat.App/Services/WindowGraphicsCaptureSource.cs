@@ -35,6 +35,11 @@ internal sealed class WindowGraphicsCaptureSource : IDisposable
         _framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(_direct3DDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, FramePoolBufferCount, _contentSize);
         _framePool.FrameArrived += FramePool_FrameArrived;
         _session = _framePool.CreateCaptureSession(item);
+        if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
+        {
+            try { _session.IsBorderRequired = false; }
+            catch (Exception error) { AppLog.Info($"Native capture: WGC border setting unavailable; Windows will show its capture indicator ({error.Message})."); }
+        }
         if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041))
         {
             try { _session.IsCursorCaptureEnabled = captureCursor; }
