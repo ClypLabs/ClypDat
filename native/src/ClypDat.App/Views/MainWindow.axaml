@@ -1369,7 +1369,7 @@
                   <StackPanel Spacing="3" HorizontalAlignment="Left">
                     <TextBlock Text="Frame Timing" Foreground="#B8C7D8" FontSize="12" />
                     <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayFrameTimingModes}" SelectedItem="{Binding SelectedReplayFrameTiming}">
-                      <ComboBox.ItemTemplate><DataTemplate><TextBlock MinWidth="180" Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
+                      <ComboBox.ItemTemplate><DataTemplate><TextBlock MinWidth="150" Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
                       <ComboBox.SelectionBoxItemTemplate><DataTemplate><TextBlock Text="{Binding Value}" /></DataTemplate></ComboBox.SelectionBoxItemTemplate>
                     </ComboBox>
                     <TextBlock Text="{Binding ReplayFrameTimingDescription}" Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" MaxWidth="520" />
