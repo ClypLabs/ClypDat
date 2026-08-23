@@ -1604,24 +1604,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (value is null || string.Equals(Settings.ReplayFrameRateMode, value.Value, StringComparison.OrdinalIgnoreCase)) return;
             Settings.ReplayFrameRateMode = value.Value;
             OnPropertyChanged();
-            OnPropertyChanged(nameof(ReplayFrameTimingStatus));
+            OnPropertyChanged(nameof(ReplayFrameTimingDescription));
+            OnPropertyChanged(nameof(ReplayFrameTimingMetrics));
             SaveSettings();
             UpdateReplayQualityRestartRequired();
         }
     }
 
-    public string ReplayFrameTimingStatus
-    {
-        get
-        {
-            var configured = SelectedReplayFrameTiming;
-            if (_activeReplayTargetFrameRate <= 0) return configured.Description;
-            var mode = string.Equals(_activeReplayFrameTimingMode, ReplayFrameTimingPolicy.Constant, StringComparison.Ordinal)
-                ? "CFR"
-                : "VFR";
-            return $"{mode}: output {_activeReplayOutputFrameRate:0.0}/{_activeReplayTargetFrameRate} FPS; unique game FPS {_activeReplayUniqueGameFrameRate:0.0}.";
-        }
-    }
+    public string ReplayFrameTimingDescription => SelectedReplayFrameTiming.Description;
+
+    public string ReplayFrameTimingMetrics => _activeReplayTargetFrameRate <= 0
+        ? string.Empty
+        : $"{(string.Equals(_activeReplayFrameTimingMode, ReplayFrameTimingPolicy.Constant, StringComparison.Ordinal) ? "CFR" : "VFR")}: output {_activeReplayOutputFrameRate:0.0}/{_activeReplayTargetFrameRate} FPS; unique game FPS {_activeReplayUniqueGameFrameRate:0.0}.";
 
     public ReplayVideoCodecOption SelectedReplayVideoCodec
     {
@@ -1781,7 +1775,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _activeReplayOutputFrameRate = health.OutputFrameRate;
         _activeReplayUniqueGameFrameRate = health.UniqueFrameRate;
         OnPropertyChanged(nameof(ReplayEncoderModeStatus));
-        OnPropertyChanged(nameof(ReplayFrameTimingStatus));
+        OnPropertyChanged(nameof(ReplayFrameTimingMetrics));
     }
 
     public void ClearReplayEncoderHealth()
@@ -1793,7 +1787,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _activeReplayUniqueGameFrameRate = 0;
         _activeReplayFrameTimingMode = ReplayFrameTimingPolicy.Normalize(Settings.ReplayFrameRateMode);
         OnPropertyChanged(nameof(ReplayEncoderModeStatus));
-        OnPropertyChanged(nameof(ReplayFrameTimingStatus));
+        OnPropertyChanged(nameof(ReplayFrameTimingMetrics));
     }
 
     public void MarkReplayBufferRestarted()
