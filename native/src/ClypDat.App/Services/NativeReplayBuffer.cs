@@ -831,7 +831,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             AVRational codecTimeBase;
             string encoderName;
             bool hardwareFramesActive;
-            codecContext = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, out codecTimeBase, out encoderName, out hardwareFramesActive);
+            codecContext = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, device, out codecTimeBase, out encoderName, out hardwareFramesActive);
             _timeBase = codecTimeBase;
             _videoCodecId = codecContext->codec_id;
             if (!hardwareFramesActive) ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
@@ -2121,7 +2121,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                         device, outputWidth, outputHeight, encodeQueueCapacity + HardwareFramePoolHeadroom);
                                 }
 
-                                var replacement = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, out _, out var rebuiltEncoderName, out var rebuiltHardware);
+                                var replacement = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, device, out _, out var rebuiltEncoderName, out var rebuiltHardware);
                                 if (!rebuiltHardware) ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
                                 requiresDistinctAmfSoftwareFrame = !rebuiltHardware && rebuiltEncoderName.Contains("amf", StringComparison.OrdinalIgnoreCase);
 
@@ -4573,53 +4573,128 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
     }
 
-    // avcodec_open2 succeeding is not proof the encoder can actually take these
-    // textures - registering a D3D11 resource with NVENC happens on the first
-    // send_frame, and that is where a driver/bind-flag mismatch surfaces. A
-    // throwaway frame through a throwaway context is what turns "this build and
-    // driver really will encode from VRAM" into something known before the
-    // session starts, rather than a capture that opens fine and then encodes
-    // nothing.
-    private static unsafe bool ProbeHardwareEncode(AVCodecContext* codecContext, AVBufferRef* framesRef)
+    // A successful one-frame send proves only that NVENC can register a D3D11
+    // resource. It does not prove that the path can maintain the configured
+    // capture rate while it copies, submits, and drains packets. Qualify both
+    // inputs on fresh throwaway contexts; no probe timestamps or delayed frames
+    // can therefore reach the replay timeline.
+    private static unsafe NvencInputPathQualification.Result BenchmarkNvencInput(
+        AVCodecContext* codecContext, AVBufferRef* framesRef, ID3D11Device? device,
+        int width, int height, bool hardwareFrames)
     {
-        var probeFrame = ffmpeg.av_frame_alloc();
-        AVPacket* probePacket = null;
+        const int warmupPackets = 12;
+        var packet = ffmpeg.av_packet_alloc();
+        AVFrame* softwareTemplate = null;
+        ID3D11Texture2D? sourceTexture = null;
+        var poolTextures = new Dictionary<nint, ID3D11Texture2D>();
         try
         {
-            if (probeFrame is null) return false;
-            if (ffmpeg.av_hwframe_get_buffer(framesRef, probeFrame, 0) < 0) return false;
-
-            probeFrame->pts = 0;
-            if (ffmpeg.avcodec_send_frame(codecContext, probeFrame) < 0) return false;
-
-            probePacket = ffmpeg.av_packet_alloc();
-            if (probePacket is null) return false;
-            while (ffmpeg.avcodec_receive_packet(codecContext, probePacket) >= 0)
+            if (packet is null) return new(false, 0);
+            if (hardwareFrames)
             {
-                ffmpeg.av_packet_unref(probePacket);
+                if (framesRef is null || device is null) return new(false, 0);
+                sourceTexture = device.CreateTexture2D(new Texture2DDescription
+                {
+                    Width = (uint)width, Height = (uint)height, MipLevels = 1, ArraySize = 1,
+                    Format = Format.NV12, SampleDescription = new SampleDescription(1, 0),
+                    Usage = ResourceUsage.Default, BindFlags = BindFlags.None,
+                    CPUAccessFlags = CpuAccessFlags.None, MiscFlags = ResourceOptionFlags.None
+                });
+            }
+            else
+            {
+                softwareTemplate = ffmpeg.av_frame_alloc();
+                if (softwareTemplate is null) return new(false, 0);
+                softwareTemplate->format = (int)AVPixelFormat.AV_PIX_FMT_NV12;
+                softwareTemplate->width = width;
+                softwareTemplate->height = height;
+                if (ffmpeg.av_frame_get_buffer(softwareTemplate, 32) < 0) return new(false, 0);
+                FillFrameBlack(softwareTemplate, height);
             }
 
-            return true;
+            var emitted = 0;
+            var measuredPackets = 0;
+            var warm = false;
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var deadline = TimeSpan.FromSeconds(1.5);
+            long pts = 0;
+            while (stopwatch.Elapsed < deadline)
+            {
+                AVFrame* input = null;
+                if (hardwareFrames)
+                {
+                    input = ffmpeg.av_frame_alloc();
+                    if (input is null || ffmpeg.av_hwframe_get_buffer(framesRef, input, 0) < 0)
+                    {
+                        if (input is not null) ffmpeg.av_frame_free(&input);
+                        return new(false, 0);
+                    }
+                    var texturePointer = (nint)input->data[0];
+                    if (!poolTextures.TryGetValue(texturePointer, out var poolTexture))
+                    {
+                        poolTexture = new ID3D11Texture2D(texturePointer);
+                        poolTextures.Add(texturePointer, poolTexture);
+                    }
+                    device!.ImmediateContext.CopySubresourceRegion(poolTexture, (uint)(nint)input->data[1], 0, 0, 0, sourceTexture!, 0);
+                }
+                else
+                {
+                    input = ffmpeg.av_frame_clone(softwareTemplate);
+                    if (input is null) return new(false, 0);
+                }
+
+                input->pts = pts++;
+                var send = ffmpeg.avcodec_send_frame(codecContext, input);
+                ffmpeg.av_frame_free(&input);
+                if (send == ffmpeg.AVERROR(ffmpeg.EAGAIN))
+                {
+                    // Drain below and retry on the next bounded iteration.
+                }
+                else if (send < 0)
+                {
+                    return new(false, 0);
+                }
+
+                while (ffmpeg.avcodec_receive_packet(codecContext, packet) >= 0)
+                {
+                    emitted++;
+                    if (warm) measuredPackets++;
+                    ffmpeg.av_packet_unref(packet);
+                }
+                if (!warm && emitted >= warmupPackets)
+                {
+                    warm = true;
+                    measuredPackets = 0;
+                    stopwatch.Restart();
+                }
+            }
+
+            var elapsed = Math.Max(stopwatch.Elapsed.TotalSeconds, 0.001);
+            return warm ? new(true, measuredPackets / elapsed) : new(false, 0, TimedOut: true);
         }
-        catch
+        catch (Exception error)
         {
-            return false;
+            AppLog.Info($"Native encoder qualification: {(hardwareFrames ? "D3D11" : "system-memory")} path failed ({error.Message}).");
+            return new(false, 0);
         }
         finally
         {
-            if (probePacket is not null) ffmpeg.av_packet_free(&probePacket);
-            if (probeFrame is not null) ffmpeg.av_frame_free(&probeFrame);
+            foreach (var texture in poolTextures.Values) texture.Dispose();
+            sourceTexture?.Dispose();
+            if (softwareTemplate is not null) ffmpeg.av_frame_free(&softwareTemplate);
+            if (packet is not null) ffmpeg.av_packet_free(&packet);
         }
     }
 
     private static unsafe AVCodecContext* CreateEncoder(ReplayBufferConfig config, int width, int height, out AVRational timeBase, out string encoderName)
-        => CreateEncoder(config, width, height, 0, out timeBase, out encoderName, out _);
+        => CreateEncoder(config, width, height, 0, null, out timeBase, out encoderName, out _);
 
     private static unsafe AVCodecContext* CreateEncoder(
         ReplayBufferConfig config,
         int width,
         int height,
         nint hardwareFramesRef,
+        ID3D11Device? hardwareDevice,
         out AVRational timeBase,
         out string encoderName,
         out bool usingHardwareFrames)
@@ -4744,17 +4819,23 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // the exact behaviour those paths have today.
             if (hardwareFramesRef != 0 && candidateName is ("h264_nvenc" or "av1_nvenc"))
             {
-                var probeContext = TryOpen(candidateCodec, candidateName, false, hardwareFrames: true);
-                if (probeContext is not null)
+                AVCodecContext* d3dContext = null;
+                AVCodecContext* systemContext = null;
+                try
                 {
-                    var probed = ProbeHardwareEncode(probeContext, (AVBufferRef*)hardwareFramesRef);
-                    // The probe already pushed a frame through this context, so
-                    // it can't be the session's encoder - its timeline starts at
-                    // pts 0 and the first real frame would be non-monotonic.
-                    // Reopening costs a few milliseconds, once, at session start.
-                    ffmpeg.avcodec_free_context(&probeContext);
+                    d3dContext = TryOpen(candidateCodec, candidateName, false, hardwareFrames: true);
+                    systemContext = TryOpen(candidateCodec, candidateName, false, hardwareFrames: false);
+                    var d3dResult = d3dContext is null
+                        ? new NvencInputPathQualification.Result(false, 0)
+                        : BenchmarkNvencInput(d3dContext, (AVBufferRef*)hardwareFramesRef, hardwareDevice, width, height, hardwareFrames: true);
+                    var systemResult = systemContext is null
+                        ? new NvencInputPathQualification.Result(false, 0)
+                        : BenchmarkNvencInput(systemContext, null, null, width, height, hardwareFrames: false);
+                    var target = Math.Clamp(config.FrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
+                    var selected = NvencInputPathQualification.Select(target, d3dResult, systemResult);
+                    AppLog.Info($"Native encoder qualification: {candidateName} D3D11={d3dResult.FramesPerSecond:F1} fps ({(d3dResult.Available ? "available" : d3dResult.TimedOut ? "timeout" : "unavailable")}), system-memory={systemResult.FramesPerSecond:F1} fps ({(systemResult.Available ? "available" : systemResult.TimedOut ? "timeout" : "unavailable")}), selected={selected?.ToString() ?? "none"}, target={target} fps, selectedReached95={(selected == NvencInputPath.D3D11 ? d3dResult : systemResult).ReachedTarget(target)}.");
 
-                    if (probed)
+                    if (selected == NvencInputPath.D3D11)
                     {
                         var hardwareContext = TryOpen(candidateCodec, candidateName, false, hardwareFrames: true);
                         if (hardwareContext is not null)
@@ -4763,15 +4844,35 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             usingHardwareFrames = true;
                             if (ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.Av1 && candidateName.StartsWith("h264_", StringComparison.OrdinalIgnoreCase))
                                 AppLog.Info("Native replay: AV1 initialization failed; H.264 fallback selected.");
-                            AppLog.Info($"Native encoder probe: {candidateName} opened with D3D11 zero-copy input (no per-frame GPU readback/upload).");
+                            AppLog.Info($"Native encoder qualification: {candidateName} selected D3D11 zero-copy input.");
                             return hardwareContext;
                         }
                     }
-                    else
+                    else if (selected == NvencInputPath.SystemMemory)
                     {
-                        AppLog.Info($"Native encoder probe: {candidateName} opened but would not encode a D3D11 texture, falling back to system-memory frames.");
+                        var softwareContext = TryOpen(candidateCodec, candidateName, false, hardwareFrames: false);
+                        if (softwareContext is not null)
+                        {
+                            encoderName = candidateName;
+                            if (ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.Av1 && candidateName.StartsWith("h264_", StringComparison.OrdinalIgnoreCase))
+                                AppLog.Info("Native replay: AV1 initialization failed; H.264 fallback selected.");
+                            AppLog.Info($"Native encoder qualification: {candidateName} selected system-memory input.");
+                            return softwareContext;
+                        }
                     }
                 }
+                finally
+                {
+                    if (d3dContext is not null) ffmpeg.avcodec_free_context(&d3dContext);
+                    if (systemContext is not null) ffmpeg.avcodec_free_context(&systemContext);
+                }
+
+                // Both NVENC paths were tested on fresh contexts. Do not undo
+                // that result by opening NVENC once more without a successful
+                // qualification: continue through the existing AMF -> QSV ->
+                // CPU candidate order instead.
+                AppLog.Info($"Native encoder qualification: {candidateName} had no usable qualified input path; trying the next encoder family.");
+                continue;
             }
 
             foreach (var lowPower in lowPowerAttempts)
