@@ -17,6 +17,23 @@ build_windows_installer:
   script:
     - '$version = $env:CI_COMMIT_TAG.Substring(1)'
     - .\dotnet.ps1 --info
+    - |
+      $pin = [xml](Get-Content eng\AvaloniaPin.props -Raw)
+      $avaloniaCommit = $pin.SelectSingleNode('//ClypDatAvaloniaStableCommit').InnerText
+      $avaloniaVersion = $pin.SelectSingleNode('//ClypDatAvaloniaStablePackageVersion').InnerText
+      $avaloniaRoot = Join-Path (Split-Path $PWD -Parent) 'clypdat-avalonia'
+      git clone --no-checkout https://github.com/ClypDat/clypdat-avalonia.git $avaloniaRoot
+      if ($LASTEXITCODE -ne 0) { throw 'Could not clone ClypDat Avalonia fork.' }
+      git -C $avaloniaRoot fetch --depth 1 origin $avaloniaCommit
+      if ($LASTEXITCODE -ne 0) { throw "Could not fetch pinned Avalonia commit $avaloniaCommit." }
+      git -C $avaloniaRoot checkout --detach $avaloniaCommit
+      if ($LASTEXITCODE -ne 0) { throw "Could not check out pinned Avalonia commit $avaloniaCommit." }
+      git -C $avaloniaRoot submodule update --init --recursive
+      if ($LASTEXITCODE -ne 0) { throw 'Could not initialize Avalonia submodules.' }
+      & (Join-Path $avaloniaRoot 'build.ps1') CreateNugetPackages --configuration Release --force-nuget-version $avaloniaVersion
+      if ($LASTEXITCODE -ne 0) { throw 'Could not build pinned Avalonia packages.' }
+      $packageFeed = Join-Path $avaloniaRoot 'artifacts\nuget'
+      if (-not (Test-Path (Join-Path $packageFeed "Avalonia.$avaloniaVersion.nupkg"))) { throw "Avalonia package feed was not created: $packageFeed" }
     - >-
       .\dotnet.ps1 publish native\src\ClypDat.App\ClypDat.App.csproj
       -c Release -r win-x64 --self-contained true -p:Platform=x64
