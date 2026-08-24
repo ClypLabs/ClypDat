@@ -310,6 +310,33 @@ function Test-DirectoryCreateAccess {
     }
 }
 
+function Invoke-AvaloniaBuild {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][string[]]$Arguments
+    )
+
+    $buildOutput = @(& $FilePath @Arguments 2>&1)
+    $exitCode = $LASTEXITCODE
+
+    foreach ($outputChunk in $buildOutput) {
+        foreach ($lineText in ("$outputChunk" -split '\r?\n')) {
+            if ($lineText -match '(?i)(:\s*(?:fatal\s+)?error\s+[A-Z]{2,}\d+|^\s*(?:fatal\s+)?error\s+[A-Z]{2,}\d+|^\s*unhandled exception\b)') {
+                Write-Host $lineText
+            }
+        }
+    }
+
+    $errorLines = @($buildOutput | ForEach-Object { "$_" -split '\r?\n' } | Where-Object {
+        $_ -match '(?i)(:\s*(?:fatal\s+)?error\s+[A-Z]{2,}\d+|^\s*(?:fatal\s+)?error\s+[A-Z]{2,}\d+|^\s*unhandled exception\b)'
+    })
+    if ($exitCode -ne 0 -and $errorLines.Count -eq 0) {
+        Write-Host 'Avalonia build failed without an error-formatted output line.'
+    }
+
+    return $exitCode
+}
+
 function Install-ClypDatDirectory {
     param(
         [Parameter(Mandatory)][string]$SourceDirectory,
@@ -358,15 +385,27 @@ function Test-AvaloniaPackageSet {
         [Parameter(Mandatory)][string]$PackageVersion,
         [string]$ExpectedCommit,
         [switch]$RequireStamp,
-        [switch]$SkipAnalyzerCheck
+        [switch]$SkipAnalyzerCheck,
+        [switch]$ShowFailure,
+        [string[]]$RequiredPackageIds = $requiredAvaloniaPackageIds
     )
+
+    function Invalid-PackageSet {
+        param([Parameter(Mandatory)][string]$Reason)
+        if ($ShowFailure) {
+            Write-Host "Avalonia package validation failed: $Reason"
+        }
+        return $false
+    }
 
     try {
         $packageFiles = @(Get-ChildItem -LiteralPath $PackageOutput -Filter '*.nupkg' -File)
-        $expectedNames = @($requiredAvaloniaPackageIds | ForEach-Object { "$_.$PackageVersion.nupkg" } | Sort-Object)
+        $expectedNames = @($RequiredPackageIds | ForEach-Object { "$_.$PackageVersion.nupkg" } | Sort-Object)
         $actualNames = @($packageFiles.Name | Sort-Object)
         if (($actualNames -join '|') -ne ($expectedNames -join '|')) {
-            return $false
+            $missing = @($expectedNames | Where-Object { $_ -notin $actualNames }) -join ', '
+            $unexpected = @($actualNames | Where-Object { $_ -notin $expectedNames }) -join ', '
+            return Invalid-PackageSet "package names differ; missing: [$missing]; unexpected: [$unexpected]"
         }
 
         $avaloniaPackagePath = Join-Path $PackageOutput "Avalonia.$PackageVersion.nupkg"
@@ -374,13 +413,13 @@ function Test-AvaloniaPackageSet {
         try {
             $buildTaskEntry = @($archive.Entries | Where-Object { $_.FullName -eq 'tools/netstandard2.0/Avalonia.Build.Tasks.dll' })
             if ($buildTaskEntry.Count -ne 1) {
-                return $false
+                return Invalid-PackageSet 'Avalonia package has no single tools/netstandard2.0/Avalonia.Build.Tasks.dll entry'
             }
 
             if (-not $SkipAnalyzerCheck) {
                 foreach ($requiredAnalyzerEntry in $requiredAvaloniaAnalyzerEntries) {
                     if (@($archive.Entries | Where-Object { $_.FullName -eq $requiredAnalyzerEntry }).Count -ne 1) {
-                        return $false
+                        return Invalid-PackageSet "Avalonia package has no single $requiredAnalyzerEntry entry"
                     }
                 }
             }
@@ -392,8 +431,8 @@ function Test-AvaloniaPackageSet {
         $packageIds = @{}
         foreach ($packageFile in $packageFiles) {
             $metadata = Read-AvaloniaNuspec -PackagePath $packageFile.FullName
-            if ($metadata.version -ne $PackageVersion -or $metadata.id -notin $requiredAvaloniaPackageIds) {
-                return $false
+            if ($metadata.version -ne $PackageVersion -or $metadata.id -notin $RequiredPackageIds) {
+                return Invalid-PackageSet "$($packageFile.Name) has id '$($metadata.id)' and version '$($metadata.version)'"
             }
 
             $packageIds[$metadata.id] = $true
@@ -401,40 +440,42 @@ function Test-AvaloniaPackageSet {
                 if ($dependency.id -like 'Avalonia*' -and $dependency.version -eq $PackageVersion) {
                     $dependencyPath = Join-Path $PackageOutput "$($dependency.id).$PackageVersion.nupkg"
                     if (-not (Test-Path -LiteralPath $dependencyPath -PathType Leaf)) {
-                        return $false
+                        return Invalid-PackageSet "$($metadata.id) requires missing package $($dependency.id).$PackageVersion.nupkg"
                     }
                 }
             }
         }
 
-        foreach ($packageId in $requiredAvaloniaPackageIds) {
+        foreach ($packageId in $RequiredPackageIds) {
             if (-not $packageIds.ContainsKey($packageId)) {
-                return $false
+                return Invalid-PackageSet "package metadata is missing required id '$packageId'"
             }
         }
 
         if ($RequireStamp) {
             $stampPath = Join-Path $PackageOutput 'clypdat-package-stamp.json'
             if (-not (Test-Path -LiteralPath $stampPath -PathType Leaf)) {
-                return $false
+                return Invalid-PackageSet 'package stamp is missing'
             }
 
             $stamp = Get-Content -LiteralPath $stampPath -Raw | ConvertFrom-Json
             if ($stamp.schema -ne 1 -or $stamp.commit -ne $ExpectedCommit -or $stamp.packageVersion -ne $PackageVersion) {
-                return $false
+                return Invalid-PackageSet 'package stamp schema, commit, or version does not match'
             }
 
             $stampPackages = @($stamp.packages | Sort-Object)
-            $expectedIds = @($requiredAvaloniaPackageIds | Sort-Object)
+            $expectedIds = @($RequiredPackageIds | Sort-Object)
             if (($stampPackages -join '|') -ne ($expectedIds -join '|')) {
-                return $false
+                return Invalid-PackageSet 'package stamp id list does not match expected desktop package list'
             }
         }
 
         return $true
     }
     catch {
-        Write-Verbose "Avalonia package validation failed: $($_.Exception.Message)"
+        if ($ShowFailure) {
+            Write-Host "Avalonia package validation failed: $($_.Exception.Message)"
+        }
         return $false
     }
 }
@@ -486,7 +527,8 @@ function Repair-CachedAvaloniaAnalyzer {
         [Parameter(Mandatory)][string]$AvaloniaRoot,
         [Parameter(Mandatory)][string]$PackageOutput,
         [Parameter(Mandatory)][string]$PackageVersion,
-        [Parameter(Mandatory)][string]$ExpectedCommit
+        [Parameter(Mandatory)][string]$ExpectedCommit,
+        [Parameter(Mandatory)][string[]]$RequiredPackageIds
     )
 
     # A pre-generator package set is otherwise complete. Repair it in place
@@ -496,15 +538,18 @@ function Repair-CachedAvaloniaAnalyzer {
             -PackageVersion $PackageVersion `
             -ExpectedCommit $ExpectedCommit `
             -RequireStamp `
+            -RequiredPackageIds $RequiredPackageIds `
             -SkipAnalyzerCheck)) {
         return $false
     }
 
     $generatorProject = Join-Path $AvaloniaRoot 'src\tools\Avalonia.Generators\Avalonia.Generators.csproj'
     $generatorOutput = Join-Path $AvaloniaRoot 'src\tools\Avalonia.Generators\bin\Release\netstandard2.0\Avalonia.Generators.dll'
-    & $dotnetExecutable build $generatorProject -c Release -f netstandard2.0 --no-restore /nologo
-    if ($LASTEXITCODE -ne 0) {
-        throw "Avalonia generator compilation failed with exit code $LASTEXITCODE while repairing the cached package."
+    $generatorBuildExitCode = Invoke-AvaloniaBuild -FilePath $dotnetExecutable -Arguments @(
+        'build', $generatorProject, '-c', 'Release', '-f', 'netstandard2.0', '--no-restore', '/nologo'
+    )
+    if ($generatorBuildExitCode -ne 0) {
+        throw "Avalonia generator compilation failed with exit code $generatorBuildExitCode while repairing the cached package."
     }
 
     Add-AvaloniaPackageFile `
@@ -516,7 +561,8 @@ function Repair-CachedAvaloniaAnalyzer {
         -PackageOutput $PackageOutput `
         -PackageVersion $PackageVersion `
         -ExpectedCommit $ExpectedCommit `
-        -RequireStamp
+        -RequireStamp `
+        -RequiredPackageIds $RequiredPackageIds
 }
 
 function Ensure-StableAvaloniaPackages {
@@ -539,6 +585,15 @@ function Ensure-StableAvaloniaPackages {
     }
     if ([string]::IsNullOrWhiteSpace($stableVersion)) {
         throw 'The stable Avalonia package version is missing from eng/AvaloniaPin.props.'
+    }
+
+    # Pinned target omits Controls.Media; local fork may include it during
+    # package work. Validate each mode against its own exact package surface.
+    $requiredPackageIds = if ($UseLocalAvalonia) {
+        $requiredAvaloniaPackageIds
+    }
+    else {
+        @($requiredAvaloniaPackageIds | Where-Object { $_ -ne 'Avalonia.Controls.Media' })
     }
 
     if (-not (Test-Path -LiteralPath (Join-Path $avaloniaRoot '.git'))) {
@@ -565,12 +620,12 @@ function Ensure-StableAvaloniaPackages {
             # is missing the generator, so evict only that incomplete extract
             # before deciding this is a usable cache hit.
             Remove-IncompleteAvaloniaPackageCache -PackageVersion $stableVersion
-            if (Test-AvaloniaPackageSet -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $stampCommit -RequireStamp) {
+            if (Test-AvaloniaPackageSet -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $stampCommit -RequireStamp -RequiredPackageIds $requiredPackageIds) {
                 Write-Host "Using cached Avalonia packages; UI/package inputs unchanged since $stampCommit."
                 return
             }
 
-            if (Repair-CachedAvaloniaAnalyzer -AvaloniaRoot $avaloniaRoot -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $stampCommit) {
+            if (Repair-CachedAvaloniaAnalyzer -AvaloniaRoot $avaloniaRoot -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $stampCommit -RequiredPackageIds $requiredPackageIds) {
                 Write-Host 'Repaired the cached Avalonia generator; UI/package inputs were unchanged.'
                 Remove-IncompleteAvaloniaPackageCache -PackageVersion $stableVersion
                 return
@@ -584,7 +639,7 @@ function Ensure-StableAvaloniaPackages {
     }
     else {
         Remove-IncompleteAvaloniaPackageCache -PackageVersion $stableVersion
-        if (Test-AvaloniaPackageSet -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $stableCommit -RequireStamp) {
+        if (Test-AvaloniaPackageSet -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $stableCommit -RequireStamp -RequiredPackageIds $requiredPackageIds) {
             Write-Host "Using stamped Avalonia package set for commit $stableCommit."
             return
         }
@@ -659,8 +714,10 @@ function Ensure-StableAvaloniaPackages {
             $previousDotNetHostPath = $env:DOTNET_HOST_PATH
             $env:DOTNET_HOST_PATH = $dotnetExecutable
             try {
-                & $msbuildExecutable $packageProject /t:Pack "/p:ClypDatPackageVersion=$stableVersion" "/p:ClypDatPackageOutput=$stagingFullPath" /nologo
-                $packageBuildExitCode = $LASTEXITCODE
+                $packageBuildExitCode = Invoke-AvaloniaBuild -FilePath $msbuildExecutable -Arguments @(
+                    $packageProject, '/t:Pack', "/p:ClypDatPackageVersion=$stableVersion",
+                    "/p:ClypDatPackageOutput=$stagingFullPath", '/nologo'
+                )
             }
             finally {
                 $env:DOTNET_HOST_PATH = $previousDotNetHostPath
@@ -675,18 +732,22 @@ function Ensure-StableAvaloniaPackages {
 
         $buildTasksProject = Join-Path $worktreeRoot 'src\Avalonia.Build.Tasks\Avalonia.Build.Tasks.csproj'
         $buildTasksOutput = Join-Path $worktreeRoot 'src\Avalonia.Build.Tasks\bin\Release\netstandard2.0'
-        & $dotnetExecutable build $buildTasksProject -c Release -f netstandard2.0 --no-restore /nologo
-        if ($LASTEXITCODE -ne 0) {
-            throw "Avalonia build task compilation failed with exit code $LASTEXITCODE."
+        $buildTasksExitCode = Invoke-AvaloniaBuild -FilePath $dotnetExecutable -Arguments @(
+            'build', $buildTasksProject, '-c', 'Release', '-f', 'netstandard2.0', '--no-restore', '/nologo'
+        )
+        if ($buildTasksExitCode -ne 0) {
+            throw "Avalonia build task compilation failed with exit code $buildTasksExitCode."
         }
 
         Add-AvaloniaBuildTaskFiles -PackagePath (Join-Path $stagingFullPath "Avalonia.$stableVersion.nupkg") -BuildOutput $buildTasksOutput
 
         $generatorProject = Join-Path $worktreeRoot 'src\tools\Avalonia.Generators\Avalonia.Generators.csproj'
         $generatorOutput = Join-Path $worktreeRoot 'src\tools\Avalonia.Generators\bin\Release\netstandard2.0\Avalonia.Generators.dll'
-        & $dotnetExecutable build $generatorProject -c Release -f netstandard2.0 --no-restore /nologo
-        if ($LASTEXITCODE -ne 0) {
-            throw "Avalonia generator compilation failed with exit code $LASTEXITCODE."
+        $generatorBuildExitCode = Invoke-AvaloniaBuild -FilePath $dotnetExecutable -Arguments @(
+            'build', $generatorProject, '-c', 'Release', '-f', 'netstandard2.0', '--no-restore', '/nologo'
+        )
+        if ($generatorBuildExitCode -ne 0) {
+            throw "Avalonia generator compilation failed with exit code $generatorBuildExitCode."
         }
 
         Add-AvaloniaPackageFile `
@@ -694,7 +755,7 @@ function Ensure-StableAvaloniaPackages {
             -SourcePath $generatorOutput `
             -EntryName 'analyzers/dotnet/cs/Avalonia.Generators.dll'
 
-        if (-not (Test-AvaloniaPackageSet -PackageOutput $stagingFullPath -PackageVersion $stableVersion)) {
+        if (-not (Test-AvaloniaPackageSet -PackageOutput $stagingFullPath -PackageVersion $stableVersion -ShowFailure -RequiredPackageIds $requiredPackageIds)) {
             throw 'Avalonia package build did not produce the exact desktop package closure.'
         }
 
@@ -711,7 +772,7 @@ function Ensure-StableAvaloniaPackages {
             schema = 1
             commit = $resolvedCommit
             packageVersion = $stableVersion
-            packages = @($requiredAvaloniaPackageIds | Sort-Object)
+            packages = @($requiredPackageIds | Sort-Object)
         } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $outputFullPath 'clypdat-package-stamp.json') -Encoding utf8
     }
     finally {
@@ -722,7 +783,7 @@ function Ensure-StableAvaloniaPackages {
 
     Remove-IncompleteAvaloniaPackageCache -PackageVersion $stableVersion
 
-    if (-not (Test-AvaloniaPackageSet -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $expectedPackageCommit -RequireStamp)) {
+    if (-not (Test-AvaloniaPackageSet -PackageOutput $packageOutput -PackageVersion $stableVersion -ExpectedCommit $expectedPackageCommit -RequireStamp -RequiredPackageIds $requiredPackageIds)) {
         throw 'Avalonia package build completed but its stamped package closure could not be verified.'
     }
 }
