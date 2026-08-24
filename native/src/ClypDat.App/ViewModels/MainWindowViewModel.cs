@@ -299,6 +299,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         UpdateClipFileNamePreview();
         ExcludedProcesses = new ObservableCollection<string>(Settings.GameAudioExcludedProcesses);
         ChatAudioApps = new ObservableCollection<string>(Settings.ChatAudioProcessNames);
+        ActiveAudioProcesses = new ObservableCollection<string>();
         SelectedMicrophones = new ObservableCollection<AudioDeviceOption>();
         GameCaptureRows = new ObservableCollection<GameBackendRowViewModel>();
         EnsureAutoClipSettings();
@@ -468,6 +469,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<AudioDeviceOption> ChatAudioDevices { get; }
     public ObservableCollection<AudioDeviceOption> MicrophoneDevices { get; }
     public ObservableCollection<ProcessOption> OpenProcesses { get; }
+    public ObservableCollection<string> ActiveAudioProcesses { get; }
     // "Add a running game" excludes processes already configured by user.
     public ObservableCollection<ProcessOption> GameCandidateProcesses { get; }
     public ObservableCollection<ReplayDurationPreset> ReplayDurationPresets { get; }
@@ -5363,11 +5365,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         var selectedChatName = SelectedChatProcess?.Name ?? Settings.ChatAudioProcessName;
         var selectedName = SelectedProcessExclusion?.Name;
-        var processes = await Task.Run(ProcessListService.GetOpenExecutables);
+        var processesTask = Task.Run(ProcessListService.GetOpenExecutables);
+        var audioProcessNamesTask = Task.Run(AudioCapturePipeline.GetActiveAudioProcessNames);
+        await Task.WhenAll(processesTask, audioProcessNamesTask);
+        var processes = await processesTask;
+        var audioProcessNames = await audioProcessNamesTask;
         OpenProcesses.Clear();
         foreach (var process in processes)
         {
             OpenProcesses.Add(process);
+        }
+        ActiveAudioProcesses.Clear();
+        foreach (var name in audioProcessNames)
+        {
+            ActiveAudioProcesses.Add(name);
         }
 
         SelectedChatProcess = string.IsNullOrWhiteSpace(selectedChatName)

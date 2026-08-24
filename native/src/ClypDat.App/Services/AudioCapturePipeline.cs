@@ -156,11 +156,14 @@ public sealed class AudioCapturePipeline : IDisposable
             ("Game Audio", BuildAlignedTrackAsync(AudioCaptureKind.Game, captures, null, segmentWindows, allowMix: true, snapshots, sourceSnapshotCache, earliestNeededUtc, cancellationToken))
         };
 
-        var chatAppNames = NormalizedList(config.ChatAudioProcessNames);
+        var chatAppNames = captures
+            .Where(capture => capture.Kind == AudioCaptureKind.Chat)
+            .Select(capture => capture.SourceKey)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
         foreach (var appName in chatAppNames)
         {
-            var label = chatAppNames.Count > 1 ? $"Chat Audio - {appName}" : "Chat Audio";
-            trackJobs.Add((label, BuildAlignedTrackAsync(AudioCaptureKind.Chat, captures, appName, segmentWindows, allowMix: true, snapshots, sourceSnapshotCache, earliestNeededUtc, cancellationToken)));
+            trackJobs.Add((appName, BuildAlignedTrackAsync(AudioCaptureKind.Chat, captures, appName, segmentWindows, allowMix: false, snapshots, sourceSnapshotCache, earliestNeededUtc, cancellationToken)));
         }
 
         // config.MicrophoneDeviceIds carries the raw configured value (e.g. the
@@ -238,7 +241,7 @@ public sealed class AudioCapturePipeline : IDisposable
             if (HasLiveCapture(AudioCaptureKind.Chat, route.AppName)) continue;
             try
             {
-                StartProcessLoopbackCapture(AudioCaptureKind.Chat, route.ProcessId, ProcessLoopbackCaptureMode.IncludeTargetProcessTree, $"Chat Audio - {route.AppName}", route.AppName);
+                StartProcessLoopbackCapture(AudioCaptureKind.Chat, route.ProcessId, ProcessLoopbackCaptureMode.IncludeTargetProcessTree, route.AppName, route.AppName);
             }
             catch (Exception error)
             {
@@ -637,6 +640,19 @@ public sealed class AudioCapturePipeline : IDisposable
     private static AudioRoutes ResolveAudioRoutes(ReplayBufferConfig config, string[] resolvedMicDeviceIds, RouteScope scope)
     {
         var chatAppNames = NormalizedList(config.ChatAudioProcessNames);
+        var gameProcessName = Path.GetFileNameWithoutExtension(config.GameExecutableName ?? string.Empty);
+        foreach (var processId in scope.ActiveAudioProcessIds)
+        {
+            if (processId == Environment.ProcessId) continue;
+            try
+            {
+                using var process = Process.GetProcessById(processId);
+                var appName = process.ProcessName;
+                if (string.IsNullOrWhiteSpace(appName) || string.Equals(appName, gameProcessName, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!chatAppNames.Contains(appName, StringComparer.OrdinalIgnoreCase)) chatAppNames.Add(appName);
+            }
+            catch { }
+        }
 
         // Multi-process apps (Discord, browsers, etc.) share one executable name across
         // several OS processes. StartProcessLoopbackCapture already uses
@@ -666,7 +682,7 @@ public sealed class AudioCapturePipeline : IDisposable
             .OrderBy(pid => pid)
             .ToArray();
         var selfPid = Environment.ProcessId;
-        var gamePids = useProcessRouting ? ResolveGameAudioProcessIds(config.GameExecutableName, excludedPids, selfPid, scope) : Array.Empty<int>();
+        var gamePids = useProcessRouting ? ResolveGameAudioProcessIds(config.GameExecutableName ?? string.Empty, excludedPids, selfPid, scope) : Array.Empty<int>();
         // One capture per distinct process tree - each capture uses
         // IncludeTargetProcessTree, so keeping a pid whose ancestor is also in
         // the set records the same audio twice (or more: a real save showed
@@ -892,6 +908,26 @@ public sealed class AudioCapturePipeline : IDisposable
         }
 
         return ids.ToArray();
+    }
+
+    public static IReadOnlyList<string> GetActiveAudioProcessNames()
+    {
+        if (!OperatingSystem.IsWindows()) return Array.Empty<string>();
+        using var enumerator = new MMDeviceEnumerator();
+        return ResolveActiveAudioProcessIds(enumerator)
+            .Select(processId =>
+            {
+                try
+                {
+                    using var process = Process.GetProcessById(processId);
+                    return process.ProcessName;
+                }
+                catch { return string.Empty; }
+            })
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase)
+            .ToArray();
     }
 
     // One pass of audio-route resolution, memoising the expensive lookups that
