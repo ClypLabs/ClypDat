@@ -457,11 +457,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         .ToArray();
     public ObservableCollection<TrackLaneViewModel> TimelineTracks { get; }
     public int TimelineTrackCount => Math.Max(1, TimelineTracks.Count);
-    // Timeline panel has 8px padding above/below, a compact clip/status header,
-    // a 34px ruler, then fixed lane heights plus separators. The outer editor
-    // grid needs this explicit measured child because the real timeline spans
-    // both rows underneath the clip-details column.
-    public double EditorTimelineHeight => 16 + 48 + 34 +
+    // Timeline panel has 12px/10px vertical padding, a 58px header plus 10px
+    // gap, a 34px ruler, then fixed lane heights plus separators. The outer
+    // editor grid needs this explicit measured child because the real timeline
+    // spans both rows underneath the clip-details column.
+    public double EditorTimelineHeight => 22 + 68 + 34 +
         (EditorHoverBarEnabled ? 0 : 44) +
         TimelineTracks.Sum(track => track.LaneHeight + track.LaneMargin.Bottom);
     public ObservableCollection<AudioDeviceOption> ChatAudioDevices { get; }

@@ -2476,17 +2476,17 @@
         </Grid>
 
         <Border Grid.Row="1" Grid.ColumnSpan="2" Classes="editorTimelinePanel">
-          <Grid RowDefinitions="Auto,Auto,*" Margin="8">
-            <Border Classes="editorTimelineHeader" Height="42" Margin="0,0,0,6">
+          <Grid RowDefinitions="Auto,Auto,*" Margin="14,12,14,10">
+            <Border Classes="editorTimelineHeader" Height="58" Margin="0,0,0,10">
               <Grid ColumnDefinitions="*,Auto" ColumnSpacing="14">
-                <StackPanel Spacing="1" VerticalAlignment="Center">
+                <StackPanel Spacing="3" VerticalAlignment="Center">
                   <TextBlock Text="TIMELINE" Classes="editorTimelineEyebrow" />
                   <TextBlock Text="{Binding SelectedVideoName}" Classes="editorTimelineTitle" TextTrimming="CharacterEllipsis" />
                 </StackPanel>
                 <Border Grid.Column="1" Classes="editorTimelineTime" VerticalAlignment="Center">
-                  <StackPanel Orientation="Horizontal" Spacing="5">
+                  <StackPanel Orientation="Horizontal" Spacing="7">
                     <TextBlock Text="PLAYHEAD" Classes="editorTimelineEyebrow" VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding TimelineStatusLabel}" Foreground="#EDF4FB" FontFamily="Consolas" FontSize="12" FontWeight="Bold" />
+                    <TextBlock Text="{Binding TimelineStatusLabel}" Foreground="#EDF4FB" FontFamily="Consolas" FontSize="13" FontWeight="Bold" />
                   </StackPanel>
                 </Border>
               </Grid>
@@ -2559,34 +2559,19 @@
               </StackPanel>
             </Grid>
 
-            <Grid Grid.Row="2" ColumnDefinitions="160,*" ColumnSpacing="12">
-              <!-- Row 0 fixed at 34 (not Auto) so it matches the timeline column's
-                   own row 0 below - Auto sized this side's row 0 to the
-                   time-badge's own content height instead, so row 1 (the track
-                   label boxes) started at a different Y than row 1 on the right
-                   (the actual timeline lanes), drifting further out of sync with
-                   every extra track. 34, not 24 (the ruler's own old height) -
-                   a fixed Grid row caps its child's MEASURED height, not just
-                   sets a minimum, and the badge's real content (10,5 padding +
-                   15px font + 1px border) needs ~34px or it gets squeezed/
-                   clipped instead of rendering at full size. TimelineRulerControl
-                   (Grid.Column="1" below) draws its label anchored to the top
-                   and its ticks anchored to the bottom of whatever height it's
-                   given (see its Render override) - the extra 10px just adds a
-                   bit of breathing room there, nothing hardcoded to 24. -->
+            <Grid Grid.Row="2" ColumnDefinitions="188,*" ColumnSpacing="16">
+              <!-- Fixed at 34 so trim metadata and timeline ruler share a row.
+                   TimelineRulerControl anchors labels at the top and ticks at
+                   the bottom, leaving enough room for both without offsetting
+                   track labels from their corresponding lanes. -->
               <Grid RowDefinitions="34,*">
-                <!-- Was a single small (11px) TextBlock, easy to miss - now a
-                     bordered readout matching the app's other pill-style
-                     badges (e.g. the library card duration badge), current
-                     time bright/bold and the " / total" half dimmer so the
-                     two don't visually compete. -->
-                <Border HorizontalAlignment="Left" VerticalAlignment="Bottom"
-                        Margin="0,0,0,6" Padding="10,5" Classes="editorTrimReadout">
-                  <StackPanel Spacing="1">
-                    <TextBlock Text="TRIM RANGE" Classes="editorTimelineEyebrow" />
-                    <TextBlock Text="{Binding TrimRangeLabel}" Foreground="#D8E7F5" FontSize="12" FontWeight="SemiBold" FontFamily="Consolas" />
-                  </StackPanel>
-                </Border>
+                <!-- Keep trim metadata flat so it reads as lane context rather
+                     than competing with the timeline ruler as another control. -->
+                <StackPanel HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                            Margin="10,0,0,7" Spacing="3" Classes="editorTrimReadout">
+                  <TextBlock Text="TRIM RANGE" Classes="editorTimelineEyebrow" />
+                  <TextBlock Text="{Binding TrimRangeLabel}" Foreground="#D8E7F5" FontSize="13" FontWeight="SemiBold" FontFamily="Consolas" />
+                </StackPanel>
                 <ItemsControl Grid.Row="1" ItemsSource="{Binding TimelineTracks}">
                   <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
@@ -2820,18 +2805,18 @@
            drift during resize, or sit above/below LibVLC unpredictably. -->
       <Border Grid.Column="1" Grid.Row="0" Classes="editorInspector">
         <Grid RowDefinitions="Auto,*,Auto">
-          <Border Height="64" Classes="editorInspectorHeader">
-            <Grid Margin="20,0,16,0" ColumnDefinitions="*,Auto" ColumnSpacing="10">
-              <StackPanel Spacing="1" VerticalAlignment="Center">
+          <Border Height="104" Classes="editorInspectorHeader">
+            <Grid Margin="24,14,20,14" RowDefinitions="Auto,Auto" RowSpacing="8">
+              <StackPanel Spacing="4">
                 <TextBlock Text="CLIP DETAILS" Classes="editorTimelineEyebrow" />
-                <TextBlock Text="{Binding EditorTitle}" Foreground="#EDF4FB" FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding EditorTitle}" Classes="editorInspectorTitle" TextTrimming="CharacterEllipsis" />
               </StackPanel>
-              <TextBlock Grid.Column="1" Text="{Binding SelectedQuality}" Foreground="#8EA7BE" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="105" />
+              <TextBlock Grid.Row="1" Text="{Binding SelectedQuality}" Classes="editorInspectorQuality" TextTrimming="CharacterEllipsis" />
             </Grid>
           </Border>
 
           <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="16" Spacing="12">
+            <StackPanel Margin="20,18" Spacing="14">
               <!-- Focusable so Enter in either box below has somewhere to put
                    focus: committing has no visible effect otherwise, and the
                    still-highlighted caret reads as "not saved yet". -->
