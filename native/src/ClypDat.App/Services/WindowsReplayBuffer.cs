@@ -679,6 +679,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
                 for (var i = 0; i < tracks.Count; i++) copyArgs.AddRange(new[] { "-map", $"{i + 1}:a" });
                 copyArgs.AddRange(new[] { "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-avoid_negative_ts", "make_zero", "-t", FormatSeconds(effectiveDurationSeconds) });
                 copyArgs.AddRange(metadataArgs);
+                copyArgs.AddRange(new[] { "-movflags", "+faststart" });
                 copyArgs.Add(outputPath);
                 result = await RunProcessAsync("ffmpeg", copyArgs, cancellationToken);
                 AppLog.Info($"Replay mux (stream copy) result: exit={result.ExitCode}, output={outputPath}.");
@@ -699,14 +700,14 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
 
                 var args = reencodeBase.ToList();
                 args.AddRange(BuildHardwareVideoArgs(config));
-                args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k", outputPath });
+                args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", outputPath });
                 result = await RunProcessAsync("ffmpeg", args, cancellationToken);
                 AppLog.Info($"Replay mux (re-encode, {ExportEncoderProbe.Family ?? "nvenc"}) result: exit={result.ExitCode}, output={outputPath}.");
                 if (result.ExitCode != 0)
                 {
                     args = reencodeBase.ToList();
                     args.AddRange(BuildSoftwareVideoArgs(config));
-                    args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k", outputPath });
+                    args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", outputPath });
                     result = await RunProcessAsync("ffmpeg", args, cancellationToken);
                     AppLog.Info($"Replay mux (re-encode, software) result: exit={result.ExitCode}, output={outputPath}.");
                     if (result.ExitCode != 0) throw new InvalidOperationException(string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg mux failed." : result.Error);

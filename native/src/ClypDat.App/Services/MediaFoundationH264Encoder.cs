@@ -159,7 +159,7 @@ internal sealed unsafe class MediaFoundationH264Encoder : IDisposable
         MediaFactory.MFSetAttributeRatio(outputType, MediaTypeAttributeKeys.FrameRate, (uint)_frameRate, 1).CheckError();
         outputType.Set(MediaTypeAttributeKeys.AvgBitrate, (uint)Math.Clamp(bitrate, 5_000_000, 100_000_000)).CheckError();
         outputType.Set(MediaTypeAttributeKeys.InterlaceMode, (uint)VideoInterlaceMode.Progressive).CheckError();
-        outputType.Set(MediaTypeAttributeKeys.MaxKeyframeSpacing, (uint)(_frameRate * 2)).CheckError();
+        outputType.Set(MediaTypeAttributeKeys.MaxKeyframeSpacing, (uint)ReplayEncoderProfilePolicy.GopFrames(_frameRate)).CheckError();
         outputType.Set(MediaTypeAttributeKeys.Mpeg2Profile, 100u).CheckError(); // H.264 High profile.
         transform.SetOutputType(0, outputType, 0);
 

@@ -507,6 +507,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             for (var i = 0; i < tracks.Count; i++) muxArgs.AddRange(new[] { "-map", $"{i + 1}:a" });
             muxArgs.AddRange(new[] { "-c:v", "copy", "-c:a", "aac", "-b:a", "192k" });
             for (var i = 0; i < tracks.Count; i++) muxArgs.AddRange(new[] { $"-metadata:s:a:{i}", $"title={tracks[i].Label}" });
+            muxArgs.AddRange(new[] { "-movflags", "+faststart" });
             muxArgs.AddRange(new[] { "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("Native")}", outputPath });
             var result = await AudioCapturePipeline.RunProcessAsync("ffmpeg", muxArgs, cancellationToken);
             if (result.ExitCode != 0)
@@ -4755,7 +4756,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // how large a clip (and the in-memory ring buffer) can actually get.
             codecContext->rc_buffer_size = (int)maxBitrate;
             codecContext->rc_max_rate = maxBitrate;
-            codecContext->gop_size = 240;
+            codecContext->gop_size = ReplayEncoderProfilePolicy.GopFrames(config.FrameRate);
             codecContext->max_b_frames = 0;
             codecContext->flags |= ffmpeg.AV_CODEC_FLAG_GLOBAL_HEADER;
             // Hardware input: the frames the capture loop hands over ARE D3D11
