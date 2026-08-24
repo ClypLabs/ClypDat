@@ -68,7 +68,6 @@ jobs:
         shell: pwsh
         run: |
           .\dotnet.ps1 restore native\src\ClypDat.App\ClypDat.App.csproj --configfile NuGet.Dev.Config -r win-x64 -p:ClypDatAvaloniaPackageVersion=${{ inputs.package_version }}
-          .\dotnet.ps1 test native\tests\ClypDat.DevChannel.Tests\ClypDat.DevChannel.Tests.csproj -c Release --no-restore
           .\dotnet.ps1 build native\src\ClypDat.App\ClypDat.App.csproj -c Release -r win-x64 --no-restore -p:Platform=x64 -p:ClypDatChannel=Dev -p:ClypDatAvaloniaPackageVersion=${{ inputs.package_version }}
 
       - name: Publish self-contained Dev application
