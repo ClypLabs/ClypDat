@@ -31,8 +31,11 @@ build_windows_installer:
       if ($LASTEXITCODE -ne 0) { Write-Error "Could not check out pinned Avalonia commit $avaloniaCommit."; exit 1 }
       git -C $avaloniaRoot submodule update --init --recursive
       if ($LASTEXITCODE -ne 0) { Write-Error 'Could not initialize Avalonia submodules.'; exit 1 }
+      Push-Location $avaloniaRoot
       & (Join-Path $avaloniaRoot 'build.ps1') CreateNugetPackages --configuration Release --force-nuget-version $avaloniaVersion
-      if ($LASTEXITCODE -ne 0) { Write-Error 'Could not build pinned Avalonia packages.'; exit 1 }
+      $packageBuildExitCode = $LASTEXITCODE
+      Pop-Location
+      if ($packageBuildExitCode -ne 0) { Write-Error 'Could not build pinned Avalonia packages.'; exit 1 }
       $packageFeed = Join-Path $avaloniaRoot 'artifacts\nuget'
       if (-not (Test-Path (Join-Path $packageFeed "Avalonia.$avaloniaVersion.nupkg"))) { Write-Error "Avalonia package feed was not created: $packageFeed"; exit 1 }
     - >-
