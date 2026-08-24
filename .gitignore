@@ -36,6 +36,7 @@ Desktop.ini
 .idea/
 .vscode/
 .claude/
+.agents/
 *.swp
 *.swo
 
