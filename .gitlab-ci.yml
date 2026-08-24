@@ -39,9 +39,11 @@ build_windows_installer:
       $previousDotNetHostPath = $env:DOTNET_HOST_PATH
       $previousDotNetRoot = $env:DOTNET_ROOT
       $previousDotNetRootX64 = $env:DOTNET_ROOT_X64
+      $previousPath = $env:PATH
       $env:DOTNET_HOST_PATH = $dotnetHost
       $env:DOTNET_ROOT = Join-Path $PWD '.dotnet'
       $env:DOTNET_ROOT_X64 = $env:DOTNET_ROOT
+      $env:PATH = "$($env:DOTNET_ROOT);$previousPath"
       & $msbuild (Join-Path $avaloniaRoot 'build\ClypDat.Win32Packages.proj') /t:Pack `
         /p:Configuration=Release `
         /p:AvsSkipBuildingLegacyTargetFrameworks=True `
@@ -53,6 +55,7 @@ build_windows_installer:
       $env:DOTNET_HOST_PATH = $previousDotNetHostPath
       $env:DOTNET_ROOT = $previousDotNetRoot
       $env:DOTNET_ROOT_X64 = $previousDotNetRootX64
+      $env:PATH = $previousPath
       if ($packageBuildExitCode -ne 0) { Write-Error 'Could not build pinned Avalonia packages.'; exit 1 }
       if (-not (Test-Path (Join-Path $packageFeed "Avalonia.$avaloniaVersion.nupkg"))) { Write-Error "Avalonia package feed was not created: $packageFeed"; exit 1 }
     - >-
