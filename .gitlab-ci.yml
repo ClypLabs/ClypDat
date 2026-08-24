@@ -31,12 +31,23 @@ build_windows_installer:
       if ($LASTEXITCODE -ne 0) { Write-Error "Could not check out pinned Avalonia commit $avaloniaCommit."; exit 1 }
       git -C $avaloniaRoot submodule update --init --recursive
       if ($LASTEXITCODE -ne 0) { Write-Error 'Could not initialize Avalonia submodules.'; exit 1 }
-      Push-Location $avaloniaRoot
-      & (Join-Path $avaloniaRoot 'build.ps1') CreateNugetPackages --skip InitDnx --configuration Release --force-nuget-version $avaloniaVersion
-      $packageBuildExitCode = $LASTEXITCODE
-      Pop-Location
-      if ($packageBuildExitCode -ne 0) { Write-Error 'Could not build pinned Avalonia packages.'; exit 1 }
+      $msbuild = Join-Path $PWD '.dotnet\sdk\10.0.302\MSBuild.exe'
+      $dotnetHost = Join-Path $PWD '.dotnet\dotnet.exe'
+      if (-not (Test-Path $msbuild)) { Write-Error "MSBuild was not found: $msbuild"; exit 1 }
+      if (-not (Test-Path $dotnetHost)) { Write-Error "dotnet host was not found: $dotnetHost"; exit 1 }
       $packageFeed = Join-Path $avaloniaRoot 'artifacts\nuget'
+      $previousDotNetHostPath = $env:DOTNET_HOST_PATH
+      $env:DOTNET_HOST_PATH = $dotnetHost
+      & $msbuild (Join-Path $avaloniaRoot 'build\ClypDat.Win32Packages.proj') /t:Pack `
+        /p:Configuration=Release `
+        /p:AvsSkipBuildingLegacyTargetFrameworks=True `
+        /p:IncludeLinuxSkia=false `
+        /p:IncludeWasmSkia=false `
+        /p:ForcePackAvaloniaNative=true `
+        "/p:ClypDatPackageVersion=$avaloniaVersion" "/p:ClypDatPackageOutput=$packageFeed" /nologo
+      $packageBuildExitCode = $LASTEXITCODE
+      $env:DOTNET_HOST_PATH = $previousDotNetHostPath
+      if ($packageBuildExitCode -ne 0) { Write-Error 'Could not build pinned Avalonia packages.'; exit 1 }
       if (-not (Test-Path (Join-Path $packageFeed "Avalonia.$avaloniaVersion.nupkg"))) { Write-Error "Avalonia package feed was not created: $packageFeed"; exit 1 }
     - >-
       .\dotnet.ps1 publish native\src\ClypDat.App\ClypDat.App.csproj
