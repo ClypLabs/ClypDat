@@ -947,6 +947,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // affordable - see MemoryTrimmer.GameRunning.
             MemoryTrimmer.GameRunning = value.IsDetected;
             if (value.IsDetected) EnsureGameCaptureRow(value);
+            RemoveGameAudioProcessSelections();
             OnPropertyChanged(nameof(IsAutomaticGameCapture));
             OnPropertyChanged(nameof(IsEffectiveDesktopCapture));
             OnPropertyChanged(nameof(EffectiveReplayCaptureSource));
@@ -3181,6 +3182,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SaveSettings();
     }
 
+    private bool IsAudioProcessEligible(ActiveAudioProcess process)
+    {
+        if (process.ProcessId == Environment.ProcessId) return false;
+        if (string.Equals(process.Name, "ClypDat", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(process.Name, "MedalEncoder", StringComparison.OrdinalIgnoreCase)) return false;
+        var activeGame = Path.GetFileNameWithoutExtension(ActiveGameDetection.ExeName ?? string.Empty);
+        if (!string.IsNullOrWhiteSpace(activeGame) && string.Equals(process.Name, activeGame, StringComparison.OrdinalIgnoreCase)) return false;
+        return !Settings.GameCaptureOverrides.Any(game =>
+            string.Equals(Path.GetFileNameWithoutExtension(game.ProcessName ?? string.Empty), process.Name, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Path.GetFileNameWithoutExtension(game.ExecutableName ?? string.Empty), process.Name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void RemoveGameAudioProcessSelections()
+    {
+        var removed = Settings.AdditionalAudioProcesses.Keys
+            .Where(name => !IsAudioProcessEligible(new ActiveAudioProcess(name, 0, string.Empty))).ToArray();
+        foreach (var name in removed) Settings.AdditionalAudioProcesses.Remove(name);
+        if (removed.Length > 0) SaveSettings();
+    }
+
     public void AddSelectedChatProcess()
     {
         var name = SelectedChatProcess?.Name;
@@ -5381,20 +5402,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var selectedChatName = SelectedChatProcess?.Name ?? Settings.ChatAudioProcessName;
         var selectedName = SelectedProcessExclusion?.Name;
         var processesTask = Task.Run(ProcessListService.GetOpenExecutables);
-        var audioProcessNamesTask = Task.Run(AudioCapturePipeline.GetActiveAudioProcessNames);
+        var audioProcessNamesTask = Task.Run(AudioCapturePipeline.GetActiveAudioProcesses);
         await Task.WhenAll(processesTask, audioProcessNamesTask);
         var processes = await processesTask;
-        var audioProcessNames = await audioProcessNamesTask;
+        var audioProcesses = await audioProcessNamesTask;
         OpenProcesses.Clear();
         foreach (var process in processes)
         {
             OpenProcesses.Add(process);
         }
         ActiveAudioProcesses.Clear();
-        foreach (var name in audioProcessNames)
+        foreach (var process in audioProcesses.Where(IsAudioProcessEligible))
         {
-            var enabled = Settings.AdditionalAudioProcesses.TryGetValue(name, out var volume);
-            ActiveAudioProcesses.Add(new AudioTrackProcessViewModel(name, enabled, enabled ? volume : 100, SetAdditionalAudioProcess));
+            var enabled = Settings.AdditionalAudioProcesses.TryGetValue(process.Name, out var volume);
+            var row = new AudioTrackProcessViewModel(process.Name, enabled, enabled ? volume : 100, SetAdditionalAudioProcess);
+            if (!string.IsNullOrWhiteSpace(process.ExecutablePath))
+            {
+                GameIconService.EnsureCached($"audio-{process.Name}", process.ProcessId);
+                row.Icon = GameIconService.TryLoad($"audio-{process.Name}");
+            }
+            ActiveAudioProcesses.Add(row);
         }
 
         SelectedChatProcess = string.IsNullOrWhiteSpace(selectedChatName)
@@ -5436,11 +5463,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // save (not just once at buffer start), so a transient null here
         // silently dropped the mic/chat track from that one clip instead of
         // falling back to the last known-good persisted choice.
-        var chatAudioProcessName = SelectedChatProcess?.Name;
-        if (string.IsNullOrWhiteSpace(chatAudioProcessName)) chatAudioProcessName = Settings.ChatAudioProcessName;
-        var chatAudioProcessNames = Settings.MultiChatAppEnabled
-            ? ChatAudioApps.ToArray()
-            : (string.IsNullOrWhiteSpace(chatAudioProcessName) ? Array.Empty<string>() : new[] { chatAudioProcessName });
+        RemoveGameAudioProcessSelections();
+        var chatAudioProcessNames = Array.Empty<string>();
 
         var microphoneDeviceId = SelectedMicrophoneDevice?.Id;
         if (string.IsNullOrWhiteSpace(microphoneDeviceId)) microphoneDeviceId = Settings.MicrophoneDeviceId;

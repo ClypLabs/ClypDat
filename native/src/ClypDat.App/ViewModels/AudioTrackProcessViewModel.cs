@@ -15,6 +15,13 @@ public sealed class AudioTrackProcessViewModel : ViewModelBase
     }
 
     public string Name { get; }
+    public string Initial => string.IsNullOrWhiteSpace(Name) ? "?" : Name[..1].ToUpperInvariant();
+    private Avalonia.Media.Imaging.Bitmap? _icon;
+    public Avalonia.Media.Imaging.Bitmap? Icon
+    {
+        get => _icon;
+        set => SetProperty(ref _icon, value);
+    }
 
     public bool IsEnabled
     {

@@ -8,6 +8,8 @@ using System.Text;
 
 namespace ClypDat.App.Services;
 
+public sealed record ActiveAudioProcess(string Name, int ProcessId, string ExecutablePath);
+
 // Audio capture (Game/Chat/Microphone process-aware routing, WASAPI loopback/mic
 // capture, aligned-track building) extracted out of
 // WindowsReplayBuffer so both it and NativeReplayBuffer can own an independent
@@ -929,6 +931,28 @@ public sealed class AudioCapturePipeline : IDisposable
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase)
+            .ToArray();
+    }
+
+    public static IReadOnlyList<ActiveAudioProcess> GetActiveAudioProcesses()
+    {
+        if (!OperatingSystem.IsWindows()) return Array.Empty<ActiveAudioProcess>();
+        using var enumerator = new MMDeviceEnumerator();
+        return ResolveActiveAudioProcessIds(enumerator)
+            .Select(processId =>
+            {
+                try
+                {
+                    using var process = Process.GetProcessById(processId);
+                    return new ActiveAudioProcess(process.ProcessName, processId, process.MainModule?.FileName ?? string.Empty);
+                }
+                catch { return null; }
+            })
+            .Where(process => process is not null && !string.IsNullOrWhiteSpace(process.Name))
+            .Select(process => process!)
+            .GroupBy(process => process.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .OrderBy(process => process.Name, StringComparer.CurrentCultureIgnoreCase)
             .ToArray();
     }
 

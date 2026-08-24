@@ -88,6 +88,7 @@ public static class AppSettingsStore
             };
             settings.ChatAudioProcessName ??= string.Empty;
             settings.ChatAudioProcessNames ??= new List<string>();
+            settings.AdditionalAudioProcesses ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             settings.MicrophoneDeviceIds ??= new List<string>();
             settings.IgnoredGameExecutables ??= new List<string>();
             settings.GameCaptureOverrides ??= new List<GameCaptureOverride>();

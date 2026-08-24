@@ -1731,6 +1731,19 @@
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
     <Setter Property="RenderTransform" Value="scale(1.05)" />
   </Style>
+  <Style Selector="Slider.volumeSlider.appVolumeSlider">
+    <Style.Resources>
+      <sys:Double x:Key="SliderTrackThemeHeight">6</sys:Double>
+      <CornerRadius x:Key="ControlCornerRadius">3</CornerRadius>
+    </Style.Resources>
+    <Setter Property="Background" Value="#273440" />
+  </Style>
+  <Style Selector="Slider.volumeSlider.appVolumeSlider /template/ Thumb">
+    <Setter Property="Width" Value="20" />
+    <Setter Property="Height" Value="20" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="BorderBrush" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}" />
+  </Style>
 
   <!-- Trim start/end handles: one thick pill running the full height of the
        video lane. Nothing inside it, nothing above it. Corner radius is
