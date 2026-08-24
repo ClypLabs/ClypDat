@@ -488,7 +488,9 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         args.AddRange(new[] { "-map", "0:v:0", "-c:v", "copy" });
         for (var i = 0; i < audioFiles.Length; i++)
         {
-            args.AddRange(new[] { "-map", $"{i + 1}:a:0", $"-metadata:s:a:{i}", $"title={AudioTitleForPath(audioFiles[i])}" });
+            var title = AudioTitleForPath(audioFiles[i]);
+            args.AddRange(new[] { "-map", $"{i + 1}:a:0", $"-metadata:s:a:{i}", $"handler_name={title}" });
+            args.AddRange(new[] { $"-metadata:s:a:{i}", $"title={title}" });
         }
 
         args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k", "-shortest", outputPath });

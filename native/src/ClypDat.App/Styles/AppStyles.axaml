@@ -1735,7 +1735,7 @@
       <sys:Double x:Key="SliderTrackThemeHeight">7</sys:Double>
       <CornerRadius x:Key="ControlCornerRadius">3.5</CornerRadius>
     </Style.Resources>
-    <Setter Property="MinHeight" Value="36" />
+    <Setter Property="MinHeight" Value="52" />
     <Setter Property="Background" Value="#273440" />
   </Style>
   <Style Selector="Slider.volumeSlider.appVolumeSlider /template/ Thumb">

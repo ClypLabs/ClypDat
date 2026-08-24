@@ -2,7 +2,7 @@ namespace ClypDat.Core.Settings;
 
 public static class AppSettingsMigrations
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     public static bool Apply(AppSettings settings)
     {
@@ -20,6 +20,14 @@ public static class AppSettingsMigrations
             settings.ChatAudioProcessName = string.Empty;
             settings.ChatAudioProcessNames?.Clear();
             settings.MultiChatAppEnabled = false;
+        }
+
+        if (settings.SettingsSchemaVersion < 3)
+        {
+            settings.AdditionalAudioProcesses = AudioProcessIdentity.NormalizeDictionary(settings.AdditionalAudioProcesses);
+            settings.ChatAudioProcessName = AudioProcessIdentity.Normalize(settings.ChatAudioProcessName);
+            settings.ChatAudioProcessNames = AudioProcessIdentity.NormalizeList(settings.ChatAudioProcessNames);
+            settings.GameAudioExcludedProcesses = AudioProcessIdentity.NormalizeList(settings.GameAudioExcludedProcesses);
         }
 
         settings.SettingsSchemaVersion = CurrentSchemaVersion;

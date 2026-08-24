@@ -507,7 +507,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             muxArgs.AddRange(new[] { "-map", "0:v" });
             for (var i = 0; i < tracks.Count; i++) muxArgs.AddRange(new[] { "-map", $"{i + 1}:a" });
             muxArgs.AddRange(new[] { "-c:v", "copy", "-c:a", "aac", "-b:a", "192k" });
-            for (var i = 0; i < tracks.Count; i++) muxArgs.AddRange(new[] { $"-metadata:s:a:{i}", $"title={tracks[i].Label}" });
+            for (var i = 0; i < tracks.Count; i++)
+            {
+                muxArgs.AddRange(new[] { $"-metadata:s:a:{i}", $"handler_name={tracks[i].Label}" });
+                muxArgs.AddRange(new[] { $"-metadata:s:a:{i}", $"title={tracks[i].Label}" });
+            }
             muxArgs.AddRange(new[] { "-movflags", "+faststart" });
             muxArgs.AddRange(new[] { "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("Native")}", outputPath });
             var result = await AudioCapturePipeline.RunProcessAsync("ffmpeg", muxArgs, cancellationToken);
@@ -4087,7 +4091,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 for (var i = 0; i < tracks.Count; i++) muxArgs.AddRange(new[] { "-map", $"{i + 1}:a" });
                 muxArgs.AddRange(videoCodecArgs);
                 muxArgs.AddRange(new[] { "-c:a", "aac", "-b:a", "192k" });
-                for (var i = 0; i < tracks.Count; i++) muxArgs.AddRange(new[] { $"-metadata:s:a:{i}", $"title={tracks[i].Label}" });
+                for (var i = 0; i < tracks.Count; i++)
+                {
+                    muxArgs.AddRange(new[] { $"-metadata:s:a:{i}", $"handler_name={tracks[i].Label}" });
+                    muxArgs.AddRange(new[] { $"-metadata:s:a:{i}", $"title={tracks[i].Label}" });
+                }
                 // +faststart moves the moov index to the front of the file.
                 // Costs one extra file rewrite at finalize, but without it
                 // every later reader (LibVLC, ffmpeg chunk/waveform/thumbnail

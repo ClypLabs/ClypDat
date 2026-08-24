@@ -3169,13 +3169,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void SetAdditionalAudioProcess(AudioTrackProcessViewModel process)
     {
+        var normalizedName = AudioProcessIdentity.Normalize(process.Name);
+        foreach (var alias in Settings.AdditionalAudioProcesses.Keys
+                     .Where(name => AudioProcessIdentity.Equals(name, normalizedName))
+                     .ToArray())
+        {
+            Settings.AdditionalAudioProcesses.Remove(alias);
+        }
+
         if (process.IsEnabled)
         {
-            Settings.AdditionalAudioProcesses[process.Name] = (int)Math.Round(process.VolumePercent);
-        }
-        else
-        {
-            Settings.AdditionalAudioProcesses.Remove(process.Name);
+            Settings.AdditionalAudioProcesses[normalizedName] = (int)Math.Round(process.VolumePercent);
         }
 
         UpdateReplayQualityRestartRequired();
@@ -3187,11 +3191,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (process.ProcessId == Environment.ProcessId) return false;
         if (string.Equals(process.Name, "ClypDat", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(process.Name, "MedalEncoder", StringComparison.OrdinalIgnoreCase)) return false;
-        var activeGame = Path.GetFileNameWithoutExtension(ActiveGameDetection.ExeName ?? string.Empty);
-        if (!string.IsNullOrWhiteSpace(activeGame) && string.Equals(process.Name, activeGame, StringComparison.OrdinalIgnoreCase)) return false;
+        var activeGame = AudioProcessIdentity.Normalize(ActiveGameDetection.ExeName);
+        if (!string.IsNullOrWhiteSpace(activeGame) && AudioProcessIdentity.Equals(process.Name, activeGame)) return false;
         return !Settings.GameCaptureOverrides.Any(game =>
-            string.Equals(Path.GetFileNameWithoutExtension(game.ProcessName ?? string.Empty), process.Name, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(Path.GetFileNameWithoutExtension(game.ExecutableName ?? string.Empty), process.Name, StringComparison.OrdinalIgnoreCase));
+            AudioProcessIdentity.Equals(game.ProcessName, process.Name) ||
+            AudioProcessIdentity.Equals(game.ExecutableName, process.Name));
     }
 
     private void RemoveGameAudioProcessSelections()
@@ -5414,7 +5418,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ActiveAudioProcesses.Clear();
         foreach (var process in audioProcesses.Where(IsAudioProcessEligible))
         {
-            var enabled = Settings.AdditionalAudioProcesses.TryGetValue(process.Name, out var volume);
+            var enabled = AudioProcessIdentity.TryGetValue(Settings.AdditionalAudioProcesses, process.Name, out var volume);
             var row = new AudioTrackProcessViewModel(process.Name, enabled, enabled ? volume : 100, SetAdditionalAudioProcess);
             if (!string.IsNullOrWhiteSpace(process.ExecutablePath))
             {
@@ -5513,7 +5517,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             CaptureCursor: desktopCapture && Settings.ReplayDesktopCaptureCursor,
             ProcessPriority: Settings.ProcessPriority,
             SaveReplayHotkey: Settings.SaveReplayHotkey,
-            AdditionalAudioProcesses: new Dictionary<string, int>(Settings.AdditionalAudioProcesses, StringComparer.OrdinalIgnoreCase));
+            AdditionalAudioProcesses: AudioProcessIdentity.NormalizeDictionary(Settings.AdditionalAudioProcesses));
     }
 
     public void SetDuration(TimeSpan duration)
@@ -8187,6 +8191,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             0 => "#05C7B7",
             1 => "#2F9DD4",
             2 => "#CA8F1B",
+            3 => "#ff4e6b",
             _ => "#607080"
         };
     }

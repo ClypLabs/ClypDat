@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.Versioning;
 using System.Text;
+using ClypDat.Core.Settings;
 
 namespace ClypDat.App.Services;
 
@@ -158,26 +159,30 @@ public sealed class AudioCapturePipeline : IDisposable
             ("Game Audio", BuildAlignedTrackAsync(AudioCaptureKind.Game, captures, null, segmentWindows, allowMix: true, snapshots, sourceSnapshotCache, earliestNeededUtc, cancellationToken))
         };
 
-        var additionalApps = config.AdditionalAudioProcesses ?? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var additionalNames = additionalApps.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var chatAppNames = captures
-            .Where(capture => capture.Kind == AudioCaptureKind.Chat)
-            .Select(capture => capture.SourceKey)
-            .Where(name => !additionalNames.Contains(name))
+        // Derive application lanes from current configuration, not from the
+        // capture list. Ended routes from an earlier refresh must not resurrect
+        // disabled apps in a newly saved clip.
+        var additionalApps = AudioProcessIdentity.NormalizeDictionary(config.AdditionalAudioProcesses);
+        var configuredApps = AudioProcessIdentity.NormalizeList(config.ChatAudioProcessNames)
+            .Concat(additionalApps.Keys)
+            .Select(AudioProcessIdentity.Normalize)
+            .Where(name => name.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        foreach (var appName in chatAppNames)
+            .ToArray();
+        var orderedApps = AudioProcessIdentity.OrderForRecording(configuredApps).ToArray();
+
+        // Social/chat apps come before microphones; other enabled apps follow
+        // alphabetically. Each application remains its own editable track.
+        void AddApplicationTracks(IEnumerable<string> names)
         {
-            trackJobs.Add((appName, BuildAlignedTrackAsync(AudioCaptureKind.Chat, captures, appName, segmentWindows, allowMix: false, snapshots, sourceSnapshotCache, earliestNeededUtc, cancellationToken)));
+            foreach (var appName in names)
+            {
+                var gain = AudioProcessIdentity.TryGetValue(additionalApps, appName, out var value) ? Math.Clamp(value, 0, 150) : 100;
+                trackJobs.Add((appName, BuildAlignedTrackAsync(AudioCaptureKind.Chat, captures, appName, segmentWindows, allowMix: false, snapshots, sourceSnapshotCache, earliestNeededUtc, cancellationToken, volumePercent: gain)));
+            }
         }
 
-        // Enabled Windows-mixer apps are deliberately never mixed: each
-        // application is an editable clip track, with its own saved gain.
-        foreach (var appName in additionalNames.OrderBy(name => name, StringComparer.OrdinalIgnoreCase))
-        {
-            var gain = additionalApps.TryGetValue(appName, out var value) ? Math.Clamp(value, 0, 150) : 100;
-            trackJobs.Add((appName, BuildAlignedTrackAsync(AudioCaptureKind.Chat, captures, appName, segmentWindows, allowMix: false, snapshots, sourceSnapshotCache, earliestNeededUtc, cancellationToken, volumePercent: gain)));
-        }
+        AddApplicationTracks(orderedApps.Where(AudioProcessIdentity.IsSocial));
 
         // config.MicrophoneDeviceIds carries the raw configured value (e.g. the
         // literal "default" placeholder), but StartAudioCaptures resolves that
@@ -194,6 +199,8 @@ public sealed class AudioCapturePipeline : IDisposable
             var label = micIds.Length > 1 ? $"Microphone {micIndex}" : "Microphone";
             trackJobs.Add((label, BuildAlignedTrackAsync(AudioCaptureKind.Microphone, captures, micId, segmentWindows, allowMix: false, snapshots, sourceSnapshotCache, earliestNeededUtc, cancellationToken, config)));
         }
+
+        AddApplicationTracks(orderedApps.Where(name => !AudioProcessIdentity.IsSocial(name)));
 
         // Game/Chat/Mic tracks are independent of each other, so build them
         // concurrently instead of one after another - this was the main
@@ -652,10 +659,10 @@ public sealed class AudioCapturePipeline : IDisposable
 
     private static AudioRoutes ResolveAudioRoutes(ReplayBufferConfig config, string[] resolvedMicDeviceIds, RouteScope scope)
     {
-        var chatAppNames = NormalizedList(config.ChatAudioProcessNames);
-        foreach (var appName in (config.AdditionalAudioProcesses ?? new Dictionary<string, int>()).Keys)
+        var chatAppNames = AudioProcessIdentity.NormalizeList(config.ChatAudioProcessNames);
+        foreach (var appName in AudioProcessIdentity.NormalizeDictionary(config.AdditionalAudioProcesses).Keys)
         {
-            if (!string.IsNullOrWhiteSpace(appName) && !chatAppNames.Contains(appName, StringComparer.OrdinalIgnoreCase)) chatAppNames.Add(appName);
+            if (!chatAppNames.Contains(appName, StringComparer.OrdinalIgnoreCase)) chatAppNames.Add(appName);
         }
 
         // Multi-process apps (Discord, browsers, etc.) share one executable name across
@@ -674,8 +681,9 @@ public sealed class AudioCapturePipeline : IDisposable
             if (rootPid > 0) chatRoutes.Add(new ChatRoute(appName, rootPid));
         }
 
-        var useProcessRouting = chatRoutes.Count > 0 || config.GameAudioExcludedProcesses.Any(name => !string.IsNullOrWhiteSpace(name));
-        var exclusionNames = config.GameAudioExcludedProcesses
+        var normalizedExclusions = AudioProcessIdentity.NormalizeList(config.GameAudioExcludedProcesses);
+        var useProcessRouting = chatRoutes.Count > 0 || normalizedExclusions.Count > 0;
+        var exclusionNames = normalizedExclusions
             .Concat(chatAppNames)
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -1179,7 +1187,7 @@ public sealed class AudioCapturePipeline : IDisposable
             var endUtc = startUtc + TimeSpan.FromSeconds(durationSeconds);
             var overlapping = captures
                 .Where(capture => capture.Kind == kind
-                    && (sourceKey is null || string.Equals(capture.SourceKey, sourceKey, StringComparison.OrdinalIgnoreCase))
+                    && (sourceKey is null || AudioProcessIdentity.Equals(capture.SourceKey, sourceKey))
                     && AudioCaptureOverlaps(capture, startUtc, endUtc))
                 .ToArray();
             if (!allowMix && overlapping.Length > 1)

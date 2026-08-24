@@ -2139,7 +2139,7 @@
                                   </Border>
                                   <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center"><TextBlock Text="{Binding Name}" Foreground="#EDF4FB" FontWeight="SemiBold" /><TextBlock Text="Separate app track" Foreground="#6B7C8C" FontSize="11" /></StackPanel>
                                   <Grid Grid.Column="3" ColumnDefinitions="200,10,50" VerticalAlignment="Center" IsEnabled="{Binding IsEnabled}">
-                                    <Slider Width="200" Height="36" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" Foreground="{Binding VolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding VolumePercent}" />
+                                    <Slider Width="200" Height="52" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" Foreground="{Binding VolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding VolumePercent}" />
                                     <TextBlock Grid.Column="2" Text="{Binding VolumePercent, StringFormat={}{0:0}%}" TextAlignment="Right" HorizontalAlignment="Stretch" Foreground="#DCE8F5" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
                                   </Grid>
                                 </Grid>
