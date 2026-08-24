@@ -24,7 +24,7 @@ public sealed class ReplayEncoderProfilePolicyTests
     [InlineData(90, 90)]
     [InlineData(120, 120)]
     [InlineData(1, 30)]
-    [InlineData(1000, 144)]
+    [InlineData(1000, 120)]
     public void GopFrames_UsesOneSecondAtTheSupportedFrameRate(int frameRate, int expected) =>
         Assert.Equal(expected, ReplayEncoderProfilePolicy.GopFrames(frameRate));
 }

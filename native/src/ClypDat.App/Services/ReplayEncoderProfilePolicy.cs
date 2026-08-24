@@ -14,7 +14,7 @@ public static class ReplayEncoderProfilePolicy
     /// <summary>
     /// Limits every replay GOP to one second at the effective recorder frame rate.
     /// </summary>
-    public static int GopFrames(int frameRate) => Math.Clamp(frameRate, 30, 144);
+    public static int GopFrames(int frameRate) => Math.Clamp(frameRate, 30, 120);
 
     public static int NvencSurfaces(int frameRate) => Math.Clamp(
         ReplayFrameTimingPolicy.EncodeQueueCapacity(frameRate) + 8,
