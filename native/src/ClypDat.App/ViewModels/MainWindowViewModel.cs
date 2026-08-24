@@ -273,8 +273,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
         ReplayBackends = new ObservableCollection<ReplayBackendPreset>
         {
-            new("Auto (recommended)", "Auto", "Uses bounded native Windows Graphics Capture for detected game windows, DXGI for desktop capture, and DXGI fallback if WGC cannot run. No process hooks."),
-            new("ClypDat", "Native", "Uses ClypDat's native capture and rolling memory buffer: WGC for game windows, DXGI for desktop capture."),
+            new("Auto (recommended)", "Auto", "Uses native DXGI Desktop Duplication with a rolling memory buffer. Covered or background games freeze rather than exposing the desktop. No process hooks."),
+            new("ClypDat", "Native", "Uses ClypDat's native DXGI capture and rolling memory buffer. Windows Graphics Capture is used only if DXGI cannot recover."),
             new("Windows Capture", "Legacy", "Uses Windows Graphics Capture for game windows with a file-backed replay buffer. No process hooks.")
         };
         ReplayCaptureSources = new ObservableCollection<string> { "Game Capture", "Desktop Capture" };

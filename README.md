@@ -14,11 +14,11 @@ Two capture backends, switchable in Settings (default is Auto):
 
 - **ClypDat (Native)**: ClypDat's own capture engine, built directly on DXGI Desktop
   Duplication with GPU-side downscaling (`native/src/ClypDat.App/Services/NativeReplayBuffer.cs`).
-  No process hook, so anti-cheat can't object to it, with true per-window
-  capture that keeps recording through alt-tabs/overlays and no stop/start
-  gap between rolling-buffer segments. Encodes with NVENC, falling back to
-  AMD AMF, then software libx264, so it isn't NVIDIA-only. Selected
-  automatically on Auto.
+  No process hook, so anti-cheat can't object to it. When a game is covered,
+  backgrounded, or minimized, it freezes the last game frame rather than
+  recording another application. Encodes with NVENC, falling back to AMD AMF,
+  then software libx264, so it isn't NVIDIA-only. Selected automatically on
+  Auto.
 - **Windows Capture (Legacy)**: `ScreenRecorderLib`, backed by Windows
   Graphics Capture / DXGI desktop duplication. Doesn't inject into the
   target process either, kept around as a fallback alongside ClypDat's own engine.

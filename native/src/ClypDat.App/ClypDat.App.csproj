@@ -116,6 +116,7 @@
     <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" GeneratePathProperty="true" Condition="'$(ClypDatUiPreview)' != 'true'" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
     <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
+    <PackageReference Include="Vortice.MediaFoundation" Version="3.8.3" />
     <PackageReference Include="FFmpeg.AutoGen" Version="8.1.0" />
     <!-- Pinned directly to the forked Avalonia version's required version.
          No direct usage. -->
@@ -191,22 +192,6 @@
     </ItemGroup>
     <Copy SourceFiles="@(FfmpegOutputFiles)"
           DestinationFiles="@(FfmpegOutputFiles->'$(OutDir)ffmpeg\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
-  </Target>
-
-  <Target Name="BuildGameHook" BeforeTargets="Build" Condition="'$(OS)' == 'Windows_NT' And '$(ClypDatUiPreview)' != 'true'">
-    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)..\ClypDat.GameHook\build.ps1&quot; -Configuration $(Configuration)" />
-  </Target>
-
-  <Target Name="CopyGameHookToOutput" AfterTargets="Build" Condition="'$(ClypDatUiPreview)' != 'true'">
-    <Copy SourceFiles="$(MSBuildThisFileDirectory)..\ClypDat.GameHook\bin\$(Configuration)\ClypDat.GameHook.dll"
-          DestinationFolder="$(OutDir)"
-          SkipUnchangedFiles="true" />
-  </Target>
-
-  <Target Name="CopyGameHookToPublish" AfterTargets="Publish" Condition="'$(ClypDatUiPreview)' != 'true'">
-    <Copy SourceFiles="$(MSBuildThisFileDirectory)..\ClypDat.GameHook\bin\$(Configuration)\ClypDat.GameHook.dll"
-          DestinationFolder="$(PublishDir)"
           SkipUnchangedFiles="true" />
   </Target>
 

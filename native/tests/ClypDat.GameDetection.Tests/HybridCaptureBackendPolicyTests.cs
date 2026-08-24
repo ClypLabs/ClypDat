@@ -11,15 +11,15 @@ public sealed class HybridCaptureBackendPolicyTests
     [InlineData("0")]
     [InlineData("true")]
     [InlineData("1")]
-    public void WgcGame_StaysEnabled(string? value)
+    public void WgcGame_IsRecoveryOnly(string? value)
     {
-        Assert.True(HybridCaptureBackendPolicy.UseWgcForGame(value));
+        Assert.False(HybridCaptureBackendPolicy.UseWgcForGame(value));
     }
 
     [Fact]
-    public void Dxgi_IsReservedForDesktopCapture()
+    public void Dxgi_IsPrimaryForEveryCaptureTarget()
     {
         Assert.True(HybridCaptureBackendPolicy.UseDxgiForDesktop(isMonitorMode: true));
-        Assert.False(HybridCaptureBackendPolicy.UseDxgiForDesktop(isMonitorMode: false));
+        Assert.True(HybridCaptureBackendPolicy.UseDxgiForDesktop(isMonitorMode: false));
     }
 }

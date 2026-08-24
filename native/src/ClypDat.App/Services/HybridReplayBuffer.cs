@@ -2,8 +2,8 @@ using ClypDat.Capture.Abstractions;
 
 namespace ClypDat.App.Services;
 
-// Native replay owns backend selection: bounded WGC for game windows, DXGI for
-// desktop capture and WGC initialization/runtime fallback. Legacy remains an
+// Native replay owns DXGI-first capture for every target with bounded WGC only
+// as its initialization/runtime recovery source. Legacy remains an
 // explicit ReplayBufferFactory choice.
 public sealed class HybridReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics, IAdaptiveCaptureFrameRate
 {
