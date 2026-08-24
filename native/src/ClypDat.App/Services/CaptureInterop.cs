@@ -111,9 +111,13 @@ internal static unsafe class CaptureInterop
     public static WgcMinimumUpdateIntervalResult TrySetMinimumUpdateInterval(GraphicsCaptureSession session, int frameRate)
     {
         var requested = WgcMinimumUpdateIntervalPolicy.FromFrameRate(frameRate);
-        var sessionPointer = WinRT.MarshalInterface<GraphicsCaptureSession>.FromManaged(session);
+        var sessionPointer = IntPtr.Zero;
         try
         {
+            // This runtime interface is optional. Some newer Windows projections cannot
+            // marshal GraphicsCaptureSession through this path, even though normal WGC
+            // capture works. Keep capture alive and use WGC's default cadence instead.
+            sessionPointer = WinRT.MarshalInterface<GraphicsCaptureSession>.FromManaged(session);
             var iid = GraphicsCaptureSession5Iid;
             var queryResult = Marshal.QueryInterface(sessionPointer, in iid, out var session5Pointer);
             if (queryResult < 0)
@@ -145,9 +149,14 @@ internal static unsafe class CaptureInterop
                 Marshal.Release(session5Pointer);
             }
         }
+        catch (Exception error)
+        {
+            return WgcMinimumUpdateIntervalPolicy.Unavailable(frameRate, error.Message);
+        }
         finally
         {
-            Marshal.Release(sessionPointer);
+            if (sessionPointer != IntPtr.Zero)
+                Marshal.Release(sessionPointer);
         }
     }
 

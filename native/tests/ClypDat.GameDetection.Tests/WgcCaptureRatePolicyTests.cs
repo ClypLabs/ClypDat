@@ -24,6 +24,16 @@ public sealed class WgcCaptureRatePolicyTests
     }
 
     [Fact]
+    public void UnavailableMinimumUpdateInterval_PreservesFailureWithoutStoppingCapture()
+    {
+        var result = WgcMinimumUpdateIntervalPolicy.Unavailable(90, "Specified cast is not valid.");
+
+        Assert.False(result.InterfaceAvailable);
+        Assert.Null(result.Applied);
+        Assert.Equal("Specified cast is not valid.", result.Failure);
+    }
+
+    [Fact]
     public void NinetyFpsWithSixtyCallbacks_FallsBackAfterWarmupAndThreeLowWindows()
     {
         var policy = new WgcCadenceFallbackPolicy();

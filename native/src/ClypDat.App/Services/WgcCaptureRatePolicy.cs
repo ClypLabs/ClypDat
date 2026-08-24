@@ -12,7 +12,10 @@ internal static class WgcMinimumUpdateIntervalPolicy
         TimeSpan.FromSeconds(1d / Math.Clamp(frameRate, 30, 144));
 
     public static WgcMinimumUpdateIntervalResult Unsupported(int frameRate) =>
-        new(false, FromFrameRate(frameRate), null);
+        Unavailable(frameRate);
+
+    public static WgcMinimumUpdateIntervalResult Unavailable(int frameRate, string? failure = null) =>
+        new(false, FromFrameRate(frameRate), null, failure);
 }
 
 // WGC can intentionally slow its producer while a window is backgrounded. Only
