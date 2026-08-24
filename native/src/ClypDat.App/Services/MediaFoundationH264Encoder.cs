@@ -101,7 +101,6 @@ internal sealed unsafe class MediaFoundationH264Encoder : IDisposable
             {
                 transform = activation.ActivateObject<IMFTransform>();
                 var friendlyName = TryFriendlyName(activation);
-                ConfigureTransform(transform, width, height, bitrate);
                 var async = TryGetUInt32(transform.Attributes, TransformAttributeKeys.TransformAsync) != 0;
                 if (async)
                 {
@@ -111,6 +110,7 @@ internal sealed unsafe class MediaFoundationH264Encoder : IDisposable
                     transform.Attributes.Set(TransformAttributeKeys.TransformAsyncUnlock, true).CheckError();
                     events = transform.QueryInterface<IMFMediaEventGenerator>();
                 }
+                ConfigureTransform(transform, width, height, bitrate);
 
                 var outputType = transform.GetOutputCurrentType(0);
                 try
@@ -143,7 +143,9 @@ internal sealed unsafe class MediaFoundationH264Encoder : IDisposable
             }
         }
 
-        throw new InvalidOperationException("No compatible hardware Media Foundation H.264 encoder MFT could be configured.", lastError);
+        throw new InvalidOperationException(
+            $"No compatible hardware Media Foundation H.264 encoder MFT could be configured ({lastError?.Message ?? "no activation candidates"}).",
+            lastError);
     }
 
     private void ConfigureTransform(IMFTransform transform, int width, int height, int bitrate)
