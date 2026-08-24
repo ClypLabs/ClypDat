@@ -65,9 +65,6 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
     public static WindowGraphicsCaptureSource Create(ID3D11Device device, object d3dLock, nint windowHandle, bool captureCursor, int frameRate) =>
         new(device, d3dLock, CaptureInterop.CreateItemForWindow(windowHandle), captureCursor, frameRate);
 
-    public static WindowGraphicsCaptureSource CreateForMonitor(ID3D11Device device, object d3dLock, nint monitorHandle, bool captureCursor, int frameRate) =>
-        new(device, d3dLock, CaptureInterop.CreateItemForMonitor(monitorHandle), captureCursor, frameRate);
-
     public (int Width, int Height) ContentSize { get { lock (_stateLock) return (_contentSize.Width, _contentSize.Height); } }
     public string CaptureMode => "Windows Graphics Capture";
     public string? Failure { get { lock (_stateLock) return _failure; } }
