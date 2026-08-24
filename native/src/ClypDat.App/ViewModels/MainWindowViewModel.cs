@@ -1751,7 +1751,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public string ReplayQualityWarning =>
-        "Higher resolution, frame rate, and bitrate use more GPU, CPU, memory, and storage while replay is armed.";
+        "Going above ClypDat's defaults can use substantially more RAM, especially at higher resolution and frame rate.";
 
     // One string covering everything the running buffer baked in at start, so
     // the restart notice doesn't need a field per encoder setting.
