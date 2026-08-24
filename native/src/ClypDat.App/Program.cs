@@ -101,6 +101,15 @@ internal static class Program
         { IsBackground = true, Name = "ClypDat Single-Instance Listener" };
         listenerThread.Start();
 
+        // Reconcile on every normal UI launch. Updates and local publishes can
+        // move the executable, while users can delete Run values externally.
+        var startupSettings = AppSettingsStore.Load();
+        var startupResult = StartupService.SetLaunchOnStartup(
+            startupSettings.LaunchOnWindowsStartup,
+            startupSettings.StartMinimizedToTray);
+        if (!startupResult.Success)
+            AppLog.Info($"Windows startup reconciliation: {startupResult.Error}");
+
         FfmpegPathResolver.EnsureBundledFfmpegOnPath();
 
         // Off-thread, and only after the line above has put the bundled ffmpeg on

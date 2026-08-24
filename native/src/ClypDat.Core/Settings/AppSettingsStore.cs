@@ -58,7 +58,9 @@ public static class AppSettingsStore
             // while the encoder silently re-clamped it underneath, reading as
             // though the limit wasn't enforced at all.
             settings.ReplayBitrateMbps = Math.Clamp(settings.ReplayBitrateMbps <= 0 ? 15 : settings.ReplayBitrateMbps, 5, 100);
-            settings.ReplayFrameRate = Math.Clamp(settings.ReplayFrameRate <= 0 ? 60 : settings.ReplayFrameRate, 30, 144);
+            var normalizedReplayFrameRate = ReplayFrameRatePolicy.NormalizePersisted(settings.ReplayFrameRate);
+            var replayFrameRateChanged = settings.ReplayFrameRate != normalizedReplayFrameRate;
+            settings.ReplayFrameRate = normalizedReplayFrameRate;
             settings.ReplayFrameRateMode = string.Equals(settings.ReplayFrameRateMode, "CFR", StringComparison.OrdinalIgnoreCase)
                 ? "CFR"
                 : "VFR";
@@ -98,7 +100,7 @@ public static class AppSettingsStore
                 game.Events ??= new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
             }
             MigrateCs2AutoClip(settings);
-            if (migrated) Save(settings);
+            if (migrated || replayFrameRateChanged) Save(settings);
             return settings;
         }
         catch

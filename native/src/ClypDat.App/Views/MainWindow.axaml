@@ -1605,6 +1605,7 @@
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding LaunchOnWindowsStartup}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
+                  <TextBlock Text="{Binding StartupRegistrationError}" Foreground="#E07070" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding HasStartupRegistrationError}" />
                   <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
                   <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Automatically Focus ClypDat|Game exit}">
                     <StackPanel Spacing="2">

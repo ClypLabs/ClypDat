@@ -115,6 +115,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _activeReplayFrameRate;
     private string _activeReplayEncoderSignature = string.Empty;
     private bool _replayQualityRestartRequired;
+    private string _startupRegistrationError = string.Empty;
     private ReplayStorageHealth _replayStorageHealth = ReplayStorageHealth.Unknown;
     private string _activeReplayEncoder = string.Empty;
     private string _activeReplayAdapter = string.Empty;
@@ -243,7 +244,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("GPU", "Hardware encoding. Recommended for most systems."),
             new("CPU", "Software H.264 encoding. Uses more CPU and may reduce game performance.")
         };
-        ReplayFrameRates = new ObservableCollection<int> { 30, 60, 90, 120, 144 };
+        ReplayFrameRates = new ObservableCollection<int>(ReplayFrameRatePolicy.Selectable);
         ReplayFrameTimingModes = new ObservableCollection<ReplayFrameTimingOption>
         {
             new("CFR (Recommended)", ReplayFrameTimingPolicy.Constant,
@@ -272,8 +273,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
         ReplayBackends = new ObservableCollection<ReplayBackendPreset>
         {
-            new("Auto (recommended)", "Auto", "Uses Windows Graphics Capture for detected game windows, with ClypDat's native monitor capture as a safe fallback. No process hooks."),
-            new("ClypDat", "Native", "Uses ClypDat's native DXGI monitor capture and rolling memory buffer. Best for desktop capture and direct GPU encoding."),
+            new("Auto (recommended)", "Auto", "Uses bounded native Windows Graphics Capture for detected game windows, DXGI for desktop capture, and DXGI fallback if WGC cannot run. No process hooks."),
+            new("ClypDat", "Native", "Uses ClypDat's native capture and rolling memory buffer: WGC for game windows, DXGI for desktop capture."),
             new("Windows Capture", "Legacy", "Uses Windows Graphics Capture for game windows with a file-backed replay buffer. No process hooks.")
         };
         ReplayCaptureSources = new ObservableCollection<string> { "Game Capture", "Desktop Capture" };
@@ -316,7 +317,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             ReplayResolutions.Add(new ResolutionOption($"Custom ({Settings.ReplayMaxHeight}p)", Settings.ReplayMaxHeight));
         }
-        if (!ReplayFrameRates.Contains(Settings.ReplayFrameRate)) ReplayFrameRates.Add(Settings.ReplayFrameRate);
+        Settings.ReplayFrameRate = ReplayFrameRatePolicy.NormalizePersisted(Settings.ReplayFrameRate);
         if (!ReplayBitrateOptions.Contains($"{Settings.ReplayBitrateMbps}M", StringComparer.Ordinal))
         {
             ReplayBitrateOptions.Add($"{Settings.ReplayBitrateMbps}M");
@@ -403,6 +404,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public AppSettings Settings { get; }
+    public string StartupRegistrationError
+    {
+        get => _startupRegistrationError;
+        private set
+        {
+            if (!SetProperty(ref _startupRegistrationError, value)) return;
+            OnPropertyChanged(nameof(HasStartupRegistrationError));
+        }
+    }
+
+    public bool HasStartupRegistrationError => !string.IsNullOrWhiteSpace(StartupRegistrationError);
     public Task InitialLibraryLoadTask { get; }
     public ObservableCollection<ClipCardViewModel> AllClips { get; }
     public bool IsRestoringLibraryCache => _isRestoringCachedLibrary;
@@ -1482,8 +1494,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         get => _selectedReplayFrameRate;
         set
         {
+            value = ReplayFrameRatePolicy.NormalizePersisted(value);
             if (!SetProperty(ref _selectedReplayFrameRate, value)) return;
-            Settings.ReplayFrameRate = Math.Clamp(value, 30, 144);
+            Settings.ReplayFrameRate = ReplayFrameRatePolicy.NormalizePersisted(value);
             _customReplayQualitySelected = true;
             _selectedReplayQualityPreset = ReplayQualityPresets[^1];
             SaveSettings();
@@ -2947,7 +2960,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Settings.LaunchOnWindowsStartup = value;
             OnPropertyChanged();
             SaveSettings();
-            StartupService.SetLaunchOnStartup(value, Settings.StartMinimizedToTray);
+            ApplyStartupRegistration(value, Settings.StartMinimizedToTray);
         }
     }
 
@@ -2960,8 +2973,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Settings.StartMinimizedToTray = value;
             OnPropertyChanged();
             SaveSettings();
-            if (Settings.LaunchOnWindowsStartup) StartupService.SetLaunchOnStartup(true, value);
+            if (Settings.LaunchOnWindowsStartup) ApplyStartupRegistration(true, value);
         }
+    }
+
+    private void ApplyStartupRegistration(bool enabled, bool minimized)
+    {
+        var result = StartupService.SetLaunchOnStartup(enabled, minimized);
+        StartupRegistrationError = result.Error;
+        if (result.Success || result.TaskManagerDisabled) return;
+
+        // Registry failure means toggle must reflect effective registration.
+        // StartupApproved is Windows-owned: retain requested state and report it.
+        Settings.LaunchOnWindowsStartup = !enabled;
+        OnPropertyChanged(nameof(LaunchOnWindowsStartup));
+        SaveSettings();
     }
 
     public string SelectedProcessPriority

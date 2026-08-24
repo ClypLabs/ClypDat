@@ -10,10 +10,10 @@ public sealed class HybridCaptureBackendPolicyTests
     [InlineData("")]
     [InlineData("0")]
     [InlineData("true")]
-    public void WgcGame_DefaultsOff(string? value) =>
-        Assert.False(HybridCaptureBackendPolicy.UseWgcForGame(value));
+    public void WgcGame_DefaultsOnUnlessDxgiForced(string? value) =>
+        Assert.True(HybridCaptureBackendPolicy.UseWgcForGame(value));
 
     [Fact]
-    public void WgcGame_RequiresExplicitDiagnosticOptIn() =>
-        Assert.True(HybridCaptureBackendPolicy.UseWgcForGame("1"));
+    public void WgcGame_ForceDxgiOverrideDisablesWgc() =>
+        Assert.False(HybridCaptureBackendPolicy.UseWgcForGame("1"));
 }
