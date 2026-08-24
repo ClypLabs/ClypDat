@@ -276,6 +276,7 @@ public sealed partial class MainWindow : Window
         Opened += (_, _) =>
         {
             RevealAfterFirstDarkFrame();
+            ShowPendingNewClipsDialog();
             if (_startupInitialized) return;
             _startupInitialized = true;
             // Only known once there is a visual root - thumbnails decode to
@@ -373,6 +374,7 @@ public sealed partial class MainWindow : Window
                 Dispatcher.UIThread.Post(UpdateAutoClipStates, DispatcherPriority.Background);
             }
         };
+        Activated += (_, _) => ShowPendingNewClipsDialog();
         // Tunnel, not bubble - a focused Button (Export, a transport button,
         // anything clicked most recently) otherwise intercepts Space itself
         // before this handler ever sees it (Button's own gesture recognizer
@@ -2749,6 +2751,7 @@ public sealed partial class MainWindow : Window
     // getting a fresh closure-captured delegate stacked on top of the last one.
     private List<NewClipEntryViewModel> _currentNewClipsEntries = new();
     private NewClipsDialog? _editorNewClipsDialog;
+    private bool _newClipsNotificationPending;
     // Clips the user has already been shown and dismissed (closed the popup, or
     // clicked one to open it). Without this the popup came straight back for the
     // same clips - a late Full Session VOD landing re-shows it via
@@ -2766,6 +2769,19 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null || !ViewModel.Settings.ShowNewClipsOnGameClose) return;
         clipPaths ??= _sessionNewClipPaths;
 
+        var presentation = NewClipsPresentationPolicy.Resolve(
+            IsVisible,
+            WindowState == WindowState.Minimized,
+            ViewModel.IsEditorVisible);
+        if (presentation == NewClipsPresentation.Deferred)
+        {
+            _newClipsNotificationPending = true;
+            CloseEditorNewClipsDialog();
+            NewClipsOverlay.IsVisible = false;
+            AppLog.Info("New Clips popup deferred until ClypDat is restored.");
+            return;
+        }
+
         // Resolve paths to live cards each time - anything deleted (from here or
         // from the library behind it) simply stops resolving and drops out.
         var entries = clipPaths
@@ -2776,6 +2792,7 @@ public sealed partial class MainWindow : Window
 
         if (entries.Count == 0)
         {
+            _newClipsNotificationPending = false;
             CloseEditorNewClipsDialog();
             NewClipsOverlay.IsVisible = false;
             _currentNewClipsEntries = new();
@@ -2787,12 +2804,14 @@ public sealed partial class MainWindow : Window
         // whole set again for context rather than that one clip alone.
         if (entries.All(entry => _dismissedNewClipPaths.Contains(entry.Path)))
         {
+            _newClipsNotificationPending = false;
             CloseEditorNewClipsDialog();
             NewClipsOverlay.IsVisible = false;
             return;
         }
 
         _currentNewClipsEntries = entries;
+        _newClipsNotificationPending = false;
 
         var clipCount = entries.Count(entry => !entry.IsVod);
         var vodCount = entries.Count - clipCount;
@@ -2832,7 +2851,7 @@ public sealed partial class MainWindow : Window
         // (see BuildNewClipCard for the matching card.Width/Margin).
         const int cardWidth = 300;
         const int cardSpacing = 16;
-        var editorDialog = ViewModel.IsEditorVisible;
+        var editorDialog = presentation == NewClipsPresentation.EditorWindow;
         var cardsPanel = editorDialog ? EnsureEditorNewClipsDialog().Cards : NewClipsCardsPanel;
         cardsPanel.ItemWidth = cardWidth + cardSpacing;
         cardsPanel.Children.Clear();
@@ -2852,17 +2871,12 @@ public sealed partial class MainWindow : Window
         const int scrollbarAllowance = 20;
         NewClipsDialogCard.Width = 3 * (cardWidth + cardSpacing) + 44 + scrollbarAllowance;
 
-        // Embedded in the main window now rather than its own OS Window (see
-        // the XAML comment above NewClipsOverlay), so unlike the old
-        // standalone-vs-owned split this needed for "ClypDat hidden to tray"
-        // there is nowhere for it to render without the main window itself
-        // showing - bring it forward rather than silently dropping the popup.
-        if (!IsVisible) Show();
         if (editorDialog)
         {
             NewClipsOverlay.IsVisible = false;
             _editorNewClipsDialog!.SetTitle(dialogTitle);
-            _editorNewClipsDialog.Show();
+            _editorNewClipsDialog.RefreshOwnerBounds();
+            _editorNewClipsDialog.Show(this);
             HideEditorHoverControls(immediate: true);
         }
         else
@@ -2871,6 +2885,11 @@ public sealed partial class MainWindow : Window
             NewClipsOverlay.IsVisible = true;
         }
         AppLog.Info($"New Clips popup shown: {entries.Count} clip(s).");
+    }
+
+    private void ShowPendingNewClipsDialog()
+    {
+        if (_newClipsNotificationPending) ShowNewClipsDialog();
     }
 
     // Which clips Delete will actually act on: whatever is ticked, or - with

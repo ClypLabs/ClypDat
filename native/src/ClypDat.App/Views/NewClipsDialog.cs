@@ -12,12 +12,14 @@ namespace ClypDat.App.Views;
 // MainWindow's visual tree, so this mirrors ShareDialog's transparent airspace.
 internal sealed class NewClipsDialog : Window
 {
+    private readonly Window _owner;
     private readonly TextBlock _title;
     public WrapPanel Cards { get; } = new() { Margin = new Thickness(24, 20, 24, 4) };
     public Button DeleteButton { get; } = new() { MinWidth = 150, Height = 40 };
 
     public NewClipsDialog(Window owner, EventHandler<RoutedEventArgs> close, EventHandler<RoutedEventArgs> delete, EventHandler<RoutedEventArgs> viewAll)
     {
+        _owner = owner;
         WindowDecorations = WindowDecorations.None;
         ShowInTaskbar = false;
         CanResize = false;
@@ -25,6 +27,13 @@ internal sealed class NewClipsDialog : Window
         Background = Brushes.Transparent;
         TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent };
         PositionOverOwner(owner);
+        owner.PositionChanged += Owner_OnPositionChanged;
+        owner.SizeChanged += Owner_OnSizeChanged;
+        Closed += (_, _) =>
+        {
+            owner.PositionChanged -= Owner_OnPositionChanged;
+            owner.SizeChanged -= Owner_OnSizeChanged;
+        };
 
         _title = new TextBlock { Foreground = Brush.Parse("#D8E4F2"), FontSize = 17, FontWeight = FontWeight.Bold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         var closeButton = new Button { Content = "✕", Width = 52, Height = 56 };
@@ -61,10 +70,16 @@ internal sealed class NewClipsDialog : Window
 
     public void SetTitle(string title) => _title.Text = title;
 
+    public void RefreshOwnerBounds() => PositionOverOwner(_owner);
+
     private void PositionOverOwner(Window owner)
     {
         Position = owner.PointToScreen(new Point(0, 0));
         Width = owner.Bounds.Width;
         Height = owner.Bounds.Height;
     }
+
+    private void Owner_OnPositionChanged(object? sender, PixelPointEventArgs e) => RefreshOwnerBounds();
+
+    private void Owner_OnSizeChanged(object? sender, SizeChangedEventArgs e) => RefreshOwnerBounds();
 }
