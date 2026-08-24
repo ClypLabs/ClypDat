@@ -16,7 +16,7 @@ public sealed class ReplayEncoderQualificationPolicyTests
     }
 
     [Fact]
-    public void Select_UsesStableTargetWinnerAndPrefersD3D11WithinThreePercent()
+    public void Select_UsesStableTargetWinnerAndPrefersNvencSystemMemoryAtHighFrameRate()
     {
         var candidates = ReplayEncoderQualificationPolicy.Candidates("H.264");
         var results = new[]
@@ -29,6 +29,19 @@ public sealed class ReplayEncoderQualificationPolicyTests
         var selected = ReplayEncoderQualificationPolicy.Select(120, "H.264", results);
 
         Assert.NotNull(selected);
+        Assert.Equal(ReplayEncoderInputPath.SystemMemory, selected!.Candidate.InputPath);
+    }
+
+    [Fact]
+    public void Select_KeepsD3D11PreferenceBelowHighFrameRateThreshold()
+    {
+        var candidates = ReplayEncoderQualificationPolicy.Candidates("H.264");
+        var selected = ReplayEncoderQualificationPolicy.Select(60, "H.264", new[]
+        {
+            Result(candidates[0], 60, 59, 59),
+            Result(candidates[1], 61, 60, 60)
+        });
+
         Assert.Equal(ReplayEncoderInputPath.D3D11, selected!.Candidate.InputPath);
     }
 
