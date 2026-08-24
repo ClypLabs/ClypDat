@@ -5416,7 +5416,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OpenProcesses.Add(process);
         }
         ActiveAudioProcesses.Clear();
-        foreach (var process in audioProcesses.Where(IsAudioProcessEligible))
+        foreach (var process in audioProcesses
+                     .Where(IsAudioProcessEligible)
+                     .OrderBy(process => AudioProcessIdentity.TryGetValue(Settings.AdditionalAudioProcesses, process.Name, out _) ? 0 : 1)
+                     .ThenBy(process => AudioProcessIdentity.IsSocial(process.Name) ? 0 : 1)
+                     .ThenBy(process => process.Name, StringComparer.CurrentCultureIgnoreCase))
         {
             var enabled = AudioProcessIdentity.TryGetValue(Settings.AdditionalAudioProcesses, process.Name, out var volume);
             var row = new AudioTrackProcessViewModel(process.Name, enabled, enabled ? volume : 100, SetAdditionalAudioProcess);

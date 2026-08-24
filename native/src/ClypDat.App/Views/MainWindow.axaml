@@ -2128,7 +2128,7 @@
                         <ItemsControl ItemsSource="{Binding ActiveAudioProcesses}">
                           <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                              <Border Classes="audioProcessRow">
+                              <Border Classes="audioProcessRow" Classes.enabledRow="{Binding IsEnabled}">
                                 <Grid ColumnDefinitions="40,32,*,Auto" ColumnSpacing="14" MinHeight="54">
                                   <ToggleSwitch Grid.Column="0" Width="40" IsChecked="{Binding IsEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                                   <Border Grid.Column="1" Width="32" Height="32" Background="#202C3A" CornerRadius="9" VerticalAlignment="Center">
