@@ -2487,7 +2487,7 @@
                 <Border Grid.Column="1" Classes="editorTimelineTime" VerticalAlignment="Center">
                   <StackPanel Orientation="Horizontal" Spacing="7">
                     <TextBlock Text="PLAYHEAD" Classes="editorTimelineEyebrow" VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding TimelineStatusLabel}" Foreground="#EDF4FB" FontFamily="Consolas" FontSize="13" FontWeight="Bold" />
+                    <TextBlock Text="{Binding TimelineStatusLabel}" Foreground="#EDF4FB" FontFamily="Consolas" FontSize="13" FontWeight="Bold" VerticalAlignment="Center" Margin="0,2,0,0" />
                   </StackPanel>
                 </Border>
               </Grid>
@@ -2657,7 +2657,7 @@
                                   Padding="0"
                                   ClipToBounds="False"
                                   VerticalAlignment="Center"
-                                  Margin="0,-3,0,0"
+                                  Margin="0,-2,0,0"
                                   Value="{Binding VolumePercent, Mode=TwoWay}"
                                   IsEnabled="{Binding CanAdjustVolume}"
                                   IsVisible="{Binding IsAudio}"
