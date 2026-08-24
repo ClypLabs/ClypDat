@@ -125,6 +125,9 @@ public sealed record ReplayCaptureHealth(
     public long TransportBusySlotSkips { get; init; }
     public TimeSpan ProducerGpuDuration { get; init; }
     public TimeSpan AverageTransportLeaseDuration { get; init; }
+    // Cursor movement is a visual update even while desktop pixels stay still.
+    // Keep it separate so source-content diagnostics remain truthful.
+    public double PointerUpdateFrameRate { get; init; }
 
     public ReplayStorageHealth Storage { get; init; } = ReplayStorageHealth.Unknown;
 

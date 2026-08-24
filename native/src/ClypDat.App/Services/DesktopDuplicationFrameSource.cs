@@ -27,17 +27,19 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
     // meant every desktop-sized BGRA frame crossed devices before we decided
     // it was too old for the selected output cadence.
     private readonly PresentSamplingBudget _transportSamplingBudget;
+    private readonly bool _captureCursor;
     private readonly Stopwatch _producerClock = Stopwatch.StartNew();
     private int _nextSlot;
     private long _generation, _sequence;
     private ulong _readyValue, _releasedValue;
     private string? _failure;
     private bool _disposed;
-    private long _sourcePresents, _acquiredFrames, _transportedFrames, _busySlotSkips, _producerCopyTicks, _leaseTicks, _leaseCount, _accumulatedPresents, _zeroPresentFrames;
+    private long _sourcePresents, _acquiredFrames, _transportedFrames, _busySlotSkips, _producerCopyTicks, _leaseTicks, _leaseCount, _accumulatedPresents, _zeroPresentFrames, _pointerUpdates, _transportedPointerFrames;
 
-    private DesktopDuplicationFrameSource(ID3D11Device captureDevice, ID3D11Device processingDevice, IDXGIOutputDuplication duplication, int frameRate)
+    private DesktopDuplicationFrameSource(ID3D11Device captureDevice, ID3D11Device processingDevice, IDXGIOutputDuplication duplication, int frameRate, bool captureCursor)
     {
         _captureDevice = captureDevice; _processingDevice = processingDevice; _duplication = duplication;
+        _captureCursor = captureCursor;
         _captureDevice5 = captureDevice.QueryInterface<ID3D11Device5>();
         _processingDevice5 = processingDevice.QueryInterface<ID3D11Device5>();
         _captureContext = captureDevice.ImmediateContext.QueryInterface<ID3D11DeviceContext4>();
@@ -65,7 +67,7 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
         var levels = new[] { FeatureLevel.Level_11_1, FeatureLevel.Level_11_0, FeatureLevel.Level_10_1 };
         D3D11.D3D11CreateDevice(adapter, DriverType.Unknown, DeviceCreationFlags.BgraSupport, levels, out var captureDevice, out _, out ID3D11DeviceContext? context).CheckError();
         context?.Dispose();
-        try { return new DesktopDuplicationFrameSource(captureDevice!, processingDevice, NativeReplayBuffer.CreateDuplicationFor(captureDevice!, targetHandle, config, out desktopBounds), config.FrameRate); }
+        try { return new DesktopDuplicationFrameSource(captureDevice!, processingDevice, NativeReplayBuffer.CreateDuplicationFor(captureDevice!, targetHandle, config, out desktopBounds), config.FrameRate, config.CaptureCursor); }
         catch { captureDevice?.Dispose(); throw; }
     }
 
@@ -92,13 +94,18 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
     internal DesktopDuplicationTelemetry GetTelemetrySnapshot()
     {
         var signal = _signal.Snapshot;
-        return new(_sourcePresents, _acquiredFrames, _transportedFrames, signal.Taken, signal.Overwritten, _busySlotSkips, _accumulatedPresents, _zeroPresentFrames, TimeSpan.FromTicks(_producerCopyTicks), _leaseCount == 0 ? TimeSpan.Zero : TimeSpan.FromTicks(_leaseTicks / _leaseCount), _failure);
+        return new(_sourcePresents, _acquiredFrames, _transportedFrames, signal.Taken, signal.Overwritten, _busySlotSkips, _accumulatedPresents, _zeroPresentFrames, _pointerUpdates, _transportedPointerFrames, TimeSpan.FromTicks(_producerCopyTicks), _leaseCount == 0 ? TimeSpan.Zero : TimeSpan.FromTicks(_leaseTicks / _leaseCount), _failure);
     }
 
     private void Produce()
     {
         try
         {
+            var pendingContentUpdate = false;
+            var pendingContentTimestamp = 0L;
+            var pendingPresents = 0L;
+            var pendingPointerUpdate = false;
+            var pendingPointerTimestamp = 0L;
             while (!_stopping.IsCancellationRequested)
             {
                 var result = _duplication.AcquireNextFrame(100, out var info, out var resource);
@@ -107,7 +114,21 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
                 Interlocked.Increment(ref _acquiredFrames);
                 try
                 {
-                    if (info.LastPresentTime == 0) { Interlocked.Increment(ref _zeroPresentFrames); continue; }
+                    var hasContentUpdate = info.LastPresentTime != 0;
+                    var hasPointerUpdate = _captureCursor && info.LastMouseUpdateTime != 0;
+                    if (!hasContentUpdate && !hasPointerUpdate) { Interlocked.Increment(ref _zeroPresentFrames); continue; }
+                    if (hasContentUpdate)
+                    {
+                        pendingContentUpdate = true;
+                        pendingContentTimestamp = info.LastPresentTime;
+                        pendingPresents += Math.Max(1, info.AccumulatedFrames);
+                    }
+                    if (hasPointerUpdate)
+                    {
+                        pendingPointerUpdate = true;
+                        pendingPointerTimestamp = info.LastMouseUpdateTime;
+                        Interlocked.Increment(ref _pointerUpdates);
+                    }
                     // A source at or below the configured rate keeps a full
                     // credit between presents and is transported intact.  A
                     // faster source keeps only the newest present at the
@@ -135,9 +156,22 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
                     timer.Stop(); Interlocked.Add(ref _producerCopyTicks, timer.Elapsed.Ticks);
                     lock (_stateLock)
                     {
-                        slot.Timestamp = info.LastPresentTime; slot.Presents = Math.Max(1, info.AccumulatedFrames); slot.Sequence = ++_sequence;
-                        _sourcePresents++; _accumulatedPresents += slot.Presents; _transportedFrames++;
+                        slot.Timestamp = Math.Max(pendingContentTimestamp, pendingPointerTimestamp);
+                        slot.ContentTimestamp = pendingContentTimestamp;
+                        slot.Presents = pendingContentUpdate ? Math.Max(1, pendingPresents) : 0;
+                        slot.HasDesktopContentUpdate = pendingContentUpdate;
+                        slot.HasPointerUpdate = pendingPointerUpdate;
+                        slot.Sequence = ++_sequence;
+                        if (slot.HasDesktopContentUpdate) _sourcePresents++;
+                        _accumulatedPresents += slot.Presents;
+                        _transportedFrames++;
+                        if (slot.HasPointerUpdate) _transportedPointerFrames++;
                     }
+                    pendingContentUpdate = false;
+                    pendingContentTimestamp = 0;
+                    pendingPresents = 0;
+                    pendingPointerUpdate = false;
+                    pendingPointerTimestamp = 0;
                     _signal.Publish();
                 }
                 finally { resource.Dispose(); _duplication.ReleaseFrame(); }
@@ -179,13 +213,13 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
 
     private sealed class SurfaceSlot : IDisposable
     {
-        public ID3D11Texture2D? CaptureTexture, ProcessingTexture; public long Timestamp, Presents, Sequence, Generation; public ulong ReadyValue, ReleaseValue; public bool Leased;
-        public void Dispose() { ProcessingTexture?.Dispose(); CaptureTexture?.Dispose(); ProcessingTexture = null; CaptureTexture = null; Timestamp = Presents = Sequence = 0; ReadyValue = ReleaseValue = 0; Leased = false; }
+        public ID3D11Texture2D? CaptureTexture, ProcessingTexture; public long Timestamp, ContentTimestamp, Presents, Sequence, Generation; public ulong ReadyValue, ReleaseValue; public bool Leased, HasDesktopContentUpdate, HasPointerUpdate;
+        public void Dispose() { ProcessingTexture?.Dispose(); CaptureTexture?.Dispose(); ProcessingTexture = null; CaptureTexture = null; Timestamp = ContentTimestamp = Presents = Sequence = 0; ReadyValue = ReleaseValue = 0; Leased = HasDesktopContentUpdate = HasPointerUpdate = false; }
     }
     private sealed class Lease(DesktopDuplicationFrameSource owner, SurfaceSlot slot) : GameFrameLease
     {
         private readonly long _started = Stopwatch.GetTimestamp(); private int _disposed;
-        public override ID3D11Texture2D Texture => slot.ProcessingTexture!; public override long SourceTimestamp => slot.Timestamp; public override long AccumulatedPresents => slot.Presents; public override int Width => (int)slot.ProcessingTexture!.Description.Width; public override int Height => (int)slot.ProcessingTexture!.Description.Height; public override long Generation => slot.Generation;
+        public override ID3D11Texture2D Texture => slot.ProcessingTexture!; public override long SourceTimestamp => slot.Timestamp; public override long AccumulatedPresents => slot.Presents; public override int Width => (int)slot.ProcessingTexture!.Description.Width; public override int Height => (int)slot.ProcessingTexture!.Description.Height; public override long Generation => slot.Generation; public override bool HasDesktopContentUpdate => slot.HasDesktopContentUpdate; public override bool HasPointerUpdate => slot.HasPointerUpdate; public override long ContentTimestamp => slot.ContentTimestamp;
         public override void Dispose() { if (Interlocked.Exchange(ref _disposed, 1) != 0) return; owner.Release(slot); Interlocked.Add(ref owner._leaseTicks, Stopwatch.GetElapsedTime(_started).Ticks); Interlocked.Increment(ref owner._leaseCount); }
     }
 
@@ -193,5 +227,5 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
     private static extern bool CloseHandle(IntPtr handle);
 }
 
-internal readonly record struct DesktopDuplicationTelemetry(long SourceFrames, long AcquiredFrames, long PublishedFrames, long TakenFrames, long OverwrittenFrames, long BusySlotSkips, long AccumulatedPresents, long ZeroPresentFrames, TimeSpan ProducerCopyTotal, TimeSpan AverageLeaseDuration, string? Failure)
+internal readonly record struct DesktopDuplicationTelemetry(long SourceFrames, long AcquiredFrames, long PublishedFrames, long TakenFrames, long OverwrittenFrames, long BusySlotSkips, long AccumulatedPresents, long ZeroPresentFrames, long PointerUpdates, long TransportedPointerFrames, TimeSpan ProducerCopyTotal, TimeSpan AverageLeaseDuration, string? Failure)
 { public long TransportedFrames => PublishedFrames; }

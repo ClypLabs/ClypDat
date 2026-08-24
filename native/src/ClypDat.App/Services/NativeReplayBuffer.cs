@@ -972,6 +972,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var previousDxgiTelemetry = default(DesktopDuplicationTelemetry);
             var framesSeen = 0;
             var framesSeenSinceLog = 0;
+            var pointerFramesSeenSinceLog = 0;
             var framesProcessedSinceLog = 0;
             var framesEncoded = 0;
             var copyMapMs = 0.0;
@@ -1246,6 +1247,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var dxgiTransportedCount = 0L;
                     var dxgiSlotOverwrites = 0L;
                     var dxgiBusySlotSkips = 0L;
+                    var dxgiPointerTransportedCount = 0L;
                     var dxgiProducerDuration = TimeSpan.Zero;
                     var dxgiLeaseDuration = TimeSpan.Zero;
                     var wgcTelemetry = wgcCapture?.GetTelemetrySnapshot();
@@ -1277,6 +1279,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         dxgiBusySlotSkips = current.BusySlotSkips >= previousDxgiTelemetry.BusySlotSkips
                             ? current.BusySlotSkips - previousDxgiTelemetry.BusySlotSkips
                             : current.BusySlotSkips;
+                        dxgiPointerTransportedCount = current.TransportedPointerFrames >= previousDxgiTelemetry.TransportedPointerFrames
+                            ? current.TransportedPointerFrames - previousDxgiTelemetry.TransportedPointerFrames
+                            : current.TransportedPointerFrames;
                         var producerTicks = current.ProducerCopyTotal >= previousDxgiTelemetry.ProducerCopyTotal
                             ? current.ProducerCopyTotal - previousDxgiTelemetry.ProducerCopyTotal
                             : current.ProducerCopyTotal;
@@ -1294,7 +1299,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         : $", wgcCallbackArrivals={wgcCallbackCount}, wgcInputFps={wgcInputRate:0.0}, wgcUniqueFps={wgcUniqueRate:0.0}, wgcPublished={wgcTelemetry.Value.PublishedFrames}, wgcTaken={wgcTelemetry.Value.TakenFrames}, wgcOverwritten={wgcTelemetry.Value.OverwrittenFrames}, wgcCallbackMs={wgcTelemetry.Value.CallbackDurationTotal.TotalMilliseconds:0.0}, wgcGpuLockWaitMs={wgcTelemetry.Value.GpuLockWaitTotal.TotalMilliseconds:0.0}, wgcTimestampGaps={wgcTelemetry.Value.SourceTimestampGapCount}, wgcMaxTimestampGapMs={wgcTelemetry.Value.SourceTimestampGapMaximum.TotalMilliseconds:0.0}, wgcResizeEvents={wgcTelemetry.Value.ResizeEvents}, wgcMinUpdateIntervalAvailable={wgcTelemetry.Value.MinimumUpdateInterval.InterfaceAvailable}, wgcMinUpdateIntervalRequestedMs={wgcTelemetry.Value.MinimumUpdateInterval.Requested.TotalMilliseconds:0.###}, wgcMinUpdateIntervalAppliedMs={wgcTelemetry.Value.MinimumUpdateInterval.Applied?.TotalMilliseconds:0.###}";
                     var dxgiTelemetryText = dxgiTelemetry is null
                         ? string.Empty
-                        : $", dxgiSourcePresents={dxgiTelemetry.Value.SourceFrames}, dxgiAcquired={dxgiAcquiredCount}, dxgiTransported={dxgiTransportedCount}, dxgiPublished={dxgiTelemetry.Value.PublishedFrames}, dxgiTaken={dxgiTelemetry.Value.TakenFrames}, dxgiOverwritten={dxgiSlotOverwrites}, dxgiBusySlotSkips={dxgiBusySlotSkips}, dxgiProducerMs={dxgiProducerDuration.TotalMilliseconds:0.0}, dxgiLeaseMs={dxgiLeaseDuration.TotalMilliseconds:0.00}, dxgiAccumulatedPresents={dxgiTelemetry.Value.AccumulatedPresents}, dxgiZeroPresentSkips={dxgiTelemetry.Value.ZeroPresentFrames}";
+                        : $", dxgiSourcePresents={dxgiTelemetry.Value.SourceFrames}, dxgiAcquired={dxgiAcquiredCount}, dxgiTransported={dxgiTransportedCount}, dxgiPublished={dxgiTelemetry.Value.PublishedFrames}, dxgiTaken={dxgiTelemetry.Value.TakenFrames}, dxgiOverwritten={dxgiSlotOverwrites}, dxgiBusySlotSkips={dxgiBusySlotSkips}, dxgiProducerMs={dxgiProducerDuration.TotalMilliseconds:0.0}, dxgiLeaseMs={dxgiLeaseDuration.TotalMilliseconds:0.00}, dxgiAccumulatedPresents={dxgiTelemetry.Value.AccumulatedPresents}, dxgiZeroPresentSkips={dxgiTelemetry.Value.ZeroPresentFrames}, dxgiPointerUpdates={dxgiTelemetry.Value.PointerUpdates}, dxgiPointerTransported={dxgiPointerTransportedCount}";
                     var outputFrameRate = packetsOutSinceLog / diagElapsed;
                     // A live production window must prove both throughput and
                     // absence of queue pressure. A static/startup burst can
@@ -1314,7 +1319,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         startupValidationWindows = 0;
                         AppLog.Info($"Native replay startup: {encoderName} validation window rejected (output={outputFrameRate:0.0}/{activeFrameRate} FPS, dropped={droppedSinceLog}, queue={encodeQueue.Count}/{encodeQueueCapacity}).");
                     }
-                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={ringPacketCount}, ringBufferMb={ringBufferMb}, ringCapacityMb={ringCapacityMb}, packetPoolMb={poolRetainedMb}, sendFrameMs={inputMicrosSinceLog / 1000.0 / inputCountSinceLog:0.00}, packetReceiveMs={outputMicrosSinceLog / 1000.0 / outputCountSinceLog:0.00}, packetCopyMs={packetCopyMicrosSinceLog / 1000.0 / packetCopyCountSinceLog:0.00}, ringInsertMs={ringInsertMicrosSinceLog / 1000.0 / ringInsertCountSinceLog:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, queueDepth={encodeQueue.Count}, pendingEncoderFrames={Volatile.Read(ref _pendingEncoderFrames)}, peakPendingEncoderFrames={Volatile.Read(ref _peakPendingEncoderFrames)}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, rollingOutputFps={outputFrameRate:0.0}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}{wgcTelemetryText}{dxgiTelemetryText}.");
+                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, pointerFramesSeen={pointerFramesSeenSinceLog}, framesEncoded={framesEncoded}, ringPackets={ringPacketCount}, ringBufferMb={ringBufferMb}, ringCapacityMb={ringCapacityMb}, packetPoolMb={poolRetainedMb}, sendFrameMs={inputMicrosSinceLog / 1000.0 / inputCountSinceLog:0.00}, packetReceiveMs={outputMicrosSinceLog / 1000.0 / outputCountSinceLog:0.00}, packetCopyMs={packetCopyMicrosSinceLog / 1000.0 / packetCopyCountSinceLog:0.00}, ringInsertMs={ringInsertMicrosSinceLog / 1000.0 / ringInsertCountSinceLog:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, queueDepth={encodeQueue.Count}, pendingEncoderFrames={Volatile.Read(ref _pendingEncoderFrames)}, peakPendingEncoderFrames={Volatile.Read(ref _peakPendingEncoderFrames)}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, rollingOutputFps={outputFrameRate:0.0}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}{wgcTelemetryText}{dxgiTelemetryText}.");
                     // Raw encoded rate, deliberately NOT crediting suppressed pads
                     // back in. It remains useful telemetry, but a low rate with
                     // an empty queue is a pacing/source shortfall, not encoder
@@ -1451,6 +1456,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         TransportBusySlotSkips = dxgiBusySlotSkips,
                         ProducerGpuDuration = dxgiProducerDuration,
                         AverageTransportLeaseDuration = dxgiLeaseDuration,
+                        PointerUpdateFrameRate = dxgiPointerTransportedCount / diagElapsed,
                         StartupPhase = startupValidationWindows < ReplayEncoderQualificationPolicy.RequiredWindows
                             ? ReplayCaptureStartupPhase.Validating : ReplayCaptureStartupPhase.Ready,
                         StartupValidationWindow = startupValidationWindows,
@@ -1464,6 +1470,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     frameStalenessCount = 0;
                     framesEncodedSinceLog = 0;
                     framesSeenSinceLog = 0;
+                    pointerFramesSeenSinceLog = 0;
                     framesProcessedSinceLog = 0;
                     padsSkippedSinceLog = 0;
                     waitMs = 0;
@@ -1623,6 +1630,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 GameFrameLease? frameLease = null;
                 var sourceHasFrame = selectedGameFrameSource is not null && selectedGameFrameSource.WaitAndTakeLatestFrame(
                     TimeSpan.FromMilliseconds(Math.Max(100d, acquireTimeoutMs * 4d)), token, out frameLease);
+                var hasDesktopContentUpdate = frameLease?.HasDesktopContentUpdate ?? false;
+                var hasPointerUpdate = frameLease?.HasPointerUpdate ?? false;
+                var contentTimestamp = frameLease?.ContentTimestamp ?? 0;
                 if (frameLease is not null) frameInfo = new OutduplFrameInfo { LastPresentTime = frameLease.SourceTimestamp, AccumulatedFrames = (uint)frameLease.AccumulatedPresents };
                 ID3D11Resource? desktopResource = frameLease?.Texture.QueryInterface<ID3D11Resource>();
                 if (desktopResource is null && selectedGameFrameSource is not null && !string.IsNullOrWhiteSpace(selectedGameFrameSource.Failure))
@@ -1649,14 +1659,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 if (desktopResource is not null)
                 {
                     consecutiveAcquireFailures = 0;
-                    // LastPresentTime is 0 when the desktop IMAGE itself hasn't
-                    // actually changed since the last delivered frame (e.g. only
-                    // the OS cursor moved) - AcquireNextFrame still "succeeds" for
-                    // these, so without this check every one of them was being
-                    // treated as fresh content: cropped, GPU-scaled, and burning a
-                    // pacing-gate slot on byte-identical data instead of the next
-                    // genuinely new frame.
-                    if (!usingWgc && frameInfo.LastPresentTime == 0)
+                    if (!usingWgc && !hasDesktopContentUpdate && !hasPointerUpdate)
                     {
                         zeroPresentSkips++;
                         desktopResource.Dispose();
@@ -1664,16 +1667,19 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     }
                     else
                     {
-                        accumulatedFramesSum += frameInfo.AccumulatedFrames;
-                        if (frameInfo.AccumulatedFrames > accumulatedFramesMax) accumulatedFramesMax = frameInfo.AccumulatedFrames;
-                        if (lastRealPresentTicks != 0)
+                        if (hasDesktopContentUpdate)
                         {
-                            var gapMs = (frameInfo.LastPresentTime - lastRealPresentTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
-                            presentGapSumMs += gapMs;
-                            presentGapCount++;
-                            if (gapMs > presentGapMaxMs) presentGapMaxMs = gapMs;
+                            accumulatedFramesSum += frameInfo.AccumulatedFrames;
+                            if (frameInfo.AccumulatedFrames > accumulatedFramesMax) accumulatedFramesMax = frameInfo.AccumulatedFrames;
+                            if (lastRealPresentTicks != 0)
+                            {
+                                var gapMs = (contentTimestamp - lastRealPresentTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                                presentGapSumMs += gapMs;
+                                presentGapCount++;
+                                if (gapMs > presentGapMaxMs) presentGapMaxMs = gapMs;
+                            }
+                            lastRealPresentTicks = contentTimestamp;
                         }
-                        lastRealPresentTicks = frameInfo.LastPresentTime;
 
                         // The crop, the Blt and the crop-size rebuild all share the
                         // D3D11 immediate context - and croppedTexture / staging /
@@ -1690,17 +1696,21 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         {
                             framesSeen++;
                             framesSeenSinceLog++;
-                            // The watchdog's heartbeat: the duplication just
-                            // handed us genuinely new desktop content, which is
-                            // the one thing a stalled capture never does.
-                            if (isStalled)
+                            if (hasPointerUpdate) pointerFramesSeenSinceLog++;
+                            // Pointer movement is fresh visual output, not proof
+                            // that desktop pixels resumed. Keep the watchdog and
+                            // content cadence tied to real desktop presents.
+                            if (hasDesktopContentUpdate && isStalled)
                             {
                                 isStalled = false;
                                 AppLog.Info($"Native capture: frames resumed after a {(stopwatch.Elapsed - lastRealFrameElapsed).TotalSeconds:0.#}s stall.");
                             }
-                            lastRealFrameElapsed = stopwatch.Elapsed;
-                            recoveryAttempts = 0;
-                            recoveryRetryInterval = baseRecoveryRetryInterval;
+                            if (hasDesktopContentUpdate)
+                            {
+                                lastRealFrameElapsed = stopwatch.Elapsed;
+                                recoveryAttempts = 0;
+                                recoveryRetryInterval = baseRecoveryRetryInterval;
+                            }
 
                             stageStopwatch.Restart();
                             int cropLeft = 0, cropTop = 0, cropWidth = captureWidth, cropHeight = captureHeight;
@@ -2023,11 +2033,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                     lastFrameContentCapturedUtc = MonotonicClock.UtcNow;
                                     framesProcessedSinceLog++;
                                 }
-                                // Unconditional, unlike the above: this is the "capture
-                                // is alive" heartbeat the stall watchdog and the UI read,
-                                // and a present the crop gate declined still proves the
-                                // source is presenting.
-                                Volatile.Write(ref _lastRealContentTicks, MonotonicClock.UtcNow.Ticks);
+                                // A pointer-only update changes captured pixels after
+                                // composition, but does not prove desktop content moved.
+                                if (hasDesktopContentUpdate)
+                                    Volatile.Write(ref _lastRealContentTicks, MonotonicClock.UtcNow.Ticks);
                                 // Set on both the GPU-scale and CPU-copy paths, unlike
                                 // croppedDirty which only the GPU one uses - the pacing
                                 // gate needs to know "is the next scheduled frame a pad"
@@ -2329,7 +2338,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     AppLog.Info($"Native capture: recording {(isPaused ? "paused (window not foreground)" : "resumed")}.");
                 }
 
-                if (!occluded && !hasCapturedRealFrame)
+                if (!occluded && hasDesktopContentUpdate && !hasCapturedRealFrame)
                 {
                     // GPU scaling normally defers the NV12 readback until the
                     // pacing tick. Qualification needs the actual foreground

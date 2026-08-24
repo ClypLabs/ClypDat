@@ -21,5 +21,11 @@ internal abstract class GameFrameLease : IDisposable
     public abstract int Width { get; }
     public abstract int Height { get; }
     public abstract long Generation { get; }
+    // A desktop image update and a pointer update are separate DXGI events.
+    // Other sources deliver composed frames, so their existing behavior is a
+    // desktop-content update by default.
+    public virtual bool HasDesktopContentUpdate => true;
+    public virtual bool HasPointerUpdate => false;
+    public virtual long ContentTimestamp => SourceTimestamp;
     public abstract void Dispose();
 }
