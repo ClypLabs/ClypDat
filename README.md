@@ -1,6 +1,6 @@
 # ClypDat
 
-![ClypDat Library preview](./assets/clypdat-library.png)
+<img width="2661" height="1811" alt="Screenshot 2026-08-25 022612" src="https://github.com/user-attachments/assets/11c03096-18fc-44f3-a02a-7844cc7ba78b" />
 
 ClypDat records a rolling buffer of gameplay on Windows and saves the last few
 minutes to a file when you press a hotkey. It also has a built-in editor for
