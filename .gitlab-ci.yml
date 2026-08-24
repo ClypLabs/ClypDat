@@ -36,6 +36,10 @@ build_windows_installer:
       if (-not (Test-Path $msbuild)) { Write-Error "MSBuild was not found: $msbuild"; exit 1 }
       if (-not (Test-Path $dotnetHost)) { Write-Error "dotnet host was not found: $dotnetHost"; exit 1 }
       $packageFeed = Join-Path $avaloniaRoot 'artifacts\nuget'
+      $nugetPackages = Join-Path $env:TEMP ("clypdat-nuget-" + $env:CI_PIPELINE_ID)
+      if (Test-Path -LiteralPath $nugetPackages) { Remove-Item -LiteralPath $nugetPackages -Recurse -Force }
+      New-Item -ItemType Directory -Path $nugetPackages -Force | Out-Null
+      $env:NUGET_PACKAGES = $nugetPackages
       $previousDotNetHostPath = $env:DOTNET_HOST_PATH
       $previousDotNetRoot = $env:DOTNET_ROOT
       $previousDotNetRootX64 = $env:DOTNET_ROOT_X64
