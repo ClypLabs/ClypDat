@@ -153,12 +153,12 @@ public sealed class ReplayEncoderQualificationPolicyTests
     }
 
     [Fact]
-    public void Result_RequiresThreeWindowsAndNinetyFivePercentInEveryWindow()
+    public void Result_RequiresTwoWindowsAndNinetyFivePercentInEveryWindow()
     {
         var candidate = ReplayEncoderQualificationPolicy.Candidates("H.264")[0];
-        Assert.False(Result(candidate, 120, 120).ReachedTarget(120));
-        Assert.False(Result(candidate, 120, 113, 120).ReachedTarget(120));
-        Assert.True(Result(candidate, 114, 114, 114).ReachedTarget(120));
+        Assert.False(Result(candidate, 120).ReachedTarget(120));
+        Assert.False(Result(candidate, 120, 113).ReachedTarget(120));
+        Assert.True(Result(candidate, 114, 114).ReachedTarget(120));
     }
 
     [Fact]

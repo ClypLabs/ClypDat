@@ -758,6 +758,8 @@ public sealed partial class MainWindow : Window
         _encoderTuning.OnHealth(health);
         ViewModel?.UpdateReplayStorageHealth(health.Storage);
         ViewModel?.UpdateReplayEncoderHealth(health);
+        if (ViewModel is not null && ViewModel.IsReplayRecording)
+            ViewModel.RecorderStatus = ViewModel.IsReplayArming ? "Replay Arming" : "Replay On";
     }
 
     private void EncoderTuning_OnFrameRateChangeRequested(object? sender, EncoderFrameRateChange change)
@@ -2418,7 +2420,9 @@ public sealed partial class MainWindow : Window
     private void UpdateRecorderStatusFromState()
     {
         if (ViewModel is null) return;
-        ViewModel.RecorderStatus = ViewModel.IsReplayRecording ? "Replay On" : ReplayIdleStatus;
+        ViewModel.RecorderStatus = ViewModel.IsReplayRecording
+            ? ViewModel.IsReplayArming ? "Replay Arming" : "Replay On"
+            : ReplayIdleStatus;
     }
 
     // Flipping the master switch takes effect now rather than at the next

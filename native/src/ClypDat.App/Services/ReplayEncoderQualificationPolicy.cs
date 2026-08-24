@@ -41,7 +41,9 @@ internal sealed record ReplayEncoderQualificationResult(
 
 internal static class ReplayEncoderQualificationPolicy
 {
-    internal const int RequiredWindows = 3;
+    // Two complete foreground seconds catch sustained queue pressure without
+    // making a newly detected game feel unavailable for several seconds.
+    internal const int RequiredWindows = 2;
     internal const double TargetThreshold = 0.95;
     internal const double TieTolerance = 0.03;
 

@@ -896,6 +896,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (!SetProperty(ref _isReplayRecording, value)) return;
             MemoryTrimmer.Recording = value;
             RecorderStatus = value ? "Replay On" : "Replay Off";
+            OnPropertyChanged(nameof(IsReplayArming));
+            OnPropertyChanged(nameof(IsReplayReady));
             if (value)
             {
                 MarkReplayBufferRestarted();
@@ -1629,6 +1631,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // Native replay deliberately starts producing provisional packets before
+    // its live encoder windows have proven safe. Keep that implementation
+    // detail out of the primary action surface: the replay is usable only
+    // once the health stream says the encoder is ready. Backends without live
+    // qualification report None and remain usable immediately.
+    public bool IsReplayArming => _isReplayRecording && _activeReplayStartupPhase is
+        ReplayCaptureStartupPhase.WaitingForForeground or
+        ReplayCaptureStartupPhase.OpeningEncoder or
+        ReplayCaptureStartupPhase.Validating or
+        ReplayCaptureStartupPhase.Fallback;
+
+    public bool IsReplayReady => _isReplayRecording && !IsReplayArming;
+
     public string ReplayFrameTimingDescription => SelectedReplayFrameTiming.Description;
 
     public string ReplayFrameTimingMetrics => _activeReplayTargetFrameRate <= 0
@@ -1802,6 +1817,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _activeReplayUniqueGameFrameRate = displayedRates.UniqueFrameRate;
         OnPropertyChanged(nameof(ReplayEncoderModeStatus));
         OnPropertyChanged(nameof(ReplayFrameTimingMetrics));
+        OnPropertyChanged(nameof(IsReplayArming));
+        OnPropertyChanged(nameof(IsReplayReady));
     }
 
     public void ClearReplayEncoderHealth()
@@ -1818,6 +1835,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _activeReplayFrameTimingMode = ReplayFrameTimingPolicy.Normalize(Settings.ReplayFrameRateMode);
         OnPropertyChanged(nameof(ReplayEncoderModeStatus));
         OnPropertyChanged(nameof(ReplayFrameTimingMetrics));
+        OnPropertyChanged(nameof(IsReplayArming));
+        OnPropertyChanged(nameof(IsReplayReady));
     }
 
     public void MarkReplayBufferRestarted()
