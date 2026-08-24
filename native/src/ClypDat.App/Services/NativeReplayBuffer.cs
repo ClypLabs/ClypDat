@@ -4633,6 +4633,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     if (!poolTextures.TryGetValue(texturePointer, out var poolTexture))
                     {
                         poolTexture = new ID3D11Texture2D(texturePointer);
+                        // AVFrame owns the pointer returned in data[0]. The
+                        // temporary Vortice wrapper does not AddRef it, so
+                        // explicitly acquire the reference this benchmark owns
+                        // before disposing that wrapper at the end. Otherwise
+                        // qualification tears down a live encoder-pool texture
+                        // and the first real CopySubresourceRegion faults.
+                        poolTexture.AddRef();
                         poolTextures.Add(texturePointer, poolTexture);
                     }
                     device!.ImmediateContext.CopySubresourceRegion(poolTexture, (uint)(nint)input->data[1], 0, 0, 0, sourceTexture!, 0);
