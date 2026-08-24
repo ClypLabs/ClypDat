@@ -4478,14 +4478,13 @@ public sealed partial class MainWindow : Window
     {
         if (sender is not Control { DataContext: ClipCardViewModel clip } control) return;
         clip.IsHovered = true;
-        var previewImage = control.GetVisualDescendants().OfType<Image>()
-            .FirstOrDefault(image => image.Classes.Contains("clipPreviewImage"));
+        var presenter = control.GetVisualDescendants().OfType<ClipPreviewPresenter>().FirstOrDefault();
         // Decode at the size this card actually paints at, not the clip's own
         // resolution - see ClipHoverPreviewController's class comment.
         var previewSize = ClipHoverPreviewController.ResolvePreviewSize(
-            previewImage?.Bounds.Size ?? default, RenderScaling);
+            presenter?.Bounds.Size ?? default, RenderScaling);
         _clipHoverPreview.Request(clip, ViewModel?.EnableClipHoverPreview == true && ViewModel.IsLibraryVisible,
-            previewImage is null ? null : () => previewImage.InvalidateVisual(), previewSize);
+            presenter, previewSize);
     }
 
     private void ClipCard_OnPointerExited(object? sender, PointerEventArgs e)

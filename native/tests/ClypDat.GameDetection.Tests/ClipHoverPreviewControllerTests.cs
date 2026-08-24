@@ -9,12 +9,10 @@ public sealed class ClipHoverPreviewControllerTests
     [Theory]
     [InlineData(24, 24)]
     [InlineData(29.97, 29.97)]
-    // Anything above the 30fps preview cap clamps to it - a library card is
-    // not worth decoding and uploading 60 frames a second for.
-    [InlineData(59.94, 30)]
-    [InlineData(60, 30)]
-    [InlineData(120, 30)]
-    [InlineData(240, 30)]
+    [InlineData(59.94, 59.94)]
+    [InlineData(60, 60)]
+    [InlineData(120, 60)]
+    [InlineData(240, 60)]
     [InlineData(0, 30)]
     [InlineData(-1, 30)]
     [InlineData(double.NaN, 30)]
@@ -33,7 +31,7 @@ public sealed class ClipHoverPreviewControllerTests
         Assert.Contains("fps=29.97,scale=w=480:h=270:flags=bilinear:force_original_aspect_ratio=decrease,pad=480:270:(ow-iw)/2:(oh-ih)/2", arguments);
         Assert.DoesNotContain("-re", arguments);
         Assert.Contains("-an", arguments);
-        Assert.Contains("bgra", arguments);
+        Assert.Contains("rgba", arguments);
     }
 
     [Theory]
@@ -92,7 +90,7 @@ public sealed class ClipHoverPreviewControllerTests
         var pacer = new HoverPreviewFramePacer(60);
 
         Assert.Equal(TimeSpan.Zero, pacer.NextDelay(TimeSpan.FromMilliseconds(100)));
-        Assert.InRange(pacer.NextDelay(TimeSpan.FromMilliseconds(100)).TotalMilliseconds, 33.32, 33.35);
+        Assert.InRange(pacer.NextDelay(TimeSpan.FromMilliseconds(100)).TotalMilliseconds, 16.65, 16.68);
     }
 
     [Fact]
@@ -102,7 +100,7 @@ public sealed class ClipHoverPreviewControllerTests
         pacer.NextDelay(TimeSpan.Zero);
 
         Assert.Equal(TimeSpan.Zero, pacer.NextDelay(TimeSpan.FromMilliseconds(40)));
-        Assert.InRange(pacer.NextDelay(TimeSpan.FromMilliseconds(40)).TotalMilliseconds, 33.32, 33.35);
+        Assert.InRange(pacer.NextDelay(TimeSpan.FromMilliseconds(40)).TotalMilliseconds, 16.65, 16.68);
     }
 
     [Fact]
@@ -116,10 +114,10 @@ public sealed class ClipHoverPreviewControllerTests
     }
 
     // A machine with decode headroom: 4ms to produce a frame, well inside the
-    // 33.3ms budget of the 30fps preview cap.
+    // 16.7ms budget of the 60fps preview cap.
     private const double FastMachineMs = 4;
-    // A machine that needs 40ms per frame - 25fps, short of the 30fps request
-    // but comfortable at the reduced 15.
+    // A machine that needs 40ms per frame - 25fps, short of 60fps but
+    // comfortable at the reduced 30fps target.
     private const double SlowMachineMs = 40;
 
     [Fact]
@@ -215,6 +213,17 @@ public sealed class ClipHoverPreviewControllerTests
         Run(pacer, FastMachineMs, frames: 400, startAt: clock + TimeSpan.FromMinutes(2));
 
         Assert.False(pacer.IsReduced);
+    }
+
+    [Fact]
+    public void FramePacer_PresentationBackpressureAlsoTriggersReducedRate()
+    {
+        var pacer = new HoverPreviewFramePacer(60);
+        Run(pacer, FastMachineMs, frames: 60);
+        for (var i = 0; i < 61; i++) pacer.ObservePresentLatency(TimeSpan.FromMilliseconds(25));
+
+        Assert.True(pacer.IsReduced);
+        Assert.Equal(ClipHoverPreviewController.ReducedFramesPerSecond, pacer.CurrentFrameRate);
     }
 
     // Drives the pacer the way ProduceFramesAsync does - honour the delay it

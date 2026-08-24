@@ -3,9 +3,8 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Avalonia;
-using Avalonia.Media.Imaging;
 using Avalonia.Platform;
-using Avalonia.Threading;
+using ClypDat.App.Controls;
 using ClypDat.App.ViewModels;
 
 namespace ClypDat.App.Services;
@@ -25,25 +24,16 @@ namespace ClypDat.App.Services;
 // low-end machines as a hover stealing a whole core from the capture pipeline.
 internal sealed class ClipHoverPreviewController : IDisposable
 {
-    // 30, not the recorded 60. Measured against the GPU engine counters while
-    // recording: ClypDat's own 3D-engine time swung by ~11 points purely with
-    // library hover activity, while the capture pipeline's share never moved.
-    // Every preview frame is a pipe read, a memcpy into a WriteableBitmap, and
-    // a texture upload plus composite on the UI thread - and a ~600x340 card
-    // is not a display anyone resolves 60 distinct frames a second on. Halving
-    // the rate halves all of it for no visible difference.
-    internal const int MaximumFramesPerSecond = 30;
+    // GPU composition uploads only card-sized RGBA textures. Keep source
+    // cadence up to 60fps; low-rate clips remain at their native cadence.
+    internal const int MaximumFramesPerSecond = 60;
     internal const int DefaultFramesPerSecond = 30;
     // What an overloaded preview falls back to. Previews run at the recorded
     // rate by default; HoverPreviewFramePacer watches whether the machine is
     // actually sustaining that and steps down to this when it isn't, rather
     // than letting a preview that can only manage 22fps keep asking for 60 and
     // burning the difference on frames nobody sees.
-    // 15, down from 30, because the full rate is now 30 too - at equal values
-    // the pacer's step-down did nothing at all (_reducedFrameRate is a Min of
-    // the two), silently costing the overload protection that this constant
-    // exists to provide.
-    internal const int ReducedFramesPerSecond = 15;
+    internal const int ReducedFramesPerSecond = 30;
     // Used when the card hasn't been laid out yet (no bounds to measure).
     internal const int DefaultPreviewWidth = 480;
     internal const int DefaultPreviewHeight = 270;
@@ -56,7 +46,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
     // spawned a full ffmpeg decoder for cards the user was only passing over.
     // The log shows the shape plainly - repeated "preview started" followed by
     // "warm exit expired" 200-400ms later, each one a process launch, a seek,
-    // and a WriteableBitmap allocation thrown away. 180ms still feels
+    // and a renderer session thrown away. 180ms still feels
     // immediate on a card the pointer actually settles on, and costs nothing
     // for the ones it does not.
     internal static readonly TimeSpan HoverDelay = TimeSpan.FromMilliseconds(180);
@@ -71,24 +61,23 @@ internal sealed class ClipHoverPreviewController : IDisposable
     private CancellationTokenSource? _warmExitCancellation;
     private Process? _process;
     private ClipCardViewModel? _clip;
-    private WriteableBitmap? _bitmap;
-    // The size the active session's bitmap and decoder were built for. A warm
+    private IClipPreviewPresenter? _presenter;
+    // The size the active presenter and decoder were built for. A warm
     // session can only be reused when the card still wants the same size -
-    // after a window resize it doesn't, and the old bitmap would be scaled by
-    // the Image control instead of matching it.
+    // after a window resize it doesn't, and the old surface would be scaled
+    // instead of matching the card.
     private PixelSize _previewSize;
-    private Action? _requestRepaint;
     private TaskCompletionSource? _attachSignal;
     private int _attachmentVersion;
     private int _generation;
     private bool _attached;
     private bool _disposed;
 
-    public void Request(ClipCardViewModel clip, bool enabled, Action? requestRepaint, PixelSize previewSize)
+    public void Request(ClipCardViewModel clip, bool enabled, IClipPreviewPresenter? presenter, PixelSize previewSize)
     {
-        if (!enabled || requestRepaint is null || !File.Exists(clip.Path)) return;
+        if (!enabled || presenter is null || !File.Exists(clip.Path)) return;
 
-        WriteableBitmap? warmBitmap = null;
+        IClipPreviewPresenter? warmPresenter = null;
         CancellationTokenSource? warmExitCancellation = null;
         CancellationTokenSource? pendingCancellation = null;
         TaskCompletionSource? attachSignal = null;
@@ -103,8 +92,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
                 warmExitCancellation = _warmExitCancellation;
                 warmReused = warmExitCancellation is not null;
                 _warmExitCancellation = null;
-                _requestRepaint = requestRepaint;
-                warmBitmap = _bitmap;
+                warmPresenter = _presenter;
                 if (!_attached)
                 {
                     _attached = true;
@@ -126,7 +114,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
 
         warmExitCancellation?.Cancel();
         warmExitCancellation?.Dispose();
-        if (warmBitmap is not null) clip.ShowHoverPreview(warmBitmap);
+        warmPresenter?.SetAttached(true);
         attachSignal?.TrySetResult();
         if (warmReused) AppLog.Debug($"Clip hover preview warm reuse: {Path.GetFileName(clip.Path)}.");
         return;
@@ -134,12 +122,12 @@ internal sealed class ClipHoverPreviewController : IDisposable
     StartPending:
         pendingCancellation?.Cancel();
         pendingCancellation?.Dispose();
-        _ = StartPendingAsync(clip, requestRepaint, previewSize, pendingGeneration, token);
+        _ = StartPendingAsync(clip, presenter, previewSize, pendingGeneration, token);
     }
 
     // Pixel size to decode at, from the card's laid-out DIP size and the
-    // window's render scaling. Even dimensions: the decoder's yuv->bgra path
-    // and the bitmap upload both want them, and an odd height silently breaks
+    // window's render scaling. Even dimensions: the decoder's yuv->rgba path
+    // and texture upload both want them, and an odd height silently breaks
     // some scaler configurations.
     internal static PixelSize ResolvePreviewSize(Size cardSize, double renderScaling)
     {
@@ -170,7 +158,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
     public void PointerLeft(ClipCardViewModel clip)
     {
         CancellationTokenSource? pendingCancellation = null;
-        WriteableBitmap? bitmap = null;
+        IClipPreviewPresenter? presenter = null;
         CancellationTokenSource? previousWarmExit = null;
         CancellationToken warmToken = CancellationToken.None;
         int generation = 0;
@@ -188,8 +176,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
             }
             if (_clip == clip)
             {
-                bitmap = _bitmap;
-                _requestRepaint = null;
+                presenter = _presenter;
                 if (_attached)
                 {
                     _attached = false;
@@ -209,7 +196,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         if (pendingCancelled) AppLog.Debug($"Clip hover preview pending cancelled: {Path.GetFileName(clip.Path)}.");
         if (!active) return;
 
-        if (bitmap is not null) clip.HideHoverPreview(bitmap);
+        presenter?.SetAttached(false);
         previousWarmExit?.Cancel();
         previousWarmExit?.Dispose();
         _ = ExpireWarmSessionAsync(clip, generation, warmToken);
@@ -241,7 +228,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         Stop(reason);
     }
 
-    private async Task StartPendingAsync(ClipCardViewModel clip, Action requestRepaint, PixelSize previewSize, int pendingGeneration, CancellationToken token)
+    private async Task StartPendingAsync(ClipCardViewModel clip, IClipPreviewPresenter presenter, PixelSize previewSize, int pendingGeneration, CancellationToken token)
     {
         try
         {
@@ -271,12 +258,13 @@ internal sealed class ClipHoverPreviewController : IDisposable
                     _clip = clip;
                     _cancellation = cancellation;
                     _previewSize = previewSize;
-                    _requestRepaint = requestRepaint;
+                    _presenter = presenter;
                     _attached = true;
                     _attachmentVersion++;
                     generation = ++_generation;
                 }
-                await RunSessionAsync(clip, generation, previewSize, cancellation.Token);
+                presenter.SetAttached(true);
+                await RunSessionAsync(clip, generation, previewSize, presenter, cancellation.Token);
             }
             finally { _sessionLock.Release(); }
         }
@@ -284,7 +272,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         catch (Exception error) { AppLog.Error("Clip hover preview failed", error); }
     }
 
-    private async Task RunSessionAsync(ClipCardViewModel clip, int generation, PixelSize previewSize, CancellationToken token)
+    private async Task RunSessionAsync(ClipCardViewModel clip, int generation, PixelSize previewSize, IClipPreviewPresenter presenter, CancellationToken token)
     {
         var metrics = new PreviewMetrics();
         try
@@ -298,12 +286,9 @@ internal sealed class ClipHoverPreviewController : IDisposable
             // the clip wraps around.
             var pacer = new HoverPreviewFramePacer(frameRate);
             var frameBytes = previewSize.Width * previewSize.Height * 4;
-            var bitmap = await Dispatcher.UIThread.InvokeAsync(
-                () => new WriteableBitmap(previewSize, new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Unpremul));
-            SetBitmap(clip, generation, bitmap);
             if (!IsCurrent(clip, generation)) return;
             var sourceMbps = clip.Duration > TimeSpan.Zero ? clip.SizeBytes * 8d / clip.Duration.TotalSeconds / 1_000_000d : 0;
-            AppLog.Info($"Clip hover preview started: {Path.GetFileName(clip.Path)}, source={clip.Media.Width}x{clip.Media.Height}, sourceMbps={sourceMbps:0.###}, output={previewSize.Width}x{previewSize.Height}, fps={frameRate:0.###} (recorded={clip.Media.Fps:0.###}).");
+            AppLog.Info($"Clip hover preview started: {Path.GetFileName(clip.Path)}, source={clip.Media.Width}x{clip.Media.Height}, sourceMbps={sourceMbps:0.###}, output={previewSize.Width}x{previewSize.Height}, targetFps={frameRate:0.###} (recorded={clip.Media.Fps:0.###}).");
             var slots = new[] { new FrameSlot(new byte[frameBytes]), new FrameSlot(new byte[frameBytes]), new FrameSlot(new byte[frameBytes]) };
 
             while (!token.IsCancellationRequested && IsCurrent(clip, generation))
@@ -315,7 +300,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
                 SetProcess(clip, generation, process);
                 var stderr = process.StandardError.ReadToEndAsync();
                 var sourceReadsBefore = GetReadBytes(process);
-                var (decoded, displayed) = await DeliverFramesAsync(process.StandardOutput.BaseStream, slots, clip, generation, bitmap, previewSize, pacer, metrics, token);
+                var (decoded, displayed) = await DeliverFramesAsync(process.StandardOutput.BaseStream, slots, clip, generation, presenter, previewSize, pacer, metrics, token);
                 await process.WaitForExitAsync(CancellationToken.None);
                 metrics.AddReadBytes(GetReadBytes(process) - sourceReadsBefore);
                 ClearProcess(process);
@@ -336,7 +321,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         }
     }
 
-    private async Task<(int Decoded, int Displayed)> DeliverFramesAsync(Stream stream, IReadOnlyList<FrameSlot> slots, ClipCardViewModel clip, int generation, WriteableBitmap bitmap, PixelSize previewSize, HoverPreviewFramePacer pacer, PreviewMetrics metrics, CancellationToken token)
+    private async Task<(int Decoded, int Displayed)> DeliverFramesAsync(Stream stream, IReadOnlyList<FrameSlot> slots, ClipCardViewModel clip, int generation, IClipPreviewPresenter presenter, PixelSize previewSize, HoverPreviewFramePacer pacer, PreviewMetrics metrics, CancellationToken token)
     {
         var decodedBefore = metrics.DecodedFrames;
         var displayedBefore = metrics.DisplayedFrames;
@@ -345,7 +330,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         foreach (var slot in slots) await freeSlots.Writer.WriteAsync(slot, token);
 
         var producer = ProduceFramesAsync(stream, freeSlots, frames, clip, generation, pacer, metrics, token);
-        var consumer = ConsumeFramesAsync(frames, freeSlots.Writer, clip, generation, bitmap, previewSize, metrics, token);
+        var consumer = ConsumeFramesAsync(frames, freeSlots.Writer, clip, generation, presenter, previewSize, pacer, metrics, token);
         await Task.WhenAll(producer, consumer);
         return (metrics.DecodedFrames - decodedBefore, metrics.DisplayedFrames - displayedBefore);
     }
@@ -368,7 +353,14 @@ internal sealed class ClipHoverPreviewController : IDisposable
                     var delay = pacer.NextDelay(metrics.Elapsed);
                     if (pacer.TryConsumeRateChange(out var newRate))
                     {
+                        metrics.MarkRateTransition();
                         AppLog.Info($"Clip hover preview rate adapted: {Path.GetFileName(clip.Path)}, now {newRate:0.###} fps (recorded={clip.Media.Fps:0.###}) - the preview was not sustaining the previous rate.");
+                        // Decoder fps is process configuration. Stop this run
+                        // so the enclosing loop immediately starts FFmpeg at
+                        // the newly selected target instead of spending the
+                        // rest of a long clip decoding the old rate.
+                        KillCurrentProcess(clip, generation);
+                        return;
                     }
                     if (delay > TimeSpan.Zero) await Task.Delay(delay, token);
                     if (!await ReadFrameAsync(stream, slot.Buffer, token)) return;
@@ -385,16 +377,17 @@ internal sealed class ClipHoverPreviewController : IDisposable
         finally { frames.Complete(); }
     }
 
-    private async Task ConsumeFramesAsync(LatestFrameMailbox<FrameSlot> frames, ChannelWriter<FrameSlot> freeSlots, ClipCardViewModel clip, int generation, WriteableBitmap bitmap, PixelSize previewSize, PreviewMetrics metrics, CancellationToken token)
+    private async Task ConsumeFramesAsync(LatestFrameMailbox<FrameSlot> frames, ChannelWriter<FrameSlot> freeSlots, ClipCardViewModel clip, int generation, IClipPreviewPresenter presenter, PixelSize previewSize, HoverPreviewFramePacer pacer, PreviewMetrics metrics, CancellationToken token)
     {
         try
         {
             while (await frames.ReadAsync(token) is { } slot)
             {
-                var uploadStarted = Stopwatch.GetTimestamp();
-                var displayed = await Dispatcher.UIThread.InvokeAsync(() => CopyFrame(clip, generation, bitmap, previewSize, slot.Buffer), DispatcherPriority.Render);
-                metrics.MarkUiUpload(Stopwatch.GetTimestamp() - uploadStarted);
-                if (displayed) metrics.MarkDisplayed();
+                if (!IsCurrent(clip, generation)) return;
+                var result = await presenter.PresentAsync(slot.Buffer, previewSize, token);
+                metrics.MarkPresent(result.Path, result.Latency);
+                metrics.MarkDisplayed();
+                pacer.ObservePresentLatency(result.Latency);
                 await freeSlots.WriteAsync(slot, token);
             }
         }
@@ -458,7 +451,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         // that wasn't even being resized.
         return ["-hide_banner", "-loglevel", "error", "-ss", start, "-i", path, "-t", duration,
             "-an", "-vf", $"fps={fps},scale=w={width}:h={height}:flags=bilinear:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
-            "-pix_fmt", "bgra", "-f", "rawvideo", "pipe:1"];
+            "-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1"];
     }
 
     private static async Task<bool> ReadFrameAsync(Stream stream, byte[] buffer, CancellationToken token)
@@ -473,40 +466,16 @@ internal sealed class ClipHoverPreviewController : IDisposable
         return true;
     }
 
-    private void SetBitmap(ClipCardViewModel clip, int generation, WriteableBitmap bitmap)
-    {
-        lock (_stateLock) { if (IsCurrentLocked(clip, generation)) _bitmap = bitmap; else bitmap.Dispose(); }
-    }
     private void SetProcess(ClipCardViewModel clip, int generation, Process process)
     {
         lock (_stateLock) { if (IsCurrentLocked(clip, generation)) _process = process; else Kill(process); }
     }
     private void ClearProcess(Process process) { lock (_stateLock) { if (_process == process) _process = null; } }
-    private bool CopyFrame(ClipCardViewModel clip, int generation, WriteableBitmap bitmap, PixelSize previewSize, byte[] frame)
+    private void KillCurrentProcess(ClipCardViewModel clip, int generation)
     {
-        Action? requestRepaint;
-        lock (_stateLock)
-        {
-            if (!IsCurrentLocked(clip, generation) || !_attached) return false;
-            requestRepaint = _requestRepaint;
-        }
-        var rowBytes = previewSize.Width * 4;
-        var frameBytes = rowBytes * previewSize.Height;
-        using var locked = bitmap.Lock();
-        unsafe
-        {
-            fixed (byte* source = frame)
-            {
-                if (locked.RowBytes == rowBytes)
-                    Buffer.MemoryCopy(source, (byte*)locked.Address, frameBytes, frameBytes);
-                else
-                    for (var row = 0; row < previewSize.Height; row++)
-                        Buffer.MemoryCopy(source + row * rowBytes, (byte*)locked.Address + row * locked.RowBytes, locked.RowBytes, rowBytes);
-            }
-        }
-        clip.ShowHoverPreview(bitmap);
-        requestRepaint?.Invoke();
-        return true;
+        Process? process;
+        lock (_stateLock) process = IsCurrentLocked(clip, generation) ? _process : null;
+        Kill(process);
     }
     private void Cleanup(ClipCardViewModel clip, int generation)
     {
@@ -521,8 +490,8 @@ internal sealed class ClipHoverPreviewController : IDisposable
     private SessionState DetachActiveLocked()
     {
         _generation++;
-        var state = new SessionState(_clip, _bitmap, _process, _cancellation, _warmExitCancellation);
-        _clip = null; _bitmap = null; _previewSize = default; _process = null; _cancellation = null; _warmExitCancellation = null; _requestRepaint = null; _attachSignal = null; _attached = false;
+        var state = new SessionState(_clip, _presenter, _process, _cancellation, _warmExitCancellation);
+        _clip = null; _presenter = null; _previewSize = default; _process = null; _cancellation = null; _warmExitCancellation = null; _attachSignal = null; _attached = false;
         return state;
     }
     private static void DisposeSession(SessionState state, string reason, bool log)
@@ -530,11 +499,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         state.Cancellation?.Cancel();
         state.WarmExitCancellation?.Cancel();
         Kill(state.Process);
-        // Deferred free - see DeferredBitmapDisposal. HideHoverPreview only
-        // swaps the card back to its static thumbnail; the compositor's last
-        // committed frame still draws from this buffer, and Stop("clip opened")
-        // runs this on the very click that opens the editor.
-        if (state.Clip is not null && state.Bitmap is not null) { state.Clip.HideHoverPreview(state.Bitmap); DeferredBitmapDisposal.Release(state.Bitmap); }
+        state.Presenter?.SetAttached(false);
         state.Cancellation?.Dispose();
         state.WarmExitCancellation?.Dispose();
         if (log) AppLog.Info($"Clip hover preview cleanup complete: {reason}.");
@@ -557,7 +522,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
     public void Dispose() { if (_disposed) return; _disposed = true; Stop("window closed"); _sessionLock.Dispose(); }
 
     private sealed class FrameSlot(byte[] buffer) { public byte[] Buffer { get; } = buffer; }
-    private readonly record struct SessionState(ClipCardViewModel? Clip, WriteableBitmap? Bitmap, Process? Process, CancellationTokenSource? Cancellation, CancellationTokenSource? WarmExitCancellation)
+    private readonly record struct SessionState(ClipCardViewModel? Clip, IClipPreviewPresenter? Presenter, Process? Process, CancellationTokenSource? Cancellation, CancellationTokenSource? WarmExitCancellation)
     { public bool IsActive => Clip is not null || Process is not null || Cancellation is not null; }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -680,6 +645,14 @@ internal sealed class HoverPreviewFramePacer
         return delay;
     }
 
+    // Presentation completion is a real deadline too. GPU slots may still be
+    // held by the compositor even when pipe reads were on time; include that
+    // latency so adaptation protects replay capture from compositor stalls.
+    public void ObservePresentLatency(TimeSpan latency)
+    {
+        if (latency > _interval) Observe(late: true);
+    }
+
     private void Observe(bool late)
     {
         // Nothing to step down to (a 24fps clip is already at or below the
@@ -733,11 +706,14 @@ internal sealed class PreviewMetrics
     private long _readBytes;
     private long _previousDisplayTicks = -1;
     private long _longestGapTicks;
-    private long _totalUiUploadTicks;
-    private long _longestUiUploadTicks;
+    private long _totalPresentTicks;
+    private long _longestPresentTicks;
     private int _decodedFrames;
     private int _displayedFrames;
     private int _droppedFrames;
+    private int _gpuPresents;
+    private int _softwarePresents;
+    private int _rateTransitions;
 
     public TimeSpan Elapsed => _clock.Elapsed;
     public int DecodedFrames => Volatile.Read(ref _decodedFrames);
@@ -756,11 +732,15 @@ internal sealed class PreviewMetrics
         if (previous >= 0) InterlockedExtensions.Max(ref _longestGapTicks, now - previous);
     }
     public void MarkDropped() => Interlocked.Increment(ref _droppedFrames);
-    public void MarkUiUpload(long elapsedTicks)
+    public void MarkRateTransition() => Interlocked.Increment(ref _rateTransitions);
+    public void MarkPresent(PreviewPresentationPath path, TimeSpan latency)
     {
-        if (elapsedTicks <= 0) return;
-        Interlocked.Add(ref _totalUiUploadTicks, elapsedTicks);
-        InterlockedExtensions.Max(ref _longestUiUploadTicks, elapsedTicks);
+        if (path == PreviewPresentationPath.Gpu) Interlocked.Increment(ref _gpuPresents);
+        else Interlocked.Increment(ref _softwarePresents);
+        var ticks = (long)(latency.TotalSeconds * Stopwatch.Frequency);
+        if (ticks <= 0) return;
+        Interlocked.Add(ref _totalPresentTicks, ticks);
+        InterlockedExtensions.Max(ref _longestPresentTicks, ticks);
     }
     public void AddReadBytes(long bytes) { if (bytes > 0) Interlocked.Add(ref _readBytes, bytes); }
     public void Log(ClipCardViewModel clip, int generation)
@@ -770,11 +750,12 @@ internal sealed class PreviewMetrics
         var firstDecoded = TicksToMilliseconds(Volatile.Read(ref _firstDecodedTicks));
         var firstDisplayed = TicksToMilliseconds(Volatile.Read(ref _firstDisplayedTicks));
         var longestGap = TicksToMilliseconds(Volatile.Read(ref _longestGapTicks));
-        var uiUploads = DisplayedFrames;
-        var averageUiUpload = uiUploads == 0 ? 0 : TicksToMilliseconds(Volatile.Read(ref _totalUiUploadTicks)) / uiUploads;
-        var longestUiUpload = TicksToMilliseconds(Volatile.Read(ref _longestUiUploadTicks));
+        var presents = DisplayedFrames;
+        var averagePresent = presents == 0 ? 0 : TicksToMilliseconds(Volatile.Read(ref _totalPresentTicks)) / presents;
+        var longestPresent = TicksToMilliseconds(Volatile.Read(ref _longestPresentTicks));
         var readMb = Volatile.Read(ref _readBytes) / (1024d * 1024d);
-        AppLog.Debug($"Clip hover preview metrics: {Path.GetFileName(clip.Path)}, generation={generation}, firstDecodedMs={firstDecoded:0}, firstDisplayedMs={firstDisplayed:0}, decoded={DecodedFrames}, displayed={DisplayedFrames}, dropped={Volatile.Read(ref _droppedFrames)}, displayedFps={DisplayedFrames / elapsed:0.##}, longestGapMs={longestGap:0}, uiUploadAvgMs={averageUiUpload:0.##}, uiUploadMaxMs={longestUiUpload:0.##}, readMB={readMb:0.##}.");
+        var path = Volatile.Read(ref _gpuPresents) > 0 ? (Volatile.Read(ref _softwarePresents) > 0 ? "gpu+software" : "gpu") : "software";
+        AppLog.Debug($"Clip hover preview metrics: {Path.GetFileName(clip.Path)}, generation={generation}, path={path}, firstDecodedMs={firstDecoded:0}, firstDisplayedMs={firstDisplayed:0}, decoded={DecodedFrames}, displayed={DisplayedFrames}, staleDrops={Volatile.Read(ref _droppedFrames)}, targetFps={ClipHoverPreviewController.ResolveFrameRate(clip.Media.Fps):0.##}, achievedFps={DisplayedFrames / elapsed:0.##}, rateTransitions={Volatile.Read(ref _rateTransitions)}, longestGapMs={longestGap:0}, presentAvgMs={averagePresent:0.##}, presentMaxMs={longestPresent:0.##}, readMB={readMb:0.##}.");
     }
     private static double TicksToMilliseconds(long ticks) => ticks < 0 ? -1 : ticks * 1000d / Stopwatch.Frequency;
 }
