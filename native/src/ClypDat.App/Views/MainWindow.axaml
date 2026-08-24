@@ -1343,10 +1343,7 @@
                         <Run Text="{Binding ReplayQualityWarningSummary}" Foreground="#B8C7D8" />
                       </TextBlock>
                       <TextBlock Text="• Check capture headroom during gameplay; higher quality increases encoder workload." Foreground="#93A6B8" FontSize="11" TextWrapping="Wrap" />
-                      <TextBlock Foreground="#93A6B8" FontSize="11" TextWrapping="Wrap">
-                        <Run Text="• " />
-                        <Run Text="{Binding ReplayQualityWarning}" />
-                      </TextBlock>
+                      <TextBlock Text="{Binding ReplayQualityWarning}" Foreground="#93A6B8" FontSize="11" TextWrapping="Wrap" />
                       <TextBlock Text="• Encoder overload is monitored, but your selected FPS is never lowered automatically." Foreground="#93A6B8" FontSize="11" TextWrapping="Wrap" />
                       <TextBlock Text="• Stable output usually matters more than maximum resolution." Foreground="#93A6B8" FontSize="11" TextWrapping="Wrap" />
                     </StackPanel>

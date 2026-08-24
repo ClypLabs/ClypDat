@@ -47,6 +47,12 @@ public sealed class ClipPreviewPresenter : Control, IClipPreviewPresenter
 
     PreviewPresentationPath IClipPreviewPresenter.Path => _adapter?.Path ?? PreviewPresentationPath.Software;
 
+    protected override void OnAttachedToVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        _ = ((IClipPreviewPresenter)this).ActivateSessionAsync(CancellationToken.None).AsTask();
+    }
+
     protected override void OnDetachedFromVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
     {
         _ = ((IClipPreviewPresenter)this).ReleaseResourcesAsync().AsTask();

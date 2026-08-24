@@ -1054,6 +1054,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // recording behavior above, unaffected.
             var hasCapturedRealFrame = false;
             var startupValidationWindows = 0;
+            var startupValidationComplete = false;
             var consecutiveOverloadWindows = 0;
             var consecutiveTransportShortfallWindows = 0;
             var activeEncoderCandidate = default(ReplayEncoderCandidate);
@@ -1312,15 +1313,29 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var validationWindowPasses = hasCapturedRealFrame && droppedSinceLog == 0 &&
                         encodeQueue.Count * 4 < encodeQueueCapacity * 3 &&
                         outputFrameRate >= activeFrameRate * ReplayEncoderQualificationPolicy.TargetThreshold;
-                    if (startupValidationWindows < ReplayEncoderQualificationPolicy.RequiredWindows && validationWindowPasses)
+                    if (!startupValidationComplete && hasCapturedRealFrame)
                     {
-                        startupValidationWindows++;
-                        AppLog.Info($"Native replay startup: {encoderName} live output validation window {startupValidationWindows}/{ReplayEncoderQualificationPolicy.RequiredWindows} reached {outputFrameRate:0.0}/{activeFrameRate} FPS.");
-                    }
-                    else if (hasCapturedRealFrame && startupValidationWindows < ReplayEncoderQualificationPolicy.RequiredWindows && !validationWindowPasses)
-                    {
-                        startupValidationWindows = 0;
-                        AppLog.Info($"Native replay startup: {encoderName} validation window rejected (output={outputFrameRate:0.0}/{activeFrameRate} FPS, dropped={droppedSinceLog}, queue={encodeQueue.Count}/{encodeQueueCapacity}).");
+                        // Count each startup observation exactly once. A slow
+                        // first second is useful evidence, but resetting to
+                        // zero made the UI appear to re-enter validation at
+                        // random times and could prolong startup indefinitely.
+                        startupValidationWindows = Math.Min(
+                            startupValidationWindows + 1,
+                            ReplayEncoderQualificationPolicy.RequiredWindows);
+                        if (validationWindowPasses)
+                        {
+                            AppLog.Info($"Native replay startup: {encoderName} live output validation window {startupValidationWindows}/{ReplayEncoderQualificationPolicy.RequiredWindows} reached {outputFrameRate:0.0}/{activeFrameRate} FPS.");
+                        }
+                        else
+                        {
+                            AppLog.Info($"Native replay startup: {encoderName} validation window {startupValidationWindows}/{ReplayEncoderQualificationPolicy.RequiredWindows} below target (output={outputFrameRate:0.0}/{activeFrameRate} FPS, dropped={droppedSinceLog}, queue={encodeQueue.Count}/{encodeQueueCapacity}).");
+                        }
+
+                        if (startupValidationWindows >= ReplayEncoderQualificationPolicy.RequiredWindows)
+                        {
+                            startupValidationComplete = true;
+                            AppLog.Info($"Native replay startup: {encoderName} one-time live output validation complete.");
+                        }
                     }
                     AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, pointerFramesSeen={pointerFramesSeenSinceLog}, framesEncoded={framesEncoded}, ringPackets={ringPacketCount}, ringBufferMb={ringBufferMb}, ringCapacityMb={ringCapacityMb}, packetPoolMb={poolRetainedMb}, sendFrameMs={inputMicrosSinceLog / 1000.0 / inputCountSinceLog:0.00}, packetReceiveMs={outputMicrosSinceLog / 1000.0 / outputCountSinceLog:0.00}, packetCopyMs={packetCopyMicrosSinceLog / 1000.0 / packetCopyCountSinceLog:0.00}, ringInsertMs={ringInsertMicrosSinceLog / 1000.0 / ringInsertCountSinceLog:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, queueDepth={encodeQueue.Count}, pendingEncoderFrames={Volatile.Read(ref _pendingEncoderFrames)}, peakPendingEncoderFrames={Volatile.Read(ref _peakPendingEncoderFrames)}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, rollingOutputFps={outputFrameRate:0.0}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}{wgcTelemetryText}{dxgiTelemetryText}.");
                     // Raw encoded rate, deliberately NOT crediting suppressed pads
@@ -1383,7 +1398,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 requiresDistinctAmfSoftwareFrame = !replacementHardware && replacementName.Contains("amf", StringComparison.OrdinalIgnoreCase);
                                 activeEncoderCandidate = candidate;
                                 consecutiveOverloadWindows = 0;
-                                startupValidationWindows = 0;
                                 switched = true;
                                 AppLog.Info($"Native capture: sustained encoder overload switched to {replacementName}/{candidate.InputPath}; replay history remains buffered.");
                                 break;
@@ -1460,8 +1474,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         ProducerGpuDuration = dxgiProducerDuration,
                         AverageTransportLeaseDuration = dxgiLeaseDuration,
                         PointerUpdateFrameRate = dxgiPointerTransportedCount / diagElapsed,
-                        StartupPhase = startupValidationWindows < ReplayEncoderQualificationPolicy.RequiredWindows
-                            ? ReplayCaptureStartupPhase.Validating : ReplayCaptureStartupPhase.Ready,
+                        StartupPhase = startupValidationComplete
+                            ? ReplayCaptureStartupPhase.Ready
+                            : ReplayCaptureStartupPhase.Validating,
                         StartupValidationWindow = startupValidationWindows,
                         StartupValidationWindowCount = ReplayEncoderQualificationPolicy.RequiredWindows
                     });
