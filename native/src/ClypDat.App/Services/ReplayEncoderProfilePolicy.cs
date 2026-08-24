@@ -16,8 +16,17 @@ public static class ReplayEncoderProfilePolicy
     /// </summary>
     public static int GopFrames(int frameRate) => Math.Clamp(frameRate, 30, 120);
 
+    public static int ReplayQueueCapacity(int frameRate) =>
+        ReplayFrameTimingPolicy.EncodeQueueCapacity(frameRate);
+
     public static int NvencSurfaces(int frameRate) => Math.Clamp(
-        ReplayFrameTimingPolicy.EncodeQueueCapacity(frameRate) + 8,
+        (int)Math.Ceiling(Math.Clamp(frameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate) / 2.0),
         16,
-        24);
+        60);
+
+    public static int D3D11FixedPoolSize(int frameRate, int headroom = 4) =>
+        NvencSurfaces(frameRate) + ReplayFrameTimingPolicy.EncodeQueueCapacity(frameRate) + 1 + Math.Max(0, headroom);
+
+    public static int D3D11DynamicPoolMinimum(int frameRate, int headroom = 4) =>
+        D3D11FixedPoolSize(frameRate, headroom);
 }

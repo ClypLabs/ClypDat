@@ -19,13 +19,12 @@ public static class ReplayVideoCodecPolicy
     public static IReadOnlyList<string> Candidates(string? requestedCodec, string? av1Family, string? encoderMode = Gpu)
     {
         if (string.Equals(encoderMode, Cpu, StringComparison.OrdinalIgnoreCase)) return new[] { "libx264" };
-        if (Normalize(requestedCodec) == H264 || string.IsNullOrWhiteSpace(av1Family)) return H264Candidates;
+        if (Normalize(requestedCodec) == H264) return H264Candidates;
 
-        var preferred = $"av1_{av1Family}";
-        return Av1Candidates
-            .OrderBy(candidate => string.Equals(candidate, preferred, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
-            .Concat(H264Candidates)
-            .ToArray();
+        // AV1 is qualified against real foreground frames. The small startup
+        // probe only says whether a family exists; it must not suppress the
+        // other vendors or make AV1 silently skip its sustained test.
+        return Av1Candidates.Concat(H264Candidates).ToArray();
     }
 
     // UI quality keeps existing H.264 1-51 meaning. AV1 uses 0-63; +12

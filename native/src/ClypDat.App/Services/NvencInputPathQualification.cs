@@ -15,10 +15,21 @@ internal static class NvencInputPathQualification
     internal const double D3D11PreferenceTolerance = 0.03;
     internal const double TargetThreshold = 0.95;
 
-    internal readonly record struct Result(bool Available, double FramesPerSecond, bool TimedOut = false)
+    internal readonly record struct Result(
+        bool Available,
+        double FramesPerSecond,
+        bool TimedOut = false,
+        IReadOnlyList<double>? WindowFramesPerSecond = null)
     {
+        internal double MinimumWindow => WindowFramesPerSecond is { Count: > 0 }
+            ? WindowFramesPerSecond.Min()
+            : FramesPerSecond;
+
         internal bool ReachedTarget(int targetFrameRate) =>
-            Available && !TimedOut && FramesPerSecond >= targetFrameRate * TargetThreshold;
+            Available && !TimedOut &&
+            FramesPerSecond >= targetFrameRate * TargetThreshold &&
+            (WindowFramesPerSecond is not { Count: > 0 } ||
+             WindowFramesPerSecond.All(rate => rate >= targetFrameRate * TargetThreshold));
     }
 
     internal static NvencInputPath? Select(int targetFrameRate, Result d3d11, Result systemMemory)

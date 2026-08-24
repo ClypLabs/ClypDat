@@ -16,19 +16,19 @@ public sealed class ReplayVideoCodecPolicyTests
         Assert.Equal(expected, ReplayVideoCodecPolicy.Normalize(requested));
 
     [Fact]
-    public void Candidates_PrefersDetectedAv1FamilyThenH264Fallbacks()
+    public void Candidates_UsesVendorOrderThenH264Fallbacks()
     {
         var candidates = ReplayVideoCodecPolicy.Candidates("AV1", "qsv");
 
-        Assert.Equal(new[] { "av1_qsv", "av1_nvenc", "av1_amf", "h264_nvenc", "h264_amf", "h264_qsv", "libx264" }, candidates);
+        Assert.Equal(new[] { "av1_nvenc", "av1_amf", "av1_qsv", "h264_nvenc", "h264_amf", "h264_qsv", "libx264" }, candidates);
     }
 
     [Fact]
-    public void Candidates_SkipsAv1WhenProbeFoundNone()
+    public void Candidates_DoesNotSkipAv1WhenStartupProbeFoundNone()
     {
         var candidates = ReplayVideoCodecPolicy.Candidates("AV1", null);
 
-        Assert.Equal(new[] { "h264_nvenc", "h264_amf", "h264_qsv", "libx264" }, candidates);
+        Assert.Equal(new[] { "av1_nvenc", "av1_amf", "av1_qsv", "h264_nvenc", "h264_amf", "h264_qsv", "libx264" }, candidates);
     }
 
     [Fact]

@@ -131,6 +131,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private long _encodeInputCountAccum;
     private long _encodeOutputMicrosAccum;
     private long _encodeOutputCountAccum;
+    private long _packetCopyMicrosAccum;
+    private long _packetCopyCountAccum;
+    private long _ringInsertMicrosAccum;
+    private long _ringInsertCountAccum;
     private long _encodeDroppedCount;
     // Diagnostics for the gap between what capture hands the encoder and what
     // reaches the ring. Clips arrive 52-260 frames short of a capture that logs
@@ -805,7 +809,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // Every queued hardware frame holds a VRAM surface. Replay capture
             // wants the newest game frame, not a second of stale work, so bound
             // the queue to roughly 125ms at every supported target rate.
-            var encodeQueueCapacity = ReplayFrameTimingPolicy.EncodeQueueCapacity(config.FrameRate);
+            var encodeQueueCapacity = ReplayEncoderProfilePolicy.ReplayQueueCapacity(config.FrameRate);
 
             if (useGpuScale && config.CaptureCursor)
             {
@@ -825,7 +829,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             if (useGpuScale && (!config.CaptureCursor || gpuCursorAvailable))
             {
                 (hwDeviceRef, hwFramesRef) = TryCreateD3D11EncodeFrames(
-                    device, outputWidth, outputHeight, encodeQueueCapacity + HardwareFramePoolHeadroom);
+                    device, outputWidth, outputHeight, ReplayEncoderProfilePolicy.D3D11FixedPoolSize(config.FrameRate, HardwareFramePoolHeadroom));
             }
 
             AVRational codecTimeBase;
@@ -836,13 +840,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             _videoCodecId = codecContext->codec_id;
             if (!hardwareFramesActive) ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
             requiresDistinctAmfSoftwareFrame = !hardwareFramesActive && encoderName.Contains("amf", StringComparison.OrdinalIgnoreCase);
-
-            if (codecContext is not null && InitFullSessionWriter(config, codecContext, out fullSessionFormatContext, out fullSessionStream, out fullSessionTempVideoPath, out fullSessionFinalOutputPath))
-            {
-                fullSessionStartUtc = MonotonicClock.UtcNow;
-                fullSessionStartWallUtc = DateTime.UtcNow;
-                fullSessionGameDisplayName = config.GameDisplayName;
-            }
 
             swsContext = CreateScaler(captureWidth, captureHeight, outputWidth, outputHeight);
 
@@ -860,30 +857,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // bright green in YUV->RGB). Fill it to black up front instead.
             FillFrameBlack(frame, outputHeight);
 
-            if (codecContext is not null) packet = ffmpeg.av_packet_alloc();
-
             encodeQueue = new BlockingCollection<EncodeJob>(boundedCapacity: encodeQueueCapacity);
             var encodeQueueGate = new object();
-            // Pointer locals can't be captured by a lambda closure directly - cross
-            // the thread boundary as nint instead, cast back inside EncodeLoop.
-            var encodeCodecContextPtr = (nint)codecContext;
-            var encodePacketPtr = (nint)packet;
-            var encodeFullSessionFormatContextPtr = (nint)fullSessionFormatContext;
-            var encodeFullSessionStreamPtr = (nint)fullSessionStream;
-            encodeThread = new Thread(() => EncodeLoop(encodeQueue, encodeCodecContextPtr, encodePacketPtr, encodeFullSessionFormatContextPtr, encodeFullSessionStreamPtr))
-            {
-                IsBackground = true,
-                Name = "ClypDat-NativeEncode"
-            };
-            try { encodeThread.Priority = ThreadPriority.AboveNormal; }
-            catch (Exception error) { AppLog.Error("Native capture: failed to raise encode thread priority (non-fatal)", error); }
-            encodeThread.Start();
 
             var adapterDescription = DescribeAdapter(device);
             var videoCodec = encoderName.StartsWith("av1_", StringComparison.OrdinalIgnoreCase) ? "AV1" : "H.264";
             var captureMode = wgcCapture is null ? "Desktop Duplication" : "Windows Graphics Capture";
-            AppLog.Info($"Native capture started ({captureMode}): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, codec={videoCodec}, encoder={encoderName}, encodePath={(hardwareFramesActive ? "D3D11 zero-copy" : "system-memory")}, cursorPath={(config.CaptureCursor ? "CPU" : "off")}, queue={encodeQueueCapacity} frames, adapter={adapterDescription}, profile={config.EncoderProfile}, frameTiming={ReplayFrameTimingPolicy.Normalize(config.FrameRateMode)}, configFrameRate={config.FrameRate}.");
-            SetHealth(new ReplayCaptureHealth("Native", captureMode, ReplayCaptureState.Healthy,
+            AppLog.Info($"Native capture armed ({captureMode}): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, qualification=waiting-for-foreground, provisionalEncoder={encoderName}, encodePath={(hardwareFramesActive ? "D3D11 zero-copy" : "system-memory")}, cursorPath={(config.CaptureCursor ? "CPU" : "off")}, queue={encodeQueueCapacity} frames, adapter={adapterDescription}, profile={config.EncoderProfile}, frameTiming={ReplayFrameTimingPolicy.Normalize(config.FrameRateMode)}, configFrameRate={config.FrameRate}.");
+            SetHealth(new ReplayCaptureHealth("Native", captureMode, ReplayCaptureState.Starting,
                 config.FrameRate, 0, 0, 0, 0, 0, 0, encoderName, "Default adapter", string.Empty, DateTime.UtcNow)
             {
                 AdapterDescription = adapterDescription,
@@ -1251,6 +1232,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var inputMicrosSinceLog = Interlocked.Exchange(ref _encodeInputMicrosAccum, 0);
                     var outputCountSinceLog = Math.Max(1, Interlocked.Exchange(ref _encodeOutputCountAccum, 0));
                     var outputMicrosSinceLog = Interlocked.Exchange(ref _encodeOutputMicrosAccum, 0);
+                    var packetCopyCountSinceLog = Math.Max(1, Interlocked.Exchange(ref _packetCopyCountAccum, 0));
+                    var packetCopyMicrosSinceLog = Interlocked.Exchange(ref _packetCopyMicrosAccum, 0);
+                    var ringInsertCountSinceLog = Math.Max(1, Interlocked.Exchange(ref _ringInsertCountAccum, 0));
+                    var ringInsertMicrosSinceLog = Interlocked.Exchange(ref _ringInsertMicrosAccum, 0);
                     var droppedSinceLog = Interlocked.Exchange(ref _encodeDroppedCount, 0);
                     var eagainSinceLog = Interlocked.Exchange(ref _sendRefusedEagainCount, 0);
                     var sendFailedSinceLog = Interlocked.Exchange(ref _sendFailedOtherCount, 0);
@@ -1274,14 +1259,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var wgcTelemetryText = wgcTelemetry is null
                         ? string.Empty
                         : $", wgcCallbackArrivals={wgcCallbackCount}, wgcInputFps={wgcInputRate:0.0}, wgcUniqueFps={wgcUniqueRate:0.0}, wgcPublished={wgcTelemetry.Value.PublishedFrames}, wgcTaken={wgcTelemetry.Value.TakenFrames}, wgcOverwritten={wgcTelemetry.Value.OverwrittenFrames}, wgcCallbackMs={wgcTelemetry.Value.CallbackDurationTotal.TotalMilliseconds:0.0}, wgcGpuLockWaitMs={wgcTelemetry.Value.GpuLockWaitTotal.TotalMilliseconds:0.0}, wgcTimestampGaps={wgcTelemetry.Value.SourceTimestampGapCount}, wgcMaxTimestampGapMs={wgcTelemetry.Value.SourceTimestampGapMaximum.TotalMilliseconds:0.0}, wgcResizeEvents={wgcTelemetry.Value.ResizeEvents}, wgcMinUpdateIntervalAvailable={wgcTelemetry.Value.MinimumUpdateInterval.InterfaceAvailable}, wgcMinUpdateIntervalRequestedMs={wgcTelemetry.Value.MinimumUpdateInterval.Requested.TotalMilliseconds:0.###}, wgcMinUpdateIntervalAppliedMs={wgcTelemetry.Value.MinimumUpdateInterval.Applied?.TotalMilliseconds:0.###}";
-                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={ringPacketCount}, ringBufferMb={ringBufferMb}, ringCapacityMb={ringCapacityMb}, packetPoolMb={poolRetainedMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgInputMs={inputMicrosSinceLog / 1000.0 / inputCountSinceLog:0.00}, avgOutputMs={outputMicrosSinceLog / 1000.0 / outputCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, pendingEncoderFrames={Volatile.Read(ref _pendingEncoderFrames)}, peakPendingEncoderFrames={Volatile.Read(ref _peakPendingEncoderFrames)}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}{wgcTelemetryText}.");
+                    var outputFrameRate = packetsOutSinceLog / diagElapsed;
+                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={ringPacketCount}, ringBufferMb={ringBufferMb}, ringCapacityMb={ringCapacityMb}, packetPoolMb={poolRetainedMb}, sendFrameMs={inputMicrosSinceLog / 1000.0 / inputCountSinceLog:0.00}, packetReceiveMs={outputMicrosSinceLog / 1000.0 / outputCountSinceLog:0.00}, packetCopyMs={packetCopyMicrosSinceLog / 1000.0 / packetCopyCountSinceLog:0.00}, ringInsertMs={ringInsertMicrosSinceLog / 1000.0 / ringInsertCountSinceLog:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, queueDepth={encodeQueue.Count}, pendingEncoderFrames={Volatile.Read(ref _pendingEncoderFrames)}, peakPendingEncoderFrames={Volatile.Read(ref _peakPendingEncoderFrames)}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, rollingOutputFps={outputFrameRate:0.0}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}{wgcTelemetryText}.");
                     // Raw encoded rate, deliberately NOT crediting suppressed pads
                     // back in. It remains useful telemetry, but a low rate with
                     // an empty queue is a pacing/source shortfall, not encoder
                     // overload and must not trigger quality advice.
                     // The encoder's returned packets are the actual output;
                     // queued AVFrames can still be delayed or rejected.
-                    var outputFrameRate = packetsOutSinceLog / diagElapsed;
                     var encoderPressure = droppedSinceLog > 0 || encodeQueue.Count * 4 >= encodeQueueCapacity * 3;
                     var outputShortfall = hasCapturedRealFrame && outputFrameRate < activeFrameRate * 0.9;
                     var overloaded = encoderPressure;
@@ -2118,7 +2103,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 if (useGpuScale && (!config.CaptureCursor || gpuCursorAvailable))
                                 {
                                     (hwDeviceRef, hwFramesRef) = TryCreateD3D11EncodeFrames(
-                                        device, outputWidth, outputHeight, encodeQueueCapacity + HardwareFramePoolHeadroom);
+                                    device, outputWidth, outputHeight, ReplayEncoderProfilePolicy.D3D11FixedPoolSize(config.FrameRate, HardwareFramePoolHeadroom));
                                 }
 
                                 var replacement = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, device, out _, out var rebuiltEncoderName, out var rebuiltHardware);
@@ -2208,6 +2193,96 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
                 if (!occluded && !hasCapturedRealFrame)
                 {
+                    // GPU scaling normally defers the NV12 readback until the
+                    // pacing tick. Qualification needs the actual foreground
+                    // pixels for both hardware and system-memory trials, so
+                    // materialize this first frame before opening trial contexts.
+                    if (useGpuScale && croppedDirty && nv12StagingRing is not null)
+                    {
+                        lock (gpuLock)
+                        {
+                            if (!nv12Ready)
+                            {
+                                bltStreams[0].Enable = true;
+                                bltStreams[0].InputSurface = inputView;
+                                bltStreams[1].Enable = false;
+                                videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, bltStreams);
+                            }
+
+                            var qualificationSlot = nv12StagingIndex;
+                            device.ImmediateContext.CopyResource(nv12StagingRing[qualificationSlot], nv12Output);
+                            var mapResult = device.ImmediateContext.Map(nv12StagingRing[qualificationSlot], 0u, MapMode.Read, MapFlags.None, out var mapped);
+                            if (mapResult.Success)
+                            {
+                                PrepareSoftwareFrameForWrite();
+                                CopyNv12PlanesToFrame(mapped, outputWidth, outputHeight, frame);
+                                if (cursorOutputX != int.MinValue)
+                                    DrawDesktopCursorNv12(frame, outputWidth, outputHeight, cursorOutputX, cursorOutputY);
+                                device.ImmediateContext.Unmap(nv12StagingRing[qualificationSlot], 0);
+                                lastFrameContentCapturedUtc = MonotonicClock.UtcNow;
+                            }
+                            nv12Ready = false;
+                            croppedDirty = false;
+                            nv12StagingIndex = (qualificationSlot + 1) % nv12StagingRing.Length;
+                        }
+                    }
+
+                    // The provisional context only keeps startup infrastructure
+                    // alive. Qualification is deliberately run once, here, from
+                    // the first actual foreground frame; no packet can enter the
+                    // replay ring before this swap because pacing is gated on
+                    // hasCapturedRealFrame.
+                    var qualifiedEncoder = CreateEncoder(
+                        config, outputWidth, outputHeight, hwFramesRef, device,
+                        out var qualifiedTimeBase, out var qualifiedEncoderName,
+                        out var qualifiedHardwareFrames,
+                        frame,
+                        useGpuScale ? nv12Output : null);
+                    if (qualifiedEncoder is null)
+                        throw new InvalidOperationException("Foreground encoder qualification did not produce a context.");
+
+                    if (codecContext is not null)
+                    {
+                        var provisional = codecContext;
+                        ffmpeg.avcodec_free_context(&provisional);
+                    }
+                    codecContext = qualifiedEncoder;
+                    _timeBase = qualifiedTimeBase;
+                    _videoCodecId = codecContext->codec_id;
+                    hardwareFramesActive = qualifiedHardwareFrames;
+                    encoderName = qualifiedEncoderName;
+                    requiresDistinctAmfSoftwareFrame = !qualifiedHardwareFrames && qualifiedEncoderName.Contains("amf", StringComparison.OrdinalIgnoreCase);
+                    if (!qualifiedHardwareFrames) ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
+                    if (codecContext is not null && InitFullSessionWriter(config, codecContext, out fullSessionFormatContext, out fullSessionStream, out fullSessionTempVideoPath, out fullSessionFinalOutputPath))
+                    {
+                        fullSessionStartUtc = MonotonicClock.UtcNow;
+                        fullSessionStartWallUtc = DateTime.UtcNow;
+                        fullSessionGameDisplayName = config.GameDisplayName;
+                    }
+
+                    packet = ffmpeg.av_packet_alloc();
+                    if (packet is null) throw new InvalidOperationException("Native replay could not allocate its encoder packet.");
+                    var encodeCodecContextPtr = (nint)codecContext;
+                    var encodePacketPtr = (nint)packet;
+                    var encodeFullSessionFormatContextPtr = (nint)fullSessionFormatContext;
+                    var encodeFullSessionStreamPtr = (nint)fullSessionStream;
+                    encodeThread = new Thread(() => EncodeLoop(encodeQueue!, encodeCodecContextPtr, encodePacketPtr, encodeFullSessionFormatContextPtr, encodeFullSessionStreamPtr))
+                    {
+                        IsBackground = true,
+                        Name = "ClypDat-NativeEncode"
+                    };
+                    try { encodeThread.Priority = ThreadPriority.AboveNormal; }
+                    catch (Exception error) { AppLog.Error("Native capture: failed to raise encode thread priority (non-fatal)", error); }
+                    encodeThread.Start();
+                    AppLog.Info($"Native replay: foreground qualification selected {qualifiedEncoderName} ({(qualifiedHardwareFrames ? "D3D11" : "system-memory")}); replay timeline starts at zero.");
+                    SetHealth(_health with
+                    {
+                        State = ReplayCaptureState.Healthy,
+                        Encoder = qualifiedEncoderName,
+                        EncodeQueueCapacity = encodeQueueCapacity,
+                        UpdatedUtc = DateTime.UtcNow
+                    });
+
                     hasCapturedRealFrame = true;
                     // Start the stall watchdog's clock here, not at loop start -
                     // this flips the moment the window first has focus, which can
@@ -2797,7 +2872,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // this on any exception path, so this is a no-op there, not a
             // duplicate drain.
             encodeQueue.CompleteAdding();
-            encodeThread.Join();
+            encodeThread?.Join();
         }
         catch (Exception error)
         {
@@ -3585,11 +3660,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 }
 
                 var jobFrame = (AVFrame*)job.FramePtr;
-                var sw = System.Diagnostics.Stopwatch.StartNew();
                 var accepted = false;
                 try
                 {
+                    var sendTimer = System.Diagnostics.Stopwatch.StartNew();
                     var sendResult = ffmpeg.avcodec_send_frame(codecContext, jobFrame);
+                    Interlocked.Add(ref _encodeInputMicrosAccum, (long)(sendTimer.Elapsed.TotalMilliseconds * 1000));
+                    Interlocked.Increment(ref _encodeInputCountAccum);
                     if (sendResult == 0)
                     {
                         pendingFrames.Enqueue(job.FramePtr, job.WallClockUtc);
@@ -3613,8 +3690,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 {
                     if (!accepted) ffmpeg.av_frame_free(&jobFrame);
                 }
-                Interlocked.Add(ref _encodeInputMicrosAccum, (long)(sw.Elapsed.TotalMilliseconds * 1000));
-                Interlocked.Increment(ref _encodeInputCountAccum);
             }
 
             // Queue drained and CompleteAdding was called (CaptureLoop's while
@@ -3640,9 +3715,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     {
         while (true)
         {
+            var receiveTimer = System.Diagnostics.Stopwatch.StartNew();
             var receiveResult = ffmpeg.avcodec_receive_packet(codecContext, packet);
+            Interlocked.Add(ref _encodeOutputMicrosAccum, (long)(receiveTimer.Elapsed.TotalMilliseconds * 1000));
             if (receiveResult == ffmpeg.AVERROR(ffmpeg.EAGAIN) || receiveResult == ffmpeg.AVERROR_EOF) break;
             if (receiveResult < 0) break;
+            Interlocked.Increment(ref _encodeOutputCountAccum);
 
             var hasPendingFrame = pendingFrames.TryTake(out var pendingFrame);
             try
@@ -3655,8 +3733,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // walked the managed heap from 23MB to 281MB across 20 gen2
             // collections, and one of those collections shows up in the log as a
             // 714ms capture stall.
+            var copyTimer = System.Diagnostics.Stopwatch.StartNew();
             var data = _packetPayloads.Rent(packet->size);
             Marshal.Copy((IntPtr)packet->data, data, 0, packet->size);
+            Interlocked.Add(ref _packetCopyMicrosAccum, (long)(copyTimer.Elapsed.TotalMilliseconds * 1000));
+            Interlocked.Increment(ref _packetCopyCountAccum);
 
             if (_extraData is null && codecContext->extradata_size > 0)
             {
@@ -3675,12 +3756,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var realWallClockUtc = hasPendingFrame ? pendingFrame.WallClockUtc : MonotonicClock.UtcNow;
 
             Interlocked.Increment(ref _packetsOutCount);
+            var insertTimer = System.Diagnostics.Stopwatch.StartNew();
             lock (_bufferLock)
             {
                 _packets.Add(new RingPacket(data, packet->size, packet->pts, isKeyframe, realWallClockUtc));
                 _ringBufferBytes += packet->size;
                 _ringBufferCapacityBytes += data.Length;
             }
+            Interlocked.Add(ref _ringInsertMicrosAccum, (long)(insertTimer.Elapsed.TotalMilliseconds * 1000));
+            Interlocked.Increment(ref _ringInsertCountAccum);
 
             if (fullSessionFormatContext is not null)
             {
@@ -4580,46 +4664,53 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // can therefore reach the replay timeline.
     private static unsafe NvencInputPathQualification.Result BenchmarkNvencInput(
         AVCodecContext* codecContext, AVBufferRef* framesRef, ID3D11Device? device,
-        int width, int height, bool hardwareFrames)
+        int width, int height, bool hardwareFrames, AVFrame* foregroundFrame = null,
+        ID3D11Texture2D? foregroundTexture = null)
     {
-        const int warmupPackets = 12;
         var packet = ffmpeg.av_packet_alloc();
         AVFrame* softwareTemplate = null;
-        ID3D11Texture2D? sourceTexture = null;
         var poolTextures = new Dictionary<nint, ID3D11Texture2D>();
+        var ownsSourceTexture = false;
+        ID3D11Texture2D? sourceTexture = foregroundTexture;
         try
         {
             if (packet is null) return new(false, 0);
             if (hardwareFrames)
             {
                 if (framesRef is null || device is null) return new(false, 0);
-                sourceTexture = device.CreateTexture2D(new Texture2DDescription
+                if (sourceTexture is null)
                 {
-                    Width = (uint)width, Height = (uint)height, MipLevels = 1, ArraySize = 1,
-                    Format = Format.NV12, SampleDescription = new SampleDescription(1, 0),
-                    Usage = ResourceUsage.Default, BindFlags = BindFlags.None,
-                    CPUAccessFlags = CpuAccessFlags.None, MiscFlags = ResourceOptionFlags.None
-                });
+                    // This path is only used by recovery before the next real
+                    // frame arrives. It is never used for initial qualification.
+                    sourceTexture = device.CreateTexture2D(new Texture2DDescription
+                    {
+                        Width = (uint)width, Height = (uint)height, MipLevels = 1, ArraySize = 1,
+                        Format = Format.NV12, SampleDescription = new SampleDescription(1, 0),
+                        Usage = ResourceUsage.Default, BindFlags = BindFlags.None,
+                        CPUAccessFlags = CpuAccessFlags.None, MiscFlags = ResourceOptionFlags.None
+                    });
+                    ownsSourceTexture = true;
+                }
             }
             else
             {
-                softwareTemplate = ffmpeg.av_frame_alloc();
+                if (foregroundFrame is null) return new(false, 0);
+                softwareTemplate = ffmpeg.av_frame_clone(foregroundFrame);
                 if (softwareTemplate is null) return new(false, 0);
-                softwareTemplate->format = (int)AVPixelFormat.AV_PIX_FMT_NV12;
-                softwareTemplate->width = width;
-                softwareTemplate->height = height;
-                if (ffmpeg.av_frame_get_buffer(softwareTemplate, 32) < 0) return new(false, 0);
-                FillFrameBlack(softwareTemplate, height);
             }
 
-            var emitted = 0;
-            var measuredPackets = 0;
-            var warm = false;
+            var windows = new List<double>(ReplayEncoderQualificationPolicy.RequiredWindows);
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-            var deadline = TimeSpan.FromSeconds(1.5);
+            var warm = false;
+            var emitted = 0;
+            var windowPackets = 0;
+            var windowStarted = TimeSpan.Zero;
             long pts = 0;
-            while (stopwatch.Elapsed < deadline)
+            while (windows.Count < ReplayEncoderQualificationPolicy.RequiredWindows)
             {
+                if (!warm && stopwatch.Elapsed >= TimeSpan.FromSeconds(2))
+                    return new(false, 0, TimedOut: true);
+
                 AVFrame* input = null;
                 if (hardwareFrames)
                 {
@@ -4633,12 +4724,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     if (!poolTextures.TryGetValue(texturePointer, out var poolTexture))
                     {
                         poolTexture = new ID3D11Texture2D(texturePointer);
-                        // AVFrame owns the pointer returned in data[0]. The
-                        // temporary Vortice wrapper does not AddRef it, so
-                        // explicitly acquire the reference this benchmark owns
-                        // before disposing that wrapper at the end. Otherwise
-                        // qualification tears down a live encoder-pool texture
-                        // and the first real CopySubresourceRegion faults.
                         poolTexture.AddRef();
                         poolTextures.Add(texturePointer, poolTexture);
                     }
@@ -4653,31 +4738,31 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 input->pts = pts++;
                 var send = ffmpeg.avcodec_send_frame(codecContext, input);
                 ffmpeg.av_frame_free(&input);
-                if (send == ffmpeg.AVERROR(ffmpeg.EAGAIN))
-                {
-                    // Drain below and retry on the next bounded iteration.
-                }
-                else if (send < 0)
-                {
-                    return new(false, 0);
-                }
+                if (send < 0 && send != ffmpeg.AVERROR(ffmpeg.EAGAIN)) return new(false, 0);
 
                 while (ffmpeg.avcodec_receive_packet(codecContext, packet) >= 0)
                 {
                     emitted++;
-                    if (warm) measuredPackets++;
+                    if (warm) windowPackets++;
                     ffmpeg.av_packet_unref(packet);
                 }
-                if (!warm && emitted >= warmupPackets)
+
+                if (!warm && emitted > 0)
                 {
                     warm = true;
-                    measuredPackets = 0;
-                    stopwatch.Restart();
+                    windowStarted = stopwatch.Elapsed;
+                    windowPackets = 0;
+                }
+                else if (warm && stopwatch.Elapsed - windowStarted >= TimeSpan.FromSeconds(1))
+                {
+                    var elapsed = Math.Max((stopwatch.Elapsed - windowStarted).TotalSeconds, 0.001);
+                    windows.Add(windowPackets / elapsed);
+                    windowStarted = stopwatch.Elapsed;
+                    windowPackets = 0;
                 }
             }
 
-            var elapsed = Math.Max(stopwatch.Elapsed.TotalSeconds, 0.001);
-            return warm ? new(true, measuredPackets / elapsed) : new(false, 0, TimedOut: true);
+            return new(true, windows.Average(), WindowFramesPerSecond: windows);
         }
         catch (Exception error)
         {
@@ -4687,14 +4772,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         finally
         {
             foreach (var texture in poolTextures.Values) texture.Dispose();
-            sourceTexture?.Dispose();
+            if (ownsSourceTexture) sourceTexture?.Dispose();
             if (softwareTemplate is not null) ffmpeg.av_frame_free(&softwareTemplate);
             if (packet is not null) ffmpeg.av_packet_free(&packet);
         }
     }
 
     private static unsafe AVCodecContext* CreateEncoder(ReplayBufferConfig config, int width, int height, out AVRational timeBase, out string encoderName)
-        => CreateEncoder(config, width, height, 0, null, out timeBase, out encoderName, out _);
+        => CreateEncoder(config, width, height, 0, null, out timeBase, out encoderName, out _, null, null);
 
     private static unsafe AVCodecContext* CreateEncoder(
         ReplayBufferConfig config,
@@ -4704,7 +4789,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         ID3D11Device? hardwareDevice,
         out AVRational timeBase,
         out string encoderName,
-        out bool usingHardwareFrames)
+        out bool usingHardwareFrames,
+        AVFrame* foregroundFrame = null,
+        ID3D11Texture2D? foregroundTexture = null)
     {
         usingHardwareFrames = false;
         // Local copy because a local function cannot capture an out parameter.
@@ -4716,8 +4803,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         if (av1Preferred)
         {
             AppLog.Info(av1Family is null
-                ? "Native replay: AV1 unavailable; trying H.264 candidates."
-                : $"Native replay: AV1 preflight passed for {av1Family}; trying AV1 before H.264 fallback.");
+                ? "Native replay: AV1 startup preflight found no preferred family; qualifying the full AV1 ladder before H.264 fallback."
+                : $"Native replay: AV1 preflight passed for {av1Family}; qualifying AV1 before H.264 fallback.");
         }
 
         // One full alloc/configure/open attempt. Returns null if the open
@@ -4802,102 +4889,95 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             return null;
         }
 
-        foreach (var candidateName in EncoderCandidates(config))
+        if (foregroundFrame is null)
         {
-            var candidateCodec = ffmpeg.avcodec_find_encoder_by_name(candidateName);
-            if (candidateCodec is null)
+            // Keep capture/audio infrastructure armable while the game is not
+            // foreground. This opens a context only to keep the existing
+            // thread wiring alive; it sends no frames and is replaced below.
+            foreach (var candidate in ReplayEncoderQualificationPolicy.Candidates(config.VideoCodec, encoderMode: config.EncoderMode))
             {
-                AppLog.Info($"Native encoder probe: {candidateName} not present in this ffmpeg build, skipping.");
-                continue;
+                var codec = ffmpeg.avcodec_find_encoder_by_name(candidate.Name);
+                if (codec is null) continue;
+                var hardware = candidate.IsD3D11 && hardwareFramesRef != 0;
+                var context = TryOpen(codec, candidate.Name, candidate.InputPath == ReplayEncoderInputPath.LowPower, hardware);
+                if (context is null) continue;
+                encoderName = candidate.Name;
+                usingHardwareFrames = hardware;
+                return context;
             }
-
-            // QSV gets two shots: the fixed-function VDENC path first, then the
-            // ordinary one if this driver/preset combination won't take it. Every
-            // other encoder has nothing to retry, so it gets one. An inner loop
-            // that exhausts its attempts falls through to the next candidate
-            // exactly as a single failed open used to.
-            var lowPowerAttempts = candidateName is "h264_qsv" or "av1_qsv"
-                ? new[] { true, false }
-                : new[] { false };
-
-            // Zero-copy is attempted for NVENC only. AMF and QSV advertise
-            // their own D3D11 input paths, but there is no AMD or Intel
-            // hardware here to confirm one against, and the fallback below is
-            // the exact behaviour those paths have today.
-            if (hardwareFramesRef != 0 && candidateName is ("h264_nvenc" or "av1_nvenc"))
-            {
-                AVCodecContext* d3dContext = null;
-                AVCodecContext* systemContext = null;
-                try
-                {
-                    d3dContext = TryOpen(candidateCodec, candidateName, false, hardwareFrames: true);
-                    systemContext = TryOpen(candidateCodec, candidateName, false, hardwareFrames: false);
-                    var d3dResult = d3dContext is null
-                        ? new NvencInputPathQualification.Result(false, 0)
-                        : BenchmarkNvencInput(d3dContext, (AVBufferRef*)hardwareFramesRef, hardwareDevice, width, height, hardwareFrames: true);
-                    var systemResult = systemContext is null
-                        ? new NvencInputPathQualification.Result(false, 0)
-                        : BenchmarkNvencInput(systemContext, null, null, width, height, hardwareFrames: false);
-                    var target = Math.Clamp(config.FrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
-                    var selected = NvencInputPathQualification.Select(target, d3dResult, systemResult);
-                    AppLog.Info($"Native encoder qualification: {candidateName} D3D11={d3dResult.FramesPerSecond:F1} fps ({(d3dResult.Available ? "available" : d3dResult.TimedOut ? "timeout" : "unavailable")}), system-memory={systemResult.FramesPerSecond:F1} fps ({(systemResult.Available ? "available" : systemResult.TimedOut ? "timeout" : "unavailable")}), selected={selected?.ToString() ?? "none"}, target={target} fps, selectedReached95={(selected == NvencInputPath.D3D11 ? d3dResult : systemResult).ReachedTarget(target)}.");
-
-                    if (selected == NvencInputPath.D3D11)
-                    {
-                        var hardwareContext = TryOpen(candidateCodec, candidateName, false, hardwareFrames: true);
-                        if (hardwareContext is not null)
-                        {
-                            encoderName = candidateName;
-                            usingHardwareFrames = true;
-                            if (ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.Av1 && candidateName.StartsWith("h264_", StringComparison.OrdinalIgnoreCase))
-                                AppLog.Info("Native replay: AV1 initialization failed; H.264 fallback selected.");
-                            AppLog.Info($"Native encoder qualification: {candidateName} selected D3D11 zero-copy input.");
-                            return hardwareContext;
-                        }
-                    }
-                    else if (selected == NvencInputPath.SystemMemory)
-                    {
-                        var softwareContext = TryOpen(candidateCodec, candidateName, false, hardwareFrames: false);
-                        if (softwareContext is not null)
-                        {
-                            encoderName = candidateName;
-                            if (ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.Av1 && candidateName.StartsWith("h264_", StringComparison.OrdinalIgnoreCase))
-                                AppLog.Info("Native replay: AV1 initialization failed; H.264 fallback selected.");
-                            AppLog.Info($"Native encoder qualification: {candidateName} selected system-memory input.");
-                            return softwareContext;
-                        }
-                    }
-                }
-                finally
-                {
-                    if (d3dContext is not null) ffmpeg.avcodec_free_context(&d3dContext);
-                    if (systemContext is not null) ffmpeg.avcodec_free_context(&systemContext);
-                }
-
-                // Both NVENC paths were tested on fresh contexts. Do not undo
-                // that result by opening NVENC once more without a successful
-                // qualification: continue through the existing AMF -> QSV ->
-                // CPU candidate order instead.
-                AppLog.Info($"Native encoder qualification: {candidateName} had no usable qualified input path; trying the next encoder family.");
-                continue;
-            }
-
-            foreach (var lowPower in lowPowerAttempts)
-            {
-                var codecContext = TryOpen(candidateCodec, candidateName, lowPower, hardwareFrames: false);
-                if (codecContext is null) continue;
-
-                encoderName = candidateName;
-                if (ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.Av1 && candidateName.StartsWith("h264_", StringComparison.OrdinalIgnoreCase))
-                    AppLog.Info("Native replay: AV1 initialization failed; H.264 fallback selected.");
-                AppLog.Info($"Native encoder probe: {candidateName} opened successfully (lowPower={lowPower}).");
-                return codecContext;
-            }
-
-            AppLog.Info($"Native encoder probe: {candidateName} unusable - no matching GPU/driver, trying next.");
+            throw new InvalidOperationException("No replay encoder context could be armed while waiting for a foreground frame.");
         }
 
-        throw new InvalidOperationException("No usable replay encoder found (tried hardware AV1, hardware H.264, and software libx264).");
+        var targetFrameRate = Math.Clamp(config.FrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
+        var qualificationResults = new List<ReplayEncoderQualificationResult>();
+        foreach (var candidate in ReplayEncoderQualificationPolicy.Candidates(config.VideoCodec, encoderMode: config.EncoderMode))
+        {
+            var candidateCodec = ffmpeg.avcodec_find_encoder_by_name(candidate.Name);
+            if (candidateCodec is null)
+            {
+                qualificationResults.Add(new ReplayEncoderQualificationResult(candidate, false, false, Array.Empty<double>(), "encoder not present"));
+                AppLog.Info($"Native encoder qualification: {candidate.Name}/{candidate.InputPath} unavailable - encoder not present.");
+                continue;
+            }
+
+            var hardware = candidate.IsD3D11 && hardwareFramesRef != 0;
+            if (candidate.IsD3D11 && !hardware)
+            {
+                qualificationResults.Add(new ReplayEncoderQualificationResult(candidate, false, false, Array.Empty<double>(), "D3D11 pool unavailable"));
+                AppLog.Info($"Native encoder qualification: {candidate.Name}/{candidate.InputPath} unavailable - D3D11 pool unavailable.");
+                continue;
+            }
+
+            var trial = TryOpen(candidateCodec, candidate.Name, candidate.InputPath == ReplayEncoderInputPath.LowPower, hardware);
+            if (trial is null)
+            {
+                qualificationResults.Add(new ReplayEncoderQualificationResult(candidate, false, false, Array.Empty<double>(), "open failed"));
+                continue;
+            }
+
+            var measured = BenchmarkNvencInput(
+                trial,
+                hardware ? (AVBufferRef*)hardwareFramesRef : null,
+                hardware ? hardwareDevice : null,
+                width,
+                height,
+                hardware,
+                foregroundFrame,
+                hardware ? foregroundTexture : null);
+            var result = new ReplayEncoderQualificationResult(
+                candidate,
+                measured.Available,
+                measured.TimedOut,
+                measured.WindowFramesPerSecond ?? Array.Empty<double>(),
+                measured.Available ? string.Empty : measured.TimedOut ? "warmup timed out" : "encode failed");
+            qualificationResults.Add(result);
+            ffmpeg.avcodec_free_context(&trial);
+
+            var reached = result.ReachedTarget(targetFrameRate);
+            AppLog.Info($"Native encoder qualification: {candidate.Name}/{candidate.InputPath} windows=[{string.Join(",", result.WindowFramesPerSecond.Select(rate => rate.ToString("F1", CultureInfo.InvariantCulture)))}] min={result.MinimumWindow:F1} mean={result.MeanWindow:F1} target={targetFrameRate} reachedTarget={reached} reason={(reached ? "qualified" : result.RejectionReason)}.");
+        }
+
+        var selectedResult = ReplayEncoderQualificationPolicy.Select(targetFrameRate, config.VideoCodec, qualificationResults);
+        if (selectedResult is null)
+            throw new InvalidOperationException("No replay encoder produced a usable qualification result.");
+
+        var selectedCodec = ffmpeg.avcodec_find_encoder_by_name(selectedResult.Candidate.Name);
+        if (selectedCodec is null)
+            throw new InvalidOperationException($"Selected replay encoder {selectedResult.Candidate.Name} disappeared after qualification.");
+
+        var finalHardware = selectedResult.Candidate.IsD3D11 && hardwareFramesRef != 0;
+        var finalContext = TryOpen(selectedCodec, selectedResult.Candidate.Name,
+            selectedResult.Candidate.InputPath == ReplayEncoderInputPath.LowPower, finalHardware);
+        if (finalContext is null)
+            throw new InvalidOperationException($"Selected replay encoder {selectedResult.Candidate.Name} could not open a fresh final context.");
+
+        encoderName = selectedResult.Candidate.Name;
+        usingHardwareFrames = finalHardware;
+        if (ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.Av1 &&
+            selectedResult.Candidate.Codec == ReplayVideoCodecPolicy.H264)
+            AppLog.Info("Native replay: AV1 qualification did not sustain the target; falling back to H.264.");
+        AppLog.Info($"Native encoder qualification: selected {encoderName}/{selectedResult.Candidate.InputPath} min={selectedResult.MinimumWindow:F1} mean={selectedResult.MeanWindow:F1} target={targetFrameRate}.");
+        return finalContext;
     }
 
     private static (int Width, int Height) CaptureOutputSize(ReplayBufferConfig config, int sourceWidth, int sourceHeight)

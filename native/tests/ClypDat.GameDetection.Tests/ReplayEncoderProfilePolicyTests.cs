@@ -11,12 +11,28 @@ public sealed class ReplayEncoderProfilePolicyTests
 
     [Theory]
     [InlineData(30, 16)]
-    [InlineData(60, 16)]
-    [InlineData(90, 20)]
-    [InlineData(120, 23)]
-    [InlineData(144, 23)]
+    [InlineData(60, 30)]
+    [InlineData(90, 45)]
+    [InlineData(120, 60)]
+    [InlineData(144, 60)]
     public void NvencSurfaces_KeepsPipelineAheadOfReplayQueue(int frameRate, int expected) =>
         Assert.Equal(expected, ReplayEncoderProfilePolicy.NvencSurfaces(frameRate));
+
+    [Theory]
+    [InlineData(30, 25)]
+    [InlineData(60, 43)]
+    [InlineData(90, 62)]
+    [InlineData(120, 80)]
+    public void D3D11FixedPoolSize_CoversEncoderQueueRetainedDuplicateAndHeadroom(int frameRate, int expected) =>
+        Assert.Equal(expected, ReplayEncoderProfilePolicy.D3D11FixedPoolSize(frameRate));
+
+    [Theory]
+    [InlineData(30, 25)]
+    [InlineData(60, 43)]
+    [InlineData(90, 62)]
+    [InlineData(120, 80)]
+    public void D3D11DynamicPoolMinimum_MatchesFixedPoolBudget(int frameRate, int expected) =>
+        Assert.Equal(expected, ReplayEncoderProfilePolicy.D3D11DynamicPoolMinimum(frameRate));
 
     [Theory]
     [InlineData(30, 30)]
