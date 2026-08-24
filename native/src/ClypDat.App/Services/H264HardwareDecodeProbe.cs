@@ -10,6 +10,8 @@ namespace ClypDat.App.Services;
 // legacy files retain the known-safe software path.
 internal static class H264HardwareDecodeProbe
 {
+    private const int ProbeTimeoutMilliseconds = 250;
+    private const int MaximumPacketPrefixBytes = 64 * 1024;
     private static readonly ConcurrentDictionary<string, bool> Cache = new(StringComparer.OrdinalIgnoreCase);
 
     internal static bool HasOnlyIdrRandomAccessPoints(string path)
@@ -30,28 +32,8 @@ internal static class H264HardwareDecodeProbe
     {
         try
         {
-            using var process = Process.Start(new ProcessStartInfo
-            {
-                FileName = "ffprobe",
-                Arguments = $"-v error -select_streams v:0 -show_packets -show_entries packet=flags,data -show_data -of json \"{path.Replace("\"", "\\\"")}\"",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            });
-            if (process is null) return false;
-            var output = process.StandardOutput.ReadToEnd();
-            if (!process.WaitForExit(5000) || process.ExitCode != 0) return false;
-            using var document = JsonDocument.Parse(output);
-            if (!document.RootElement.TryGetProperty("packets", out var packets)) return false;
-            var keyframes = 0;
-            foreach (var packet in packets.EnumerateArray())
-            {
-                if (!packet.TryGetProperty("flags", out var flags) || !flags.GetString()!.Contains('K')) continue;
-                keyframes++;
-                if (!packet.TryGetProperty("data", out var data) || !ContainsIdr(data.GetString())) return false;
-            }
-            return keyframes > 0;
+            var metadata = ReadPacketIndex(path);
+            return metadata is not null && HasOnlyIdrRandomAccessPoints(path, metadata.Value.Format, metadata.Value.KeyPackets);
         }
         catch (Exception error)
         {
@@ -60,31 +42,118 @@ internal static class H264HardwareDecodeProbe
         }
     }
 
-    private static bool ContainsIdr(string? dump)
+    // Kept internal so the bounded, filesystem-free part of the probe has a
+    // deterministic regression seam. `pos` is ffprobe's file position; only
+    // a small prefix is read from every key packet.
+    internal static bool HasOnlyIdrRandomAccessPoints(string path, H264PacketFormat format, IReadOnlyList<H264KeyPacket> keyPackets)
+    {
+        if (keyPackets.Count == 0) return false;
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            foreach (var packet in keyPackets)
+            {
+                if (packet.Position < 0 || packet.Size <= 0 || packet.Position >= stream.Length) return false;
+                stream.Position = packet.Position;
+                var bytesToRead = (int)Math.Min(Math.Min(packet.Size, MaximumPacketPrefixBytes), stream.Length - packet.Position);
+                if (bytesToRead <= 0) return false;
+                var bytes = new byte[bytesToRead];
+                var read = 0;
+                while (read < bytes.Length)
+                {
+                    var count = stream.Read(bytes, read, bytes.Length - read);
+                    if (count == 0) break;
+                    read += count;
+                }
+                if (read != bytes.Length || !ContainsIdrPayload(bytes, format)) return false;
+            }
+            return true;
+        }
+        catch { return false; }
+    }
+
+    private static (H264PacketFormat Format, IReadOnlyList<H264KeyPacket> KeyPackets)? ReadPacketIndex(string path)
+    {
+        using var process = Process.Start(new ProcessStartInfo
+        {
+            FileName = "ffprobe",
+            // Deliberately omit packet=data. Only compact index metadata and
+            // bounded codec configuration reach managed memory.
+            Arguments = $"-v error -select_streams v:0 -show_entries stream=codec_name,extradata:packet=flags,pos,size -show_data -of json \"{path.Replace("\"", "\\\"")}\"",
+            UseShellExecute = false, RedirectStandardOutput = true,
+            RedirectStandardError = true, CreateNoWindow = true
+        });
+        if (process is null) return null;
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(ProbeTimeoutMilliseconds))
+        {
+            try { process.Kill(entireProcessTree: true); } catch { }
+            return null;
+        }
+        var output = outputTask.GetAwaiter().GetResult();
+        _ = errorTask.GetAwaiter().GetResult();
+        if (process.ExitCode != 0 || output.Length > 2 * 1024 * 1024) return null;
+        using var document = JsonDocument.Parse(output);
+        if (!document.RootElement.TryGetProperty("streams", out var streams) || streams.GetArrayLength() != 1 ||
+            !streams[0].TryGetProperty("codec_name", out var codec) || !string.Equals(codec.GetString(), "h264", StringComparison.OrdinalIgnoreCase) ||
+            !document.RootElement.TryGetProperty("packets", out var packets)) return null;
+        var format = streams[0].TryGetProperty("extradata", out var extra) && ContainsStartCode(extra.GetString())
+            ? H264PacketFormat.AnnexB : H264PacketFormat.Avcc;
+        var result = new List<H264KeyPacket>();
+        foreach (var packet in packets.EnumerateArray())
+        {
+            if (!packet.TryGetProperty("flags", out var flags) || !(flags.GetString()?.Contains('K') ?? false)) continue;
+            if (!TryGetInt64(packet, "pos", out var position) || !TryGetInt64(packet, "size", out var size)) return null;
+            result.Add(new H264KeyPacket(position, size));
+        }
+        return (format, result);
+    }
+
+    private static bool TryGetInt64(JsonElement packet, string name, out long value)
+    {
+        value = 0;
+        return packet.TryGetProperty(name, out var field) && long.TryParse(field.GetString(), out value);
+    }
+
+    private static bool ContainsStartCode(string? dump)
     {
         if (string.IsNullOrEmpty(dump)) return false;
         var hex = new string(dump.Where(Uri.IsHexDigit).ToArray());
-        if (hex.Length < 2 || hex.Length % 2 != 0) return false;
-        return ContainsIdrPayload(Convert.FromHexString(hex));
+        return hex.Contains("000001", StringComparison.Ordinal);
     }
 
-    internal static bool ContainsIdrPayload(ReadOnlySpan<byte> bytes)
+    internal static bool ContainsIdrPayload(ReadOnlySpan<byte> bytes) => ContainsIdrPayload(bytes, H264PacketFormat.Auto);
+
+    internal static bool ContainsIdrPayload(ReadOnlySpan<byte> bytes, H264PacketFormat format)
+    {
+        if (format is H264PacketFormat.Auto or H264PacketFormat.AnnexB && ContainsAnnexBIdr(bytes)) return true;
+        return format is H264PacketFormat.Auto or H264PacketFormat.Avcc && ContainsAvccIdr(bytes);
+    }
+
+    private static bool ContainsAnnexBIdr(ReadOnlySpan<byte> bytes)
     {
         for (var i = 0; i + 4 < bytes.Length; i++)
         {
             var start = bytes[i] == 0 && bytes[i + 1] == 0 && (bytes[i + 2] == 1 || (bytes[i + 2] == 0 && bytes[i + 3] == 1));
-            if (!start) continue;
-            var nal = bytes[i + (bytes[i + 2] == 1 ? 3 : 4)] & 0x1f;
-            if (nal == 5) return true;
+            if (start && (bytes[i + (bytes[i + 2] == 1 ? 3 : 4)] & 0x1f) == 5) return true;
         }
+        return false;
+    }
+
+    private static bool ContainsAvccIdr(ReadOnlySpan<byte> bytes)
+    {
         for (var offset = 0; offset + 4 <= bytes.Length;)
         {
             var length = (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3];
             offset += 4;
-            if (length <= 0 || offset + length > bytes.Length) break;
+            if (length <= 0 || offset + length > bytes.Length) return false;
             if ((bytes[offset] & 0x1f) == 5) return true;
             offset += length;
         }
         return false;
     }
 }
+
+internal enum H264PacketFormat { Auto, Avcc, AnnexB }
+internal readonly record struct H264KeyPacket(long Position, long Size);

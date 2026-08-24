@@ -319,6 +319,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null)
     {
         if (!_sessionActive) throw new InvalidOperationException("Replay buffer is not recording.");
+        // Packets emitted before live qualification belong to a provisional
+        // encoder generation. Never let a hotkey turn those into a clip while
+        // the generation is still being accepted or replaced.
+        if (_health.StartupPhase is ReplayCaptureStartupPhase.WaitingForForeground or ReplayCaptureStartupPhase.OpeningEncoder or ReplayCaptureStartupPhase.Validating or ReplayCaptureStartupPhase.Fallback)
+            throw new InvalidOperationException("Replay encoder still validating.");
 
         var requestedStartUtc = clipWindow?.StartUtc ?? MonotonicClock.UtcNow - Duration;
         var requestedEndUtc = clipWindow?.EndUtc ?? MonotonicClock.UtcNow;
@@ -1169,7 +1174,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
             while (!token.IsCancellationRequested)
             {
-                if (stopwatch.Elapsed - lastDiagLog >= TimeSpan.FromSeconds(2))
+                // Qualification samples three foreground production seconds;
+                // after acceptance diagnostics can return to their cheaper
+                // two-second cadence.
+                if (stopwatch.Elapsed - lastDiagLog >= TimeSpan.FromSeconds(startupValidationWindows < ReplayEncoderQualificationPolicy.RequiredWindows ? 1 : 2))
                 {
                     // Under the GPU lock: half these counters (scaleMs, encodeMs,
                     // frameStalenessMs, the encoded/pad counts) are now written by
@@ -1262,11 +1270,22 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         ? string.Empty
                         : $", wgcCallbackArrivals={wgcCallbackCount}, wgcInputFps={wgcInputRate:0.0}, wgcUniqueFps={wgcUniqueRate:0.0}, wgcPublished={wgcTelemetry.Value.PublishedFrames}, wgcTaken={wgcTelemetry.Value.TakenFrames}, wgcOverwritten={wgcTelemetry.Value.OverwrittenFrames}, wgcCallbackMs={wgcTelemetry.Value.CallbackDurationTotal.TotalMilliseconds:0.0}, wgcGpuLockWaitMs={wgcTelemetry.Value.GpuLockWaitTotal.TotalMilliseconds:0.0}, wgcTimestampGaps={wgcTelemetry.Value.SourceTimestampGapCount}, wgcMaxTimestampGapMs={wgcTelemetry.Value.SourceTimestampGapMaximum.TotalMilliseconds:0.0}, wgcResizeEvents={wgcTelemetry.Value.ResizeEvents}, wgcMinUpdateIntervalAvailable={wgcTelemetry.Value.MinimumUpdateInterval.InterfaceAvailable}, wgcMinUpdateIntervalRequestedMs={wgcTelemetry.Value.MinimumUpdateInterval.Requested.TotalMilliseconds:0.###}, wgcMinUpdateIntervalAppliedMs={wgcTelemetry.Value.MinimumUpdateInterval.Applied?.TotalMilliseconds:0.###}";
                     var outputFrameRate = packetsOutSinceLog / diagElapsed;
-                    if (hasCapturedRealFrame && startupValidationWindows < ReplayEncoderQualificationPolicy.RequiredWindows &&
-                        outputFrameRate >= activeFrameRate * ReplayEncoderQualificationPolicy.TargetThreshold)
+                    // A live production window must prove both throughput and
+                    // absence of queue pressure. A static/startup burst can
+                    // produce target-rate packets while submissions already
+                    // back up behind a foreground game, which is exactly the
+                    // failure mode qualification is intended to catch.
+                    var validationWindowPasses = hasCapturedRealFrame && droppedSinceLog == 0 &&
+                        encodeQueue.Count * 4 < encodeQueueCapacity * 3 &&
+                        outputFrameRate >= activeFrameRate * ReplayEncoderQualificationPolicy.TargetThreshold;
+                    if (startupValidationWindows < ReplayEncoderQualificationPolicy.RequiredWindows && validationWindowPasses)
                     {
                         startupValidationWindows++;
                         AppLog.Info($"Native replay startup: {encoderName} live output validation window {startupValidationWindows}/{ReplayEncoderQualificationPolicy.RequiredWindows} reached {outputFrameRate:0.0}/{activeFrameRate} FPS.");
+                    }
+                    else if (hasCapturedRealFrame && startupValidationWindows < ReplayEncoderQualificationPolicy.RequiredWindows && !validationWindowPasses)
+                    {
+                        AppLog.Info($"Native replay startup: {encoderName} validation window rejected (output={outputFrameRate:0.0}/{activeFrameRate} FPS, dropped={droppedSinceLog}, queue={encodeQueue.Count}/{encodeQueueCapacity}).");
                     }
                     AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={ringPacketCount}, ringBufferMb={ringBufferMb}, ringCapacityMb={ringCapacityMb}, packetPoolMb={poolRetainedMb}, sendFrameMs={inputMicrosSinceLog / 1000.0 / inputCountSinceLog:0.00}, packetReceiveMs={outputMicrosSinceLog / 1000.0 / outputCountSinceLog:0.00}, packetCopyMs={packetCopyMicrosSinceLog / 1000.0 / packetCopyCountSinceLog:0.00}, ringInsertMs={ringInsertMicrosSinceLog / 1000.0 / ringInsertCountSinceLog:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, queueDepth={encodeQueue.Count}, pendingEncoderFrames={Volatile.Read(ref _pendingEncoderFrames)}, peakPendingEncoderFrames={Volatile.Read(ref _peakPendingEncoderFrames)}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, rollingOutputFps={outputFrameRate:0.0}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}{wgcTelemetryText}.");
                     // Raw encoded rate, deliberately NOT crediting suppressed pads

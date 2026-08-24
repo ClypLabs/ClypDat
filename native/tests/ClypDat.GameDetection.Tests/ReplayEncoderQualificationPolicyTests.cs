@@ -161,6 +161,26 @@ public sealed class ReplayEncoderQualificationPolicyTests
         Assert.True(Result(candidate, 114, 114, 114).ReachedTarget(120));
     }
 
+    [Fact]
+    public void Result_RejectsQueueSaturationEvenWhenOutputRateLooksHealthy()
+    {
+        var candidate = ReplayEncoderQualificationPolicy.Candidates("H.264")[0];
+        var result = new ReplayEncoderQualificationResult(candidate, true, false, new[] { 120d, 120d, 120d },
+            WindowDroppedFrames: new[] { 0, 0, 0 }, WindowQueueDepths: new[] { 30, 30, 30 }, QueueCapacity: 30);
+
+        Assert.False(result.ReachedTarget(120));
+    }
+
+    [Fact]
+    public void Result_RejectsDroppedFramesInAnyProductionWindow()
+    {
+        var candidate = ReplayEncoderQualificationPolicy.Candidates("H.264")[0];
+        var result = new ReplayEncoderQualificationResult(candidate, true, false, new[] { 120d, 120d, 120d },
+            WindowDroppedFrames: new[] { 0, 1, 0 });
+
+        Assert.False(result.ReachedTarget(120));
+    }
+
     private static ReplayEncoderQualificationResult Result(ReplayEncoderCandidate candidate, params double[] windows) =>
         new(candidate, true, false, windows);
 

@@ -23,7 +23,10 @@ internal sealed record ReplayEncoderQualificationResult(
     bool Available,
     bool TimedOut,
     IReadOnlyList<double> WindowFramesPerSecond,
-    string RejectionReason = "")
+    string RejectionReason = "",
+    IReadOnlyList<int>? WindowDroppedFrames = null,
+    IReadOnlyList<int>? WindowQueueDepths = null,
+    int QueueCapacity = 0)
 {
     internal double MinimumWindow => WindowFramesPerSecond.Count == 0 ? 0 : WindowFramesPerSecond.Min();
     internal double MeanWindow => WindowFramesPerSecond.Count == 0 ? 0 : WindowFramesPerSecond.Average();
@@ -31,7 +34,9 @@ internal sealed record ReplayEncoderQualificationResult(
     internal bool ReachedTarget(int targetFrameRate) =>
         Available && !TimedOut &&
         WindowFramesPerSecond.Count >= ReplayEncoderQualificationPolicy.RequiredWindows &&
-        WindowFramesPerSecond.All(rate => rate >= targetFrameRate * ReplayEncoderQualificationPolicy.TargetThreshold);
+        WindowFramesPerSecond.All(rate => rate >= targetFrameRate * ReplayEncoderQualificationPolicy.TargetThreshold) &&
+        (WindowDroppedFrames is null || WindowDroppedFrames.All(dropped => dropped == 0)) &&
+        (WindowQueueDepths is null || QueueCapacity <= 0 || WindowQueueDepths.All(depth => depth * 4 < QueueCapacity * 3));
 }
 
 internal static class ReplayEncoderQualificationPolicy
