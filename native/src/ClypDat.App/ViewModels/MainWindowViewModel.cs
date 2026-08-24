@@ -241,7 +241,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             new("Low Quality", "Efficient capture for lighter systems", "480p · 30 FPS · 5 Mbps", 480, 30, 5),
             new("Standard", "Balanced detail and performance", "720p · 60 FPS · 10 Mbps", 720, 60, 10),
-            new("High Quality", "Sharper video at higher resource cost", "1080p · 60 FPS · 15 Mbps", 1080, 60, 15),
+            new("High Quality", "Sharper video at higher resource cost", "1080p · 60 FPS · 20 Mbps", 1080, 60, 20),
             new("Custom", "Set each recording option yourself", "Choose resolution, FPS, and bitrate", -1, 0, 0)
         };
         ReplayEncoderModes = new ObservableCollection<ReplayEncoderModeOption>
@@ -1410,8 +1410,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             <= 480 => new ReplayBitrateRecommendation(5, 5),
             <= 720 => isAv1 ? new ReplayBitrateRecommendation(7, 7) : new ReplayBitrateRecommendation(10, 10),
-            <= 1080 => isAv1 ? new ReplayBitrateRecommendation(7, 10) : new ReplayBitrateRecommendation(15, 20),
-            <= 1440 => isAv1 ? new ReplayBitrateRecommendation(10, 20) : new ReplayBitrateRecommendation(20, 30),
+            <= 1080 => isAv1 ? new ReplayBitrateRecommendation(7, 10) : new ReplayBitrateRecommendation(20, 20),
+            <= 1440 => isAv1 ? new ReplayBitrateRecommendation(10, 20) : new ReplayBitrateRecommendation(25, 25),
             _ => isAv1 ? new ReplayBitrateRecommendation(20, 35) : new ReplayBitrateRecommendation(50, 70)
         };
     }
