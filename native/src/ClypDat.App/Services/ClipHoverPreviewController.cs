@@ -114,7 +114,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
 
         warmExitCancellation?.Cancel();
         warmExitCancellation?.Dispose();
-        warmPresenter?.SetAttached(true);
+        if (warmPresenter is not null) _ = warmPresenter.SetAttachedAsync(true).AsTask();
         attachSignal?.TrySetResult();
         if (warmReused) AppLog.Debug($"Clip hover preview warm reuse: {Path.GetFileName(clip.Path)}.");
         return;
@@ -196,7 +196,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         if (pendingCancelled) AppLog.Debug($"Clip hover preview pending cancelled: {Path.GetFileName(clip.Path)}.");
         if (!active) return;
 
-        presenter?.SetAttached(false);
+        if (presenter is not null) _ = presenter.SetAttachedAsync(false).AsTask();
         previousWarmExit?.Cancel();
         previousWarmExit?.Dispose();
         _ = ExpireWarmSessionAsync(clip, generation, warmToken);
@@ -216,7 +216,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         }
         pendingCancellation?.Cancel();
         pendingCancellation?.Dispose();
-        DisposeSession(state, reason, state.IsActive);
+        _ = DisposeDetachedSessionAsync(state, reason, state.IsActive);
     }
 
     public void StopIfActive(ClipCardViewModel clip, string reason)
@@ -241,13 +241,14 @@ internal sealed class ClipHoverPreviewController : IDisposable
                 if (!IsPendingLocked(clip, pendingGeneration)) return;
                 previous = DetachActiveLocked();
             }
-            DisposeSession(previous, "replaced", previous.IsActive);
+            await DisposeSessionAsync(previous, "replaced", previous.IsActive);
 
             await _sessionLock.WaitAsync(token);
+            var runStarted = false;
+            var generation = 0;
             try
             {
                 CancellationTokenSource cancellation;
-                int generation;
                 lock (_stateLock)
                 {
                     if (!IsPendingLocked(clip, pendingGeneration)) return;
@@ -263,10 +264,22 @@ internal sealed class ClipHoverPreviewController : IDisposable
                     _attachmentVersion++;
                     generation = ++_generation;
                 }
-                presenter.SetAttached(true);
+                await presenter.ActivateSessionAsync(cancellation.Token);
+                bool attached;
+                lock (_stateLock)
+                {
+                    if (!IsCurrentLocked(clip, generation)) return;
+                    attached = _attached;
+                }
+                await presenter.SetAttachedAsync(attached);
+                runStarted = true;
                 await RunSessionAsync(clip, generation, previewSize, presenter, cancellation.Token);
             }
-            finally { _sessionLock.Release(); }
+            finally
+            {
+                if (!runStarted) await AbandonSessionAsync(clip, generation);
+                _sessionLock.Release();
+            }
         }
         catch (OperationCanceledException) { }
         catch (Exception error) { AppLog.Error("Clip hover preview failed", error); }
@@ -317,7 +330,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         finally
         {
             metrics.Log(clip, generation);
-            Cleanup(clip, generation);
+            await CleanupAsync(clip, generation);
         }
     }
 
@@ -421,7 +434,18 @@ internal sealed class ClipHoverPreviewController : IDisposable
             if (!IsCurrentLocked(clip, generation) || _warmExitCancellation?.Token != token) return;
             state = DetachActiveLocked();
         }
-        DisposeSession(state, "warm exit expired", state.IsActive);
+        _ = DisposeDetachedSessionAsync(state, "warm exit expired", state.IsActive);
+    }
+
+    private async Task AbandonSessionAsync(ClipCardViewModel clip, int generation)
+    {
+        SessionState state;
+        lock (_stateLock)
+        {
+            if (!IsCurrentLocked(clip, generation)) return;
+            state = DetachActiveLocked();
+        }
+        await DisposeSessionAsync(state, "activation cancelled", state.IsActive);
     }
 
     internal static double ResolveFrameRate(double recordedFrameRate) =>
@@ -477,7 +501,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         lock (_stateLock) process = IsCurrentLocked(clip, generation) ? _process : null;
         Kill(process);
     }
-    private void Cleanup(ClipCardViewModel clip, int generation)
+    private async Task CleanupAsync(ClipCardViewModel clip, int generation)
     {
         SessionState state;
         lock (_stateLock)
@@ -485,7 +509,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
             if (!IsCurrentLocked(clip, generation)) return;
             state = DetachActiveLocked();
         }
-        DisposeSession(state, "completed", state.IsActive);
+        await DisposeSessionAsync(state, "completed", state.IsActive);
     }
     private SessionState DetachActiveLocked()
     {
@@ -494,15 +518,26 @@ internal sealed class ClipHoverPreviewController : IDisposable
         _clip = null; _presenter = null; _previewSize = default; _process = null; _cancellation = null; _warmExitCancellation = null; _attachSignal = null; _attached = false;
         return state;
     }
-    private static void DisposeSession(SessionState state, string reason, bool log)
+    private static async Task DisposeSessionAsync(SessionState state, string reason, bool log)
     {
         state.Cancellation?.Cancel();
         state.WarmExitCancellation?.Cancel();
         Kill(state.Process);
-        state.Presenter?.SetAttached(false);
+        if (state.Presenter is not null)
+        {
+            await state.Presenter.SetAttachedAsync(false);
+            await state.Presenter.ReleaseResourcesAsync();
+        }
         state.Cancellation?.Dispose();
         state.WarmExitCancellation?.Dispose();
         if (log) AppLog.Info($"Clip hover preview cleanup complete: {reason}.");
+    }
+
+    private async Task DisposeDetachedSessionAsync(SessionState state, string reason, bool log)
+    {
+        await _sessionLock.WaitAsync();
+        try { await DisposeSessionAsync(state, reason, log); }
+        finally { _sessionLock.Release(); }
     }
     private bool IsPending(ClipCardViewModel clip, int generation) { lock (_stateLock) return IsPendingLocked(clip, generation); }
     private bool IsPendingLocked(ClipCardViewModel clip, int generation) => !_disposed && _pendingGeneration == generation && _pendingClip == clip;
@@ -519,7 +554,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         catch { return 0; }
     }
     private static void Kill(Process? process) { try { if (process is { HasExited: false }) process.Kill(true); } catch { } }
-    public void Dispose() { if (_disposed) return; _disposed = true; Stop("window closed"); _sessionLock.Dispose(); }
+    public void Dispose() { if (_disposed) return; _disposed = true; Stop("window closed"); }
 
     private sealed class FrameSlot(byte[] buffer) { public byte[] Buffer { get; } = buffer; }
     private readonly record struct SessionState(ClipCardViewModel? Clip, IClipPreviewPresenter? Presenter, Process? Process, CancellationTokenSource? Cancellation, CancellationTokenSource? WarmExitCancellation)

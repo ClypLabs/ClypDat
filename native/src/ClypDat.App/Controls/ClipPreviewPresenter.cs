@@ -21,7 +21,9 @@ namespace ClypDat.App.Controls;
 internal interface IClipPreviewPresenter : IAsyncDisposable
 {
     PreviewPresentationPath Path { get; }
-    void SetAttached(bool attached);
+    ValueTask ActivateSessionAsync(CancellationToken cancellationToken);
+    ValueTask SetAttachedAsync(bool attached);
+    ValueTask ReleaseResourcesAsync();
     ValueTask<PreviewPresentResult> PresentAsync(ReadOnlyMemory<byte> rgba, PixelSize size, CancellationToken cancellationToken);
 }
 
@@ -32,10 +34,10 @@ internal readonly record struct PreviewPresentResult(PreviewPresentationPath Pat
 public sealed class ClipPreviewPresenter : Control, IClipPreviewPresenter
 {
     private readonly SoftwareClipPreviewAdapter _software;
+    private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
     private IClipPreviewPresenter? _adapter;
     private bool _requestedAttached;
     private bool _disposed;
-    private Task? _gpuInitialization;
 
     public ClipPreviewPresenter()
     {
@@ -45,23 +47,16 @@ public sealed class ClipPreviewPresenter : Control, IClipPreviewPresenter
 
     PreviewPresentationPath IClipPreviewPresenter.Path => _adapter?.Path ?? PreviewPresentationPath.Software;
 
-    protected override void OnAttachedToVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
-    {
-        base.OnAttachedToVisualTree(e);
-        _gpuInitialization ??= InitializeGpuAsync();
-    }
-
     protected override void OnDetachedFromVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
     {
-        SetAttached(false);
-        _ = ReleaseGpuAsync();
+        _ = ((IClipPreviewPresenter)this).ReleaseResourcesAsync().AsTask();
         base.OnDetachedFromVisualTree(e);
     }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
-        if (change.Property == BoundsProperty && _adapter is GpuClipPreviewAdapter gpu)
-            gpu.Resize(Bounds.Size);
+        if (change.Property == BoundsProperty)
+            _ = ResizeGpuAsync(Bounds.Size);
         base.OnPropertyChanged(change);
     }
 
@@ -71,49 +66,68 @@ public sealed class ClipPreviewPresenter : Control, IClipPreviewPresenter
             context.DrawImage(bitmap, Bounds);
     }
 
-    public void SetAttached(bool attached)
+    async ValueTask IClipPreviewPresenter.ActivateSessionAsync(CancellationToken cancellationToken)
     {
-        _requestedAttached = attached;
-        if (!Dispatcher.UIThread.CheckAccess())
+        await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            Dispatcher.UIThread.Post(() => ApplyAttached(attached), DispatcherPriority.Render);
-            return;
+            if (_disposed) throw new ObjectDisposedException(nameof(ClipPreviewPresenter));
+            if (_adapter is not SoftwareClipPreviewAdapter) return;
+            await InitializeGpuAsync(cancellationToken).ConfigureAwait(true);
         }
-        ApplyAttached(attached);
+        finally { _lifecycleLock.Release(); }
     }
 
-    private void ApplyAttached(bool attached)
+    async ValueTask IClipPreviewPresenter.SetAttachedAsync(bool attached)
     {
-        _adapter?.SetAttached(attached);
-        InvalidateVisual();
+        await _lifecycleLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_disposed) return;
+            _requestedAttached = attached;
+            if (_adapter is { } adapter) await adapter.SetAttachedAsync(attached).ConfigureAwait(false);
+            await Dispatcher.UIThread.InvokeAsync(InvalidateVisual, DispatcherPriority.Render);
+        }
+        finally { _lifecycleLock.Release(); }
     }
 
     async ValueTask<PreviewPresentResult> IClipPreviewPresenter.PresentAsync(ReadOnlyMemory<byte> rgba, PixelSize size, CancellationToken cancellationToken)
     {
-        if (_disposed) throw new ObjectDisposedException(nameof(ClipPreviewPresenter));
-        if (_gpuInitialization is { } initialization) await initialization.ConfigureAwait(false);
-        var adapter = _adapter ?? _software;
+        await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            return await adapter.PresentAsync(rgba, size, cancellationToken).ConfigureAwait(false);
+            if (_disposed) throw new ObjectDisposedException(nameof(ClipPreviewPresenter));
+            var adapter = _adapter ?? _software;
+            try
+            {
+                return await adapter.PresentAsync(rgba, size, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception error) when (adapter is GpuClipPreviewAdapter && !cancellationToken.IsCancellationRequested)
+            {
+                // Device loss/import failures must not discard this frame. Switch
+                // immediately, then render the same decoded bytes through software.
+                AppLog.Info($"Clip hover preview GPU path lost; switching to software: {error.Message}");
+                _adapter = _software;
+                await _software.SetAttachedAsync(_requestedAttached).ConfigureAwait(false);
+                await adapter.ReleaseResourcesAsync().ConfigureAwait(false);
+                return await _software.PresentAsync(rgba, size, cancellationToken).ConfigureAwait(false);
+            }
         }
-        catch (Exception error) when (adapter is GpuClipPreviewAdapter && !cancellationToken.IsCancellationRequested)
+        finally
         {
-            // Device loss/import failures must not discard this frame. Switch
-            // immediately, then render the same decoded bytes through software.
-            AppLog.Info($"Clip hover preview GPU path lost; switching to software: {error.Message}");
-            await SwitchToSoftwareAsync(adapter).ConfigureAwait(false);
-            return await _software.PresentAsync(rgba, size, cancellationToken).ConfigureAwait(false);
+            _lifecycleLock.Release();
         }
     }
 
-    private async Task InitializeGpuAsync()
+    private async Task InitializeGpuAsync(CancellationToken cancellationToken)
     {
         try
         {
             var element = ElementComposition.GetElementVisual(this);
             if (element is null) return;
+            cancellationToken.ThrowIfCancellationRequested();
             var interop = await element.Compositor.TryGetCompositionGpuInterop();
+            cancellationToken.ThrowIfCancellationRequested();
             if (interop is null || interop.IsLost || interop.DeviceLuid is not { Length: 8 }
                 || !interop.SupportedImageHandleTypes.Contains(KnownPlatformGraphicsExternalImageHandleTypes.D3D11TextureGlobalSharedHandle)
                 || !interop.GetSynchronizationCapabilities(KnownPlatformGraphicsExternalImageHandleTypes.D3D11TextureGlobalSharedHandle)
@@ -123,40 +137,61 @@ public sealed class ClipPreviewPresenter : Control, IClipPreviewPresenter
             var gpu = GpuClipPreviewAdapter.TryCreate(this, element.Compositor, interop);
             if (gpu is null) return;
             _adapter = gpu;
-            gpu.SetAttached(_requestedAttached);
+            await gpu.SetAttachedAsync(_requestedAttached).ConfigureAwait(false);
             InvalidateVisual();
-            AppLog.Debug("Clip hover preview presenter: D3D11 composition path ready.");
+            AppLog.Debug("Clip hover preview GPU resources created.");
         }
+        catch (OperationCanceledException) { throw; }
         catch (Exception error)
         {
             AppLog.Debug($"Clip hover preview presenter: software path selected ({error.Message}).");
         }
     }
 
-    private async Task SwitchToSoftwareAsync(IClipPreviewPresenter failed)
+    private async Task ResizeGpuAsync(Size size)
     {
-        if (!ReferenceEquals(_adapter, failed)) return;
-        _adapter = _software;
-        _software.SetAttached(_requestedAttached);
-        await failed.DisposeAsync();
-        await Dispatcher.UIThread.InvokeAsync(InvalidateVisual, DispatcherPriority.Render);
+        await _lifecycleLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (!_disposed && _adapter is GpuClipPreviewAdapter gpu) gpu.Resize(size);
+        }
+        finally { _lifecycleLock.Release(); }
     }
 
-    private async Task ReleaseGpuAsync()
+    async ValueTask IClipPreviewPresenter.ReleaseResourcesAsync()
     {
-        if (_adapter is not GpuClipPreviewAdapter gpu) return;
+        await _lifecycleLock.WaitAsync().ConfigureAwait(false);
+        try { await ReleaseResourcesCoreAsync().ConfigureAwait(false); }
+        finally { _lifecycleLock.Release(); }
+    }
+
+    private async ValueTask ReleaseResourcesCoreAsync()
+    {
+        _requestedAttached = false;
+        if (_adapter is { } activeAdapter) await activeAdapter.SetAttachedAsync(false).ConfigureAwait(false);
+        var adapter = _adapter;
         _adapter = _software;
-        _gpuInitialization = null;
-        await gpu.DisposeAsync();
+        if (adapter is not null && adapter != _software)
+        {
+            await adapter.ReleaseResourcesAsync().ConfigureAwait(false);
+            AppLog.Debug("Clip hover preview GPU resources released.");
+        }
+        await _software.ReleaseResourcesAsync().ConfigureAwait(false);
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (_disposed) return;
-        _disposed = true;
-        var adapter = Interlocked.Exchange(ref _adapter, null);
-        if (adapter is not null && adapter != _software) await adapter.DisposeAsync();
-        await _software.DisposeAsync();
+        await _lifecycleLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_disposed) return;
+            _disposed = true;
+            await ReleaseResourcesCoreAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            _lifecycleLock.Release();
+        }
     }
 }
 
@@ -168,7 +203,13 @@ internal sealed class SoftwareClipPreviewAdapter(ClipPreviewPresenter owner) : I
     public WriteableBitmap? Bitmap => _bitmap;
     public PreviewPresentationPath Path => PreviewPresentationPath.Software;
 
-    public void SetAttached(bool attached) => _attached = attached;
+    public ValueTask ActivateSessionAsync(CancellationToken cancellationToken) => ValueTask.CompletedTask;
+
+    public ValueTask SetAttachedAsync(bool attached)
+    {
+        _attached = attached;
+        return ValueTask.CompletedTask;
+    }
 
     public async ValueTask<PreviewPresentResult> PresentAsync(ReadOnlyMemory<byte> rgba, PixelSize size, CancellationToken cancellationToken)
     {
@@ -198,12 +239,14 @@ internal sealed class SoftwareClipPreviewAdapter(ClipPreviewPresenter owner) : I
         return new PreviewPresentResult(Path, Stopwatch.GetElapsedTime(started));
     }
 
-    public ValueTask DisposeAsync()
+    public ValueTask ReleaseResourcesAsync()
     {
         var bitmap = Interlocked.Exchange(ref _bitmap, null);
         Services.DeferredBitmapDisposal.Release(bitmap);
         return ValueTask.CompletedTask;
     }
+
+    public ValueTask DisposeAsync() => ReleaseResourcesAsync();
 }
 
 internal sealed class GpuClipPreviewAdapter : IClipPreviewPresenter
@@ -265,10 +308,13 @@ internal sealed class GpuClipPreviewAdapter : IClipPreviewPresenter
         finally { adapter?.Dispose(); }
     }
 
-    public void SetAttached(bool attached)
+    public ValueTask ActivateSessionAsync(CancellationToken cancellationToken) => ValueTask.CompletedTask;
+
+    public ValueTask SetAttachedAsync(bool attached)
     {
         _attached = attached;
         _visual.Opacity = attached ? 1 : 0;
+        return ValueTask.CompletedTask;
     }
 
     public void Resize(Size size) => _visual.Size = ToVector(size);
@@ -332,7 +378,11 @@ internal sealed class GpuClipPreviewAdapter : IClipPreviewPresenter
         _nextSlot = 0;
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask ReleaseResourcesAsync() => DisposeCoreAsync();
+
+    public ValueTask DisposeAsync() => DisposeCoreAsync();
+
+    private async ValueTask DisposeCoreAsync()
     {
         if (_disposed) return;
         _disposed = true;
