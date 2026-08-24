@@ -9,7 +9,6 @@ public sealed class EncoderTuningService
     public event EventHandler<EncoderResolutionChange>? ResolutionChangeRequested;
 #pragma warning restore CS0067
 
-    private static readonly int[] FrameRateLadder = { 144, 120, 90, 60, 30 };
     private static readonly TimeSpan Warmup = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan Cooldown = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan RestoreAfterClean = TimeSpan.FromMinutes(10);
@@ -68,15 +67,7 @@ public sealed class EncoderTuningService
         _cleanSinceUtc = null;
         _peakQueueSinceClean = 0;
 
-        if (!enabled && _sessionStartUtc != DateTime.MinValue && _activeFrameRate != _configuredFrameRate)
-        {
-            var previous = _activeFrameRate;
-            _activeFrameRate = _configuredFrameRate;
-            AppLog.Info($"Encoder tuning: automatic FPS adjustment disabled; restoring {previous} -> {_configuredFrameRate} fps.");
-            FrameRateChangeRequested?.Invoke(this, new EncoderFrameRateChange(previous, _configuredFrameRate));
-        }
-
-        AppLog.Info($"Encoder tuning: automatic FPS adjustment {(enabled ? "enabled" : "disabled")}.");
+        AppLog.Info($"Encoder tuning: overload monitoring {(enabled ? "enabled" : "disabled")}; the selected FPS is always preserved.");
     }
 
     public void EndSession()
@@ -138,59 +129,19 @@ public sealed class EncoderTuningService
         var severeCount = _recentSevere.Count(entry => entry);
         if (severe && _recentSevere.Count >= WindowSize && severeCount >= DemoteThreshold)
         {
-            ProposeFrameRateReduction(health, now, severeCount);
+            RecordSustainedOverload(health, now, severeCount);
             return;
         }
-
-        ProposeFrameRateRestore(health, now);
     }
 
-    private void ProposeFrameRateReduction(ReplayCaptureHealth health, DateTime now, int severeCount)
+    private void RecordSustainedOverload(ReplayCaptureHealth health, DateTime now, int severeCount)
     {
-        if (_activeFrameRate <= 30)
-        {
-            AppLog.Info($"Encoder tuning: sustained overload at 30 fps floor; queue={health.QueueDepth}/{health.EncodeQueueCapacity}, " +
-                        $"outputFps={health.OutputFrameRate:0.0}/{health.TargetFrameRate}.");
-            _lastDecisionUtc = now;
-            _recentSevere.Clear();
-            _recentOutputs.Clear();
-            return;
-        }
-
-        var measuredCapacity = _recentOutputs
-            .Where(value => value.HasValue)
-            .Select(value => value!.Value)
-            .OrderBy(value => value)
-            .ElementAt(_recentSevere.Count(entry => entry) / 2);
-        var next = FrameRateLadder.FirstOrDefault(rate => rate < _activeFrameRate && rate <= measuredCapacity);
-        if (next == 0) next = 30;
-
-        var previous = _activeFrameRate;
-        _activeFrameRate = next;
-        AppLog.Info($"Encoder tuning: lowering target frame rate {previous} -> {next} fps. " +
-                    $"{severeCount}/{WindowSize} windows severe, measured capacity={measuredCapacity:0.0}, " +
-                    $"queue={health.QueueDepth}/{health.EncodeQueueCapacity}, " +
+        AppLog.Info($"Encoder tuning: sustained overload detected, preserving selected {_configuredFrameRate} fps. " +
+                    $"{severeCount}/{WindowSize} windows severe, queue={health.QueueDepth}/{health.EncodeQueueCapacity}, " +
                     $"outputFps={health.OutputFrameRate:0.0}/{health.TargetFrameRate}.");
-        FrameRateChangeRequested?.Invoke(this, new EncoderFrameRateChange(previous, next));
         _lastDecisionUtc = now;
         _recentSevere.Clear();
         _recentOutputs.Clear();
-        _cleanSinceUtc = null;
-        _peakQueueSinceClean = 0;
-    }
-
-    private void ProposeFrameRateRestore(ReplayCaptureHealth health, DateTime now)
-    {
-        if (_activeFrameRate >= _configuredFrameRate || _cleanSinceUtc is null) return;
-        if (now - _cleanSinceUtc < RestoreAfterClean) return;
-        if (_peakQueueSinceClean >= health.EncodeQueueCapacity * HealthyQueueFraction) return;
-
-        var previous = _activeFrameRate;
-        _activeFrameRate = _configuredFrameRate;
-        AppLog.Info($"Encoder tuning: restoring target frame rate {previous} -> {_configuredFrameRate} fps after " +
-                    $"{(now - _cleanSinceUtc.Value).TotalMinutes:0.0} clean minutes.");
-        FrameRateChangeRequested?.Invoke(this, new EncoderFrameRateChange(previous, _configuredFrameRate));
-        _lastDecisionUtc = now;
         _cleanSinceUtc = null;
         _peakQueueSinceClean = 0;
     }

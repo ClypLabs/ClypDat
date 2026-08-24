@@ -9,72 +9,13 @@ public sealed class EncoderTuningServiceTests
     private static readonly TimeSpan SampleInterval = TimeSpan.FromSeconds(2);
 
     [Fact]
-    public void Lowers120FpsToMeasured60FpsCapacity()
+    public void PreservesConfiguredRateDuringSustainedOverload()
     {
         var service = new EncoderTuningService();
         var changes = Changes(service);
         service.BeginSession(ReplayEncoderProfilePolicy.Automatic, 120, 1440);
 
         Feed(service, 30, targetFrameRate: 120, outputFrameRate: 61, queueDepth: 80, queueCapacity: 120);
-
-        var change = Assert.Single(changes);
-        Assert.Equal(new EncoderFrameRateChange(120, 60), change);
-    }
-
-    [Fact]
-    public void Lowers60FpsTo30WhenEncoderSustainsOnly44Fps()
-    {
-        var service = new EncoderTuningService();
-        var changes = Changes(service);
-        service.BeginSession(ReplayEncoderProfilePolicy.Automatic, 60, 1080);
-
-        Feed(service, 30, targetFrameRate: 60, outputFrameRate: 44, queueDepth: 7, queueCapacity: 8);
-
-        Assert.Equal(new EncoderFrameRateChange(60, 30), Assert.Single(changes));
-    }
-
-    [Fact]
-    public void CanReduceAgainAfterCooldownWhenOverloadContinues()
-    {
-        var service = new EncoderTuningService();
-        var changes = Changes(service);
-        service.BeginSession(ReplayEncoderProfilePolicy.Automatic, 120, 1080);
-
-        Feed(service, 30, 120, 61, 80, 120);
-        Feed(service, 60, 120, 35, 80, 120);
-
-        Assert.Equal(new[]
-        {
-            new EncoderFrameRateChange(120, 60),
-            new EncoderFrameRateChange(60, 30)
-        }, changes);
-    }
-
-    [Fact]
-    public void RestoresConfiguredRateAfterCleanPeriod()
-    {
-        var service = new EncoderTuningService();
-        var changes = Changes(service);
-        service.BeginSession(ReplayEncoderProfilePolicy.Automatic, 120, 1440);
-
-        Feed(service, 30, 120, 61, 80, 120);
-        Feed(service, 310, 120, 120, 0, 120, ReplayDegradeReason.None, ReplayCaptureState.Healthy, startUtc: DateTime.UtcNow.AddMinutes(2));
-
-        Assert.Equal(new[]
-        {
-            new EncoderFrameRateChange(120, 60),
-            new EncoderFrameRateChange(60, 120)
-        }, changes);
-    }
-
-    [Fact]
-    public void DoesNotGoBelow30Fps()
-    {
-        var service = new EncoderTuningService();
-        var changes = Changes(service);
-        service.BeginSession(ReplayEncoderProfilePolicy.Automatic, 30, 1080);
-
-        Feed(service, 300, 30, 10, 30, 30);
 
         Assert.Empty(changes);
     }
@@ -118,7 +59,7 @@ public sealed class EncoderTuningServiceTests
     }
 
     [Fact]
-    public void DisablingAfterReductionRestoresConfiguredTarget()
+    public void DisablingMonitoringDoesNotRequestTargetChange()
     {
         var service = new EncoderTuningService();
         var changes = Changes(service);
@@ -127,11 +68,7 @@ public sealed class EncoderTuningServiceTests
         Feed(service, 30, 120, 61, 80, 120);
         service.SetEnabled(false);
 
-        Assert.Equal(new[]
-        {
-            new EncoderFrameRateChange(120, 60),
-            new EncoderFrameRateChange(60, 120)
-        }, changes);
+        Assert.Empty(changes);
     }
 
     private static List<EncoderFrameRateChange> Changes(EncoderTuningService service)
