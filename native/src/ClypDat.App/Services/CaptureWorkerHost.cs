@@ -128,20 +128,22 @@ internal static class CaptureWorkerHost
     private static async Task AttachAsync(Stream client, CaptureWorkerEnvelope message, CancellationToken cancellationToken)
     {
         var config = message.Payload.Deserialize<ReplayBufferConfig>(JsonOptions) ?? throw new InvalidDataException("Invalid replay configuration.");
-        if (_buffer is null || !string.Equals(ConfigIdentity(_config), ConfigIdentity(config), StringComparison.Ordinal))
+        var configChanged = !string.Equals(ConfigIdentity(_config), ConfigIdentity(config), StringComparison.Ordinal);
+        if (_buffer is not null && configChanged && !_buffer.IsRecording)
         {
-            if (_buffer is { IsRecording: false }) _buffer.Dispose();
-            if (_buffer is null || !_buffer.IsRecording)
-            {
-                _config = config;
-                _buffer?.Dispose();
-                _buffer = ReplayBufferFactory.CreateLocal(() => _config!);
-                _buffer.RecordingStopped += (_, _) => _ = SendEventAsync("recording-stopped", new { });
-                if (_buffer is IReplayCaptureDiagnostics diagnostics)
-                    diagnostics.HealthChanged += (_, health) => _ = SendEventAsync("health", health with { Storage = Storage.Health });
-            }
+            _buffer.Dispose();
+            _buffer = null;
         }
-        else
+
+        if (_buffer is null)
+        {
+            _config = config;
+            _buffer = ReplayBufferFactory.CreateLocal(() => _config!);
+            _buffer.RecordingStopped += (_, _) => _ = SendEventAsync("recording-stopped", new { });
+            if (_buffer is IReplayCaptureDiagnostics diagnostics)
+                diagnostics.HealthChanged += (_, health) => _ = SendEventAsync("health", health with { Storage = Storage.Health });
+        }
+        else if (!configChanged)
         {
             _config = config;
         }
