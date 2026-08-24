@@ -280,8 +280,9 @@ public sealed class ClipCardViewModel : ViewModelBase
         get => _isMatchedByGameFilter;
         set
         {
+            var wasVisible = IsVisibleInLibrary;
             if (!SetProperty(ref _isMatchedByGameFilter, value)) return;
-            OnPropertyChanged(nameof(IsVisibleInLibrary));
+            if (wasVisible != IsVisibleInLibrary) OnPropertyChanged(nameof(IsVisibleInLibrary));
         }
     }
 
@@ -296,8 +297,9 @@ public sealed class ClipCardViewModel : ViewModelBase
         get => _isMatchedByClipTypeFilter;
         set
         {
+            var wasVisible = IsVisibleInLibrary;
             if (!SetProperty(ref _isMatchedByClipTypeFilter, value)) return;
-            OnPropertyChanged(nameof(IsVisibleInLibrary));
+            if (wasVisible != IsVisibleInLibrary) OnPropertyChanged(nameof(IsVisibleInLibrary));
         }
     }
 
@@ -310,8 +312,9 @@ public sealed class ClipCardViewModel : ViewModelBase
         get => _isMatchedBySearch;
         set
         {
+            var wasVisible = IsVisibleInLibrary;
             if (!SetProperty(ref _isMatchedBySearch, value)) return;
-            OnPropertyChanged(nameof(IsVisibleInLibrary));
+            if (wasVisible != IsVisibleInLibrary) OnPropertyChanged(nameof(IsVisibleInLibrary));
         }
     }
 

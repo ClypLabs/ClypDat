@@ -748,7 +748,8 @@
         </Grid>
       </Border>
 
-      <Border Grid.Column="1" Background="#101820" IsVisible="{Binding IsLibraryVisible}">
+      <controls:RetainedPageHost Grid.Column="1" IsActive="{Binding IsLibraryVisible}">
+      <Border Background="#101820">
         <DockPanel>
           <!-- Toolbar carrying the library heading and the search box. Sits
                OUTSIDE the margined content grid below so it spans the full
@@ -1203,7 +1204,8 @@
         </DockPanel>
       </Grid>
         </DockPanel>
-    </Border>
+      </Border>
+      </controls:RetainedPageHost>
 
     <Border Grid.Column="1" Background="#101820" IsVisible="{Binding IsSettingsVisible}">
       <Grid ColumnDefinitions="240,*,Auto">

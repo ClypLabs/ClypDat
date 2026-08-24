@@ -120,10 +120,7 @@ internal sealed class LibraryCardPanel : Panel
             if (_visibilitySubscriptions.ContainsKey(clip)) continue;
             PropertyChangedEventHandler handler = (_, change) =>
             {
-                if (change.PropertyName is nameof(ClipCardViewModel.IsVisibleInLibrary)
-                    or nameof(ClipCardViewModel.IsMatchedByGameFilter)
-                    or nameof(ClipCardViewModel.IsMatchedByClipTypeFilter)
-                    or nameof(ClipCardViewModel.IsMatchedBySearch))
+                if (change.PropertyName == nameof(ClipCardViewModel.IsVisibleInLibrary))
                 {
                     InvalidateMeasure();
                     InvalidateArrange();

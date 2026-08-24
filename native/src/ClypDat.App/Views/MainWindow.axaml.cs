@@ -199,6 +199,10 @@ public sealed partial class MainWindow : Window
     private bool _libraryReturnAnchorDirty;
     private bool _libraryResizeAnchorRestorePending;
     private string? _libraryReturnAnchorRestorePath;
+    private readonly Stopwatch _libraryReturnClock = new();
+    private string? _libraryReturnSource;
+    private int _libraryReturnTimingGeneration;
+    private bool _libraryReturnFramePending;
     // Win32 can present a newly-created client area before Avalonia's first
     // compositor frame. DWM cloaks that first native frame until two Avalonia
     // frame callbacks have passed, leaving a dark rendered surface to reveal.
@@ -226,6 +230,7 @@ public sealed partial class MainWindow : Window
         LibraryScrollViewer.LayoutUpdated += (_, _) =>
         {
             CompleteLibraryLayoutPass();
+            TryCompleteLibraryReturnTiming();
             TryCompleteInitialLibraryLayout();
             QueueDateScrubberRebuild();
         };
@@ -334,6 +339,14 @@ public sealed partial class MainWindow : Window
                         // LibraryCardPanel publishes current geometry before its
                         // children measure. Restore on the first completed pass.
                         _libraryReturnAnchorRestorePath = anchorPath;
+                    }
+                    if (e.PropertyName == nameof(MainWindowViewModel.IsEditorVisible) && ViewModel.IsLibraryVisible)
+                    {
+                        StartLibraryReturnTiming("Editor");
+                    }
+                    if (e.PropertyName == nameof(MainWindowViewModel.IsSettingsVisible) && ViewModel.IsLibraryVisible)
+                    {
+                        StartLibraryReturnTiming("Settings");
                     }
                     if (e.PropertyName == nameof(MainWindowViewModel.StartupLibraryIndexVersion)) QueueDateScrubberRebuild();
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible)
@@ -1679,6 +1692,40 @@ public sealed partial class MainWindow : Window
         if (!_libraryResizeAnchorRestorePending) return;
         _libraryResizeAnchorRestorePending = false;
         RestoreLibraryResizeAnchor(_libraryResizeAnchorPath);
+    }
+
+    private void StartLibraryReturnTiming(string source)
+    {
+        _libraryReturnClock.Restart();
+        _libraryReturnSource = source;
+        _libraryReturnFramePending = false;
+        _libraryReturnTimingGeneration++;
+        Dispatcher.UIThread.Post(TryCompleteLibraryReturnTiming, DispatcherPriority.Loaded);
+    }
+
+    private void TryCompleteLibraryReturnTiming()
+    {
+        if (_libraryReturnSource is null
+            || _libraryReturnFramePending
+            || ViewModel?.IsLibraryVisible != true
+            || LibraryScrollViewer.Bounds.Width <= 0
+            || LibraryScrollViewer.Viewport.Height <= 0) return;
+
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel is null) return;
+
+        _libraryReturnFramePending = true;
+        var generation = _libraryReturnTimingGeneration;
+        topLevel.RequestAnimationFrame(_ =>
+        {
+            if (generation != _libraryReturnTimingGeneration
+                || _libraryReturnSource is null
+                || ViewModel?.IsLibraryVisible != true) return;
+
+            AppLog.Info($"Library return: source={_libraryReturnSource}, clips={ViewModel.AllClips.Count}, elapsed={_libraryReturnClock.ElapsedMilliseconds}ms.");
+            _libraryReturnSource = null;
+            _libraryReturnFramePending = false;
+        });
     }
 
     private void LibraryCardPanel_OnMetricsChanged(object? sender, LibraryCardLayout layout) =>

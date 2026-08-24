@@ -7074,6 +7074,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // however many are set. Used by the logo/home button.
     public void ClearAllFilters()
     {
+        if (_activeGameFilters.Count == 0
+            && _activeClipTypeFilters.Count == 0
+            && _librarySearchText.Length == 0) return;
+
         var gamesBefore = string.Join(", ", _activeGameFilters.OrderBy(key => key, StringComparer.OrdinalIgnoreCase));
         var clipTypesBefore = string.Join(", ", _activeClipTypeFilters.OrderBy(key => key, StringComparer.OrdinalIgnoreCase));
         var searchBefore = _librarySearchText;
@@ -7083,17 +7087,29 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _activeClipTypeFilters.Clear();
         foreach (var option in GameFilterOptions) option.SetCheckedSilently(false);
         foreach (var option in ClipTypeFilterOptions) option.SetCheckedSilently(false);
-        LibrarySearchText = string.Empty;
-        ApplyGameFilters();
-        ApplyClipTypeFilters();
-        ApplySearchFilter();
+        SetProperty(ref _librarySearchText, string.Empty, nameof(LibrarySearchText));
+        RestoreAllLibraryFilterMatches();
+        UpdateFirstOfDateFlags();
+        UpdateDaySelectionStates();
+        if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
         OnPropertyChanged(nameof(IsGameFilterActive));
         OnPropertyChanged(nameof(IsClipTypeFilterActive));
         OnPropertyChanged(nameof(IsAllClipsActive));
+        OnPropertyChanged(nameof(IsLibraryHeaderSelected));
         OnPropertyChanged(nameof(LibraryReservedContentHeight));
         OnPropertyChanged(nameof(LibraryTitle));
         var visible = AllClips.Count(clip => clip.IsVisibleInLibrary);
         AppLog.Info($"Library filters reset complete: {visible}/{AllClips.Count} clips visible.");
+    }
+
+    private void RestoreAllLibraryFilterMatches()
+    {
+        foreach (var clip in AllClips)
+        {
+            clip.IsMatchedByGameFilter = true;
+            clip.IsMatchedByClipTypeFilter = true;
+            clip.IsMatchedBySearch = true;
+        }
     }
 
     public bool CombineSidebarFilters
