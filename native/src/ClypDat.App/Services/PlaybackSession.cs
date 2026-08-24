@@ -37,7 +37,13 @@ public sealed class PlaybackSession : IDisposable
     private readonly object _transportLock = new();
     private readonly object _previewLock = new();
     private readonly EditorSeekRequestQueue _previewRequests = new();
+    private readonly EditorSeekCoordinator _seekCoordinator = new();
+    private readonly EditorAvClockPolicy _audioClockPolicy = new();
     private Task? _previewWorker;
+    private EventHandler<MediaPlayerTimeChangedEventArgs>? _audioDriftHandler;
+    private long _audioAnchorDevicePosition;
+    private TimeSpan _audioAnchorMediaTime;
+    private long _audioAnchorTimestamp;
     // Completion of the PREVIOUS WasapiOut's endpoint release. Only
     // RebuildAudioOutput has to respect it (see DisposeAudioOutput).
     private Task _audioOutputRelease = Task.CompletedTask;
@@ -333,7 +339,7 @@ public sealed class PlaybackSession : IDisposable
         // user presses Play. Its old completion must not pause/stop the newer
         // transport state after PlayFrom has already started it.
         Interlocked.Increment(ref _seekVersion);
-        var playVersion = Interlocked.Increment(ref _playVersion);
+        Interlocked.Increment(ref _playVersion);
         var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
         var wasStoppedOrEnded = IsEnded || VideoPlayer.State == VLCState.Stopped;
         AppLog.Debug($"Editor play from requested={time.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}, ended={IsEnded}.");
@@ -351,93 +357,26 @@ public sealed class PlaybackSession : IDisposable
         // VideoPlayer.Time here makes VLC redo a full keyframe seek/rebuffer for no
         // reason, which is what causes the video to freeze on unpause.
         var needsSeek = wasStoppedOrEnded || Math.Abs(VideoPlayer.Time - milliseconds) > 150;
-        lock (_transportLock)
-        {
-            if (needsSeek)
-            {
-                // LibVLC silently ignores a .Time assignment made before the player
-                // has actually started (state still NothingSpecial) - confirmed via
-                // logs showing the value bounce right back to 0. Play() must happen
-                // first so the seek actually takes. Paused immediately after, for
-                // the same reason SeekAsync holds it paused: the clock must not
-                // run away while the decoder is still doing the keyframe work.
-                VideoPlayer.Play();
-                VideoPlayer.SetPause(true);
-                VideoPlayer.Time = milliseconds;
-            }
-            EnsureAudioOutputConnected();
-            if (needsSeek)
-            {
-                SeekAudio(time);
-            }
-            else
-            {
-                // Resume from pause, and the one path that never repositioned
-                // audio at all - it assumed the readers were still sitting
-                // exactly where the video is. They are not, reliably: whatever
-                // anchored them last (Pause, or a timeline seek that landed
-                // paused) did so around a VideoPlayer.SetPause(true) that does
-                // not take effect when the call returns. The picture keeps
-                // advancing for some tens of milliseconds after, further if
-                // EnsureAudioOutputConnected had to rebuild WASAPI on the way
-                // through, and the audio ends up anchored that far behind where
-                // the video actually came to rest. Playing from there is the
-                // audio-lagging-video desync after a timeline skip, and it
-                // persisted precisely because only a real seek re-anchored -
-                // hence clicking the timeline again, or pausing and replaying,
-                // "fixing" it.
-                //
-                // The video is stopped at this instant, so VideoPlayer's own
-                // clock is a truthful anchor. Reading it here costs nothing and
-                // makes every resume start both halves from the same place.
-                SeekAudio(Position);
-            }
-            // A plain resume-from-pause is already sitting on a decoded frame,
-            // so both halves start here together. A real seek leaves the player
-            // paused at the target instead and hands the resume to
-            // ResumeBothOnceDecoderReadyAsync, which releases video and audio in
-            // the same instant once the decoder has caught up - starting either
-            // one before that is what put them out of step.
-            if (!needsSeek)
-            {
-                VideoPlayer.Play();
-                VideoPlayer.SetPause(false);
-                _audioOutput?.Play();
-            }
-        }
-
         if (needsSeek)
         {
-            _ = ResumeBothOnceDecoderReadyAsync(playVersion, TimeSpan.FromMilliseconds(milliseconds));
-        }
-
-        AppLog.Debug($"Editor play from requested={time.TotalSeconds:0.###}s (seek={needsSeek}), vlc after={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}.");
-    }
-
-    // PlayFrom's counterpart to the resume inside SeekAsync: waits for the
-    // decoder, then releases the paused video and the audio output together.
-    // Guarded by playVersion (and _shouldPlay) so a Pause/Stop/newer PlayFrom
-    // that happens before this fires can't restart playback out from under
-    // whatever state the session has since moved on to.
-    private async Task ResumeBothOnceDecoderReadyAsync(long playVersion, TimeSpan target)
-    {
-        try
-        {
-            await WaitForDecoderReadyAsync(target, CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
+            // Stopped/ended playback and a distant PlayFrom target are final
+            // seeks too. Route them through the same pause -> land -> roll
+            // sequence as the timeline rather than issuing a parallel seek.
+            _ = SeekAsync(TimeSpan.FromMilliseconds(milliseconds), resumePlayback: true);
             return;
         }
 
-        if (Interlocked.Read(ref _playVersion) != playVersion || !_shouldPlay) return;
         lock (_transportLock)
         {
-            if (Interlocked.Read(ref _playVersion) != playVersion || !_shouldPlay) return;
-            SeekAudio(Position);
+            EnsureAudioOutputConnected();
+            var anchor = Position;
+            SeekAudio(anchor);
+            VideoPlayer.Play();
             VideoPlayer.SetPause(false);
-            _audioOutput?.Play();
+            StartAudioAt(anchor, Interlocked.Read(ref _seekVersion));
         }
+
+        AppLog.Debug($"Editor play from requested={time.TotalSeconds:0.###}s (seek={needsSeek}), vlc after={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}.");
     }
 
     public void Pause()
@@ -446,6 +385,7 @@ public sealed class PlaybackSession : IDisposable
         _shouldPlay = false;
         lock (_transportLock)
         {
+            StopAudioClockMonitoring();
             _audioOutput?.Stop();
             VideoPlayer.SetPause(true);
             // WasapiOut's 120ms buffer (see RebuildAudioOutput) means the audio
@@ -468,6 +408,7 @@ public sealed class PlaybackSession : IDisposable
             Interlocked.Increment(ref _playVersion);
             lock (_transportLock)
             {
+                StopAudioClockMonitoring();
                 _audioOutput?.Stop();
                 VideoPlayer.Stop();
             }
@@ -552,9 +493,17 @@ public sealed class PlaybackSession : IDisposable
                     if (seekVersion != Interlocked.Read(ref _seekVersion) || !_previewRequests.IsCurrent(generation)) continue;
                     lock (_transportLock)
                     {
-                        PrepareVideoForSeek();
+                        // Preview writes intentionally do not settle or touch
+                        // audio. The next final seek owns pause/land/roll.
+                        ForceVideoSilent();
+                        if (IsEnded || VideoPlayer.State == VLCState.Stopped)
+                        {
+                            VideoPlayer.Stop();
+                            _ended = false;
+                            VideoPlayer.Play();
+                        }
+                        VideoPlayer.Time = (long)target.TotalMilliseconds;
                     }
-                    await SeekAndWaitAsync(target, CancellationToken.None).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -571,7 +520,7 @@ public sealed class PlaybackSession : IDisposable
 
     public async Task<bool> SeekAsync(TimeSpan time, bool resumePlayback = false, CancellationToken cancellationToken = default)
     {
-        _previewRequests.BeginFinalSeek();
+        var finalRequestGeneration = _previewRequests.BeginFinalSeek();
         var seekVersion = Interlocked.Increment(ref _seekVersion);
         try
         {
@@ -579,7 +528,7 @@ public sealed class PlaybackSession : IDisposable
         }
         catch
         {
-            _previewRequests.CompleteFinalSeek();
+            _previewRequests.CompleteFinalSeek(finalRequestGeneration);
             throw;
         }
         if (seekVersion != Interlocked.Read(ref _seekVersion))
@@ -588,7 +537,7 @@ public sealed class PlaybackSession : IDisposable
             // before touching VLC at all, instead of issuing a now-stale seek that
             // would just interrupt the newer one's in-flight decode.
             _seekLock.Release();
-            _previewRequests.CompleteFinalSeek();
+            _previewRequests.CompleteFinalSeek(finalRequestGeneration);
             return false;
         }
         var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
@@ -596,84 +545,38 @@ public sealed class PlaybackSession : IDisposable
         _isSeeking = true;
         _shouldPlay = resumePlayback;
         _lastRequestedPosition = requested;
-        var resumed = false;
         try
         {
-            lock (_transportLock)
-            {
-                _audioOutput?.Stop();
-                ForceVideoSilent();
-                // VLC accepts a Time assignment after EndReached without
-                // restarting its decoder, but leaves the transport state at
-                // Ended. Reset it before issuing the seek so settling lands
-                // in a usable paused/playing state. Keep the existing audio
-                // output and readers: they are repositioned after video
-                // settles below, avoiding a slow WASAPI/mixer rebuild.
-                var resetTransport = IsEnded || VideoPlayer.State == VLCState.Stopped;
-                if (resetTransport)
-                {
-                    VideoPlayer.Stop();
-                    _ended = false;
-                }
-                // Started, then immediately held PAUSED for the seek. LibVLC
-                // ignores a Time assignment before the player has started (see
-                // PlayFrom), so Play() still has to happen - but letting it
-                // actually roll during the settle is what let the picture run
-                // away from the audio. Paused, the decoder does its keyframe
-                // work with the clock standing still, and the resume below can
-                // start both halves from the same instant.
-                PrepareVideoForSeek();
-            }
             AppLog.Debug($"Editor seek begin: requested={requested.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}, resume={resumePlayback}, version={seekVersion}.");
-            if (seekVersion != Interlocked.Read(ref _seekVersion)) return false;
-            var videoReady = await SeekAndWaitAsync(requested, cancellationToken).ConfigureAwait(false);
-            if (seekVersion != Interlocked.Read(ref _seekVersion)) return false;
-            var settledTime = Position;
-            lock (_transportLock)
+            var result = await _seekCoordinator.SeekAsync(
+                new PlaybackSeekTransport(this, seekVersion),
+                requested,
+                resumePlayback,
+                seekVersion,
+                () => seekVersion == Interlocked.Read(ref _seekVersion),
+                cancellationToken).ConfigureAwait(false);
+
+            if (!result.Succeeded)
             {
-                // Seek audio to where the video actually landed (settledTime), not
-                // the raw requested time - SeekAndWaitAsync tolerates the video
-                // settling up to 650ms away from the request, and audio pinning to
-                // the unadjusted request instead of that actual position is what
-                // caused audible desync after a paused timeline click.
-                EnsureAudioOutputConnected();
-                if (EditorSeekRequestQueue.ShouldResume(resumePlayback, videoReady))
-                {
-                    // Both halves released in the same block, from the same
-                    // anchor. Neither waits on the other: the video has been
-                    // sitting paused on a decoded frame (see the paused seek
-                    // above plus WaitForDecoderReadyAsync), so unpausing rolls
-                    // immediately rather than rebuffering while audio plays on
-                    // without it - and audio no longer has to be held back to
-                    // avoid that, which is what made it trail the picture in.
-                    SeekAudio(settledTime);
-                    VideoPlayer.SetPause(false);
-                    _audioOutput?.Play();
-                    resumed = true;
-                }
-                else
-                {
-                    _shouldPlay = false;
-                    _audioOutput?.Stop();
-                    VideoPlayer.SetPause(true);
-                    // Anchor AFTER the pause is issued and off the video's own
-                    // clock, not off settledTime, which was sampled before
-                    // EnsureAudioOutputConnected and the pause itself - the
-                    // video has moved on by then. Still not exact (SetPause is
-                    // asynchronous), which is why PlayFrom re-anchors on resume
-                    // rather than trusting this.
-                    SeekAudio(Position);
-                }
+                if (seekVersion == Interlocked.Read(ref _seekVersion)) _shouldPlay = false;
+                AppLog.Debug($"Editor seek failed: requested={requested.TotalSeconds:0.###}s, landed={result.Landed.TotalSeconds:0.###}s, resume={resumePlayback}, superseded={result.Superseded}, generation={seekVersion}.");
+                return false;
             }
 
-            AppLog.Debug($"Editor seek end: requested={requested.TotalSeconds:0.###}s, settled={settledTime.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}, resume={resumePlayback}, resumed={resumed}, version={seekVersion}.");
-            return !resumePlayback || resumed;
+            _lastRequestedPosition = result.Landed;
+            if (!resumePlayback)
+            {
+                lock (_transportLock) SeekAudio(result.Landed);
+            }
+
+            AppLog.Debug($"Editor seek end: requested={requested.TotalSeconds:0.###}s, landed={result.Landed.TotalSeconds:0.###}s, audioAnchor={result.AudioAnchor.TotalSeconds:0.###}s, rollConfirmed={result.Resumed}, state={VideoPlayer.State}, resume={resumePlayback}, generation={seekVersion}.");
+            return !resumePlayback || result.Resumed;
         }
         finally
         {
-            _isSeeking = false;
+            if (seekVersion == Interlocked.Read(ref _seekVersion)) _isSeeking = false;
             _seekLock.Release();
-            _previewRequests.CompleteFinalSeek();
+            _previewRequests.CompleteFinalSeek(finalRequestGeneration);
         }
     }
 
@@ -686,7 +589,7 @@ public sealed class PlaybackSession : IDisposable
         {
             if (!VideoPlayer.IsPlaying) VideoPlayer.Play();
             VideoPlayer.SetPause(false);
-            if (_audioOutput is not null && _audioOutput.PlaybackState != PlaybackState.Playing) _audioOutput.Play();
+            if (_audioOutput is not null && _audioOutput.PlaybackState != PlaybackState.Playing) StartAudioAt(Position, Interlocked.Read(ref _seekVersion));
         }
     }
 
@@ -737,7 +640,7 @@ public sealed class PlaybackSession : IDisposable
         {
             if (_audioOutput is not null && _audioOutput.PlaybackState != PlaybackState.Playing)
             {
-                _audioOutput.Play();
+                StartAudioAt(Position, Interlocked.Read(ref _seekVersion));
             }
         }
     }
@@ -759,7 +662,7 @@ public sealed class PlaybackSession : IDisposable
             var willPlay = _shouldPlay;
             if (willPlay)
             {
-                _audioOutput.Play();
+                StartAudioAt(position, Interlocked.Read(ref _seekVersion));
             }
 
             var readerState = string.Join(",", _audioSources.Select(pair =>
@@ -781,166 +684,10 @@ public sealed class PlaybackSession : IDisposable
         _seekLock.Dispose();
     }
 
-    // Longest the resume will sit waiting for the decoder. A local file usually
-    // reports ready in a few tens of ms; this only bounds the pathological case
-    // so a seek that never confirms still resumes rather than hanging silent.
-    private static readonly TimeSpan DecoderReadyTimeout = TimeSpan.FromMilliseconds(400);
-
-    // "The seek was accepted" and "there is a decoded frame to show" are not the
-    // same event, and SeekAndWaitAsync only proves the first: LibVLC reports the
-    // new Time, and raises TimeChanged carrying it, the instant Time is
-    // assigned. Resuming on that signal starts a video that is still refilling
-    // its buffers, which is where the audio-ahead desync came from.
-    //
-    // Buffering is the signal that actually means the decoder is fed - VLC
-    // raises it 0 -> 100 across a rebuffer. A seek inside already-buffered local
-    // media may raise nothing at all, so a TimeChanged at the target counts too
-    // (with the player held paused, that event can only mean the seek landed,
-    // not that playback has run past it), and the whole thing is bounded.
-    private async Task WaitForDecoderReadyAsync(TimeSpan target, CancellationToken cancellationToken)
-    {
-        var targetMs = target.TotalMilliseconds;
-        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        void OnBuffering(object? sender, MediaPlayerBufferingEventArgs args)
-        {
-            if (args.Cache >= 100f) ready.TrySetResult();
-        }
-
-        void OnTimeChanged(object? sender, MediaPlayerTimeChangedEventArgs args)
-        {
-            if (Math.Abs(args.Time - targetMs) < 650) ready.TrySetResult();
-        }
-
-        VideoPlayer.Buffering += OnBuffering;
-        VideoPlayer.TimeChanged += OnTimeChanged;
-        try
-        {
-            await ready.Task.WaitAsync(DecoderReadyTimeout, cancellationToken).ConfigureAwait(false);
-        }
-        catch (TimeoutException)
-        {
-            AppLog.Debug($"Editor decoder ready timeout: target={target.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}.");
-        }
-        finally
-        {
-            VideoPlayer.Buffering -= OnBuffering;
-            VideoPlayer.TimeChanged -= OnTimeChanged;
-        }
-    }
-
-    private async Task<bool> SeekAndWaitAsync(TimeSpan target, CancellationToken cancellationToken)
-    {
-        // Only real (settling) seeks reach here now - drag-scrub and keyboard
-        // repeat go through SeekPreview, which never waits at all.
-        //
-        // 900ms was safe while the player kept rolling through the seek, because
-        // a rolling player raises TimeChanged constantly. It is held PAUSED
-        // through the seek now (see SeekAsync, so the picture cannot run away
-        // from the audio), and a paused player may raise nothing at all for a
-        // seek inside already-buffered local media - which would turn this into
-        // a flat 900ms stall on every click. Hence the shorter cap, Buffering
-        // accepted as a second confirmation, and the position check below that
-        // treats "Time already matches" as the success it is.
-        var waitTimeout = DecoderReadyTimeout;
-        var targetMs = target.TotalMilliseconds;
-        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        void OnTimeChanged(object? sender, MediaPlayerTimeChangedEventArgs args)
-        {
-            if (Math.Abs(args.Time - targetMs) < 650)
-            {
-                ready.TrySetResult();
-            }
-        }
-
-        void OnBuffering(object? sender, MediaPlayerBufferingEventArgs args)
-        {
-            if (args.Cache >= 100f) ready.TrySetResult();
-        }
-
-        // Subscribe before issuing the seek, not after: LibVLC's TimeChanged can fire
-        // (on its own thread) before this method gets around to attaching a handler,
-        // which was silently swallowing the confirmation and forcing a false timeout
-        // even though the seek had actually landed correctly.
-        VideoPlayer.TimeChanged += OnTimeChanged;
-        VideoPlayer.Buffering += OnBuffering;
-        try
-        {
-            lock (_transportLock)
-            {
-                VideoPlayer.Time = (long)targetMs;
-            }
-
-            try
-            {
-                await ready.Task.WaitAsync(waitTimeout, cancellationToken).ConfigureAwait(false);
-            }
-            catch (TimeoutException)
-            {
-                // The confirmation event may still have been missed even with the
-                // race closed (e.g. a very long keyframe seek). Fall back to the
-                // actual current position instead of unconditionally treating this
-                // as failure - failure here meant "resume" silently turned into
-                // "pause" even when the seek genuinely succeeded.
-                if (Math.Abs(VideoPlayer.Time - targetMs) >= 650)
-                {
-                    AppLog.Debug($"Editor video seek settle timeout: target={target.TotalSeconds:0.###}s, actual={Position.TotalSeconds:0.###}s, playing={VideoPlayer.IsPlaying}.");
-                    return false;
-                }
-                AppLog.Debug($"Editor video seek settle timeout but position already matches: target={target.TotalSeconds:0.###}s, actual={Position.TotalSeconds:0.###}s.");
-            }
-
-            // TimeChanged acknowledges seek acceptance, not a decoded picture.
-            // Keep transport paused, explicitly step the decoder, then wait for
-            // the post-step timestamp before allowing UI/audio restoration.
-            var stepped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            void OnPostStepTimeChanged(object? sender, MediaPlayerTimeChangedEventArgs args)
-            {
-                if (VideoPlayer.VoutCount > 0) stepped.TrySetResult();
-            }
-
-            VideoPlayer.TimeChanged += OnPostStepTimeChanged;
-            try
-            {
-                lock (_transportLock) VideoPlayer.NextFrame();
-                try { await stepped.Task.WaitAsync(waitTimeout, cancellationToken).ConfigureAwait(false); }
-                catch (TimeoutException)
-                {
-                    AppLog.Debug($"Editor post-seek frame timeout: target={target.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s.");
-                }
-            }
-            finally
-            {
-                VideoPlayer.TimeChanged -= OnPostStepTimeChanged;
-            }
-
-            _lastRequestedPosition = TimeSpan.FromMilliseconds(Math.Max(0, VideoPlayer.Time));
-            return true;
-        }
-        finally
-        {
-            VideoPlayer.TimeChanged -= OnTimeChanged;
-            VideoPlayer.Buffering -= OnBuffering;
-        }
-    }
-
     private void ForceVideoSilent()
     {
         VideoPlayer.Mute = true;
         VideoPlayer.Volume = 0;
-    }
-
-    private void PrepareVideoForSeek()
-    {
-        if (IsEnded || VideoPlayer.State == VLCState.Stopped)
-        {
-            VideoPlayer.Stop();
-            _ended = false;
-        }
-
-        // LibVLC ignores Time assignments while stopped. Start transport, then
-        // hold it paused while GOP reconstruction and frame-step complete.
-        if (!VideoPlayer.IsPlaying) VideoPlayer.Play();
-        VideoPlayer.SetPause(true);
     }
 
     private void SeekAudio(TimeSpan time)
@@ -949,6 +696,132 @@ public sealed class PlaybackSession : IDisposable
         foreach (var source in _audioSources.Values)
         {
             source.Reader.CurrentTime = time < TimeSpan.Zero ? TimeSpan.Zero : time;
+        }
+    }
+
+    private void StartAudioAt(TimeSpan anchor, long generation)
+    {
+        if (_audioOutput is null) return;
+        StopAudioClockMonitoring();
+        _audioOutput.Play();
+        _audioAnchorMediaTime = anchor;
+        try { _audioAnchorDevicePosition = _audioOutput.GetPosition(); }
+        catch { _audioAnchorDevicePosition = 0; }
+        _audioAnchorTimestamp = Stopwatch.GetTimestamp();
+        _audioClockPolicy.Begin(generation);
+        _audioDriftHandler = (_, args) => ObserveAudioDrift(generation, TimeSpan.FromMilliseconds(Math.Max(0, args.Time)));
+        VideoPlayer.TimeChanged += _audioDriftHandler;
+        AppLog.Debug($"Editor audio anchor: media={anchor.TotalSeconds:0.###}s, hardware={_audioAnchorDevicePosition}, generation={generation}.");
+    }
+
+    private void ObserveAudioDrift(long generation, TimeSpan videoTime)
+    {
+        if (generation != Interlocked.Read(ref _seekVersion) || _audioOutput is null) return;
+        long devicePosition;
+        try { devicePosition = _audioOutput.GetPosition(); }
+        catch { return; }
+
+        var audible = EditorAvClockPolicy.ToMediaTime(_audioAnchorMediaTime, _audioAnchorDevicePosition, devicePosition, 48_000 * 2 * sizeof(float));
+        var elapsed = Stopwatch.GetElapsedTime(_audioAnchorTimestamp);
+        if (!_audioClockPolicy.TryGetCorrection(generation, elapsed, audible, videoTime, out var correction)) return;
+
+        AppLog.Debug($"Editor A/V drift: audio={audible.TotalSeconds:0.###}s, video={videoTime.TotalSeconds:0.###}s, correction={correction.TotalSeconds:0.###}s, generation={generation}.");
+        _ = ApplyAudioCorrectionAsync(generation, correction);
+    }
+
+    private async Task ApplyAudioCorrectionAsync(long generation, TimeSpan correction)
+    {
+        await _seekLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (generation != Interlocked.Read(ref _seekVersion) || !_shouldPlay || _audioOutput is null) return;
+            lock (_transportLock)
+            {
+                _audioOutput.Stop();
+                SeekAudio(correction);
+                _audioOutput.Play();
+                _audioAnchorMediaTime = correction;
+                try { _audioAnchorDevicePosition = _audioOutput.GetPosition(); }
+                catch { _audioAnchorDevicePosition = 0; }
+                _audioAnchorTimestamp = Stopwatch.GetTimestamp();
+            }
+            AppLog.Debug($"Editor A/V correction applied: anchor={correction.TotalSeconds:0.###}s, generation={generation}.");
+        }
+        finally
+        {
+            _seekLock.Release();
+        }
+    }
+
+    private void StopAudioClockMonitoring()
+    {
+        if (_audioDriftHandler is null) return;
+        VideoPlayer.TimeChanged -= _audioDriftHandler;
+        _audioDriftHandler = null;
+    }
+
+    private sealed class PlaybackSeekTransport(PlaybackSession session, long generation) : IEditorSeekTransport
+    {
+        private TimeSpan _audioAnchor;
+
+        public bool IsPaused => session.VideoPlayer.State == VLCState.Paused;
+        public TimeSpan Position => TimeSpan.FromMilliseconds(Math.Max(0, session.VideoPlayer.Time));
+
+        public void StopAudio()
+        {
+            lock (session._transportLock)
+            {
+                session.StopAudioClockMonitoring();
+                session._audioOutput?.Stop();
+                session.ForceVideoSilent();
+            }
+        }
+
+        public void PauseVideo()
+        {
+            lock (session._transportLock)
+            {
+                session.ForceVideoSilent();
+                if (session.IsEnded || session.VideoPlayer.State == VLCState.Stopped)
+                {
+                    session.VideoPlayer.Stop();
+                    session._ended = false;
+                    session.VideoPlayer.Play();
+                }
+                else if (session.VideoPlayer.State != VLCState.Paused && !session.VideoPlayer.IsPlaying)
+                {
+                    // A just-loaded LibVLC player is often NothingSpecial;
+                    // it must be started once before a pause/Time sequence is
+                    // accepted by the transport.
+                    session.VideoPlayer.Play();
+                }
+                session.VideoPlayer.SetPause(true);
+            }
+        }
+
+        public void WritePosition(TimeSpan target)
+        {
+            lock (session._transportLock) session.VideoPlayer.Time = (long)target.TotalMilliseconds;
+        }
+
+        public void ResumeVideo()
+        {
+            lock (session._transportLock) session.VideoPlayer.SetPause(false);
+        }
+
+        public void AnchorAudio(TimeSpan position)
+        {
+            lock (session._transportLock)
+            {
+                session.EnsureAudioOutputConnected();
+                session.SeekAudio(position);
+                _audioAnchor = position;
+            }
+        }
+
+        public void StartAudio()
+        {
+            lock (session._transportLock) session.StartAudioAt(_audioAnchor, generation);
         }
     }
 
@@ -1006,6 +879,7 @@ public sealed class PlaybackSession : IDisposable
         WasapiOut? previous;
         lock (_transportLock)
         {
+            StopAudioClockMonitoring();
             previous = _audioOutput;
             _audioOutput = null;
             _audioMixer = null;

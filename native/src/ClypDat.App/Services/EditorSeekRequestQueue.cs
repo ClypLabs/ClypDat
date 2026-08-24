@@ -5,6 +5,7 @@ internal sealed class EditorSeekRequestQueue
     private readonly object _sync = new();
     private TimeSpan? _preview;
     private bool _finalSeekPending;
+    private long _finalSeekGeneration;
     private long _generation;
 
     public long QueuePreview(TimeSpan target)
@@ -18,19 +19,24 @@ internal sealed class EditorSeekRequestQueue
         }
     }
 
-    public void BeginFinalSeek()
+    public long BeginFinalSeek()
     {
         lock (_sync)
         {
             _preview = null;
             _finalSeekPending = true;
             _generation++;
+            _finalSeekGeneration = _generation;
+            return _finalSeekGeneration;
         }
     }
 
-    public void CompleteFinalSeek()
+    public void CompleteFinalSeek(long generation = 0)
     {
-        lock (_sync) _finalSeekPending = false;
+        lock (_sync)
+        {
+            if (generation == 0 || generation == _finalSeekGeneration) _finalSeekPending = false;
+        }
     }
 
     public bool TryTakePreview(out TimeSpan target, out long generation)

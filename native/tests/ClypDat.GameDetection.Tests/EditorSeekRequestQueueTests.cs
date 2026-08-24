@@ -29,6 +29,23 @@ public sealed class EditorSeekRequestQueueTests
         Assert.False(queue.TryTakePreview(out _, out _));
     }
 
+    [Fact]
+    public void SupersededFinalCompletion_DoesNotReopenPreviewProcessing()
+    {
+        var queue = new EditorSeekRequestQueue();
+        var first = queue.BeginFinalSeek();
+        var second = queue.BeginFinalSeek();
+
+        queue.CompleteFinalSeek(first);
+        queue.QueuePreview(TimeSpan.FromSeconds(4));
+        Assert.False(queue.TryTakePreview(out _, out _));
+
+        queue.CompleteFinalSeek(second);
+        queue.QueuePreview(TimeSpan.FromSeconds(4));
+        Assert.True(queue.TryTakePreview(out var target, out _));
+        Assert.Equal(TimeSpan.FromSeconds(4), target);
+    }
+
     [Theory]
     [InlineData(-1, 0)]
     [InlineData(0, 0)]
