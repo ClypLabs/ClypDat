@@ -11,6 +11,7 @@ $repoRoot = $PSScriptRoot
 $nativeRoot = Join-Path $repoRoot 'native'
 $appProject = Join-Path $nativeRoot 'src\ClypDat.App\ClypDat.App.csproj'
 $installDirectory = Join-Path $env:LOCALAPPDATA 'ClypDat.LocalBuild'
+$programInstallDirectory = Join-Path $env:LOCALAPPDATA 'Programs\ClypDat'
 $dotnetExecutable = & (Join-Path $repoRoot 'eng\Ensure-DotNet.ps1')
 $selfContainedVerifier = Join-Path $repoRoot 'eng\Test-SelfContainedPublish.ps1'
 $globalJson = Get-Content -LiteralPath (Join-Path $repoRoot 'global.json') -Raw | ConvertFrom-Json
@@ -305,6 +306,48 @@ function Test-DirectoryCreateAccess {
     finally {
         if (Test-Path -LiteralPath $probeDirectory) {
             Remove-Item -LiteralPath $probeDirectory -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Install-ClypDatDirectory {
+    param(
+        [Parameter(Mandatory)][string]$SourceDirectory,
+        [Parameter(Mandatory)][string]$DestinationDirectory
+    )
+
+    $destinationParent = Split-Path -Parent $DestinationDirectory
+    New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
+    if (-not (Test-DirectoryCreateAccess -Directory $destinationParent)) {
+        throw "Cannot create local publish files under $destinationParent."
+    }
+
+    $stagedDirectory = Join-Path $destinationParent ('.ClypDat.staged-' + [Guid]::NewGuid().ToString('N'))
+    $previousDirectory = $null
+    try {
+        Copy-Item -LiteralPath $SourceDirectory -Destination $stagedDirectory -Recurse -Force
+
+        if (Test-Path -LiteralPath $DestinationDirectory) {
+            $previousDirectory = Join-Path $destinationParent ('.ClypDat.previous-' + [Guid]::NewGuid().ToString('N'))
+            Move-Item -LiteralPath $DestinationDirectory -Destination $previousDirectory
+        }
+
+        try {
+            Move-Item -LiteralPath $stagedDirectory -Destination $DestinationDirectory
+        }
+        catch {
+            if ($previousDirectory -and (Test-Path -LiteralPath $previousDirectory) -and -not (Test-Path -LiteralPath $DestinationDirectory)) {
+                Move-Item -LiteralPath $previousDirectory -Destination $DestinationDirectory
+            }
+            throw
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $stagedDirectory) {
+            Remove-Item -LiteralPath $stagedDirectory -Recurse -Force
+        }
+        if ($previousDirectory -and (Test-Path -LiteralPath $previousDirectory)) {
+            Remove-Item -LiteralPath $previousDirectory -Recurse -Force
         }
     }
 }
@@ -770,6 +813,9 @@ try {
 
     $installedExe = Join-Path $installDirectory 'ClypDat.exe'
     Write-Host "Installed local build to: $installedExe"
+
+    Install-ClypDatDirectory -SourceDirectory $installDirectory -DestinationDirectory $programInstallDirectory
+    Write-Host "Copied local build to: $(Join-Path $programInstallDirectory 'ClypDat.exe')"
 
     Write-Host 'Starting updated ClypDat.'
     Start-Process -FilePath $installedExe
