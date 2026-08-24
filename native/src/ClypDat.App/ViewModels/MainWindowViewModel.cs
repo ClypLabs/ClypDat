@@ -278,7 +278,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
         ReplayBackends = new ObservableCollection<ReplayBackendPreset>
         {
-            new("DXGI Desktop Duplication", "Native", "Uses ClypDat's native DXGI capture and rolling memory buffer. Covered or background games freeze rather than exposing the desktop. No process hooks.")
+            new("ClypDat", "Native", "Uses ClypDat's rolling memory buffer. Covered or background games freeze rather than exposing the desktop. No process hooks.")
         };
         ReplayCaptureSources = new ObservableCollection<string> { "Game Capture", "Desktop Capture" };
         DesktopMonitors = new ObservableCollection<DesktopMonitorOption>();
@@ -5961,7 +5961,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var isMedalImport = !string.IsNullOrWhiteSpace(ClipInfoSidecar.Load(Settings.LibraryFolder, media.Path)?.MedalImportKey);
         SelectedCaptureBackend = isMedalImport
             ? "Imported from Medal"
-            : (string.IsNullOrWhiteSpace(media.CaptureBackend) ? string.Empty : $"Captured with: {ClipMetadataTagger.NormalizeBackendLabel(media.CaptureBackend)}");
+            : "Captured with: ClypDat";
         SelectedMetadata = $"{SelectedQuality} - {SelectedSize}";
         // Share's bitrate/downscale math needs the source's raw dimensions -
         // SelectedQuality above only keeps a formatted display string.
