@@ -492,6 +492,12 @@ public sealed class PlaybackSession : IDisposable
                         continue;
                     }
 
+                    // Keep a preview decode alive only while pointer updates
+                    // are arriving. This gives LibVLC time to present the
+                    // landed frame, then parks video when the mouse stops.
+                    if (await WaitForPreviewActivityAsync().ConfigureAwait(false)) continue;
+
+                    lock (_transportLock) VideoPlayer.SetPause(true);
                     lock (_previewLock)
                     {
                         // Queueing can race the worker's empty check. Keep
@@ -511,7 +517,8 @@ public sealed class PlaybackSession : IDisposable
                     lock (_transportLock)
                     {
                         // Preview writes intentionally do not settle or touch
-                        // audio. The next final seek owns pause/land/roll.
+                        // audio. Video is parked by the idle branch above;
+                        // the next final seek owns pause/land/roll.
                         ForceVideoSilent();
                         if (IsEnded || VideoPlayer.State == VLCState.Stopped)
                         {
@@ -529,7 +536,6 @@ public sealed class PlaybackSession : IDisposable
                             VideoPlayer.Play();
                         }
                         VideoPlayer.Time = (long)target.TotalMilliseconds;
-                        VideoPlayer.SetPause(true);
                         _previewRequests.MarkPreviewWritten(generation, DateTimeOffset.UtcNow);
                     }
                 }
@@ -733,6 +739,18 @@ public sealed class PlaybackSession : IDisposable
         {
             source.Reader.CurrentTime = time < TimeSpan.Zero ? TimeSpan.Zero : time;
         }
+    }
+
+    private async Task<bool> WaitForPreviewActivityAsync()
+    {
+        var clock = Stopwatch.StartNew();
+        while (clock.Elapsed < TimeSpan.FromMilliseconds(50))
+        {
+            if (_previewRequests.HasPendingPreview()) return true;
+            await Task.Delay(TimeSpan.FromMilliseconds(10)).ConfigureAwait(false);
+        }
+
+        return _previewRequests.HasPendingPreview();
     }
 
     private void StartAudioAt(TimeSpan anchor, long generation)
