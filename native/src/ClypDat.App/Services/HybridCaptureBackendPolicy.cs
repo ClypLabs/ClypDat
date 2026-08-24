@@ -6,8 +6,7 @@ namespace ClypDat.App.Services;
 // unrelated to this source.
 internal static class HybridCaptureBackendPolicy
 {
-    internal const string ForceDxgiVariable = "CLYPDAT_FORCE_DXGI";
+    public static bool UseWgcForGame(string? _) => true;
 
-    public static bool UseWgcForGame(string? forceDxgiValue) =>
-        !string.Equals(forceDxgiValue, "1", StringComparison.Ordinal);
+    public static bool UseDxgiForDesktop(bool isMonitorMode) => isMonitorMode;
 }

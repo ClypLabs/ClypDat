@@ -718,8 +718,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // alone is the wrong thing to compare against.
             var targetMonitor = ResolveTargetMonitor(targetHandle, config);
             Vortice.RawRect desktopBounds;
-            if (!isMonitorMode && HybridCaptureBackendPolicy.UseWgcForGame(
-                    Environment.GetEnvironmentVariable(HybridCaptureBackendPolicy.ForceDxgiVariable)))
+            if (!isMonitorMode)
             {
                 try
                 {
@@ -730,15 +729,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 }
                 catch (Exception error)
                 {
-                    AppLog.Error("Native capture: WGC initialization failed; falling back to DXGI with privacy freeze.", error);
+                    AppLog.Error("Native capture: WGC initialization failed for game window.", error);
                     wgcCapture?.Dispose();
-                    wgcCapture = null;
-                    duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds);
+                    throw new InvalidOperationException("Windows.Graphics.Capture is required for game capture.", error);
                 }
             }
             else
             {
-                if (!isMonitorMode) AppLog.Info($"Native capture: diagnostic DXGI override active ({HybridCaptureBackendPolicy.ForceDxgiVariable}).");
+                if (!HybridCaptureBackendPolicy.UseDxgiForDesktop(isMonitorMode)) throw new InvalidOperationException("DXGI is reserved for desktop capture.");
                 duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds);
             }
 
@@ -993,7 +991,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var lastDiagLog = TimeSpan.Zero;
             var lastRingTrim = TimeSpan.Zero;
             var previousWgcTelemetry = default(WindowGraphicsCaptureTelemetry);
-            var wgcCadenceFallback = new WgcCadenceFallbackPolicy();
             var framesSeen = 0;
             var framesSeenSinceLog = 0;
             var framesProcessedSinceLog = 0;
@@ -1252,12 +1249,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var packetsOutSinceLog = Interlocked.Exchange(ref _packetsOutCount, 0);
                     var inputFrameCount = framesSeenSinceLog;
                     var wgcCallbackCount = 0L;
-                    var wgcResizeRecovered = false;
                     var wgcTelemetry = wgcCapture?.GetTelemetrySnapshot();
                     if (wgcTelemetry is not null)
                     {
                         var current = wgcTelemetry.Value;
-                        wgcResizeRecovered = current.ResizeEvents != previousWgcTelemetry.ResizeEvents;
                         wgcCallbackCount = current.CallbackArrivals >= previousWgcTelemetry.CallbackArrivals
                             ? current.CallbackArrivals - previousWgcTelemetry.CallbackArrivals
                             : current.CallbackArrivals;
@@ -1282,18 +1277,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var encoderPressure = droppedSinceLog > 0 || encodeQueue.Count * 4 >= encodeQueueCapacity * 3;
                     var outputShortfall = hasCapturedRealFrame && outputFrameRate < activeFrameRate * 0.9;
                     var overloaded = encoderPressure;
-                    if (wgcResizeRecovered) wgcCadenceFallback.Reset();
-                    var wgcForegroundAndVisible = !isMonitorMode && IsWindowForegroundAndVisible(targetHandle);
-                    if (wgcCapture is not null && wgcCadenceFallback.ShouldFallback(
-                            activeFrameRate, wgcInputRate, wgcForegroundAndVisible, encoderPressure))
-                    {
-                        AppLog.Info($"Native capture: WGC callback cadence {wgcInputRate:0.0} fps stayed below {activeFrameRate * 0.9:0.0} fps for three foreground diagnostic windows; switching to DXGI fallback with privacy freeze.");
-                        wgcCapture.Dispose();
-                        wgcCapture = null;
-                        previousWgcTelemetry = default;
-                        try { duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds); }
-                        catch (Exception error) { AppLog.Error("Native capture: DXGI fallback after low WGC cadence failed.", error); }
-                    }
                     // A stall is worse than an overload and reads nothing like one:
                     // no frames arrive at all, so nothing gets dropped and the queue
                     // stays empty - every overload signal above says "healthy" right
@@ -1390,8 +1373,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             wgcCapture = null;
                             duplication?.Dispose();
                             duplication = null;
-                            if (!isMonitorMode && HybridCaptureBackendPolicy.UseWgcForGame(
-                                    Environment.GetEnvironmentVariable(HybridCaptureBackendPolicy.ForceDxgiVariable)))
+                            if (!isMonitorMode)
                             {
                                 try
                                 {
@@ -1402,12 +1384,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 }
                                 catch (Exception error)
                                 {
-                                    AppLog.Error("Native capture: WGC replacement failed; using DXGI fallback with privacy freeze.", error);
+                                    AppLog.Error("Native capture: WGC replacement failed for game window.", error);
                                     wgcCapture?.Dispose();
-                                    wgcCapture = null;
+                                    throw new InvalidOperationException("Windows.Graphics.Capture is required for game capture.", error);
                                 }
                             }
-                            if (wgcCapture is null)
+                            if (isMonitorMode)
                             {
                                 try { duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds); }
                                 catch (Exception error) { AppLog.Error("Native capture: failed to switch DXGI duplication target.", error); }
@@ -1419,7 +1401,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             isPaused = false;
                             lock (_bufferLock) _pauseEvents.Add(new PauseEvent(MonotonicClock.UtcNow, false));
                         }
-                        wgcCadenceFallback.Reset();
                         previousWgcTelemetry = default;
                     }
                 }
@@ -1502,11 +1483,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         : null;
                     if (desktopResource is null && !string.IsNullOrWhiteSpace(wgcCapture.Failure))
                     {
-                        AppLog.Info($"Native capture: WGC source closed ({wgcCapture.Failure}); switching to DXGI fallback with privacy freeze.");
+                        AppLog.Info($"Native capture: WGC source closed ({wgcCapture.Failure}); restarting WGC.");
                         wgcCapture.Dispose();
-                        wgcCapture = null;
-                        try { duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds); }
-                        catch (Exception error) { AppLog.Error("Native capture: DXGI fallback after WGC closure failed.", error); }
+                        try { wgcCapture = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor, activeFrameRate); }
+                        catch (Exception error) { throw new InvalidOperationException("Windows.Graphics.Capture could not restart for game capture.", error); }
                     }
                 }
                 else
@@ -2242,7 +2222,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     idealFrameIntervalMicroseconds = 1_000_000.0 / activeFrameRate;
                     cropSamplingBudget.SetRate(activeFrameRate, stopwatch.Elapsed);
                     wgcCapture?.TrySetTargetFrameRate(activeFrameRate);
-                    wgcCadenceFallback.Reset();
                     previousWgcTelemetry = default;
                     SetHealth(_health with { TargetFrameRate = activeFrameRate, UpdatedUtc = DateTime.UtcNow });
                     AppLog.Info($"Native capture: target frame rate now {activeFrameRate} fps.");
