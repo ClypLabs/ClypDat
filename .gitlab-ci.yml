@@ -32,7 +32,7 @@ build_windows_installer:
       git -C $avaloniaRoot submodule update --init --recursive
       if ($LASTEXITCODE -ne 0) { Write-Error 'Could not initialize Avalonia submodules.'; exit 1 }
       Push-Location $avaloniaRoot
-      & (Join-Path $avaloniaRoot 'build.ps1') CreateNugetPackages --configuration Release --force-nuget-version $avaloniaVersion
+      & (Join-Path $avaloniaRoot 'build.ps1') CreateNugetPackages --skip InitDnx --configuration Release --force-nuget-version $avaloniaVersion
       $packageBuildExitCode = $LASTEXITCODE
       Pop-Location
       if ($packageBuildExitCode -ne 0) { Write-Error 'Could not build pinned Avalonia packages.'; exit 1 }
