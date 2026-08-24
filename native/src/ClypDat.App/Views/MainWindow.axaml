@@ -2708,7 +2708,7 @@
                                   <Slider Grid.Row="1"
                                   Grid.Column="2"
                                   Classes="volumeSlider"
-                                  Foreground="{Binding VolumeBrush}"
+                                  Foreground="{Binding VolumeAccentBrush}"
                                   Minimum="0"
                                   Maximum="150"
                                   TickFrequency="1"

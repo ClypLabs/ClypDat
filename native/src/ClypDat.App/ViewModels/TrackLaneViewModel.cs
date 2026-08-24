@@ -13,6 +13,8 @@ public sealed class TrackLaneViewModel : ViewModelBase
     private bool _isLastAudioTrack;
     private IReadOnlyList<double> _waveformPeaks = Array.Empty<double>();
     private Bitmap? _filmstrip;
+    private readonly Color _laneColor;
+    private readonly SolidColorBrush _volumeAccentBrush;
 
     public TrackLaneViewModel(int streamIndex, string label, string type, string color, bool canAdjustVolume, double volumePercent = 100)
     {
@@ -20,9 +22,11 @@ public sealed class TrackLaneViewModel : ViewModelBase
         Label = label;
         Type = type;
         Color = color;
-        VolumeBrush = new SolidColorBrush(Avalonia.Media.Color.Parse(color));
+        _laneColor = Avalonia.Media.Color.Parse(color);
+        VolumeBrush = new SolidColorBrush(_laneColor);
         CanAdjustVolume = canAdjustVolume;
         _volumePercent = Math.Clamp(volumePercent, 0, 150);
+        _volumeAccentBrush = new SolidColorBrush(GetVolumeAccentColor(_volumePercent));
     }
 
     public int StreamIndex { get; }
@@ -30,6 +34,7 @@ public sealed class TrackLaneViewModel : ViewModelBase
     public string Type { get; }
     public string Color { get; }
     public IBrush VolumeBrush { get; }
+    public IBrush VolumeAccentBrush => _volumeAccentBrush;
     public bool CanAdjustVolume { get; }
     public bool IsAudio => Type == "audio";
     public bool IsVideo => Type == "video";
@@ -81,8 +86,17 @@ public sealed class TrackLaneViewModel : ViewModelBase
             OnPropertyChanged(nameof(VolumeBadgeMargin));
             OnPropertyChanged(nameof(EffectiveVolumePercent));
             OnPropertyChanged(nameof(IsVolumeNonDefault));
+            _volumeAccentBrush.Color = GetVolumeAccentColor(clamped);
+            OnPropertyChanged(nameof(VolumeAccentBrush));
         }
     }
+
+    private Color GetVolumeAccentColor(double volumePercent) => volumePercent switch
+    {
+        > 125 => Avalonia.Media.Color.Parse("#F05A63"),
+        > 100 => Avalonia.Media.Color.Parse("#F4B73E"),
+        _ => _laneColor
+    };
 
     // Drives the per-track reset button (MainWindow.axaml) - only shown once
     // a track has actually been moved off its 100% default, so the row
