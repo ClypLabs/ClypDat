@@ -14,7 +14,7 @@ internal sealed class NewClipsDialog : Window
 {
     private readonly Window _owner;
     private readonly TextBlock _title;
-    public WrapPanel Cards { get; } = new() { Margin = new Thickness(24, 20, 24, 4) };
+    public StackPanel Cards { get; } = new() { Margin = new Thickness(24, 20, 24, 4) };
     public Button DeleteButton { get; } = new() { MinWidth = 150, Height = 40 };
 
     public NewClipsDialog(Window owner, EventHandler<RoutedEventArgs> close, EventHandler<RoutedEventArgs> delete, EventHandler<RoutedEventArgs> viewAll)

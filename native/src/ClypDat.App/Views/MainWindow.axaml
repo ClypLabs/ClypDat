@@ -1513,6 +1513,8 @@
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding ShowNewClipsOnGameClose}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
+                  <Button Classes="primaryButton" Content="Preview New Clips Overlay" HorizontalAlignment="Left" Height="34"
+                          Click="PreviewNewClipsOverlayButton_OnClick" />
 
                   <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
 
@@ -3097,7 +3099,7 @@
           </Border>
 
           <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="620">
-            <WrapPanel x:Name="NewClipsCardsPanel" Margin="24,20,24,4" />
+            <StackPanel x:Name="NewClipsCardsPanel" Margin="24,20,24,4" />
           </ScrollViewer>
         </DockPanel>
       </Border>
