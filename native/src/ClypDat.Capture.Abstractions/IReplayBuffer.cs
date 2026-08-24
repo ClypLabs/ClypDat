@@ -91,6 +91,16 @@ public sealed record ReplayCaptureHealth(
     // evidence the machine cannot sustain its settings.
     public bool SaveInProgress { get; init; }
 
+    // WGC and hook transport counters remain separate from InputFrameRate so a
+    // support bundle can distinguish compositor cadence from a game-present
+    // transport issue without parsing the debug log.
+    public TimeSpan? WgcRequestedUpdateInterval { get; init; }
+    public TimeSpan? WgcAppliedUpdateInterval { get; init; }
+    public long HookPresents { get; init; }
+    public long HookTransportedFrames { get; init; }
+    public long HookTransportDrops { get; init; }
+    public string HookFallbackReason { get; init; } = string.Empty;
+
     public ReplayStorageHealth Storage { get; init; } = ReplayStorageHealth.Unknown;
 
     public static ReplayCaptureHealth Unknown(string backend = "Unknown") => new(

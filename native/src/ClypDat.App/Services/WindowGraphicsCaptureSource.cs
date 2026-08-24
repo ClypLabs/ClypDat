@@ -11,7 +11,7 @@ namespace ClypDat.App.Services;
 // Owns short-lived WGC frames on its callback thread. Consumers receive only
 // an application-owned texture, so an encoder can never starve WGC's pool.
 [SupportedOSPlatform("windows10.0.17763.0")]
-internal sealed class WindowGraphicsCaptureSource : IDisposable
+internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposable
 {
     private const int FramePoolBufferCount = 3;
     private readonly ID3D11Device _device;
@@ -66,6 +66,7 @@ internal sealed class WindowGraphicsCaptureSource : IDisposable
         new(device, d3dLock, CaptureInterop.CreateItemForWindow(windowHandle), captureCursor, frameRate);
 
     public (int Width, int Height) ContentSize { get { lock (_stateLock) return (_contentSize.Width, _contentSize.Height); } }
+    public string CaptureMode => "Windows Graphics Capture";
     public string? Failure { get { lock (_stateLock) return _failure; } }
 
     internal WindowGraphicsCaptureTelemetry GetTelemetrySnapshot()
@@ -108,7 +109,7 @@ internal sealed class WindowGraphicsCaptureSource : IDisposable
         return result.Applied is not null;
     }
 
-    internal bool WaitAndTakeLatestTexture(TimeSpan timeout, CancellationToken cancellationToken, out ID3D11Texture2D? texture)
+    public bool WaitAndTakeLatestTexture(TimeSpan timeout, CancellationToken cancellationToken, out ID3D11Texture2D? texture)
     {
         texture = null;
         try

@@ -576,6 +576,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         IDXGIOutputDuplication? duplication = null;
         WindowGraphicsCaptureSource? wgcCapture = null;
         GameHookSession? gameHook = null;
+        IGameFrameSource? activeGameFrameSource = null;
+        var wgcFallbackPolicy = new WgcCadenceFallbackPolicy();
+        var hookFallbackAttempted = false;
+        var hookFallbackFailed = false;
+        var hookSourceActive = false;
+        var lastHookFrameAt = TimeSpan.Zero;
         // GPU-side downscale path (see TrySetupGpuScale) - only actually used
         // when useGpuScale ends up true; `staging`/swsContext above always
         // still get created too so there's a guaranteed-working fallback if
@@ -712,7 +718,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
             var targetHandle = ResolveTargetWindow(config);
             var isMonitorMode = targetHandle == 0;
-            if (!isMonitorMode) gameHook = GameHookSession.TryStart(targetHandle);
+            if (!isMonitorMode) gameHook = GameHookSession.TryStart(targetHandle, device, gpuLock, config.FrameRate, automatic: false);
             // Which output the duplication below is actually bound to - see the
             // once-a-second target recheck in the loop for why the window handle
             // alone is the wrong thing to compare against.
@@ -723,6 +729,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 try
                 {
                     wgcCapture = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor, config.FrameRate);
+                    activeGameFrameSource = wgcCapture;
                     var size = wgcCapture.ContentSize;
                     desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
                     AppLog.Info($"Native capture: using bounded Windows.Graphics.Capture for game window 0x{targetHandle:X}.");
@@ -822,9 +829,17 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 }
             }
 
-            // Hardware encoders use the bounded system-memory NV12 transport.
-            // Dynamic D3D11 texture registration was slower than this staging path.
-            codecContext = CreateEncoder(config, outputWidth, outputHeight, 0, out var codecTimeBase, out var encoderName, out var hardwareFramesActive);
+            // Keep the scaler and NVENC on the same D3D11 device.  The encoder
+            // probe below remains authoritative: if this GPU/driver cannot use
+            // these frames it releases the pool and takes the existing
+            // system-memory path, rather than making capture fail.
+            if (useGpuScale && (!config.CaptureCursor || gpuCursorAvailable))
+            {
+                (hwDeviceRef, hwFramesRef) = TryCreateD3D11EncodeFrames(
+                    device, outputWidth, outputHeight, encodeQueueCapacity + HardwareFramePoolHeadroom);
+            }
+
+            codecContext = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, out var codecTimeBase, out var encoderName, out var hardwareFramesActive);
             _timeBase = codecTimeBase;
             _videoCodecId = codecContext->codec_id;
 
@@ -876,7 +891,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var adapterDescription = DescribeAdapter(device);
             var videoCodec = encoderName.StartsWith("av1_", StringComparison.OrdinalIgnoreCase) ? "AV1" : "H.264";
             var captureMode = wgcCapture is null ? "Desktop Duplication" : "Windows Graphics Capture";
-            AppLog.Info($"Native capture started ({captureMode}): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, codec={videoCodec}, encoder={encoderName}, encodePath=system-memory, cursorPath={(config.CaptureCursor ? "CPU" : "off")}, queue={encodeQueueCapacity} frames, adapter={adapterDescription}, profile={config.EncoderProfile}, frameTiming={ReplayFrameTimingPolicy.Normalize(config.FrameRateMode)}, configFrameRate={config.FrameRate}.");
+            AppLog.Info($"Native capture started ({captureMode}): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, codec={videoCodec}, encoder={encoderName}, encodePath={(hardwareFramesActive ? "D3D11 zero-copy" : "system-memory")}, cursorPath={(config.CaptureCursor ? "CPU" : "off")}, queue={encodeQueueCapacity} frames, adapter={adapterDescription}, profile={config.EncoderProfile}, frameTiming={ReplayFrameTimingPolicy.Normalize(config.FrameRateMode)}, configFrameRate={config.FrameRate}.");
             SetHealth(new ReplayCaptureHealth("Native", captureMode, ReplayCaptureState.Healthy,
                 config.FrameRate, 0, 0, 0, 0, 0, 0, encoderName, "Default adapter", string.Empty, DateTime.UtcNow)
             {
@@ -1275,6 +1290,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // queued AVFrames can still be delayed or rejected.
                     var outputFrameRate = packetsOutSinceLog / diagElapsed;
                     var encoderPressure = droppedSinceLog > 0 || encodeQueue.Count * 4 >= encodeQueueCapacity * 3;
+                    var hookTelemetry = gameHook?.Telemetry;
                     var outputShortfall = hasCapturedRealFrame && outputFrameRate < activeFrameRate * 0.9;
                     var overloaded = encoderPressure;
                     // A stall is worse than an overload and reads nothing like one:
@@ -1295,7 +1311,27 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         const string recoveryGuidance = "Automatic hardware profile is already active; reduce capture resolution or frame rate.";
                         AppLog.Info($"Native capture: overload - dropped {droppedSinceLog} frame(s) in the last {diagElapsed:0.0}s, queue {encodeQueue.Count}/{encodeQueueCapacity}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.0}, avgScaleMs={scaleMs / n:0.0}. {recoveryGuidance}");
                     }
-                    var activeCaptureMode = wgcCapture is null ? "Desktop Duplication" : "Windows Graphics Capture";
+                    // WGC stays alive while the hook connects.  A valid shared
+                    // frame is the only handoff point; denied injection and a
+                    // non-D3D11 game remain on WGC without interrupting capture.
+                    if (!isMonitorMode && wgcCapture is not null && !hookFallbackAttempted && !hookFallbackFailed &&
+                        wgcFallbackPolicy.ShouldFallback(activeFrameRate, wgcInputRate, IsWindowForegroundAndVisible(targetHandle), encoderPressure, Volatile.Read(ref _savesInFlight) > 0))
+                    {
+                        gameHook?.Dispose();
+                        gameHook = GameHookSession.TryStart(targetHandle, device, gpuLock, activeFrameRate, automatic: true);
+                        hookFallbackAttempted = true;
+                        if (gameHook is null) hookFallbackFailed = true;
+                        else AppLog.Info("Native capture: WGC cadence stayed below 90% of target; waiting for D3D11 hook transport.");
+                    }
+
+                    if (hookFallbackAttempted && !hookSourceActive && gameHook is not null && !gameHook.IsAttached && stopwatch.Elapsed > TimeSpan.FromSeconds(5))
+                    {
+                        hookFallbackFailed = true;
+                        AppLog.Info($"Native capture: game hook fallback failed for this process ({gameHook.Failure ?? "no connection within five seconds"}); retaining WGC.");
+                        gameHook.Dispose(); gameHook = null;
+                    }
+
+                    var activeCaptureMode = hookSourceActive ? "Game Hook (D3D11)" : wgcCapture is null ? "Desktop Duplication" : "Windows Graphics Capture";
                     SetHealth(new ReplayCaptureHealth("Native", activeCaptureMode,
                         overloaded || isStalled ? ReplayCaptureState.Degraded : ReplayCaptureState.Healthy,
                         activeFrameRate, inputFrameCount / diagElapsed, framesProcessedSinceLog / diagElapsed,
@@ -1303,6 +1339,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         encoderName, "Default adapter",
                         isStalled ? "Capture stalled - no new frames from the display. Recovering." :
                         overloaded ? "Capture overload. Output may fall below target FPS." :
+                        hookFallbackFailed ? "Game hook fallback failed; Windows Graphics Capture remains active." :
                         outputShortfall ? "Capture cadence below target; encoder queue is keeping up." : string.Empty,
                         DateTime.UtcNow)
                     {
@@ -1322,7 +1359,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // See ReplayCaptureHealth.SaveInProgress. A save backs
                         // the queue up for a second or two by design; it is not
                         // evidence the settings are unsustainable.
-                        SaveInProgress = Volatile.Read(ref _savesInFlight) > 0
+                        SaveInProgress = Volatile.Read(ref _savesInFlight) > 0,
+                        WgcRequestedUpdateInterval = wgcTelemetry?.MinimumUpdateInterval.Requested,
+                        WgcAppliedUpdateInterval = wgcTelemetry?.MinimumUpdateInterval.Applied,
+                        HookPresents = hookTelemetry?.Presents ?? 0,
+                        HookTransportedFrames = hookTelemetry?.TransportedFrames ?? 0,
+                        HookTransportDrops = hookTelemetry?.TransportDrops ?? 0,
+                        HookFallbackReason = hookFallbackFailed ? gameHook?.Failure ?? "Hook transport stalled or did not connect." : string.Empty
                     });
                     copyMapMs = 0;
                     scaleMs = 0;
@@ -1363,7 +1406,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         gameHook?.Dispose();
                         targetHandle = freshHandle;
                         isMonitorMode = targetHandle == 0;
-                        if (!isMonitorMode) gameHook = GameHookSession.TryStart(targetHandle);
+                        if (!isMonitorMode) gameHook = GameHookSession.TryStart(targetHandle, device, gpuLock, activeFrameRate, automatic: false);
+                        wgcFallbackPolicy.Reset();
+                        hookFallbackAttempted = false;
+                        hookFallbackFailed = false;
+                        hookSourceActive = false;
+                        activeGameFrameSource = wgcCapture;
+                        lastHookFrameAt = TimeSpan.Zero;
 
                         var freshMonitor = ResolveTargetMonitor(targetHandle, config);
                         if (wgcCapture is not null || freshMonitor != targetMonitor || duplication is null)
@@ -1378,6 +1427,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 try
                                 {
                                     wgcCapture = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor, activeFrameRate);
+                                    activeGameFrameSource = wgcCapture;
                                     var size = wgcCapture.ContentSize;
                                     desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
                                     AppLog.Info($"Native capture: WGC source replaced for game window 0x{targetHandle:X}.");
@@ -1477,14 +1527,31 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 ID3D11Resource? desktopResource;
                 if (usingWgc)
                 {
-                    desktopResource = wgcCapture!.WaitAndTakeLatestTexture(
-                        TimeSpan.FromMilliseconds(Math.Max(100d, acquireTimeoutMs * 4d)), token, out var latestTexture)
-                        ? latestTexture
-                        : null;
-                    if (desktopResource is null && !string.IsNullOrWhiteSpace(wgcCapture.Failure))
+                    if (!hookSourceActive && gameHook?.HasValidFrames == true)
                     {
-                        AppLog.Info($"Native capture: WGC source closed ({wgcCapture.Failure}); restarting WGC.");
-                        wgcCapture.Dispose();
+                        hookSourceActive = true;
+                        activeGameFrameSource = gameHook;
+                        lastHookFrameAt = stopwatch.Elapsed;
+                        AppLog.Info("Native capture: switched game frame transport from WGC to D3D11 hook.");
+                    }
+                    var selectedGameFrameSource = activeGameFrameSource ?? wgcCapture!;
+                    var sourceHasFrame = selectedGameFrameSource.WaitAndTakeLatestTexture(
+                        TimeSpan.FromMilliseconds(Math.Max(100d, acquireTimeoutMs * 4d)), token, out var latestTexture);
+                    desktopResource = sourceHasFrame ? latestTexture : null;
+                    if (sourceHasFrame && hookSourceActive) lastHookFrameAt = stopwatch.Elapsed;
+                    if (hookSourceActive && stopwatch.Elapsed - lastHookFrameAt >= TimeSpan.FromSeconds(2))
+                    {
+                        AppLog.Info("Native capture: D3D11 hook transport stalled; restoring WGC for this game process.");
+                        hookSourceActive = false;
+                        activeGameFrameSource = wgcCapture;
+                        hookFallbackFailed = true;
+                        gameHook?.Dispose(); gameHook = null;
+                    }
+                    var activeWgcCapture = wgcCapture!;
+                    if (desktopResource is null && !string.IsNullOrWhiteSpace(activeWgcCapture.Failure))
+                    {
+                        AppLog.Info($"Native capture: WGC source closed ({activeWgcCapture.Failure}); restarting WGC.");
+                        activeWgcCapture.Dispose();
                         try { wgcCapture = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor, activeFrameRate); }
                         catch (Exception error) { throw new InvalidOperationException("Windows.Graphics.Capture could not restart for game capture.", error); }
                     }
@@ -2222,6 +2289,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     idealFrameIntervalMicroseconds = 1_000_000.0 / activeFrameRate;
                     cropSamplingBudget.SetRate(activeFrameRate, stopwatch.Elapsed);
                     wgcCapture?.TrySetTargetFrameRate(activeFrameRate);
+                    gameHook?.SetTargetFrameRate(activeFrameRate);
                     previousWgcTelemetry = default;
                     SetHealth(_health with { TargetFrameRate = activeFrameRate, UpdatedUtc = DateTime.UtcNow });
                     AppLog.Info($"Native capture: target frame rate now {activeFrameRate} fps.");
@@ -4316,7 +4384,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             TrySet("preset", "p1");
             if (profile is not null) TrySet("profile", profile);
             TrySet("tune", "ll");
-            TrySet("zerolatency", "1");
             TrySet("surfaces", ReplayEncoderProfilePolicy.NvencSurfaces(config.FrameRate).ToString(CultureInfo.InvariantCulture));
             // This is a replay buffer, not a live stream. NVENC's zerolatency
             // option forces a packet out for every submitted frame; when the

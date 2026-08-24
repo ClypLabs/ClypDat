@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using Windows.Foundation.Metadata;
 using Windows.Graphics.Capture;
 using Windows.Graphics.DirectX.Direct3D11;
 
@@ -11,18 +12,14 @@ namespace ClypDat.App.Services;
 // projection. This is the standard, well-established pattern for using WGC from a
 // desktop (non-UWP) app.
 //
-// Calls go through raw vtable function pointers rather than a [ComImport] interface -
-// casting a Marshal.GetObjectForIUnknown-wrapped pointer to a ComImport interface here
-// threw InvalidCastException at the first method call (a known fragility of classic COM
-// interop dispatch in this configuration); direct vtable calls sidestep it entirely.
+// The item factory and DXGI surface bridge are classic COM interfaces, so those
+// calls use direct vtable pointers.  WGC session features themselves use the
+// SDK's WinRT projection (see TrySetMinimumUpdateInterval).
 [SupportedOSPlatform("windows10.0.17763.0")]
 internal static unsafe class CaptureInterop
 {
     private static readonly Guid GraphicsCaptureItemInteropIid = new("3628E81B-3CAC-4C60-B7F4-23CE0E0C3356");
     private static readonly Guid Direct3DDxgiInterfaceAccessIid = new("A9B3D012-3DF2-4EE3-B8D1-8695F457D3C1");
-    // IGraphicsCaptureSession5, documented by Windows.Graphics.Capture. Its
-    // MinUpdateInterval accessors follow IInspectable at vtable slots 6 and 7.
-    private static readonly Guid GraphicsCaptureSession5Iid = new("67C0EA62-1F85-5061-925A-239BE0AC09CB");
     // The documented IID of Windows.Graphics.Capture.IGraphicsCaptureItem itself -
     // typeof(GraphicsCaptureItem).GUID does NOT reliably match what the native
     // CreateForWindow/CreateForMonitor factory expects as riid (returns E_NOINTERFACE).
@@ -111,52 +108,23 @@ internal static unsafe class CaptureInterop
     public static WgcMinimumUpdateIntervalResult TrySetMinimumUpdateInterval(GraphicsCaptureSession session, int frameRate)
     {
         var requested = WgcMinimumUpdateIntervalPolicy.FromFrameRate(frameRate);
-        var sessionPointer = IntPtr.Zero;
+        // MinUpdateInterval is projected by the current Windows SDK.  Do not
+        // query the optional IGraphicsCaptureSession5 by hand: that path
+        // requires marshaling a WinRT object through classic COM and fails on
+        // current projections even when WGC itself is healthy.
+        if (!ApiInformation.IsPropertyPresent("Windows.Graphics.Capture.GraphicsCaptureSession", "MinUpdateInterval"))
+            return WgcMinimumUpdateIntervalPolicy.Unsupported(frameRate);
+
         try
         {
-            // This runtime interface is optional. Some newer Windows projections cannot
-            // marshal GraphicsCaptureSession through this path, even though normal WGC
-            // capture works. Keep capture alive and use WGC's default cadence instead.
-            sessionPointer = WinRT.MarshalInterface<GraphicsCaptureSession>.FromManaged(session);
-            var iid = GraphicsCaptureSession5Iid;
-            var queryResult = Marshal.QueryInterface(sessionPointer, in iid, out var session5Pointer);
-            if (queryResult < 0)
-            {
-                if (queryResult == unchecked((int)0x80004002))
-                    return WgcMinimumUpdateIntervalPolicy.Unsupported(frameRate);
-
-                return new WgcMinimumUpdateIntervalResult(false, requested, null,
-                    $"QueryInterface failed (0x{queryResult:X8}).");
-            }
-
-            try
-            {
-                var vtable = *(IntPtr**)session5Pointer;
-                var put = (delegate* unmanaged<IntPtr, long, int>)vtable[7];
-                Marshal.ThrowExceptionForHR(put(session5Pointer, requested.Ticks));
-
-                var get = (delegate* unmanaged<IntPtr, long*, int>)vtable[6];
-                long appliedTicks;
-                Marshal.ThrowExceptionForHR(get(session5Pointer, &appliedTicks));
-                return new WgcMinimumUpdateIntervalResult(true, requested, TimeSpan.FromTicks(appliedTicks));
-            }
-            catch (Exception error)
-            {
-                return new WgcMinimumUpdateIntervalResult(true, requested, null, error.Message);
-            }
-            finally
-            {
-                Marshal.Release(session5Pointer);
-            }
+            session.MinUpdateInterval = requested;
+            return new WgcMinimumUpdateIntervalResult(true, requested, session.MinUpdateInterval);
         }
         catch (Exception error)
         {
-            return WgcMinimumUpdateIntervalPolicy.Unavailable(frameRate, error.Message);
-        }
-        finally
-        {
-            if (sessionPointer != IntPtr.Zero)
-                Marshal.Release(sessionPointer);
+            // This setting is optional; a rejected interval must never tear
+            // down an otherwise valid game capture session.
+            return new WgcMinimumUpdateIntervalResult(true, requested, null, error.Message);
         }
     }
 

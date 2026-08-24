@@ -73,4 +73,30 @@ public sealed class WgcCaptureRatePolicyTests
         Assert.False(policy.ShouldFallback(60, 40, foregroundAndVisible: true, encoderPressure: false));
         Assert.False(policy.ShouldFallback(60, 40, foregroundAndVisible: true, encoderPressure: false));
     }
+
+    [Fact]
+    public void SaveInProgress_DoesNotAdvanceCadenceProbe()
+    {
+        var policy = new WgcCadenceFallbackPolicy();
+
+        Assert.False(policy.ShouldFallback(90, 60, foregroundAndVisible: true, encoderPressure: false));
+        Assert.False(policy.ShouldFallback(90, 60, foregroundAndVisible: true, encoderPressure: false, saveInProgress: true));
+        Assert.False(policy.ShouldFallback(90, 60, foregroundAndVisible: true, encoderPressure: false));
+        Assert.False(policy.ShouldFallback(90, 60, foregroundAndVisible: true, encoderPressure: false));
+        Assert.False(policy.ShouldFallback(90, 60, foregroundAndVisible: true, encoderPressure: false));
+        Assert.True(policy.ShouldFallback(90, 60, foregroundAndVisible: true, encoderPressure: false));
+    }
+
+    [Fact]
+    public void CommittedFallback_DoesNotOscillateBackToWgc()
+    {
+        var policy = new WgcCadenceFallbackPolicy();
+
+        Assert.False(policy.ShouldFallback(90, 60, true, false));
+        Assert.False(policy.ShouldFallback(90, 60, true, false));
+        Assert.False(policy.ShouldFallback(90, 60, true, false));
+        Assert.True(policy.ShouldFallback(90, 60, true, false));
+        Assert.True(policy.FallbackCommitted);
+        Assert.False(policy.ShouldFallback(90, 90, true, false));
+    }
 }

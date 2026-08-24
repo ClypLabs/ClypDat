@@ -24,10 +24,23 @@ internal sealed class WgcCadenceFallbackPolicy
 {
     private bool _warmupWindowIgnored;
     private int _consecutiveLowWindows;
+    private bool _fallbackCommitted;
 
-    public bool ShouldFallback(int targetFrameRate, double callbackFrameRate, bool foregroundAndVisible, bool encoderPressure)
+    public bool FallbackCommitted => _fallbackCommitted;
+
+    public bool ShouldFallback(
+        int targetFrameRate,
+        double callbackFrameRate,
+        bool foregroundAndVisible,
+        bool encoderPressure,
+        bool saveInProgress = false)
     {
-        if (!foregroundAndVisible || encoderPressure)
+        // A selected hook is kept for the lifetime of this game process.  It
+        // avoids a source swap every time WGC has one good sample, which would
+        // itself create the cadence oscillation this watchdog is meant to cure.
+        if (_fallbackCommitted) return false;
+
+        if (!foregroundAndVisible || encoderPressure || saveInProgress)
         {
             Reset();
             return false;
@@ -45,12 +58,15 @@ internal sealed class WgcCadenceFallbackPolicy
             return false;
         }
 
-        return ++_consecutiveLowWindows >= 3;
+        if (++_consecutiveLowWindows < 3) return false;
+        _fallbackCommitted = true;
+        return true;
     }
 
     public void Reset()
     {
         _warmupWindowIgnored = false;
         _consecutiveLowWindows = 0;
+        _fallbackCommitted = false;
     }
 }
