@@ -2806,7 +2806,7 @@
       <Border Grid.Column="1" Grid.Row="0" Classes="editorInspector">
         <Grid RowDefinitions="Auto,*,Auto">
           <Border Height="104" Classes="editorInspectorHeader">
-            <Grid Margin="24,14,20,14" RowDefinitions="Auto,Auto" RowSpacing="8">
+            <Grid Margin="24,14,20,14" RowDefinitions="Auto,Auto" RowSpacing="8" VerticalAlignment="Center">
               <StackPanel Spacing="4">
                 <TextBlock Text="CLIP DETAILS" Classes="editorTimelineEyebrow" />
                 <TextBlock Text="{Binding EditorTitle}" Classes="editorInspectorTitle" TextTrimming="CharacterEllipsis" />
