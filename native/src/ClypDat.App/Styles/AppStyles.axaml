@@ -1179,7 +1179,6 @@
   <!-- 100% is the blue reference point. The exposed tail warns before gain
        reaches the yellow/red boost zone, while Fluent keeps the thumb crisp. -->
   <Style Selector="Slider.appVolumeSlider">
-    <Setter Property="Width" Value="82" />
     <Setter Property="Foreground" Value="#59B6FF" />
     <Setter Property="Background">
       <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,0%">
@@ -1733,15 +1732,16 @@
   </Style>
   <Style Selector="Slider.volumeSlider.appVolumeSlider">
     <Style.Resources>
-      <sys:Double x:Key="SliderTrackThemeHeight">6</sys:Double>
-      <CornerRadius x:Key="ControlCornerRadius">3</CornerRadius>
+      <sys:Double x:Key="SliderTrackThemeHeight">7</sys:Double>
+      <CornerRadius x:Key="ControlCornerRadius">3.5</CornerRadius>
     </Style.Resources>
+    <Setter Property="MinHeight" Value="36" />
     <Setter Property="Background" Value="#273440" />
   </Style>
   <Style Selector="Slider.volumeSlider.appVolumeSlider /template/ Thumb">
-    <Setter Property="Width" Value="20" />
-    <Setter Property="Height" Value="20" />
-    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Width" Value="22" />
+    <Setter Property="Height" Value="22" />
+    <Setter Property="CornerRadius" Value="11" />
     <Setter Property="BorderBrush" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}" />
   </Style>
 

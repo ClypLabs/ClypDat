@@ -2106,36 +2106,42 @@
                     <Border Classes="audioProcessList">
                       <StackPanel Spacing="0">
                         <Border Classes="audioProcessRow">
-                          <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-                            <PathIcon Data="M4,19H20V21H4V19M6,3H18V17H6V3M8,5V15H16V5H8Z" Width="18" Height="18" Foreground="#78B8FF" VerticalAlignment="Center" />
-                            <StackPanel Grid.Column="1" Spacing="1"><TextBlock Text="Game Audio" Foreground="#EDF4FB" FontWeight="SemiBold" /><TextBlock Text="Dedicated capture track" Foreground="#6B7C8C" FontSize="11" /></StackPanel>
-                            <TextBlock Grid.Column="2" Text="Separate" Foreground="#54D7A7" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
+                          <Grid ColumnDefinitions="40,32,*,Auto" ColumnSpacing="14" MinHeight="54">
+                            <Border Width="40" Height="32" />
+                            <Border Grid.Column="1" Width="32" Height="32" Background="#202C3A" CornerRadius="9" VerticalAlignment="Center">
+                              <PathIcon Data="M4,19H20V21H4V19M6,3H18V17H6V3M8,5V15H16V5H8Z" Width="18" Height="18" Foreground="#78B8FF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center"><TextBlock Text="Game Audio" Foreground="#EDF4FB" FontWeight="SemiBold" /><TextBlock Text="Dedicated capture track" Foreground="#6B7C8C" FontSize="11" /></StackPanel>
+                            <TextBlock Grid.Column="3" Text="Always separate" TextAlignment="Right" HorizontalAlignment="Right" Foreground="#54D7A7" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
                           </Grid>
                         </Border>
                         <Border Classes="audioProcessRow">
-                          <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-                            <PathIcon Data="M12,14C13.66,14 15,12.66 15,11V5C15,3.34 13.66,2 12,2C10.34,2 9,3.34 9,5V11C9,12.66 10.34,14 12,14M17.3,11C17.3,14 14.76,16.1 12,16.1C9.24,16.1 6.7,14 6.7,11H5C5,14.41 7.72,17.23 11,17.72V21H13V17.72C16.28,17.23 19,14.41 19,11H17.3Z" Width="18" Height="18" Foreground="#78B8FF" VerticalAlignment="Center" />
-                            <StackPanel Grid.Column="1" Spacing="1"><TextBlock Text="Microphone" Foreground="#EDF4FB" FontWeight="SemiBold" /><TextBlock Text="Dedicated capture track" Foreground="#6B7C8C" FontSize="11" /></StackPanel>
-                            <TextBlock Grid.Column="2" Text="Separate" Foreground="#54D7A7" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
+                          <Grid ColumnDefinitions="40,32,*,Auto" ColumnSpacing="14" MinHeight="54">
+                            <Border Width="40" Height="32" />
+                            <Border Grid.Column="1" Width="32" Height="32" Background="#202C3A" CornerRadius="9" VerticalAlignment="Center">
+                              <PathIcon Data="M12,14C13.66,14 15,12.66 15,11V5C15,3.34 13.66,2 12,2C10.34,2 9,3.34 9,5V11C9,12.66 10.34,14 12,14M17.3,11C17.3,14 14.76,16.1 12,16.1C9.24,16.1 6.7,14 6.7,11H5C5,14.41 7.72,17.23 11,17.72V21H13V17.72C16.28,17.23 19,14.41 19,11H17.3Z" Width="18" Height="18" Foreground="#78B8FF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center"><TextBlock Text="Microphone" Foreground="#EDF4FB" FontWeight="SemiBold" /><TextBlock Text="Dedicated capture track" Foreground="#6B7C8C" FontSize="11" /></StackPanel>
+                            <TextBlock Grid.Column="3" Text="Always separate" TextAlignment="Right" HorizontalAlignment="Right" Foreground="#54D7A7" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
                           </Grid>
                         </Border>
                         <ItemsControl ItemsSource="{Binding ActiveAudioProcesses}">
                           <ItemsControl.ItemTemplate>
                             <DataTemplate>
                               <Border Classes="audioProcessRow">
-                                <Grid ColumnDefinitions="Auto,*,230,Auto" ColumnSpacing="14" MinHeight="54">
-                                  <Border Width="32" Height="32" Background="#202C3A" CornerRadius="9" VerticalAlignment="Center">
+                                <Grid ColumnDefinitions="40,32,*,Auto" ColumnSpacing="14" MinHeight="54">
+                                  <ToggleSwitch Grid.Column="0" Width="40" IsChecked="{Binding IsEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                                  <Border Grid.Column="1" Width="32" Height="32" Background="#202C3A" CornerRadius="9" VerticalAlignment="Center">
                                     <Grid>
                                       <TextBlock Text="{Binding Initial}" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#BFD5EE" FontWeight="Bold" />
                                       <Image Source="{Binding Icon}" Stretch="Uniform" />
                                     </Grid>
                                   </Border>
-                                  <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center"><TextBlock Text="{Binding Name}" Foreground="#EDF4FB" FontWeight="SemiBold" /><TextBlock Text="Separate app track" Foreground="#6B7C8C" FontSize="11" /></StackPanel>
-                                  <Grid Grid.Column="2" ColumnDefinitions="*,Auto" ColumnSpacing="8" VerticalAlignment="Center" IsEnabled="{Binding IsEnabled}">
-                                    <Slider Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" Foreground="{Binding VolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding VolumePercent}" />
-                                    <TextBlock Grid.Column="1" Text="{Binding VolumePercent, StringFormat={}{0:0}%}" Foreground="#DCE8F5" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                  <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center"><TextBlock Text="{Binding Name}" Foreground="#EDF4FB" FontWeight="SemiBold" /><TextBlock Text="Separate app track" Foreground="#6B7C8C" FontSize="11" /></StackPanel>
+                                  <Grid Grid.Column="3" ColumnDefinitions="200,10,50" VerticalAlignment="Center" IsEnabled="{Binding IsEnabled}">
+                                    <Slider Width="200" Height="36" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" Foreground="{Binding VolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding VolumePercent}" />
+                                    <TextBlock Grid.Column="2" Text="{Binding VolumePercent, StringFormat={}{0:0}%}" TextAlignment="Right" HorizontalAlignment="Stretch" Foreground="#DCE8F5" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
                                   </Grid>
-                                  <ToggleSwitch Grid.Column="3" IsChecked="{Binding IsEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                                 </Grid>
                               </Border>
                             </DataTemplate>
