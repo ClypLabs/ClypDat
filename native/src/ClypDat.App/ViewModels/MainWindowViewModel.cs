@@ -3690,6 +3690,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var clip = new ClipCardViewModel(state, Settings.LibraryFolder);
         AttachClip(clip);
         AllClips.Add(clip);
+        // Cached cards intentionally arrive one at a time to keep first paint
+        // smooth. Keep the rail's usage figure and quota ring in step with the
+        // cards instead of leaving them stale until the restore finishes.
+        OnPropertyChanged(nameof(LibrarySizeDisplay));
+        NotifyStorageChrome();
         if (_isRestoringCachedLibrary)
         {
             _loadedStartupClipCount++;
