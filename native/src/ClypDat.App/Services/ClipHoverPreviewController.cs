@@ -24,16 +24,10 @@ namespace ClypDat.App.Services;
 // low-end machines as a hover stealing a whole core from the capture pipeline.
 internal sealed class ClipHoverPreviewController : IDisposable
 {
-    // GPU composition uploads only card-sized RGBA textures. Keep source
-    // cadence up to 60fps; low-rate clips remain at their native cadence.
+    // GPU composition uploads only card-sized RGBA textures. Every preview is
+    // paced at a fixed 60fps so the card never silently changes cadence while
+    // it is being watched.
     internal const int MaximumFramesPerSecond = 60;
-    internal const int DefaultFramesPerSecond = 30;
-    // What an overloaded preview falls back to. Previews run at the recorded
-    // rate by default; HoverPreviewFramePacer watches whether the machine is
-    // actually sustaining that and steps down to this when it isn't, rather
-    // than letting a preview that can only manage 22fps keep asking for 60 and
-    // burning the difference on frames nobody sees.
-    internal const int ReducedFramesPerSecond = 30;
     // Used when the card hasn't been laid out yet (no bounds to measure).
     internal const int DefaultPreviewWidth = 480;
     internal const int DefaultPreviewHeight = 270;
@@ -42,14 +36,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
     internal const int MaximumPreviewWidth = 640;
     private const int MinimumPreviewWidth = 160;
     private const int MinimumPreviewHeight = 90;
-    // 75ms was short enough that sweeping the pointer across the library
-    // spawned a full ffmpeg decoder for cards the user was only passing over.
-    // The log shows the shape plainly - repeated "preview started" followed by
-    // "warm exit expired" 200-400ms later, each one a process launch, a seek,
-    // and a renderer session thrown away. 180ms still feels
-    // immediate on a card the pointer actually settles on, and costs nothing
-    // for the ones it does not.
-    internal static readonly TimeSpan HoverDelay = TimeSpan.FromMilliseconds(180);
+    internal static readonly TimeSpan HoverDelay = TimeSpan.FromMilliseconds(75);
     internal static readonly TimeSpan WarmExitGrace = TimeSpan.FromMilliseconds(150);
 
     private readonly object _stateLock = new();
@@ -84,6 +71,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         var warmReused = false;
         CancellationToken token;
         int pendingGeneration;
+        long requestTimestamp;
         lock (_stateLock)
         {
             if (_disposed) return;
@@ -108,6 +96,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
                 _pendingClip = clip;
                 token = _pendingCancellation.Token;
                 pendingGeneration = ++_pendingGeneration;
+                requestTimestamp = Stopwatch.GetTimestamp();
                 goto StartPending;
             }
         }
@@ -122,7 +111,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
     StartPending:
         pendingCancellation?.Cancel();
         pendingCancellation?.Dispose();
-        _ = StartPendingAsync(clip, presenter, previewSize, pendingGeneration, token);
+        _ = StartPendingAsync(clip, presenter, previewSize, pendingGeneration, token, requestTimestamp);
     }
 
     // Pixel size to decode at, from the card's laid-out DIP size and the
@@ -228,7 +217,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         Stop(reason);
     }
 
-    private async Task StartPendingAsync(ClipCardViewModel clip, IClipPreviewPresenter presenter, PixelSize previewSize, int pendingGeneration, CancellationToken token)
+    private async Task StartPendingAsync(ClipCardViewModel clip, IClipPreviewPresenter presenter, PixelSize previewSize, int pendingGeneration, CancellationToken token, long requestTimestamp)
     {
         try
         {
@@ -273,7 +262,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
                 }
                 await presenter.SetAttachedAsync(attached);
                 runStarted = true;
-                await RunSessionAsync(clip, generation, previewSize, presenter, cancellation.Token);
+                await RunSessionAsync(clip, generation, previewSize, presenter, cancellation.Token, requestTimestamp);
             }
             finally
             {
@@ -285,18 +274,14 @@ internal sealed class ClipHoverPreviewController : IDisposable
         catch (Exception error) { AppLog.Error("Clip hover preview failed", error); }
     }
 
-    private async Task RunSessionAsync(ClipCardViewModel clip, int generation, PixelSize previewSize, IClipPreviewPresenter presenter, CancellationToken token)
+    private async Task RunSessionAsync(ClipCardViewModel clip, int generation, PixelSize previewSize, IClipPreviewPresenter presenter, CancellationToken token, long requestTimestamp)
     {
-        var metrics = new PreviewMetrics();
+        var metrics = new PreviewMetrics(requestTimestamp);
         try
         {
             var range = clip.HoverPreviewRange;
             if (range.Duration <= TimeSpan.Zero) return;
-            var frameRate = ResolveFrameRate(clip.Media.Fps);
-            // Session-scoped, not per decoder run: the whole point is to carry
-            // what it learned about this machine across the preview's loop
-            // restarts instead of re-optimistically asking for 60 every time
-            // the clip wraps around.
+            var frameRate = MaximumFramesPerSecond;
             var pacer = new HoverPreviewFramePacer(frameRate);
             var frameBytes = previewSize.Width * previewSize.Height * 4;
             if (!IsCurrent(clip, generation)) return;
@@ -306,9 +291,6 @@ internal sealed class ClipHoverPreviewController : IDisposable
 
             while (!token.IsCancellationRequested && IsCurrent(clip, generation))
             {
-                // Ask FFmpeg for whatever rate the pacer has settled on. Once
-                // it has stepped down, this stops the decode work happening at
-                // all rather than merely throttling reads off the pipe.
                 using var process = StartDecoder(clip.Path, range, pacer.CurrentFrameRate, previewSize);
                 SetProcess(clip, generation, process);
                 var stderr = process.StandardError.ReadToEndAsync();
@@ -343,7 +325,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         foreach (var slot in slots) await freeSlots.Writer.WriteAsync(slot, token);
 
         var producer = ProduceFramesAsync(stream, freeSlots, frames, clip, generation, pacer, metrics, token);
-        var consumer = ConsumeFramesAsync(frames, freeSlots.Writer, clip, generation, presenter, previewSize, pacer, metrics, token);
+        var consumer = ConsumeFramesAsync(frames, freeSlots.Writer, clip, generation, presenter, previewSize, metrics, token);
         await Task.WhenAll(producer, consumer);
         return (metrics.DecodedFrames - decodedBefore, metrics.DisplayedFrames - displayedBefore);
     }
@@ -364,17 +346,6 @@ internal sealed class ClipHoverPreviewController : IDisposable
                         pacer.Reset();
                     }
                     var delay = pacer.NextDelay(metrics.Elapsed);
-                    if (pacer.TryConsumeRateChange(out var newRate))
-                    {
-                        metrics.MarkRateTransition();
-                        AppLog.Info($"Clip hover preview rate adapted: {Path.GetFileName(clip.Path)}, now {newRate:0.###} fps (recorded={clip.Media.Fps:0.###}) - the preview was not sustaining the previous rate.");
-                        // Decoder fps is process configuration. Stop this run
-                        // so the enclosing loop immediately starts FFmpeg at
-                        // the newly selected target instead of spending the
-                        // rest of a long clip decoding the old rate.
-                        KillCurrentProcess(clip, generation);
-                        return;
-                    }
                     if (delay > TimeSpan.Zero) await Task.Delay(delay, token);
                     if (!await ReadFrameAsync(stream, slot.Buffer, token)) return;
                     metrics.MarkDecoded();
@@ -390,7 +361,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         finally { frames.Complete(); }
     }
 
-    private async Task ConsumeFramesAsync(LatestFrameMailbox<FrameSlot> frames, ChannelWriter<FrameSlot> freeSlots, ClipCardViewModel clip, int generation, IClipPreviewPresenter presenter, PixelSize previewSize, HoverPreviewFramePacer pacer, PreviewMetrics metrics, CancellationToken token)
+    private async Task ConsumeFramesAsync(LatestFrameMailbox<FrameSlot> frames, ChannelWriter<FrameSlot> freeSlots, ClipCardViewModel clip, int generation, IClipPreviewPresenter presenter, PixelSize previewSize, PreviewMetrics metrics, CancellationToken token)
     {
         try
         {
@@ -400,7 +371,6 @@ internal sealed class ClipHoverPreviewController : IDisposable
                 var result = await presenter.PresentAsync(slot.Buffer, previewSize, token);
                 metrics.MarkPresent(result.Path, result.Latency);
                 metrics.MarkDisplayed();
-                pacer.ObservePresentLatency(result.Latency);
                 await freeSlots.WriteAsync(slot, token);
             }
         }
@@ -448,10 +418,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         await DisposeSessionAsync(state, "activation cancelled", state.IsActive);
     }
 
-    internal static double ResolveFrameRate(double recordedFrameRate) =>
-        double.IsFinite(recordedFrameRate) && recordedFrameRate > 0
-            ? Math.Clamp(recordedFrameRate, 1, MaximumFramesPerSecond)
-            : DefaultFramesPerSecond;
+    internal static double ResolveFrameRate(double recordedFrameRate) => MaximumFramesPerSecond;
 
     private static Process StartDecoder(string path, (TimeSpan Start, TimeSpan Duration) range, double frameRate, PixelSize previewSize)
     {
@@ -495,12 +462,6 @@ internal sealed class ClipHoverPreviewController : IDisposable
         lock (_stateLock) { if (IsCurrentLocked(clip, generation)) _process = process; else Kill(process); }
     }
     private void ClearProcess(Process process) { lock (_stateLock) { if (_process == process) _process = null; } }
-    private void KillCurrentProcess(ClipCardViewModel clip, int generation)
-    {
-        Process? process;
-        lock (_stateLock) process = IsCurrentLocked(clip, generation) ? _process : null;
-        Kill(process);
-    }
     private async Task CleanupAsync(ClipCardViewModel clip, int generation)
     {
         SessionState state;
@@ -520,9 +481,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
     }
     private static async Task DisposeSessionAsync(SessionState state, string reason, bool log)
     {
-        state.Cancellation?.Cancel();
-        state.WarmExitCancellation?.Cancel();
-        Kill(state.Process);
+        CancelSession(state);
         if (state.Presenter is not null)
         {
             await state.Presenter.SetAttachedAsync(false);
@@ -535,9 +494,19 @@ internal sealed class ClipHoverPreviewController : IDisposable
 
     private async Task DisposeDetachedSessionAsync(SessionState state, string reason, bool log)
     {
+        // Cancel before waiting. The session lock is held by RunSessionAsync;
+        // waiting first leaves FFmpeg alive with nobody reading its pipe and
+        // can block cleanup for the entire clip duration.
+        CancelSession(state);
         await _sessionLock.WaitAsync();
         try { await DisposeSessionAsync(state, reason, log); }
         finally { _sessionLock.Release(); }
+    }
+    private static void CancelSession(SessionState state)
+    {
+        state.Cancellation?.Cancel();
+        state.WarmExitCancellation?.Cancel();
+        Kill(state.Process);
     }
     private bool IsPending(ClipCardViewModel clip, int generation) { lock (_stateLock) return IsPendingLocked(clip, generation); }
     private bool IsPendingLocked(ClipCardViewModel clip, int generation) => !_disposed && _pendingGeneration == generation && _pendingClip == clip;
@@ -578,163 +547,46 @@ internal sealed class ClipHoverPreviewController : IDisposable
     }
 }
 
-// Paces frame reads off the decoder pipe, and watches whether the machine is
-// keeping up with the rate it asked for.
-//
-// The overload signal is already in the pacing itself: NextDelay returns a
-// positive delay when the caller arrived ahead of schedule (there is headroom)
-// and Zero when it arrived late (there is not). A preview that is genuinely
-// sustaining its rate is ahead most of the time; one that is late on most
-// frames is being asked for a rate this machine cannot deliver, and every frame
-// it does manage costs decode, pipe and UI-upload work for a result nobody sees
-// as smoother. In that case step down to ReducedFramesPerSecond, which also
-// halves what FFmpeg is asked to decode on the next loop restart.
+// Paces frame reads off the decoder pipe at a fixed target rate.
 internal sealed class HoverPreviewFramePacer
 {
-    // One observation window. At 60fps that is a second of preview - long
-    // enough that a single slow paint doesn't trip it, short enough to react
-    // while the user is still hovering.
-    private const int WindowSize = 60;
-    // Late on at least half the window: not keeping up.
-    private const double DegradeLateShare = 0.5;
-    // Comfortably ahead. The gap between this and DegradeLateShare is the
-    // hysteresis band that stops a machine sitting right on the boundary from
-    // flapping between rates.
-    private const double RestoreLateShare = 0.15;
-    // Consecutive clean windows before full rate is tried again. Restoring is
-    // far more cautious than degrading, for the same reason EncoderTuningService
-    // promotes cautiously: a wrong degrade costs preview smoothness, a wrong
-    // restore costs the capture pipeline CPU it cannot spare.
-    private const int RestoreCleanWindows = 5;
-    // Two step-downs in one preview session means this is not a blip - stop
-    // offering full rate back for the rest of the session.
-    private const int MaximumDegrades = 2;
-
-    private readonly double _requestedFrameRate;
-    private readonly double _reducedFrameRate;
-    private TimeSpan _interval;
+    private readonly TimeSpan _interval;
     private TimeSpan? _nextFrameAt;
-    private int _windowCount;
-    private int _lateCount;
-    private int _cleanWindows;
-    private int _degrades;
-    private bool _reduced;
-    private double? _pendingRateChange;
 
     public HoverPreviewFramePacer(double frameRate)
     {
-        _requestedFrameRate = ClipHoverPreviewController.ResolveFrameRate(frameRate);
-        _reducedFrameRate = Math.Min(_requestedFrameRate, ClipHoverPreviewController.ReducedFramesPerSecond);
-        _interval = TimeSpan.FromSeconds(1 / _requestedFrameRate);
+        _interval = TimeSpan.FromSeconds(1 / ClipHoverPreviewController.ResolveFrameRate(frameRate));
     }
 
-    public double CurrentFrameRate => _reduced ? _reducedFrameRate : _requestedFrameRate;
-    public bool IsReduced => _reduced;
+    public double CurrentFrameRate => ClipHoverPreviewController.MaximumFramesPerSecond;
 
-    // True once per transition, so the caller can log it without the pacer
-    // needing to know which clip it belongs to.
-    public bool TryConsumeRateChange(out double frameRate)
-    {
-        if (_pendingRateChange is not { } pending)
-        {
-            frameRate = 0;
-            return false;
-        }
-        _pendingRateChange = null;
-        frameRate = pending;
-        return true;
-    }
-
-    // Called when the preview re-attaches after the pointer left and came back.
-    // The schedule is stale (wall time ran on while detached) and so is the
-    // observation window - frames missed while nothing was being painted say
-    // nothing about whether this machine can sustain the rate.
+    // Re-attach starts a fresh cadence after the pointer was away.
     public void Reset()
     {
         _nextFrameAt = null;
-        _windowCount = 0;
-        _lateCount = 0;
     }
 
     public TimeSpan NextDelay(TimeSpan now)
     {
-        var hadSchedule = _nextFrameAt is not null;
         TimeSpan delay;
-        bool late;
         if (_nextFrameAt is { } scheduled && now < scheduled)
         {
-            late = false;
             delay = scheduled - now;
             _nextFrameAt = scheduled + _interval;
         }
         else
         {
-            late = true;
             _nextFrameAt = now + _interval;
             delay = TimeSpan.Zero;
         }
-
-        // The first call after a reset has no schedule to be late against, so
-        // it is late by construction and must not count as evidence.
-        if (hadSchedule) Observe(late);
         return delay;
-    }
-
-    // Presentation completion is a real deadline too. GPU slots may still be
-    // held by the compositor even when pipe reads were on time; include that
-    // latency so adaptation protects replay capture from compositor stalls.
-    public void ObservePresentLatency(TimeSpan latency)
-    {
-        if (latency > _interval) Observe(late: true);
-    }
-
-    private void Observe(bool late)
-    {
-        // Nothing to step down to (a 24fps clip is already at or below the
-        // reduced rate), or already stepped down as far as this is allowed to.
-        if (_requestedFrameRate <= _reducedFrameRate) return;
-        if (_reduced && _degrades >= MaximumDegrades) return;
-
-        _windowCount++;
-        if (late) _lateCount++;
-        if (_windowCount < WindowSize) return;
-
-        var lateShare = (double)_lateCount / _windowCount;
-        _windowCount = 0;
-        _lateCount = 0;
-
-        if (!_reduced)
-        {
-            if (lateShare < DegradeLateShare) return;
-            _degrades++;
-            SetReduced(true);
-            return;
-        }
-
-        if (lateShare > RestoreLateShare)
-        {
-            _cleanWindows = 0;
-            return;
-        }
-
-        if (++_cleanWindows < RestoreCleanWindows) return;
-        _cleanWindows = 0;
-        SetReduced(false);
-    }
-
-    private void SetReduced(bool reduced)
-    {
-        _reduced = reduced;
-        _interval = TimeSpan.FromSeconds(1 / CurrentFrameRate);
-        // The old schedule was built on the old interval - re-anchor rather
-        // than carrying a deadline that means something different now.
-        _nextFrameAt = null;
-        _pendingRateChange = CurrentFrameRate;
     }
 }
 
 internal sealed class PreviewMetrics
 {
+    private readonly long _requestTimestamp;
+    private readonly long _runStartTimestamp;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private long _firstDecodedTicks = -1;
     private long _firstDisplayedTicks = -1;
@@ -748,7 +600,11 @@ internal sealed class PreviewMetrics
     private int _droppedFrames;
     private int _gpuPresents;
     private int _softwarePresents;
-    private int _rateTransitions;
+    public PreviewMetrics(long requestTimestamp)
+    {
+        _requestTimestamp = requestTimestamp;
+        _runStartTimestamp = Stopwatch.GetTimestamp();
+    }
 
     public TimeSpan Elapsed => _clock.Elapsed;
     public int DecodedFrames => Volatile.Read(ref _decodedFrames);
@@ -767,7 +623,6 @@ internal sealed class PreviewMetrics
         if (previous >= 0) InterlockedExtensions.Max(ref _longestGapTicks, now - previous);
     }
     public void MarkDropped() => Interlocked.Increment(ref _droppedFrames);
-    public void MarkRateTransition() => Interlocked.Increment(ref _rateTransitions);
     public void MarkPresent(PreviewPresentationPath path, TimeSpan latency)
     {
         if (path == PreviewPresentationPath.Gpu) Interlocked.Increment(ref _gpuPresents);
@@ -784,13 +639,19 @@ internal sealed class PreviewMetrics
         var elapsed = Math.Max(_clock.Elapsed.TotalSeconds, 0.001);
         var firstDecoded = TicksToMilliseconds(Volatile.Read(ref _firstDecodedTicks));
         var firstDisplayed = TicksToMilliseconds(Volatile.Read(ref _firstDisplayedTicks));
+        var hoverToFirstDisplayed = firstDisplayed < 0
+            ? -1
+            : Stopwatch.GetElapsedTime(_requestTimestamp, _runStartTimestamp).TotalMilliseconds + firstDisplayed;
         var longestGap = TicksToMilliseconds(Volatile.Read(ref _longestGapTicks));
         var presents = DisplayedFrames;
         var averagePresent = presents == 0 ? 0 : TicksToMilliseconds(Volatile.Read(ref _totalPresentTicks)) / presents;
         var longestPresent = TicksToMilliseconds(Volatile.Read(ref _longestPresentTicks));
         var readMb = Volatile.Read(ref _readBytes) / (1024d * 1024d);
         var path = Volatile.Read(ref _gpuPresents) > 0 ? (Volatile.Read(ref _softwarePresents) > 0 ? "gpu+software" : "gpu") : "software";
-        AppLog.Debug($"Clip hover preview metrics: {Path.GetFileName(clip.Path)}, generation={generation}, path={path}, firstDecodedMs={firstDecoded:0}, firstDisplayedMs={firstDisplayed:0}, decoded={DecodedFrames}, displayed={DisplayedFrames}, staleDrops={Volatile.Read(ref _droppedFrames)}, targetFps={ClipHoverPreviewController.ResolveFrameRate(clip.Media.Fps):0.##}, achievedFps={DisplayedFrames / elapsed:0.##}, rateTransitions={Volatile.Read(ref _rateTransitions)}, longestGapMs={longestGap:0}, presentAvgMs={averagePresent:0.##}, presentMaxMs={longestPresent:0.##}, readMB={readMb:0.##}.");
+        var steadyFps = firstDisplayed < 0
+            ? 0
+            : Math.Max(0, DisplayedFrames - 1) / Math.Max(elapsed - firstDisplayed / 1000, 0.001);
+        AppLog.Debug($"Clip hover preview metrics: {Path.GetFileName(clip.Path)}, generation={generation}, path={path}, firstDecodedMs={firstDecoded:0}, firstDisplayedMs={firstDisplayed:0}, hoverToFirstDisplayedMs={hoverToFirstDisplayed:0}, decoded={DecodedFrames}, displayed={DisplayedFrames}, staleDrops={Volatile.Read(ref _droppedFrames)}, targetFps={ClipHoverPreviewController.ResolveFrameRate(clip.Media.Fps):0.##}, achievedFps={DisplayedFrames / elapsed:0.##}, steadyFps={steadyFps:0.##}, longestGapMs={longestGap:0}, presentAvgMs={averagePresent:0.##}, presentMaxMs={longestPresent:0.##}, readMB={readMb:0.##}.");
     }
     private static double TicksToMilliseconds(long ticks) => ticks < 0 ? -1 : ticks * 1000d / Stopwatch.Frequency;
 }
