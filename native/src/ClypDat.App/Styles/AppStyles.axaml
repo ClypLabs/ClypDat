@@ -1574,6 +1574,73 @@
     <Setter Property="Background" Value="#263C4C" />
     <Setter Property="Foreground" Value="#EDF4FB" />
   </Style>
+  <!-- Editor timeline and inspector share one quiet, layered surface. The
+       clip name and trim range stay visible while scrubbing, so controls do
+       not need to carry that context themselves. -->
+  <Style Selector="Border.editorTimelinePanel">
+    <Setter Property="Background" Value="#111A22" />
+    <Setter Property="BorderBrush" Value="#2A3A48" />
+    <Setter Property="BorderThickness" Value="0,1,0,0" />
+  </Style>
+  <Style Selector="Border.editorTimelineHeader">
+    <Setter Property="Background" Value="#15212B" />
+    <Setter Property="BorderBrush" Value="#2A3D4C" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Padding" Value="12,5" />
+  </Style>
+  <Style Selector="TextBlock.editorTimelineEyebrow">
+    <Setter Property="Foreground" Value="#7FA5C7" />
+    <Setter Property="FontSize" Value="9" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="LetterSpacing" Value="0.8" />
+  </Style>
+  <Style Selector="TextBlock.editorTimelineTitle">
+    <Setter Property="Foreground" Value="#EDF4FB" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="Border.editorTimelineTime">
+    <Setter Property="Background" Value="#0D151C" />
+    <Setter Property="BorderBrush" Value="#283A48" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="5" />
+    <Setter Property="Padding" Value="8,4" />
+  </Style>
+  <Style Selector="Border.editorTrimReadout">
+    <Setter Property="Background" Value="#172630" />
+    <Setter Property="BorderBrush" Value="#315065" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="6" />
+  </Style>
+  <Style Selector="Border.editorTrackCard">
+    <Setter Property="Background" Value="#16222C" />
+    <Setter Property="BorderBrush" Value="#2B4050" />
+    <Setter Property="CornerRadius" Value="9" />
+  </Style>
+  <Style Selector="Border.editorInspector">
+    <Setter Property="Background" Value="#111920" />
+    <Setter Property="BorderBrush" Value="#30404D" />
+    <Setter Property="BorderThickness" Value="1,0,0,0" />
+  </Style>
+  <Style Selector="Border.editorInspectorHeader">
+    <Setter Property="Background" Value="#101820" />
+    <Setter Property="BorderBrush" Value="#263743" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+  </Style>
+  <Style Selector="Border.editorInspectorCard">
+    <Setter Property="Background" Value="#17232D" />
+    <Setter Property="BorderBrush" Value="#2D4252" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="14" />
+  </Style>
+  <Style Selector="Border.editorInspectorActions">
+    <Setter Property="Background" Value="#101820" />
+    <Setter Property="BorderBrush" Value="#263743" />
+    <Setter Property="BorderThickness" Value="0,1,0,0" />
+    <Setter Property="Padding" Value="16" />
+  </Style>
   <!-- Shared by every volume slider - per-track lanes AND both master
        volume controls (regular editor + fullscreen) - so all three look and
        feel identical.

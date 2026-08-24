@@ -2475,13 +2475,27 @@
           </Border>
         </Grid>
 
-        <Border Grid.Row="1" Grid.ColumnSpan="2" Background="#141D24" BorderBrush="#22303A" BorderThickness="0,1,0,0">
-          <Grid RowDefinitions="Auto,*" Margin="8,8,8,8">
+        <Border Grid.Row="1" Grid.ColumnSpan="2" Classes="editorTimelinePanel">
+          <Grid RowDefinitions="Auto,Auto,*" Margin="8">
+            <Border Classes="editorTimelineHeader" Height="42" Margin="0,0,0,6">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="14">
+                <StackPanel Spacing="1" VerticalAlignment="Center">
+                  <TextBlock Text="TIMELINE" Classes="editorTimelineEyebrow" />
+                  <TextBlock Text="{Binding SelectedVideoName}" Classes="editorTimelineTitle" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <Border Grid.Column="1" Classes="editorTimelineTime" VerticalAlignment="Center">
+                  <StackPanel Orientation="Horizontal" Spacing="5">
+                    <TextBlock Text="PLAYHEAD" Classes="editorTimelineEyebrow" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding TimelineStatusLabel}" Foreground="#EDF4FB" FontFamily="Consolas" FontSize="12" FontWeight="Bold" />
+                  </StackPanel>
+                </Border>
+              </Grid>
+            </Border>
             <!-- The docked control row, and the default: exactly the bar that sat
                  here before the hover bar replaced it. Auto row rather than a
                  fixed 44 so it collapses to nothing (not an empty gap) when the
                  Hoverbar setting moves these controls over the video instead. -->
-            <Grid Height="44" Margin="0,-4,0,4" IsVisible="{Binding !EditorHoverBarEnabled}">
+            <Grid Grid.Row="1" Height="44" Margin="0,-4,0,4" IsVisible="{Binding !EditorHoverBarEnabled}">
               <StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center" Spacing="8" Margin="4,0,0,0">
                 <Border Classes="muteToggle"
                         Width="26"
@@ -2545,7 +2559,7 @@
               </StackPanel>
             </Grid>
 
-            <Grid Grid.Row="1" ColumnDefinitions="160,*" ColumnSpacing="12">
+            <Grid Grid.Row="2" ColumnDefinitions="160,*" ColumnSpacing="12">
               <!-- Row 0 fixed at 34 (not Auto) so it matches the timeline column's
                    own row 0 below - Auto sized this side's row 0 to the
                    time-badge's own content height instead, so row 1 (the track
@@ -2566,29 +2580,11 @@
                      badges (e.g. the library card duration badge), current
                      time bright/bold and the " / total" half dimmer so the
                      two don't visually compete. -->
-                <Border HorizontalAlignment="Left"
-                        VerticalAlignment="Bottom"
-                        Margin="0,0,0,6"
-                        Padding="10,5"
-                        Background="#141D24"
-                        BorderBrush="#232F3A"
-                        BorderThickness="1"
-                        CornerRadius="6"
-                        IsVisible="{Binding !EditorHoverBarEnabled}">
-                  <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="{Binding CurrentTimeLabel}"
-                               Foreground="#EDF4FB"
-                               FontSize="15"
-                               FontWeight="Bold"
-                               FontFamily="Consolas" />
-                    <TextBlock Text=" / "
-                               Foreground="#5C6D7E"
-                               FontSize="15"
-                               FontFamily="Consolas" />
-                    <TextBlock Text="{Binding DurationLabel}"
-                               Foreground="#8C98A7"
-                               FontSize="15"
-                               FontFamily="Consolas" />
+                <Border HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                        Margin="0,0,0,6" Padding="10,5" Classes="editorTrimReadout">
+                  <StackPanel Spacing="1">
+                    <TextBlock Text="TRIM RANGE" Classes="editorTimelineEyebrow" />
+                    <TextBlock Text="{Binding TrimRangeLabel}" Foreground="#D8E7F5" FontSize="12" FontWeight="SemiBold" FontFamily="Consolas" />
                   </StackPanel>
                 </Border>
                 <ItemsControl Grid.Row="1" ItemsSource="{Binding TimelineTracks}">
@@ -2599,12 +2595,8 @@
                   </ItemsControl.ItemsPanel>
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                      <Border Height="{Binding LaneHeight}"
+                      <Border Height="{Binding LaneHeight}" Classes="editorTrackCard"
                               Margin="{Binding LaneMargin}"
-                              Background="#151E26"
-                              BorderBrush="#27333F"
-                              BorderThickness="1"
-                              CornerRadius="12"
                               ClipToBounds="False">
                         <Grid Margin="12,7" RowDefinitions="Auto,*" ColumnDefinitions="20,10,*">
                           <!-- ZIndex so the Reset button below keeps its own
@@ -2826,11 +2818,16 @@
       <!-- Permanent editor inspector. This deliberately lives in MainWindow's
            visual tree rather than an owned native window: it cannot be hidden,
            drift during resize, or sit above/below LibVLC unpredictably. -->
-      <Border Grid.Column="1" Grid.Row="0" Background="#111920" BorderBrush="#30404D" BorderThickness="1,0,0,0">
+      <Border Grid.Column="1" Grid.Row="0" Classes="editorInspector">
         <Grid RowDefinitions="Auto,*,Auto">
-          <Border Height="64" Background="#101820" BorderBrush="#263743" BorderThickness="0,0,0,1">
-            <TextBlock Text="CLIP DETAILS" Foreground="#EDF4FB" FontSize="17" FontWeight="SemiBold"
-                       VerticalAlignment="Center" Margin="24,0,16,0" />
+          <Border Height="64" Classes="editorInspectorHeader">
+            <Grid Margin="20,0,16,0" ColumnDefinitions="*,Auto" ColumnSpacing="10">
+              <StackPanel Spacing="1" VerticalAlignment="Center">
+                <TextBlock Text="CLIP DETAILS" Classes="editorTimelineEyebrow" />
+                <TextBlock Text="{Binding EditorTitle}" Foreground="#EDF4FB" FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+              <TextBlock Grid.Column="1" Text="{Binding SelectedQuality}" Foreground="#8EA7BE" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="105" />
+            </Grid>
           </Border>
 
           <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
@@ -2838,8 +2835,7 @@
               <!-- Focusable so Enter in either box below has somewhere to put
                    focus: committing has no visible effect otherwise, and the
                    still-highlighted caret reads as "not saved yet". -->
-              <Border x:Name="EditorDetailsCard" Focusable="True"
-                      Background="#151F28" BorderBrush="#293A47" BorderThickness="1" CornerRadius="9" Padding="12">
+              <Border x:Name="EditorDetailsCard" Focusable="True" Classes="editorInspectorCard">
                 <StackPanel Spacing="8">
                   <TextBlock Text="DETAILS" Foreground="#9EC6F0" FontSize="11" FontWeight="Bold" />
                   <TextBlock Text="Title" Foreground="#8EA1B6" FontSize="12" />
@@ -2857,7 +2853,7 @@
                 </StackPanel>
               </Border>
 
-              <Border Background="#151F28" BorderBrush="#293A47" BorderThickness="1" CornerRadius="9" Padding="12">
+              <Border Classes="editorInspectorCard">
                 <StackPanel Spacing="9">
                   <TextBlock Text="Export codec" Foreground="#8EA1B6" FontSize="12" />
                   <ComboBox Classes="settingsInput" ItemsSource="{Binding ExportCodecs}" SelectedItem="{Binding SelectedExportCodec}"
@@ -2867,7 +2863,7 @@
             </StackPanel>
           </ScrollViewer>
 
-          <Border Grid.Row="2" Background="#101820" BorderBrush="#263743" BorderThickness="0,1,0,0" Padding="16">
+          <Border Grid.Row="2" Classes="editorInspectorActions">
             <StackPanel Spacing="8">
               <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
                 <Button Content="Save Trim" Height="38" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
