@@ -61,7 +61,48 @@ build_windows_installer:
       $env:DOTNET_ROOT_X64 = $previousDotNetRootX64
       $env:PATH = $previousPath
       if ($packageBuildExitCode -ne 0) { Write-Error 'Could not build pinned Avalonia packages.'; exit 1 }
-      if (-not (Test-Path (Join-Path $packageFeed "Avalonia.$avaloniaVersion.nupkg"))) { Write-Error "Avalonia package feed was not created: $packageFeed"; exit 1 }
+      $avaloniaPackagePath = Join-Path $packageFeed "Avalonia.$avaloniaVersion.nupkg"
+      if (-not (Test-Path -LiteralPath $avaloniaPackagePath)) { Write-Error "Avalonia package feed was not created: $packageFeed"; exit 1 }
+
+      # The pinned Avalonia pack graph does not include build-task and
+      # generator outputs in Avalonia.nupkg. Add them, matching publish.ps1's
+      # stable-package repair path, before the app restore consumes the feed.
+      $buildTasksProject = Join-Path $avaloniaRoot 'src\Avalonia.Build.Tasks\Avalonia.Build.Tasks.csproj'
+      $buildTasksOutput = Join-Path $avaloniaRoot 'src\Avalonia.Build.Tasks\bin\Release\netstandard2.0'
+      & $dotnetHost build $buildTasksProject -c Release -f netstandard2.0 /nologo
+      if ($LASTEXITCODE -ne 0) { Write-Error 'Could not build Avalonia build tasks.'; exit 1 }
+
+      $generatorProject = Join-Path $avaloniaRoot 'src\tools\Avalonia.Generators\Avalonia.Generators.csproj'
+      $generatorOutput = Join-Path $avaloniaRoot 'src\tools\Avalonia.Generators\bin\Release\netstandard2.0\Avalonia.Generators.dll'
+      & $dotnetHost build $generatorProject -c Release -f netstandard2.0 /nologo
+      if ($LASTEXITCODE -ne 0) { Write-Error 'Could not build Avalonia generators.'; exit 1 }
+
+      Add-Type -AssemblyName System.IO.Compression.FileSystem
+      function Add-PackageFile {
+        param([string]$PackagePath, [string]$SourcePath, [string]$EntryName)
+        if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) { throw "Package source file was not found: $SourcePath" }
+        $archive = [IO.Compression.ZipFile]::Open($PackagePath, [IO.Compression.ZipArchiveMode]::Update)
+        try {
+          foreach ($existingEntry in @($archive.Entries | Where-Object { $_.FullName -eq $EntryName })) { $existingEntry.Delete() }
+          $entry = $archive.CreateEntry($EntryName, [IO.Compression.CompressionLevel]::Optimal)
+          $input = [IO.File]::OpenRead($SourcePath)
+          $output = $entry.Open()
+          try { $input.CopyTo($output) } finally { $output.Dispose(); $input.Dispose() }
+        }
+        finally { $archive.Dispose() }
+      }
+
+      foreach ($taskFile in @(Get-ChildItem -LiteralPath $buildTasksOutput -File)) {
+        Add-PackageFile $avaloniaPackagePath $taskFile.FullName "tools/netstandard2.0/$($taskFile.Name)"
+      }
+      Add-PackageFile $avaloniaPackagePath $generatorOutput 'analyzers/dotnet/cs/Avalonia.Generators.dll'
+
+      $archive = [IO.Compression.ZipFile]::OpenRead($avaloniaPackagePath)
+      try {
+        if (@($archive.Entries | Where-Object { $_.FullName -eq 'tools/netstandard2.0/Avalonia.Build.Tasks.dll' }).Count -ne 1) { throw 'Avalonia package is missing Avalonia.Build.Tasks.dll.' }
+        if (@($archive.Entries | Where-Object { $_.FullName -eq 'analyzers/dotnet/cs/Avalonia.Generators.dll' }).Count -ne 1) { throw 'Avalonia package is missing Avalonia.Generators.dll.' }
+      }
+      finally { $archive.Dispose() }
     - >-
       .\dotnet.ps1 publish native\src\ClypDat.App\ClypDat.App.csproj
       -c Release -r win-x64 --self-contained true -p:Platform=x64
