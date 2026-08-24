@@ -27,7 +27,7 @@ if (-not $msbuildExecutable) {
     $msbuildExecutable = $dotnetExecutable
 }
 $requiredAvaloniaPackageIds = @(
-    'Avalonia', 'Avalonia.Base', 'Avalonia.Controls', 'Avalonia.DesignerSupport',
+    'Avalonia', 'Avalonia.Base', 'Avalonia.Controls', 'Avalonia.Controls.Media', 'Avalonia.DesignerSupport',
     'Avalonia.Desktop', 'Avalonia.Dialogs', 'Avalonia.Fonts.Inter',
     'Avalonia.FreeDesktop', 'Avalonia.FreeDesktop.AtSpi', 'Avalonia.HarfBuzz',
     'Avalonia.Markup', 'Avalonia.Markup.Xaml', 'Avalonia.Metal', 'Avalonia.MicroCom',
