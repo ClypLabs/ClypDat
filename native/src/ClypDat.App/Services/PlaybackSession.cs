@@ -464,7 +464,7 @@ public sealed class PlaybackSession : IDisposable
             lock (_previewLock)
             {
                 _previewRequests.QueuePreview(TimeSpan.FromMilliseconds(milliseconds));
-                if (_previewWorker is null) _previewWorker = PreviewSeekWorkerAsync();
+                if (_previewWorker is null) _previewWorker = Task.Run(PreviewSeekWorkerAsync);
             }
         }
         catch (Exception error)
@@ -487,8 +487,16 @@ public sealed class PlaybackSession : IDisposable
                         continue;
                     }
 
-                    lock (_previewLock) _previewWorker = null;
-                    return;
+                    lock (_previewLock)
+                    {
+                        // Queueing can race the worker's empty check. Keep
+                        // this worker alive when a target arrived before it
+                        // acquired the lifecycle lock; otherwise that target
+                        // would sit forever with no writer.
+                        if (_previewRequests.HasPendingPreview()) continue;
+                        _previewWorker = null;
+                        return;
+                    }
                 }
 
                 await _seekLock.WaitAsync().ConfigureAwait(false);
@@ -506,6 +514,15 @@ public sealed class PlaybackSession : IDisposable
                             _ended = false;
                             VideoPlayer.Play();
                         }
+                        else if (!VideoPlayer.IsPlaying)
+                        {
+                            // Timeline drags pause the normal transport. A
+                            // preview must briefly run the video pipeline so
+                            // LibVLC presents the newly landed frame; audio is
+                            // already muted/stopped above and remains off.
+                            VideoPlayer.Play();
+                        }
+                        VideoPlayer.SetPause(false);
                         VideoPlayer.Time = (long)target.TotalMilliseconds;
                         _previewRequests.MarkPreviewWritten(generation, DateTimeOffset.UtcNow);
                     }

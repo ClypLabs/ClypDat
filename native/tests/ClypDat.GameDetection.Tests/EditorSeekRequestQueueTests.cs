@@ -86,6 +86,21 @@ public sealed class EditorSeekRequestQueueTests
     }
 
     [Fact]
+    public void PendingPreview_RemainsVisibleToWorkerLifecycleCheck()
+    {
+        var queue = new EditorSeekRequestQueue();
+        var now = DateTimeOffset.UnixEpoch;
+        queue.QueuePreview(TimeSpan.FromSeconds(1));
+        Assert.True(queue.TryTakePreview(now, out _, out var generation, out _));
+        queue.QueuePreview(TimeSpan.FromSeconds(2));
+        queue.MarkPreviewWritten(generation, now);
+
+        Assert.True(queue.HasPendingPreview());
+        Assert.True(queue.TryTakePreview(now, out var target, out _, out _));
+        Assert.Equal(TimeSpan.FromSeconds(2), target);
+    }
+
+    [Fact]
     public void SupersededFinalCompletion_DoesNotReopenPreviewProcessing()
     {
         var queue = new EditorSeekRequestQueue();
