@@ -109,9 +109,9 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
         return result.Applied is not null;
     }
 
-    public bool WaitAndTakeLatestTexture(TimeSpan timeout, CancellationToken cancellationToken, out ID3D11Texture2D? texture)
+    public bool WaitAndTakeLatestFrame(TimeSpan timeout, CancellationToken cancellationToken, out GameFrameLease? frame)
     {
-        texture = null;
+        frame = null;
         try
         {
             if (!_frameSignal.WaitAndTake(timeout, cancellationToken)) return false;
@@ -124,7 +124,7 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
         lock (_stateLock)
         {
             if (_disposed || _latestTexture is null) return false;
-            texture = _latestTexture.QueryInterface<ID3D11Texture2D>();
+            frame = new WgcLease(_latestTexture.QueryInterface<ID3D11Texture2D>(), _lastSourceTimestamp.Ticks, _contentSize.Width, _contentSize.Height);
             return true;
         }
     }
@@ -241,6 +241,17 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
         _frameSignal.Wake();
         lock (_d3dLock) latestTexture?.Dispose();
         _frameSignal.Dispose();
+    }
+
+    private sealed class WgcLease(ID3D11Texture2D texture, long timestamp, int width, int height) : GameFrameLease
+    {
+        public override ID3D11Texture2D Texture => texture;
+        public override long SourceTimestamp => timestamp;
+        public override long AccumulatedPresents => 1;
+        public override int Width => width;
+        public override int Height => height;
+        public override long Generation => 0;
+        public override void Dispose() => texture.Dispose();
     }
 }
 

@@ -736,8 +736,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             if (!HybridCaptureBackendPolicy.UseDxgiForDesktop(isMonitorMode)) throw new InvalidOperationException("DXGI capture is disabled.");
             try
             {
-                var createdDuplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds);
-                dxgiCapture = new DesktopDuplicationFrameSource(device, gpuLock, createdDuplication);
+                dxgiCapture = DesktopDuplicationFrameSource.Create(device, targetHandle, config, out desktopBounds);
                 activeGameFrameSource = dxgiCapture;
                 AppLog.Info($"Native capture: using DXGI Desktop Duplication for {(isMonitorMode ? "desktop" : $"game window 0x{targetHandle:X}")}.");
             }
@@ -1483,8 +1482,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             duplication = null;
                             try
                             {
-                                var replacementDuplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds);
-                                dxgiCapture = new DesktopDuplicationFrameSource(device, gpuLock, replacementDuplication);
+                                dxgiCapture = DesktopDuplicationFrameSource.Create(device, targetHandle, config, out desktopBounds);
                                 activeGameFrameSource = dxgiCapture;
                                 AppLog.Info("Native capture: DXGI duplication replaced for the new target.");
                             }
@@ -1564,8 +1562,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     Thread.Sleep(50);
                     try
                     {
-                        var replacementDuplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds);
-                        dxgiCapture = new DesktopDuplicationFrameSource(device, gpuLock, replacementDuplication);
+                        dxgiCapture = DesktopDuplicationFrameSource.Create(device, targetHandle, config, out desktopBounds);
                         activeGameFrameSource = dxgiCapture;
                         AppLog.Info("Native capture: DXGI duplication recreated after prior failure.");
                     }
@@ -1595,16 +1592,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 // Both sources now publish application-owned textures. DXGI's
                 // producer has already copied and released its acquired frame
                 // before this consumer begins crop/scale work.
-                var frameInfo = new OutduplFrameInfo { LastPresentTime = System.Diagnostics.Stopwatch.GetTimestamp(), AccumulatedFrames = 1 };
+                var frameInfo = new OutduplFrameInfo();
                 var acquireResultCode = ResultCode.WaitTimeout.Code;
                 var selectedGameFrameSource = activeGameFrameSource ?? (IGameFrameSource?)dxgiCapture;
-                ID3D11Texture2D? latestTexture = null;
-                var sourceHasFrame = selectedGameFrameSource is not null && selectedGameFrameSource.WaitAndTakeLatestTexture(
-                    TimeSpan.FromMilliseconds(Math.Max(100d, acquireTimeoutMs * 4d)), token, out latestTexture);
-                ID3D11Resource? desktopResource = sourceHasFrame && latestTexture is not null
-                    ? latestTexture.QueryInterface<ID3D11Resource>()
-                    : null;
-                latestTexture?.Dispose();
+                GameFrameLease? frameLease = null;
+                var sourceHasFrame = selectedGameFrameSource is not null && selectedGameFrameSource.WaitAndTakeLatestFrame(
+                    TimeSpan.FromMilliseconds(Math.Max(100d, acquireTimeoutMs * 4d)), token, out frameLease);
+                if (frameLease is not null) frameInfo = new OutduplFrameInfo { LastPresentTime = frameLease.SourceTimestamp, AccumulatedFrames = (uint)frameLease.AccumulatedPresents };
+                ID3D11Resource? desktopResource = frameLease?.Texture.QueryInterface<ID3D11Resource>();
                 if (desktopResource is null && selectedGameFrameSource is not null && !string.IsNullOrWhiteSpace(selectedGameFrameSource.Failure))
                 {
                     if (usingWgc)
@@ -1640,6 +1635,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     {
                         zeroPresentSkips++;
                         desktopResource.Dispose();
+                        frameLease?.Dispose();
                     }
                     else
                     {
@@ -2023,12 +2019,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         {
                             Monitor.Exit(gpuLock);
                             desktopResource.Dispose();
+                            frameLease?.Dispose();
                         }
                     }
                 }
                 else
                 {
                     desktopResource?.Dispose();
+                    frameLease?.Dispose();
                     if (!usingWgc && acquireResultCode == ResultCode.AccessLost.Code)
                     {
                         AppLog.Info("Native capture: DXGI duplication access lost, recreating.");
@@ -3621,7 +3619,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
     }
 
-    private static IDXGIOutputDuplication CreateDuplicationFor(ID3D11Device device, nint targetHandle, ReplayBufferConfig config, out Vortice.RawRect desktopBounds)
+    internal static IDXGIOutputDuplication CreateDuplicationFor(ID3D11Device device, nint targetHandle, ReplayBufferConfig config, out Vortice.RawRect desktopBounds)
     {
         var monitorHandle = ResolveTargetMonitor(targetHandle, config);
 

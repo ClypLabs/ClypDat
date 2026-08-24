@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.IO.MemoryMappedFiles;
 using System.IO.Pipes;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using Vortice.Direct3D11;
@@ -82,9 +83,9 @@ internal sealed class GameHookSession : IGameFrameSource, IDisposable
         catch (Exception error) { Fail($"control write failed: {error.Message}"); }
     }
 
-    public bool WaitAndTakeLatestTexture(TimeSpan timeout, CancellationToken token, out ID3D11Texture2D? texture)
+    public bool WaitAndTakeLatestFrame(TimeSpan timeout, CancellationToken token, out GameFrameLease? frame)
     {
-        texture = null;
+        frame = null;
         EventWaitHandle? signal;
         lock (_stateLock) signal = _frameEvent;
         if (signal is null || !signal.WaitOne(timeout)) return false;
@@ -109,11 +110,22 @@ internal sealed class GameHookSession : IGameFrameSource, IDisposable
                 Interlocked.Increment(ref _transported);
                 _presents = _header.ReadInt64(48);
                 _drops = _header.ReadInt64(64);
-                texture = latest.QueryInterface<ID3D11Texture2D>();
+                frame = new HookLease(latest.QueryInterface<ID3D11Texture2D>(), _presents);
                 return true;
             }
             finally { _mutexes[slot].ReleaseSync(0); }
         }
+    }
+
+    private sealed class HookLease(ID3D11Texture2D texture, long presents) : GameFrameLease
+    {
+        public override ID3D11Texture2D Texture => texture;
+        public override long SourceTimestamp => Stopwatch.GetTimestamp();
+        public override long AccumulatedPresents => Math.Max(1, presents);
+        public override int Width => (int)texture.Description.Width;
+        public override int Height => (int)texture.Description.Height;
+        public override long Generation => 0;
+        public override void Dispose() => texture.Dispose();
     }
 
     private async Task ReadLoopAsync()
