@@ -194,6 +194,22 @@
           SkipUnchangedFiles="true" />
   </Target>
 
+  <Target Name="BuildGameHook" BeforeTargets="Build" Condition="'$(OS)' == 'Windows_NT' And '$(ClypDatUiPreview)' != 'true'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)..\ClypDat.GameHook\build.ps1&quot; -Configuration $(Configuration)" />
+  </Target>
+
+  <Target Name="CopyGameHookToOutput" AfterTargets="Build" Condition="'$(ClypDatUiPreview)' != 'true'">
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)..\ClypDat.GameHook\bin\$(Configuration)\ClypDat.GameHook.dll"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyGameHookToPublish" AfterTargets="Publish" Condition="'$(ClypDatUiPreview)' != 'true'">
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)..\ClypDat.GameHook\bin\$(Configuration)\ClypDat.GameHook.dll"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
   <!-- LibVLC (LGPL-2.1) is bundled in every distributed
        build; their licenses require these notices/texts to ship alongside
        the binaries. See THIRD-PARTY-LICENSES.md at the repo root. -->

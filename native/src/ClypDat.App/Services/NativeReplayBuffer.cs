@@ -575,6 +575,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         ID3D11Texture2D? staging = null;
         IDXGIOutputDuplication? duplication = null;
         WindowGraphicsCaptureSource? wgcCapture = null;
+        GameHookSession? gameHook = null;
         // GPU-side downscale path (see TrySetupGpuScale) - only actually used
         // when useGpuScale ends up true; `staging`/swsContext above always
         // still get created too so there's a guaranteed-working fallback if
@@ -711,6 +712,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
             var targetHandle = ResolveTargetWindow(config);
             var isMonitorMode = targetHandle == 0;
+            if (!isMonitorMode) gameHook = GameHookSession.TryStart(targetHandle);
             // Which output the duplication below is actually bound to - see the
             // once-a-second target recheck in the loop for why the window handle
             // alone is the wrong thing to compare against.
@@ -1375,8 +1377,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var freshHandle = ResolveTargetWindow(_configProvider());
                     if (freshHandle != targetHandle)
                     {
+                        gameHook?.Dispose();
                         targetHandle = freshHandle;
                         isMonitorMode = targetHandle == 0;
+                        if (!isMonitorMode) gameHook = GameHookSession.TryStart(targetHandle);
 
                         var freshMonitor = ResolveTargetMonitor(targetHandle, config);
                         if (wgcCapture is not null || freshMonitor != targetMonitor || duplication is null)
@@ -2912,6 +2916,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             hardwarePoolTextures.Clear();
             ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
             wgcCapture?.Dispose();
+            gameHook?.Dispose();
             duplication?.Dispose();
             staging?.Dispose();
             foreach (var view in desktopInputViews.Values) view.Dispose();
