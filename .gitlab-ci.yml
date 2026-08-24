@@ -9,6 +9,31 @@ workflow:
 
 variables:
   GIT_DEPTH: "0"
+  RELEASE_DESCRIPTION: |
+    # What's New
+    - GPU-backed Library clip previews with card-sized rendering and fixed 60 FPS playback.
+    - Faster hover previews with short warm-session reuse.
+    - Selectable active-application audio tracks for replay capture.
+    - Modernized recording audio controls and clearer track selection.
+    - Higher replay-quality bitrate targets.
+    - Improved high-FPS replay capture and 120 FPS preview handling.
+    - Refreshed Library loading tiles, filters, startup cache, and storage updates.
+    - Improved editor timeline, trim controls, playback seeking, and A/V synchronization.
+    - Improved H.264 probing, replay qualification, and startup encoder validation.
+    - GitLab release includes ZIP, Portable EXE, Setup EXE, and MSI downloads.
+
+    # Fixes
+    - Prevent per-card GPU preview allocation from exploding RAM, handles, and threads.
+    - Fix preview cleanup stalls caused by FFmpeg sessions waiting on unread pipes.
+    - Keep software fallback and GPU device-loss recovery safe during preview changes.
+    - Preserve selected replay frame rate during encoder and capture load.
+    - Recreate the capture worker safely after configuration changes.
+    - Stabilize DXGI/WGC capture transport cadence and cursor composition.
+    - Correct application-audio track mapping and recording audio alignment.
+    - Keep Library card loading responsive while clips and thumbnails are restored.
+    - Fix editor seek timing and synchronized audio/video resume behavior.
+    - Improve quality guidance for resolution, frame rate, bitrate, and RAM cost.
+    - Make local publishing replace and launch the updated build reliably.
 
 build_windows_installer:
   stage: build
@@ -151,8 +176,11 @@ build_windows_installer:
       $srcDir = (Resolve-Path native\publish\win-x64-folder).Path
       & "$wixBin\candle.exe" -arch x64 -dClypDatVersion=$version -dClypDatSourceDir=$srcDir -ext WixUtilExtension -ext WixUIExtension installer\Product.wxs installer\AppFiles.wxs -out installer\
       if ($LASTEXITCODE -ne 0) { throw "candle.exe failed with exit code $LASTEXITCODE" }
-      & "$wixBin\light.exe" -ext WixUtilExtension -ext WixUIExtension installer\Product.wixobj installer\AppFiles.wixobj -out ClypDat.msi -sice:ICE61 -sice:ICE38 -sice:ICE64
+      $msiPath = Join-Path $PWD 'ClypDat.msi'
+      & "$wixBin\light.exe" -ext WixUtilExtension -ext WixUIExtension installer\Product.wixobj installer\AppFiles.wixobj -out $msiPath -sice:ICE61 -sice:ICE38 -sice:ICE64
       if ($LASTEXITCODE -ne 0) { throw "light.exe failed with exit code $LASTEXITCODE" }
+      if (-not (Test-Path -LiteralPath $msiPath -PathType Leaf)) { throw "MSI was not created: $msiPath" }
+      if ((Get-Item -LiteralPath $msiPath).Length -le 0) { throw "MSI is empty: $msiPath" }
     - |
       $assets = @("ClypDat-win-x64.zip", "ClypDat-Portable.exe", "ClypDat-Setup.exe", "ClypDat.msi")
       foreach ($asset in $assets) {
@@ -184,49 +212,25 @@ publish_gitlab_release:
         curl.exe --fail --show-error --header "JOB-TOKEN: $env:CI_JOB_TOKEN" --upload-file $asset $packageUrl
         if ($LASTEXITCODE -ne 0) { throw "Failed to upload $asset." }
       }
-  release:
-    tag_name: '$CI_COMMIT_TAG'
-    name: 'ClypDat $CI_COMMIT_TAG'
-    description: |
-      # What's New
-      - GPU-backed Library clip previews with card-sized rendering and fixed 60 FPS playback.
-      - Faster hover previews with short warm-session reuse.
-      - Selectable active-application audio tracks for replay capture.
-      - Modernized recording audio controls and clearer track selection.
-      - Higher replay-quality bitrate targets.
-      - Improved high-FPS replay capture and 120 FPS preview handling.
-      - Refreshed Library loading tiles, filters, startup cache, and storage updates.
-      - Improved editor timeline, trim controls, playback seeking, and A/V synchronization.
-      - Improved H.264 probing, replay qualification, and startup encoder validation.
-      - GitLab release includes ZIP, Portable EXE, Setup EXE, and MSI downloads.
-
-      # Fixes
-      - Prevent per-card GPU preview allocation from exploding RAM, handles, and threads.
-      - Fix preview cleanup stalls caused by FFmpeg sessions waiting on unread pipes.
-      - Keep software fallback and GPU device-loss recovery safe during preview changes.
-      - Preserve selected replay frame rate during encoder and capture load.
-      - Recreate the capture worker safely after configuration changes.
-      - Stabilize DXGI/WGC capture transport cadence and cursor composition.
-      - Correct application-audio track mapping and recording audio alignment.
-      - Keep Library card loading responsive while clips and thumbnails are restored.
-      - Fix editor seek timing and synchronized audio/video resume behavior.
-      - Improve quality guidance for resolution, frame rate, bitrate, and RAM cost.
-      - Make local publishing replace and launch the updated build reliably.
-    assets:
-      links:
-        - name: ClypDat-win-x64.zip
-          url: '$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/clypdat/$CI_COMMIT_TAG/ClypDat-win-x64.zip'
-          direct_asset_path: '/ClypDat-win-x64.zip'
-          link_type: package
-        - name: ClypDat-Portable.exe
-          url: '$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/clypdat/$CI_COMMIT_TAG/ClypDat-Portable.exe'
-          direct_asset_path: '/ClypDat-Portable.exe'
-          link_type: package
-        - name: ClypDat-Setup.exe
-          url: '$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/clypdat/$CI_COMMIT_TAG/ClypDat-Setup.exe'
-          direct_asset_path: '/ClypDat-Setup.exe'
-          link_type: package
-        - name: ClypDat.msi
-          url: '$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/clypdat/$CI_COMMIT_TAG/ClypDat.msi'
-          direct_asset_path: '/ClypDat.msi'
-          link_type: package
+      $releaseUrl = "$env:CI_API_V4_URL/projects/$env:CI_PROJECT_ID/releases"
+      $releaseLinks = @(
+        @{ name = 'ClypDat-win-x64.zip'; url = "$packageBase/ClypDat-win-x64.zip"; direct_asset_path = '/ClypDat-win-x64.zip'; link_type = 'package' },
+        @{ name = 'ClypDat-Portable.exe'; url = "$packageBase/ClypDat-Portable.exe"; direct_asset_path = '/ClypDat-Portable.exe'; link_type = 'package' },
+        @{ name = 'ClypDat-Setup.exe'; url = "$packageBase/ClypDat-Setup.exe"; direct_asset_path = '/ClypDat-Setup.exe'; link_type = 'package' },
+        @{ name = 'ClypDat.msi'; url = "$packageBase/ClypDat.msi"; direct_asset_path = '/ClypDat.msi'; link_type = 'package' }
+      )
+      $releasePayload = @{
+        tag_name = $env:CI_COMMIT_TAG
+        name = "ClypDat $env:CI_COMMIT_TAG"
+        description = $env:RELEASE_DESCRIPTION
+        assets = @{ links = $releaseLinks }
+      } | ConvertTo-Json -Depth 6
+      $releaseHeaders = @{ 'JOB-TOKEN' = $env:CI_JOB_TOKEN }
+      try {
+        Invoke-RestMethod -Uri $releaseUrl -Method Post -Headers $releaseHeaders -ContentType 'application/json' -Body $releasePayload | Out-Null
+      }
+      catch {
+        if ($_.Exception.Response.StatusCode.value__ -ne 409) { throw }
+        $tagUrl = "$releaseUrl/$([uri]::EscapeDataString($env:CI_COMMIT_TAG))"
+        Invoke-RestMethod -Uri $tagUrl -Method Put -Headers $releaseHeaders -ContentType 'application/json' -Body $releasePayload | Out-Null
+      }
