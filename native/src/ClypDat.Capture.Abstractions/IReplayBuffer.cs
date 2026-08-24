@@ -14,6 +14,16 @@ public enum ReplayCaptureState
     Stopped
 }
 
+public enum ReplayCaptureStartupPhase
+{
+    None,
+    WaitingForForeground,
+    OpeningEncoder,
+    Validating,
+    Ready,
+    Fallback
+}
+
 // Why a backend reported Degraded. Both causes look identical through State
 // alone, and they call for opposite responses: an encoder overload means the
 // encode settings are too expensive for this machine, while a stall means the
@@ -90,6 +100,9 @@ public sealed record ReplayCaptureHealth(
     // react to sustained overload (EncoderTuningService) must not treat that as
     // evidence the machine cannot sustain its settings.
     public bool SaveInProgress { get; init; }
+    public ReplayCaptureStartupPhase StartupPhase { get; init; }
+    public int StartupValidationWindow { get; init; }
+    public int StartupValidationWindowCount { get; init; }
 
     // WGC and hook transport counters remain separate from InputFrameRate so a
     // support bundle can distinguish compositor cadence from a game-present

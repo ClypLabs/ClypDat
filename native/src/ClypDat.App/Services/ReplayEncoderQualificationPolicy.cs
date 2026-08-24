@@ -67,6 +67,20 @@ internal static class ReplayEncoderQualificationPolicy
         return candidates;
     }
 
+    // At high CFR rates the system-memory NVENC upload path is independent of
+    // the game's D3D11 queue. Prefer it for startup; D3D11 remains available
+    // when it is the only viable path and for lower-rate capture.
+    internal static IReadOnlyList<ReplayEncoderCandidate> StartupCandidates(
+        string requestedCodec,
+        int targetFrameRate,
+        string encoderMode = ReplayVideoCodecPolicy.Gpu) =>
+        Candidates(requestedCodec, encoderMode: encoderMode)
+            .OrderBy(candidate => targetFrameRate >= 90 &&
+                                  candidate.Name.EndsWith("_nvenc", StringComparison.OrdinalIgnoreCase) &&
+                                  candidate.InputPath == ReplayEncoderInputPath.SystemMemory ? 0 :
+                                  candidate.InputPath == ReplayEncoderInputPath.D3D11 ? 1 : 2)
+            .ToArray();
+
     internal static ReplayEncoderQualificationResult? Select(
         int targetFrameRate,
         string requestedCodec,

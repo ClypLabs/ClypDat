@@ -189,13 +189,15 @@ public sealed class PlaybackSession : IDisposable
         _videoMedia.AddOption(":no-audio");
         if (IsH264(videoCodec))
         {
-            // H.264 clips are decoded in software. Hardware H.264 seeking has
-            // produced stale surfaces and macroblock corruption on affected
-            // drivers; keep every quality shortcut disabled too.
-            _videoMedia.AddOption(":avcodec-hw=none");
+            var safeForHardwareDecode = H264HardwareDecodeProbe.HasOnlyIdrRandomAccessPoints(path);
+            // Hardware H.264 seeking is safe only for clips whose advertised
+            // random-access packets are genuine IDRs. Current replay output
+            // is; legacy clips retain the software fallback.
+            _videoMedia.AddOption(safeForHardwareDecode ? ":avcodec-hw=any" : ":avcodec-hw=none");
             _videoMedia.AddOption(":avcodec-skiploopfilter=0");
             _videoMedia.AddOption(":avcodec-skip-frame=0");
             _videoMedia.AddOption(":avcodec-skip-idct=0");
+            AppLog.Info($"Editor H.264 decode: {(safeForHardwareDecode ? "hardware" : "software")} (IDR random-access probe).");
         }
         else
         {

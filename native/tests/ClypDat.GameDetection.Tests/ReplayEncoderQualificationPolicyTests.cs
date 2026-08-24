@@ -6,6 +6,14 @@ namespace ClypDat.GameDetection.Tests;
 public sealed class ReplayEncoderQualificationPolicyTests
 {
     [Fact]
+    public void StartupCandidates_PreferIndependentNvencUploadAtHighFrameRates()
+    {
+        var candidates = ReplayEncoderQualificationPolicy.StartupCandidates("H.264", 120);
+
+        Assert.Equal(new ReplayEncoderCandidate("h264_nvenc", ReplayVideoCodecPolicy.H264, ReplayEncoderInputPath.SystemMemory, 0), candidates[0]);
+    }
+
+    [Fact]
     public void Candidates_OrdersH264PathsAndQsvModes()
     {
         var candidates = ReplayEncoderQualificationPolicy.Candidates("H.264");

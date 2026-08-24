@@ -123,6 +123,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _activeReplayTargetFrameRate;
     private double _activeReplayOutputFrameRate;
     private double _activeReplayUniqueGameFrameRate;
+    private ReplayCaptureStartupPhase _activeReplayStartupPhase;
+    private int _activeReplayStartupWindow;
+    private int _activeReplayStartupWindowCount;
     private readonly ReplayFrameRateDisplaySmoother _replayFrameRateDisplaySmoother = new();
     private string _selectedClipOverlayPosition = "Top Right";
     private string _selectedClipOverlayVolume = "Medium";
@@ -1630,6 +1633,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string ReplayFrameTimingMetrics => _activeReplayTargetFrameRate <= 0
         ? string.Empty
+        : _activeReplayStartupPhase == ReplayCaptureStartupPhase.WaitingForForeground
+        ? "Waiting for game foreground before replay frames begin."
+        : _activeReplayStartupPhase == ReplayCaptureStartupPhase.Validating
+        ? $"Validating encoder ({_activeReplayStartupWindow}/{_activeReplayStartupWindowCount}): {(string.Equals(_activeReplayFrameTimingMode, ReplayFrameTimingPolicy.Constant, StringComparison.Ordinal) ? "CFR" : "VFR")} output {_activeReplayOutputFrameRate:0.0}/{_activeReplayTargetFrameRate} FPS; unique game FPS {_activeReplayUniqueGameFrameRate:0.0}."
         : $"{(string.Equals(_activeReplayFrameTimingMode, ReplayFrameTimingPolicy.Constant, StringComparison.Ordinal) ? "CFR" : "VFR")}: output {_activeReplayOutputFrameRate:0.0}/{_activeReplayTargetFrameRate} FPS; unique game FPS {_activeReplayUniqueGameFrameRate:0.0}.";
 
     public ReplayVideoCodecOption SelectedReplayVideoCodec
@@ -1787,6 +1794,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         _activeReplayFrameTimingMode = ReplayFrameTimingPolicy.Normalize(health.FrameRateMode);
         _activeReplayTargetFrameRate = health.TargetFrameRate;
+        _activeReplayStartupPhase = health.StartupPhase;
+        _activeReplayStartupWindow = health.StartupValidationWindow;
+        _activeReplayStartupWindowCount = health.StartupValidationWindowCount;
         var displayedRates = _replayFrameRateDisplaySmoother.Update(health);
         _activeReplayOutputFrameRate = displayedRates.OutputFrameRate;
         _activeReplayUniqueGameFrameRate = displayedRates.UniqueFrameRate;
@@ -1802,6 +1812,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _activeReplayTargetFrameRate = 0;
         _activeReplayOutputFrameRate = 0;
         _activeReplayUniqueGameFrameRate = 0;
+        _activeReplayStartupPhase = ReplayCaptureStartupPhase.None;
+        _activeReplayStartupWindow = 0;
+        _activeReplayStartupWindowCount = 0;
         _activeReplayFrameTimingMode = ReplayFrameTimingPolicy.Normalize(Settings.ReplayFrameRateMode);
         OnPropertyChanged(nameof(ReplayEncoderModeStatus));
         OnPropertyChanged(nameof(ReplayFrameTimingMetrics));

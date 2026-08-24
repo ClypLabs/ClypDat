@@ -870,7 +870,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 AdapterDescription = adapterDescription,
                 EncoderProfile = config.EncoderProfile,
                 EncodeQueueCapacity = encodeQueueCapacity,
-                FrameRateMode = ReplayFrameTimingPolicy.Normalize(config.FrameRateMode)
+                FrameRateMode = ReplayFrameTimingPolicy.Normalize(config.FrameRateMode),
+                StartupPhase = ReplayCaptureStartupPhase.WaitingForForeground
             });
             ready.TrySetResult();
 
@@ -1057,6 +1058,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // mid-session alt-tab) go back to the existing freeze-and-keep-
             // recording behavior above, unaffected.
             var hasCapturedRealFrame = false;
+            var startupValidationWindows = 0;
             // See the content-write sites above and the pacing gate below -
             // measures how stale frame->data's content actually is at the
             // moment each output frame gets encoded, to find out whether a
@@ -1260,6 +1262,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         ? string.Empty
                         : $", wgcCallbackArrivals={wgcCallbackCount}, wgcInputFps={wgcInputRate:0.0}, wgcUniqueFps={wgcUniqueRate:0.0}, wgcPublished={wgcTelemetry.Value.PublishedFrames}, wgcTaken={wgcTelemetry.Value.TakenFrames}, wgcOverwritten={wgcTelemetry.Value.OverwrittenFrames}, wgcCallbackMs={wgcTelemetry.Value.CallbackDurationTotal.TotalMilliseconds:0.0}, wgcGpuLockWaitMs={wgcTelemetry.Value.GpuLockWaitTotal.TotalMilliseconds:0.0}, wgcTimestampGaps={wgcTelemetry.Value.SourceTimestampGapCount}, wgcMaxTimestampGapMs={wgcTelemetry.Value.SourceTimestampGapMaximum.TotalMilliseconds:0.0}, wgcResizeEvents={wgcTelemetry.Value.ResizeEvents}, wgcMinUpdateIntervalAvailable={wgcTelemetry.Value.MinimumUpdateInterval.InterfaceAvailable}, wgcMinUpdateIntervalRequestedMs={wgcTelemetry.Value.MinimumUpdateInterval.Requested.TotalMilliseconds:0.###}, wgcMinUpdateIntervalAppliedMs={wgcTelemetry.Value.MinimumUpdateInterval.Applied?.TotalMilliseconds:0.###}";
                     var outputFrameRate = packetsOutSinceLog / diagElapsed;
+                    if (hasCapturedRealFrame && startupValidationWindows < ReplayEncoderQualificationPolicy.RequiredWindows &&
+                        outputFrameRate >= activeFrameRate * ReplayEncoderQualificationPolicy.TargetThreshold)
+                    {
+                        startupValidationWindows++;
+                        AppLog.Info($"Native replay startup: {encoderName} live output validation window {startupValidationWindows}/{ReplayEncoderQualificationPolicy.RequiredWindows} reached {outputFrameRate:0.0}/{activeFrameRate} FPS.");
+                    }
                     AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={ringPacketCount}, ringBufferMb={ringBufferMb}, ringCapacityMb={ringCapacityMb}, packetPoolMb={poolRetainedMb}, sendFrameMs={inputMicrosSinceLog / 1000.0 / inputCountSinceLog:0.00}, packetReceiveMs={outputMicrosSinceLog / 1000.0 / outputCountSinceLog:0.00}, packetCopyMs={packetCopyMicrosSinceLog / 1000.0 / packetCopyCountSinceLog:0.00}, ringInsertMs={ringInsertMicrosSinceLog / 1000.0 / ringInsertCountSinceLog:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, queueDepth={encodeQueue.Count}, pendingEncoderFrames={Volatile.Read(ref _pendingEncoderFrames)}, peakPendingEncoderFrames={Volatile.Read(ref _peakPendingEncoderFrames)}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, rollingOutputFps={outputFrameRate:0.0}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}{wgcTelemetryText}.");
                     // Raw encoded rate, deliberately NOT crediting suppressed pads
                     // back in. It remains useful telemetry, but a low rate with
@@ -1321,7 +1329,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         HookPresents = 0,
                         HookTransportedFrames = 0,
                         HookTransportDrops = 0,
-                        HookFallbackReason = string.Empty
+                        HookFallbackReason = string.Empty,
+                        StartupPhase = startupValidationWindows < ReplayEncoderQualificationPolicy.RequiredWindows
+                            ? ReplayCaptureStartupPhase.Validating : ReplayCaptureStartupPhase.Ready,
+                        StartupValidationWindow = startupValidationWindows,
+                        StartupValidationWindowCount = ReplayEncoderQualificationPolicy.RequiredWindows
                     });
                     copyMapMs = 0;
                     scaleMs = 0;
@@ -2280,6 +2292,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         State = ReplayCaptureState.Healthy,
                         Encoder = qualifiedEncoderName,
                         EncodeQueueCapacity = encodeQueueCapacity,
+                        StartupPhase = ReplayCaptureStartupPhase.Validating,
+                        StartupValidationWindow = 0,
+                        StartupValidationWindowCount = ReplayEncoderQualificationPolicy.RequiredWindows,
                         UpdatedUtc = DateTime.UtcNow
                     });
 
@@ -4798,15 +4813,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         var encoderTimeBase = new AVRational { num = 1, den = 1_000_000 };
         timeBase = encoderTimeBase;
         encoderName = string.Empty;
-        var av1Preferred = ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.Av1;
-        var av1Family = av1Preferred ? ExportEncoderProbe.Av1Family : null;
-        if (av1Preferred)
-        {
-            AppLog.Info(av1Family is null
-                ? "Native replay: AV1 startup preflight found no preferred family; qualifying the full AV1 ladder before H.264 fallback."
-                : $"Native replay: AV1 preflight passed for {av1Family}; qualifying AV1 before H.264 fallback.");
-        }
-
         // One full alloc/configure/open attempt. Returns null if the open
         // fails - which is the only way some options can report unsupported
         // (low_power in particular is accepted by av_opt_set and rejected by
@@ -4894,7 +4900,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // Keep capture/audio infrastructure armable while the game is not
             // foreground. This opens a context only to keep the existing
             // thread wiring alive; it sends no frames and is replaced below.
-            foreach (var candidate in ReplayEncoderQualificationPolicy.Candidates(config.VideoCodec, encoderMode: config.EncoderMode))
+            foreach (var candidate in ReplayEncoderQualificationPolicy.StartupCandidates(config.VideoCodec, config.FrameRate, config.EncoderMode))
             {
                 var codec = ffmpeg.avcodec_find_encoder_by_name(candidate.Name);
                 if (codec is null) continue;
@@ -4908,76 +4914,41 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             throw new InvalidOperationException("No replay encoder context could be armed while waiting for a foreground frame.");
         }
 
-        var targetFrameRate = Math.Clamp(config.FrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
-        var qualificationResults = new List<ReplayEncoderQualificationResult>();
-        foreach (var candidate in ReplayEncoderQualificationPolicy.Candidates(config.VideoCodec, encoderMode: config.EncoderMode))
+        // A replay buffer must not hold the first foreground frame hostage
+        // while it benchmarks every available encoder.  Those trials used to
+        // take 6-8 seconds on a healthy RTX 4070 Ti even after NVENC had
+        // already proved usable.  Open the preferred viable production context
+        // now; the normal rolling health monitor validates its real gameplay
+        // output instead of synthetic trial frames.
+        foreach (var candidate in ReplayEncoderQualificationPolicy.StartupCandidates(config.VideoCodec, config.FrameRate, config.EncoderMode))
         {
             var candidateCodec = ffmpeg.avcodec_find_encoder_by_name(candidate.Name);
             if (candidateCodec is null)
             {
-                qualificationResults.Add(new ReplayEncoderQualificationResult(candidate, false, false, Array.Empty<double>(), "encoder not present"));
-                AppLog.Info($"Native encoder qualification: {candidate.Name}/{candidate.InputPath} unavailable - encoder not present.");
+                AppLog.Info($"Native replay startup: {candidate.Name}/{candidate.InputPath} unavailable - encoder not present.");
                 continue;
             }
 
             var hardware = candidate.IsD3D11 && hardwareFramesRef != 0;
             if (candidate.IsD3D11 && !hardware)
             {
-                qualificationResults.Add(new ReplayEncoderQualificationResult(candidate, false, false, Array.Empty<double>(), "D3D11 pool unavailable"));
-                AppLog.Info($"Native encoder qualification: {candidate.Name}/{candidate.InputPath} unavailable - D3D11 pool unavailable.");
+                AppLog.Info($"Native replay startup: {candidate.Name}/{candidate.InputPath} unavailable - D3D11 pool unavailable.");
                 continue;
             }
 
-            var trial = TryOpen(candidateCodec, candidate.Name, candidate.InputPath == ReplayEncoderInputPath.LowPower, hardware);
-            if (trial is null)
+            var context = TryOpen(candidateCodec, candidate.Name, candidate.InputPath == ReplayEncoderInputPath.LowPower, hardware);
+            if (context is null)
             {
-                qualificationResults.Add(new ReplayEncoderQualificationResult(candidate, false, false, Array.Empty<double>(), "open failed"));
                 continue;
             }
 
-            var measured = BenchmarkNvencInput(
-                trial,
-                hardware ? (AVBufferRef*)hardwareFramesRef : null,
-                hardware ? hardwareDevice : null,
-                width,
-                height,
-                hardware,
-                foregroundFrame,
-                hardware ? foregroundTexture : null);
-            var result = new ReplayEncoderQualificationResult(
-                candidate,
-                measured.Available,
-                measured.TimedOut,
-                measured.WindowFramesPerSecond ?? Array.Empty<double>(),
-                measured.Available ? string.Empty : measured.TimedOut ? "warmup timed out" : "encode failed");
-            qualificationResults.Add(result);
-            ffmpeg.avcodec_free_context(&trial);
-
-            var reached = result.ReachedTarget(targetFrameRate);
-            AppLog.Info($"Native encoder qualification: {candidate.Name}/{candidate.InputPath} windows=[{string.Join(",", result.WindowFramesPerSecond.Select(rate => rate.ToString("F1", CultureInfo.InvariantCulture)))}] min={result.MinimumWindow:F1} mean={result.MeanWindow:F1} target={targetFrameRate} reachedTarget={reached} reason={(reached ? "qualified" : result.RejectionReason)}.");
+            encoderName = candidate.Name;
+            usingHardwareFrames = hardware;
+            AppLog.Info($"Native replay startup: selected {encoderName}/{candidate.InputPath}; production packets begin immediately and rolling output validates the selection.");
+            return context;
         }
 
-        var selectedResult = ReplayEncoderQualificationPolicy.Select(targetFrameRate, config.VideoCodec, qualificationResults);
-        if (selectedResult is null)
-            throw new InvalidOperationException("No replay encoder produced a usable qualification result.");
-
-        var selectedCodec = ffmpeg.avcodec_find_encoder_by_name(selectedResult.Candidate.Name);
-        if (selectedCodec is null)
-            throw new InvalidOperationException($"Selected replay encoder {selectedResult.Candidate.Name} disappeared after qualification.");
-
-        var finalHardware = selectedResult.Candidate.IsD3D11 && hardwareFramesRef != 0;
-        var finalContext = TryOpen(selectedCodec, selectedResult.Candidate.Name,
-            selectedResult.Candidate.InputPath == ReplayEncoderInputPath.LowPower, finalHardware);
-        if (finalContext is null)
-            throw new InvalidOperationException($"Selected replay encoder {selectedResult.Candidate.Name} could not open a fresh final context.");
-
-        encoderName = selectedResult.Candidate.Name;
-        usingHardwareFrames = finalHardware;
-        if (ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.Av1 &&
-            selectedResult.Candidate.Codec == ReplayVideoCodecPolicy.H264)
-            AppLog.Info("Native replay: AV1 qualification did not sustain the target; falling back to H.264.");
-        AppLog.Info($"Native encoder qualification: selected {encoderName}/{selectedResult.Candidate.InputPath} min={selectedResult.MinimumWindow:F1} mean={selectedResult.MeanWindow:F1} target={targetFrameRate}.");
-        return finalContext;
+        throw new InvalidOperationException("No replay encoder context could be opened for the first foreground frame.");
     }
 
     private static (int Width, int Height) CaptureOutputSize(ReplayBufferConfig config, int sourceWidth, int sourceHeight)
