@@ -47,7 +47,7 @@ public sealed class EncoderTuningService
         _recentSevere.Clear();
         _recentOutputs.Clear();
         _configuredProfile = encoderProfile;
-        _configuredFrameRate = Math.Clamp(configuredFrameRate, 30, 144);
+        _configuredFrameRate = Math.Clamp(configuredFrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
         _activeFrameRate = _configuredFrameRate;
         _enabled = enabled;
         _enabledSinceUtc = enabled ? _sessionStartUtc : DateTime.MaxValue;

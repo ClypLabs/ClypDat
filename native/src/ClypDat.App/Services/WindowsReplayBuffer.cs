@@ -366,7 +366,7 @@ public sealed class WindowsReplayBuffer : IReplayBuffer, IDisposable
             IsFixedFramerate = true,
             Quality = 85,
             Bitrate = FixedBitrate(config),
-            Framerate = Math.Clamp(config.FrameRate, 30, 144)
+            Framerate = Math.Clamp(config.FrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate)
         };
 
         return options;

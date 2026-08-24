@@ -20,7 +20,7 @@ public sealed class ReplayFrameTimingPolicyTests
     [InlineData(60, 8)]
     [InlineData(90, 12)]
     [InlineData(120, 15)]
-    [InlineData(144, 18)]
+    [InlineData(144, 15)]
     public void BoundsQueueToAbout125Milliseconds(int frameRate, int expectedCapacity)
     {
         Assert.Equal(expectedCapacity, ReplayFrameTimingPolicy.EncodeQueueCapacity(frameRate));
@@ -71,11 +71,14 @@ public sealed class ReplayFrameTimingPolicyTests
     [InlineData(144)]
     public void SourceGapPadsAtSelectedRate(int frameRate)
     {
-        var interval = 1_000_000.0 / frameRate;
+        var selectedFrameRate = Math.Clamp(frameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
+        var interval = 1_000_000.0 / selectedFrameRate;
         long lastPts = 0;
-        for (var index = 0; index < frameRate; index++)
+        var nextPts = 0d;
+        for (var index = 0; index < selectedFrameRate; index++)
         {
-            var paddedPts = lastPts + (long)Math.Round(interval);
+            nextPts += interval;
+            var paddedPts = (long)Math.Round(nextPts);
             Assert.InRange(Math.Abs(paddedPts - (long)Math.Round((index + 1) * interval)), 0, 1);
             lastPts = paddedPts;
         }

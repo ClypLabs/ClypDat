@@ -9,7 +9,7 @@ internal readonly record struct WgcMinimumUpdateIntervalResult(
 internal static class WgcMinimumUpdateIntervalPolicy
 {
     public static TimeSpan FromFrameRate(int frameRate) =>
-        TimeSpan.FromSeconds(1d / Math.Clamp(frameRate, 30, 144));
+        TimeSpan.FromSeconds(1d / Math.Clamp(frameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate));
 
     public static WgcMinimumUpdateIntervalResult Unsupported(int frameRate) =>
         Unavailable(frameRate);
@@ -52,7 +52,7 @@ internal sealed class WgcCadenceFallbackPolicy
             return false;
         }
 
-        if (callbackFrameRate >= Math.Clamp(targetFrameRate, 30, 144) * 0.9)
+        if (callbackFrameRate >= Math.Clamp(targetFrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate) * 0.9)
         {
             _consecutiveLowWindows = 0;
             return false;

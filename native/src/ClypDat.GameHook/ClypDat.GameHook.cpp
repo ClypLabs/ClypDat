@@ -36,7 +36,7 @@ std::wstring HeaderName() { return L"Local\\ClypDat-GameHook-Header-" + std::to_
 std::wstring EventName() { return L"Local\\ClypDat-GameHook-Frame-" + std::to_wstring(GetCurrentProcessId()); }
 bool Send(const std::wstring& text) { DWORD written = 0; return pipe != INVALID_HANDLE_VALUE && WriteFile(pipe, text.data(), DWORD(text.size() * sizeof(wchar_t)), &written, nullptr) && written == text.size() * sizeof(wchar_t); }
 bool Supported(DXGI_FORMAT f) { return f == DXGI_FORMAT_B8G8R8A8_UNORM || f == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB || f == DXGI_FORMAT_R8G8B8A8_UNORM || f == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB; }
-LONG ClampRate(LONG rate) { return rate < 30 ? 30 : rate > 144 ? 144 : rate; }
+LONG ClampRate(LONG rate) { return rate < 30 ? 30 : rate > 120 ? 120 : rate; }
 
 void ReleaseTransport() {
     for (auto& surface : surfaces) { if (surface.mutex) surface.mutex->Release(); if (surface.texture) surface.texture->Release(); surface = {}; }

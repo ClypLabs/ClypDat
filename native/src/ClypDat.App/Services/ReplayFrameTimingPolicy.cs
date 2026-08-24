@@ -5,6 +5,8 @@ namespace ClypDat.App.Services;
 // setting, scheduler and tests agree on the same small set of invariants.
 public static class ReplayFrameTimingPolicy
 {
+    public const int MinimumFrameRate = 30;
+    public const int MaximumFrameRate = 120;
     public const string Variable = "VFR";
     public const string Constant = "CFR";
 
@@ -24,7 +26,7 @@ public static class ReplayFrameTimingPolicy
     // Keep only a small, bounded amount of work in front of the encoder. A
     // replay needs the most recent game frame, not a second of stale history.
     public static int EncodeQueueCapacity(int frameRate) =>
-        Math.Clamp((int)Math.Ceiling(Math.Clamp(frameRate, 30, 144) / 8.0), 4, 18);
+        Math.Clamp((int)Math.Ceiling(Math.Clamp(frameRate, MinimumFrameRate, MaximumFrameRate) / 8.0), 4, 15);
 
     public static long RealPtsMicroseconds(TimeSpan elapsed, long previousPts) =>
         Math.Max(previousPts + 1, (long)Math.Round(Math.Max(0, elapsed.TotalMilliseconds) * 1_000));

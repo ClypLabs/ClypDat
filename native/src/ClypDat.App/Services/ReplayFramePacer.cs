@@ -11,11 +11,11 @@ internal sealed class ReplayFramePacer
 
     public ReplayFramePacer(int frameRate, bool variableFrameRate)
     {
-        _frameRate = Math.Clamp(frameRate, 30, 144);
+        _frameRate = Math.Clamp(frameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
         _variableFrameRate = variableFrameRate;
     }
 
-    public void SetFrameRate(int frameRate) => _frameRate = Math.Clamp(frameRate, 30, 144);
+    public void SetFrameRate(int frameRate) => _frameRate = Math.Clamp(frameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
 
     public long Next(TimeSpan elapsed, bool sourceAdvanced)
     {

@@ -188,7 +188,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
             "-rtbufsize", "128M"
         };
 
-        var frameRate = Math.Clamp(config.FrameRate, 30, 144).ToString();
+        var frameRate = Math.Clamp(config.FrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate).ToString();
         var size = $"{Math.Max(320, config.CaptureWidth)}x{Math.Max(240, config.CaptureHeight)}";
         if (backend == CaptureBackend.Ddagrab)
         {

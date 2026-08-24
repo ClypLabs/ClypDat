@@ -6,19 +6,19 @@ namespace ClypDat.GameDetection.Tests;
 public sealed class ReplayFramePacerTests
 {
     [Theory]
-    [InlineData(30)]
-    [InlineData(60)]
-    [InlineData(90)]
-    [InlineData(120)]
-    [InlineData(144)]
-    public void ConstantRateKeepsSelectedCadenceAcrossSourceGap(int frameRate)
+    [InlineData(30, 30)]
+    [InlineData(60, 60)]
+    [InlineData(90, 90)]
+    [InlineData(120, 120)]
+    [InlineData(144, 120)]
+    public void ConstantRateKeepsSelectedCadenceAcrossSourceGap(int requestedFrameRate, int expectedFrameRate)
     {
-        var pacer = new ReplayFramePacer(frameRate, variableFrameRate: false);
+        var pacer = new ReplayFramePacer(requestedFrameRate, variableFrameRate: false);
 
-        for (var index = 0; index < frameRate * 2; index++)
+        for (var index = 0; index < expectedFrameRate * 2; index++)
         {
-            var actual = pacer.Next(TimeSpan.FromSeconds(index / (double)frameRate), sourceAdvanced: index == 0);
-            var expected = (long)Math.Round(index * 1_000_000.0 / frameRate);
+            var actual = pacer.Next(TimeSpan.FromSeconds(index / (double)expectedFrameRate), sourceAdvanced: index == 0);
+            var expected = (long)Math.Round(index * 1_000_000.0 / expectedFrameRate);
             Assert.InRange(Math.Abs(actual - expected), 0, 1);
         }
     }

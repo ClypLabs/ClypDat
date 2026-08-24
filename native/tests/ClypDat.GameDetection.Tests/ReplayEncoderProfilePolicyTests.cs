@@ -14,7 +14,7 @@ public sealed class ReplayEncoderProfilePolicyTests
     [InlineData(60, 16)]
     [InlineData(90, 20)]
     [InlineData(120, 23)]
-    [InlineData(144, 24)]
+    [InlineData(144, 23)]
     public void NvencSurfaces_KeepsPipelineAheadOfReplayQueue(int frameRate, int expected) =>
         Assert.Equal(expected, ReplayEncoderProfilePolicy.NvencSurfaces(frameRate));
 

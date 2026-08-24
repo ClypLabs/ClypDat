@@ -78,7 +78,7 @@ internal sealed class GameHookSession : IGameFrameSource, IDisposable
 
     public void SetTargetFrameRate(int frameRate)
     {
-        try { _writer.WriteLine($"target {Math.Clamp(frameRate, 30, 144)}"); }
+        try { _writer.WriteLine($"target {Math.Clamp(frameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate)}"); }
         catch (Exception error) { Fail($"control write failed: {error.Message}"); }
     }
 

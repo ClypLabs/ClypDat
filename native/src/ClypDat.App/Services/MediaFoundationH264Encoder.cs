@@ -34,7 +34,7 @@ internal sealed unsafe class MediaFoundationH264Encoder : IDisposable
     private MediaFoundationH264Encoder(D3D11Device device, int frameRate)
     {
         _device = device;
-        _frameRate = Math.Clamp(frameRate, 30, 144);
+        _frameRate = Math.Clamp(frameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
     }
 
     public string Name { get; private set; } = "Media Foundation H.264 MFT";
@@ -151,6 +151,7 @@ internal sealed unsafe class MediaFoundationH264Encoder : IDisposable
     private void ConfigureTransform(IMFTransform transform, int width, int height, int bitrate)
     {
         transform.ProcessMessage(TMessageType.MessageSetD3DManager, unchecked((nuint)_deviceManager!.NativePointer));
+        ConfigureCodecApi(transform, bitrate);
 
         using var outputType = MediaFactory.MFCreateMediaType();
         outputType.Set(MediaTypeAttributeKeys.MajorType, MediaTypeGuids.Video).CheckError();
@@ -172,6 +173,31 @@ internal sealed unsafe class MediaFoundationH264Encoder : IDisposable
         transform.SetInputType(0, inputType, 0);
     }
 
+    private static void ConfigureCodecApi(IMFTransform transform, int bitrate)
+    {
+        var codecApiId = MediaFoundationH264CodecSettings.InterfaceId;
+        if (Marshal.QueryInterface(transform.NativePointer, in codecApiId, out var codecApiPointer) < 0) return;
+
+        try
+        {
+            var codecApi = (ICodecApi)Marshal.GetObjectForIUnknown(codecApiPointer);
+            foreach (var setting in MediaFoundationH264CodecSettings.Create(bitrate))
+            {
+                var property = setting.Property;
+                // Hardware MFTs advertise optional CodecAPI properties. Leave a
+                // property alone when this encoder does not expose it; a listed
+                // modifiable property must take the replay throughput value.
+                if (codecApi.IsSupported(ref property) != 0 || codecApi.IsModifiable(ref property) != 0) continue;
+                var result = codecApi.SetValue(ref property, setting.Value);
+                if (result < 0) Marshal.ThrowExceptionForHR(result);
+            }
+        }
+        finally
+        {
+            Marshal.Release(codecApiPointer);
+        }
+    }
+
     // Owns queue.FramePtr until it is matched with encoded output. The supplied
     // callbacks must be non-blocking; packet copying/remuxing is already bounded
     // by the replay ring's existing locks.
@@ -179,14 +205,16 @@ internal sealed unsafe class MediaFoundationH264Encoder : IDisposable
         BlockingCollection<NativeReplayBuffer.EncodeJob> queue,
         Action<MediaFoundationEncodedSample> onSample,
         Action<nint> releaseFrame,
-        Action<TimeSpan> onSubmission)
+        Action<TimeSpan> onSubmission,
+        Action<TimeSpan> onOutput,
+        Action<int> onPendingFrames)
     {
         try
         {
             _transform!.ProcessMessage(TMessageType.MessageNotifyBeginStreaming, UIntPtr.Zero);
             _transform.ProcessMessage(TMessageType.MessageNotifyStartOfStream, UIntPtr.Zero);
-            if (_async) RunAsync(queue, onSample, releaseFrame, onSubmission);
-            else RunSynchronous(queue, onSample, releaseFrame, onSubmission);
+            if (_async) RunAsync(queue, onSample, releaseFrame, onSubmission, onOutput, onPendingFrames);
+            else RunSynchronous(queue, onSample, releaseFrame, onSubmission, onOutput, onPendingFrames);
         }
         catch (Exception error)
         {
@@ -204,60 +232,99 @@ internal sealed unsafe class MediaFoundationH264Encoder : IDisposable
         BlockingCollection<NativeReplayBuffer.EncodeJob> queue,
         Action<MediaFoundationEncodedSample> onSample,
         Action<nint> releaseFrame,
-        Action<TimeSpan> onSubmission)
+        Action<TimeSpan> onSubmission,
+        Action<TimeSpan> onOutput,
+        Action<int> onPendingFrames)
     {
         var pending = new Queue<(nint Frame, DateTime WallClockUtc)>();
-        var draining = false;
+        var pump = new MediaFoundationAsyncPump();
         try
         {
             while (true)
             {
-                IMFMediaEvent? mediaEvent;
-                try
+                // Empty every available MFT event before waiting for capture
+                // input. In particular, TransformHaveOutput must never sit
+                // behind an idle NeedInput credit.
+                while (TryGetEventNoWait(out var mediaEvent))
                 {
-                    mediaEvent = _events!.GetEvent(0);
+                    using (mediaEvent!)
+                        if (HandleEvent(mediaEvent!, pump, pending, onSample, releaseFrame, onOutput, onPendingFrames)) return;
                 }
-                catch (SharpGenException error) when (error.HResult == MfENoEventsAvailable)
+
+                if (pump.InputCredits > 0 && !pump.IsDraining)
                 {
+                    // A short wait wakes promptly for new work, then the next
+                    // iteration polls output again. Do not use Timeout.Infinite:
+                    // drivers may already have output queued beside NeedInput.
+                    if (queue.TryTake(out var job, TimeSpan.FromMilliseconds(2)))
+                    {
+                        if (job.FramePtr == 0)
+                        {
+                            job.SwapCompleted?.Set();
+                        }
+                        else if (pump.TryAcceptInput(inputAvailable: true))
+                        {
+                            Submit(job, pending, onSubmission, onPendingFrames);
+                        }
+                    }
+                    else if (pump.TryBeginDrain(queue.IsCompleted))
+                    {
+                        _transform!.ProcessMessage(TMessageType.MessageNotifyEndOfStream, UIntPtr.Zero);
+                        _transform.ProcessMessage(TMessageType.MessageCommandDrain, UIntPtr.Zero);
+                    }
                     continue;
                 }
 
-                using (mediaEvent)
-                {
-                    if (mediaEvent.Status.Failure) throw new COMException("Media Foundation MFT reported an error.", mediaEvent.Status.Code);
-                    switch (mediaEvent.EventType)
-                    {
-                        case MediaEventTypes.TransformNeedInput:
-                            if (queue.TryTake(out var job, Timeout.Infinite))
-                            {
-                                if (job.FramePtr == 0)
-                                {
-                                    job.SwapCompleted?.Set();
-                                    continue;
-                                }
-                                Submit(job, pending, onSubmission);
-                            }
-                            else if (!draining)
-                            {
-                                draining = true;
-                                _transform!.ProcessMessage(TMessageType.MessageNotifyEndOfStream, UIntPtr.Zero);
-                                _transform.ProcessMessage(TMessageType.MessageCommandDrain, UIntPtr.Zero);
-                            }
-                            break;
-
-                        case MediaEventTypes.TransformHaveOutput:
-                            DrainOneOutput(pending, onSample, releaseFrame);
-                            break;
-
-                        case MediaEventTypes.TransformDrainComplete:
-                            return;
-                    }
-                }
+                using var blockingEvent = _events!.GetEvent(0);
+                if (HandleEvent(blockingEvent, pump, pending, onSample, releaseFrame, onOutput, onPendingFrames)) return;
             }
         }
         finally
         {
             while (pending.TryDequeue(out var retained)) releaseFrame(retained.Frame);
+            onPendingFrames(0);
+        }
+    }
+
+    private bool HandleEvent(
+        IMFMediaEvent mediaEvent,
+        MediaFoundationAsyncPump pump,
+        Queue<(nint Frame, DateTime WallClockUtc)> pending,
+        Action<MediaFoundationEncodedSample> onSample,
+        Action<nint> releaseFrame,
+        Action<TimeSpan> onOutput,
+        Action<int> onPendingFrames)
+    {
+        if (mediaEvent.Status.Failure) throw new COMException("Media Foundation MFT reported an error.", mediaEvent.Status.Code);
+        switch (mediaEvent.EventType)
+        {
+            case MediaEventTypes.TransformNeedInput:
+                pump.OnNeedInput();
+                break;
+
+            case MediaEventTypes.TransformHaveOutput:
+                pump.OnHaveOutput();
+                if (pump.TryDrainOutput())
+                    while (DrainOneOutput(pending, onSample, releaseFrame, onOutput, onPendingFrames)) { }
+                break;
+
+            case MediaEventTypes.TransformDrainComplete:
+                return true;
+        }
+        return false;
+    }
+
+    private bool TryGetEventNoWait(out IMFMediaEvent? mediaEvent)
+    {
+        try
+        {
+            mediaEvent = _events!.GetEvent(EventNoWait);
+            return true;
+        }
+        catch (SharpGenException error) when (error.HResult == MfENoEventsAvailable)
+        {
+            mediaEvent = null;
+            return false;
         }
     }
 
@@ -265,7 +332,9 @@ internal sealed unsafe class MediaFoundationH264Encoder : IDisposable
         BlockingCollection<NativeReplayBuffer.EncodeJob> queue,
         Action<MediaFoundationEncodedSample> onSample,
         Action<nint> releaseFrame,
-        Action<TimeSpan> onSubmission)
+        Action<TimeSpan> onSubmission,
+        Action<TimeSpan> onOutput,
+        Action<int> onPendingFrames)
     {
         var pending = new Queue<(nint Frame, DateTime WallClockUtc)>();
         try
@@ -277,21 +346,22 @@ internal sealed unsafe class MediaFoundationH264Encoder : IDisposable
                     job.SwapCompleted?.Set();
                     continue;
                 }
-                Submit(job, pending, onSubmission);
-                while (DrainOneOutput(pending, onSample, releaseFrame)) { }
+                Submit(job, pending, onSubmission, onPendingFrames);
+                while (DrainOneOutput(pending, onSample, releaseFrame, onOutput, onPendingFrames)) { }
             }
 
             _transform!.ProcessMessage(TMessageType.MessageNotifyEndOfStream, UIntPtr.Zero);
             _transform.ProcessMessage(TMessageType.MessageCommandDrain, UIntPtr.Zero);
-            while (DrainOneOutput(pending, onSample, releaseFrame)) { }
+            while (DrainOneOutput(pending, onSample, releaseFrame, onOutput, onPendingFrames)) { }
         }
         finally
         {
             while (pending.TryDequeue(out var retained)) releaseFrame(retained.Frame);
+            onPendingFrames(0);
         }
     }
 
-    private void Submit(NativeReplayBuffer.EncodeJob job, Queue<(nint Frame, DateTime WallClockUtc)> pending, Action<TimeSpan> onSubmission)
+    private void Submit(NativeReplayBuffer.EncodeJob job, Queue<(nint Frame, DateTime WallClockUtc)> pending, Action<TimeSpan> onSubmission, Action<int> onPendingFrames)
     {
         var frame = (AVFrame*)job.FramePtr;
         var texturePointer = (nint)frame->data[0];
@@ -316,13 +386,17 @@ internal sealed unsafe class MediaFoundationH264Encoder : IDisposable
         _transform!.ProcessInput(0, sample, 0);
         onSubmission(sw.Elapsed);
         pending.Enqueue((job.FramePtr, job.WallClockUtc));
+        onPendingFrames(pending.Count);
     }
 
     private bool DrainOneOutput(
         Queue<(nint Frame, DateTime WallClockUtc)> pending,
         Action<MediaFoundationEncodedSample> onSample,
-        Action<nint> releaseFrame)
+        Action<nint> releaseFrame,
+        Action<TimeSpan> onOutput,
+        Action<int> onPendingFrames)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         var streamInfo = _transform!.GetOutputStreamInfo(0);
         IMFSample? suppliedSample = null;
         try
@@ -335,14 +409,16 @@ internal sealed unsafe class MediaFoundationH264Encoder : IDisposable
                 var provided = new OutputDataBuffer { StreamID = 0, Sample = suppliedSample };
                 var providedResult = _transform.ProcessOutput(ProcessOutputFlags.None, 1, ref provided, out var providedStatus);
                 if (providedResult.Failure) return false;
-                EmitOutput(provided.Sample ?? suppliedSample, pending, onSample, releaseFrame);
+                EmitOutput(provided.Sample ?? suppliedSample, pending, onSample, releaseFrame, onPendingFrames);
+                onOutput(sw.Elapsed);
                 return true;
             }
 
             var output = new OutputDataBuffer { StreamID = 0 };
             var result = _transform.ProcessOutput(ProcessOutputFlags.None, 1, ref output, out var status);
             if (result.Failure || output.Sample is null) return false;
-            using (output.Sample) EmitOutput(output.Sample, pending, onSample, releaseFrame);
+            using (output.Sample) EmitOutput(output.Sample, pending, onSample, releaseFrame, onPendingFrames);
+            onOutput(sw.Elapsed);
             return true;
         }
         finally
@@ -355,7 +431,8 @@ internal sealed unsafe class MediaFoundationH264Encoder : IDisposable
         IMFSample sample,
         Queue<(nint Frame, DateTime WallClockUtc)> pending,
         Action<MediaFoundationEncodedSample> onSample,
-        Action<nint> releaseFrame)
+        Action<nint> releaseFrame,
+        Action<int> onPendingFrames)
     {
         var buffer = sample.ConvertToContiguousBuffer();
         try
@@ -370,6 +447,7 @@ internal sealed unsafe class MediaFoundationH264Encoder : IDisposable
                 var wallClock = pending.Count > 0 ? pending.Dequeue() : default;
                 onSample(new MediaFoundationEncodedSample(bytes, sample.SampleTime / 10, keyframe, wallClock.WallClockUtc));
                 if (wallClock.Frame != 0) releaseFrame(wallClock.Frame);
+                onPendingFrames(pending.Count);
             }
             finally
             {
@@ -506,6 +584,47 @@ internal sealed unsafe class MediaFoundationH264Encoder : IDisposable
             _started = false;
         }
     }
+}
+
+internal readonly record struct CodecApiSetting(Guid Property, object Value);
+
+internal static class MediaFoundationH264CodecSettings
+{
+    public static readonly Guid InterfaceId = new("901db4c7-31ce-41a2-85dc-8fa0bf41b8da");
+    private static readonly Guid AvLowLatencyMode = new("9c27891a-ed7a-40e1-88e8-b22727a024ee");
+    private static readonly Guid AvEncCommonQualityVsSpeed = new("98332df8-03cd-476b-89fa-3f9e442dec9f");
+    private static readonly Guid AvEncCommonRateControlMode = new("1c0608e9-370c-4710-8a58-cb6181c42423");
+    private static readonly Guid AvEncCommonMeanBitRate = new("f7222374-2144-4815-b550-a37f8e12ee52");
+    private static readonly Guid AvEncCommonBufferSize = new("0db96574-b6a4-4c8b-8106-3773de0310cd");
+
+    // Values mirror codecapi.h: CBR is eAVEncCommonRateControlMode_CBR (0),
+    // QualityVsSpeed 0 is fastest, and buffer size is one second of bitrate.
+    public static IReadOnlyList<CodecApiSetting> Create(int bitrate)
+    {
+        var selectedBitrate = (uint)Math.Clamp(bitrate, 5_000_000, 100_000_000);
+        return new[]
+        {
+            new CodecApiSetting(AvLowLatencyMode, true),
+            new CodecApiSetting(AvEncCommonQualityVsSpeed, 0u),
+            new CodecApiSetting(AvEncCommonRateControlMode, 0u),
+            new CodecApiSetting(AvEncCommonMeanBitRate, selectedBitrate),
+            new CodecApiSetting(AvEncCommonBufferSize, selectedBitrate)
+        };
+    }
+}
+
+[ComImport]
+[Guid("901db4c7-31ce-41a2-85dc-8fa0bf41b8da")]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface ICodecApi
+{
+    [PreserveSig] int IsSupported(ref Guid property);
+    [PreserveSig] int IsModifiable(ref Guid property);
+    [PreserveSig] int GetParameterRange(ref Guid property, nint minimum, nint maximum, nint steppingDelta);
+    [PreserveSig] int GetParameterValues(ref Guid property, nint values, nint valueCount);
+    [PreserveSig] int GetDefaultValue(ref Guid property, nint value);
+    [PreserveSig] int GetValue(ref Guid property, nint value);
+    [PreserveSig] int SetValue(ref Guid property, [MarshalAs(UnmanagedType.Struct)] object value);
 }
 
 internal readonly record struct MediaFoundationEncodedSample(byte[] Data, long PtsMicroseconds, bool IsKeyframe, DateTime WallClockUtc);

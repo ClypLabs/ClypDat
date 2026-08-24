@@ -127,8 +127,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // that thread, read/reset from CaptureLoop's own periodic diag line. Plain
     // instance fields are safe here since only one capture session (and so only
     // one encode thread) is ever active at a time.
-    private long _encodeMicrosAccum;
-    private long _encodeCountAccum;
+    private long _encodeInputMicrosAccum;
+    private long _encodeInputCountAccum;
+    private long _encodeOutputMicrosAccum;
+    private long _encodeOutputCountAccum;
     private long _encodeDroppedCount;
     // Diagnostics for the gap between what capture hands the encoder and what
     // reaches the ring. Clips arrive 52-260 frames short of a capture that logs
@@ -172,7 +174,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     public void RequestFrameRate(int frameRate)
     {
         if (!_sessionActive) return;
-        Volatile.Write(ref _requestedFrameRate, Math.Clamp(frameRate, 30, 144));
+        Volatile.Write(ref _requestedFrameRate, Math.Clamp(frameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate));
     }
 
     public TimeSpan Duration { get; private set; } = TimeSpan.FromSeconds(60);
@@ -402,7 +404,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 ? Math.Max(1, (long)Math.Round((requestedEndUtc - window[^1].WallClockUtc).TotalMilliseconds * 1_000))
                 : window.Length > 1
                     ? Math.Max(1, window[^1].PtsMs - window[^2].PtsMs)
-                    : Math.Max(1, 1_000_000L / Math.Clamp(config.FrameRate, 30, 144));
+                    : Math.Max(1, 1_000_000L / Math.Clamp(config.FrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate));
             var videoDurationSeconds = (window[^1].PtsMs - window[0].PtsMs + finalPacketDurationMicroseconds) / 1_000_000.0;
             AppLog.Debug($"Native replay audio/video duration check: videoDurationSeconds={videoDurationSeconds:0.000}, audioWindowDurationSeconds={windowDurationSeconds:0.000}, deltaMs={(windowDurationSeconds - videoDurationSeconds) * 1000:0.0}, packetCount={window.Length}.");
 
@@ -931,7 +933,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var lastForcedKeyframe = TimeSpan.Zero;
             var lastTargetRefresh = TimeSpan.Zero;
             var lastEncodedAt = TimeSpan.Zero;
-            var targetFrameInterval = TimeSpan.FromSeconds(1.0 / Math.Clamp(config.FrameRate, 30, 144));
+            var targetFrameInterval = TimeSpan.FromSeconds(1.0 / Math.Clamp(config.FrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate));
             var variableFrameTiming = ReplayFrameTimingPolicy.IsVariable(config.FrameRateMode);
             // Counts encoded frames (including duplicate/padding ones) so
             // frame->pts can be assigned an IDEAL, constant-rate timestamp
@@ -951,8 +953,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // setup) and independent of frame rate, so nothing else moves.
             var nextPtsMicroseconds = 0.0;
             long lastVariablePtsMicroseconds = -1;
-            var idealFrameIntervalMicroseconds = 1_000_000.0 / Math.Clamp(config.FrameRate, 30, 144);
-            var activeFrameRate = Math.Clamp(config.FrameRate, 30, 144);
+            var idealFrameIntervalMicroseconds = 1_000_000.0 / Math.Clamp(config.FrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
+            var activeFrameRate = Math.Clamp(config.FrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
             Volatile.Write(ref _requestedFrameRate, activeFrameRate);
             var cropSamplingBudget = new PresentSamplingBudget(activeFrameRate);
             // The real capture-moment timestamp FIFO (one per avcodec_send_frame
@@ -1279,8 +1281,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // call. queueDepth/droppedFrames confirm whether decoupling is
                     // actually keeping up: a growing depth or nonzero drops under
                     // load means the encoder itself is too slow, not just blocked.
-                    var encodeCountSinceLog = Math.Max(1, Interlocked.Exchange(ref _encodeCountAccum, 0));
-                    var encodeMicrosSinceLog = Interlocked.Exchange(ref _encodeMicrosAccum, 0);
+                    var inputCountSinceLog = Math.Max(1, Interlocked.Exchange(ref _encodeInputCountAccum, 0));
+                    var inputMicrosSinceLog = Interlocked.Exchange(ref _encodeInputMicrosAccum, 0);
+                    var outputCountSinceLog = Math.Max(1, Interlocked.Exchange(ref _encodeOutputCountAccum, 0));
+                    var outputMicrosSinceLog = Interlocked.Exchange(ref _encodeOutputMicrosAccum, 0);
                     var droppedSinceLog = Interlocked.Exchange(ref _encodeDroppedCount, 0);
                     var eagainSinceLog = Interlocked.Exchange(ref _sendRefusedEagainCount, 0);
                     var sendFailedSinceLog = Interlocked.Exchange(ref _sendFailedOtherCount, 0);
@@ -1304,7 +1308,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var wgcTelemetryText = wgcTelemetry is null
                         ? string.Empty
                         : $", wgcCallbackArrivals={wgcCallbackCount}, wgcInputFps={wgcInputRate:0.0}, wgcUniqueFps={wgcUniqueRate:0.0}, wgcPublished={wgcTelemetry.Value.PublishedFrames}, wgcTaken={wgcTelemetry.Value.TakenFrames}, wgcOverwritten={wgcTelemetry.Value.OverwrittenFrames}, wgcCallbackMs={wgcTelemetry.Value.CallbackDurationTotal.TotalMilliseconds:0.0}, wgcGpuLockWaitMs={wgcTelemetry.Value.GpuLockWaitTotal.TotalMilliseconds:0.0}, wgcTimestampGaps={wgcTelemetry.Value.SourceTimestampGapCount}, wgcMaxTimestampGapMs={wgcTelemetry.Value.SourceTimestampGapMaximum.TotalMilliseconds:0.0}, wgcResizeEvents={wgcTelemetry.Value.ResizeEvents}, wgcMinUpdateIntervalAvailable={wgcTelemetry.Value.MinimumUpdateInterval.InterfaceAvailable}, wgcMinUpdateIntervalRequestedMs={wgcTelemetry.Value.MinimumUpdateInterval.Requested.TotalMilliseconds:0.###}, wgcMinUpdateIntervalAppliedMs={wgcTelemetry.Value.MinimumUpdateInterval.Applied?.TotalMilliseconds:0.###}";
-                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={ringPacketCount}, ringBufferMb={ringBufferMb}, ringCapacityMb={ringCapacityMb}, packetPoolMb={poolRetainedMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, pendingEncoderFrames={Volatile.Read(ref _pendingEncoderFrames)}, peakPendingEncoderFrames={Volatile.Read(ref _peakPendingEncoderFrames)}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}{wgcTelemetryText}.");
+                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={ringPacketCount}, ringBufferMb={ringBufferMb}, ringCapacityMb={ringCapacityMb}, packetPoolMb={poolRetainedMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgInputMs={inputMicrosSinceLog / 1000.0 / inputCountSinceLog:0.00}, avgOutputMs={outputMicrosSinceLog / 1000.0 / outputCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, pendingEncoderFrames={Volatile.Read(ref _pendingEncoderFrames)}, peakPendingEncoderFrames={Volatile.Read(ref _peakPendingEncoderFrames)}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}{wgcTelemetryText}.");
                     // Raw encoded rate, deliberately NOT crediting suppressed pads
                     // back in. It remains useful telemetry, but a low rate with
                     // an empty queue is a pacing/source shortfall, not encoder
@@ -1331,7 +1335,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // debug log is 1-8MB/day and isn't something to ask for
                         // first when triaging "clips are choppy."
                         const string recoveryGuidance = "Automatic hardware profile is already active; reduce capture resolution or frame rate.";
-                        AppLog.Info($"Native capture: overload - dropped {droppedSinceLog} frame(s) in the last {diagElapsed:0.0}s, queue {encodeQueue.Count}/{encodeQueueCapacity}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.0}, avgScaleMs={scaleMs / n:0.0}. {recoveryGuidance}");
+                        AppLog.Info($"Native capture: overload - dropped {droppedSinceLog} frame(s) in the last {diagElapsed:0.0}s, queue {encodeQueue.Count}/{encodeQueueCapacity}, avgInputMs={inputMicrosSinceLog / 1000.0 / inputCountSinceLog:0.0}, avgOutputMs={outputMicrosSinceLog / 1000.0 / outputCountSinceLog:0.0}, avgScaleMs={scaleMs / n:0.0}. {recoveryGuidance}");
                     }
                     var activeCaptureMode = wgcCapture is null ? "Desktop Duplication" : "Windows Graphics Capture (recovery)";
                     SetHealth(new ReplayCaptureHealth("Native", activeCaptureMode,
@@ -3116,8 +3120,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             InputHeight = (uint)captureHeight,
             OutputWidth = (uint)outputWidth,
             OutputHeight = (uint)outputHeight,
-            InputFrameRate = new Rational((uint)Math.Clamp(frameRate, 30, 144), 1),
-            OutputFrameRate = new Rational((uint)Math.Clamp(frameRate, 30, 144), 1),
+            InputFrameRate = new Rational((uint)Math.Clamp(frameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate), 1),
+            OutputFrameRate = new Rational((uint)Math.Clamp(frameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate), 1),
             // Capture runs continuously at the target frame rate, unlike a
             // one-off export. OptimalQuality can make the driver spend more
             // 3D time on every crop/scale/colour-conversion pass, competing
@@ -3644,8 +3648,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 {
                     if (!accepted) ffmpeg.av_frame_free(&jobFrame);
                 }
-                Interlocked.Add(ref _encodeMicrosAccum, (long)(sw.Elapsed.TotalMilliseconds * 1000));
-                Interlocked.Increment(ref _encodeCountAccum);
+                Interlocked.Add(ref _encodeInputMicrosAccum, (long)(sw.Elapsed.TotalMilliseconds * 1000));
+                Interlocked.Increment(ref _encodeInputCountAccum);
             }
 
             // Queue drained and CompleteAdding was called (CaptureLoop's while
@@ -3680,8 +3684,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             FreeEncodeFrame,
             elapsed =>
             {
-                Interlocked.Add(ref _encodeMicrosAccum, (long)(elapsed.TotalMilliseconds * 1000));
-                Interlocked.Increment(ref _encodeCountAccum);
+                Interlocked.Add(ref _encodeInputMicrosAccum, (long)(elapsed.TotalMilliseconds * 1000));
+                Interlocked.Increment(ref _encodeInputCountAccum);
+            },
+            elapsed =>
+            {
+                Interlocked.Add(ref _encodeOutputMicrosAccum, (long)(elapsed.TotalMilliseconds * 1000));
+                Interlocked.Increment(ref _encodeOutputCountAccum);
+            },
+            pendingFrames =>
+            {
+                Volatile.Write(ref _pendingEncoderFrames, pendingFrames);
+                UpdatePeak(ref _peakPendingEncoderFrames, pendingFrames);
             });
     }
 
@@ -4717,7 +4731,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             codecContext->width = width;
             codecContext->height = height;
             codecContext->time_base = encoderTimeBase;
-            codecContext->framerate = new AVRational { num = Math.Clamp(config.FrameRate, 30, 144), den = 1 };
+            codecContext->framerate = new AVRational { num = Math.Clamp(config.FrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate), den = 1 };
             codecContext->pix_fmt = AVPixelFormat.AV_PIX_FMT_NV12;
             // Limited/studio range (16-235), matching what the scalers
             // (CreateScaler/CreateGpuScaler) now write, and tagged as such.

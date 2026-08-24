@@ -14,6 +14,14 @@ public sealed class WgcCaptureRatePolicyTests
     }
 
     [Fact]
+    public void MinimumUpdateInterval_ClampsLegacy144FpsTo120()
+    {
+        var interval = WgcMinimumUpdateIntervalPolicy.FromFrameRate(144);
+
+        Assert.Equal(TimeSpan.FromSeconds(1d / 120d), interval);
+    }
+
+    [Fact]
     public void UnsupportedMinimumUpdateInterval_HasNoAppliedValue()
     {
         var result = WgcMinimumUpdateIntervalPolicy.Unsupported(90);
