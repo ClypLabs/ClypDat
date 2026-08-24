@@ -93,10 +93,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // one lock the encode thread needs for every packet it produces.
     private long _ringBufferBytes;
     private long _ringBufferCapacityBytes;
-    // Live target frame rate. The capture loop owns the pacing interval and
-    // reads this once per iteration; anything outside the loop asks via
-    // RequestFrameRate rather than touching the interval directly.
-    private int _requestedFrameRate;
     // Recording-paused transitions (see class summary) - trimmed alongside
     // _packets so this never grows unbounded across a long session.
     private readonly List<PauseEvent> _pauseEvents = new();
@@ -165,20 +161,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
     public bool IsRecording => _sessionActive;
 
-    // Retargets pacing on a running session. Cheap and safe mid-session: only
-    // how often a frame is scheduled changes, so the encoder, the GPU scaler
-    // and the stream's parameters all stay exactly as they were and packets
-    // recorded either side of the change still mux into a single clip.
-    //
-    // Resolution deliberately has no equivalent. Changing it means rebuilding
-    // the encoder, which would leave the ring holding packets of two different
-    // sizes - unmuxable into one file - so the only honest implementation would
-    // discard the user's buffered replay history at the exact moment the
-    // machine is struggling. Frame rate is the lever that costs nothing.
+    // Capture quality is selected by the user, not a health heuristic. Keep
+    // this compatibility entry point for worker protocol clients, but never
+    // alter a running session's cadence: doing so silently changes the CFR
+    // contract and makes diagnostics conceal the actual transport problem.
     public void RequestFrameRate(int frameRate)
     {
-        if (!_sessionActive) return;
-        Volatile.Write(ref _requestedFrameRate, Math.Clamp(frameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate));
+        if (_sessionActive)
+            AppLog.Info($"Native capture: ignored adaptive frame-rate request ({frameRate} FPS); selected cadence remains fixed for this session.");
     }
 
     public TimeSpan Duration { get; private set; } = TimeSpan.FromSeconds(60);
@@ -898,19 +888,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // a MonotonicClock.UtcNow captured at each actual encode, passed
             // straight into DrainToRingBuffer, so idealizing video's own
             // timeline can't drag audio sync off with it.
-            // Accumulated rather than "index * interval", because the interval
-            // is no longer fixed for the life of the session - RequestFrameRate
-            // can halve it when the encoder cannot keep up. Multiplying a
-            // running index by a changed interval would retroactively restate
-            // every timestamp already emitted and jump the timeline; adding the
-            // current interval each time keeps PTS monotonic and exactly spaced
-            // across the change. time_base is microseconds (see the encoder
-            // setup) and independent of frame rate, so nothing else moves.
+            // Accumulated rather than multiplying an index, keeping the CFR
+            // clock exact without accumulating floating-point rounding error.
             var nextPtsMicroseconds = 0.0;
             long lastVariablePtsMicroseconds = -1;
             var idealFrameIntervalMicroseconds = 1_000_000.0 / Math.Clamp(config.FrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
             var activeFrameRate = Math.Clamp(config.FrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
-            Volatile.Write(ref _requestedFrameRate, activeFrameRate);
             var cropSamplingBudget = new PresentSamplingBudget(activeFrameRate);
             // The real capture-moment timestamp FIFO (one per avcodec_send_frame
             // call, dequeued one-for-one as packets actually come out - see
@@ -1068,6 +1051,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var hasCapturedRealFrame = false;
             var startupValidationWindows = 0;
             var consecutiveOverloadWindows = 0;
+            var consecutiveTransportShortfallWindows = 0;
             var activeEncoderCandidate = default(ReplayEncoderCandidate);
             var attemptedEncoderCandidates = new HashSet<ReplayEncoderCandidate>();
             // See the content-write sites above and the pacing gate below -
@@ -1315,9 +1299,19 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // The encoder's returned packets are the actual output;
                     // queued AVFrames can still be delayed or rejected.
                     var encoderPressure = droppedSinceLog > 0 || encodeQueue.Count * 4 >= encodeQueueCapacity * 3;
-                    var outputShortfall = hasCapturedRealFrame && outputFrameRate < activeFrameRate * 0.9;
-                    var overloaded = encoderPressure;
                     var saveInProgress = Volatile.Read(ref _savesInFlight) > 0;
+                    var sourceFrameRate = inputFrameCount / diagElapsed;
+                    var freshTransportRate = framesProcessedSinceLog / diagElapsed;
+                    var freshTransportTarget = Math.Min(activeFrameRate, sourceFrameRate);
+                    var outputShortfall = hasCapturedRealFrame && outputFrameRate < activeFrameRate * ReplayEncoderQualificationPolicy.TargetThreshold;
+                    var transportShortfall = hasCapturedRealFrame && freshTransportTarget > 0 &&
+                        freshTransportRate < freshTransportTarget * ReplayEncoderQualificationPolicy.TargetThreshold;
+                    if (transportShortfall && !saveInProgress)
+                        consecutiveTransportShortfallWindows++;
+                    else
+                        consecutiveTransportShortfallWindows = 0;
+                    var transportDegraded = consecutiveTransportShortfallWindows >= ReplayEncoderFailoverPolicy.RequiredOverloadWindows;
+                    var overloaded = encoderPressure;
                     if (hasCapturedRealFrame && !saveInProgress && overloaded)
                         consecutiveOverloadWindows++;
                     else if (!overloaded || saveInProgress)
@@ -1380,7 +1374,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // up until the clip comes out frozen. Report it while it is
                     // happening instead, so the UI can say so live rather than the
                     // save-time warning being the first anyone hears of it.
-                    if (isStalled) _lastDegradedUtc = DateTime.UtcNow;
+                    if (isStalled || transportDegraded) _lastDegradedUtc = DateTime.UtcNow;
                     if (overloaded)
                     {
                         _lastDegradedUtc = DateTime.UtcNow;
@@ -1392,14 +1386,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         const string recoveryGuidance = "Automatic hardware profile is already active; reduce capture resolution or frame rate.";
                         AppLog.Info($"Native capture: overload - dropped {droppedSinceLog} frame(s) in the last {diagElapsed:0.0}s, queue {encodeQueue.Count}/{encodeQueueCapacity}, avgInputMs={inputMicrosSinceLog / 1000.0 / inputCountSinceLog:0.0}, avgOutputMs={outputMicrosSinceLog / 1000.0 / outputCountSinceLog:0.0}, avgScaleMs={scaleMs / n:0.0}. {recoveryGuidance}");
                     }
-                    var activeCaptureMode = wgcCapture is null ? "Desktop Duplication" : "Windows Graphics Capture (recovery)";
+                    var activeCaptureMode = wgcCapture is null ? dxgiCapture?.CaptureMode ?? "Game Capture" : "Windows Graphics Capture (recovery)";
                     SetHealth(new ReplayCaptureHealth("Native", activeCaptureMode,
-                        overloaded || isStalled ? ReplayCaptureState.Degraded : ReplayCaptureState.Healthy,
+                        overloaded || isStalled || transportDegraded ? ReplayCaptureState.Degraded : ReplayCaptureState.Healthy,
                         activeFrameRate, inputFrameCount / diagElapsed, framesProcessedSinceLog / diagElapsed,
                         outputFrameRate, Math.Max(0, packetsOutSinceLog - framesProcessedSinceLog), droppedSinceLog, encodeQueue.Count,
                         encoderName, "Default adapter",
                         isStalled ? "Capture stalled - no new frames from the display. Recovering." :
                         overloaded ? "Capture overload. Output may fall below target FPS." :
+                        transportDegraded ? "Game Capture transport is below 99% of source/selected cadence." :
                         outputShortfall ? "Capture cadence below target; encoder queue is keeping up." : string.Empty,
                         DateTime.UtcNow)
                     {
@@ -1411,6 +1406,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // that rather than the encode settings being too costly.
                         DegradeReason = isStalled ? ReplayDegradeReason.CaptureStall
                             : overloaded ? ReplayDegradeReason.EncoderOverload
+                            : transportDegraded ? ReplayDegradeReason.CaptureTransport
                             : ReplayDegradeReason.None,
                         AdapterDescription = adapterDescription,
                         EncoderProfile = config.EncoderProfile,
@@ -2428,24 +2424,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
                 // session as real recorded content).
 
-                // Picked up here rather than only at session start so an
-                // explicit user FPS change takes effect without restarting the
-                // capture. Encoder overload never writes this value: preserving
-                // the selected capture cadence takes priority over silently
-                // changing a clip to 60 or 30 FPS.
-                var requestedFrameRate = Volatile.Read(ref _requestedFrameRate);
-                if (requestedFrameRate != activeFrameRate && requestedFrameRate > 0)
-                {
-                    activeFrameRate = requestedFrameRate;
-                    targetFrameInterval = TimeSpan.FromSeconds(1.0 / activeFrameRate);
-                    idealFrameIntervalMicroseconds = 1_000_000.0 / activeFrameRate;
-                    cropSamplingBudget.SetRate(activeFrameRate, stopwatch.Elapsed);
-                    wgcCapture?.TrySetTargetFrameRate(activeFrameRate);
-                    previousWgcTelemetry = default;
-                    previousDxgiTelemetry = default;
-                    SetHealth(_health with { TargetFrameRate = activeFrameRate, UpdatedUtc = DateTime.UtcNow });
-                    AppLog.Info($"Native capture: target frame rate now {activeFrameRate} fps.");
-                }
             }
 
             // The pacing tick, running on its own thread (see pacingThread below).

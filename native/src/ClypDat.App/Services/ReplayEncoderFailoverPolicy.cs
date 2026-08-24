@@ -2,8 +2,8 @@ namespace ClypDat.App.Services;
 
 // Keeps automatic recovery deterministic: a candidate that has already
 // saturated during this capture session is not retried until the next session.
-// NVENC's D3D11 path is deliberately excluded after a system-memory NVENC
-// throughput failure; it is only an open-time fallback for that family.
+// NVENC's D3D11 and upload paths exercise different bottlenecks, so an upload
+// overload must still allow the zero-copy path to qualify before AMF/QSV.
 internal static class ReplayEncoderFailoverPolicy
 {
     internal const int RequiredOverloadWindows = 3;
@@ -22,10 +22,6 @@ internal static class ReplayEncoderFailoverPolicy
             .Skip(activeIndex + 1)
             .Where(candidate => candidate.Codec == active.Codec)
             .Where(candidate => !attempted.Contains(candidate))
-            .Where(candidate => !(active.Name.EndsWith("_nvenc", StringComparison.OrdinalIgnoreCase) &&
-                                  active.InputPath == ReplayEncoderInputPath.SystemMemory &&
-                                  candidate.Name.EndsWith("_nvenc", StringComparison.OrdinalIgnoreCase) &&
-                                  candidate.InputPath == ReplayEncoderInputPath.D3D11))
             .ToArray();
     }
 }

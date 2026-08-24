@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Vortice;
 using Vortice.Direct3D;
 using Vortice.Direct3D11;
@@ -6,13 +7,16 @@ using Vortice.DXGI;
 
 namespace ClypDat.App.Services;
 
-// DXGI acquisition owns a separate immediate context. Three keyed shared
-// textures cross to processing. Producer never waits; consumer keeps lease
-// through crop/scale; newest pending frame wins.
+// Game capture owns a second DXGI device so acquisition cannot be blocked by
+// conversion/encoding. Three shared surfaces cross to the processing device.
+// Shared fences express GPU ownership; CPU code never Flushes or waits.
 internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposable
 {
     private const int SurfaceCount = 3;
     private readonly ID3D11Device _captureDevice, _processingDevice;
+    private readonly ID3D11Device5 _captureDevice5, _processingDevice5;
+    private readonly ID3D11DeviceContext4 _captureContext, _processingContext;
+    private readonly ID3D11Fence _readyFence, _releasedFence, _readyFenceOnProcessing, _releasedFenceOnCapture;
     private readonly IDXGIOutputDuplication _duplication;
     private readonly object _stateLock = new();
     private readonly CancellationTokenSource _stopping = new();
@@ -21,6 +25,7 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
     private readonly Thread _producer;
     private int _nextSlot;
     private long _generation, _sequence;
+    private ulong _readyValue, _releasedValue;
     private string? _failure;
     private bool _disposed;
     private long _sourcePresents, _acquiredFrames, _transportedFrames, _busySlotSkips, _producerCopyTicks, _leaseTicks, _leaseCount, _accumulatedPresents, _zeroPresentFrames;
@@ -28,8 +33,22 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
     private DesktopDuplicationFrameSource(ID3D11Device captureDevice, ID3D11Device processingDevice, IDXGIOutputDuplication duplication)
     {
         _captureDevice = captureDevice; _processingDevice = processingDevice; _duplication = duplication;
+        _captureDevice5 = captureDevice.QueryInterface<ID3D11Device5>();
+        _processingDevice5 = processingDevice.QueryInterface<ID3D11Device5>();
+        _captureContext = captureDevice.ImmediateContext.QueryInterface<ID3D11DeviceContext4>();
+        _processingContext = processingDevice.ImmediateContext.QueryInterface<ID3D11DeviceContext4>();
+        _readyFence = _captureDevice5.CreateFence<ID3D11Fence>(0, FenceFlags.Shared);
+        _releasedFence = _processingDevice5.CreateFence<ID3D11Fence>(0, FenceFlags.Shared);
+        var readyHandle = _readyFence.CreateSharedHandle(null, null!);
+        var releasedHandle = _releasedFence.CreateSharedHandle(null, null!);
+        try
+        {
+            _readyFenceOnProcessing = _processingDevice5.OpenSharedFence<ID3D11Fence>(readyHandle);
+            _releasedFenceOnCapture = _captureDevice5.OpenSharedFence<ID3D11Fence>(releasedHandle);
+        }
+        finally { CloseHandle(readyHandle); CloseHandle(releasedHandle); }
         for (var i = 0; i < SurfaceCount; i++) _slots[i] = new SurfaceSlot();
-        _producer = new Thread(Produce) { IsBackground = true, Priority = ThreadPriority.AboveNormal, Name = "ClypDat-DXGI-Producer" };
+        _producer = new Thread(Produce) { IsBackground = true, Priority = ThreadPriority.AboveNormal, Name = "ClypDat-GameCapture-Producer" };
         _producer.Start();
     }
 
@@ -37,34 +56,31 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
     {
         using var dxgi = processingDevice.QueryInterface<IDXGIDevice>();
         using var adapter = dxgi.GetParent<IDXGIAdapter>();
-        var levels = new[] { Vortice.Direct3D.FeatureLevel.Level_11_1, Vortice.Direct3D.FeatureLevel.Level_11_0, Vortice.Direct3D.FeatureLevel.Level_10_1 };
+        var levels = new[] { FeatureLevel.Level_11_1, FeatureLevel.Level_11_0, FeatureLevel.Level_10_1 };
         D3D11.D3D11CreateDevice(adapter, DriverType.Unknown, DeviceCreationFlags.BgraSupport, levels, out var captureDevice, out _, out ID3D11DeviceContext? context).CheckError();
         context?.Dispose();
-        try
-        {
-            var duplication = NativeReplayBuffer.CreateDuplicationFor(captureDevice!, targetHandle, config, out desktopBounds);
-            return new DesktopDuplicationFrameSource(captureDevice!, processingDevice, duplication);
-        }
+        try { return new DesktopDuplicationFrameSource(captureDevice!, processingDevice, NativeReplayBuffer.CreateDuplicationFor(captureDevice!, targetHandle, config, out desktopBounds)); }
         catch { captureDevice?.Dispose(); throw; }
     }
 
-    public string CaptureMode => "Desktop Duplication";
+    public string CaptureMode => "Game Capture (DXGI shared fences)";
     public string? Failure { get { lock (_stateLock) return _failure; } }
 
     public bool WaitAndTakeLatestFrame(TimeSpan timeout, CancellationToken cancellationToken, out GameFrameLease? frame)
     {
         frame = null;
         if (!_signal.WaitAndTake(timeout, cancellationToken)) return false;
-        SurfaceSlot[] candidates;
-        lock (_stateLock) candidates = _slots.Where(x => x.ProcessingTexture is not null && x.Sequence != 0).OrderByDescending(x => x.Sequence).ToArray();
-        foreach (var slot in candidates)
+        lock (_stateLock)
         {
-            try { slot.ProcessingMutex!.AcquireSync(1, 0); }
-            catch { continue; }
+            var slot = _slots.Where(s => s.ProcessingTexture is not null && !s.Leased && s.Sequence != 0).OrderByDescending(s => s.Sequence).FirstOrDefault();
+            if (slot is null) return false;
+            slot.Leased = true;
+            // Queue the dependency. The consumer CPU can immediately acquire
+            // another frame; its conversion work will wait only on the GPU.
+            _processingContext.Wait(_readyFenceOnProcessing, slot.ReadyValue);
             frame = new Lease(this, slot);
             return true;
         }
-        return false;
     }
 
     internal DesktopDuplicationTelemetry GetTelemetrySnapshot()
@@ -91,35 +107,21 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
                     lock (_stateLock)
                     {
                         if (_disposed) return;
-                        for (var attempt = 0; attempt < SurfaceCount; attempt++)
+                        for (var i = 0; i < SurfaceCount; i++)
                         {
                             var candidate = _slots[_nextSlot]; _nextSlot = (_nextSlot + 1) % SurfaceCount;
-                            if (candidate.CaptureMutex is null)
-                            {
-                                EnsureSurface(candidate, source.Description);
-                                candidate.CaptureMutex!.AcquireSync(0, 0);
-                                slot = candidate;
-                                break;
-                            }
-                            try { candidate.CaptureMutex.AcquireSync(0, 0); }
-                            catch { Interlocked.Increment(ref _busySlotSkips); continue; }
-                            if (candidate.CaptureTexture!.Description.Width != source.Description.Width || candidate.CaptureTexture.Description.Height != source.Description.Height || candidate.CaptureTexture.Description.Format != source.Description.Format)
-                            {
-                                candidate.CaptureMutex.ReleaseSync(0);
-                                candidate.Dispose();
-                                EnsureSurface(candidate, source.Description);
-                                candidate.CaptureMutex!.AcquireSync(0, 0);
-                            }
+                            if (candidate.Leased || _releasedFenceOnCapture.CompletedValue < candidate.ReleaseValue) { Interlocked.Increment(ref _busySlotSkips); continue; }
+                            EnsureSurface(candidate, source.Description);
                             slot = candidate;
                             break;
                         }
                         if (slot is null) continue;
                     }
-                    var copyTimer = Stopwatch.StartNew();
+                    var timer = Stopwatch.StartNew();
                     _captureDevice.ImmediateContext.CopyResource(slot.CaptureTexture!, source);
-                    _captureDevice.ImmediateContext.Flush();
-                    slot.CaptureMutex!.ReleaseSync(1);
-                    copyTimer.Stop(); Interlocked.Add(ref _producerCopyTicks, copyTimer.Elapsed.Ticks);
+                    slot.ReadyValue = unchecked(++_readyValue);
+                    _captureContext.Signal(_readyFence, slot.ReadyValue);
+                    timer.Stop(); Interlocked.Add(ref _producerCopyTicks, timer.Elapsed.Ticks);
                     lock (_stateLock)
                     {
                         slot.Timestamp = info.LastPresentTime; slot.Presents = Math.Max(1, info.AccumulatedFrames); slot.Sequence = ++_sequence;
@@ -137,38 +139,48 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
     {
         if (slot.CaptureTexture is not null && slot.CaptureTexture.Description.Width == description.Width && slot.CaptureTexture.Description.Height == description.Height && slot.CaptureTexture.Description.Format == description.Format) return;
         slot.Dispose();
-        slot.CaptureTexture = _captureDevice.CreateTexture2D(new Texture2DDescription { Width = description.Width, Height = description.Height, MipLevels = 1, ArraySize = 1, Format = description.Format, SampleDescription = description.SampleDescription, Usage = ResourceUsage.Default, BindFlags = BindFlags.None, CPUAccessFlags = CpuAccessFlags.None, MiscFlags = ResourceOptionFlags.SharedKeyedMutex });
-        slot.CaptureMutex = slot.CaptureTexture.QueryInterface<IDXGIKeyedMutex>();
+        slot.CaptureTexture = _captureDevice.CreateTexture2D(new Texture2DDescription { Width = description.Width, Height = description.Height, MipLevels = 1, ArraySize = 1, Format = description.Format, SampleDescription = description.SampleDescription, Usage = ResourceUsage.Default, BindFlags = BindFlags.None, CPUAccessFlags = CpuAccessFlags.None, MiscFlags = ResourceOptionFlags.Shared });
         using var shared = slot.CaptureTexture.QueryInterface<IDXGIResource>();
         slot.ProcessingTexture = _processingDevice.OpenSharedResource<ID3D11Texture2D>(shared.SharedHandle);
-        slot.ProcessingMutex = slot.ProcessingTexture.QueryInterface<IDXGIKeyedMutex>();
         slot.Generation = ++_generation;
     }
 
-    private void Fail(string failure, Exception? error = null) { lock (_stateLock) { if (_disposed) return; _failure ??= failure; } if (error is null) AppLog.Info($"Native capture: DXGI producer stopped ({failure})."); else AppLog.Error("Native capture: DXGI producer failed.", error); _signal.Wake(); }
+    private void Release(SurfaceSlot slot)
+    {
+        lock (_stateLock)
+        {
+            if (_disposed) return;
+            slot.ReleaseValue = unchecked(++_releasedValue);
+            slot.Leased = false;
+            _processingContext.Signal(_releasedFence, slot.ReleaseValue);
+        }
+    }
+
+    private void Fail(string failure, Exception? error = null) { lock (_stateLock) { if (_disposed) return; _failure ??= failure; } if (error is null) AppLog.Info($"Native capture: Game Capture producer stopped ({failure})."); else AppLog.Error("Native capture: Game Capture producer failed.", error); _signal.Wake(); }
 
     public void Dispose()
     {
         lock (_stateLock) { if (_disposed) return; _disposed = true; }
         _stopping.Cancel(); _signal.Wake(); if (Thread.CurrentThread != _producer) _producer.Join(TimeSpan.FromSeconds(2));
         lock (_stateLock) foreach (var slot in _slots) slot.Dispose();
-        _duplication.Dispose(); _captureDevice.Dispose(); _signal.Dispose(); _stopping.Dispose();
+        _duplication.Dispose(); _readyFenceOnProcessing.Dispose(); _releasedFenceOnCapture.Dispose(); _readyFence.Dispose(); _releasedFence.Dispose(); _processingContext.Dispose(); _captureContext.Dispose(); _processingDevice5.Dispose(); _captureDevice5.Dispose(); _captureDevice.Dispose(); _signal.Dispose(); _stopping.Dispose();
     }
 
     private sealed class SurfaceSlot : IDisposable
     {
-        public ID3D11Texture2D? CaptureTexture, ProcessingTexture; public IDXGIKeyedMutex? CaptureMutex, ProcessingMutex; public long Timestamp, Presents, Sequence, Generation;
-        public void Dispose() { ProcessingMutex?.Dispose(); ProcessingTexture?.Dispose(); CaptureMutex?.Dispose(); CaptureTexture?.Dispose(); ProcessingMutex = null; ProcessingTexture = null; CaptureMutex = null; CaptureTexture = null; Sequence = 0; }
+        public ID3D11Texture2D? CaptureTexture, ProcessingTexture; public long Timestamp, Presents, Sequence, Generation; public ulong ReadyValue, ReleaseValue; public bool Leased;
+        public void Dispose() { ProcessingTexture?.Dispose(); CaptureTexture?.Dispose(); ProcessingTexture = null; CaptureTexture = null; Timestamp = Presents = Sequence = 0; ReadyValue = ReleaseValue = 0; Leased = false; }
     }
     private sealed class Lease(DesktopDuplicationFrameSource owner, SurfaceSlot slot) : GameFrameLease
     {
         private readonly long _started = Stopwatch.GetTimestamp(); private int _disposed;
         public override ID3D11Texture2D Texture => slot.ProcessingTexture!; public override long SourceTimestamp => slot.Timestamp; public override long AccumulatedPresents => slot.Presents; public override int Width => (int)slot.ProcessingTexture!.Description.Width; public override int Height => (int)slot.ProcessingTexture!.Description.Height; public override long Generation => slot.Generation;
-        public override void Dispose() { if (Interlocked.Exchange(ref _disposed, 1) != 0) return; slot.ProcessingMutex!.ReleaseSync(0); Interlocked.Add(ref owner._leaseTicks, Stopwatch.GetElapsedTime(_started).Ticks); Interlocked.Increment(ref owner._leaseCount); }
+        public override void Dispose() { if (Interlocked.Exchange(ref _disposed, 1) != 0) return; owner.Release(slot); Interlocked.Add(ref owner._leaseTicks, Stopwatch.GetElapsedTime(_started).Ticks); Interlocked.Increment(ref owner._leaseCount); }
     }
+
+    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
 }
 
 internal readonly record struct DesktopDuplicationTelemetry(long SourceFrames, long AcquiredFrames, long PublishedFrames, long TakenFrames, long OverwrittenFrames, long BusySlotSkips, long AccumulatedPresents, long ZeroPresentFrames, TimeSpan ProducerCopyTotal, TimeSpan AverageLeaseDuration, string? Failure)
-{
-    public long TransportedFrames => PublishedFrames;
-}
+{ public long TransportedFrames => PublishedFrames; }

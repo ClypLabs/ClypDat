@@ -161,16 +161,16 @@ public sealed class ReplayEncoderQualificationPolicyTests
     }
 
     [Fact]
-    public void Result_RequiresThreeWindowsAndNinetyFivePercentInEveryWindow()
+    public void Result_RequiresThreeWindowsAndNinetyNinePercentInEveryWindow()
     {
         var candidate = ReplayEncoderQualificationPolicy.Candidates("H.264")[0];
         Assert.False(Result(candidate, 120).ReachedTarget(120));
-        Assert.False(Result(candidate, 114, 114).ReachedTarget(120));
-        Assert.True(Result(candidate, 114, 114, 114).ReachedTarget(120));
+        Assert.False(Result(candidate, 118.8, 118.8).ReachedTarget(120));
+        Assert.True(Result(candidate, 118.8, 118.8, 118.8).ReachedTarget(120));
     }
 
     [Fact]
-    public void Failover_UsesAmfThenQsvThenCpu_AfterSystemMemoryNvenc()
+    public void Failover_UsesD3D11NvencThenAmfQsvAndCpu_AfterSystemMemoryNvenc()
     {
         var candidates = ReplayEncoderQualificationPolicy.StartupCandidates("H.264", 90);
         var active = candidates[0];
@@ -178,8 +178,8 @@ public sealed class ReplayEncoderQualificationPolicyTests
 
         var remaining = ReplayEncoderFailoverPolicy.CandidatesAfter("H.264", ReplayVideoCodecPolicy.Gpu, active, attempted);
 
-        Assert.Equal(new[] { "h264_amf", "h264_qsv", "h264_qsv", "libx264" }, remaining.Select(candidate => candidate.Name));
-        Assert.DoesNotContain(remaining, candidate => candidate.Name == "h264_nvenc" && candidate.InputPath == ReplayEncoderInputPath.D3D11);
+        Assert.Equal(new[] { "h264_nvenc", "h264_amf", "h264_qsv", "h264_qsv", "libx264" }, remaining.Select(candidate => candidate.Name));
+        Assert.Equal(ReplayEncoderInputPath.D3D11, remaining[0].InputPath);
     }
 
     [Fact]

@@ -44,7 +44,9 @@ internal static class ReplayEncoderQualificationPolicy
     // Three complete foreground seconds reject the brief idle/menu burst that
     // previously let a saturated encoder leave Arming just before gameplay.
     internal const int RequiredWindows = 3;
-    internal const double TargetThreshold = 0.95;
+    // A selected cadence is a contract. Qualification needs normal scheduling
+    // tolerance, but it must not bless a sustained shortfall as "exact".
+    internal const double TargetThreshold = 0.99;
     internal const double TieTolerance = 0.03;
 
     internal static IReadOnlyList<ReplayEncoderCandidate> Candidates(

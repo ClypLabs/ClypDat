@@ -55,7 +55,8 @@ public enum ReplayDegradeReason
 {
     None,
     EncoderOverload,
-    CaptureStall
+    CaptureStall,
+    CaptureTransport
 }
 
 // Keep capture health separate from IReplayBuffer. Old/third-party backends can

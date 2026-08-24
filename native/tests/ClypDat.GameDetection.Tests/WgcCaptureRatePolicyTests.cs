@@ -53,7 +53,7 @@ public sealed class WgcCaptureRatePolicyTests
     }
 
     [Theory]
-    [InlineData(90, 81)]
+    [InlineData(90, 89.1)]
     [InlineData(60, 60)]
     [InlineData(30, 30)]
     public void CadenceAtThresholdOrTarget_DoesNotFallback(int target, double callbacks)

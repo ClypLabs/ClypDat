@@ -52,7 +52,7 @@ internal sealed class WgcCadenceFallbackPolicy
             return false;
         }
 
-        if (callbackFrameRate >= Math.Clamp(targetFrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate) * 0.9)
+        if (callbackFrameRate >= Math.Clamp(targetFrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate) * 0.99)
         {
             _consecutiveLowWindows = 0;
             return false;

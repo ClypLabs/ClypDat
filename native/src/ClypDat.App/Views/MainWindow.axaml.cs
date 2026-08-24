@@ -771,14 +771,7 @@ public sealed partial class MainWindow : Window
 
     private void ApplyEncoderFrameRateChange(EncoderFrameRateChange change)
     {
-        if (_replayBuffer is not IAdaptiveCaptureFrameRate adaptive)
-        {
-            AppLog.Info($"Encoder tuning: requested {change.FrameRate} fps, active replay backend cannot retarget live.");
-            return;
-        }
-
-        adaptive.RequestFrameRate(change.FrameRate);
-        ShowClipNotification($"Capture adjusted to {change.FrameRate} FPS", playSound: false);
+        AppLog.Info($"Encoder tuning: detected pressure at {change.FrameRate} FPS; selected capture cadence is immutable, so no live adjustment was applied.");
     }
 
     private void InitializeReplayServices()
