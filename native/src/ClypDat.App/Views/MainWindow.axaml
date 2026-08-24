@@ -2105,9 +2105,9 @@
                     </Grid>
                     <Border Classes="audioProcessList">
                       <StackPanel Spacing="0">
-                        <Border Classes="audioProcessRow">
+                        <Border Classes="audioProcessRow enabledRow">
                           <Grid ColumnDefinitions="40,32,*,Auto" ColumnSpacing="14" MinHeight="54">
-                            <Border Width="40" Height="32" />
+                            <ToggleSwitch Grid.Column="0" Width="40" IsChecked="True" IsEnabled="False" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                             <Border Grid.Column="1" Width="32" Height="32" Background="#202C3A" CornerRadius="9" VerticalAlignment="Center">
                               <PathIcon Data="M4,19H20V21H4V19M6,3H18V17H6V3M8,5V15H16V5H8Z" Width="18" Height="18" Foreground="#78B8FF" HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Border>
@@ -2115,9 +2115,9 @@
                             <TextBlock Grid.Column="3" Text="Always separate" TextAlignment="Right" HorizontalAlignment="Right" Foreground="#54D7A7" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
                           </Grid>
                         </Border>
-                        <Border Classes="audioProcessRow">
+                        <Border Classes="audioProcessRow enabledRow">
                           <Grid ColumnDefinitions="40,32,*,Auto" ColumnSpacing="14" MinHeight="54">
-                            <Border Width="40" Height="32" />
+                            <ToggleSwitch Grid.Column="0" Width="40" IsChecked="True" IsEnabled="False" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                             <Border Grid.Column="1" Width="32" Height="32" Background="#202C3A" CornerRadius="9" VerticalAlignment="Center">
                               <PathIcon Data="M12,14C13.66,14 15,12.66 15,11V5C15,3.34 13.66,2 12,2C10.34,2 9,3.34 9,5V11C9,12.66 10.34,14 12,14M17.3,11C17.3,14 14.76,16.1 12,16.1C9.24,16.1 6.7,14 6.7,11H5C5,14.41 7.72,17.23 11,17.72V21H13V17.72C16.28,17.23 19,14.41 19,11H17.3Z" Width="18" Height="18" Foreground="#78B8FF" HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Border>
@@ -2707,7 +2707,7 @@
                                in this cell should ever cut the thumb again. -->
                                   <Slider Grid.Row="1"
                                   Grid.Column="2"
-                                  Classes="volumeSlider"
+                                  Classes="volumeSlider editorTrackVolumeSlider"
                                   Foreground="{Binding VolumeAccentBrush}"
                                   Minimum="0"
                                   Maximum="150"
