@@ -426,8 +426,8 @@ public sealed class PlaybackSession : IDisposable
         SeekAsync(time, resumePlayback).GetAwaiter().GetResult();
     }
 
-    // Scrub/keyboard-repeat seeking: issue the position write and return, with
-    // no lock, no confirmation wait and no audio work at all.
+    // Scrub/keyboard-repeat seeking: queue a video-only preview and return,
+    // with no confirmation wait and no audio work at all.
     //
     // These used to go through SeekAsync like any other seek, which made them
     // as slow as the slowest thing in that method. Two costs dominated. First,
@@ -479,10 +479,14 @@ public sealed class PlaybackSession : IDisposable
         {
             while (true)
             {
-                await Task.Delay(TimeSpan.FromMilliseconds(25)).ConfigureAwait(false);
-                var seekVersion = Interlocked.Read(ref _seekVersion);
-                if (!_previewRequests.TryTakePreview(out var target, out var generation))
+                if (!_previewRequests.TryTakePreview(DateTimeOffset.UtcNow, out var target, out var generation, out var delay))
                 {
+                    if (delay > TimeSpan.Zero)
+                    {
+                        await Task.Delay(delay).ConfigureAwait(false);
+                        continue;
+                    }
+
                     lock (_previewLock) _previewWorker = null;
                     return;
                 }
@@ -490,7 +494,7 @@ public sealed class PlaybackSession : IDisposable
                 await _seekLock.WaitAsync().ConfigureAwait(false);
                 try
                 {
-                    if (seekVersion != Interlocked.Read(ref _seekVersion) || !_previewRequests.IsCurrent(generation)) continue;
+                    if (!_previewRequests.IsCurrent(generation)) continue;
                     lock (_transportLock)
                     {
                         // Preview writes intentionally do not settle or touch
@@ -503,6 +507,7 @@ public sealed class PlaybackSession : IDisposable
                             VideoPlayer.Play();
                         }
                         VideoPlayer.Time = (long)target.TotalMilliseconds;
+                        _previewRequests.MarkPreviewWritten(generation, DateTimeOffset.UtcNow);
                     }
                 }
                 finally
@@ -520,7 +525,8 @@ public sealed class PlaybackSession : IDisposable
 
     public async Task<bool> SeekAsync(TimeSpan time, bool resumePlayback = false, CancellationToken cancellationToken = default)
     {
-        var finalRequestGeneration = _previewRequests.BeginFinalSeek();
+        var finalRequest = _previewRequests.BeginFinalSeek(DateTimeOffset.UtcNow);
+        var finalRequestGeneration = finalRequest.Generation;
         var seekVersion = Interlocked.Increment(ref _seekVersion);
         try
         {
@@ -547,14 +553,21 @@ public sealed class PlaybackSession : IDisposable
         _lastRequestedPosition = requested;
         try
         {
-            AppLog.Debug($"Editor seek begin: requested={requested.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}, resume={resumePlayback}, version={seekVersion}.");
+            if (finalRequest.QuietPeriod > TimeSpan.Zero)
+            {
+                AppLog.Debug($"Editor seek waiting for preview quiet period: waitMs={finalRequest.QuietPeriod.TotalMilliseconds:0}, previewWrites={finalRequest.PreviewWriteCount}, generation={seekVersion}.");
+                await Task.Delay(finalRequest.QuietPeriod, cancellationToken).ConfigureAwait(false);
+            }
+
+            AppLog.Debug($"Editor seek begin: requested={requested.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}, resume={resumePlayback}, previewRequests={finalRequest.PreviewRequestCount}, previewWrites={finalRequest.PreviewWriteCount}, coalesced={Math.Max(0, finalRequest.PreviewRequestCount - finalRequest.PreviewWriteCount)}, proactiveReset={finalRequest.RequiresDecoderReset}, generation={seekVersion}.");
             var result = await _seekCoordinator.SeekAsync(
                 new PlaybackSeekTransport(this, seekVersion),
                 requested,
                 resumePlayback,
                 seekVersion,
                 () => seekVersion == Interlocked.Read(ref _seekVersion),
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                finalRequest.RequiresDecoderReset).ConfigureAwait(false);
 
             if (!result.Succeeded)
             {
@@ -802,6 +815,18 @@ public sealed class PlaybackSession : IDisposable
         public void WritePosition(TimeSpan target)
         {
             lock (session._transportLock) session.VideoPlayer.Time = (long)target.TotalMilliseconds;
+        }
+
+        public void ResetVideo()
+        {
+            lock (session._transportLock)
+            {
+                session.ForceVideoSilent();
+                session.VideoPlayer.Stop();
+                session._ended = false;
+                session.VideoPlayer.Play();
+                session.VideoPlayer.SetPause(true);
+            }
         }
 
         public void ResumeVideo()

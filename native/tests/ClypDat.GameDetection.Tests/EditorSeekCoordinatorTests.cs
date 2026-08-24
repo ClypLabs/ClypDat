@@ -34,7 +34,7 @@ public sealed class EditorSeekCoordinatorTests
 
         Assert.False(result.Succeeded);
         Assert.False(result.Resumed);
-        Assert.Equal(2, transport.PositionWrites);
+        Assert.Equal(4, transport.PositionWrites);
         Assert.DoesNotContain("start-audio", transport.Events);
         Assert.Equal("pause", transport.Events[^1]);
     }
@@ -95,6 +95,64 @@ public sealed class EditorSeekCoordinatorTests
     }
 
     [Fact]
+    public async Task StressedPreview_ProactivelyResetsBeforeLanding()
+    {
+        var transport = new FakeTransport(TimeSpan.Zero);
+        var result = await FastCoordinator().SeekAsync(transport, TimeSpan.FromSeconds(5), false, 1, () => true, CancellationToken.None, resetBeforeSeek: true);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(new[] { "stop-audio", "reset", "pause", "write:5000" }, transport.Events);
+    }
+
+    [Fact]
+    public async Task LandingFailure_ResetsAndRetriesOnce()
+    {
+        var transport = new FakeTransport(TimeSpan.Zero) { LandAfterWrites = 3 };
+        var result = await FastCoordinator().SeekAsync(transport, TimeSpan.FromSeconds(5), false, 1, () => true, CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, transport.ResetCalls);
+        Assert.Equal(3, transport.PositionWrites);
+    }
+
+    [Fact]
+    public async Task FailedRecovery_RemainsPausedAndSilent()
+    {
+        var transport = new FakeTransport(TimeSpan.Zero) { LandAfterWrites = int.MaxValue };
+        var result = await FastCoordinator().SeekAsync(transport, TimeSpan.FromSeconds(5), true, 1, () => true, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(1, transport.ResetCalls);
+        Assert.DoesNotContain("start-audio", transport.Events);
+        Assert.Equal("pause", transport.Events[^1]);
+    }
+
+    [Fact]
+    public async Task RollFailure_ResetsAndResumesAfterRecovery()
+    {
+        var transport = new FakeTransport(TimeSpan.Zero) { RollAfterCalls = 3 };
+        var result = await FastCoordinator().SeekAsync(transport, TimeSpan.FromSeconds(5), true, 1, () => true, CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.Resumed);
+        Assert.Equal(1, transport.ResetCalls);
+        Assert.Contains("start-audio", transport.Events);
+    }
+
+    [Fact]
+    public async Task SupersededRecovery_DoesNotRetryOrStartAudio()
+    {
+        var transport = new FakeTransport(TimeSpan.Zero) { LandAfterWrites = int.MaxValue };
+        var result = await FastCoordinator().SeekAsync(
+            transport, TimeSpan.FromSeconds(5), true, 1,
+            () => transport.ResetCalls == 0, CancellationToken.None);
+
+        Assert.True(result.Superseded);
+        Assert.Equal(1, transport.ResetCalls);
+        Assert.DoesNotContain("start-audio", transport.Events);
+    }
+
+    [Fact]
     public void AudioClock_ConvertsHardwarePositionAndCorrectsOnlyOnce()
     {
         var policy = new EditorAvClockPolicy();
@@ -139,6 +197,7 @@ public sealed class EditorSeekCoordinatorTests
         public int LandAfterWrites { get; init; } = 1;
         public int RollAfterCalls { get; init; } = 1;
         public int PositionWrites { get; private set; }
+        public int ResetCalls { get; private set; }
         public bool IsPaused => _pauseCalls >= PauseAfterCalls;
         public TimeSpan Position
         {
@@ -151,6 +210,7 @@ public sealed class EditorSeekCoordinatorTests
 
         public void StopAudio() => Events.Add("stop-audio");
         public void PauseVideo() { _pauseCalls++; Events.Add("pause"); }
+        public void ResetVideo() { ResetCalls++; _pauseCalls = PauseAfterCalls; Events.Add("reset"); }
         public void WritePosition(TimeSpan target)
         {
             PositionWrites++;

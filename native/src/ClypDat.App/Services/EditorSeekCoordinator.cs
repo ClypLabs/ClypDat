@@ -24,7 +24,8 @@ internal sealed class EditorSeekCoordinator
         bool resume,
         long generation,
         Func<bool> isCurrent,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool resetBeforeSeek = false)
     {
         target = target < TimeSpan.Zero ? TimeSpan.Zero : target;
         if (!isCurrent()) return EditorSeekResult.SupersededResult;
@@ -32,57 +33,31 @@ internal sealed class EditorSeekCoordinator
         try
         {
             transport.StopAudio();
-            TimeSpan landed = default;
-            var landedSuccessfully = false;
-            for (var attempt = 1; attempt <= 2 && !landedSuccessfully; attempt++)
+            if (resetBeforeSeek)
             {
-                if (!isCurrent()) return EditorSeekResult.SupersededResult;
-                transport.PauseVideo();
-                if (!await WaitUntilAsync(() => transport.IsPaused, isCurrent, cancellationToken).ConfigureAwait(false)) continue;
-
-                if (!isCurrent()) return EditorSeekResult.SupersededResult;
-                transport.WritePosition(target);
-                if (!await WaitUntilAsync(
-                        () => Math.Abs((transport.Position - target).TotalMilliseconds) <= PositionTolerance.TotalMilliseconds,
-                        isCurrent,
-                        cancellationToken).ConfigureAwait(false))
+                AppLog.Debug($"Editor seek proactive decoder reset: requested={target.TotalSeconds:0.###}s, generation={generation}.");
+                if (!await ResetAndConfirmPausedAsync(transport, isCurrent, cancellationToken).ConfigureAwait(false))
                 {
-                    continue;
+                    if (!isCurrent()) return EditorSeekResult.SupersededResult;
+                    MakeSafe(transport, generation, target, "proactive reset timeout");
+                    return EditorSeekResult.FailedResult;
                 }
-
-                landed = transport.Position;
-                landedSuccessfully = true;
             }
 
-            if (!landedSuccessfully)
+            var result = await TrySeekSequenceAsync(transport, target, resume, isCurrent, cancellationToken).ConfigureAwait(false);
+            if (result.Succeeded || result.Superseded) return result.Result;
+
+            AppLog.Debug($"Editor seek recovery reset: requested={target.TotalSeconds:0.###}s, reason={result.FailureReason}, generation={generation}.");
+            if (!await ResetAndConfirmPausedAsync(transport, isCurrent, cancellationToken).ConfigureAwait(false))
             {
-                MakeSafe(transport, generation, target, "landing timeout");
+                if (!isCurrent()) return EditorSeekResult.SupersededResult;
+                MakeSafe(transport, generation, target, "recovery reset timeout");
                 return EditorSeekResult.FailedResult;
             }
 
-            if (!resume) return new EditorSeekResult(true, false, false, landed, default);
-
-            for (var attempt = 1; attempt <= 2; attempt++)
-            {
-                if (!isCurrent()) return EditorSeekResult.SupersededResult;
-                transport.ResumeVideo();
-                if (await WaitUntilAsync(
-                        () => transport.Position - landed >= TimeSpan.FromMilliseconds(20),
-                        isCurrent,
-                        cancellationToken).ConfigureAwait(false))
-                {
-                    if (!isCurrent()) return EditorSeekResult.SupersededResult;
-                    var anchor = transport.Position;
-                    transport.AnchorAudio(anchor);
-                    transport.StartAudio();
-                    return new EditorSeekResult(true, true, false, landed, anchor);
-                }
-
-                if (!isCurrent()) return EditorSeekResult.SupersededResult;
-                transport.PauseVideo();
-            }
-
-            MakeSafe(transport, generation, target, "roll timeout");
+            result = await TrySeekSequenceAsync(transport, target, resume, isCurrent, cancellationToken).ConfigureAwait(false);
+            if (result.Succeeded || result.Superseded) return result.Result;
+            MakeSafe(transport, generation, target, $"recovery {result.FailureReason}");
             return EditorSeekResult.FailedResult;
         }
         catch (OperationCanceledException)
@@ -90,6 +65,65 @@ internal sealed class EditorSeekCoordinator
             MakeSafe(transport, generation, target, "cancelled");
             throw;
         }
+    }
+
+    private async Task<SeekAttempt> TrySeekSequenceAsync(
+        IEditorSeekTransport transport,
+        TimeSpan target,
+        bool resume,
+        Func<bool> isCurrent,
+        CancellationToken cancellationToken)
+    {
+        TimeSpan landed = default;
+        var landedSuccessfully = false;
+        for (var attempt = 1; attempt <= 2 && !landedSuccessfully; attempt++)
+        {
+            if (!isCurrent()) return SeekAttempt.SupersededResult;
+            transport.PauseVideo();
+            if (!await WaitUntilAsync(() => transport.IsPaused, isCurrent, cancellationToken).ConfigureAwait(false)) continue;
+
+            if (!isCurrent()) return SeekAttempt.SupersededResult;
+            transport.WritePosition(target);
+            if (!await WaitUntilAsync(
+                    () => Math.Abs((transport.Position - target).TotalMilliseconds) <= PositionTolerance.TotalMilliseconds,
+                    isCurrent,
+                    cancellationToken).ConfigureAwait(false)) continue;
+
+            landed = transport.Position;
+            landedSuccessfully = true;
+        }
+
+        if (!landedSuccessfully) return SeekAttempt.LandingFailed;
+        if (!resume) return new SeekAttempt(new EditorSeekResult(true, false, false, landed, default), string.Empty);
+
+        for (var attempt = 1; attempt <= 2; attempt++)
+        {
+            if (!isCurrent()) return SeekAttempt.SupersededResult;
+            transport.ResumeVideo();
+            if (await WaitUntilAsync(
+                    () => transport.Position - landed >= TimeSpan.FromMilliseconds(20),
+                    isCurrent,
+                    cancellationToken).ConfigureAwait(false))
+            {
+                if (!isCurrent()) return SeekAttempt.SupersededResult;
+                var anchor = transport.Position;
+                transport.AnchorAudio(anchor);
+                transport.StartAudio();
+                return new SeekAttempt(new EditorSeekResult(true, true, false, landed, anchor), string.Empty);
+            }
+
+            if (!isCurrent()) return SeekAttempt.SupersededResult;
+            transport.PauseVideo();
+        }
+
+        return SeekAttempt.RollFailed;
+    }
+
+    private async Task<bool> ResetAndConfirmPausedAsync(IEditorSeekTransport transport, Func<bool> isCurrent, CancellationToken cancellationToken)
+    {
+        if (!isCurrent()) return false;
+        transport.ResetVideo();
+        return await WaitUntilAsync(() => transport.IsPaused, isCurrent, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<bool> WaitUntilAsync(Func<bool> predicate, Func<bool> isCurrent, CancellationToken cancellationToken)
@@ -121,10 +155,20 @@ internal interface IEditorSeekTransport
     TimeSpan Position { get; }
     void StopAudio();
     void PauseVideo();
+    void ResetVideo();
     void WritePosition(TimeSpan target);
     void ResumeVideo();
     void AnchorAudio(TimeSpan position);
     void StartAudio();
+}
+
+internal readonly record struct SeekAttempt(EditorSeekResult Result, string FailureReason)
+{
+    public bool Succeeded => Result.Succeeded;
+    public bool Superseded => Result.Superseded;
+    public static SeekAttempt LandingFailed => new(EditorSeekResult.FailedResult, "landing timeout");
+    public static SeekAttempt RollFailed => new(EditorSeekResult.FailedResult, "roll timeout");
+    public static SeekAttempt SupersededResult => new(EditorSeekResult.SupersededResult, string.Empty);
 }
 
 internal readonly record struct EditorSeekResult(bool Succeeded, bool Resumed, bool Superseded, TimeSpan Landed, TimeSpan AudioAnchor)
