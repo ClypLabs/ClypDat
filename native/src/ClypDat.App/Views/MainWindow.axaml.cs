@@ -7329,7 +7329,7 @@ public sealed partial class MainWindow : Window
             task =>
             {
                 AppLog.Debug($"Editor open trace: video load picked up at {openClock.ElapsedMilliseconds}ms.");
-                return task.Result.LoadVideoAsync(videoPath, videoCodec, replayArmed);
+                return task.Result.LoadVideoAsync(videoPath, videoCodec, replayArmed, cts.Token);
             },
             cts.Token,
             TaskContinuationOptions.OnlyOnRanToCompletion,

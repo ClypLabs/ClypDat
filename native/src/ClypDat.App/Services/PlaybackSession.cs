@@ -35,6 +35,7 @@ public sealed class PlaybackSession : IDisposable
     private TimeSpan _lastRequestedPosition = TimeSpan.Zero;
     private readonly SemaphoreSlim _seekLock = new(1, 1);
     private readonly object _transportLock = new();
+    private readonly PlaybackLoadGate _loadGate = new();
     private readonly object _previewLock = new();
     private readonly EditorSeekRequestQueue _previewRequests = new();
     private readonly EditorSeekCoordinator _seekCoordinator = new();
@@ -164,8 +165,10 @@ public sealed class PlaybackSession : IDisposable
 
     public Task LoadVideoAsync(string path, bool replayArmed = false) => LoadVideoAsync(path, string.Empty, replayArmed);
 
-    internal Task LoadVideoAsync(string path, string videoCodec, bool replayArmed = false) => Task.Run(() =>
+    internal Task LoadVideoAsync(string path, string videoCodec, bool replayArmed = false, CancellationToken cancellationToken = default) => Task.Run(async () =>
     {
+        using var load = await _loadGate.EnterAsync(cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
         // Split timings, because the three things this body does have wildly
         // different costs and only the total was ever visible: Stop() is
         // libvlc tearing down the PREVIOUS clip's decode/vout threads (real
@@ -175,6 +178,7 @@ public sealed class PlaybackSession : IDisposable
         // fix has to go.
         var loadClock = Stopwatch.StartNew();
         Stop();
+        cancellationToken.ThrowIfCancellationRequested();
         var stopMs = loadClock.ElapsedMilliseconds;
         DisposeMedia();
         DisposeAudio();
@@ -219,6 +223,7 @@ public sealed class PlaybackSession : IDisposable
         // for smoothing out a problem local storage doesn't have.
         var isNetwork = IsNetworkPath(path);
         _videoMedia.AddOption($":file-caching={(isNetwork ? 5000 : 300)}");
+        cancellationToken.ThrowIfCancellationRequested();
         VideoPlayer.Media = _videoMedia;
         VideoPlayer.Mute = true;
         VideoPlayer.Volume = 0;
@@ -266,13 +271,15 @@ public sealed class PlaybackSession : IDisposable
     // (see ChunkedAudioReader), so this only records what to build readers
     // from and constructs the output; audio is ready near-instantly even for
     // an hour-long clip instead of waiting on a full-track WAV extract.
-    public Task LoadAudioAsync(string path, IReadOnlyList<AudioPreviewTrack> audioTracks, TimeSpan duration, CancellationToken cancellationToken)
+    public Task LoadAudioAsync(string path, IReadOnlyList<AudioPreviewTrack> audioTracks, TimeSpan duration, CancellationToken cancellationToken) => Task.Run(() =>
     {
+        using var load = _loadGate.Enter(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         DisposeAudioOutput();
         _audioStreamIndexes.Clear();
         _audioInputPath = path;
         _audioDuration = duration;
-        if (audioTracks.Count == 0) return Task.CompletedTask;
+        if (audioTracks.Count == 0) return;
 
         foreach (var track in audioTracks)
         {
@@ -282,8 +289,7 @@ public sealed class PlaybackSession : IDisposable
 
         AppLog.Debug($"Editor audio loaded (chunked): streams={string.Join(",", _audioStreamIndexes.OrderBy(key => key))}, volumes={string.Join(",", _audioVolumes.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:{pair.Value:0}%"))}.");
         RebuildAudioOutput();
-        return Task.CompletedTask;
-    }
+    }, cancellationToken);
 
     private void RebuildAudioOutput()
     {
@@ -441,10 +447,9 @@ public sealed class PlaybackSession : IDisposable
     // to reposition audio that is stopped for the whole drag anyway.
     //
     // Audio is repositioned once, by the real SeekAsync the caller issues when
-    // the drag/key-repeat ends. Video is deliberately left running here rather
-    // than paused per tick: pausing and unpausing around every position write
-    // makes libvlc rebuffer, and the next tick (or the settling seek) supersedes
-    // it in a few tens of milliseconds regardless.
+    // the drag/key-repeat ends. The preview worker keeps video paused between
+    // writes; it only starts the pipeline around a position write when LibVLC
+    // needs that transition to present a newly landed frame.
     public void SeekPreview(TimeSpan time)
     {
         var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
@@ -516,14 +521,15 @@ public sealed class PlaybackSession : IDisposable
                         }
                         else if (!VideoPlayer.IsPlaying)
                         {
-                            // Timeline drags pause the normal transport. A
-                            // preview must briefly run the video pipeline so
-                            // LibVLC presents the newly landed frame; audio is
-                            // already muted/stopped above and remains off.
+                            // Timeline drags keep transport paused. Start the
+                            // pipeline only long enough for LibVLC to accept
+                            // the preview seek; pause immediately after the
+                            // write so the clip cannot run while the pointer
+                            // is stationary.
                             VideoPlayer.Play();
                         }
-                        VideoPlayer.SetPause(false);
                         VideoPlayer.Time = (long)target.TotalMilliseconds;
+                        VideoPlayer.SetPause(true);
                         _previewRequests.MarkPreviewWritten(generation, DateTimeOffset.UtcNow);
                     }
                 }
