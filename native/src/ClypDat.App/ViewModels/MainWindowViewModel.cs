@@ -278,9 +278,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
         ReplayBackends = new ObservableCollection<ReplayBackendPreset>
         {
-            new("Auto (recommended)", "Auto", "Uses native DXGI Desktop Duplication with a rolling memory buffer. Covered or background games freeze rather than exposing the desktop. No process hooks."),
-            new("ClypDat", "Native", "Uses ClypDat's native DXGI capture and rolling memory buffer. Windows Graphics Capture is used only if DXGI cannot recover."),
-            new("Windows Capture", "Legacy", "Uses Windows Graphics Capture for game windows with a file-backed replay buffer. No process hooks.")
+            new("DXGI Desktop Duplication", "Native", "Uses ClypDat's native DXGI capture and rolling memory buffer. Covered or background games freeze rather than exposing the desktop. No process hooks.")
         };
         ReplayCaptureSources = new ObservableCollection<string> { "Game Capture", "Desktop Capture" };
         DesktopMonitors = new ObservableCollection<DesktopMonitorOption>();
@@ -338,9 +336,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _activeReplayEncoderSignature = EncoderSignature;
         SelectedExportCodec = ExportCodecs.FirstOrDefault(codec => string.Equals(codec.Label, Settings.ExportVideoCodec, StringComparison.OrdinalIgnoreCase)) ??
                               ExportCodecs.First(codec => codec.Label == "H.264");
-        var initialReplayBackend = string.IsNullOrWhiteSpace(Settings.ReplayBackend) ? "Auto" : Settings.ReplayBackend;
-        _selectedReplayBackend = ReplayBackends.FirstOrDefault(preset => string.Equals(preset.Value, initialReplayBackend, StringComparison.OrdinalIgnoreCase)) ??
-                                  ReplayBackends.First(preset => preset.Value == "Auto");
+        _selectedReplayBackend = ReplayBackends[0];
         _selectedReplayCaptureSource = string.Equals(Settings.ReplayCaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase)
             ? "Desktop Capture"
             : "Game Capture";
@@ -1682,8 +1678,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get
         {
-            if (string.Equals(Settings.ReplayBackend, "Legacy", StringComparison.OrdinalIgnoreCase))
-                return "Windows Capture uses H.264; AV1 applies to ClypDat capture.";
             if (IsReplayEncoderCpu)
                 return "CPU mode uses software H.264.";
             if (string.Equals(Settings.ReplayVideoCodec, "H.264", StringComparison.OrdinalIgnoreCase))
@@ -1753,18 +1747,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    // Past 1080p60 both backends cost something, but not the same something, so
-    // one shared sentence was telling most users about a cost they were never
-    // going to pay. Windows Capture's is on the SAVE side - its clips take
-    // noticeably longer to process. ClypDat's own engine is the opposite: saves
-    // are quick, and the price is paid continuously by the GPU for as long as
-    // the buffer is armed, which is the part worth warning about before someone
-    // leaves it running all day at 1440p144. Auto resolves to the ClypDat
-    // engine (see the backend list), so it gets that same warning.
     public string ReplayQualityWarning =>
-        string.Equals(Settings.ReplayBackend, "Legacy", StringComparison.OrdinalIgnoreCase)
-            ? "Higher quality uses more resources. Windows Capture may also take longer to process clips."
-            : "Higher resolution, frame rate, and bitrate use more GPU, CPU, memory, and storage while replay is armed.";
+        "Higher resolution, frame rate, and bitrate use more GPU, CPU, memory, and storage while replay is armed.";
 
     // One string covering everything the running buffer baked in at start, so
     // the restart notice doesn't need a field per encoder setting.
@@ -5258,8 +5242,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         foreach (var entry in supplemental.OrderBy(e => e.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
             var overrideEntry = Settings.GameCaptureOverrides.FirstOrDefault(g => string.Equals(g.ExecutableName, entry.ExecutableName, StringComparison.OrdinalIgnoreCase));
-            var backend = ReplayBackends.FirstOrDefault(preset => string.Equals(preset.Value, overrideEntry?.CaptureBackend, StringComparison.OrdinalIgnoreCase))
-                          ?? ReplayBackends.First(preset => preset.Value == "Auto");
+            var backend = ReplayBackends[0];
             var row = new GameBackendRowViewModel(entry.ExecutableName, entry.DisplayName, overrideEntry?.ProcessName ?? string.Empty, entry.IsCustom, backend);
             row.PropertyChanged += GameCaptureRow_OnPropertyChanged;
             GameCaptureRows.Add(row);
@@ -5412,10 +5395,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var detectionKey = string.IsNullOrWhiteSpace(ActiveGameDetection.DetectionKey) ? ActiveGameDetection.ExeName : ActiveGameDetection.DetectionKey;
         var gameOverride = Settings.GameCaptureOverrides
             .FirstOrDefault(g => string.Equals(g.ExecutableName, detectionKey, StringComparison.OrdinalIgnoreCase));
-        var effectiveBackend = !string.IsNullOrWhiteSpace(gameOverride?.CaptureBackend) &&
-                                !string.Equals(gameOverride.CaptureBackend, "Auto", StringComparison.OrdinalIgnoreCase)
-            ? gameOverride.CaptureBackend
-            : Settings.ReplayBackend;
+        const string effectiveBackend = "Native";
 
         // SelectedChatProcess/SelectedMicrophoneDevice reflect whatever the
         // ComboBox last resolved to, and can legitimately be transiently null

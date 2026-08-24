@@ -61,7 +61,7 @@ public sealed class AppSettings
     // values deserialize unchanged; absent values become this new default.
     public string ReplayFramePacingMode { get; set; } = "CFR";
     public int ReplayMaxHeight { get; set; } = 1080;
-    public string ReplayBackend { get; set; } = "Auto";
+    public string ReplayBackend { get; set; } = "Native";
     public string ExportVideoCodec { get; set; } = "H.264";
     public string SaveReplayHotkey { get; set; } = "Ctrl+Shift+F9";
     public bool StartReplayOnLaunch { get; set; }

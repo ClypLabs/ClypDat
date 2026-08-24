@@ -76,6 +76,11 @@ public static class AppSettingsStore
             }
             if (settings.ReplayMaxHeight <= 0) settings.ReplayMaxHeight = 1080;
             if (string.IsNullOrWhiteSpace(settings.ExportVideoCodec)) settings.ExportVideoCodec = "H.264";
+            // Replay capture is DXGI-only. Migrate the old backend selector and
+            // per-game overrides rather than allowing stale settings to revive
+            // a retired capture implementation.
+            settings.ReplayBackend = "Native";
+            foreach (var game in settings.GameCaptureOverrides ?? []) game.CaptureBackend = "Native";
             settings.ProcessPriority = settings.ProcessPriority switch
             {
                 "Idle" or "BelowNormal" or "Normal" or "AboveNormal" or "High" => settings.ProcessPriority,

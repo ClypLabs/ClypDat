@@ -708,10 +708,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         try
         {
             var config = _configProvider();
-            // This remains useful to support reports: DXGI is now normally the
-            // primary source, while this switch prevents the bounded WGC
-            // recovery path from hiding a duplication failure.
-            var forceDxgi = string.Equals(Environment.GetEnvironmentVariable("CLYPDAT_FORCE_DXGI"), "1", StringComparison.Ordinal);
+            // DXGI is the sole capture backend. A failure remains visible and
+            // retries DXGI recovery; it never swaps to a different API with
+            // different cadence and composition semantics.
+            const bool forceDxgi = true;
             // Before any D3D work: a game that owns the GPU otherwise outranks
             // this process's own submissions, which is what turns an 8ms encode
             // into a 50ms one under load. Device priority is applied by worker.
@@ -723,7 +723,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // alone is the wrong thing to compare against.
             var targetMonitor = ResolveTargetMonitor(targetHandle, config);
             Vortice.RawRect desktopBounds;
-            if (!HybridCaptureBackendPolicy.UseDxgiForDesktop(isMonitorMode)) throw new InvalidOperationException("DXGI capture is disabled.");
             try
             {
                 dxgiCapture = DesktopDuplicationFrameSource.Create(device, targetHandle, config, out desktopBounds);

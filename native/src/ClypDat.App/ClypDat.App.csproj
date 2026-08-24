@@ -74,9 +74,7 @@
 
   <ItemGroup Condition="'$(ClypDatUiPreview)' == 'true'">
     <Compile Remove="Services\CaptureInterop.cs" />
-    <Compile Remove="Services\HybridReplayBuffer.cs" />
     <Compile Remove="Services\NativeReplayBuffer.cs" />
-    <Compile Remove="Services\WindowsReplayBuffer.cs" />
   </ItemGroup>
 
   <!-- System.GC.ConserveMemory (0-9): how hard the GC works to hand freed
