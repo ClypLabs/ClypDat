@@ -2705,9 +2705,10 @@
                                growing pile of negative margins here was
                                chasing. ClipToBounds is belt and braces: nothing
                                in this cell should ever cut the thumb again. -->
-                          <Slider Grid.Row="1"
+                                  <Slider Grid.Row="1"
                                   Grid.Column="2"
                                   Classes="volumeSlider"
+                                  Foreground="{Binding VolumeBrush}"
                                   Minimum="0"
                                   Maximum="150"
                                   TickFrequency="1"

@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Media;
 using Avalonia.Media.Imaging;
 
 namespace ClypDat.App.ViewModels;
@@ -19,6 +20,7 @@ public sealed class TrackLaneViewModel : ViewModelBase
         Label = label;
         Type = type;
         Color = color;
+        VolumeBrush = new SolidColorBrush(Avalonia.Media.Color.Parse(color));
         CanAdjustVolume = canAdjustVolume;
         _volumePercent = Math.Clamp(volumePercent, 0, 150);
     }
@@ -27,6 +29,7 @@ public sealed class TrackLaneViewModel : ViewModelBase
     public string Label { get; }
     public string Type { get; }
     public string Color { get; }
+    public IBrush VolumeBrush { get; }
     public bool CanAdjustVolume { get; }
     public bool IsAudio => Type == "audio";
     public bool IsVideo => Type == "video";
