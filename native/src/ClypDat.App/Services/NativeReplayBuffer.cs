@@ -708,9 +708,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         try
         {
             var config = _configProvider();
-            // This remains useful to support reports: DXGI is now normally the
-            // primary source, while this switch prevents the bounded WGC
-            // recovery path from hiding a duplication failure.
+            // Keep a direct DXGI escape hatch for A/B diagnosis. Desktop capture
+            // otherwise prefers WGC, which is driven by compositor callbacks and
+            // remains responsive when a browser throttles duplication presents.
             var forceDxgi = string.Equals(Environment.GetEnvironmentVariable("CLYPDAT_FORCE_DXGI"), "1", StringComparison.Ordinal);
             // Before any D3D work: a game that owns the GPU otherwise outranks
             // this process's own submissions, which is what turns an 8ms encode
@@ -722,21 +722,43 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // once-a-second target recheck in the loop for why the window handle
             // alone is the wrong thing to compare against.
             var targetMonitor = ResolveTargetMonitor(targetHandle, config);
+            WindowGraphicsCaptureSource CreateWgcCapture(int frameRate) => isMonitorMode
+                ? WindowGraphicsCaptureSource.CreateForMonitor(device, gpuLock, targetMonitor, config.CaptureCursor, frameRate)
+                : WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor, frameRate);
             Vortice.RawRect desktopBounds;
-            if (!HybridCaptureBackendPolicy.UseDxgiForDesktop(isMonitorMode)) throw new InvalidOperationException("DXGI capture is disabled.");
-            try
+            if (isMonitorMode && !forceDxgi)
             {
-                dxgiCapture = DesktopDuplicationFrameSource.Create(device, targetHandle, config, out desktopBounds);
-                activeGameFrameSource = dxgiCapture;
-                AppLog.Info($"Native capture: using DXGI Desktop Duplication for {(isMonitorMode ? "desktop" : $"game window 0x{targetHandle:X}")}.");
+                try
+                {
+                    wgcCapture = CreateWgcCapture(config.FrameRate);
+                    activeGameFrameSource = wgcCapture;
+                    var size = wgcCapture.ContentSize;
+                    desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
+                    AppLog.Info("Native capture: using WGC monitor capture for desktop.");
+                }
+                catch (Exception error)
+                {
+                    AppLog.Error("Native capture: WGC monitor initialization failed; using DXGI Desktop Duplication.", error);
+                    dxgiCapture = DesktopDuplicationFrameSource.Create(device, targetHandle, config, out desktopBounds);
+                    activeGameFrameSource = dxgiCapture;
+                }
             }
-            catch (Exception error) when (!isMonitorMode && !forceDxgi)
+            else
             {
-                AppLog.Error("Native capture: DXGI initialization failed; using bounded WGC recovery source.", error);
-                wgcCapture = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor, config.FrameRate);
-                activeGameFrameSource = wgcCapture;
-                var size = wgcCapture.ContentSize;
-                desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
+                try
+                {
+                    dxgiCapture = DesktopDuplicationFrameSource.Create(device, targetHandle, config, out desktopBounds);
+                    activeGameFrameSource = dxgiCapture;
+                    AppLog.Info($"Native capture: using DXGI Desktop Duplication for {(isMonitorMode ? "desktop" : $"game window 0x{targetHandle:X}")}.");
+                }
+                catch (Exception error) when (!isMonitorMode && !forceDxgi)
+                {
+                    AppLog.Error("Native capture: DXGI initialization failed; using bounded WGC recovery source.", error);
+                    wgcCapture = CreateWgcCapture(config.FrameRate);
+                    activeGameFrameSource = wgcCapture;
+                    var size = wgcCapture.ContentSize;
+                    desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
+                }
             }
 
             var (captureWidth, captureHeight) = wgcCapture is not null
@@ -1521,7 +1543,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             catch (Exception error) when (!isMonitorMode && !forceDxgi)
                             {
                                 AppLog.Error("Native capture: DXGI target replacement failed; using bounded WGC recovery source.", error);
-                                wgcCapture = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor, activeFrameRate);
+                                wgcCapture = CreateWgcCapture(activeFrameRate);
                                 activeGameFrameSource = wgcCapture;
                                 var size = wgcCapture.ContentSize;
                                 desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
@@ -1605,7 +1627,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         {
                             try
                             {
-                                wgcCapture = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor, activeFrameRate);
+                                wgcCapture = CreateWgcCapture(activeFrameRate);
                                 activeGameFrameSource = wgcCapture;
                                 var size = wgcCapture.ContentSize;
                                 desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
@@ -1641,7 +1663,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     {
                         AppLog.Info($"Native capture: WGC source closed ({selectedGameFrameSource.Failure}); restarting WGC.");
                         wgcCapture!.Dispose();
-                        try { wgcCapture = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor, activeFrameRate); activeGameFrameSource = wgcCapture; }
+                        try { wgcCapture = CreateWgcCapture(activeFrameRate); activeGameFrameSource = wgcCapture; }
                         catch (Exception error) { throw new InvalidOperationException("Windows.Graphics.Capture could not restart for game capture.", error); }
                     }
                     else
@@ -1955,7 +1977,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                         // Same screen->crop conversion the CPU path does, then scaled
                                         // into output pixels so the readback side can draw straight
                                         // into the NV12 frame without needing the crop rect.
-                                        if (config.CaptureCursor && GetCursorPos(out var gpuCursor))
+                                        if (config.CaptureCursor && !usingWgc && GetCursorPos(out var gpuCursor))
                                         {
                                             var cropX = gpuCursor.X - desktopBounds.Left - cropLeft;
                                             var cropY = gpuCursor.Y - desktopBounds.Top - cropTop;
@@ -1993,7 +2015,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                     stageStopwatch.Restart();
                                     try
                                     {
-                                        if (config.CaptureCursor && GetCursorPos(out var cursor))
+                                        if (config.CaptureCursor && !usingWgc && GetCursorPos(out var cursor))
                                         {
                                             DrawDesktopCursor((byte*)mapped.DataPointer, (int)mapped.RowPitch, captureWidth, captureHeight,
                                                 cursor.X - desktopBounds.Left - cropLeft,
@@ -2310,7 +2332,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         {
                             try
                             {
-                                wgcCapture = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor, activeFrameRate);
+                                wgcCapture = CreateWgcCapture(activeFrameRate);
                                 activeGameFrameSource = wgcCapture;
                                 var size = wgcCapture.ContentSize;
                                 desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
