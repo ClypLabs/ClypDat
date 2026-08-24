@@ -721,7 +721,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             {
                 try
                 {
-                    wgcCapture = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor);
+                    wgcCapture = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor, config.FrameRate);
                     var size = wgcCapture.ContentSize;
                     desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
                     AppLog.Info($"Native capture: using bounded Windows.Graphics.Capture for game window 0x{targetHandle:X}.");
@@ -991,6 +991,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var lastDiagLog = TimeSpan.Zero;
             var lastRingTrim = TimeSpan.Zero;
             var previousWgcTelemetry = default(WindowGraphicsCaptureTelemetry);
+            var wgcCadenceFallback = new WgcCadenceFallbackPolicy();
             var framesSeen = 0;
             var framesSeenSinceLog = 0;
             var framesProcessedSinceLog = 0;
@@ -1249,10 +1250,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var packetsOutSinceLog = Interlocked.Exchange(ref _packetsOutCount, 0);
                     var inputFrameCount = framesSeenSinceLog;
                     var wgcCallbackCount = 0L;
+                    var wgcResizeRecovered = false;
                     var wgcTelemetry = wgcCapture?.GetTelemetrySnapshot();
                     if (wgcTelemetry is not null)
                     {
                         var current = wgcTelemetry.Value;
+                        wgcResizeRecovered = current.ResizeEvents != previousWgcTelemetry.ResizeEvents;
                         wgcCallbackCount = current.CallbackArrivals >= previousWgcTelemetry.CallbackArrivals
                             ? current.CallbackArrivals - previousWgcTelemetry.CallbackArrivals
                             : current.CallbackArrivals;
@@ -1265,7 +1268,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var wgcUniqueRate = framesProcessedSinceLog / diagElapsed;
                     var wgcTelemetryText = wgcTelemetry is null
                         ? string.Empty
-                        : $", wgcCallbackArrivals={wgcCallbackCount}, wgcInputFps={wgcInputRate:0.0}, wgcUniqueFps={wgcUniqueRate:0.0}, wgcPublished={wgcTelemetry.Value.PublishedFrames}, wgcTaken={wgcTelemetry.Value.TakenFrames}, wgcOverwritten={wgcTelemetry.Value.OverwrittenFrames}, wgcCallbackMs={wgcTelemetry.Value.CallbackDurationTotal.TotalMilliseconds:0.0}, wgcGpuLockWaitMs={wgcTelemetry.Value.GpuLockWaitTotal.TotalMilliseconds:0.0}, wgcTimestampGaps={wgcTelemetry.Value.SourceTimestampGapCount}, wgcMaxTimestampGapMs={wgcTelemetry.Value.SourceTimestampGapMaximum.TotalMilliseconds:0.0}";
+                        : $", wgcCallbackArrivals={wgcCallbackCount}, wgcInputFps={wgcInputRate:0.0}, wgcUniqueFps={wgcUniqueRate:0.0}, wgcPublished={wgcTelemetry.Value.PublishedFrames}, wgcTaken={wgcTelemetry.Value.TakenFrames}, wgcOverwritten={wgcTelemetry.Value.OverwrittenFrames}, wgcCallbackMs={wgcTelemetry.Value.CallbackDurationTotal.TotalMilliseconds:0.0}, wgcGpuLockWaitMs={wgcTelemetry.Value.GpuLockWaitTotal.TotalMilliseconds:0.0}, wgcTimestampGaps={wgcTelemetry.Value.SourceTimestampGapCount}, wgcMaxTimestampGapMs={wgcTelemetry.Value.SourceTimestampGapMaximum.TotalMilliseconds:0.0}, wgcResizeEvents={wgcTelemetry.Value.ResizeEvents}, wgcMinUpdateIntervalAvailable={wgcTelemetry.Value.MinimumUpdateInterval.InterfaceAvailable}, wgcMinUpdateIntervalRequestedMs={wgcTelemetry.Value.MinimumUpdateInterval.Requested.TotalMilliseconds:0.###}, wgcMinUpdateIntervalAppliedMs={wgcTelemetry.Value.MinimumUpdateInterval.Applied?.TotalMilliseconds:0.###}";
                     AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, framesEncoded={framesEncoded}, ringPackets={ringPacketCount}, ringBufferMb={ringBufferMb}, ringCapacityMb={ringCapacityMb}, packetPoolMb={poolRetainedMb}, avgCopyMapMs={copyMapMs / n:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, avgEncodeMs={encodeMicrosSinceLog / 1000.0 / encodeCountSinceLog:0.00}, queueDepth={encodeQueue.Count}, pendingEncoderFrames={Volatile.Read(ref _pendingEncoderFrames)}, peakPendingEncoderFrames={Volatile.Read(ref _peakPendingEncoderFrames)}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}{wgcTelemetryText}.");
                     // Raw encoded rate, deliberately NOT crediting suppressed pads
                     // back in. It remains useful telemetry, but a low rate with
@@ -1277,6 +1280,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var encoderPressure = droppedSinceLog > 0 || encodeQueue.Count * 4 >= encodeQueueCapacity * 3;
                     var outputShortfall = hasCapturedRealFrame && outputFrameRate < activeFrameRate * 0.9;
                     var overloaded = encoderPressure;
+                    if (wgcResizeRecovered) wgcCadenceFallback.Reset();
+                    var wgcForegroundAndVisible = !isMonitorMode && IsWindowForegroundAndVisible(targetHandle);
+                    if (wgcCapture is not null && wgcCadenceFallback.ShouldFallback(
+                            activeFrameRate, wgcInputRate, wgcForegroundAndVisible, encoderPressure))
+                    {
+                        AppLog.Info($"Native capture: WGC callback cadence {wgcInputRate:0.0} fps stayed below {activeFrameRate * 0.9:0.0} fps for three foreground diagnostic windows; switching to DXGI fallback with privacy freeze.");
+                        wgcCapture.Dispose();
+                        wgcCapture = null;
+                        previousWgcTelemetry = default;
+                        try { duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds); }
+                        catch (Exception error) { AppLog.Error("Native capture: DXGI fallback after low WGC cadence failed.", error); }
+                    }
                     // A stall is worse than an overload and reads nothing like one:
                     // no frames arrive at all, so nothing gets dropped and the queue
                     // stays empty - every overload signal above says "healthy" right
@@ -1376,7 +1391,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             {
                                 try
                                 {
-                                    wgcCapture = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor);
+                                    wgcCapture = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor, activeFrameRate);
                                     var size = wgcCapture.ContentSize;
                                     desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
                                     AppLog.Info($"Native capture: WGC source replaced for game window 0x{targetHandle:X}.");
@@ -1400,6 +1415,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             isPaused = false;
                             lock (_bufferLock) _pauseEvents.Add(new PauseEvent(MonotonicClock.UtcNow, false));
                         }
+                        wgcCadenceFallback.Reset();
+                        previousWgcTelemetry = default;
                     }
                 }
 
@@ -2220,6 +2237,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     targetFrameInterval = TimeSpan.FromSeconds(1.0 / activeFrameRate);
                     idealFrameIntervalMicroseconds = 1_000_000.0 / activeFrameRate;
                     cropSamplingBudget.SetRate(activeFrameRate, stopwatch.Elapsed);
+                    wgcCapture?.TrySetTargetFrameRate(activeFrameRate);
+                    wgcCadenceFallback.Reset();
+                    previousWgcTelemetry = default;
                     SetHealth(_health with { TargetFrameRate = activeFrameRate, UpdatedUtc = DateTime.UtcNow });
                     AppLog.Info($"Native capture: target frame rate now {activeFrameRate} fps.");
                 }

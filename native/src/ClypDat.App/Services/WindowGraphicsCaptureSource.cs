@@ -32,9 +32,11 @@ internal sealed class WindowGraphicsCaptureSource : IDisposable
     private long _sourceTimestampGapTicks;
     private long _sourceTimestampGapCount;
     private long _sourceTimestampGapMaxTicks;
+    private long _resizeEvents;
     private TimeSpan _lastSourceTimestamp;
+    private WgcMinimumUpdateIntervalResult _minimumUpdateInterval;
 
-    private WindowGraphicsCaptureSource(ID3D11Device device, object d3dLock, GraphicsCaptureItem item, bool captureCursor)
+    private WindowGraphicsCaptureSource(ID3D11Device device, object d3dLock, GraphicsCaptureItem item, bool captureCursor, int frameRate)
     {
         _device = device;
         _d3dLock = d3dLock;
@@ -56,11 +58,12 @@ internal sealed class WindowGraphicsCaptureSource : IDisposable
             try { _session.IsCursorCaptureEnabled = captureCursor; }
             catch (Exception error) { AppLog.Info($"Native capture: WGC cursor setting unavailable; using system default ({error.Message})."); }
         }
+        TrySetTargetFrameRate(frameRate);
         _session.StartCapture();
     }
 
-    public static WindowGraphicsCaptureSource Create(ID3D11Device device, object d3dLock, nint windowHandle, bool captureCursor) =>
-        new(device, d3dLock, CaptureInterop.CreateItemForWindow(windowHandle), captureCursor);
+    public static WindowGraphicsCaptureSource Create(ID3D11Device device, object d3dLock, nint windowHandle, bool captureCursor, int frameRate) =>
+        new(device, d3dLock, CaptureInterop.CreateItemForWindow(windowHandle), captureCursor, frameRate);
 
     public (int Width, int Height) ContentSize { get { lock (_stateLock) return (_contentSize.Width, _contentSize.Height); } }
     public string? Failure { get { lock (_stateLock) return _failure; } }
@@ -79,8 +82,30 @@ internal sealed class WindowGraphicsCaptureSource : IDisposable
                 TimeSpan.FromTicks(_sourceTimestampGapTicks),
                 TimeSpan.FromTicks(_sourceTimestampGapMaxTicks),
                 TimeSpan.FromTicks(_callbackDurationTicks),
-                TimeSpan.FromTicks(_gpuLockWaitTicks));
+                TimeSpan.FromTicks(_gpuLockWaitTicks),
+                _resizeEvents,
+                _minimumUpdateInterval);
         }
+    }
+
+    public bool TrySetTargetFrameRate(int frameRate)
+    {
+        WgcMinimumUpdateIntervalResult result;
+        lock (_stateLock)
+        {
+            if (_disposed || _session is null) return false;
+            result = CaptureInterop.TrySetMinimumUpdateInterval(_session, frameRate);
+            _minimumUpdateInterval = result;
+        }
+
+        var requestedMs = result.Requested.TotalMilliseconds;
+        if (!result.InterfaceAvailable)
+            AppLog.Info($"Native capture: WGC MinUpdateInterval unavailable; requested={requestedMs:0.###}ms.");
+        else if (result.Applied is not null)
+            AppLog.Info($"Native capture: WGC MinUpdateInterval requested={requestedMs:0.###}ms, applied={result.Applied.Value.TotalMilliseconds:0.###}ms.");
+        else
+            AppLog.Info($"Native capture: WGC MinUpdateInterval request failed; requested={requestedMs:0.###}ms ({result.Failure}).");
+        return result.Applied is not null;
     }
 
     internal bool WaitAndTakeLatestTexture(TimeSpan timeout, CancellationToken cancellationToken, out ID3D11Texture2D? texture)
@@ -142,6 +167,7 @@ internal sealed class WindowGraphicsCaptureSource : IDisposable
                             _latestTexture = CreateOwnedTexture(size.Width, size.Height);
                             _contentSize = size;
                             recreatePool = true;
+                            _resizeEvents++;
                         }
                         _device.ImmediateContext.CopyResource(_latestTexture!, sourceTexture);
                         if (sourceTimestamp > TimeSpan.Zero && _lastSourceTimestamp > TimeSpan.Zero && sourceTimestamp > _lastSourceTimestamp)
@@ -226,4 +252,6 @@ internal readonly record struct WindowGraphicsCaptureTelemetry(
     TimeSpan SourceTimestampGapTotal,
     TimeSpan SourceTimestampGapMaximum,
     TimeSpan CallbackDurationTotal,
-    TimeSpan GpuLockWaitTotal);
+    TimeSpan GpuLockWaitTotal,
+    long ResizeEvents,
+    WgcMinimumUpdateIntervalResult MinimumUpdateInterval);

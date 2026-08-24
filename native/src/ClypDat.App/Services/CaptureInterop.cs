@@ -20,6 +20,9 @@ internal static unsafe class CaptureInterop
 {
     private static readonly Guid GraphicsCaptureItemInteropIid = new("3628E81B-3CAC-4C60-B7F4-23CE0E0C3356");
     private static readonly Guid Direct3DDxgiInterfaceAccessIid = new("A9B3D012-3DF2-4EE3-B8D1-8695F457D3C1");
+    // IGraphicsCaptureSession5, documented by Windows.Graphics.Capture. Its
+    // MinUpdateInterval accessors follow IInspectable at vtable slots 6 and 7.
+    private static readonly Guid GraphicsCaptureSession5Iid = new("67C0EA62-1F85-5061-925A-239BE0AC09CB");
     // The documented IID of Windows.Graphics.Capture.IGraphicsCaptureItem itself -
     // typeof(GraphicsCaptureItem).GUID does NOT reliably match what the native
     // CreateForWindow/CreateForMonitor factory expects as riid (returns E_NOINTERFACE).
@@ -102,6 +105,49 @@ internal static unsafe class CaptureInterop
         finally
         {
             Marshal.Release(surfacePointer);
+        }
+    }
+
+    public static WgcMinimumUpdateIntervalResult TrySetMinimumUpdateInterval(GraphicsCaptureSession session, int frameRate)
+    {
+        var requested = WgcMinimumUpdateIntervalPolicy.FromFrameRate(frameRate);
+        var sessionPointer = WinRT.MarshalInterface<GraphicsCaptureSession>.FromManaged(session);
+        try
+        {
+            var iid = GraphicsCaptureSession5Iid;
+            var queryResult = Marshal.QueryInterface(sessionPointer, in iid, out var session5Pointer);
+            if (queryResult < 0)
+            {
+                if (queryResult == unchecked((int)0x80004002))
+                    return WgcMinimumUpdateIntervalPolicy.Unsupported(frameRate);
+
+                return new WgcMinimumUpdateIntervalResult(false, requested, null,
+                    $"QueryInterface failed (0x{queryResult:X8}).");
+            }
+
+            try
+            {
+                var vtable = *(IntPtr**)session5Pointer;
+                var put = (delegate* unmanaged<IntPtr, long, int>)vtable[7];
+                Marshal.ThrowExceptionForHR(put(session5Pointer, requested.Ticks));
+
+                var get = (delegate* unmanaged<IntPtr, long*, int>)vtable[6];
+                long appliedTicks;
+                Marshal.ThrowExceptionForHR(get(session5Pointer, &appliedTicks));
+                return new WgcMinimumUpdateIntervalResult(true, requested, TimeSpan.FromTicks(appliedTicks));
+            }
+            catch (Exception error)
+            {
+                return new WgcMinimumUpdateIntervalResult(true, requested, null, error.Message);
+            }
+            finally
+            {
+                Marshal.Release(session5Pointer);
+            }
+        }
+        finally
+        {
+            Marshal.Release(sessionPointer);
         }
     }
 
