@@ -2750,7 +2750,6 @@ public sealed partial class MainWindow : Window
     private List<NewClipEntryViewModel> _currentNewClipsEntries = new();
     private NewClipsDialog? _editorNewClipsDialog;
     private bool _newClipsNotificationPending;
-    private bool _newClipsDialogIsPreview;
     // Clips the user has already been shown and dismissed (closed the popup, or
     // clicked one to open it). Without this the popup came straight back for the
     // same clips - a late Full Session VOD landing re-shows it via
@@ -2763,9 +2762,9 @@ public sealed partial class MainWindow : Window
     // set that was on show instead, so rebuilding after deleting some of them
     // re-resolves exactly those - survivors stay, deleted ones stop resolving and
     // drop out - rather than whatever the session list has since become.
-    private void ShowNewClipsDialog(IReadOnlyList<string>? clipPaths = null, bool isPreview = false)
+    private void ShowNewClipsDialog(IReadOnlyList<string>? clipPaths = null)
     {
-        if (ViewModel is null || (!isPreview && !ViewModel.Settings.ShowNewClipsOnGameClose)) return;
+        if (ViewModel is null || !ViewModel.Settings.ShowNewClipsOnGameClose) return;
         clipPaths ??= _sessionNewClipPaths;
 
         var presentation = NewClipsPresentationPolicy.Resolve(
@@ -2801,7 +2800,7 @@ public sealed partial class MainWindow : Window
         // Nothing here the user hasn't already seen and dismissed - stay down.
         // A single genuinely new clip is enough to bring it back, showing the
         // whole set again for context rather than that one clip alone.
-        if (!isPreview && entries.All(entry => _dismissedNewClipPaths.Contains(entry.Path)))
+        if (entries.All(entry => _dismissedNewClipPaths.Contains(entry.Path)))
         {
             _newClipsNotificationPending = false;
             CloseEditorNewClipsDialog();
@@ -2811,7 +2810,6 @@ public sealed partial class MainWindow : Window
 
         _currentNewClipsEntries = entries;
         _newClipsNotificationPending = false;
-        _newClipsDialogIsPreview = isPreview;
 
         var clipCount = entries.Count(entry => !entry.IsVod);
         var vodCount = entries.Count - clipCount;
@@ -2896,19 +2894,6 @@ public sealed partial class MainWindow : Window
         if (_newClipsNotificationPending) ShowNewClipsDialog();
     }
 
-    private async void PreviewNewClipsOverlayButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        if (ViewModel is null) return;
-        var clipPaths = ViewModel.AllClips.Take(7).Select(clip => clip.Path).ToArray();
-        if (clipPaths.Length == 0)
-        {
-            await ShowMessageAsync("No clips to preview", "Add a clip to your library, then use Preview New Clips Overlay to test the popup.");
-            return;
-        }
-
-        ShowNewClipsDialog(clipPaths, isPreview: true);
-    }
-
     // Which clips Delete will actually act on: whatever is ticked, or - with
     // nothing ticked - every clip on show, matching the reference's bulk
     // "Delete N clips". Kept in one place so the button's label can never
@@ -2931,11 +2916,7 @@ public sealed partial class MainWindow : Window
     // re-show it otherwise). Only a clip that has never been dismissed will.
     private void DismissNewClipsDialog()
     {
-        if (!_newClipsDialogIsPreview)
-        {
-            foreach (var entry in _currentNewClipsEntries) _dismissedNewClipPaths.Add(entry.Path);
-        }
-        _newClipsDialogIsPreview = false;
+        foreach (var entry in _currentNewClipsEntries) _dismissedNewClipPaths.Add(entry.Path);
         NewClipsOverlay.IsVisible = false;
         CloseEditorNewClipsDialog();
     }
