@@ -77,15 +77,16 @@ build_windows_installer:
       & $dotnetHost build $generatorProject -c Release -f netstandard2.0 /nologo
       if ($LASTEXITCODE -ne 0) { Write-Error 'Could not build Avalonia generators.'; exit 1 }
 
+      Add-Type -AssemblyName System.IO.Compression
       Add-Type -AssemblyName System.IO.Compression.FileSystem
       function Add-PackageFile {
         param([string]$PackagePath, [string]$SourcePath, [string]$EntryName)
         if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) { throw "Package source file was not found: $SourcePath" }
-        $archive = [IO.Compression.ZipFile]::Open($PackagePath, [IO.Compression.ZipArchiveMode]::Update)
+        $archive = [System.IO.Compression.ZipFile]::Open($PackagePath, [System.IO.Compression.ZipArchiveMode]::Update)
         try {
           foreach ($existingEntry in @($archive.Entries | Where-Object { $_.FullName -eq $EntryName })) { $existingEntry.Delete() }
-          $entry = $archive.CreateEntry($EntryName, [IO.Compression.CompressionLevel]::Optimal)
-          $input = [IO.File]::OpenRead($SourcePath)
+          $entry = $archive.CreateEntry($EntryName, [System.IO.Compression.CompressionLevel]::Optimal)
+          $input = [System.IO.File]::OpenRead($SourcePath)
           $output = $entry.Open()
           try { $input.CopyTo($output) } finally { $output.Dispose(); $input.Dispose() }
         }
@@ -97,7 +98,7 @@ build_windows_installer:
       }
       Add-PackageFile $avaloniaPackagePath $generatorOutput 'analyzers/dotnet/cs/Avalonia.Generators.dll'
 
-      $archive = [IO.Compression.ZipFile]::OpenRead($avaloniaPackagePath)
+      $archive = [System.IO.Compression.ZipFile]::OpenRead($avaloniaPackagePath)
       try {
         if (@($archive.Entries | Where-Object { $_.FullName -eq 'tools/netstandard2.0/Avalonia.Build.Tasks.dll' }).Count -ne 1) { throw 'Avalonia package is missing Avalonia.Build.Tasks.dll.' }
         if (@($archive.Entries | Where-Object { $_.FullName -eq 'analyzers/dotnet/cs/Avalonia.Generators.dll' }).Count -ne 1) { throw 'Avalonia package is missing Avalonia.Generators.dll.' }
