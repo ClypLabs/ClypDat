@@ -9,6 +9,10 @@ namespace ClypDat.App.Services;
 internal sealed class PresentSamplingBudget
 {
     private const double MaximumCredits = 2.0;
+    // TimeSpan's 100ns ticks cannot exactly represent common frame intervals
+    // (notably 1/90 and 1/60).  Do not turn that rounding residue into a
+    // periodic lost source frame when this budget runs at the producer.
+    private const double CreditRoundingTolerance = 0.001;
     private double _credits = 1.0;
     private double _samplesPerSecond;
     private TimeSpan _lastRefill;
@@ -36,9 +40,9 @@ internal sealed class PresentSamplingBudget
         // candidate that can feed that tick when the source is not faster than
         // the target, so it is allowed to borrow one credit.
         if (!pendingSample && _credits < 1.0) _credits = 1.0;
-        if (_credits < 1.0) return false;
+        if (_credits < 1.0 - CreditRoundingTolerance) return false;
 
-        _credits -= 1.0;
+        _credits = Math.Max(0, _credits - 1.0);
         return true;
     }
 }

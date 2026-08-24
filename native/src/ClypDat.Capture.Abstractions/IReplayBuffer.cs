@@ -115,6 +115,17 @@ public sealed record ReplayCaptureHealth(
     public long HookTransportDrops { get; init; }
     public string HookFallbackReason { get; init; } = string.Empty;
 
+    // Producer-side DXGI measurements.  These deliberately do not reuse
+    // UniqueFrameRate: that value describes frames that made it through the
+    // consumer, whereas these values make a slow shared-texture transport
+    // visible even while the encoder is otherwise healthy.
+    public double AcquiredFrameRate { get; init; }
+    public double TransportFrameRate { get; init; }
+    public long TransportSlotOverwrites { get; init; }
+    public long TransportBusySlotSkips { get; init; }
+    public TimeSpan ProducerGpuDuration { get; init; }
+    public TimeSpan AverageTransportLeaseDuration { get; init; }
+
     public ReplayStorageHealth Storage { get; init; } = ReplayStorageHealth.Unknown;
 
     public static ReplayCaptureHealth Unknown(string backend = "Unknown") => new(

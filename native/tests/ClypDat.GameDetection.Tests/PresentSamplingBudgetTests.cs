@@ -68,4 +68,25 @@ public sealed class PresentSamplingBudgetTests
 
         Assert.InRange(accepted, 58, 63);
     }
+
+    [Theory]
+    [InlineData(30, 30, 30, 30)]
+    [InlineData(60, 60, 60, 60)]
+    [InlineData(90, 90, 90, 90)]
+    [InlineData(120, 90, 89, 91)]
+    [InlineData(109, 90, 89, 91)]
+    public void ProducerSamplingKeepsSlowSourcesAndCapsFastSources(
+        int sourceFps, int selectedFps, int minimumAccepted, int maximumAccepted)
+    {
+        var budget = new PresentSamplingBudget(selectedFps);
+        var interval = TimeSpan.FromSeconds(1.0 / sourceFps);
+        var accepted = 0;
+
+        // The producer has no downstream pending surface: it decides whether
+        // to transport each acquired present before the cross-device copy.
+        for (var i = 0; i < sourceFps; i++)
+            if (budget.TryConsume(TimeSpan.FromTicks(interval.Ticks * i), pendingSample: true)) accepted++;
+
+        Assert.InRange(accepted, minimumAccepted, maximumAccepted);
+    }
 }

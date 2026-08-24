@@ -1242,6 +1242,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var packetsOutSinceLog = Interlocked.Exchange(ref _packetsOutCount, 0);
                     var inputFrameCount = framesSeenSinceLog;
                     var wgcCallbackCount = 0L;
+                    var dxgiAcquiredCount = 0L;
+                    var dxgiTransportedCount = 0L;
+                    var dxgiSlotOverwrites = 0L;
+                    var dxgiBusySlotSkips = 0L;
+                    var dxgiProducerDuration = TimeSpan.Zero;
+                    var dxgiLeaseDuration = TimeSpan.Zero;
                     var wgcTelemetry = wgcCapture?.GetTelemetrySnapshot();
                     var dxgiTelemetry = dxgiCapture?.GetTelemetrySnapshot();
                     if (wgcTelemetry is not null)
@@ -1259,6 +1265,23 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         var sourcePresents = current.AccumulatedPresents >= previousDxgiTelemetry.AccumulatedPresents
                             ? current.AccumulatedPresents - previousDxgiTelemetry.AccumulatedPresents
                             : current.AccumulatedPresents;
+                        dxgiAcquiredCount = current.AcquiredFrames >= previousDxgiTelemetry.AcquiredFrames
+                            ? current.AcquiredFrames - previousDxgiTelemetry.AcquiredFrames
+                            : current.AcquiredFrames;
+                        dxgiTransportedCount = current.TransportedFrames >= previousDxgiTelemetry.TransportedFrames
+                            ? current.TransportedFrames - previousDxgiTelemetry.TransportedFrames
+                            : current.TransportedFrames;
+                        dxgiSlotOverwrites = current.OverwrittenFrames >= previousDxgiTelemetry.OverwrittenFrames
+                            ? current.OverwrittenFrames - previousDxgiTelemetry.OverwrittenFrames
+                            : current.OverwrittenFrames;
+                        dxgiBusySlotSkips = current.BusySlotSkips >= previousDxgiTelemetry.BusySlotSkips
+                            ? current.BusySlotSkips - previousDxgiTelemetry.BusySlotSkips
+                            : current.BusySlotSkips;
+                        var producerTicks = current.ProducerCopyTotal >= previousDxgiTelemetry.ProducerCopyTotal
+                            ? current.ProducerCopyTotal - previousDxgiTelemetry.ProducerCopyTotal
+                            : current.ProducerCopyTotal;
+                        dxgiProducerDuration = producerTicks;
+                        dxgiLeaseDuration = current.AverageLeaseDuration;
                         inputFrameCount = (int)Math.Min(int.MaxValue, sourcePresents);
                         previousDxgiTelemetry = current;
                     }
@@ -1271,7 +1294,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         : $", wgcCallbackArrivals={wgcCallbackCount}, wgcInputFps={wgcInputRate:0.0}, wgcUniqueFps={wgcUniqueRate:0.0}, wgcPublished={wgcTelemetry.Value.PublishedFrames}, wgcTaken={wgcTelemetry.Value.TakenFrames}, wgcOverwritten={wgcTelemetry.Value.OverwrittenFrames}, wgcCallbackMs={wgcTelemetry.Value.CallbackDurationTotal.TotalMilliseconds:0.0}, wgcGpuLockWaitMs={wgcTelemetry.Value.GpuLockWaitTotal.TotalMilliseconds:0.0}, wgcTimestampGaps={wgcTelemetry.Value.SourceTimestampGapCount}, wgcMaxTimestampGapMs={wgcTelemetry.Value.SourceTimestampGapMaximum.TotalMilliseconds:0.0}, wgcResizeEvents={wgcTelemetry.Value.ResizeEvents}, wgcMinUpdateIntervalAvailable={wgcTelemetry.Value.MinimumUpdateInterval.InterfaceAvailable}, wgcMinUpdateIntervalRequestedMs={wgcTelemetry.Value.MinimumUpdateInterval.Requested.TotalMilliseconds:0.###}, wgcMinUpdateIntervalAppliedMs={wgcTelemetry.Value.MinimumUpdateInterval.Applied?.TotalMilliseconds:0.###}";
                     var dxgiTelemetryText = dxgiTelemetry is null
                         ? string.Empty
-                        : $", dxgiSourcePresents={dxgiTelemetry.Value.SourceFrames}, dxgiPublished={dxgiTelemetry.Value.PublishedFrames}, dxgiTaken={dxgiTelemetry.Value.TakenFrames}, dxgiOverwritten={dxgiTelemetry.Value.OverwrittenFrames}, dxgiAccumulatedPresents={dxgiTelemetry.Value.AccumulatedPresents}, dxgiZeroPresentSkips={dxgiTelemetry.Value.ZeroPresentFrames}";
+                        : $", dxgiSourcePresents={dxgiTelemetry.Value.SourceFrames}, dxgiAcquired={dxgiAcquiredCount}, dxgiTransported={dxgiTransportedCount}, dxgiPublished={dxgiTelemetry.Value.PublishedFrames}, dxgiTaken={dxgiTelemetry.Value.TakenFrames}, dxgiOverwritten={dxgiSlotOverwrites}, dxgiBusySlotSkips={dxgiBusySlotSkips}, dxgiProducerMs={dxgiProducerDuration.TotalMilliseconds:0.0}, dxgiLeaseMs={dxgiLeaseDuration.TotalMilliseconds:0.00}, dxgiAccumulatedPresents={dxgiTelemetry.Value.AccumulatedPresents}, dxgiZeroPresentSkips={dxgiTelemetry.Value.ZeroPresentFrames}";
                     var outputFrameRate = packetsOutSinceLog / diagElapsed;
                     // A live production window must prove both throughput and
                     // absence of queue pressure. A static/startup burst can
@@ -1422,6 +1445,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         HookTransportedFrames = 0,
                         HookTransportDrops = 0,
                         HookFallbackReason = string.Empty,
+                        AcquiredFrameRate = dxgiAcquiredCount / diagElapsed,
+                        TransportFrameRate = dxgiTransportedCount / diagElapsed,
+                        TransportSlotOverwrites = dxgiSlotOverwrites,
+                        TransportBusySlotSkips = dxgiBusySlotSkips,
+                        ProducerGpuDuration = dxgiProducerDuration,
+                        AverageTransportLeaseDuration = dxgiLeaseDuration,
                         StartupPhase = startupValidationWindows < ReplayEncoderQualificationPolicy.RequiredWindows
                             ? ReplayCaptureStartupPhase.Validating : ReplayCaptureStartupPhase.Ready,
                         StartupValidationWindow = startupValidationWindows,

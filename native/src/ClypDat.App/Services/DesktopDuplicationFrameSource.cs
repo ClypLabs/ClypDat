@@ -23,6 +23,11 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
     private readonly LatestFrameSignal _signal = new();
     private readonly SurfaceSlot[] _slots = new SurfaceSlot[SurfaceCount];
     private readonly Thread _producer;
+    // Sampling belongs on the acquisition device.  Keeping it downstream
+    // meant every desktop-sized BGRA frame crossed devices before we decided
+    // it was too old for the selected output cadence.
+    private readonly PresentSamplingBudget _transportSamplingBudget;
+    private readonly Stopwatch _producerClock = Stopwatch.StartNew();
     private int _nextSlot;
     private long _generation, _sequence;
     private ulong _readyValue, _releasedValue;
@@ -30,7 +35,7 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
     private bool _disposed;
     private long _sourcePresents, _acquiredFrames, _transportedFrames, _busySlotSkips, _producerCopyTicks, _leaseTicks, _leaseCount, _accumulatedPresents, _zeroPresentFrames;
 
-    private DesktopDuplicationFrameSource(ID3D11Device captureDevice, ID3D11Device processingDevice, IDXGIOutputDuplication duplication)
+    private DesktopDuplicationFrameSource(ID3D11Device captureDevice, ID3D11Device processingDevice, IDXGIOutputDuplication duplication, int frameRate)
     {
         _captureDevice = captureDevice; _processingDevice = processingDevice; _duplication = duplication;
         _captureDevice5 = captureDevice.QueryInterface<ID3D11Device5>();
@@ -48,6 +53,7 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
         }
         finally { CloseHandle(readyHandle); CloseHandle(releasedHandle); }
         for (var i = 0; i < SurfaceCount; i++) _slots[i] = new SurfaceSlot();
+        _transportSamplingBudget = new PresentSamplingBudget(frameRate);
         _producer = new Thread(Produce) { IsBackground = true, Priority = ThreadPriority.AboveNormal, Name = "ClypDat-GameCapture-Producer" };
         _producer.Start();
     }
@@ -59,7 +65,7 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
         var levels = new[] { FeatureLevel.Level_11_1, FeatureLevel.Level_11_0, FeatureLevel.Level_10_1 };
         D3D11.D3D11CreateDevice(adapter, DriverType.Unknown, DeviceCreationFlags.BgraSupport, levels, out var captureDevice, out _, out ID3D11DeviceContext? context).CheckError();
         context?.Dispose();
-        try { return new DesktopDuplicationFrameSource(captureDevice!, processingDevice, NativeReplayBuffer.CreateDuplicationFor(captureDevice!, targetHandle, config, out desktopBounds)); }
+        try { return new DesktopDuplicationFrameSource(captureDevice!, processingDevice, NativeReplayBuffer.CreateDuplicationFor(captureDevice!, targetHandle, config, out desktopBounds), config.FrameRate); }
         catch { captureDevice?.Dispose(); throw; }
     }
 
@@ -102,6 +108,11 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
                 try
                 {
                     if (info.LastPresentTime == 0) { Interlocked.Increment(ref _zeroPresentFrames); continue; }
+                    // A source at or below the configured rate keeps a full
+                    // credit between presents and is transported intact.  A
+                    // faster source keeps only the newest present at the
+                    // selected cadence, before any shared-resource copy.
+                    if (!_transportSamplingBudget.TryConsume(_producerClock.Elapsed, pendingSample: true)) continue;
                     using var source = resource.QueryInterface<ID3D11Texture2D>();
                     SurfaceSlot? slot = null;
                     lock (_stateLock)
