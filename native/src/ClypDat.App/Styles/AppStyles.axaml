@@ -1162,6 +1162,36 @@
   <Style Selector="ListBox.pillGroup ListBoxItem:selected:pointerover">
     <Setter Property="Background" Value="{StaticResource AccentBrushHover}" />
   </Style>
+
+  <Style Selector="Border.audioProcessList">
+    <Setter Property="Background" Value="#111923" />
+    <Setter Property="BorderBrush" Value="#263644" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="ClipToBounds" Value="True" />
+  </Style>
+
+  <Style Selector="Border.audioProcessRow">
+    <Setter Property="Padding" Value="14,11" />
+    <Setter Property="BorderBrush" Value="#22303C" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+  </Style>
+  <!-- 100% is the blue reference point. The exposed tail warns before gain
+       reaches the yellow/red boost zone, while Fluent keeps the thumb crisp. -->
+  <Style Selector="Slider.appVolumeSlider">
+    <Setter Property="Width" Value="82" />
+    <Setter Property="Foreground" Value="#59B6FF" />
+    <Setter Property="Background">
+      <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,0%">
+        <GradientStop Color="#334757" Offset="0" />
+        <GradientStop Color="#334757" Offset="0.666" />
+        <GradientStop Color="#F4B73E" Offset="0.667" />
+        <GradientStop Color="#F4B73E" Offset="0.85" />
+        <GradientStop Color="#F05A63" Offset="0.851" />
+        <GradientStop Color="#F05A63" Offset="1" />
+      </LinearGradientBrush>
+    </Setter>
+  </Style>
   <Style Selector="ListBox.qualityPresetCards">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />

@@ -299,7 +299,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         UpdateClipFileNamePreview();
         ExcludedProcesses = new ObservableCollection<string>(Settings.GameAudioExcludedProcesses);
         ChatAudioApps = new ObservableCollection<string>(Settings.ChatAudioProcessNames);
-        ActiveAudioProcesses = new ObservableCollection<string>();
+        ActiveAudioProcesses = new ObservableCollection<AudioTrackProcessViewModel>();
         SelectedMicrophones = new ObservableCollection<AudioDeviceOption>();
         GameCaptureRows = new ObservableCollection<GameBackendRowViewModel>();
         EnsureAutoClipSettings();
@@ -469,7 +469,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<AudioDeviceOption> ChatAudioDevices { get; }
     public ObservableCollection<AudioDeviceOption> MicrophoneDevices { get; }
     public ObservableCollection<ProcessOption> OpenProcesses { get; }
-    public ObservableCollection<string> ActiveAudioProcesses { get; }
+    public ObservableCollection<AudioTrackProcessViewModel> ActiveAudioProcesses { get; }
     // "Add a running game" excludes processes already configured by user.
     public ObservableCollection<ProcessOption> GameCandidateProcesses { get; }
     public ObservableCollection<ReplayDurationPreset> ReplayDurationPresets { get; }
@@ -1755,7 +1755,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // One string covering everything the running buffer baked in at start, so
     // the restart notice doesn't need a field per encoder setting.
     private string EncoderSignature =>
-        $"{Settings.ReplayVideoCodec}|{Settings.ReplayEncoderMode}|{Settings.ReplayBitrateMbps}|{Settings.ReplayFrameRateMode}";
+        $"{Settings.ReplayVideoCodec}|{Settings.ReplayEncoderMode}|{Settings.ReplayBitrateMbps}|{Settings.ReplayFrameRateMode}|{string.Join(',', Settings.AdditionalAudioProcesses.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase).Select(pair => $"{pair.Key}:{pair.Value}"))}";
 
     private void UpdateReplayQualityRestartRequired()
     {
@@ -3164,6 +3164,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged();
             SaveSettings();
         }
+    }
+
+    private void SetAdditionalAudioProcess(AudioTrackProcessViewModel process)
+    {
+        if (process.IsEnabled)
+        {
+            Settings.AdditionalAudioProcesses[process.Name] = (int)Math.Round(process.VolumePercent);
+        }
+        else
+        {
+            Settings.AdditionalAudioProcesses.Remove(process.Name);
+        }
+
+        UpdateReplayQualityRestartRequired();
+        SaveSettings();
     }
 
     public void AddSelectedChatProcess()
@@ -5378,7 +5393,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ActiveAudioProcesses.Clear();
         foreach (var name in audioProcessNames)
         {
-            ActiveAudioProcesses.Add(name);
+            var enabled = Settings.AdditionalAudioProcesses.TryGetValue(name, out var volume);
+            ActiveAudioProcesses.Add(new AudioTrackProcessViewModel(name, enabled, enabled ? volume : 100, SetAdditionalAudioProcess));
         }
 
         SelectedChatProcess = string.IsNullOrWhiteSpace(selectedChatName)
@@ -5472,7 +5488,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             CaptureMonitorDeviceName: desktopCapture ? desktopMonitor.DeviceName : string.Empty,
             CaptureCursor: desktopCapture && Settings.ReplayDesktopCaptureCursor,
             ProcessPriority: Settings.ProcessPriority,
-            SaveReplayHotkey: Settings.SaveReplayHotkey);
+            SaveReplayHotkey: Settings.SaveReplayHotkey,
+            AdditionalAudioProcesses: new Dictionary<string, int>(Settings.AdditionalAudioProcesses, StringComparer.OrdinalIgnoreCase));
     }
 
     public void SetDuration(TimeSpan duration)

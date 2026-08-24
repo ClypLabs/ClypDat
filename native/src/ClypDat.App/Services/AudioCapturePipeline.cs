@@ -156,14 +156,25 @@ public sealed class AudioCapturePipeline : IDisposable
             ("Game Audio", BuildAlignedTrackAsync(AudioCaptureKind.Game, captures, null, segmentWindows, allowMix: true, snapshots, sourceSnapshotCache, earliestNeededUtc, cancellationToken))
         };
 
+        var additionalApps = config.AdditionalAudioProcesses ?? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var additionalNames = additionalApps.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var chatAppNames = captures
             .Where(capture => capture.Kind == AudioCaptureKind.Chat)
             .Select(capture => capture.SourceKey)
+            .Where(name => !additionalNames.Contains(name))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         foreach (var appName in chatAppNames)
         {
             trackJobs.Add((appName, BuildAlignedTrackAsync(AudioCaptureKind.Chat, captures, appName, segmentWindows, allowMix: false, snapshots, sourceSnapshotCache, earliestNeededUtc, cancellationToken)));
+        }
+
+        // Enabled Windows-mixer apps are deliberately never mixed: each
+        // application is an editable clip track, with its own saved gain.
+        foreach (var appName in additionalNames.OrderBy(name => name, StringComparer.OrdinalIgnoreCase))
+        {
+            var gain = additionalApps.TryGetValue(appName, out var value) ? Math.Clamp(value, 0, 150) : 100;
+            trackJobs.Add((appName, BuildAlignedTrackAsync(AudioCaptureKind.Chat, captures, appName, segmentWindows, allowMix: false, snapshots, sourceSnapshotCache, earliestNeededUtc, cancellationToken, volumePercent: gain)));
         }
 
         // config.MicrophoneDeviceIds carries the raw configured value (e.g. the
@@ -640,18 +651,9 @@ public sealed class AudioCapturePipeline : IDisposable
     private static AudioRoutes ResolveAudioRoutes(ReplayBufferConfig config, string[] resolvedMicDeviceIds, RouteScope scope)
     {
         var chatAppNames = NormalizedList(config.ChatAudioProcessNames);
-        var gameProcessName = Path.GetFileNameWithoutExtension(config.GameExecutableName ?? string.Empty);
-        foreach (var processId in scope.ActiveAudioProcessIds)
+        foreach (var appName in (config.AdditionalAudioProcesses ?? new Dictionary<string, int>()).Keys)
         {
-            if (processId == Environment.ProcessId) continue;
-            try
-            {
-                using var process = Process.GetProcessById(processId);
-                var appName = process.ProcessName;
-                if (string.IsNullOrWhiteSpace(appName) || string.Equals(appName, gameProcessName, StringComparison.OrdinalIgnoreCase)) continue;
-                if (!chatAppNames.Contains(appName, StringComparer.OrdinalIgnoreCase)) chatAppNames.Add(appName);
-            }
-            catch { }
+            if (!string.IsNullOrWhiteSpace(appName) && !chatAppNames.Contains(appName, StringComparer.OrdinalIgnoreCase)) chatAppNames.Add(appName);
         }
 
         // Multi-process apps (Discord, browsers, etc.) share one executable name across
@@ -1138,7 +1140,8 @@ public sealed class AudioCapturePipeline : IDisposable
         ConcurrentDictionary<ReplayAudioCapture, Lazy<Task<SourceSnapshot?>>> sourceSnapshotCache,
         DateTime? earliestNeededUtc,
         CancellationToken cancellationToken,
-        ReplayBufferConfig? config = null)
+        ReplayBufferConfig? config = null,
+        int volumePercent = 100)
     {
         // Segments are independent time windows, so they overlap rather than
         // running one ffmpeg spawn after another - but only as far as
@@ -1187,9 +1190,28 @@ public sealed class AudioCapturePipeline : IDisposable
             return await CreateSilentClipAsync(totalDuration, snapshots, cancellationToken);
         }
 
-        return segmentClips.Length == 1
+        var outputPath = segmentClips.Length == 1
             ? segmentClips[0]
             : await ConcatClipsAsync(segmentClips, snapshots, cancellationToken);
+        return volumePercent == 100
+            ? outputPath
+            : await ApplyGainAsync(outputPath, volumePercent, snapshots, cancellationToken);
+    }
+
+    private async Task<string> ApplyGainAsync(string inputPath, int volumePercent, ICollection<string> snapshots, CancellationToken cancellationToken)
+    {
+        var outputPath = Path.Combine(_bufferFolder, $"audio_gain_{Guid.NewGuid():N}.wav");
+        var gain = (Math.Clamp(volumePercent, 0, 150) / 100d).ToString("0.###", CultureInfo.InvariantCulture);
+        var result = await RunGatedProcessAsync("ffmpeg", new[] { "-y", "-v", "error", "-i", inputPath, "-af", $"volume={gain}", "-c:a", "pcm_f32le", outputPath }, cancellationToken);
+        if (result.ExitCode != 0 || !IsUsableAudioFile(outputPath))
+        {
+            AppLog.Error($"App audio gain failed: volume={volumePercent}, error={result.Error}");
+            TryDelete(outputPath);
+            return inputPath;
+        }
+
+        lock (snapshots) snapshots.Add(outputPath);
+        return outputPath;
     }
 
     private async Task<string> CreateSilentClipAsync(double durationSeconds, ICollection<string> snapshots, CancellationToken cancellationToken)

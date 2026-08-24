@@ -96,6 +96,9 @@ public sealed class AppSettings
     public bool MultiChatAppEnabled { get; set; }
     public bool MultiMicrophoneEnabled { get; set; }
     public List<string> ChatAudioProcessNames { get; set; } = new();
+    // Applications explicitly enabled in Recording Audio. Each becomes its
+    // own clip track; the value is its capture gain in percent (0–150).
+    public Dictionary<string, int> AdditionalAudioProcesses { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public List<string> MicrophoneDeviceIds { get; set; } = new();
     public List<string> GameAudioExcludedProcesses { get; set; } = new();
     public bool EnableEditorKeyboardShortcuts { get; set; } = true;

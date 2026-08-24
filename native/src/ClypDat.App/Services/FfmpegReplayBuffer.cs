@@ -816,7 +816,8 @@ public sealed record ReplayBufferConfig(
     bool CaptureCursor = false,
     string ProcessPriority = "Normal",
     string SaveReplayHotkey = "Ctrl+Shift+F9",
-    string FramePacingMode = "CFR");
+    string FramePacingMode = "CFR",
+    IReadOnlyDictionary<string, int>? AdditionalAudioProcesses = null);
 
 internal sealed class AudioCaptureSession : IDisposable
 {
