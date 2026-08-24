@@ -654,7 +654,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         ID3D11VideoProcessorInputView? cursorInputView = null;
         var gpuCursorAvailable = false;
         AVCodecContext* codecContext = null;
-        MediaFoundationH264Encoder? mediaFoundationEncoder = null;
         SwsContext* swsContext = null;
         AVFrame* frame = null;
         AVPacket* packet = null;
@@ -717,11 +716,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // this process's own submissions, which is what turns an 8ms encode
             // into a 50ms one under load. Device priority is applied by worker.
             device = CreateD3D11Device();
-            if (MediaFoundationHardwareEncoderProbe.TryProbe(device, out var mediaFoundationDetail))
-                AppLog.Info($"Native capture: Media Foundation hardware encoder path available ({mediaFoundationDetail}); H.264 replay will use it when its D3D11 surface setup succeeds.");
-            else
-                AppLog.Info($"Native capture: Media Foundation hardware encoder path unavailable ({mediaFoundationDetail}); using FFmpeg encoder fallback.");
-
             var targetHandle = ResolveTargetWindow(config);
             var isMonitorMode = targetHandle == 0;
             // Which output the duplication below is actually bound to - see the
@@ -826,44 +820,22 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 }
             }
 
-            // Keep the scaler and encoder input on the same D3D11 device. The
-            // Media Foundation path consumes these pool textures directly; the
-            // FFmpeg probe remains the compatibility fallback for unavailable
-            // MFTs, AV1, CPU mode, and full-session recording.
+            // Keep the scaler and FFmpeg encoder input on the same D3D11 device
+            // so NVIDIA can consume the capture surfaces without a readback.
             if (useGpuScale && (!config.CaptureCursor || gpuCursorAvailable))
             {
                 (hwDeviceRef, hwFramesRef) = TryCreateD3D11EncodeFrames(
                     device, outputWidth, outputHeight, encodeQueueCapacity + HardwareFramePoolHeadroom);
             }
 
-            var useMediaFoundation = hwFramesRef != 0 &&
-                ReplayVideoCodecPolicy.Normalize(config.VideoCodec) == ReplayVideoCodecPolicy.H264 &&
-                !string.Equals(config.EncoderMode, ReplayVideoCodecPolicy.Cpu, StringComparison.OrdinalIgnoreCase) &&
-                !config.FullSessionRecordingEnabled;
             AVRational codecTimeBase;
             string encoderName;
             bool hardwareFramesActive;
-            var mediaFoundationSetupDetail = "not requested";
-            if (useMediaFoundation && MediaFoundationH264Encoder.TryCreate(
-                    device, outputWidth, outputHeight, config.FrameRate, (int)FixedBitrate(config), out mediaFoundationEncoder, out mediaFoundationSetupDetail))
-            {
-                codecTimeBase = new AVRational { num = 1, den = 1_000_000 };
-                encoderName = mediaFoundationEncoder!.Name;
-                hardwareFramesActive = true;
-                _timeBase = codecTimeBase;
-                _videoCodecId = AVCodecID.AV_CODEC_ID_H264;
-                _extraData = mediaFoundationEncoder.SequenceHeader;
-                AppLog.Info($"Native capture: using Media Foundation hardware H.264 encoder ({mediaFoundationSetupDetail}).");
-            }
-            else
-            {
-                if (useMediaFoundation) AppLog.Info($"Native capture: Media Foundation H.264 encoder unavailable ({mediaFoundationSetupDetail}); using FFmpeg hardware encoder fallback.");
-                codecContext = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, out codecTimeBase, out encoderName, out hardwareFramesActive);
-                _timeBase = codecTimeBase;
-                _videoCodecId = codecContext->codec_id;
-                if (!hardwareFramesActive) ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
-                requiresDistinctAmfSoftwareFrame = !hardwareFramesActive && encoderName.Contains("amf", StringComparison.OrdinalIgnoreCase);
-            }
+            codecContext = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, out codecTimeBase, out encoderName, out hardwareFramesActive);
+            _timeBase = codecTimeBase;
+            _videoCodecId = codecContext->codec_id;
+            if (!hardwareFramesActive) ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
+            requiresDistinctAmfSoftwareFrame = !hardwareFramesActive && encoderName.Contains("amf", StringComparison.OrdinalIgnoreCase);
 
             if (codecContext is not null && InitFullSessionWriter(config, codecContext, out fullSessionFormatContext, out fullSessionStream, out fullSessionTempVideoPath, out fullSessionFinalOutputPath))
             {
@@ -898,13 +870,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var encodePacketPtr = (nint)packet;
             var encodeFullSessionFormatContextPtr = (nint)fullSessionFormatContext;
             var encodeFullSessionStreamPtr = (nint)fullSessionStream;
-            encodeThread = new Thread(() =>
-            {
-                if (mediaFoundationEncoder is not null)
-                    MediaFoundationEncodeLoop(encodeQueue, mediaFoundationEncoder);
-                else
-                    EncodeLoop(encodeQueue, encodeCodecContextPtr, encodePacketPtr, encodeFullSessionFormatContextPtr, encodeFullSessionStreamPtr);
-            })
+            encodeThread = new Thread(() => EncodeLoop(encodeQueue, encodeCodecContextPtr, encodePacketPtr, encodeFullSessionFormatContextPtr, encodeFullSessionStreamPtr))
             {
                 IsBackground = true,
                 Name = "ClypDat-NativeEncode"
@@ -916,7 +882,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var adapterDescription = DescribeAdapter(device);
             var videoCodec = encoderName.StartsWith("av1_", StringComparison.OrdinalIgnoreCase) ? "AV1" : "H.264";
             var captureMode = wgcCapture is null ? "Desktop Duplication" : "Windows Graphics Capture";
-            AppLog.Info($"Native capture started ({captureMode}): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, codec={videoCodec}, encoder={encoderName}, encodePath={(mediaFoundationEncoder is not null ? "D3D11 Media Foundation" : hardwareFramesActive ? "D3D11 zero-copy" : "system-memory")}, cursorPath={(config.CaptureCursor ? "CPU" : "off")}, queue={encodeQueueCapacity} frames, adapter={adapterDescription}, profile={config.EncoderProfile}, frameTiming={ReplayFrameTimingPolicy.Normalize(config.FrameRateMode)}, configFrameRate={config.FrameRate}.");
+            AppLog.Info($"Native capture started ({captureMode}): target={(targetHandle != 0 ? "window" : "primary monitor")}, source={captureWidth}x{captureHeight}, output={outputWidth}x{outputHeight}, codec={videoCodec}, encoder={encoderName}, encodePath={(hardwareFramesActive ? "D3D11 zero-copy" : "system-memory")}, cursorPath={(config.CaptureCursor ? "CPU" : "off")}, queue={encodeQueueCapacity} frames, adapter={adapterDescription}, profile={config.EncoderProfile}, frameTiming={ReplayFrameTimingPolicy.Normalize(config.FrameRateMode)}, configFrameRate={config.FrameRate}.");
             SetHealth(new ReplayCaptureHealth("Native", captureMode, ReplayCaptureState.Healthy,
                 config.FrameRate, 0, 0, 0, 0, 0, 0, encoderName, "Default adapter", string.Empty, DateTime.UtcNow)
             {
@@ -2946,7 +2912,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 ffmpeg.avcodec_free_context(&context);
             }
             retiredCodecContexts.Clear();
-            mediaFoundationEncoder?.Dispose();
             // Frame pool before the textures under it: unreferencing the last
             // frame is what lets the pool release its D3D11 surfaces, and those
             // belong to the device disposed a few lines down.
@@ -3671,52 +3636,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
     }
 
-    // The Media Foundation MFT has its own asynchronous input/output contract,
-    // but it shares this bounded latest-frame queue with FFmpeg. That preserves
-    // the recorder's stale-frame eviction behaviour while moving the actual
-    // encode submission off FFmpeg's CUDA/D3D interop path.
-    private void MediaFoundationEncodeLoop(BlockingCollection<EncodeJob> queue, MediaFoundationH264Encoder encoder)
-    {
-        using var encodeMmcss = MmcssScope.Capture("Media Foundation encode thread");
-        encoder.Run(
-            queue,
-            AddMediaFoundationSampleToRing,
-            FreeEncodeFrame,
-            elapsed =>
-            {
-                Interlocked.Add(ref _encodeInputMicrosAccum, (long)(elapsed.TotalMilliseconds * 1000));
-                Interlocked.Increment(ref _encodeInputCountAccum);
-            },
-            elapsed =>
-            {
-                Interlocked.Add(ref _encodeOutputMicrosAccum, (long)(elapsed.TotalMilliseconds * 1000));
-                Interlocked.Increment(ref _encodeOutputCountAccum);
-            },
-            pendingFrames =>
-            {
-                Volatile.Write(ref _pendingEncoderFrames, pendingFrames);
-                UpdatePeak(ref _peakPendingEncoderFrames, pendingFrames);
-            });
-    }
-
-    private void AddMediaFoundationSampleToRing(MediaFoundationEncodedSample sample)
-    {
-        var data = _packetPayloads.Rent(sample.Data.Length);
-        Buffer.BlockCopy(sample.Data, 0, data, 0, sample.Data.Length);
-        Interlocked.Increment(ref _packetsOutCount);
-        lock (_bufferLock)
-        {
-            _packets.Add(new RingPacket(
-                data,
-                sample.Data.Length,
-                sample.PtsMicroseconds,
-                sample.IsKeyframe,
-                sample.WallClockUtc == default ? MonotonicClock.UtcNow : sample.WallClockUtc));
-            _ringBufferBytes += sample.Data.Length;
-            _ringBufferCapacityBytes += data.Length;
-        }
-    }
-
     private unsafe void DrainToRingBuffer(AVCodecContext* codecContext, AVPacket* packet, AVFormatContext* fullSessionFormatContext, AVStream* fullSessionStream, EncoderFrameLifetimeQueue pendingFrames)
     {
         while (true)
@@ -4402,7 +4321,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // persisted 5-100 Mbps range is clamped here rather than trusted.
     private static long FixedBitrate(ReplayBufferConfig config) => Math.Clamp(config.BitrateMbps, 5, 100) * 1_000_000L;
 
-    private static unsafe void ApplyLowLatencyEncoderOptions(AVCodecContext* codecContext, string candidateName, ReplayBufferConfig config, bool lowPower = false)
+    private static unsafe void ApplyReplayThroughputEncoderOptions(AVCodecContext* codecContext, string candidateName, ReplayBufferConfig config, bool lowPower = false)
     {
         void TrySet(string name, string value)
         {
@@ -4790,7 +4709,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 }
             }
 
-            ApplyLowLatencyEncoderOptions(codecContext, candidateName, config, lowPower);
+            ApplyReplayThroughputEncoderOptions(codecContext, candidateName, config, lowPower);
 
             var openResult = ffmpeg.avcodec_open2(codecContext, candidateCodec, null);
             if (openResult == 0) return codecContext;

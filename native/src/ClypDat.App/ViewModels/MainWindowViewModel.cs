@@ -123,6 +123,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _activeReplayTargetFrameRate;
     private double _activeReplayOutputFrameRate;
     private double _activeReplayUniqueGameFrameRate;
+    private readonly ReplayFrameRateDisplaySmoother _replayFrameRateDisplaySmoother = new();
     private string _selectedClipOverlayPosition = "Top Right";
     private string _selectedClipOverlayVolume = "Medium";
     private string _selectedClipFileNameScheme = ClipFileNaming.StandardScheme;
@@ -1786,14 +1787,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         _activeReplayFrameTimingMode = ReplayFrameTimingPolicy.Normalize(health.FrameRateMode);
         _activeReplayTargetFrameRate = health.TargetFrameRate;
-        _activeReplayOutputFrameRate = health.OutputFrameRate;
-        _activeReplayUniqueGameFrameRate = health.UniqueFrameRate;
+        var displayedRates = _replayFrameRateDisplaySmoother.Update(health);
+        _activeReplayOutputFrameRate = displayedRates.OutputFrameRate;
+        _activeReplayUniqueGameFrameRate = displayedRates.UniqueFrameRate;
         OnPropertyChanged(nameof(ReplayEncoderModeStatus));
         OnPropertyChanged(nameof(ReplayFrameTimingMetrics));
     }
 
     public void ClearReplayEncoderHealth()
     {
+        _replayFrameRateDisplaySmoother.Reset();
         _activeReplayEncoder = string.Empty;
         _activeReplayAdapter = string.Empty;
         _activeReplayTargetFrameRate = 0;
@@ -1806,6 +1809,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void MarkReplayBufferRestarted()
     {
+        _replayFrameRateDisplaySmoother.Reset();
         _activeReplayMaxHeight = Settings.ReplayMaxHeight;
         _activeReplayFrameRate = Settings.ReplayFrameRate;
         _activeReplayEncoderSignature = EncoderSignature;
