@@ -10,8 +10,8 @@ public sealed class NvencInputPathQualificationTests
         Assert.Equal(NvencInputPath.SystemMemory, NvencInputPathQualification.Select(120, Result(110), Result(118)));
 
     [Fact]
-    public void Select_PrefersD3D11WhenRatesAreWithinThreePercent() =>
-        Assert.Equal(NvencInputPath.D3D11, NvencInputPathQualification.Select(120, Result(114), Result(117)));
+    public void Select_PrefersSystemMemoryWhenRatesAreWithinThreePercent() =>
+        Assert.Equal(NvencInputPath.SystemMemory, NvencInputPathQualification.Select(120, Result(114), Result(117)));
 
     [Fact]
     public void Select_ExcludesUnavailablePaths() =>

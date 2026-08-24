@@ -5,10 +5,14 @@ namespace ClypDat.GameDetection.Tests;
 
 public sealed class ReplayEncoderQualificationPolicyTests
 {
-    [Fact]
-    public void StartupCandidates_PreferIndependentNvencUploadAtHighFrameRates()
+    [Theory]
+    [InlineData(30)]
+    [InlineData(60)]
+    [InlineData(90)]
+    [InlineData(120)]
+    public void StartupCandidates_PreferIndependentNvencUploadAtEverySupportedFrameRate(int frameRate)
     {
-        var candidates = ReplayEncoderQualificationPolicy.StartupCandidates("H.264", 120);
+        var candidates = ReplayEncoderQualificationPolicy.StartupCandidates("H.264", frameRate);
 
         Assert.Equal(new ReplayEncoderCandidate("h264_nvenc", ReplayVideoCodecPolicy.H264, ReplayEncoderInputPath.SystemMemory, 0), candidates[0]);
     }
@@ -40,17 +44,21 @@ public sealed class ReplayEncoderQualificationPolicyTests
         Assert.Equal(ReplayEncoderInputPath.SystemMemory, selected!.Candidate.InputPath);
     }
 
-    [Fact]
-    public void Select_KeepsD3D11PreferenceBelowHighFrameRateThreshold()
+    [Theory]
+    [InlineData(30)]
+    [InlineData(60)]
+    [InlineData(90)]
+    [InlineData(120)]
+    public void Select_PrefersNvencSystemMemoryWhenBothInputPathsQualify(int frameRate)
     {
         var candidates = ReplayEncoderQualificationPolicy.Candidates("H.264");
-        var selected = ReplayEncoderQualificationPolicy.Select(60, "H.264", new[]
+        var selected = ReplayEncoderQualificationPolicy.Select(frameRate, "H.264", new[]
         {
-            Result(candidates[0], 60, 59, 59),
-            Result(candidates[1], 61, 60, 60)
+            Result(candidates[0], frameRate, frameRate, frameRate),
+            Result(candidates[1], frameRate, frameRate, frameRate)
         });
 
-        Assert.Equal(ReplayEncoderInputPath.D3D11, selected!.Candidate.InputPath);
+        Assert.Equal(ReplayEncoderInputPath.SystemMemory, selected!.Candidate.InputPath);
     }
 
     [Fact]

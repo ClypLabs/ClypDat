@@ -12,7 +12,6 @@ internal enum NvencInputPath
 /// </summary>
 internal static class NvencInputPathQualification
 {
-    internal const double D3D11PreferenceTolerance = 0.03;
     internal const double TargetThreshold = 0.95;
 
     internal readonly record struct Result(
@@ -39,10 +38,9 @@ internal static class NvencInputPathQualification
         if (!d3dAvailable) return systemAvailable ? NvencInputPath.SystemMemory : null;
         if (!systemAvailable) return NvencInputPath.D3D11;
 
-        // Zero-copy wins ties and near-ties. It avoids readback/upload pressure
-        // during real gameplay even when an idle startup benchmark is equal.
-        return d3d11.FramesPerSecond >= systemMemory.FramesPerSecond * (1 - D3D11PreferenceTolerance)
-            ? NvencInputPath.D3D11
-            : NvencInputPath.SystemMemory;
+        // An idle benchmark cannot reveal D3D11 queue contention from a
+        // foreground game. Prefer the independent upload path whenever it is
+        // available; D3D11 is strictly an open-time fallback.
+        return NvencInputPath.SystemMemory;
     }
 }

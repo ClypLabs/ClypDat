@@ -74,16 +74,15 @@ internal static class ReplayEncoderQualificationPolicy
         return candidates;
     }
 
-    // At high CFR rates the system-memory NVENC upload path is independent of
-    // the game's D3D11 queue. Prefer it for startup; D3D11 remains available
-    // when it is the only viable path and for lower-rate capture.
+    // The system-memory NVENC upload path is independent of the game's D3D11
+    // queue. Prefer it for startup at every supported rate; D3D11 remains an
+    // open-time fallback when the independent path is unavailable.
     internal static IReadOnlyList<ReplayEncoderCandidate> StartupCandidates(
         string requestedCodec,
         int targetFrameRate,
         string encoderMode = ReplayVideoCodecPolicy.Gpu) =>
         Candidates(requestedCodec, encoderMode: encoderMode)
-            .OrderBy(candidate => targetFrameRate >= 90 &&
-                                  candidate.Name.EndsWith("_nvenc", StringComparison.OrdinalIgnoreCase) &&
+            .OrderBy(candidate => candidate.Name.EndsWith("_nvenc", StringComparison.OrdinalIgnoreCase) &&
                                   candidate.InputPath == ReplayEncoderInputPath.SystemMemory ? 0 :
                                   candidate.InputPath == ReplayEncoderInputPath.D3D11 ? 1 : 2)
             .ToArray();
@@ -128,28 +127,32 @@ internal static class ReplayEncoderQualificationPolicy
         int targetFrameRate,
         IEnumerable<ReplayEncoderQualificationResult> family)
     {
+        // This is deliberately a policy choice rather than a benchmark tie
+        // break: D3D11 can look quicker while the desktop is idle, then block
+        // on the foreground game's queue in production. If the independent
+        // upload path qualified across the complete production windows, use
+        // it. D3D11 remains available only when that path cannot qualify.
+        var independentNvenc = family.FirstOrDefault(result =>
+            result.Candidate.Name.EndsWith("_nvenc", StringComparison.OrdinalIgnoreCase) &&
+            result.Candidate.InputPath == ReplayEncoderInputPath.SystemMemory);
+        if (independentNvenc is not null) return independentNvenc;
+
         var ordered = family
             .OrderByDescending(result => result.MeanWindow)
             .ThenByDescending(result => result.Candidate.IsHardware)
             .ToArray();
         var bestMean = ordered[0].MeanWindow;
         var tied = ordered.Where(result => result.MeanWindow >= bestMean * (1 - TieTolerance));
-        // At 90+ FPS a D3D11 NVENC input surface is not automatically the
-        // cheaper path. On the 4070 Ti it is the path that blocks behind the
+        // A D3D11 NVENC input surface is not automatically the cheaper path.
+        // On the 4070 Ti it is the path that blocks behind the
         // foreground game's D3D work (8-17ms send_frame), while NVENC fed from
         // system memory remains well above target. The old tie-break treated a
         // synthetic, static-frame burst as proof that D3D11 was faster and
-        // selected the path that later saved 78 FPS clips. Keep D3D11 only when
-        // it has a meaningful measured lead; within the existing 3% tie band,
-        // prefer the independent NVENC upload path for high-rate replay.
-        var preferNvencSystemMemory = targetFrameRate >= 90 &&
-            tied.Any(result => result.Candidate.Name.EndsWith("_nvenc", StringComparison.OrdinalIgnoreCase) &&
-                                result.Candidate.InputPath == ReplayEncoderInputPath.SystemMemory);
+        // selected the path that later saved 78 FPS clips. Keep D3D11 only
+        // when system memory did not qualify; within the tie band, prefer the
+        // independent NVENC upload path at every supported replay rate.
         return tied
             .OrderByDescending(result => result.Candidate.IsHardware)
-            .ThenByDescending(result => preferNvencSystemMemory &&
-                                      result.Candidate.Name.EndsWith("_nvenc", StringComparison.OrdinalIgnoreCase) &&
-                                      result.Candidate.InputPath == ReplayEncoderInputPath.SystemMemory)
             .ThenByDescending(result => result.Candidate.IsD3D11)
             .ThenByDescending(result => result.MinimumWindow)
             .First();
