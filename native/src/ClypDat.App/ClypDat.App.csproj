@@ -26,7 +26,7 @@
     <SelfContained>true</SelfContained>
     <PlatformTarget>x64</PlatformTarget>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-    <Version>1.2.2</Version>
+    <Version>1.3.0</Version>
     <ClypDatChannel Condition="'$(ClypDatChannel)' == ''">Stable</ClypDatChannel>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Precompiles IL to native code for this RID at publish time so the

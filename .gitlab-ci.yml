@@ -1,0 +1,145 @@
+stages:
+  - build
+  - release
+
+workflow:
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/i'
+    - when: never
+
+variables:
+  GIT_DEPTH: "0"
+
+build_windows_installer:
+  stage: build
+  tags:
+    - saas-windows-medium-amd64
+  script:
+    - '$version = $env:CI_COMMIT_TAG.Substring(1)'
+    - .\dotnet.ps1 --info
+    - >-
+      .\dotnet.ps1 publish native\src\ClypDat.App\ClypDat.App.csproj
+      -c Release -r win-x64 --self-contained true -p:Platform=x64
+      -p:Version=$version -o native\publish\win-x64-folder --nologo
+    - .\eng\Test-SelfContainedPublish.ps1 -PublishDirectory native\publish\win-x64-folder
+    - >-
+      choco install nsis -y --no-progress
+    - >-
+      choco install wixtoolset 7zip -y --no-progress
+    - |
+      if (-not (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe")) { throw "NSIS was not installed." }
+      if (-not (Test-Path "C:\Program Files\7-Zip\7z.exe")) { throw "7-Zip was not installed." }
+    - >-
+      Compress-Archive -Path native\publish\win-x64-folder\* -DestinationPath ClypDat-win-x64.zip
+    - |
+      $sevenZip = "C:\Program Files\7-Zip\7z.exe"
+      $sfxModule = "C:\Program Files\7-Zip\7z.sfx"
+      & $sevenZip a -mx=5 payload.7z ".\native\publish\win-x64-folder\*"
+      if ($LASTEXITCODE -ne 0) { throw "7-Zip archive creation failed." }
+      $configLines = @(
+        ';!@Install@!UTF-8!',
+        'Title="ClypDat"',
+        'RunProgram="ClypDat.exe"',
+        ';!@InstallEnd@!'
+      )
+      [System.IO.File]::WriteAllText("sfx-config.txt", ($configLines -join "`r`n"), [System.Text.Encoding]::UTF8)
+      cmd /c copy /b "$sfxModule" + sfx-config.txt + payload.7z ClypDat-Portable.exe
+      if ($LASTEXITCODE -ne 0) { throw "Portable executable creation failed." }
+    - >-
+      & "C:\Program Files (x86)\NSIS\makensis.exe"
+      /DCLYPDAT_VERSION=$version
+      /DCLYPDAT_SOURCE_DIR=..\native\publish\win-x64-folder
+      /DCLYPDAT_OUTPUT_FILE=..\ClypDat-Setup.exe
+      installer\ClypDat.nsi
+    - 'if (-not (Test-Path -LiteralPath ClypDat-Setup.exe)) { throw "ClypDat-Setup.exe was not created." }'
+    - |
+      $found = Get-ChildItem "C:\Program Files (x86)\WiX Toolset*\bin\heat.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+      if (-not $found) {
+        $found = Get-ChildItem "C:\Program Files\WiX Toolset*\bin\heat.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+      }
+      if (-not $found) { throw "Could not locate WiX Toolset's bin directory (heat.exe)." }
+      $wixBin = $found.DirectoryName
+      & "$wixBin\heat.exe" dir native\publish\win-x64-folder -cg AppFiles -dr INSTALLFOLDER -srd -sreg -gg -g1 -sfrag -var var.ClypDatSourceDir -out installer\AppFiles.wxs
+      if ($LASTEXITCODE -ne 0) { throw "heat.exe failed with exit code $LASTEXITCODE" }
+      $srcDir = (Resolve-Path native\publish\win-x64-folder).Path
+      & "$wixBin\candle.exe" -arch x64 -dClypDatVersion=$version -dClypDatSourceDir=$srcDir -ext WixUtilExtension -ext WixUIExtension installer\Product.wxs installer\AppFiles.wxs -out installer\
+      if ($LASTEXITCODE -ne 0) { throw "candle.exe failed with exit code $LASTEXITCODE" }
+      & "$wixBin\light.exe" -ext WixUtilExtension -ext WixUIExtension installer\Product.wixobj installer\AppFiles.wixobj -out ClypDat.msi -sice:ICE61 -sice:ICE38 -sice:ICE64
+      if ($LASTEXITCODE -ne 0) { throw "light.exe failed with exit code $LASTEXITCODE" }
+    - |
+      $assets = @("ClypDat-win-x64.zip", "ClypDat-Portable.exe", "ClypDat-Setup.exe", "ClypDat.msi")
+      foreach ($asset in $assets) {
+        if (-not (Test-Path -LiteralPath $asset)) { throw "$asset was not created." }
+        Get-FileHash -Algorithm SHA256 $asset | Format-List
+      }
+  artifacts:
+    name: "ClypDat-$CI_COMMIT_TAG"
+    paths:
+      - ClypDat-win-x64.zip
+      - ClypDat-Portable.exe
+      - ClypDat-Setup.exe
+      - ClypDat.msi
+    expire_in: 1 year
+
+publish_gitlab_release:
+  stage: release
+  tags:
+    - saas-windows-medium-amd64
+  needs:
+    - job: build_windows_installer
+      artifacts: true
+  script:
+    - |
+      $packageBase = "$env:CI_API_V4_URL/projects/$env:CI_PROJECT_ID/packages/generic/clypdat/$env:CI_COMMIT_TAG"
+      $assets = @("ClypDat-win-x64.zip", "ClypDat-Portable.exe", "ClypDat-Setup.exe", "ClypDat.msi")
+      foreach ($asset in $assets) {
+        $packageUrl = "$packageBase/$asset"
+        curl.exe --fail --show-error --header "JOB-TOKEN: $env:CI_JOB_TOKEN" --upload-file $asset $packageUrl
+        if ($LASTEXITCODE -ne 0) { throw "Failed to upload $asset." }
+      }
+  release:
+    tag_name: '$CI_COMMIT_TAG'
+    name: 'ClypDat $CI_COMMIT_TAG'
+    description: |
+      # What's New
+      - GPU-backed Library clip previews with card-sized rendering and fixed 60 FPS playback.
+      - Faster hover previews with short warm-session reuse.
+      - Selectable active-application audio tracks for replay capture.
+      - Modernized recording audio controls and clearer track selection.
+      - Higher replay-quality bitrate targets.
+      - Improved high-FPS replay capture and 120 FPS preview handling.
+      - Refreshed Library loading tiles, filters, startup cache, and storage updates.
+      - Improved editor timeline, trim controls, playback seeking, and A/V synchronization.
+      - Improved H.264 probing, replay qualification, and startup encoder validation.
+      - GitLab release includes ZIP, Portable EXE, Setup EXE, and MSI downloads.
+
+      # Fixes
+      - Prevent per-card GPU preview allocation from exploding RAM, handles, and threads.
+      - Fix preview cleanup stalls caused by FFmpeg sessions waiting on unread pipes.
+      - Keep software fallback and GPU device-loss recovery safe during preview changes.
+      - Preserve selected replay frame rate during encoder and capture load.
+      - Recreate the capture worker safely after configuration changes.
+      - Stabilize DXGI/WGC capture transport cadence and cursor composition.
+      - Correct application-audio track mapping and recording audio alignment.
+      - Keep Library card loading responsive while clips and thumbnails are restored.
+      - Fix editor seek timing and synchronized audio/video resume behavior.
+      - Improve quality guidance for resolution, frame rate, bitrate, and RAM cost.
+      - Make local publishing replace and launch the updated build reliably.
+    assets:
+      links:
+        - name: ClypDat-win-x64.zip
+          url: '$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/clypdat/$CI_COMMIT_TAG/ClypDat-win-x64.zip'
+          direct_asset_path: '/ClypDat-win-x64.zip'
+          link_type: package
+        - name: ClypDat-Portable.exe
+          url: '$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/clypdat/$CI_COMMIT_TAG/ClypDat-Portable.exe'
+          direct_asset_path: '/ClypDat-Portable.exe'
+          link_type: package
+        - name: ClypDat-Setup.exe
+          url: '$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/clypdat/$CI_COMMIT_TAG/ClypDat-Setup.exe'
+          direct_asset_path: '/ClypDat-Setup.exe'
+          link_type: package
+        - name: ClypDat.msi
+          url: '$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/clypdat/$CI_COMMIT_TAG/ClypDat.msi'
+          direct_asset_path: '/ClypDat.msi'
+          link_type: package
