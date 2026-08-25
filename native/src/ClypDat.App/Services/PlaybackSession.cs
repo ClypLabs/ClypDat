@@ -432,6 +432,38 @@ public sealed class PlaybackSession : IDisposable
         }
     }
 
+    /// <summary>
+    /// Stops transport and RELEASES THE FILE: disposes the Media that libvlc is
+    /// demuxing and tears down the audio output along with its ChunkedAudioReaders.
+    ///
+    /// Deliberately not Dispose(): VideoPlayer and the LibVLC engine stay alive so the
+    /// session can be reused for the next clip, which is what the editor relies on.
+    ///
+    /// This exists because Stop() alone does not release the file. libvlc opens it
+    /// without FILE_SHARE_DELETE, and _videoMedia is only released by DisposeMedia, so
+    /// deleting a clip while its session still held the Media failed with a sharing
+    /// violation. It is the same teardown prefix LoadVideoAsync already runs before
+    /// loading a new path, so a later open re-runs it against nulls harmlessly.
+    /// </summary>
+    public void UnloadMedia()
+    {
+        Stop();
+
+        try
+        {
+            // Drop the player's own reference first, so disposing the Media below
+            // actually takes its refcount to zero.
+            VideoPlayer.Media = null;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Editor media detach failed", error);
+        }
+
+        DisposeMedia();
+        DisposeAudio();
+    }
+
     // Scrub/keyboard-repeat seeking: queue a video-only preview and return,
     // with no confirmation wait and no audio work at all.
     //

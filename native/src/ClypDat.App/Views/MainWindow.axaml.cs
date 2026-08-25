@@ -31,6 +31,10 @@ public sealed partial class MainWindow : Window
     private LeagueAutoClipListener? _leagueAutoClipListener;
     private PlaybackSession? _playback;
     private CancellationTokenSource? _playbackStartCts;
+    // Held from the moment a clip open starts until its picture AND sound are up, so
+    // background library work parks instead of competing for the UI thread and for
+    // ffmpeg. See EditorForegroundWork.
+    private IDisposable? _editorForegroundScope;
     private CancellationTokenSource? _editorSeekCts;
     private TimelineDragMode _timelineDragMode = TimelineDragMode.None;
     // Distance between where the pointer went down and the trim boundary it
@@ -5984,11 +5988,27 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            // Close the editor BEFORE deleting, not after. The clip is open in a
-            // playback session that holds the file, so deleting underneath it is
-            // a locked-file failure rather than a delete.
+            // Tear the playback session down BEFORE deleting, not after. The comment
+            // that used to be here said as much, but CloseEditor only flips ViewModel
+            // flags - it never touched the session. Two things followed from that:
+            //
+            //   The audio kept playing. Editor sound is not libvlc (the media is opened
+            //   ":no-audio" and the player is muted); it comes from a NAudio WasapiOut
+            //   fed by ChunkedAudioReaders serving PCM out of an in-memory cache, so
+            //   deleting the file could not stop it. Nothing called Stop().
+            //
+            //   The delete failed. libvlc still held the file open without
+            //   FILE_SHARE_DELETE, so File.Delete hit a sharing violation, retried for
+            //   about a second, and threw "Delete failed" while the clip stayed put.
+            //
+            // StopEditorPlayback first (it detaches EditorVideoView.MediaPlayer), then
+            // UnloadMedia to actually release the file. Synchronous, not Background:
+            // Background hands the stop to a worker with no ordering, which would race
+            // the delete below. The brief UI stall is fine here - a modal just closed.
             _clipHoverPreview.Stop("clip deleted");
-            ViewModel.CloseEditor();
+            StopEditorPlayback(stopMode: PlaybackStopMode.Synchronous);
+            _playback?.UnloadMedia();
+            ViewModel.CloseEditor(refreshLibraryCard: false);
             await ViewModel.DeleteClipAsync(clip);
         }
         catch (Exception error)
@@ -7384,6 +7404,15 @@ public sealed partial class MainWindow : Window
         // layout had already been serviced. Now the two overlap.
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
         StopEditorPlayback(cancelQueuedStart: false, stopMode: PlaybackStopMode.Skip);
+
+        // After that stop, not before: it releases any scope a previous open left
+        // behind, and this open needs its own. Dispose is idempotent, so the explicit
+        // dispose here is harmless if the stop already did it.
+        _editorForegroundScope?.Dispose();
+        _editorForegroundScope = EditorForegroundWork.Begin();
+        // Captured rather than read back from the field, which a newer open may replace.
+        var foregroundScope = _editorForegroundScope;
+        _ = ReleaseEditorForegroundScopeAfterAsync(foregroundScope, TimeSpan.FromSeconds(12));
         // Reused across editor opens instead of constructing a fresh
         // PlaybackSession every time - PlaybackSession's constructor spins up a
         // whole new LibVLC engine + MediaPlayer, which was the bulk of the
@@ -7452,12 +7481,16 @@ public sealed partial class MainWindow : Window
                 }
 
                 if (cts.IsCancellationRequested) return;
-                await StartEditorPlaybackAsync(session, videoLoad, cts.Token);
+                await StartEditorPlaybackAsync(session, videoLoad, cts.Token, foregroundScope);
             },
             DispatcherPriority.Default);
     }
 
-    private async Task StartEditorPlaybackAsync(PlaybackSession playback, Task videoLoad, CancellationToken cancellationToken)
+    private async Task StartEditorPlaybackAsync(
+        PlaybackSession playback,
+        Task videoLoad,
+        CancellationToken cancellationToken,
+        IDisposable? foregroundScope = null)
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
         if (cancellationToken.IsCancellationRequested) return;
@@ -7541,7 +7574,7 @@ public sealed partial class MainWindow : Window
             playback.VideoPlayer.TimeChanged += OnTimeChanged;
 
             playback.PlayFrom(ViewModel.CurrentTime);
-            _ = LoadEditorAudioAsync(playback, ViewModel.SelectedVideoPath, audioTracks, videoReady.Task, cancellationToken);
+            _ = LoadEditorAudioAsync(playback, ViewModel.SelectedVideoPath, audioTracks, videoReady.Task, cancellationToken, foregroundScope);
             await Task.Delay(200, cancellationToken);
             if (playback.Duration > TimeSpan.Zero && IsPlausibleDuration(playback.Duration, ViewModel.Duration))
             {
@@ -7603,7 +7636,8 @@ public sealed partial class MainWindow : Window
         string videoPath,
         IReadOnlyList<AudioPreviewTrack> audioTracks,
         Task videoReady,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IDisposable? foregroundScope = null)
     {
         try
         {
@@ -7637,6 +7671,26 @@ public sealed partial class MainWindow : Window
             AppLog.Error("Editor audio preview failed", error);
             await Dispatcher.UIThread.InvokeAsync(() => ShowMessageAsync("Audio preview unavailable", error.Message));
         }
+        finally
+        {
+            // Released here rather than at the first video frame: sound comes up after
+            // the picture, and the chunk extractions behind it are exactly the work that
+            // was losing the race to library hydration.
+            foregroundScope?.Dispose();
+        }
+    }
+
+    // Backstop for the paths that end an open without reaching either the audio load or
+    // StopEditorPlayback. Nothing should normally hit this; if the debug line below shows
+    // up in a log, a release path has been missed and background library work would have
+    // stayed parked for this long.
+    private static async Task ReleaseEditorForegroundScopeAfterAsync(IDisposable? scope, TimeSpan delay)
+    {
+        if (scope is null) return;
+        await Task.Delay(delay).ConfigureAwait(false);
+        if (!EditorForegroundWork.IsActive) return;
+        AppLog.Debug($"Editor foreground scope released by its {delay.TotalSeconds:0}s backstop.");
+        scope.Dispose();
     }
 
     // How this call should deal with the (reused) PlaybackSession itself, as
@@ -7657,6 +7711,13 @@ public sealed partial class MainWindow : Window
 
     private void StopEditorPlayback(bool cancelQueuedStart = true, PlaybackStopMode stopMode = PlaybackStopMode.Synchronous)
     {
+        // Unconditional: every route out of an open - close, navigate, delete, error, or
+        // being superseded by another open - comes through here, and none of them should
+        // leave background library work parked. QueueEditorPlayback starts a fresh scope
+        // immediately after its own call to this.
+        _editorForegroundScope?.Dispose();
+        _editorForegroundScope = null;
+
         if (cancelQueuedStart)
         {
             _playbackStartCts?.Cancel();

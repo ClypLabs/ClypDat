@@ -3706,6 +3706,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 // resizes. Drip cards in at roughly one per frame instead.
                 foreach (var state in batch)
                 {
+                    // Per card, not per batch. Realizing a card's visual tree is UI-thread
+                    // work, and a clip opened mid-restore is waiting on that same thread -
+                    // parking per batch would still let eight of these through first.
+                    await EditorForegroundWork.ParkWhileActiveAsync(cancellationToken);
                     await Dispatcher.UIThread.InvokeAsync(() =>
                     {
                         if (cancellationToken.IsCancellationRequested || !string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase)) return;
@@ -3714,6 +3718,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     await Task.Delay(cardArrivalDelay, cancellationToken);
                 }
 
+                // These three are each O(every clip) and also run on the UI thread.
+                await EditorForegroundWork.ParkWhileActiveAsync(cancellationToken);
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     if (cancellationToken.IsCancellationRequested || !string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase)) return;
@@ -4853,15 +4859,27 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public async Task DeleteClipAsync(ClipCardViewModel clip)
     {
-        // See DeleteSelectedAsync - must read this before the sidecar is deleted.
-        var medalImportKey = ClipInfoSidecar.Load(Settings.LibraryFolder, clip.Path)?.MedalImportKey;
+        // Read the import keys before anything is deleted - the sidecar that carries
+        // them goes below - but PERSIST the history changes only after the file is
+        // actually gone. They used to be written first, so a delete that failed (a
+        // locked file, say) still committed the removal: the clip stayed in the library
+        // having lost its import history, and re-importing it would silently duplicate.
+        // One load, not two; DeleteSelectedAsync already reads-before/persists-after.
+        var info = ClipInfoSidecar.Load(Settings.LibraryFolder, clip.Path);
+        var medalImportKey = info?.MedalImportKey;
+        var steelSeriesImportKey = info?.SteelSeriesImportKey;
+
+        _recentlySelfAddedPaths[clip.Path] = DateTime.UtcNow;
+        // Throws on failure, so nothing below this line is committed.
+        await FileRetry.RunAsync(() => File.Delete(clip.Path), $"Delete clip {clip.Path}");
+
         if (!string.IsNullOrWhiteSpace(medalImportKey))
         {
             var importedKeys = LoadMedalImportHistory();
             importedKeys.Remove(medalImportKey);
             PersistMedalImportHistory(importedKeys);
         }
-        var steelSeriesImportKey = ClipInfoSidecar.Load(Settings.LibraryFolder, clip.Path)?.SteelSeriesImportKey;
+
         if (!string.IsNullOrWhiteSpace(steelSeriesImportKey))
         {
             var steelSeriesKeys = LoadSteelSeriesImportHistory();
@@ -4869,8 +4887,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             PersistSteelSeriesImportHistory(steelSeriesKeys);
         }
 
-        _recentlySelfAddedPaths[clip.Path] = DateTime.UtcNow;
-        await FileRetry.RunAsync(() => File.Delete(clip.Path), $"Delete clip {clip.Path}");
         _mediaProbe.DeleteCacheFor(clip.Path);
         ClipEditSidecar.Delete(Settings.LibraryFolder, clip.Path);
         ClipInfoSidecar.Delete(Settings.LibraryFolder, clip.Path);
@@ -5036,7 +5052,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _ = HydrateClipImagesAsync(clip, newPath);
     }
 
-    public void CloseEditor()
+    /// <param name="refreshLibraryCard">
+    /// False when the clip is being deleted: the re-hydrate below would re-probe a path
+    /// that is about to disappear, racing the delete for the same file.
+    /// </param>
+    public void CloseEditor(bool refreshLibraryCard = true)
     {
         _waveformCts?.Cancel();
         _waveformCts?.Dispose();
@@ -5055,10 +5075,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // (and its ffprobe re-hydrate) happens after the close transition has
         // already rendered, instead of stalling it.
         var editedClipPath = SelectedVideoPath;
-        if (!string.IsNullOrWhiteSpace(editedClipPath))
+        if (refreshLibraryCard && !string.IsNullOrWhiteSpace(editedClipPath))
         {
             Dispatcher.UIThread.Post(() => _ = AddOrUpdateLibraryClipAsync(editedClipPath));
         }
+
+        // Cleared after the capture above, so a normal close still refreshes the card it
+        // was editing. Several guards elsewhere test "IsEditorVisible && SelectedVideoPath
+        // == path" to decide whether a change concerns the open clip; leaving a deleted
+        // path here lets those match a file that no longer exists.
+        SelectedVideoPath = string.Empty;
 
         // Closing the editor is the moment the app's largest caches - extracted
         // audio chunks (up to 256MB) and decoded bitmaps - become dead weight.
@@ -8080,6 +8106,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 try
                 {
                     token.ThrowIfCancellationRequested();
+                    // Hydration is deliberately never cancelled by opening a clip - see
+                    // OpenClipAsync - so it yields instead. Parked before the work
+                    // starts rather than mid-probe, so no ffprobe/ffmpeg of ours is
+                    // running against the disk while the editor needs it.
+                    await EditorForegroundWork.ParkWhileActiveAsync(token);
                     await action(clip);
                     if (token.IsCancellationRequested) return;
                     await Dispatcher.UIThread.InvokeAsync(RecordHydrationStep);
