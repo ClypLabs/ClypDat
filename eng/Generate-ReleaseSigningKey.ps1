@@ -50,8 +50,11 @@ Write-Host ""
 Write-Host "Private key written to $OutputPath (readable only by $([Security.Principal.WindowsIdentity]::GetCurrent().Name))."
 Write-Host "Move it somewhere offline. Do NOT commit it and do NOT put it in CI secrets."
 Write-Host ""
-Write-Host "Paste this into ReleaseSigning.PublicKeySubjectPublicKeyInfoBase64:"
+Write-Host "Add this to ReleaseSigning.PinnedPublicKeys as:"
+Write-Host '    new PinnedReleaseKey("<label>", "<the base64 below>")'
 Write-Host ""
-Write-Host $publicKey
+# Write-Output, not Write-Host, so callers can capture it:
+#   $pub = .\eng\Generate-ReleaseSigningKey.ps1 -OutputPath ... | Select-Object -Last 1
+Write-Output $publicKey
 Write-Host ""
-Write-Host "Until that constant is set, the updater keeps its old digest-only behaviour."
+Write-Host "Until at least one key is pinned, the updater keeps its old digest-only behaviour."

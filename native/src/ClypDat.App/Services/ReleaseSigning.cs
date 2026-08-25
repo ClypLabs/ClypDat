@@ -27,23 +27,66 @@ public static class ReleaseSigning
     public const string SignatureAssetName = "ClypDat-Release.manifest.sig";
 
     /// <summary>
-    /// SubjectPublicKeyInfo of the offline release-signing key, base64.
+    /// SubjectPublicKeyInfo of every trusted release-signing key, base64.
     ///
-    /// EMPTY UNTIL SET UP. Run eng/Generate-ReleaseSigningKey.ps1, then paste the public
-    /// half it prints here. While this is empty the updater keeps its previous
-    /// digest-only behaviour and logs that signature enforcement is off; the moment it
-    /// holds a key, every update must carry a manifest signed by it or be refused.
+    /// EMPTY UNTIL SET UP. Run eng/Generate-ReleaseSigningKey.ps1 and paste the public
+    /// half it prints here. While this list is empty the updater keeps its previous
+    /// digest-only behaviour and logs that enforcement is off; as soon as it holds a
+    /// key, every update must carry a manifest signed by one of these or be refused.
+    ///
+    /// A LIST rather than a single key, for two reasons:
+    ///
+    ///   Multiple signers. If more than one person cuts releases, they each keep their
+    ///   own private key instead of sharing one. A leak is then contained to that
+    ///   signer, and it stays answerable who signed a given release - a shared key makes
+    ///   that unanswerable. NEVER hand a private key to a second person; add their
+    ///   public key here instead.
+    ///
+    ///   Rotation. The trusted set lives in the binary, so replacing a key means
+    ///   shipping a build that trusts the new one. Publishing the replacement's public
+    ///   key alongside the current one - so both are accepted for a release or two -
+    ///   lets a key be retired without a flag day, and lets a compromised key be dropped
+    ///   without stranding users on a build that trusts nothing else.
+    ///
+    /// Order is irrelevant; a signature from any entry is accepted.
     /// </summary>
-    public const string PublicKeySubjectPublicKeyInfoBase64 = "";
+    public static readonly IReadOnlyList<PinnedReleaseKey> PinnedPublicKeys = new PinnedReleaseKey[]
+    {
+        // new PinnedReleaseKey("arashii", "MIIBoj...")
+    };
 
-    public static bool IsConfigured => PublicKeySubjectPublicKeyInfoBase64.Length > 0;
+    public static bool IsConfigured => PinnedPublicKeys.Count > 0;
+
+    /// <summary>
+    /// Short, stable identifier for a key: the first 16 hex characters of the SHA-256 of
+    /// its SubjectPublicKeyInfo. Logged so it is visible which key accepted a release.
+    /// </summary>
+    public static string Fingerprint(string subjectPublicKeyInfoBase64)
+    {
+        try
+        {
+            var hash = SHA256.HashData(Convert.FromBase64String(subjectPublicKeyInfoBase64));
+            return Convert.ToHexString(hash)[..16].ToLowerInvariant();
+        }
+        catch
+        {
+            return "unreadable";
+        }
+    }
 
     /// <summary>
     /// Verifies the detached signature over the manifest bytes and returns the parsed
     /// manifest. Throws on any failure - a manifest that does not verify is not a
     /// manifest, and callers must not fall back to unsigned metadata.
     /// </summary>
-    public static ReleaseManifest Verify(ReadOnlySpan<byte> manifestBytes, ReadOnlySpan<byte> signatureBytes)
+    public static ReleaseManifest Verify(ReadOnlySpan<byte> manifestBytes, ReadOnlySpan<byte> signatureBytes) =>
+        Verify(manifestBytes, signatureBytes, out _);
+
+    /// <summary>
+    /// As <see cref="Verify(ReadOnlySpan{byte}, ReadOnlySpan{byte})"/>, additionally
+    /// reporting which pinned key accepted the signature.
+    /// </summary>
+    public static ReleaseManifest Verify(ReadOnlySpan<byte> manifestBytes, ReadOnlySpan<byte> signatureBytes, out PinnedReleaseKey acceptedBy)
     {
         if (!IsConfigured)
         {
@@ -61,12 +104,38 @@ public static class ReleaseSigning
         }
 
         // Verify before parsing, so the JSON reader never sees unauthenticated bytes.
-        using var rsa = RSA.Create();
-        rsa.ImportSubjectPublicKeyInfo(Convert.FromBase64String(PublicKeySubjectPublicKeyInfoBase64), out _);
-        if (!rsa.VerifyData(manifestBytes.ToArray(), signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pss))
+        // Every pinned key is tried; a signature from any of them is accepted. A key that
+        // will not even import is skipped rather than failing the whole check, so one
+        // malformed entry cannot strand users on a build that trusts nothing.
+        var manifestArray = manifestBytes.ToArray();
+        PinnedReleaseKey? accepted = null;
+        foreach (var candidate in PinnedPublicKeys)
         {
-            throw new CryptographicException("Release manifest signature verification failed.");
+            using var rsa = RSA.Create();
+            try
+            {
+                rsa.ImportSubjectPublicKeyInfo(Convert.FromBase64String(candidate.SubjectPublicKeyInfoBase64), out _);
+            }
+            catch (Exception error)
+            {
+                AppLog.Error($"Pinned release key '{candidate.Label}' could not be imported; skipping it.", error);
+                continue;
+            }
+
+            if (rsa.VerifyData(manifestArray, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pss))
+            {
+                accepted = candidate;
+                break;
+            }
         }
+
+        if (accepted is null)
+        {
+            throw new CryptographicException(
+                $"Release manifest signature did not verify against any of the {PinnedPublicKeys.Count} pinned release key(s).");
+        }
+
+        acceptedBy = accepted;
 
         var manifest = JsonSerializer.Deserialize<ReleaseManifest>(manifestBytes) ??
             throw new InvalidDataException("Release manifest was empty.");
@@ -94,6 +163,14 @@ public static class ReleaseSigning
 
         return null;
     }
+}
+
+/// <summary>A release-signing public key trusted by this build.</summary>
+/// <param name="Label">Human-readable name for logs - who or what holds the private half.</param>
+/// <param name="SubjectPublicKeyInfoBase64">Base64 SubjectPublicKeyInfo of the public key.</param>
+public sealed record PinnedReleaseKey(string Label, string SubjectPublicKeyInfoBase64)
+{
+    public string Fingerprint => ReleaseSigning.Fingerprint(SubjectPublicKeyInfoBase64);
 }
 
 public sealed record ReleaseManifest

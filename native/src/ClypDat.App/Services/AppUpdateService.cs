@@ -319,7 +319,7 @@ public static class AppUpdateService
         var manifestBytes = await GetTrustedAssetAsync(client, update.ManifestUrl, MaximumManifestBytes, cancellationToken);
         var signatureBytes = await GetTrustedAssetAsync(client, update.ManifestSignatureUrl, MaximumSignatureBytes, cancellationToken);
 
-        var manifest = ReleaseSigning.Verify(manifestBytes, signatureBytes);
+        var manifest = ReleaseSigning.Verify(manifestBytes, signatureBytes, out var acceptedBy);
 
         // Bind the manifest to the release being installed, so a validly-signed manifest
         // from a DIFFERENT release cannot be replayed against this download.
@@ -332,7 +332,7 @@ public static class AppUpdateService
         var signedDigest = ReleaseSigning.FindAssetSha256(manifest, ExpectedAssetName)
             ?? throw new InvalidOperationException($"Signed manifest for {manifest.Tag} does not cover {ExpectedAssetName}.");
 
-        AppLog.Info($"Update {update.TagName}: signed manifest verified against the pinned release key.");
+        AppLog.Info($"Update {update.TagName}: signed manifest verified against pinned release key '{acceptedBy.Label}' ({acceptedBy.Fingerprint}).");
         return signedDigest;
     }
 
