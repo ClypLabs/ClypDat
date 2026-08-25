@@ -6149,15 +6149,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 continue;
             }
 
-            var color = track.Type switch
-            {
-                "video" => "#05C7B7",
-                "audio" => AudioColor(audioIndex),
-                _ => "#607080"
-            };
             var label = track.Type == "audio"
                 ? AudioLaneLabel(track.Label, audioIndex)
                 : "Video";
+            var color = track.Type switch
+            {
+                "video" => "#05C7B7",
+                "audio" => AudioColor(audioIndex, track.Label, label),
+                _ => "#607080"
+            };
             var lane = new TrackLaneViewModel(
                 track.Index,
                 label,
@@ -8269,8 +8269,34 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             : label;
     }
 
-    private static string AudioColor(int audioIndex)
+    // Spotify's brand green. An app-specific track reads as that app at a glance when
+    // it carries the colour people already associate with it.
+    private const string SpotifyGreen = "#1ED760";
+
+    // Matched on the LABEL rather than on the lane position. An app track is labelled
+    // with its process name, and which slot it lands in depends on how many chat apps
+    // and microphones are also captured - so keying off "the fourth lane" would colour
+    // the wrong track as soon as that count changed.
+    private static bool IsSpotifyTrack(params string?[] candidates)
     {
+        foreach (var candidate in candidates)
+        {
+            if (!string.IsNullOrWhiteSpace(candidate) &&
+                candidate.Contains("spotify", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string AudioColor(int audioIndex, params string?[] labels)
+    {
+        // Every other app track - Apple Music included - keeps the palette colour for
+        // its position, so nothing else changes.
+        if (IsSpotifyTrack(labels)) return SpotifyGreen;
+
         return audioIndex switch
         {
             0 => "#05C7B7",
