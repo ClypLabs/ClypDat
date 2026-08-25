@@ -1593,7 +1593,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 var fallback = string.Equals(_activeReplayEncoder, "libx264", StringComparison.OrdinalIgnoreCase) && !IsReplayEncoderCpu
                     ? " CPU fallback active."
                     : string.Empty;
-                return $"Active encoder: {_activeReplayEncoder}{(string.IsNullOrWhiteSpace(_activeReplayAdapter) ? string.Empty : $" on {_activeReplayAdapter}")}.{fallback}";
+
+                // The adapter belongs to the ENCODER, not to capture. AdapterDescription
+                // names the D3D11 device used for capture and scaling, which is a GPU even
+                // in CPU encode mode - frames are grabbed on the GPU and handed to a
+                // software encoder on the CPU. Appending it unconditionally produced
+                // "libx264 on AMD Radeon RX 9060 XT", crediting a software encoder to a
+                // graphics card it never touches.
+                var suffix = IsHardwareEncoderName(_activeReplayEncoder)
+                    ? string.IsNullOrWhiteSpace(_activeReplayAdapter) ? string.Empty : $" on {_activeReplayAdapter}"
+                    : " (software, CPU)";
+                return $"Active encoder: {_activeReplayEncoder}{suffix}.{fallback}";
             }
 
             return IsReplayEncoderCpu
@@ -1675,6 +1685,32 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SaveSettings();
             UpdateReplayQualityRestartRequired();
         }
+    }
+
+    // Hardware encoders are identified by their FFmpeg backend suffix rather than by
+    // guessing from a software list: an unrecognised name is treated as software, so an
+    // encoder this build has never heard of is described conservatively instead of being
+    // attributed to a GPU that may have nothing to do with it.
+    private static readonly string[] HardwareEncoderMarkers =
+    {
+        "_nvenc",   // NVIDIA
+        "_amf",     // AMD
+        "_qsv",     // Intel Quick Sync
+        "_mf",      // Media Foundation
+        "_vaapi",
+        "_videotoolbox",
+        "_v4l2m2m",
+    };
+
+    internal static bool IsHardwareEncoderName(string? encoder)
+    {
+        if (string.IsNullOrWhiteSpace(encoder)) return false;
+        foreach (var marker in HardwareEncoderMarkers)
+        {
+            if (encoder.Contains(marker, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        return false;
     }
 
     public string ReplayVideoCodecStatus
