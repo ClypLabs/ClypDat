@@ -52,7 +52,7 @@ public static class ReleaseSigning
     /// </summary>
     public static readonly IReadOnlyList<PinnedReleaseKey> PinnedPublicKeys = new PinnedReleaseKey[]
     {
-        // new PinnedReleaseKey("arashii", "MIIBoj...")
+        new PinnedReleaseKey("arashii", "MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA1REPK3NqTAR33oWpngYIh4Wmvp5sgDFRAn2YWiqwV56dOeAitGmXDfvE0NtVm7igLiqGiNSBW/vrH8GErllwIUcUpbTddIPG9gVf9H0QsVXzudeK0/REsc++3j+kq3FASujX0+cAtiB0yatGyMhiq2c0HSICjqOA5YhrzNMgCXNbdlEHNK3zPdhmQIoUEwxTDv6VFzfGSzTX7Xq43FF9Jsv0Yc0Cvm54KYthDnxl3zH4JyTI6Za1PSQivJNFfP/7b3UriccCShwyrzIvu6sW2n37GltJFSzH1EXzWrC8gXagcqk8Ym9CASV2p78oLo95k2oT0+LVfPfIfV60tWFbPCyqLFd4RzoryWaQaQtEWPmSg798VDNR7qR8evf4/W2ettUs+z55QF10TqGWozzCNJHLRKjhd+3pixT8kkiXeUYGUk7xdBsZOBWdRBT1GBFJqnpDHu/1oEjzgnU6NyyD70fclq+W5t8um1mAJt2e5xZXISCGsaMrvJSnTHMnsJeBAgMBAAE="),
     };
 
     public static bool IsConfigured => PinnedPublicKeys.Count > 0;

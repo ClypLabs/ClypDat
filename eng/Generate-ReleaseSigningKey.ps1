@@ -22,25 +22,46 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# PowerShell 7+ required. The key handling here uses ExportPkcs8PrivateKeyPem /
+# ImportFromPem, which are .NET Core 3.0+ APIs and simply do not exist on the .NET
+# Framework that Windows PowerShell 5.1 runs on - where this fails with a confusing
+# "does not contain a method named" error partway through.
+if ($PSVersionTable.PSVersion.Major -lt 6) {
+    throw "This script needs PowerShell 7+. Re-run it with 'pwsh' instead of 'powershell' (current: $($PSVersionTable.PSVersion))."
+}
 if (Test-Path -LiteralPath $OutputPath) { throw "Refusing to overwrite existing key: $OutputPath" }
 
 $directory = Split-Path -Parent $OutputPath
 if ([string]::IsNullOrWhiteSpace($directory)) { $directory = '.' }
 New-Item -ItemType Directory -Force -Path $directory | Out-Null
 
+$identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $rsa = [Security.Cryptography.RSA]::Create(3072)
 try {
-    # Lock the file down before the key bytes land in it.
+    # Create the file empty and lock it down BEFORE the key bytes land in it, so the
+    # private key is never briefly readable under the directory's inherited ACL.
     [IO.File]::WriteAllText($OutputPath, '', [Text.UTF8Encoding]::new($false))
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $acl = Get-Acl -LiteralPath $OutputPath
-    $acl.SetAccessRuleProtection($true, $false)
-    foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRule($rule) }
-    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($identity, 'FullControl', 'Allow')))
-    Set-Acl -LiteralPath $OutputPath -AclObject $acl
+
+    # icacls rather than Get-Acl/Set-Acl: those live in Microsoft.PowerShell.Security,
+    # which does not autoload in every host (a constrained Windows PowerShell 5.1 will
+    # fail with CommandNotFoundException), and an ACL failure here must not be something
+    # you can shrug off - it is the only thing keeping the key from other accounts.
+    #   /inheritance:r  drop inherited entries instead of copying them
+    #   /grant:r        replace any existing grant for this identity
+    $icacls = & icacls "$OutputPath" /inheritance:r /grant:r "${identity}:(F)" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not restrict permissions on ${OutputPath}: $icacls"
+    }
 
     [IO.File]::WriteAllText($OutputPath, $rsa.ExportPkcs8PrivateKeyPem(), [Text.UTF8Encoding]::new($false))
     $publicKey = [Convert]::ToBase64String($rsa.ExportSubjectPublicKeyInfo())
+}
+catch {
+    # Never leave a key file behind that is not protected, and never leave an empty stub
+    # that blocks the next attempt.
+    if (Test-Path -LiteralPath $OutputPath) { Remove-Item -LiteralPath $OutputPath -Force -ErrorAction SilentlyContinue }
+    throw
 }
 finally {
     $rsa.Dispose()

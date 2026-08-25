@@ -22,6 +22,14 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# PowerShell 7+ required. The key handling here uses ExportPkcs8PrivateKeyPem /
+# ImportFromPem, which are .NET Core 3.0+ APIs and simply do not exist on the .NET
+# Framework that Windows PowerShell 5.1 runs on - where this fails with a confusing
+# "does not contain a method named" error partway through.
+if ($PSVersionTable.PSVersion.Major -lt 6) {
+    throw "This script needs PowerShell 7+. Re-run it with 'pwsh' instead of 'powershell' (current: $($PSVersionTable.PSVersion))."
+}
 if ($Tag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$') { throw "Tag '$Tag' is not vMAJOR.MINOR.PATCH." }
 if (-not (Test-Path -LiteralPath $PrivateKeyPath -PathType Leaf)) { throw "Private key not found: $PrivateKeyPath" }
 if (-not (Test-Path -LiteralPath $ArtifactDirectory -PathType Container)) { throw "Artifact directory not found: $ArtifactDirectory" }
