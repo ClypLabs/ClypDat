@@ -2717,7 +2717,7 @@
                                   Padding="0"
                                   ClipToBounds="False"
                                   VerticalAlignment="Center"
-                                  Margin="0,-2,0,0"
+                                  Margin="{Binding VolumeSliderMargin}"
                                   Value="{Binding VolumePercent, Mode=TwoWay}"
                                   IsEnabled="{Binding CanAdjustVolume}"
                                   IsVisible="{Binding IsAudio}"

@@ -75,6 +75,9 @@ public sealed class TrackLaneViewModel : ViewModelBase
     public Thickness LaneContentMargin => IsCompactAudioLane
         ? new Thickness(12, 4)
         : new Thickness(12, 7);
+    public Thickness VolumeSliderMargin => IsCompactAudioLane
+        ? new Thickness(0, -4, 0, 0)
+        : new Thickness(0, -2, 0, 0);
     public Thickness LabelMargin => IsAudio
         ? new Thickness(0, IsCompactAudioLane ? 0 : 2, 0, 0)
         : new Thickness(0);
