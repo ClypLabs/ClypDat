@@ -57,7 +57,7 @@ jobs:
           path: avalonia-artifact
           repository: ClypLabs/clypdat-avalonia
           run-id: ${{ inputs.avalonia_run_id }}
-          github-token: ${{ secrets.AVALONIA_ACTIONS_READ_TOKEN }}
+          github-token: ${{ secrets.CLYPDAT_CI_CROSSREPO }}
 
       - name: Verify package manifest and package version
         shell: pwsh
