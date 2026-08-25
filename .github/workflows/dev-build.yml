@@ -38,7 +38,7 @@ jobs:
         with:
           name: ${{ inputs.artifact_name }}
           path: avalonia-artifact
-          repository: ClypDat/clypdat-avalonia
+          repository: ClypLabs/clypdat-avalonia
           run-id: ${{ inputs.avalonia_run_id }}
           github-token: ${{ secrets.AVALONIA_ACTIONS_READ_TOKEN }}
 
