@@ -7,14 +7,22 @@ namespace ClypDat.App.Services;
 [SupportedOSPlatform("windows")]
 public static class DotaGsiDeployer
 {
-    public static bool TryDeploy(int port, out string status)
+    public static bool TryDeploy(int port, string authToken, out string status)
     {
         var folder = FindCfgFolder();
         if (folder is null) { status = "Dota 2 was not found in your Steam libraries. Install it, then return here to finish setup."; return false; }
         try
         {
             Directory.CreateDirectory(folder);
-            var path = Path.Combine(folder, "gamestate_integration_eve.cfg");
+            // Same rebrand cleanup as the CS2 deployer.
+            var legacyPath = Path.Combine(folder, "gamestate_integration_eve.cfg");
+            if (File.Exists(legacyPath))
+            {
+                try { File.Delete(legacyPath); AppLog.Info($"Removed the pre-rebrand Dota GSI config at {legacyPath}."); }
+                catch (Exception error) { AppLog.Error($"Could not remove the pre-rebrand Dota GSI config at {legacyPath}", error); }
+            }
+
+            var path = Path.Combine(folder, "gamestate_integration_clypdat.cfg");
             var content = $$"""
                 "ClypDat Dota GSI"
                 {
@@ -23,6 +31,7 @@ public static class DotaGsiDeployer
                  "buffer" "0.1"
                  "throttle" "0.1"
                  "heartbeat" "15.0"
+                 "auth" { "{{GsiAuth.TokenKey}}" "{{authToken}}" }
                  "data" { "provider" "1" "map" "1" "player" "1" "hero" "1" "items" "1" "events" "1" "roshan" "1" }
                 }
                 """;

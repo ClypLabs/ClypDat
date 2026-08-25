@@ -298,6 +298,15 @@ public sealed class Cs2AutoClipSettings
 public sealed class AutoClippingSettings
 {
     public bool Enabled { get; set; } = true;
+
+    // Shared secret between ClypDat and the GSI configs it deploys into CS2/Dota.
+    // The listeners bind loopback HTTP, which any local process - and, through a
+    // no-cors POST from a web page, any site the user visits - can otherwise drive
+    // into recording the screen on demand. Valve's GSI protocol carries an "auth"
+    // block for exactly this. Generated on first use and persisted; empty in
+    // settings written by older builds, which is why deploy regenerates it.
+    public string GsiAuthToken { get; set; } = string.Empty;
+
     public Dictionary<string, AutoClipGameSettings> Games { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 

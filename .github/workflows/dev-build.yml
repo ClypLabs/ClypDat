@@ -31,10 +31,27 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # Dispatch inputs are attacker-controlled for anyone who can trigger this
+      # workflow. Validate their shape once, here, in a step that holds no secrets -
+      # and pass them to every later step through env: rather than interpolating
+      # ${{ inputs.* }} into a run: block, which splices caller text into the script.
+      - name: Validate dispatch inputs
+        shell: pwsh
+        env:
+          AVALONIA_COMMIT: ${{ inputs.avalonia_commit }}
+          PACKAGE_VERSION: ${{ inputs.package_version }}
+          AVALONIA_RUN_ID: ${{ inputs.avalonia_run_id }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
+        run: |
+          if ($env:AVALONIA_COMMIT -notmatch '^[0-9a-f]{40}$') { throw "avalonia_commit must be a full 40-character git SHA." }
+          if ($env:PACKAGE_VERSION -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$') { throw "package_version has an unexpected shape." }
+          if ($env:AVALONIA_RUN_ID -notmatch '^[0-9]+$') { throw "avalonia_run_id must be numeric." }
+          if ($env:ARTIFACT_NAME -notmatch '^[0-9A-Za-z._-]{1,128}$') { throw "artifact_name has an unexpected shape." }
 
       - name: Download exact Avalonia package artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: ${{ inputs.artifact_name }}
           path: avalonia-artifact
@@ -44,11 +61,14 @@ jobs:
 
       - name: Verify package manifest and package version
         shell: pwsh
+        env:
+          AVALONIA_COMMIT: ${{ inputs.avalonia_commit }}
+          PACKAGE_VERSION: ${{ inputs.package_version }}
         run: |
           Expand-Archive -LiteralPath (Get-ChildItem avalonia-artifact -Filter *.zip | Select-Object -First 1).FullName -DestinationPath avalonia-packages
           $manifest = Get-Content avalonia-packages/manifest.json -Raw | ConvertFrom-Json
-          if ($manifest.commit -ne "${{ inputs.avalonia_commit }}") { throw "Avalonia artifact commit mismatch." }
-          if ($manifest.packageVersion -ne "${{ inputs.package_version }}") { throw "Avalonia artifact package version mismatch." }
+          if ($manifest.commit -ne $env:AVALONIA_COMMIT) { throw "Avalonia artifact commit mismatch." }
+          if ($manifest.packageVersion -ne $env:PACKAGE_VERSION) { throw "Avalonia artifact package version mismatch." }
           foreach ($package in $manifest.packages) {
             $path = Join-Path avalonia-packages $package.name
             if (-not (Test-Path $path)) { throw "Missing package $($package.name)." }
@@ -62,24 +82,29 @@ jobs:
 
       - name: Install NSIS
         shell: pwsh
-        run: choco install nsis -y --no-progress
+        run: choco install nsis -y --no-progress --requirechecksums
 
       - name: Build and test current ClypDat master
         shell: pwsh
+        env:
+          PACKAGE_VERSION: ${{ inputs.package_version }}
         run: |
-          .\dotnet.ps1 restore native\src\ClypDat.App\ClypDat.App.csproj --configfile NuGet.Dev.Config -r win-x64 -p:ClypDatAvaloniaPackageVersion=${{ inputs.package_version }}
-          .\dotnet.ps1 build native\src\ClypDat.App\ClypDat.App.csproj -c Release -r win-x64 --no-restore -p:Platform=x64 -p:ClypDatChannel=Dev -p:ClypDatAvaloniaPackageVersion=${{ inputs.package_version }}
+          .\dotnet.ps1 restore native\src\ClypDat.App\ClypDat.App.csproj --configfile NuGet.Dev.Config -r win-x64 -p:ClypDatAvaloniaPackageVersion=$env:PACKAGE_VERSION
+          .\dotnet.ps1 build native\src\ClypDat.App\ClypDat.App.csproj -c Release -r win-x64 --no-restore -p:Platform=x64 -p:ClypDatChannel=Dev -p:ClypDatAvaloniaPackageVersion=$env:PACKAGE_VERSION
 
       - name: Publish self-contained Dev application
         id: publish
         shell: pwsh
+        env:
+          AVALONIA_COMMIT: ${{ inputs.avalonia_commit }}
+          PACKAGE_VERSION: ${{ inputs.package_version }}
         run: |
           $clypdat = (git rev-parse HEAD).Trim()
-          $avalonia = "${{ inputs.avalonia_commit }}"
+          $avalonia = $env:AVALONIA_COMMIT
           $buildId = "$clypdat-$($avalonia.Substring(0, 7))"
           $payload = Join-Path $pwd "dev-payload\$buildId"
           New-Item -ItemType Directory -Force $payload | Out-Null
-          .\dotnet.ps1 publish native\src\ClypDat.App\ClypDat.App.csproj -c Release -r win-x64 --self-contained true -p:Platform=x64 -p:ClypDatChannel=Dev -p:ClypDatAvaloniaPackageVersion=${{ inputs.package_version }} -o $payload --nologo
+          .\dotnet.ps1 publish native\src\ClypDat.App\ClypDat.App.csproj -c Release -r win-x64 --self-contained true -p:Platform=x64 -p:ClypDatChannel=Dev -p:ClypDatAvaloniaPackageVersion=$env:PACKAGE_VERSION -o $payload --nologo
           .\eng\Test-SelfContainedPublish.ps1 -PublishDirectory $payload
           "build_id=$buildId" >> $env:GITHUB_OUTPUT
           "clypdat_commit=$clypdat" >> $env:GITHUB_OUTPUT
@@ -89,16 +114,20 @@ jobs:
         shell: pwsh
         env:
           CLYPDAT_DEV_SIGNING_PRIVATE_KEY: ${{ secrets.CLYPDAT_DEV_SIGNING_PRIVATE_KEY }}
+          PACKAGE_VERSION: ${{ inputs.package_version }}
+          BUILD_ID: ${{ steps.publish.outputs.build_id }}
+          CLYPDAT_COMMIT: ${{ steps.publish.outputs.clypdat_commit }}
+          AVALONIA_COMMIT: ${{ steps.publish.outputs.avalonia_commit }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:CLYPDAT_DEV_SIGNING_PRIVATE_KEY)) { throw "CLYPDAT_DEV_SIGNING_PRIVATE_KEY is not configured." }
-          $buildId = "${{ steps.publish.outputs.build_id }}"
+          $buildId = $env:BUILD_ID
           $payload = Join-Path $pwd "dev-payload\$buildId"
           Compress-Archive -Path "$payload\*" -DestinationPath ClypDat-Dev.zip
           $archive = Get-Item ClypDat-Dev.zip
           $hash = (Get-FileHash $archive.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           $manifest = [ordered]@{
-            schema = 1; buildId = $buildId; clypDatCommit = "${{ steps.publish.outputs.clypdat_commit }}"; avaloniaCommit = "${{ steps.publish.outputs.avalonia_commit }}";
-            avaloniaPackageVersion = "${{ inputs.package_version }}"; buildIdSource = $buildId; buildNumber = [long]$env:GITHUB_RUN_NUMBER;
+            schema = 1; buildId = $buildId; clypDatCommit = $env:CLYPDAT_COMMIT; avaloniaCommit = $env:AVALONIA_COMMIT;
+            avaloniaPackageVersion = $env:PACKAGE_VERSION; buildIdSource = $buildId; buildNumber = [long]$env:GITHUB_RUN_NUMBER;
             archiveSize = $archive.Length; archiveSha256 = $hash; createdUtc = [DateTimeOffset]::UtcNow.ToString("O")
           }
           $manifestBytes = [Text.Encoding]::UTF8.GetBytes(($manifest | ConvertTo-Json -Depth 4 -Compress))

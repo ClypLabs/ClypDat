@@ -127,6 +127,7 @@
     <Compile Include="..\ClypDat.DevChannel\DevBuildManifest.cs" Link="Services\DevChannel\DevBuildManifest.cs" />
     <Compile Include="..\ClypDat.DevChannel\DevPackageVerifier.cs" Link="Services\DevChannel\DevPackageVerifier.cs" />
     <Compile Include="..\ClypDat.DevChannel\DevInstallState.cs" Link="Services\DevChannel\DevInstallState.cs" />
+    <Compile Include="..\ClypDat.DevChannel\DevChannelPaths.cs" Link="Services\DevChannel\DevChannelPaths.cs" />
   </ItemGroup>
 
   <ItemGroup>

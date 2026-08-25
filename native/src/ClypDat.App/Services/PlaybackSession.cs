@@ -26,7 +26,10 @@ public sealed class PlaybackSession : IDisposable
     // session, not just the one that was loaded when it was set.
     private double _masterVolumePercent = 100;
     private Media? _videoMedia;
-    private bool _disposed;
+    private volatile bool _disposed;
+    // Generous on purpose: a preview decode holding _seekLock is bounded work, and
+    // overshooting the wait is far cheaper than the leak the timeout path takes.
+    private static readonly TimeSpan PreviewWorkerDrainTimeout = TimeSpan.FromSeconds(5);
     private bool _ended;
     private bool _isSeeking;
     private bool _shouldPlay;
@@ -429,11 +432,6 @@ public sealed class PlaybackSession : IDisposable
         }
     }
 
-    public void Seek(TimeSpan time, bool resumePlayback = false)
-    {
-        SeekAsync(time, resumePlayback).GetAwaiter().GetResult();
-    }
-
     // Scrub/keyboard-repeat seeking: queue a video-only preview and return,
     // with no confirmation wait and no audio work at all.
     //
@@ -470,6 +468,7 @@ public sealed class PlaybackSession : IDisposable
             // can acquire the same lock.
             lock (_previewLock)
             {
+                if (_disposed) return;
                 _previewRequests.QueuePreview(TimeSpan.FromMilliseconds(milliseconds));
                 if (_previewWorker is null) _previewWorker = Task.Run(PreviewSeekWorkerAsync);
             }
@@ -486,6 +485,15 @@ public sealed class PlaybackSession : IDisposable
         {
             while (true)
             {
+                // Dispose() releases the media player and the LibVLC instance. Every
+                // VideoPlayer touch below is a call into native libvlc, so bail out
+                // the moment disposal starts rather than racing it.
+                if (_disposed)
+                {
+                    lock (_previewLock) _previewWorker = null;
+                    return;
+                }
+
                 if (!_previewRequests.TryTakePreview(DateTimeOffset.UtcNow, out var target, out var generation, out var delay))
                 {
                     if (delay > TimeSpan.Zero)
@@ -499,7 +507,17 @@ public sealed class PlaybackSession : IDisposable
                     // landed frame, then parks video when the mouse stops.
                     if (await WaitForPreviewActivityAsync().ConfigureAwait(false)) continue;
 
-                    lock (_transportLock) VideoPlayer.SetPause(true);
+                    lock (_transportLock)
+                    {
+                        if (_disposed)
+                        {
+                            lock (_previewLock) _previewWorker = null;
+                            return;
+                        }
+
+                        VideoPlayer.SetPause(true);
+                    }
+
                     lock (_previewLock)
                     {
                         // Queueing can race the worker's empty check. Keep
@@ -516,8 +534,10 @@ public sealed class PlaybackSession : IDisposable
                 try
                 {
                     if (!_previewRequests.IsCurrent(generation)) continue;
+                    if (_disposed) return;
                     lock (_transportLock)
                     {
+                        if (_disposed) return;
                         // Preview writes intentionally do not settle or touch
                         // audio. Video is parked by the idle branch above;
                         // the next final seek owns pause/land/roll.
@@ -720,7 +740,42 @@ public sealed class PlaybackSession : IDisposable
         if (_disposed) return;
         _disposed = true;
         _previewRequests.BeginFinalSeek();
+
+        // The preview worker is a detached Task.Run that calls into libvlc
+        // (SetPause / Time) and awaits _seekLock. Releasing the media player, the
+        // LibVLC instance, or the semaphore while it is still running is a native
+        // use-after-free - reachable by closing the editor while the timeline
+        // scrubber is being dragged. Drain it first.
+        Task? worker;
+        lock (_previewLock) worker = _previewWorker;
+
+        var drained = true;
+        if (worker is not null && !worker.IsCompleted)
+        {
+            try
+            {
+                drained = worker.Wait(PreviewWorkerDrainTimeout);
+            }
+            catch (Exception error)
+            {
+                // A faulted worker is already finished, which is all this needs.
+                AppLog.Debug($"Editor preview worker ended with an error during dispose: {error.Message}");
+            }
+        }
+
         Stop();
+
+        if (!drained)
+        {
+            // Leak rather than free-and-use: the worker is still inside libvlc, so
+            // releasing these handles now would corrupt native state. The process is
+            // closing this editor, not the app, so this is a bounded, logged leak.
+            AppLog.Error($"Editor preview worker did not stop within {PreviewWorkerDrainTimeout.TotalSeconds:0.#}s; " +
+                         "leaving the media player and LibVLC instance alive to avoid a use-after-free.");
+            DisposeAudio();
+            return;
+        }
+
         VideoPlayer.Dispose();
         DisposeAudio();
         DisposeMedia();
@@ -782,14 +837,27 @@ public sealed class PlaybackSession : IDisposable
         if (!_audioClockPolicy.TryGetCorrection(generation, elapsed, audible, videoTime, out var correction)) return;
 
         AppLog.Debug($"Editor A/V drift: audio={audible.TotalSeconds:0.###}s, video={videoTime.TotalSeconds:0.###}s, correction={correction.TotalSeconds:0.###}s, generation={generation}.");
+        if (_disposed) return;
         _ = ApplyAudioCorrectionAsync(generation, correction);
     }
 
     private async Task ApplyAudioCorrectionAsync(long generation, TimeSpan correction)
     {
-        await _seekLock.WaitAsync().ConfigureAwait(false);
+        // Fire-and-forget from the TimeChanged handler, so it can still be in flight
+        // when the editor closes and Dispose() releases _seekLock.
+        if (_disposed) return;
         try
         {
+            await _seekLock.WaitAsync().ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+
+        try
+        {
+            if (_disposed) return;
             if (generation != Interlocked.Read(ref _seekVersion) || !_shouldPlay || _audioOutput is null) return;
             lock (_transportLock)
             {
@@ -805,7 +873,7 @@ public sealed class PlaybackSession : IDisposable
         }
         finally
         {
-            _seekLock.Release();
+            try { _seekLock.Release(); } catch (ObjectDisposedException) { }
         }
     }
 

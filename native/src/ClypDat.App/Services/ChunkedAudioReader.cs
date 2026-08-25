@@ -21,6 +21,10 @@ namespace ClypDat.App.Services;
 // cache).
 public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
 {
+    // A chunk is 30s of 48kHz stereo float PCM (~11MB). 128MB is an order of magnitude
+    // of headroom over any legitimate chunk while still bounding a pathological file.
+    private const long MaximumChunkPcmBytes = 128L * 1024 * 1024;
+
     private const int ChunkSeconds = 30;
     private const int SampleRate = 48000;
     private const int Channels = 2;
@@ -349,8 +353,31 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
             // await before WaitForExitAsync rather than deadlocking on a full
             // pipe buffer.
             var errorTask = process.StandardError.ReadToEndAsync();
+            // Bounded copy. The input is capped with -t, but a file with pathological or
+            // non-monotonic timestamps can make ffmpeg emit far more PCM than that
+            // implies, and this buffers all of it before ToArray doubles it again.
             using var pcm = new MemoryStream();
-            await process.StandardOutput.BaseStream.CopyToAsync(pcm);
+            var pcmBuffer = new byte[81920];
+            int pcmRead;
+            var truncated = false;
+            while ((pcmRead = await process.StandardOutput.BaseStream.ReadAsync(pcmBuffer)) > 0)
+            {
+                if (pcm.Length + pcmRead > MaximumChunkPcmBytes)
+                {
+                    truncated = true;
+                    try { process.Kill(entireProcessTree: true); } catch { }
+                    break;
+                }
+
+                pcm.Write(pcmBuffer, 0, pcmRead);
+            }
+
+            if (truncated)
+            {
+                AppLog.Error($"Editor audio chunk exceeded {MaximumChunkPcmBytes / (1024 * 1024)}MB: input={_inputPath}, stream={_streamIndex}, chunk={chunkIndex}.");
+                return;
+            }
+
             await process.WaitForExitAsync();
             var error = await errorTask;
 

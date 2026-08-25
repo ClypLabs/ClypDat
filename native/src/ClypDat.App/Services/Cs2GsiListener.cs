@@ -11,12 +11,14 @@ public sealed record Cs2AutoClipRequest(string EventId, string EventType, string
 public sealed class Cs2GsiListener : IDisposable
 {
     private static readonly TimeSpan EventPadding = TimeSpan.FromSeconds(4);
+    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan PostKillCaptureDuration = TimeSpan.FromSeconds(10);
     private readonly Func<AutoClipGameSettings> _settingsProvider;
     private readonly object _stateLock = new();
     private HttpListener? _listener;
     private CancellationTokenSource? _cts;
     private bool _seeded;
+    private string _authToken = string.Empty;
     private int _lastRoundKills;
     private int _lastRoundKillHs;
     private int _lastMatchDeaths;
@@ -35,9 +37,10 @@ public sealed class Cs2GsiListener : IDisposable
 
     public Cs2GsiListener(Func<AutoClipGameSettings> settingsProvider) => _settingsProvider = settingsProvider;
 
-    public bool Start(int port)
+    public bool Start(int port, string authToken)
     {
         Stop();
+        _authToken = authToken;
         var listener = new HttpListener();
         listener.Prefixes.Add($"http://127.0.0.1:{port}/");
         try
@@ -83,19 +86,45 @@ public sealed class Cs2GsiListener : IDisposable
             try { context = await listener.GetContextAsync(); }
             catch { break; }
 
-            try
+            // Handle off the accept loop: reading a body inline lets one slow client
+            // that declares a Content-Length and never sends it block every later
+            // request indefinitely.
+            _ = Task.Run(async () =>
             {
-                using var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding);
-                var body = await reader.ReadToEndAsync(token);
-                context.Response.StatusCode = 200;
-                context.Response.Close();
-                ProcessPayload(body);
-            }
-            catch (Exception error)
-            {
-                AppLog.Error("CS2 GSI payload processing failed", error);
-                try { context.Response.StatusCode = 500; context.Response.Close(); } catch { }
-            }
+                try
+                {
+                    if (!GsiAuth.IsRequestShapeValid(context.Request))
+                    {
+                        context.Response.StatusCode = 403;
+                        context.Response.Close();
+                        return;
+                    }
+
+                    using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                    requestTimeout.CancelAfter(RequestTimeout);
+
+                    var body = await GsiAuth.ReadBoundedBodyAsync(context.Request, requestTimeout.Token);
+                    if (body is null)
+                    {
+                        context.Response.StatusCode = 413;
+                        context.Response.Close();
+                        return;
+                    }
+
+                    context.Response.StatusCode = 200;
+                    context.Response.Close();
+                    ProcessPayload(body);
+                }
+                catch (OperationCanceledException)
+                {
+                    try { context.Response.Abort(); } catch { }
+                }
+                catch (Exception error)
+                {
+                    AppLog.Error("CS2 GSI payload processing failed", error);
+                    try { context.Response.StatusCode = 500; context.Response.Close(); } catch { }
+                }
+            }, token);
         }
     }
 
@@ -103,6 +132,12 @@ public sealed class Cs2GsiListener : IDisposable
     {
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
+
+        // Before anything else. The old provider/steamid comparison below was the only
+        // sender check and was skipped entirely when the payload omitted "provider",
+        // so it authenticated nothing.
+        if (!GsiAuth.IsPayloadAuthorized(root, _authToken)) return;
+
         if (!root.TryGetProperty("player", out var player)) return;
 
         if (root.TryGetProperty("provider", out var provider) &&

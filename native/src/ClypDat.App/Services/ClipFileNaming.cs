@@ -58,10 +58,14 @@ public static class ClipFileNaming
             {
                 builder.Append(replacement);
             }
-            else if (char.IsControl(character))
+            else if (char.IsControl(character) ||
+                     System.Globalization.CharUnicodeInfo.GetUnicodeCategory(character) == System.Globalization.UnicodeCategory.Format)
             {
-                // No sensible stand-in for a control character, and nothing is
-                // lost by dropping one.
+                // No sensible stand-in for a control character, and nothing is lost by
+                // dropping one. Format-category characters go too: char.IsControl only
+                // matches category Cc, so U+202E RIGHT-TO-LEFT OVERRIDE survived it and
+                // is not in GetInvalidFileNameChars either - leaving a title that can
+                // spoof how the filename reads in Explorer.
             }
             else if (Array.IndexOf(Path.GetInvalidFileNameChars(), character) >= 0)
             {
@@ -156,19 +160,40 @@ public static class ClipFileNaming
             if (string.IsNullOrWhiteSpace(format)) throw new FormatException("The datetime token needs a format.");
             return timestamp.ToString(format, CultureInfo.CurrentCulture);
         });
+        // Validate the TEMPLATE for leftover braces, before substitution. Checking
+        // after meant a brace arriving from the title or the game name - neither of
+        // which the user typed into the template - tripped the guard and threw out of
+        // the clip-save path, losing the recording the hotkey was pressed for. Game
+        // names reach here from the remote catalog and from CS2 auto-clip titles.
+        var probe = result
+            .Replace("{title}", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Replace("{game}", string.Empty, StringComparison.OrdinalIgnoreCase);
+        if (probe.Contains('{') || probe.Contains('}')) throw new FormatException("Use {title}, {game}, or {datetime:format} tokens only.");
+
         result = result.Replace("{title}", title, StringComparison.OrdinalIgnoreCase);
         result = result.Replace("{game}", string.IsNullOrWhiteSpace(gameDisplayName) ? title : gameDisplayName, StringComparison.OrdinalIgnoreCase);
-        if (result.Contains('{') || result.Contains('}')) throw new FormatException("Use {title}, {game}, or {datetime:format} tokens only.");
         return result;
     }
 
-    private static string SanitizeStem(string value)
+    internal static string SanitizeStem(string value)
     {
         value = SanitizeSegment(value);
         if (string.IsNullOrWhiteSpace(value)) value = "Replay";
-        if (value.Length > 180) value = value[..180].TrimEnd('.', ' ');
+        if (value.Length > 180)
+        {
+            // Emoji titles are expected (imports carry them), and a naive cut can
+            // split a surrogate pair into a lone half.
+            var cut = 180;
+            if (char.IsHighSurrogate(value[cut - 1])) cut--;
+            value = value[..cut].TrimEnd('.', ' ');
+            if (string.IsNullOrWhiteSpace(value)) value = "Replay";
+        }
+
+        // Win32 resolves CON.foo.mp4 to the CON device, so the reserved-name test has
+        // to run against the segment before the first dot, not the whole stem.
+        var deviceCandidate = value.Split('.')[0];
         var reserved = new[] { "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9" };
-        return reserved.Contains(value, StringComparer.OrdinalIgnoreCase) ? $"_{value}" : value;
+        return reserved.Contains(deviceCandidate, StringComparer.OrdinalIgnoreCase) ? $"_{value}" : value;
     }
 
     private static string OrdinalSuffix(int day)

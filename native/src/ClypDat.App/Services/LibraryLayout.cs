@@ -25,14 +25,36 @@ public static class LibraryLayout
 
     public static string SidecarPath(string libraryRoot, string videoPath, string suffix)
     {
-        var relative = Path.GetRelativePath(libraryRoot, videoPath);
-        if (relative.StartsWith("..", StringComparison.Ordinal))
+        // Path.GetRelativePath returns the SECOND path unchanged when the two have
+        // different roots - another drive, or a UNC share. That result does not start
+        // with "..", so the old containment test passed it straight through, and
+        // Path.Combine(root, "D:\x\y.mp4.info.json") discards its first argument
+        // because the second is rooted. The sidecar was then created next to the clip,
+        // outside the library, and later deleted from there.
+        var fullRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(libraryRoot)) + Path.DirectorySeparatorChar;
+        var fullVideo = Path.GetFullPath(videoPath);
+
+        string relative;
+        if (fullVideo.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase))
         {
-            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(videoPath))))[..24].ToLowerInvariant();
+            relative = fullVideo[fullRoot.Length..];
+        }
+        else
+        {
+            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullVideo)))[..24].ToLowerInvariant();
             relative = Path.Combine("external", hash + Path.GetExtension(videoPath));
         }
 
         var path = Path.Combine(ClipInfoRoot(libraryRoot), relative + suffix);
+
+        // Belt and braces: whatever the composition produced must still be inside
+        // .clipinfo, or the sidecar does not get written there at all.
+        var infoRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(ClipInfoRoot(libraryRoot))) + Path.DirectorySeparatorChar;
+        if (!Path.GetFullPath(path).StartsWith(infoRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullVideo)))[..24].ToLowerInvariant();
+            path = Path.Combine(ClipInfoRoot(libraryRoot), "external", hash + Path.GetExtension(videoPath) + suffix);
+        }
         EnsureClipInfoRoot(libraryRoot);
         return path;
     }

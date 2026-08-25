@@ -428,6 +428,15 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IAudioCaptureClientNative
     {
+        // [PreserveSig] on every member: without it the CLR treats the int return as an
+        // HRESULT it should check and throw on, and marshals the declared return value
+        // as an extra trailing out-parameter - so native GetBuffer was being called with
+        // six arguments instead of five. On this x64-only build that happens to be
+        // harmless (the caller cleans the stack, and the zero-initialised retval slot
+        // makes the implicit ThrowExceptionForHR a no-op), but it is an ABI mismatch
+        // that breaks on x86 and it contradicts the [PreserveSig] used on the sibling
+        // interface a few lines up.
+        [PreserveSig]
         int GetBuffer(
             out IntPtr data,
             out int numFramesToRead,
@@ -435,8 +444,10 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
             out long devicePosition,
             out long qpcPosition);
 
+        [PreserveSig]
         int ReleaseBuffer(int numFramesRead);
 
+        [PreserveSig]
         int GetNextPacketSize(out int numFramesInNextPacket);
     }
 

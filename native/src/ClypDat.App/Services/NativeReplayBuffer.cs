@@ -327,6 +327,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // method, which is what lets the ring recycle again.
         var window = BorrowWindowUnderLock(requestedStartUtc, requestedEndUtc);
         var saveGateHeld = false;
+        // Hoisted so the finally can hand the borrowed-window release to it. The remux
+        // reads the borrowed payload arrays directly, and the release returns them to
+        // the pool for DrainToRingBuffer to immediately re-rent and overwrite - so
+        // releasing while the remux is still copying splices frames from a later moment
+        // of the recording into the saved clip.
+        Task<long>? remuxTask = null;
         Interlocked.Increment(ref _savesInFlight);
         try
         {
@@ -375,7 +381,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // of disk-bound remux followed by ~30s of CPU-bound ffmpeg, when
             // the two barely compete for the same resource. Awaited together
             // below, before the mux that is the first thing to need both.
-            var remuxTask = Task.Run(() =>
+            remuxTask = Task.Run(() =>
             {
                 var stageTimer = System.Diagnostics.Stopwatch.StartNew();
                 var previousPriority = Thread.CurrentThread.Priority;
@@ -535,7 +541,21 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         {
             if (saveGateHeld) SaveEncodeGate.Release();
             Interlocked.Decrement(ref _savesInFlight);
-            ReleaseBorrowedWindow();
+
+            // The happy path awaits remuxTask before reaching here, but anything that
+            // throws between starting it and that await - the segment-chunking loop or
+            // the sidecar write - lands here with the remux still running. A finally
+            // cannot await, so defer the release onto the task instead of blocking a
+            // possibly UI-bound continuation.
+            var pendingRemux = remuxTask;
+            if (pendingRemux is not null && !pendingRemux.IsCompleted)
+            {
+                pendingRemux.ContinueWith(_ => ReleaseBorrowedWindow(), TaskScheduler.Default);
+            }
+            else
+            {
+                ReleaseBorrowedWindow();
+            }
         }
     }
 
@@ -708,6 +728,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // core - see MmcssScope.Capture.
         using var captureMmcss = MmcssScope.Capture("native capture loop");
         var gpuLock = new object();
+        // Decides in the finally whether the native frees are safe to run. Starts true
+        // so that a failure before the pacing thread ever starts still tears down
+        // normally; it is cleared the moment that thread is running, and set again only
+        // by a successful join.
+        var pacingThreadStopped = true;
 
         try
         {
@@ -844,10 +869,17 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             swsContext = CreateScaler(captureWidth, captureHeight, outputWidth, outputHeight);
 
             frame = ffmpeg.av_frame_alloc();
+            // Checked before the dereference below: av_frame_alloc returns NULL on OOM,
+            // and every field assignment that follows would write through it.
+            if (frame is null) throw new InvalidOperationException("av_frame_alloc failed.");
             frame->format = (int)AVPixelFormat.AV_PIX_FMT_NV12;
             frame->width = outputWidth;
             frame->height = outputHeight;
-            ffmpeg.av_frame_get_buffer(frame, 32);
+            // The return was ignored, and the InitBlockUnaligned below writes through
+            // frame->data[0] - which stays NULL when this fails.
+            var frameBufferResult = ffmpeg.av_frame_get_buffer(frame, 32);
+            if (frameBufferResult < 0 || frame->data[0] is null)
+                throw new InvalidOperationException($"av_frame_get_buffer failed ({frameBufferResult}).");
             // av_frame_get_buffer leaves the buffer uninitialized - if the
             // target window starts occluded (recording begins before the game
             // has focus, common when starting the buffer from ClypDat's own
@@ -1166,6 +1198,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 Name = "ClypDat capture pacing"
             };
             pacingThread.Start();
+            // From here until the join below, the pacing thread may be inside the
+            // encode path touching hwFramesRef, lastHardwareFrame and the D3D device.
+            pacingThreadStopped = false;
 
             while (!token.IsCancellationRequested)
             {
@@ -1777,7 +1812,48 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                     {
                                         inputView!.Dispose();
                                         croppedTexture!.Dispose();
-                                        (croppedTexture, inputView) = CreateGpuCropInputView(device, videoDevice!, vpEnumerator!, captureWidth, captureHeight);
+
+                                        // The video processor and its enumerator bake the INPUT
+                                        // size into their content description, so they are stale
+                                        // now too. Only the staging texture, the CPU scaler and
+                                        // the crop view were being rebuilt, leaving the processor
+                                        // configured for the previous input size. The output-sized
+                                        // resources (nv12Output, the staging ring, outputView) do
+                                        // not depend on the crop and are deliberately kept.
+                                        try
+                                        {
+                                            videoProcessor?.Dispose();
+                                            vpEnumerator?.Dispose();
+                                            (vpEnumerator, videoProcessor) = CreateVideoProcessorForSize(
+                                                videoDevice!, captureWidth, captureHeight, outputWidth, outputHeight, activeFrameRate);
+                                            (croppedTexture, inputView) = CreateGpuCropInputView(device, videoDevice!, vpEnumerator, captureWidth, captureHeight);
+
+                                            // The cursor overlay's input view was created from the
+                                            // enumerator just replaced, so it has to be rebuilt with it.
+                                            if (gpuCursorAvailable)
+                                            {
+                                                cursorInputView?.Dispose();
+                                                cursorTexture?.Dispose();
+                                                (cursorTexture, cursorInputView) = CreateGpuCursorOverlay(device, videoDevice!, vpEnumerator);
+                                            }
+                                        }
+                                        catch (Exception error)
+                                        {
+                                            // Rebuilding the processor mid-session failed. Fall back
+                                            // to the CPU scaler - which was just recreated for the new
+                                            // size above - rather than blitting through a processor
+                                            // that no longer matches its input.
+                                            AppLog.Error("Native capture: GPU scaler could not be rebuilt for the new crop size; falling back to CPU scaling.", error);
+                                            videoProcessor = null;
+                                            vpEnumerator = null;
+                                            croppedTexture = null;
+                                            inputView = null;
+                                            cursorTexture = null;
+                                            cursorInputView = null;
+                                            gpuCursorAvailable = false;
+                                            useGpuScale = false;
+                                        }
+
                                         // The texture the pending crop lived in is gone - the
                                         // replacement holds nothing yet, so there is nothing
                                         // for the next encode tick to convert until a fresh
@@ -2147,6 +2223,23 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // Full Session writer are deliberately left alone: they hold
                     // the recording's history, and none of them depend on D3D.
                     var rebuildDevice = recoveryAttempts > recoveryAttemptsBeforeDeviceRebuild;
+                    // Serialized against the pacing thread for the whole recovery.
+                    // The per-frame capture body above releases gpuLock at its Monitor.Exit
+                    // before reaching here, and this block never took it - so the device,
+                    // duplication, staging/cropped textures, video processor, hwFramesRef
+                    // and lastHardwareFrame were all being disposed and freed while the
+                    // pacing thread was inside EncodeScheduledFrame* using exactly those
+                    // objects (av_hwframe_get_buffer, av_frame_clone, ImmediateContext.Map).
+                    //
+                    // Deadlock-free: gpuLock is taken only by this capture thread and the
+                    // pacing thread. The encoder swap below waits on the ENCODE thread,
+                    // which never takes gpuLock, so holding it across that wait cannot
+                    // deadlock - the pacing thread simply blocks until recovery finishes.
+                    // Recovery only runs after a multi-second stall, so the cost of
+                    // holding it here is not on any hot path.
+                    Monitor.Enter(gpuLock);
+                    try
+                    {
                     try
                     {
                         if (rebuildDevice)
@@ -2341,6 +2434,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 AppLog.Error("Native capture: WGC recovery source could not start.", wgcError);
                             }
                         }
+                    }
+                    }
+                    finally
+                    {
+                        Monitor.Exit(gpuLock);
                     }
 
                     // The recreate above can leave `duplication` null on failure;
@@ -3017,7 +3115,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 }
             }
 
-            pacingThread.Join(TimeSpan.FromSeconds(2));
+            // Bounded, but generously: RunPacingTick contends on _bufferLock with the
+            // encode thread, calls _audio.PruneOlderThan (filesystem deletes), and can
+            // encode a catch-up burst in one tick, so 2s was optimistic. Whether it
+            // actually stopped decides below whether the native frees are safe to run:
+            // the pacing thread touches hwFramesRef, lastHardwareFrame and the D3D
+            // device, and its own catch swallows exceptions and keeps looping, so a
+            // free underneath it would not even stop at the first bad access.
+            pacingThreadStopped = pacingThread.Join(TimeSpan.FromSeconds(10));
+            if (!pacingThreadStopped)
+            {
+                AppLog.Error("Native capture: pacing thread did not stop within 10s; leaking its native resources rather than freeing them underneath it.");
+            }
 
             // Stop accepting new jobs and wait for EncodeLoop to drain everything
             // already queued (including its own final flush of whatever's still
@@ -3069,10 +3178,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             }
             encodeQueue?.Dispose();
 
-            if (amfSoftwareFrameGuard is not null) { var staleGuard = amfSoftwareFrameGuard; ffmpeg.av_frame_free(&staleGuard); amfSoftwareFrameGuard = null; }
-            if (frame is not null) { var f = frame; ffmpeg.av_frame_free(&f); }
-            if (packet is not null) { var p = packet; ffmpeg.av_packet_free(&p); }
-            if (swsContext is not null) ffmpeg.sws_freeContext(swsContext);
+            // Leak rather than free-and-use when the pacing thread is still running: it
+            // touches these same pointers, and a leak ends with the process while a
+            // use-after-free on libav/D3D pointers is native memory corruption. The
+            // full-session finalize below still runs either way - skipping it would
+            // lose the recording, which is a worse outcome than a leaked allocation.
+            if (pacingThreadStopped)
+            {
+                if (amfSoftwareFrameGuard is not null) { var staleGuard = amfSoftwareFrameGuard; ffmpeg.av_frame_free(&staleGuard); amfSoftwareFrameGuard = null; }
+                if (frame is not null) { var f = frame; ffmpeg.av_frame_free(&f); }
+                if (packet is not null) { var p = packet; ffmpeg.av_packet_free(&p); }
+                if (swsContext is not null) ffmpeg.sws_freeContext(swsContext);
+            }
             FinalizeFullSessionWriter(fullSessionFormatContext);
             if (!string.IsNullOrEmpty(fullSessionTempVideoPath))
             {
@@ -3130,7 +3247,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     FinalizeFullSessionRecording(finalizeConfig, fullSessionStartUtc, fullSessionStartWallUtc, fullSessionTempVideoPath, fullSessionFinalOutputPath, fullSessionGameDisplayName);
                 }
             }
-            if (codecContext is not null) { var c = codecContext; ffmpeg.avcodec_free_context(&c); }
+            if (pacingThreadStopped && codecContext is not null) { var c = codecContext; ffmpeg.avcodec_free_context(&c); }
             // Encoders replaced mid-session (device rebuild). Safe only here:
             // the encode thread has already been joined above, so nothing can
             // still be inside one.
@@ -3143,29 +3260,36 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // Frame pool before the textures under it: unreferencing the last
             // frame is what lets the pool release its D3D11 surfaces, and those
             // belong to the device disposed a few lines down.
-            if (lastHardwareFrame is not null) { var staleHardwareFrame = lastHardwareFrame; ffmpeg.av_frame_free(&staleHardwareFrame); lastHardwareFrame = null; }
-            // Never disposed, only dropped - these wrappers were built over
-            // pointers the pool owns and hold no reference of their own.
-            hardwarePoolTextures.Clear();
-            ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
-            wgcCapture?.Dispose();
-            dxgiCapture?.Dispose();
-            duplication?.Dispose();
-            staging?.Dispose();
-            foreach (var view in desktopInputViews.Values) view.Dispose();
-            desktopInputViews.Clear();
-            inputView?.Dispose();
-            croppedTexture?.Dispose();
-            cursorInputView?.Dispose();
-            cursorTexture?.Dispose();
-            outputView?.Dispose();
-            if (nv12StagingRing is not null) foreach (var t in nv12StagingRing) t.Dispose();
-            nv12Output?.Dispose();
-            videoProcessor?.Dispose();
-            vpEnumerator?.Dispose();
-            videoContext?.Dispose();
-            videoDevice?.Dispose();
-            device?.Dispose();
+            // Everything below is touched by the pacing thread's encode path
+            // (av_hwframe_get_buffer on hwFramesRef, av_frame_clone of
+            // lastHardwareFrame, device.ImmediateContext.Map). Same rule as above:
+            // if that thread is still alive, leak instead of freeing under it.
+            if (pacingThreadStopped)
+            {
+                if (lastHardwareFrame is not null) { var staleHardwareFrame = lastHardwareFrame; ffmpeg.av_frame_free(&staleHardwareFrame); lastHardwareFrame = null; }
+                // Never disposed, only dropped - these wrappers were built over
+                // pointers the pool owns and hold no reference of their own.
+                hardwarePoolTextures.Clear();
+                ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
+                wgcCapture?.Dispose();
+                dxgiCapture?.Dispose();
+                duplication?.Dispose();
+                staging?.Dispose();
+                foreach (var view in desktopInputViews.Values) view.Dispose();
+                desktopInputViews.Clear();
+                inputView?.Dispose();
+                croppedTexture?.Dispose();
+                cursorInputView?.Dispose();
+                cursorTexture?.Dispose();
+                outputView?.Dispose();
+                if (nv12StagingRing is not null) foreach (var t in nv12StagingRing) t.Dispose();
+                nv12Output?.Dispose();
+                videoProcessor?.Dispose();
+                vpEnumerator?.Dispose();
+                videoContext?.Dispose();
+                videoDevice?.Dispose();
+                device?.Dispose();
+            }
             if (timerResolutionRaised) TimeEndPeriod(1);
             if (_health.State != ReplayCaptureState.Failed)
             {
@@ -3301,12 +3425,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // (often 4K) every single frame. Throws on any failure - caller treats
     // that as "not supported on this hardware/driver" and falls back to CPU
     // scale, so nothing here needs to be defensive beyond that.
-    private static (ID3D11VideoDevice VideoDevice, ID3D11VideoContext VideoContext, ID3D11VideoProcessorEnumerator Enumerator, ID3D11VideoProcessor Processor, ID3D11Texture2D Nv12Output, ID3D11Texture2D[] Nv12StagingRing, ID3D11VideoProcessorOutputView OutputView)
-        CreateGpuScaler(ID3D11Device device, int captureWidth, int captureHeight, int outputWidth, int outputHeight, int frameRate)
+    // Enumerator and processor both bake InputWidth/InputHeight into their content
+    // description, so a crop-size change invalidates them - the window-resize rebuild
+    // used to recreate only the staging texture, the CPU scaler and the crop input view,
+    // leaving the processor describing the PREVIOUS input size while a new input view of
+    // the new size was blitted through it. Shared by initial creation and that rebuild so
+    // the description cannot drift between the two.
+    private static (ID3D11VideoProcessorEnumerator Enumerator, ID3D11VideoProcessor Processor) CreateVideoProcessorForSize(
+        ID3D11VideoDevice videoDevice, int captureWidth, int captureHeight, int outputWidth, int outputHeight, int frameRate)
     {
-        var videoDevice = device.QueryInterface<ID3D11VideoDevice>();
-        var videoContext = device.ImmediateContext.QueryInterface<ID3D11VideoContext>();
-
+        var rate = new Rational((uint)Math.Clamp(frameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate), 1);
         var contentDescription = new VideoProcessorContentDescription
         {
             InputFrameFormat = VideoFrameFormat.Progressive,
@@ -3314,17 +3442,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             InputHeight = (uint)captureHeight,
             OutputWidth = (uint)outputWidth,
             OutputHeight = (uint)outputHeight,
-            InputFrameRate = new Rational((uint)Math.Clamp(frameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate), 1),
-            OutputFrameRate = new Rational((uint)Math.Clamp(frameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate), 1),
-            // Capture runs continuously at the target frame rate, unlike a
-            // one-off export. OptimalQuality can make the driver spend more
-            // 3D time on every crop/scale/colour-conversion pass, competing
-            // with the game for the same GPU. The output is immediately fed
-            // to NVENC, so throughput matters more than a premium resize
-            // kernel here. OptimalSpeed keeps the conversion GPU-side while
-            // avoiding that quality-biased per-frame cost.
+            InputFrameRate = rate,
+            OutputFrameRate = rate,
+            // Capture runs continuously at the target frame rate, unlike a one-off
+            // export. OptimalQuality can make the driver spend more 3D time on every
+            // crop/scale/colour-conversion pass, competing with the game for the same
+            // GPU. The output is immediately fed to NVENC, so throughput matters more
+            // than a premium resize kernel here.
             Usage = VideoUsage.OptimalSpeed
         };
+
         ID3D11VideoProcessorEnumerator enumerator;
         try
         {
@@ -3335,15 +3462,26 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             throw new InvalidOperationException($"CreateVideoProcessorEnumerator failed: {error.Message}", error);
         }
 
-        ID3D11VideoProcessor processor;
         try
         {
-            processor = videoDevice.CreateVideoProcessor(enumerator, 0);
+            return (enumerator, videoDevice.CreateVideoProcessor(enumerator, 0));
         }
         catch (Exception error)
         {
+            enumerator.Dispose();
             throw new InvalidOperationException($"CreateVideoProcessor failed: {error.Message}", error);
         }
+    }
+
+    private static (ID3D11VideoDevice VideoDevice, ID3D11VideoContext VideoContext, ID3D11VideoProcessorEnumerator Enumerator, ID3D11VideoProcessor Processor, ID3D11Texture2D Nv12Output, ID3D11Texture2D[] Nv12StagingRing, ID3D11VideoProcessorOutputView OutputView)
+        CreateGpuScaler(ID3D11Device device, int captureWidth, int captureHeight, int outputWidth, int outputHeight, int frameRate)
+    {
+        var videoDevice = device.QueryInterface<ID3D11VideoDevice>();
+        var videoContext = device.ImmediateContext.QueryInterface<ID3D11VideoContext>();
+
+        var (enumerator, processor) = CreateVideoProcessorForSize(
+            videoDevice, captureWidth, captureHeight, outputWidth, outputHeight, frameRate);
+
 
         // The two ends of this conversion are deliberately different ranges, so
         // they get their own structs. D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE is
@@ -3966,6 +4104,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             if (formatContext is null) return false;
 
             var stream = ffmpeg.avformat_new_stream(formatContext, null);
+            if (stream is null)
+            {
+                ffmpeg.avformat_free_context(formatContext);
+                return false;
+            }
+
             if (ffmpeg.avcodec_parameters_from_context(stream->codecpar, codecContext) < 0)
             {
                 ffmpeg.avformat_free_context(formatContext);
@@ -4479,6 +4623,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             if (formatContext is null) throw new InvalidOperationException("avformat_alloc_output_context2 failed.");
 
             var stream = ffmpeg.avformat_new_stream(formatContext, null);
+            if (stream is null) throw new InvalidOperationException("avformat_new_stream failed.");
             stream->time_base = _timeBase;
             stream->codecpar->codec_type = AVMediaType.AVMEDIA_TYPE_VIDEO;
             stream->codecpar->codec_id = _videoCodecId;
@@ -4489,6 +4634,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             if (_extraData is { Length: > 0 })
             {
                 var extraDataPtr = (byte*)ffmpeg.av_mallocz((ulong)_extraData.Length);
+                if (extraDataPtr is null) throw new InvalidOperationException("av_mallocz failed for codec extradata.");
                 Marshal.Copy(_extraData, 0, (IntPtr)extraDataPtr, _extraData.Length);
                 stream->codecpar->extradata = extraDataPtr;
                 stream->codecpar->extradata_size = _extraData.Length;
@@ -4519,7 +4665,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // packets came from CopyWindowUnderLock and so are already
                     // exact-sized, but reading the field keeps this correct if
                     // a pooled packet ever reaches here.
-                    ffmpeg.av_new_packet(packet, ringPacket.Length);
+                    var newPacketResult = ffmpeg.av_new_packet(packet, ringPacket.Length);
+                    if (newPacketResult < 0 || packet->data is null)
+                        throw new InvalidOperationException($"av_new_packet failed ({newPacketResult}).");
                     Marshal.Copy(ringPacket.Data, 0, (IntPtr)packet->data, ringPacket.Length);
                     packet->pts = packet->dts = ringPacket.PtsMs - basePts;
                     // Explicit, because variable-frame-rate packets can be far

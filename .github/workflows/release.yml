@@ -29,15 +29,29 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      # Untrusted values reach PowerShell through env: only. Interpolating
+      # ${{ inputs.* }} directly into a run: block splices the caller's text into
+      # the script itself, so a dispatch input containing a quote can execute
+      # arbitrary commands in a job that holds release secrets.
       - name: Resolve version
         id: version
         shell: pwsh
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          $tag = "${{ inputs.tag }}"
-          if ([string]::IsNullOrWhiteSpace($tag)) { $tag = "${{ github.ref_name }}" }
+          $tag = $env:INPUT_TAG
+          if ([string]::IsNullOrWhiteSpace($tag)) { $tag = $env:REF_NAME }
+          if ($tag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$') {
+            throw "Refusing to build tag '$tag': expected vMAJOR.MINOR.PATCH."
+          }
           $version = $tag.TrimStart("v")
+          # .NET's $ also matches before a single trailing newline, so the pattern
+          # above would accept "v1.0.0`n". A newline here would let the value inject
+          # further keys into GITHUB_OUTPUT.
+          if ($tag.Contains("`n") -or $tag.Contains("`r")) { throw "Tag contains a line break." }
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "version=$version" >> $env:GITHUB_OUTPUT
 
@@ -75,7 +89,7 @@ jobs:
           )
 
           for ($attempt = 1; $attempt -le 3; $attempt++) {
-            choco install nsis wixtoolset 7zip -y --no-progress
+            choco install nsis wixtoolset 7zip -y --no-progress --requirechecksums
             if (($requiredTools | Where-Object { -not (Test-Path $_) }).Count -eq 0) {
               exit 0
             }
@@ -169,6 +183,18 @@ jobs:
           & "$wixBin\light.exe" @lightArgs
           if ($LASTEXITCODE -ne 0) { throw "light.exe failed with exit code $LASTEXITCODE" }
 
+      # NOTE: the release is not fully published until its signed manifest is uploaded.
+      # ClypDat's updater verifies ClypDat-Release.manifest.json against a key pinned in
+      # the binary, and once that key is set a release without the manifest is REFUSED by
+      # the updater. Signing is deliberately not done here: the private key must never
+      # reach CI, because a key that lives where the download URL is served proves
+      # nothing. After this workflow finishes, run locally:
+      #
+      #   gh release download <tag> --repo ClypLabs/ClypDat --dir .\artifacts
+      #   .\eng\Sign-ReleaseManifest.ps1 -Tag <tag> -ArtifactDirectory .\artifacts -PrivateKeyPath <offline key>
+      #   gh release upload <tag> .\artifacts\ClypDat-Release.manifest.json .\artifacts\ClypDat-Release.manifest.sig --repo ClypLabs/ClypDat
+      #
+      # Then re-run the mirror sync so the mirror serves the manifest too.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

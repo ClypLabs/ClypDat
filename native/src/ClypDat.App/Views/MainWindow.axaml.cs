@@ -552,12 +552,22 @@ public sealed partial class MainWindow : Window
 
     private async void UpdateDetectedGame()
     {
+        // async void with no catch: an exception here is rethrown on the captured
+        // context and terminates the process. Detect() does EnumWindows, OpenProcess,
+        // QueryFullProcessImageName, NtQueryInformationProcess and registry/Steam/Epic
+        // library scanning - all of it throwable I/O - and this runs from a
+        // DispatcherTimer tick. The finally below only reset the in-flight flag.
         if (ViewModel is null || _gameDetectionInFlight) return;
         _gameDetectionInFlight = true;
         GameDetection detection;
         try
         {
             detection = await Task.Run(() => _gameDetector.Detect());
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Active game detection failed", error);
+            return;
         }
         finally
         {
@@ -4339,7 +4349,16 @@ public sealed partial class MainWindow : Window
             if (isFileTitle && string.IsNullOrWhiteSpace(newTitle)) return;
             if (newTitle == originalText) return;
 
-            await ApplyClipTitleRenameAsync(clip, newTitle);
+            // Same async void hazard: the rename does File.Move and sidecar writes,
+            // and an IOException escaping here would take the process down.
+            try
+            {
+                await ApplyClipTitleRenameAsync(clip, newTitle);
+            }
+            catch (Exception error)
+            {
+                AppLog.Error("Inline clip title rename failed", error);
+            }
         }
 
         _resolveActiveInlineTitleEdit = Resolve;
@@ -5123,7 +5142,8 @@ public sealed partial class MainWindow : Window
         if (_cs2GsiListener.IsListening) return;
 
         var port = ViewModel.Settings.AutoClipping.Games["cs2"].ListenerPort;
-        if (!_cs2GsiListener.Start(port))
+        var cs2Token = GsiAuth.EnsureToken(ViewModel.Settings, ViewModel.SaveSettings);
+        if (!_cs2GsiListener.Start(port, cs2Token))
         {
             game.StatusText = $"Listener couldn't start on port {port} - it may already be in use.";
             return;
@@ -5131,7 +5151,7 @@ public sealed partial class MainWindow : Window
 
         _cs2GsiListener.AutoClipPending += Cs2GsiListener_OnAutoClipPending;
         _cs2GsiListener.AutoClipReady += Cs2GsiListener_OnAutoClipReady;
-        Cs2GsiDeployer.TryDeploy(port, out var statusMessage);
+        Cs2GsiDeployer.TryDeploy(port, cs2Token, out var statusMessage);
         game.StatusText = statusMessage;
     }
 
@@ -5148,10 +5168,10 @@ public sealed partial class MainWindow : Window
         if (!_dotaGsiListener.IsListening)
         {
             var port = ViewModel.Settings.AutoClipping.Games["dota2"].ListenerPort;
-            if (!_dotaGsiListener.Start(port)) { game.StatusText = $"Listener couldn't start on port {port}."; return; }
+            if (!_dotaGsiListener.Start(port, GsiAuth.EnsureToken(ViewModel.Settings, ViewModel.SaveSettings))) { game.StatusText = $"Listener couldn't start on port {port}."; return; }
             _dotaGsiListener.AutoClipPending += AutoClip_OnPending; _dotaGsiListener.AutoClipReady += AutoClip_OnReady;
         }
-        DotaGsiDeployer.TryDeploy(ViewModel.Settings.AutoClipping.Games["dota2"].ListenerPort, out var status); game.StatusText = status;
+        DotaGsiDeployer.TryDeploy(ViewModel.Settings.AutoClipping.Games["dota2"].ListenerPort, GsiAuth.EnsureToken(ViewModel.Settings, ViewModel.SaveSettings), out var status); game.StatusText = status;
     }
 
     private void UpdateLeagueAutoClipState()
@@ -5189,7 +5209,7 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null) return;
         var port = ViewModel.Settings.AutoClipping.Games["dota2"].ListenerPort;
-        DotaGsiDeployer.TryDeploy(port, out var status);
+        DotaGsiDeployer.TryDeploy(port, GsiAuth.EnsureToken(ViewModel.Settings, ViewModel.SaveSettings), out var status);
         if (ViewModel.FindAutoClipGame("dota2") is { } game) game.StatusText = status;
     }
 

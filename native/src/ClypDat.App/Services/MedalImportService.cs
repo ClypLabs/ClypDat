@@ -366,6 +366,10 @@ public static class MedalImportService
         {
             var videoPath = reader.GetString(1);
             if (!seenPaths.Add(videoPath)) continue;
+            // Medal's database lives under %APPDATA%, so it is per-user rather than
+            // plantable by another account the way the ProgramData one is - but the
+            // paths inside it still drive a copy or a move, so they get the same check.
+            if (!ImportSourceGuard.IsAllowedSourcePath(videoPath)) continue;
             if (!File.Exists(videoPath)) continue;
 
             var thumbnailPath = reader.IsDBNull(2) ? null : reader.GetString(2);

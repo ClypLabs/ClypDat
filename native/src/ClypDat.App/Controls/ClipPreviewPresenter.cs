@@ -213,6 +213,20 @@ internal sealed class SoftwareClipPreviewAdapter(ClipPreviewPresenter owner) : I
 
     public async ValueTask<PreviewPresentResult> PresentAsync(ReadOnlyMemory<byte> rgba, PixelSize size, CancellationToken cancellationToken)
     {
+        // The copies below read size.Width * size.Height * 4 bytes from rgba with no
+        // reference to its actual length. It is correct today - the only producer
+        // allocates exactly that, fills every slot, passes the same size, and pins
+        // ffmpeg to scale+pad with -pix_fmt rgba - but this is the path that consumes
+        // decoder output from clips the user may have imported, so it should not depend
+        // on a caller invariant to stay in bounds.
+        var requiredBytes = (long)size.Width * size.Height * 4;
+        if (size.Width <= 0 || size.Height <= 0 || rgba.Length < requiredBytes)
+        {
+            throw new ArgumentException(
+                $"Preview buffer is {rgba.Length} bytes; {size.Width}x{size.Height} RGBA needs {requiredBytes}.",
+                nameof(rgba));
+        }
+
         var started = Stopwatch.GetTimestamp();
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
@@ -321,6 +335,20 @@ internal sealed class GpuClipPreviewAdapter : IClipPreviewPresenter
 
     public async ValueTask<PreviewPresentResult> PresentAsync(ReadOnlyMemory<byte> rgba, PixelSize size, CancellationToken cancellationToken)
     {
+        // The copies below read size.Width * size.Height * 4 bytes from rgba with no
+        // reference to its actual length. It is correct today - the only producer
+        // allocates exactly that, fills every slot, passes the same size, and pins
+        // ffmpeg to scale+pad with -pix_fmt rgba - but this is the path that consumes
+        // decoder output from clips the user may have imported, so it should not depend
+        // on a caller invariant to stay in bounds.
+        var requiredBytes = (long)size.Width * size.Height * 4;
+        if (size.Width <= 0 || size.Height <= 0 || rgba.Length < requiredBytes)
+        {
+            throw new ArgumentException(
+                $"Preview buffer is {rgba.Length} bytes; {size.Width}x{size.Height} RGBA needs {requiredBytes}.",
+                nameof(rgba));
+        }
+
         if (_disposed || _interop.IsLost) throw new InvalidOperationException("Avalonia composition device is unavailable.");
         if (!_attached) return new PreviewPresentResult(Path, TimeSpan.Zero);
         var started = Stopwatch.GetTimestamp();

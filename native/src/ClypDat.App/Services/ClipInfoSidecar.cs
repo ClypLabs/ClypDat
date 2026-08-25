@@ -70,7 +70,8 @@ public static class ClipInfoSidecar
         if (!File.Exists(path)) return null;
         try
         {
-            return JsonSerializer.Deserialize<ClipInfo>(File.ReadAllText(path));
+            var json = ReadBounded(path);
+            return json is null ? null : JsonSerializer.Deserialize<ClipInfo>(json);
         }
         catch (Exception error)
         {
@@ -90,5 +91,16 @@ public static class ClipInfoSidecar
         {
             AppLog.Error($"Clip info sidecar delete failed: {clipPath}", error);
         }
+    }
+
+    // Sidecars are a few hundred bytes. A library refresh reads one per clip, so an
+    // oversized file - however it got there - should be skipped rather than loaded.
+    private const long MaximumSidecarBytes = 64 * 1024;
+
+    private static string? ReadBounded(string path)
+    {
+        var info = new FileInfo(path);
+        if (!info.Exists || info.Length > MaximumSidecarBytes) return null;
+        return File.ReadAllText(path);
     }
 }

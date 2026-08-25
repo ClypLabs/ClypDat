@@ -46,11 +46,46 @@ public static class CaptureDiagnosticBundle
         JsonSerializer.Serialize(stream, value, new JsonSerializerOptions { WriteIndented = true });
     }
 
+    // Diagnostics are meant to be handed to someone else, so scrubbing has to cover more
+    // than the profile path. Logs carry the library and full-session folders (often on a
+    // different drive entirely, so %USERPROFILE% never matched them), the machine name,
+    // and UNC server names for network libraries.
+    //
+    // Longest-first ordering matters: replacing a short value that is a substring of a
+    // longer path first would leave the longer one unscrubbed.
     private static string Scrub(string value)
     {
-        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        if (!string.IsNullOrWhiteSpace(profile)) value = value.Replace(profile, "%USERPROFILE%", StringComparison.OrdinalIgnoreCase);
-        if (!string.IsNullOrWhiteSpace(Environment.UserName)) value = value.Replace(Environment.UserName, "%USERNAME%", StringComparison.OrdinalIgnoreCase);
+        var replacements = new List<(string Value, string Token)>();
+
+        void Add(string? candidate, string token)
+        {
+            if (!string.IsNullOrWhiteSpace(candidate) && candidate.Length > 2) replacements.Add((candidate, token));
+        }
+
+        try
+        {
+            var settings = ClypDat.Core.Settings.AppSettingsStore.Load();
+            Add(settings.LibraryFolder, "%LIBRARY%");
+            Add(settings.FullSessionRecordingFolder, "%FULLSESSION%");
+        }
+        catch
+        {
+            // Diagnostics must not fail because settings could not be read.
+        }
+
+        Add(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "%USERPROFILE%");
+        Add(Environment.MachineName, "%MACHINE%");
+        Add(Environment.UserName, "%USERNAME%");
+
+        foreach (var (candidate, token) in replacements.OrderByDescending(pair => pair.Value.Length))
+        {
+            value = value.Replace(candidate, token, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Any remaining UNC prefix names a server and share this machine can reach.
+        value = System.Text.RegularExpressions.Regex.Replace(
+            value, @"\\\\[^\\\s""']+\\[^\\\s""']+", "%UNC%");
+
         return value;
     }
 }

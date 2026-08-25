@@ -135,9 +135,9 @@ build_windows_installer:
       -p:Version=$version -o native\publish\win-x64-folder --nologo
     - .\eng\Test-SelfContainedPublish.ps1 -PublishDirectory native\publish\win-x64-folder
     - >-
-      choco install nsis -y --no-progress
+      choco install nsis -y --no-progress --requirechecksums
     - >-
-      choco install wixtoolset 7zip -y --no-progress
+      choco install wixtoolset 7zip -y --no-progress --requirechecksums
     - |
       if (-not (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe")) { throw "NSIS was not installed." }
       if (-not (Test-Path "C:\Program Files\7-Zip\7z.exe")) { throw "7-Zip was not installed." }

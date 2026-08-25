@@ -54,14 +54,24 @@ public sealed class GlobalHotkeyService : IDisposable
 
     public void Dispose()
     {
-        if (_hwnd != IntPtr.Zero)
-        {
-            UnregisterHotKey(_hwnd, HotkeyId);
-        }
-
+        // UnregisterHotKey is thread-affine to the window that owns the registration -
+        // the same reason SetHotkey posts a message instead of calling it directly.
+        // Calling it here, from the caller's thread, was a cross-thread Win32 call, and
+        // clearing _hwnd immediately afterwards meant the message loop's own
+        // DestroyWindow(_hwnd) then ran against IntPtr.Zero, leaking the message-only
+        // window and its registration for the life of the process.
+        //
+        // Post WM_QUIT and let the owning thread unregister and destroy on its way out,
+        // then join it before clearing the fields.
+        var thread = _thread;
         if (_threadId != 0)
         {
             PostThreadMessage(_threadId, WmQuit, IntPtr.Zero, IntPtr.Zero);
+        }
+
+        if (thread is not null && thread != Thread.CurrentThread)
+        {
+            thread.Join(TimeSpan.FromSeconds(2));
         }
 
         _thread = null;
@@ -91,8 +101,10 @@ public sealed class GlobalHotkeyService : IDisposable
             DispatchMessage(ref msg);
         }
 
+        // Unregister on the owning thread, immediately before destroying its window.
         if (_hwnd != IntPtr.Zero)
         {
+            UnregisterHotKey(_hwnd, HotkeyId);
             DestroyWindow(_hwnd);
         }
     }

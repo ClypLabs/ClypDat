@@ -9,7 +9,7 @@ namespace ClypDat.App.Services;
 public static class DevUpdateService
 {
     private const string ReleaseApiUrl = "https://api.github.com/repos/ClypLabs/ClypDat/releases/tags/dev-channel";
-    private const string Owner = "ClypDat";
+    private const string Owner = "ClypLabs";
     private const string Repository = "ClypDat";
 
     public static void StartBackgroundCheck()
@@ -33,15 +33,19 @@ public static class DevUpdateService
         var manifestAsset = Find(release, DevChannelConstants.ManifestAssetName);
         var signatureAsset = Find(release, DevChannelConstants.SignatureAssetName);
         var archiveAsset = Find(release, DevChannelConstants.ArchiveAssetName);
-        var manifestBytes = await client.GetByteArrayAsync(manifestAsset.DownloadUrl, cancellationToken);
-        var signatureBytes = await client.GetByteArrayAsync(signatureAsset.DownloadUrl, cancellationToken);
+        // The archive download enforced host + path prefix + size; these two did not,
+        // so the manifest and its signature - the inputs the whole dev-channel trust
+        // model rests on - were fetched from whatever URL the release metadata named,
+        // with no size bound.
+        var manifestBytes = await GetTrustedAssetAsync(client, manifestAsset.DownloadUrl, MaximumManifestBytes, cancellationToken);
+        var signatureBytes = await GetTrustedAssetAsync(client, signatureAsset.DownloadUrl, MaximumSignatureBytes, cancellationToken);
         var manifest = DevPackageVerifier.VerifyManifest(manifestBytes, signatureBytes);
         if (manifest.BuildIdSource != $"{manifest.ClypDatCommit}-{manifest.AvaloniaCommit[..7]}")
             throw new InvalidDataException("Dev manifest build identity is inconsistent.");
 
         var root = AppDataPaths.Root;
-        var versionsRoot = Path.Combine(root, "versions");
-        var statePath = Path.Combine(root, "state.json");
+        var versionsRoot = DevChannelPaths.VersionsRootFor(root);
+        var statePath = DevChannelPaths.StatePathFor(root);
         var current = DevInstallStateStore.Load(statePath);
         if (string.Equals(current.CurrentBuildId, manifest.BuildId, StringComparison.Ordinal) ||
             string.Equals(current.PendingBuildId, manifest.BuildId, StringComparison.Ordinal)) return;
@@ -58,12 +62,45 @@ public static class DevUpdateService
         DevInstallStateStore.SaveAtomic(statePath, current with { PendingBuildId = manifest.BuildId });
     }
 
-    private static async Task DownloadAsync(HttpClient client, string url, string path, long expectedSize, CancellationToken cancellationToken)
+    // A manifest is a few hundred bytes and a signature is a base64 RSA-3072 block;
+    // these caps are orders of magnitude above either.
+    private const long MaximumManifestBytes = 64 * 1024;
+    private const long MaximumSignatureBytes = 8 * 1024;
+
+    private static Uri EnsureTrustedAssetUrl(string url)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps ||
             !string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase) ||
             !uri.AbsolutePath.StartsWith($"/{Owner}/{Repository}/releases/download/", StringComparison.Ordinal))
-            throw new InvalidDataException("Dev archive URL is not trusted.");
+            throw new InvalidDataException("Dev asset URL is not trusted.");
+        return uri;
+    }
+
+    private static async Task<byte[]> GetTrustedAssetAsync(HttpClient client, string url, long maximumBytes, CancellationToken cancellationToken)
+    {
+        var uri = EnsureTrustedAssetUrl(url);
+        using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        if (response.Content.Headers.ContentLength > maximumBytes)
+            throw new InvalidDataException($"Dev asset {uri.AbsolutePath} exceeds {maximumBytes} bytes.");
+
+        await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[8192];
+        int read;
+        while ((read = await source.ReadAsync(chunk, cancellationToken)) > 0)
+        {
+            if (buffer.Length + read > maximumBytes)
+                throw new InvalidDataException($"Dev asset {uri.AbsolutePath} exceeds {maximumBytes} bytes.");
+            buffer.Write(chunk, 0, read);
+        }
+
+        return buffer.ToArray();
+    }
+
+    private static async Task DownloadAsync(HttpClient client, string url, string path, long expectedSize, CancellationToken cancellationToken)
+    {
+        var uri = EnsureTrustedAssetUrl(url);
         var partial = path + ".partial";
         try
         {

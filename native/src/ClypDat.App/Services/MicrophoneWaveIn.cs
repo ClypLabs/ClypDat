@@ -86,7 +86,14 @@ internal sealed class MicrophoneWaveIn : IWaveIn
     public void Dispose()
     {
         StopRecording();
-        _audioClient.Dispose();
+
+        // Deliberately NOT disposing _audioClient. MMDevice.AudioClient lazily creates
+        // and CACHES the client, handing back the same instance on every access, and
+        // the MMDevice owns it. This type is handed a device it does not own - the
+        // caller keeps using it afterwards (device.ID, device.FriendlyName) - so
+        // disposing the client left that MMDevice holding a released COM wrapper, and
+        // every later AudioClient access on it returned a disposed object. That
+        // silently broke microphone capture for the rest of the session.
     }
 
     private void CaptureLoop(CancellationToken token)

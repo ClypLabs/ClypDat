@@ -17,7 +17,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     private Task? _reader;
     private ReplayCaptureHealth _health = ReplayCaptureHealth.Unknown("Worker");
     private bool _isRecording;
-    private bool _disposed;
+    private volatile bool _disposed;
 
     public CaptureWorkerProxy(Func<ReplayBufferConfig> configProvider) => _configProvider = configProvider;
 
@@ -100,10 +100,14 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
 
     public void Dispose()
     {
+        // SendBestEffortAsync is fire-and-forget and may be awaiting either gate right
+        // now; disposing them underneath it throws ObjectDisposedException on a task
+        // nothing observes. _disposed is set first so new work bails out, and the gates
+        // are deliberately NOT disposed - a SemaphoreSlim holds no unmanaged handle
+        // unless its AvailableWaitHandle was touched, which this type never does, so
+        // leaving them to the GC is free and removes the race entirely.
         _disposed = true;
         Disconnect();
-        _connectionGate.Dispose();
-        _writeGate.Dispose();
     }
 
     private async Task EnsureAttachedAsync(CancellationToken cancellationToken)
@@ -163,6 +167,10 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
 
     private async Task<T> SendAsync<T>(string type, object payload, CancellationToken cancellationToken)
     {
+        // Snapshot the pipe: the read loop nulls _pipe on disconnect, and Disconnect can
+        // dispose it while this send is in flight. ObjectDisposedException is surfaced as
+        // IOException so callers see the one failure shape they already handle.
+        if (_disposed) throw new IOException("Capture worker proxy is disposed.");
         var pipe = _pipe ?? throw new IOException("Capture worker pipe is not connected.");
         var requestId = Guid.NewGuid();
         var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -173,6 +181,10 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
             try
             {
                 await CaptureWorkerPipe.WriteAsync(pipe, type, requestId, payload, cancellationToken).ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException error)
+            {
+                throw new IOException("Capture worker pipe was disposed mid-send.", error);
             }
             finally
             {

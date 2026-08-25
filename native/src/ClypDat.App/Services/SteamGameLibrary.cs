@@ -194,7 +194,13 @@ public sealed class SteamGameLibrary
                 if (!values.TryGetValue("appid", out var idText) || !int.TryParse(idText, out var appId) ||
                     !values.TryGetValue("name", out var name) || !values.TryGetValue("installdir", out var installDir) ||
                     string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(installDir)) continue;
+                // installdir comes straight out of a third-party appmanifest_*.acf, and
+                // Path.Combine happily accepts both "..\..\" and a rooted path (which
+                // discards the earlier segments entirely). Mis-attributing a process to a
+                // game only changes a clip's folder name, but the containment check
+                // already exists a few lines down - there is no reason not to use it.
                 var installPath = Path.Combine(steamApps, "common", installDir);
+                if (!IsUnderPath(installPath, Path.Combine(steamApps, "common"))) continue;
                 if (Directory.Exists(installPath)) games.Add(new SteamGameInstall(appId, name, installPath));
             }
         }

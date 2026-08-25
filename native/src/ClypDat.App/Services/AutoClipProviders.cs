@@ -10,12 +10,14 @@ public sealed record AutoClipRequest(string GameId, string GameName, string Even
 public sealed class DotaGsiListener : IDisposable
 {
     private static readonly TimeSpan Padding = TimeSpan.FromSeconds(4);
+    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan MultiKillQuietWindow = TimeSpan.FromSeconds(18);
     private readonly Func<AutoClipGameSettings> _settings;
     private readonly object _gate = new();
     private HttpListener? _listener;
     private CancellationTokenSource? _cts;
     private bool _seeded;
+    private string _authToken = string.Empty;
     private int _kills, _deaths, _assists;
     private readonly List<DateTime> _killTimes = new();
     private readonly List<AutoClipEvent> _pendingEvents = new();
@@ -30,9 +32,10 @@ public sealed class DotaGsiListener : IDisposable
     public event EventHandler<AutoClipRequest>? AutoClipReady;
     public bool IsListening => _listener?.IsListening == true;
 
-    public bool Start(int port)
+    public bool Start(int port, string authToken)
     {
         Stop();
+        _authToken = authToken;
         var listener = new HttpListener();
         listener.Prefixes.Add($"http://127.0.0.1:{port}/");
         try { listener.Start(); }
@@ -52,21 +55,43 @@ public sealed class DotaGsiListener : IDisposable
     {
         while (!token.IsCancellationRequested && listener.IsListening)
         {
-            try
+            HttpListenerContext context;
+            // GetContextAsync sat inside the try with no break, so a persistently
+            // failing accept spun a hot logging loop instead of ending the listener.
+            try { context = await listener.GetContextAsync(); }
+            catch { break; }
+
+            _ = Task.Run(async () =>
             {
-                var context = await listener.GetContextAsync();
-                using var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding);
-                var body = await reader.ReadToEndAsync(token);
-                context.Response.StatusCode = 200; context.Response.Close(); Process(body);
-            }
-            catch (OperationCanceledException) { break; }
-            catch (Exception error) { AppLog.Error("Dota GSI payload processing failed", error); }
+                try
+                {
+                    if (!GsiAuth.IsRequestShapeValid(context.Request))
+                    {
+                        context.Response.StatusCode = 403; context.Response.Close(); return;
+                    }
+
+                    using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                    requestTimeout.CancelAfter(RequestTimeout);
+
+                    var body = await GsiAuth.ReadBoundedBodyAsync(context.Request, requestTimeout.Token);
+                    if (body is null)
+                    {
+                        context.Response.StatusCode = 413; context.Response.Close(); return;
+                    }
+
+                    context.Response.StatusCode = 200; context.Response.Close(); Process(body);
+                }
+                catch (OperationCanceledException) { try { context.Response.Abort(); } catch { } }
+                catch (Exception error) { AppLog.Error("Dota GSI payload processing failed", error); }
+            }, token);
         }
     }
 
     private void Process(string json)
     {
         using var doc = JsonDocument.Parse(json); var root = doc.RootElement;
+        // This listener had no sender check of any kind before the token.
+        if (!GsiAuth.IsPayloadAuthorized(root, _authToken)) return;
         if (!root.TryGetProperty("player", out var player)) return;
         var now = MonotonicClock.UtcNow;
         var kills = GetInt(player, "kills");

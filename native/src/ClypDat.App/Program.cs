@@ -17,8 +17,29 @@ internal static class Program
     // Mutex enforces one instance; a launch that loses the race just asks the
     // existing instance to show itself and exits immediately instead of
     // starting a second capture pipeline.
-    private const string SingleInstanceMutexName = "ClypDat-Recorder-SingleInstance-9F3D2A61";
-    private const string ShowRequestEventName = "ClypDat-Recorder-ShowRequest-9F3D2A61";
+    // Suffixed with the current user's SID. These are session-local names with no ACL,
+    // so without a per-user suffix another ACCOUNT on the same machine could create them
+    // first and make every ClypDat launch believe an instance was already running - a
+    // silent denial of the app. A process running as the SAME user can still squat them,
+    // which is not solvable by naming; such a process can already replace the executable.
+    private static readonly string UserScopeSuffix = GetUserScopeSuffix();
+    private static readonly string SingleInstanceMutexName = $"ClypDat-Recorder-SingleInstance-9F3D2A61-{UserScopeSuffix}";
+    private static readonly string ShowRequestEventName = $"ClypDat-Recorder-ShowRequest-9F3D2A61-{UserScopeSuffix}";
+
+    private static string GetUserScopeSuffix()
+    {
+        try
+        {
+            var sid = System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value;
+            if (!string.IsNullOrEmpty(sid)) return sid;
+        }
+        catch
+        {
+            // Fall through to the machine-wide name below.
+        }
+
+        return "default";
+    }
 
     [STAThread]
     public static void Main(string[] args)

@@ -8,6 +8,17 @@ public static class AppSettingsStore
 
     public static string SettingsPath => Path.Combine(AppDataPaths.Root, "settings.json");
 
+    /// <summary>
+    /// Set when settings.json existed but could not be read or parsed - as opposed to
+    /// simply not existing yet. Callers can surface this; a silent reset looks identical
+    /// to a fresh install from the UI, while actually having discarded the library
+    /// folder, hotkeys, quotas and the GSI auth token.
+    /// </summary>
+    public static string? LastLoadError { get; private set; }
+
+    /// <summary>Path the previous settings file was preserved to when it could not be read.</summary>
+    public static string? PreservedUnreadablePath { get; private set; }
+
     public static AppSettings Load()
     {
         try
@@ -109,9 +120,36 @@ public static class AppSettingsStore
             if (migrated || replayFrameRateChanged) Save(settings);
             return settings;
         }
+        catch (Exception error)
+        {
+            // A file that exists but will not parse is NOT the same as no file at all.
+            // Returning defaults here and letting the next Save() write over the
+            // original destroyed the user's settings permanently, with nothing shown.
+            // Preserve whatever is there before anything overwrites it, and record why.
+            LastLoadError = error.Message;
+            PreservedUnreadablePath = TryPreserveUnreadableSettings();
+            return new AppSettings();
+        }
+    }
+
+    // Moves an unreadable settings.json aside so the next Save cannot destroy it.
+    // Best-effort: if this fails there is nothing more useful to do than continue with
+    // defaults, which is what the caller does anyway.
+    private static string? TryPreserveUnreadableSettings()
+    {
+        try
+        {
+            if (!File.Exists(SettingsPath)) return null;
+            var stamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
+            var preserved = Path.Combine(
+                Path.GetDirectoryName(SettingsPath) ?? AppDataPaths.Root,
+                $"settings.unreadable-{stamp}.json");
+            File.Copy(SettingsPath, preserved, overwrite: false);
+            return preserved;
+        }
         catch
         {
-            return new AppSettings();
+            return null;
         }
     }
 
@@ -182,7 +220,14 @@ public static class AppSettingsStore
         {
             var folder = Path.GetDirectoryName(SettingsPath);
             if (!string.IsNullOrWhiteSpace(folder)) Directory.CreateDirectory(folder);
-            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
+
+            // Write-then-rename rather than writing in place. A crash or power loss
+            // during a direct WriteAllText leaves settings.json truncated, which fails
+            // to parse on next launch and - before the catch above was fixed - silently
+            // reset every setting. Same shape MedalImportHistoryStore already uses.
+            var temporaryPath = SettingsPath + ".tmp";
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(settings, JsonOptions));
+            File.Move(temporaryPath, SettingsPath, overwrite: true);
         }
         catch
         {

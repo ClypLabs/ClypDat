@@ -4870,7 +4870,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var oldStem = Path.GetFileNameWithoutExtension(oldPath);
         var strippedOld = ClipFileNaming.StripTimestampSuffix(oldStem);
         var suffix = oldStem[strippedOld.Length..];
-        var newStem = sanitizedTitle + suffix;
+        // SanitizeStem, not just SanitizeSegment: the rename path skipped the
+        // reserved-device-name and length guards entirely, so renaming a clip to
+        // "LPT1" or to a 400-character title produced a name File.Move would choke on.
+        var newStem = ClipFileNaming.SanitizeStem(sanitizedTitle + suffix);
         var directory = Path.GetDirectoryName(oldPath) ?? Settings.LibraryFolder;
         var newPath = ClipFileNaming.BuildUniquePath(directory, newStem + Path.GetExtension(oldPath));
 

@@ -49,7 +49,23 @@ Function .onInit
   ${GetParameters} $R0
   ${GetOptions} "$R0" "/UPDATEPID=" $UpdateProcessId
   ${If} $UpdateProcessId != ""
-    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Wait-Process -Id $UpdateProcessId -ErrorAction SilentlyContinue"'
+    ; /UPDATEPID= is interpolated into the -Command string below, and GetOptions
+    ; terminates its value at whitespace - which PowerShell does not need. A value
+    ; like "1;Start-Process(('calc'))" would run as a second statement, turning this
+    ; user-trusted installer into an arbitrary-code launcher for anyone who can
+    ; invoke it. ClypDat itself only ever passes Environment.ProcessId.
+    ;
+    ; IntOp parses the leading integer and stops, so round-tripping the value and
+    ; comparing it as a string rejects anything not purely digits: "1;calc" becomes
+    ; "1", which no longer matches the original.
+    IntOp $R1 $UpdateProcessId + 0
+    ${If} "$R1" != "$UpdateProcessId"
+      DetailPrint "Ignoring malformed /UPDATEPID value."
+    ${ElseIf} $R1 <= 0
+      DetailPrint "Ignoring out-of-range /UPDATEPID value."
+    ${Else}
+      nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Wait-Process -Id $R1 -ErrorAction SilentlyContinue"'
+    ${EndIf}
   ${EndIf}
 FunctionEnd
 
@@ -114,6 +130,25 @@ Section "ClypDat" SecMain
 SectionEnd
 
 Section "Uninstall"
+  ; $INSTDIR comes from MUI_PAGE_DIRECTORY, so the user can point the install at any
+  ; folder - and this recursive delete would then take that whole folder with it.
+  ; Installing to C:\ or to Program Files and later uninstalling would have deleted
+  ; far more than ClypDat. Only remove a directory that actually looks like ours.
+  StrCpy $0 "$INSTDIR" "" -7
+  ${If} $INSTDIR == ""
+  ${OrIf} $INSTDIR == "$PROGRAMFILES64"
+  ${OrIf} $INSTDIR == "$PROGRAMFILES"
+  ${OrIf} $INSTDIR == "$WINDIR"
+  ${OrIf} $INSTDIR == "$SYSDIR"
+  ${OrIf} $INSTDIR == "$DESKTOP"
+  ${OrIf} $INSTDIR == "$DOCUMENTS"
+  ${OrIf} $INSTDIR == "$LOCALAPPDATA"
+  ${OrIf} $INSTDIR == "$APPDATA"
+  ${OrIf} $INSTDIR == "$PROFILE"
+  ${OrIf} $0 != "ClypDat"
+    MessageBox MB_ICONSTOP "Refusing to uninstall from $INSTDIR - it is not a ClypDat install directory. Remove the folder by hand if you are sure."
+    Abort
+  ${EndIf}
   RMDir /r "$INSTDIR"
   Delete "$SMPROGRAMS\ClypDat\ClypDat.lnk"
   Delete "$SMPROGRAMS\ClypDat\Uninstall ClypDat.lnk"

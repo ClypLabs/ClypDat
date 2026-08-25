@@ -1318,8 +1318,11 @@ public sealed class MediaProbeService
             // Priority is a nice-to-have; never let it block the probe.
         }
 
-        var outputTask = process.StandardOutput.ReadToEndAsync();
-        var errorTask = process.StandardError.ReadToEndAsync();
+        // Bounded reads. ReadToEndAsync has no cap, and these parse output produced from
+        // media the user may have imported - a file that makes ffmpeg emit endlessly
+        // would otherwise be buffered in full.
+        var outputTask = ReadBoundedAsync(process.StandardOutput, MaximumProcessOutputBytes);
+        var errorTask = ReadBoundedAsync(process.StandardError, MaximumProcessOutputBytes);
         try
         {
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
@@ -1330,6 +1333,32 @@ public sealed class MediaProbeService
             throw;
         }
         return new ProcessResult(process.ExitCode, await outputTask.ConfigureAwait(false), await errorTask.ConfigureAwait(false));
+    }
+
+    // ffprobe JSON for a long file is well under a megabyte; 16MB is a generous ceiling
+    // that still bounds a runaway process.
+    private const int MaximumProcessOutputBytes = 16 * 1024 * 1024;
+
+    private static async Task<string> ReadBoundedAsync(StreamReader reader, int maximumBytes)
+    {
+        var builder = new System.Text.StringBuilder();
+        var buffer = new char[8192];
+        int read;
+        while ((read = await reader.ReadAsync(buffer).ConfigureAwait(false)) > 0)
+        {
+            if (builder.Length + read > maximumBytes)
+            {
+                // Keep draining so the child does not block on a full pipe, but stop
+                // accumulating. Callers treat oversized output as a failed probe.
+                builder.Append(buffer, 0, Math.Max(0, maximumBytes - builder.Length));
+                while (await reader.ReadAsync(buffer).ConfigureAwait(false) > 0) { }
+                break;
+            }
+
+            builder.Append(buffer, 0, read);
+        }
+
+        return builder.ToString();
     }
 
     private static void TryKill(Process process)

@@ -12,7 +12,18 @@ internal static class H264HardwareDecodeProbe
 {
     private const int ProbeTimeoutMilliseconds = 250;
     private const int MaximumPacketPrefixBytes = 64 * 1024;
+    // Bounded: the key is path|length|mtime, so a library browsed over a long session
+    // - or one whose clips are re-encoded, changing their mtime - grows this
+    // indefinitely for the life of the process. Cheap eviction: once the cap is hit,
+    // clear and start again. The probe costs one bounded ffprobe run to repopulate.
+    private const int MaximumCacheEntries = 4096;
     private static readonly ConcurrentDictionary<string, bool> Cache = new(StringComparer.OrdinalIgnoreCase);
+
+    private static void CacheResult(string key, bool value)
+    {
+        if (Cache.Count >= MaximumCacheEntries) Cache.Clear();
+        Cache[key] = value;
+    }
 
     internal static bool HasOnlyIdrRandomAccessPoints(string path)
     {
@@ -20,7 +31,10 @@ internal static class H264HardwareDecodeProbe
         {
             var info = new FileInfo(path);
             var key = $"{Path.GetFullPath(path)}|{info.Length}|{info.LastWriteTimeUtc.Ticks}";
-            return Cache.GetOrAdd(key, _ => Probe(path));
+            if (Cache.TryGetValue(key, out var cached)) return cached;
+            var probed = Probe(path);
+            CacheResult(key, probed);
+            return probed;
         }
         catch
         {
@@ -106,6 +120,10 @@ internal static class H264HardwareDecodeProbe
         if (!process.WaitForExit(ProbeTimeoutMilliseconds))
         {
             try { process.Kill(entireProcessTree: true); } catch { }
+            // Observe both reads before leaving. Returning without touching them left
+            // faulted tasks for the finalizer thread to rethrow as unobserved exceptions.
+            try { outputTask.GetAwaiter().GetResult(); } catch { }
+            try { errorTask.GetAwaiter().GetResult(); } catch { }
             return null;
         }
         var output = outputTask.GetAwaiter().GetResult();
@@ -164,7 +182,13 @@ internal static class H264HardwareDecodeProbe
         {
             var length = (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3];
             offset += 4;
-            if (length <= 0 || offset + length > bytes.Length) return false;
+            // Subtract rather than add: offset + length overflows int for a length near
+            // 0x7FFFFFFF - which the four length bytes of a crafted MP4 can supply
+            // directly - wrapping negative and passing the guard, after which
+            // offset += length also goes negative. The span's own bounds check turned
+            // that into an IndexOutOfRangeException rather than a read out of bounds,
+            // but the arithmetic was wrong and this path parses untrusted media.
+            if (length <= 0 || length > bytes.Length - offset) return false;
             if ((bytes[offset] & 0x1f) == 5) return true;
             offset += length;
         }

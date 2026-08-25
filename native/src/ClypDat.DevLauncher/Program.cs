@@ -9,11 +9,11 @@ internal static class Program
 
     public static int Main()
     {
-        var installRoot = AppContext.BaseDirectory;
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var dataRoot = Path.Combine(localAppData, "ClypDat-Dev");
-        var versionsRoot = Path.Combine(installRoot, "versions");
-        var statePath = Path.Combine(dataRoot, "state.json");
+        var dataRoot = DevChannelPaths.DataRoot;
+        // Was Path.Combine(installRoot, "versions") while the updater staged into the
+        // data root - see DevChannelPaths. Both sides read this one definition now.
+        var versionsRoot = DevChannelPaths.VersionsRootFor(dataRoot);
+        var statePath = DevChannelPaths.StatePathFor(dataRoot);
         var healthRoot = Path.Combine(dataRoot, "health");
         Directory.CreateDirectory(versionsRoot);
         Directory.CreateDirectory(healthRoot);
@@ -23,7 +23,11 @@ internal static class Program
         var current = FindUsableBuild(state.CurrentBuildId, versionsRoot);
         if (current is null)
         {
+            // Restricted to well-formed build ids. Without this, any directory that
+            // sorted above a hex SHA - "zzzzzzzz" - planted by any process running as
+            // the user would be selected and executed here, with no manifest check.
             current = Directory.EnumerateDirectories(versionsRoot)
+                .Where(path => DevChannelPaths.IsValidBuildId(Path.GetFileName(path)))
                 .Where(path => File.Exists(Path.Combine(path, "ClypDat.exe")))
                 .OrderByDescending(Path.GetFileName, StringComparer.Ordinal)
                 .FirstOrDefault();
@@ -91,7 +95,7 @@ internal static class Program
 
     private static string? FindUsableBuild(string? buildId, string versionsRoot) =>
         buildId is null ? null :
-        buildId.IndexOfAny(['/', '\\', ':']) >= 0 ? null :
+        !DevChannelPaths.IsValidBuildId(buildId) ? null :
         Directory.Exists(Path.Combine(versionsRoot, buildId)) && File.Exists(Path.Combine(versionsRoot, buildId, "ClypDat.exe"))
             ? Path.Combine(versionsRoot, buildId) : null;
 

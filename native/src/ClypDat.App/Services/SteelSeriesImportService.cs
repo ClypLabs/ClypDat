@@ -45,6 +45,10 @@ public static class SteelSeriesImportService
     {
         var db = DatabasePath;
         if (!File.Exists(db)) return null;
+        // C:\ProgramData lets any user create a missing directory chain and own what
+        // they create, so a machine with no SteelSeries GG install is one where this
+        // database can be planted. Only trust one an installer actually created.
+        if (!ImportSourceGuard.IsTrustedMachineWideDatabase(db)) return null;
         try
         {
             using var connection = OpenReadOnly(db);
@@ -77,6 +81,7 @@ public static class SteelSeriesImportService
     private static bool TryReadCatalog(List<SteelSeriesClipRecord> results, HashSet<string> seenPaths, IProgress<SteelSeriesScanProgress>? progress)
     {
         if (!File.Exists(DatabasePath)) return false;
+        if (!ImportSourceGuard.IsTrustedMachineWideDatabase(DatabasePath)) return false;
         try
         {
             using var connection = OpenReadOnly(DatabasePath);
@@ -90,6 +95,10 @@ public static class SteelSeriesImportService
                 if (reader.GetInt64(6) != 0) continue;
                 var path = reader.GetString(2);
                 if (IsSavedClipsPath(path)) continue;
+                // The path is whatever the database says. Importing copies it into the
+                // library - or MOVES it when the copy toggle is off - so a UNC path, a
+                // removable drive, or a symlink is not something to act on.
+                if (!ImportSourceGuard.IsAllowedSourcePath(path)) continue;
                 if (!File.Exists(path) || !seenPaths.Add(path)) continue;
                 var fileStem = Path.GetFileNameWithoutExtension(path);
                 var hasFilenameTimestamp = TryParseTimestampedName(fileStem, out _, out var filenameCapturedAt);

@@ -14,8 +14,15 @@ public sealed record AppUpdateInfo(
     IReadOnlyList<string> WhatsNew,
     IReadOnlyList<string> Fixes,
     // Lowercase hex SHA-256 of the asset as reported by the release API, or
-    // empty when the API didn't report one.
-    string Sha256 = "");
+    // empty when the API didn't report one. NOT trusted on its own - see
+    // ReleaseSigning: it comes from the same document as DownloadUrl. When a
+    // signing key is pinned, the enforced digest is taken from the signed
+    // manifest instead and this is only a fallback for unsigned builds.
+    string Sha256 = "",
+    // URLs of the detached signed manifest and its signature, when the release
+    // publishes them. Null on releases made before signing was set up.
+    string? ManifestUrl = null,
+    string? ManifestSignatureUrl = null);
 
 public sealed record UpdateDownloadProgress(string Status, double? Percentage, double? BytesPerSecond = null);
 
@@ -24,7 +31,7 @@ public static class AppUpdateService
     // Updates use the NSIS installer rather than replacing files in place, so
     // it can safely replace the running app after ClypDat exits.
     private const string ExpectedAssetName = "ClypDat-Setup.exe";
-    private const string UpstreamOwner = "ClypDat";
+    private const string UpstreamOwner = "ClypLabs";
     private const string UpstreamRepository = "ClypDat";
     private const string LatestReleaseUrl = $"https://api.github.com/repos/{UpstreamOwner}/{UpstreamRepository}/releases/latest";
     private const string ReleasesUrl = $"https://api.github.com/repos/{UpstreamOwner}/{UpstreamRepository}/releases?per_page=100";
@@ -33,6 +40,10 @@ public static class AppUpdateService
     // Keep this project path aligned with the GitLab mirror repository.
     private const string GitLabProjectPath = "clypdat-group1/ClypDat-App";
     private const string GitLabProjectId = "clypdat-group1%2FClypDat-App";
+    // GitLab release assets are published to the generic package registry, and its
+    // download URLs address the project by NUMERIC id, not by path - so they never
+    // match the /-/releases/ form and were being rejected as untrusted.
+    private const string GitLabNumericProjectId = "85476417";
     private const string GitLabHost = "gitlab.com";
     private const string GitLabLatestReleaseUrl = $"https://{GitLabHost}/api/v4/projects/{GitLabProjectId}/releases/permalink/latest";
     private const string GitLabReleasesUrl = $"https://{GitLabHost}/api/v4/projects/{GitLabProjectId}/releases?per_page=100";
@@ -213,18 +224,36 @@ public static class AppUpdateService
 
         var selectedAsset = selected.Release.Assets.First(item => item.Name.Equals(ExpectedAssetName, StringComparison.OrdinalIgnoreCase));
         var (whatsNew, fixes) = await LoadReleaseNotesAsync(client, selected.Version, cancellationToken);
-        return new AppUpdateInfo(CurrentVersion, selected.Version, selected.Release.TagName, selectedAsset.DownloadUrl, whatsNew, fixes, ParseSha256Digest(selectedAsset.Digest));
+        var manifestAsset = selected.Release.Assets.FirstOrDefault(item => item.Name.Equals(ReleaseSigning.ManifestAssetName, StringComparison.OrdinalIgnoreCase));
+        var signatureAsset = selected.Release.Assets.FirstOrDefault(item => item.Name.Equals(ReleaseSigning.SignatureAssetName, StringComparison.OrdinalIgnoreCase));
+
+        return new AppUpdateInfo(
+            CurrentVersion,
+            selected.Version,
+            selected.Release.TagName,
+            selectedAsset.DownloadUrl,
+            whatsNew,
+            fixes,
+            ParseSha256Digest(selectedAsset.Digest),
+            manifestAsset?.DownloadUrl,
+            signatureAsset?.DownloadUrl);
     }
 
     public static async Task DownloadAndRestartAsync(AppUpdateInfo update, IProgress<UpdateDownloadProgress>? progress = null, CancellationToken cancellationToken = default)
     {
+        // Resolve the digest to enforce BEFORE downloading anything. When a signing key
+        // is pinned this must come from the signed manifest; the release API's own digest
+        // is not an independent control, because whoever serves the metadata serves both
+        // it and the download URL.
+        var expectedSha256 = await ResolveVerifiedSha256Async(update, cancellationToken);
+
         var updateRoot = Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "updates");
         Directory.CreateDirectory(updateRoot);
         var setupPath = Path.Combine(updateRoot, $"ClypDat-Setup-{update.LatestVersion}.exe");
 
         using var client = CreateDownloadClient();
         progress?.Report(new UpdateDownloadProgress("Downloading update...", 0));
-        using (var response = await client.GetAsync(update.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
+        using (var response = await GetFollowingTrustedRedirectsAsync(client, update.DownloadUrl, cancellationToken))
         {
             response.EnsureSuccessStatusCode();
             var contentLength = response.Content.Headers.ContentLength;
@@ -245,16 +274,91 @@ public static class AppUpdateService
             }
         }
 
-        // Verify before running the downloaded installer. The digest comes
-        // from the release API, so it protects transport integrity rather
-        // than a compromised release publisher.
-        await VerifyDownloadAsync(setupPath, update.Sha256, cancellationToken);
+        // Verify before running the downloaded installer.
+        //
+        // NOTE: the digest still comes from the same document as the download URL,
+        // so it proves transport integrity only - it is not an independent control
+        // against whoever controls the release metadata (clypdat.xyz, its R2 bucket,
+        // its DNS, or the GitLab mirror). Closing that requires a detached signature
+        // over the metadata, verified against a pinned offline key, the way
+        // DevPackageVerifier already does for the Dev channel.
+        await VerifyDownloadAsync(setupPath, expectedSha256, cancellationToken);
 
         progress?.Report(new UpdateDownloadProgress("Starting installer...", 1));
         Process.Start(new ProcessStartInfo(setupPath, $"/S /UPDATEPID={Environment.ProcessId}")
         {
             UseShellExecute = true,
         });
+    }
+
+    // Returns the SHA-256 the downloaded installer must match.
+    //
+    // With a pinned signing key this is the signed manifest's value and nothing else:
+    // a release with no manifest, an unverifiable signature, a manifest for a different
+    // tag, or one that does not cover the installer asset all fail the update rather
+    // than falling back to the unsigned digest - falling back would let an attacker
+    // disable the check by simply omitting the manifest.
+    //
+    // With no key pinned (signing not set up yet) this keeps the previous behaviour and
+    // says so in the log, so the weaker state is visible rather than silent.
+    private static async Task<string> ResolveVerifiedSha256Async(AppUpdateInfo update, CancellationToken cancellationToken)
+    {
+        if (!ReleaseSigning.IsConfigured)
+        {
+            AppLog.Info("Update signature enforcement is off: no release signing key is pinned in this build.");
+            return update.Sha256;
+        }
+
+        if (string.IsNullOrEmpty(update.ManifestUrl) || string.IsNullOrEmpty(update.ManifestSignatureUrl))
+        {
+            throw new InvalidOperationException(
+                $"Release {update.TagName} publishes no signed manifest; refusing to install it.");
+        }
+
+        using var client = CreateClient();
+        var manifestBytes = await GetTrustedAssetAsync(client, update.ManifestUrl, MaximumManifestBytes, cancellationToken);
+        var signatureBytes = await GetTrustedAssetAsync(client, update.ManifestSignatureUrl, MaximumSignatureBytes, cancellationToken);
+
+        var manifest = ReleaseSigning.Verify(manifestBytes, signatureBytes);
+
+        // Bind the manifest to the release being installed, so a validly-signed manifest
+        // from a DIFFERENT release cannot be replayed against this download.
+        if (!string.Equals(manifest.Tag, update.TagName, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Signed manifest is for {manifest.Tag}, not {update.TagName}; refusing to install it.");
+        }
+
+        var signedDigest = ReleaseSigning.FindAssetSha256(manifest, ExpectedAssetName)
+            ?? throw new InvalidOperationException($"Signed manifest for {manifest.Tag} does not cover {ExpectedAssetName}.");
+
+        AppLog.Info($"Update {update.TagName}: signed manifest verified against the pinned release key.");
+        return signedDigest;
+    }
+
+    private const long MaximumManifestBytes = 256 * 1024;
+    private const long MaximumSignatureBytes = 8 * 1024;
+
+    // Bounded, allowlisted fetch for the small signed-metadata assets.
+    private static async Task<byte[]> GetTrustedAssetAsync(HttpClient client, string url, long maximumBytes, CancellationToken cancellationToken)
+    {
+        using var response = await GetFollowingTrustedRedirectsAsync(client, url, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        if (response.Content.Headers.ContentLength > maximumBytes)
+            throw new InvalidDataException($"Release asset {url} exceeds {maximumBytes} bytes.");
+
+        await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[8192];
+        int read;
+        while ((read = await source.ReadAsync(chunk, cancellationToken)) > 0)
+        {
+            if (buffer.Length + read > maximumBytes)
+                throw new InvalidDataException($"Release asset {url} exceeds {maximumBytes} bytes.");
+            buffer.Write(chunk, 0, read);
+        }
+
+        return buffer.ToArray();
     }
 
     private static HttpClient CreateClient()
@@ -275,10 +379,45 @@ public static class AppUpdateService
     // caller's CancellationToken instead.
     private static HttpClient CreateDownloadClient()
     {
-        var client = new HttpClient();
+        // AllowAutoRedirect stays off so every hop can be re-checked against the
+        // trusted-host list. The mirror redirects /download/<asset> to R2, and with
+        // automatic redirects the final target was never validated at all - a 302 to
+        // any host was followed silently.
+        var handler = new HttpClientHandler { AllowAutoRedirect = false };
+        var client = new HttpClient(handler);
         client.Timeout = Timeout.InfiniteTimeSpan;
         client.DefaultRequestHeaders.UserAgent.ParseAdd("ClypDat-AppUpdater");
         return client;
+    }
+
+    // Follows redirects manually, re-running the trusted-URL check on each Location
+    // before making the next request. Bounded so a redirect loop cannot spin forever.
+    private static async Task<HttpResponseMessage> GetFollowingTrustedRedirectsAsync(
+        HttpClient client, string url, CancellationToken cancellationToken)
+    {
+        const int maximumRedirects = 5;
+        var current = url;
+
+        for (var hop = 0; hop <= maximumRedirects; hop++)
+        {
+            if (!IsTrustedDownloadHop(current, hop))
+            {
+                throw new InvalidOperationException($"Refusing to download an update from an untrusted URL: {current}");
+            }
+
+            var response = await client.GetAsync(current, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            if ((int)response.StatusCode is < 300 or > 399 || response.Headers.Location is null)
+            {
+                return response;
+            }
+
+            var location = response.Headers.Location;
+            var next = location.IsAbsoluteUri ? location : new Uri(new Uri(current), location);
+            response.Dispose();
+            current = next.ToString();
+        }
+
+        throw new InvalidOperationException($"Update download exceeded {maximumRedirects} redirects.");
     }
 
     private static bool TryParseVersion(string tag, out Version version) =>
@@ -394,7 +533,8 @@ public static class AppUpdateService
 
         if (string.Equals(uri.Host, GitLabHost, StringComparison.OrdinalIgnoreCase))
         {
-            return uri.AbsolutePath.StartsWith($"/{GitLabProjectPath}/-/releases/", StringComparison.OrdinalIgnoreCase);
+            return uri.AbsolutePath.StartsWith($"/{GitLabProjectPath}/-/releases/", StringComparison.OrdinalIgnoreCase) ||
+                   uri.AbsolutePath.StartsWith($"/api/v4/projects/{GitLabNumericProjectId}/packages/generic/", StringComparison.OrdinalIgnoreCase);
         }
 
         // Mirror. The site redirects /download/<asset> to R2; the redirect
@@ -406,6 +546,35 @@ public static class AppUpdateService
             string.Equals(uri.Host, MirrorApexHost, StringComparison.OrdinalIgnoreCase);
 
         return isMirrorHost && uri.AbsolutePath.StartsWith("/download/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Hosts a trusted release URL is allowed to redirect INTO. None of these are
+    // valid as a starting URL - they are the CDN/storage endpoints the three
+    // release sources hand out:
+    //   github.com/.../releases/download/...  -> release-assets.githubusercontent.com
+    //   www.clypdat.xyz/download/...          -> mirror.clypdat.xyz  (the R2 bucket)
+    // GitLab serves its package files directly, with no redirect.
+    // objects.githubusercontent.com is GitHub's older asset host, kept so an
+    // infrastructure rollback does not break updating.
+    private static readonly string[] TrustedRedirectHosts =
+    {
+        "release-assets.githubusercontent.com",
+        "objects.githubusercontent.com",
+        "mirror.clypdat.xyz",
+    };
+
+    internal static bool IsTrustedDownloadHop(string value, int hop)
+    {
+        // The first request must be a URL the release metadata was allowed to name.
+        if (hop == 0) return IsTrustedReleaseAssetUrl(value);
+
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
+        {
+            return false;
+        }
+
+        if (IsTrustedReleaseAssetUrl(value)) return true;
+        return TrustedRedirectHosts.Contains(uri.Host, StringComparer.OrdinalIgnoreCase);
     }
 
     private static void TryDelete(string path)
@@ -436,11 +605,12 @@ public static class AppUpdateService
     {
         if (string.IsNullOrEmpty(expectedSha256))
         {
-            // Releases published before GitHub exposed per-asset digests have
-            // none to check. Refusing them would break updating from those
-            // builds entirely, so proceed but leave a record.
-            AppLog.Info("Update package has no published SHA-256; skipping integrity check.");
-            return;
+            // Previously this logged and proceeded, which meant an attacker who
+            // controlled the release metadata could disable the only integrity check
+            // by simply omitting the digest. Every release ClypDat publishes carries
+            // one, so a missing digest now fails the update instead.
+            throw new InvalidOperationException(
+                "Refusing to install an update that publishes no SHA-256 digest.");
         }
 
         string actual;

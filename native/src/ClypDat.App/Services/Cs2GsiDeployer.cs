@@ -11,9 +11,13 @@ namespace ClypDat.App.Services;
 [SupportedOSPlatform("windows")]
 public static class Cs2GsiDeployer
 {
-    private const string ConfigFileName = "gamestate_integration_eve.cfg";
+    private const string ConfigFileName = "gamestate_integration_clypdat.cfg";
+    // Pre-rebrand name. CS2 loads every gamestate_integration_*.cfg in the folder, so
+    // leaving this behind would keep a second, tokenless endpoint configured - which
+    // the listener now rejects, producing silent duplicate traffic. Removed on deploy.
+    private const string LegacyConfigFileName = "gamestate_integration_eve.cfg";
 
-    public static bool TryDeploy(int port, out string statusMessage)
+    public static bool TryDeploy(int port, string authToken, out string statusMessage)
     {
         var cfgFolder = FindCs2CfgFolder();
         if (cfgFolder is null)
@@ -25,8 +29,23 @@ public static class Cs2GsiDeployer
         try
         {
             Directory.CreateDirectory(cfgFolder);
+
+            var legacyPath = Path.Combine(cfgFolder, LegacyConfigFileName);
+            if (File.Exists(legacyPath))
+            {
+                try
+                {
+                    File.Delete(legacyPath);
+                    AppLog.Info($"Removed the pre-rebrand GSI config at {legacyPath}.");
+                }
+                catch (Exception error)
+                {
+                    AppLog.Error($"Could not remove the pre-rebrand GSI config at {legacyPath}", error);
+                }
+            }
+
             var path = Path.Combine(cfgFolder, ConfigFileName);
-            var content = BuildConfig(port);
+            var content = BuildConfig(port, authToken);
             if (!File.Exists(path) || File.ReadAllText(path) != content)
             {
                 File.WriteAllText(path, content);
@@ -43,7 +62,7 @@ public static class Cs2GsiDeployer
         }
     }
 
-    private static string BuildConfig(int port) => $$"""
+    private static string BuildConfig(int port, string authToken) => $$"""
         "ClypDat GSI"
         {
          "uri"          "http://127.0.0.1:{{port}}/"
@@ -51,6 +70,10 @@ public static class Cs2GsiDeployer
          "buffer"       "0.1"
          "throttle"     "0.1"
          "heartbeat"    "30.0"
+         "auth"
+         {
+          "{{GsiAuth.TokenKey}}" "{{authToken}}"
+         }
          "data"
          {
           "provider"            "1"

@@ -40,10 +40,25 @@ backend's audio routing) uses NAudio, licensed under the **MIT License**.
 ## ffmpeg / ffprobe (GPL)
 
 ClypDat bundles `ffmpeg.exe` and `ffprobe.exe` (the gyan.dev "essentials"
-Windows build, version **8.1.1**) so muxing, probing, and thumbnail/
+Windows build, version **8.1.2**) so muxing, probing, and thumbnail/
 waveform generation work without a separate ffmpeg install. This build is
-compiled with `--enable-gpl` and `--enable-libx264`, making the distributed
-binaries GPL-licensed. ffmpeg is a combination of many components under a
+compiled with `--enable-gpl`, **`--enable-version3`**, and `--enable-libx264`,
+so the distributed binaries are licensed under the **GPL version 3 or later**
+rather than GPLv2 - `--enable-version3` opts in components whose terms are
+GPLv3-or-later, which upgrades the licence of the combined work. ClypDat is
+itself GPLv3 (see `LICENSE`), so this is not a licensing conflict, but the
+governing version stated here has to be right.
+
+The exact build shipped in this repository, for CVE tracking and provenance:
+
+| File | SHA-256 |
+| --- | --- |
+| `ffmpeg.exe` | `1326dde4c84ff1f96fe6b8916c5bed29e163e9b5dccf995f6f3db069d143ec5e` |
+| `ffprobe.exe` | `b49ccc7c6547b141ad5a2f6ec69cc04323d7133d7704d70b331b904c63eecb07` |
+
+Reported version string: `ffmpeg version 8.1.2-essentials_build-www.gyan.dev`.
+
+ffmpeg is a combination of many components under a
 mix of GPLv2, GPLv2-or-later, and GPLv3-or-later terms depending on build
 configuration; see https://ffmpeg.org/legal.html for the authoritative
 per-component breakdown for this exact configuration.
@@ -51,15 +66,17 @@ per-component breakdown for this exact configuration.
 - Project: https://ffmpeg.org and https://github.com/FFmpeg/FFmpeg
 - Build source: https://www.gyan.dev/ffmpeg/builds (see that page's "Git
   Windows builds" section for the exact commit each release is built from)
-- The GPLv2 text this build is built under is reproduced in the GPLv2
-  section below.
+- The governing licence for these binaries is GPLv3-or-later (see
+  `--enable-version3` above). The GPLv2 text below is retained for the
+  components that remain under GPLv2; the full GPLv3 text is at
+  https://www.gnu.org/licenses/gpl-3.0.html and in ClypDat's own `LICENSE`.
 - ClypDat does not modify these binaries.
 
 ClypDat's experimental "ClypDat" capture backend additionally bundles the
 **shared-library** build of the same ffmpeg version (`avcodec-62.dll`,
 `avformat-62.dll`, `avutil-60.dll`, `swscale-9.dll`, `swresample-6.dll`,
 also from gyan.dev), P/Invoked directly (via `FFmpeg.AutoGen`) instead of
-shelled out to as a separate process. Same GPLv2/libx264 build
+shelled out to as a separate process. Same GPLv3/libx264 build
 configuration and terms as above; ClypDat is GPLv3-licensed itself (see
 `LICENSE`), so directly linking a GPL component is not a licensing
 conflict.

@@ -149,6 +149,7 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
                         }
                         if (slot is null) continue;
                     }
+                    lock (_stateLock) { if (_disposed) return; }
                     var timer = Stopwatch.StartNew();
                     _captureDevice.ImmediateContext.CopyResource(slot.CaptureTexture!, source);
                     slot.ReadyValue = unchecked(++_readyValue);
@@ -206,7 +207,27 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
     public void Dispose()
     {
         lock (_stateLock) { if (_disposed) return; _disposed = true; }
-        _stopping.Cancel(); _signal.Wake(); if (Thread.CurrentThread != _producer) _producer.Join(TimeSpan.FromSeconds(2));
+        _stopping.Cancel(); _signal.Wake();
+
+        // The producer's GPU work is deliberately outside _stateLock, and neither
+        // AcquireNextFrame nor ReleaseFrame is _disposed-guarded, so disposing the
+        // slots while it is mid-CopyResource releases the destination texture out from
+        // under the copy. The old bound was 2s, which a 4K BGRA CopyResource under GPU
+        // contention can exceed. AcquireNextFrame's own timeout is 100ms, so a healthy
+        // producer notices cancellation almost immediately and this returns at once;
+        // 10s only matters when the GPU is genuinely stuck.
+        var producerStopped = true;
+        if (Thread.CurrentThread != _producer) producerStopped = _producer.Join(TimeSpan.FromSeconds(10));
+
+        if (!producerStopped)
+        {
+            // Leak rather than free-and-use. These are GPU resources held by a thread
+            // still writing into them; the process is ending this capture session, and
+            // a leaked texture is recoverable where a use-after-free is not.
+            AppLog.Error("Native capture: Game Capture producer did not stop within 10s; leaving its GPU resources alive rather than releasing them underneath it.");
+            return;
+        }
+
         lock (_stateLock) foreach (var slot in _slots) slot.Dispose();
         _duplication.Dispose(); _readyFenceOnProcessing.Dispose(); _releasedFenceOnCapture.Dispose(); _readyFence.Dispose(); _releasedFence.Dispose(); _processingContext.Dispose(); _captureContext.Dispose(); _processingDevice5.Dispose(); _captureDevice5.Dispose(); _captureDevice.Dispose(); _signal.Dispose(); _stopping.Dispose();
     }
