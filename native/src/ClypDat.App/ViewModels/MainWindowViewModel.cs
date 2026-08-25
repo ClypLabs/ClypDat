@@ -6061,10 +6061,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var dropMedalPreMix = medalAudioTrackCount > 1;
         var skippedMedalPreMixTrack = false;
         var timelineAudioTrackCount = media.Tracks.Count(track => track.Type == "audio") - (dropMedalPreMix ? 1 : 0);
-        // A video lane always exists, including audio-only imports where one is
-        // inserted below. Keep the standard roomy lanes through three total
-        // tracks; compact the audio lanes once the timeline has four or more.
-        var compactAudioLanes = timelineAudioTrackCount + 1 > 3;
+        // Video is not an audio track. Keep the standard roomy audio lanes
+        // through Game Audio, Chat/Discord, and Microphone; compact only when
+        // a fourth audio stream such as Spotify is present.
+        var compactAudioLanes = timelineAudioTrackCount > 3;
         // Filmstrip starts empty and is filled in by StartFilmstripLoad below.
         // Decoding it here meant a ~2844x160 JPEG decode on the UI thread on
         // every single open, blocking the editor from appearing - and for no

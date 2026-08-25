@@ -6,6 +6,10 @@ namespace ClypDat.App.ViewModels;
 
 public sealed class TrackLaneViewModel : ViewModelBase
 {
+    public const double StandardAudioLaneHeight = 66;
+    public const double CompactAudioLaneHeight = 48;
+    public const double CompactAudioLaneHeightReduction = StandardAudioLaneHeight - CompactAudioLaneHeight;
+
     private double _volumePercent = 100;
     private double _volumeBadgeX = 46;
     private bool _showVolumePercent;
@@ -58,11 +62,10 @@ public sealed class TrackLaneViewModel : ViewModelBase
     // extra headroom is also what lets the Slider take its natural height:
     // squeezed into less, its 16px thumb overflowed the control and was
     // clipped along the bottom edge.
-    // Four or more timeline tracks would otherwise make the timeline consume too
+    // More than three audio tracks would otherwise make the timeline consume too
     // much of a shorter editor window. Compact lanes still leave a full label,
-    // mute control, and 16px slider thumb, while returning 18px per audio lane
-    // to the video area.
-    public double LaneHeight => IsVideo ? 44 : IsCompactAudioLane ? 48 : 66;
+    // mute control, and 16px slider thumb, while saving 18px per audio lane.
+    public double LaneHeight => IsVideo ? 44 : IsCompactAudioLane ? CompactAudioLaneHeight : StandardAudioLaneHeight;
     // Keep the normal 6px separator between every lane, but do not leave an
     // empty strip below the final audio (normally microphone) lane.
     public Thickness LaneMargin => IsAudio && IsLastAudioTrack ? new Thickness(0) : new Thickness(0, 0, 0, 6);
