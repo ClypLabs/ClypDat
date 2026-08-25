@@ -308,12 +308,13 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
 
     private async Task ExtractChunkAsync(int chunkIndex)
     {
-        var startInfo = new ProcessStartInfo("ffmpeg")
+        var startInfo = new ProcessStartInfo(FfmpegPathResolver.FfmpegPath)
         {
             RedirectStandardError = true,
             RedirectStandardOutput = true,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            WorkingDirectory = FfmpegPathResolver.WorkingDirectory,
         };
         foreach (var argument in new[]
         {

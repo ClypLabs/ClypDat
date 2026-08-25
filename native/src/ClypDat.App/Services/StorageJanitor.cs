@@ -69,7 +69,7 @@ public static class StorageJanitor
                 long removedBytes = 0;
                 try
                 {
-                    foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+                    foreach (var file in EnumerateContainedFiles(path))
                     {
                         try
                         {
@@ -111,7 +111,7 @@ public static class StorageJanitor
     {
         var removed = 0;
         if (!Directory.Exists(root)) return removed;
-        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        foreach (var file in EnumerateContainedFiles(root))
         {
             var info = new FileInfo(file);
             if (info.LastWriteTimeUtc >= cutoffUtc) continue;
@@ -120,6 +120,46 @@ public static class StorageJanitor
         }
 
         return removed;
+    }
+
+    // Enumerates files under root WITHOUT following directory junctions or symlinks.
+    //
+    // The default EnumerationOptions skips only Hidden|System, and a junction created
+    // by `mklink /J` carries neither attribute - it is ReparsePoint|Directory. A plain
+    // SearchOption.AllDirectories walk therefore descends through a junction planted in
+    // a scratch folder and File.Delete then operates on the real targets outside it,
+    // which turns this sweep into an arbitrary-file-deletion primitive for any process
+    // running as the user. (Directory.Delete(path, recursive: true) is reparse-safe on
+    // .NET Core+ and unlinks the junction instead; this hand-rolled walk is not, so it
+    // has to opt out explicitly.)
+    //
+    // The per-file full-path re-check is belt-and-braces: it also rejects anything that
+    // resolves outside root, so a reparse point created mid-walk cannot slip through.
+    private static IEnumerable<string> EnumerateContainedFiles(string root)
+    {
+        var options = new EnumerationOptions
+        {
+            RecurseSubdirectories = true,
+            AttributesToSkip = FileAttributes.ReparsePoint | FileAttributes.System,
+            IgnoreInaccessible = true,
+        };
+
+        var fullRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)) + Path.DirectorySeparatorChar;
+        foreach (var file in Directory.EnumerateFiles(root, "*", options))
+        {
+            string full;
+            try
+            {
+                full = Path.GetFullPath(file);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (!full.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase)) continue;
+            yield return full;
+        }
     }
 
     private static void OnCaptureStateChanged(bool active)

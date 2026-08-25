@@ -74,15 +74,32 @@ internal static class H264HardwareDecodeProbe
 
     private static (H264PacketFormat Format, IReadOnlyList<H264KeyPacket> KeyPackets)? ReadPacketIndex(string path)
     {
-        using var process = Process.Start(new ProcessStartInfo
+        var probeStartInfo = new ProcessStartInfo
         {
-            FileName = "ffprobe",
-            // Deliberately omit packet=data. Only compact index metadata and
-            // bounded codec configuration reach managed memory.
-            Arguments = $"-v error -select_streams v:0 -show_entries stream=codec_name,extradata:packet=flags,pos,size -show_data -of json \"{path.Replace("\"", "\\\"")}\"",
+            FileName = FfmpegPathResolver.FfprobePath,
             UseShellExecute = false, RedirectStandardOutput = true,
-            RedirectStandardError = true, CreateNoWindow = true
-        });
+            RedirectStandardError = true, CreateNoWindow = true,
+            WorkingDirectory = FfmpegPathResolver.WorkingDirectory,
+        };
+        // ArgumentList rather than a hand-quoted Arguments string: this was the only
+        // site in the codebase building one by hand, and its escaping was wrong for a
+        // path ending in a backslash, which would escape the closing quote.
+        // Deliberately omit packet=data. Only compact index metadata and
+        // bounded codec configuration reach managed memory.
+        foreach (var argument in new[]
+        {
+            "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=codec_name,extradata:packet=flags,pos,size",
+            "-show_data",
+            "-of", "json",
+            path,
+        })
+        {
+            probeStartInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(probeStartInfo);
         if (process is null) return null;
         var outputTask = process.StandardOutput.ReadToEndAsync();
         var errorTask = process.StandardError.ReadToEndAsync();

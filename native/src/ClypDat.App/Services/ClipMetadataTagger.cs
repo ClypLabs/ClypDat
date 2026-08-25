@@ -48,12 +48,13 @@ public static class ClipMetadataTagger
         var taggedPath = Path.Combine(Path.GetDirectoryName(path) ?? string.Empty, $"{Path.GetFileNameWithoutExtension(path)}.tag{Path.GetExtension(path)}");
         try
         {
-            var startInfo = new ProcessStartInfo("ffmpeg")
+            var startInfo = new ProcessStartInfo(FfmpegPathResolver.FfmpegPath)
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardError = true,
-                RedirectStandardOutput = true
+                RedirectStandardOutput = true,
+                WorkingDirectory = FfmpegPathResolver.WorkingDirectory,
             };
             foreach (var arg in new[] { "-y", "-v", "error", "-i", path, "-map", "0", "-c", "copy", "-metadata", $"{CommentKey}={BuildCommentValue(backendLabel)}", taggedPath })
             {

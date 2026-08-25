@@ -510,12 +510,13 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
 
     private static Process StartProcess(string fileName, IEnumerable<string> args, bool redirect)
     {
-        var info = new ProcessStartInfo(fileName)
+        var info = new ProcessStartInfo(FfmpegPathResolver.Resolve(fileName))
         {
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardError = redirect,
-            RedirectStandardOutput = redirect
+            RedirectStandardOutput = redirect,
+            WorkingDirectory = FfmpegPathResolver.WorkingDirectory,
         };
         foreach (var arg in args) info.ArgumentList.Add(arg);
         return Process.Start(info) ?? throw new InvalidOperationException($"Could not start {fileName}.");
@@ -523,12 +524,13 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
 
     private Process StartCaptureProcess(string fileName, IEnumerable<string> args)
     {
-        var info = new ProcessStartInfo(fileName)
+        var info = new ProcessStartInfo(FfmpegPathResolver.Resolve(fileName))
         {
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardError = true,
-            RedirectStandardOutput = false
+            RedirectStandardOutput = false,
+            WorkingDirectory = FfmpegPathResolver.WorkingDirectory,
         };
         foreach (var arg in args) info.ArgumentList.Add(arg);
         var process = Process.Start(info) ?? throw new InvalidOperationException($"Could not start {fileName}.");

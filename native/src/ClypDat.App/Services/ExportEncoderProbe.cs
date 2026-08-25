@@ -98,12 +98,13 @@ public static class ExportEncoderProbe
     {
         try
         {
-            var startInfo = new ProcessStartInfo("ffmpeg")
+            var startInfo = new ProcessStartInfo(FfmpegPathResolver.FfmpegPath)
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
-                RedirectStandardError = true
+                RedirectStandardError = true,
+                WorkingDirectory = FfmpegPathResolver.WorkingDirectory,
             };
             foreach (var argument in new[]
                      {

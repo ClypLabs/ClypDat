@@ -422,7 +422,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
 
     private static Process StartDecoder(string path, (TimeSpan Start, TimeSpan Duration) range, double frameRate, PixelSize previewSize)
     {
-        var info = new ProcessStartInfo("ffmpeg") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        var info = new ProcessStartInfo(FfmpegPathResolver.FfmpegPath) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = FfmpegPathResolver.WorkingDirectory };
         foreach (var argument in BuildDecoderArguments(path, range, frameRate, previewSize)) info.ArgumentList.Add(argument);
         var process = Process.Start(info) ?? throw new InvalidOperationException("FFmpeg did not start.");
         try { process.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }

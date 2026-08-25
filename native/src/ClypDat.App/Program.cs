@@ -36,7 +36,7 @@ internal static class Program
             // The worker owns all replay backends, including the native FFmpeg
             // path. Initialize bundled FFmpeg before the worker loads any
             // backend; the normal UI path does this below after its mutex setup.
-            FfmpegPathResolver.EnsureBundledFfmpegOnPath();
+            FfmpegPathResolver.EnsureBundledFfmpeg();
             CaptureWorkerHost.Run();
             return;
         }
@@ -110,7 +110,7 @@ internal static class Program
         if (!startupResult.Success)
             AppLog.Info($"Windows startup reconciliation: {startupResult.Error}");
 
-        FfmpegPathResolver.EnsureBundledFfmpegOnPath();
+        FfmpegPathResolver.EnsureBundledFfmpeg();
 
         // Off-thread, and only after the line above has put the bundled ffmpeg on
         // PATH for it to find. Doing it now means the first export already knows

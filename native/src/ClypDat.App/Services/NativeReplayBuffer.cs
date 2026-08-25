@@ -4208,7 +4208,20 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var vodsRoot = LibraryLayout.VodsRoot(config.LibraryFolder);
             if (!Directory.Exists(vodsRoot)) return;
 
-            var sessions = Directory.EnumerateFiles(vodsRoot, "*.*", SearchOption.AllDirectories)
+            // Junctions are not followed: the default EnumerationOptions skips only
+            // Hidden|System, so a `mklink /J` reparse point planted anywhere under the
+            // user-configurable library folder would otherwise let this quota sweep
+            // delete files outside the library entirely.
+            var vodsEnumeration = new EnumerationOptions
+            {
+                RecurseSubdirectories = true,
+                AttributesToSkip = FileAttributes.ReparsePoint | FileAttributes.System,
+                IgnoreInaccessible = true,
+            };
+            var vodsFullRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(vodsRoot)) + Path.DirectorySeparatorChar;
+
+            var sessions = Directory.EnumerateFiles(vodsRoot, "*.*", vodsEnumeration)
+                .Where(path => Path.GetFullPath(path).StartsWith(vodsFullRoot, StringComparison.OrdinalIgnoreCase))
                 .Where(MediaProbeService.IsVideoFile)
                 .Where(path =>
                 {

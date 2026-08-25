@@ -1393,14 +1393,15 @@ public sealed class AudioCapturePipeline : IDisposable
 
     private static Process StartProcess(string fileName, IEnumerable<string> args)
     {
-        var info = new ProcessStartInfo(fileName)
+        var info = new ProcessStartInfo(FfmpegPathResolver.Resolve(fileName))
         {
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardError = true,
             RedirectStandardOutput = true,
             StandardErrorEncoding = Encoding.UTF8,
-            StandardOutputEncoding = Encoding.UTF8
+            StandardOutputEncoding = Encoding.UTF8,
+            WorkingDirectory = FfmpegPathResolver.WorkingDirectory,
         };
         foreach (var arg in args) info.ArgumentList.Add(arg);
         var process = Process.Start(info) ?? throw new InvalidOperationException($"Could not start {fileName}.");

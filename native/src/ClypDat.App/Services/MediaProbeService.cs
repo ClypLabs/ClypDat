@@ -898,12 +898,13 @@ public sealed class MediaProbeService
         await ProbeProcessGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var startInfo = new ProcessStartInfo("ffmpeg")
+            var startInfo = new ProcessStartInfo(FfmpegPathResolver.FfmpegPath)
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
-                CreateNoWindow = true
+                CreateNoWindow = true,
+                WorkingDirectory = FfmpegPathResolver.WorkingDirectory,
             };
             foreach (var argument in args) startInfo.ArgumentList.Add(argument);
 
@@ -1281,12 +1282,13 @@ public sealed class MediaProbeService
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken)
     {
-        var startInfo = new ProcessStartInfo(fileName)
+        var startInfo = new ProcessStartInfo(FfmpegPathResolver.Resolve(fileName))
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            WorkingDirectory = FfmpegPathResolver.WorkingDirectory,
         };
 
         foreach (var argument in arguments)

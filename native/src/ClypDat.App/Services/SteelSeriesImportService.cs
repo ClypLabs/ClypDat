@@ -220,11 +220,12 @@ public static class SteelSeriesImportService
             {
                 StartInfo = new ProcessStartInfo
                 {
-                    FileName = "ffprobe",
+                    FileName = FfmpegPathResolver.FfprobePath,
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
-                    CreateNoWindow = true
+                    CreateNoWindow = true,
+                    WorkingDirectory = FfmpegPathResolver.WorkingDirectory,
                 }
             };
             process.StartInfo.ArgumentList.Add("-v");
