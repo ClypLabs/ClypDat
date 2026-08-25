@@ -66,6 +66,13 @@ namespace ClypDat.App.Services;
 [SupportedOSPlatform("windows10.0.17763.0")]
 public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics, IAdaptiveCaptureFrameRate
 {
+    // How long teardown waits for the pacing thread before giving up and leaking its
+    // native resources instead of freeing them underneath it. Generous because
+    // RunPacingTick contends on _bufferLock, does filesystem deletes, and can encode a
+    // catch-up burst in one tick.
+    private static readonly TimeSpan PacingThreadStopTimeout = TimeSpan.FromSeconds(10);
+
+
     private readonly Func<ReplayBufferConfig> _configProvider;
     private readonly string _bufferFolder;
     private readonly AudioCapturePipeline _audio;
@@ -733,6 +740,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // normally; it is cleared the moment that thread is running, and set again only
         // by a successful join.
         var pacingThreadStopped = true;
+        // Held so the finally can join it on EVERY exit path. The join after the capture
+        // loop only runs on a normal exit; a cancellation or a device error throws from
+        // inside the loop and jumps straight to the finally.
+        Thread? pacingThread = null;
 
         try
         {
@@ -1151,7 +1162,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // ProcessLoopbackWaveIn's capture thread). Its lateness is directly
             // visible in the output - as padsSkipped, and as a clip that reads
             // under its configured frame rate - so it also runs AboveNormal.
-            var pacingThread = new Thread(() =>
+            pacingThread = new Thread(() =>
             {
                 var nextTickAt = stopwatch.Elapsed;
                 while (!token.IsCancellationRequested)
@@ -3122,11 +3133,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // the pacing thread touches hwFramesRef, lastHardwareFrame and the D3D
             // device, and its own catch swallows exceptions and keeps looping, so a
             // free underneath it would not even stop at the first bad access.
-            pacingThreadStopped = pacingThread.Join(TimeSpan.FromSeconds(10));
-            if (!pacingThreadStopped)
-            {
-                AppLog.Error("Native capture: pacing thread did not stop within 10s; leaking its native resources rather than freeing them underneath it.");
-            }
+            pacingThreadStopped = pacingThread.Join(PacingThreadStopTimeout);
 
             // Stop accepting new jobs and wait for EncodeLoop to drain everything
             // already queued (including its own final flush of whatever's still
@@ -3177,6 +3184,22 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 AppLog.Error("Native capture: encode thread shutdown failed.", error);
             }
             encodeQueue?.Dispose();
+
+            // Authoritative join. The one after the capture loop covers only the normal
+            // exit; an OperationCanceledException from a stop, or a device error, throws
+            // from inside the loop and lands here with the thread still running and
+            // pacingThreadStopped still false. Skipping the disposals in that case leaked
+            // the DXGI duplication, and the next DuplicateOutput on the same output then
+            // failed with E_INVALIDARG - which is what a capture restart (changing the
+            // encoder, for instance) does immediately afterwards.
+            if (pacingThread is not null && !pacingThreadStopped)
+            {
+                pacingThreadStopped = pacingThread.Join(PacingThreadStopTimeout);
+                if (!pacingThreadStopped)
+                {
+                    AppLog.Error($"Native capture: pacing thread did not stop within {PacingThreadStopTimeout.TotalSeconds:0.#}s; leaking its native resources rather than freeing them underneath it.");
+                }
+            }
 
             // Leak rather than free-and-use when the pacing thread is still running: it
             // touches these same pointers, and a leak ends with the process while a
