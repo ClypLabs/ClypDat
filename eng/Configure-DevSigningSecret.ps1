@@ -2,7 +2,7 @@
 param(
     [Parameter(Mandatory)]
     [string]$PrivateKeyPath,
-    [string]$Repository = 'ClypDat/ClypDat'
+    [string]$Repository = 'ClypLabs/ClypDat'
 )
 
 $ErrorActionPreference = 'Stop'

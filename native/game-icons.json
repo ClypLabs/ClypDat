@@ -41,16 +41,16 @@
     "Battlefield™ 6": 2807960
   },
   "icons": {
-    "VALORANT": "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons/valorant-official.png",
-    "Valorant": "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons/valorant-official.png",
-    "VALORANT-Win64-Shipping": "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons/valorant-official.png",
-    "LeagueClient": "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons/league-of-legends.png",
-    "LeagueClientUx": "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons/league-of-legends.png",
-    "LeagueClientUxRelease": "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons/league-of-legends.png",
-    "League of Legends": "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons/league-of-legends.png",
-    "Roblox": "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons/roblox-2025.png",
-    "RobloxPlayerBeta": "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons/roblox-2025.png",
-    "RobloxPlayerLauncher": "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons/roblox-2025.png",
-    "Minecraft": "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons/minecraft.png"
+    "VALORANT": "https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/game-icons/valorant-official.png",
+    "Valorant": "https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/game-icons/valorant-official.png",
+    "VALORANT-Win64-Shipping": "https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/game-icons/valorant-official.png",
+    "LeagueClient": "https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/game-icons/league-of-legends.png",
+    "LeagueClientUx": "https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/game-icons/league-of-legends.png",
+    "LeagueClientUxRelease": "https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/game-icons/league-of-legends.png",
+    "League of Legends": "https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/game-icons/league-of-legends.png",
+    "Roblox": "https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/game-icons/roblox-2025.png",
+    "RobloxPlayerBeta": "https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/game-icons/roblox-2025.png",
+    "RobloxPlayerLauncher": "https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/game-icons/roblox-2025.png",
+    "Minecraft": "https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/game-icons/minecraft.png"
   }
 }

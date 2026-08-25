@@ -15,7 +15,7 @@ namespace ClypDat.App.Services;
 // executable icon or a letter badge.
 public static class RemoteGameIconsService
 {
-    private const string IconsUrl = "https://raw.githubusercontent.com/ClypDat/ClypDat/master/native/game-icons.json";
+    private const string IconsUrl = "https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/game-icons.json";
     private const string CacheFileName = "remote-game-icons.json";
     private static string LocalManifestPath => Path.Combine(AppContext.BaseDirectory, "game-icons.json");
 

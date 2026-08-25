@@ -37,7 +37,7 @@ public static class GameIconService
     private static HttpClient CreateHttpClient()
     {
         var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("ClypDat-GameIcons/1.0 (+https://github.com/ClypDat/ClypDat)");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("ClypDat-GameIcons/1.0 (+https://github.com/ClypLabs/ClypDat)");
         return client;
     }
 

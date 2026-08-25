@@ -1542,7 +1542,7 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            Process.Start(new ProcessStartInfo("https://github.com/ClypDat/ClypDat/issues") { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo("https://github.com/ClypLabs/ClypDat/issues") { UseShellExecute = true });
         }
         catch (Exception error)
         {
@@ -5240,7 +5240,7 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            Process.Start(new ProcessStartInfo("https://github.com/ClypDat/ClypDat") { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo("https://github.com/ClypLabs/ClypDat") { UseShellExecute = true });
         }
         catch (Exception error)
         {

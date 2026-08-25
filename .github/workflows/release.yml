@@ -194,4 +194,4 @@ jobs:
             Write-Host "MIRROR_DISPATCH_TOKEN not set; the scheduled sync will pick this up."
             exit 0
           }
-          gh api repos/ClypDat/webapp/dispatches -f event_type=release-published
+          gh api repos/ClypLabs/webapp/dispatches -f event_type=release-published

@@ -8,7 +8,7 @@ namespace ClypDat.App.Services;
 
 public static class DevUpdateService
 {
-    private const string ReleaseApiUrl = "https://api.github.com/repos/ClypDat/ClypDat/releases/tags/dev-channel";
+    private const string ReleaseApiUrl = "https://api.github.com/repos/ClypLabs/ClypDat/releases/tags/dev-channel";
     private const string Owner = "ClypDat";
     private const string Repository = "ClypDat";
 

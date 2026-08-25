@@ -1237,7 +1237,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool HasAppCommit => CommitHash.Length > 0;
     public string AppCommitDisplay => $"({CommitHash})";
-    public string AppCommitUrl => $"https://github.com/ClypDat/ClypDat/commit/{CommitHash}";
+    public string AppCommitUrl => $"https://github.com/ClypLabs/ClypDat/commit/{CommitHash}";
 
     private string? _selectedImportSource;
 
