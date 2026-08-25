@@ -1600,9 +1600,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 // software encoder on the CPU. Appending it unconditionally produced
                 // "libx264 on AMD Radeon RX 9060 XT", crediting a software encoder to a
                 // graphics card it never touches.
+                // Name the part that is actually doing the encoding: the GPU for a
+                // hardware encoder, the CPU for a software one.
                 var suffix = IsHardwareEncoderName(_activeReplayEncoder)
                     ? string.IsNullOrWhiteSpace(_activeReplayAdapter) ? string.Empty : $" on {_activeReplayAdapter}"
-                    : " (software, CPU)";
+                    : string.IsNullOrWhiteSpace(ProcessorName) ? " (software, CPU)" : $" on {ProcessorName}";
                 return $"Active encoder: {_activeReplayEncoder}{suffix}.{fallback}";
             }
 
@@ -1686,6 +1688,34 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             UpdateReplayQualityRestartRequired();
         }
     }
+
+    // Read once from the registry rather than through WMI, which is slow enough to be
+    // felt on a settings page. Falls back to an empty string, in which case the status
+    // line just says "(software, CPU)" instead of naming the part.
+    private static readonly Lazy<string> LazyProcessorName = new(() =>
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                @"HARDWARE\DESCRIPTION\System\CentralProcessor\0");
+            var raw = key?.GetValue("ProcessorNameString") as string;
+            if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+
+            // Vendor strings carry (R)/(TM) noise and padded spacing that the GPU
+            // description does not, so trim them for a line the two share.
+            var cleaned = raw.Replace("(R)", string.Empty, StringComparison.OrdinalIgnoreCase)
+                             .Replace("(TM)", string.Empty, StringComparison.OrdinalIgnoreCase)
+                             .Replace("(tm)", string.Empty, StringComparison.Ordinal);
+            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"\s+", " ").Trim();
+            return cleaned;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    });
+
+    internal static string ProcessorName => LazyProcessorName.Value;
 
     // Hardware encoders are identified by their FFmpeg backend suffix rather than by
     // guessing from a software list: an unrecognised name is treated as software, so an
