@@ -16,7 +16,14 @@ public sealed class TrackLaneViewModel : ViewModelBase
     private readonly Color _laneColor;
     private readonly SolidColorBrush _volumeAccentBrush;
 
-    public TrackLaneViewModel(int streamIndex, string label, string type, string color, bool canAdjustVolume, double volumePercent = 100)
+    public TrackLaneViewModel(
+        int streamIndex,
+        string label,
+        string type,
+        string color,
+        bool canAdjustVolume,
+        double volumePercent = 100,
+        bool isCompactAudioLane = false)
     {
         StreamIndex = streamIndex;
         Label = label;
@@ -25,6 +32,7 @@ public sealed class TrackLaneViewModel : ViewModelBase
         _laneColor = Avalonia.Media.Color.Parse(color);
         VolumeBrush = new SolidColorBrush(_laneColor);
         CanAdjustVolume = canAdjustVolume;
+        IsCompactAudioLane = isCompactAudioLane;
         _volumePercent = Math.Clamp(volumePercent, 0, 150);
         _volumeAccentBrush = new SolidColorBrush(GetVolumeAccentColor(_volumePercent));
     }
@@ -38,6 +46,7 @@ public sealed class TrackLaneViewModel : ViewModelBase
     public bool CanAdjustVolume { get; }
     public bool IsAudio => Type == "audio";
     public bool IsVideo => Type == "video";
+    public bool IsCompactAudioLane { get; }
     // Video bumped from its old 32 (a plain outlined box, no real content)
     // now that it renders filmstrip thumbnails (TimelineLaneControl) - taller
     // than that so the frames are readable, but not as tall as the audio
@@ -49,14 +58,23 @@ public sealed class TrackLaneViewModel : ViewModelBase
     // extra headroom is also what lets the Slider take its natural height:
     // squeezed into less, its 16px thumb overflowed the control and was
     // clipped along the bottom edge.
-    public double LaneHeight => IsVideo ? 44 : 66;
+    // Four or more timeline tracks would otherwise make the timeline consume too
+    // much of a shorter editor window. Compact lanes still leave a full label,
+    // mute control, and 16px slider thumb, while returning 18px per audio lane
+    // to the video area.
+    public double LaneHeight => IsVideo ? 44 : IsCompactAudioLane ? 48 : 66;
     // Keep the normal 6px separator between every lane, but do not leave an
     // empty strip below the final audio (normally microphone) lane.
     public Thickness LaneMargin => IsAudio && IsLastAudioTrack ? new Thickness(0) : new Thickness(0, 0, 0, 6);
     // Audio labels sit a couple of pixels low, optically centring them in the
     // space above the slider row. A video label is centred in the whole box
     // (LabelRowSpan) and needs no nudge.
-    public Thickness LabelMargin => IsAudio ? new Thickness(0, 2, 0, 0) : new Thickness(0);
+    public Thickness LaneContentMargin => IsCompactAudioLane
+        ? new Thickness(12, 4)
+        : new Thickness(12, 7);
+    public Thickness LabelMargin => IsAudio
+        ? new Thickness(0, IsCompactAudioLane ? 0 : 2, 0, 0)
+        : new Thickness(0);
     // A video lane has no slider row under its label, so its header spans the
     // whole box and centres in it instead of sitting at the top with empty
     // space below - which is what made "Video" look top-aligned next to the

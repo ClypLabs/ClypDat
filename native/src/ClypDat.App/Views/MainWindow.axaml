@@ -2643,7 +2643,7 @@
                       <Border Height="{Binding LaneHeight}" Classes="editorTrackCard"
                               Margin="{Binding LaneMargin}"
                               ClipToBounds="False">
-                        <Grid Margin="12,7" RowDefinitions="Auto,*" ColumnDefinitions="20,10,*">
+                        <Grid Margin="{Binding LaneContentMargin}" RowDefinitions="Auto,*" ColumnDefinitions="20,10,*">
                           <!-- ZIndex so the Reset button below keeps its own
                                clicks. The Slider in row 1 is taller than the
                                row it draws in and is declared after this one,

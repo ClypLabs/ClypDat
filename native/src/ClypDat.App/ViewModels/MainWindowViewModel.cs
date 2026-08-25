@@ -6060,6 +6060,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             : 0;
         var dropMedalPreMix = medalAudioTrackCount > 1;
         var skippedMedalPreMixTrack = false;
+        var timelineAudioTrackCount = media.Tracks.Count(track => track.Type == "audio") - (dropMedalPreMix ? 1 : 0);
+        // A video lane always exists, including audio-only imports where one is
+        // inserted below. Keep the standard roomy lanes through three total
+        // tracks; compact the audio lanes once the timeline has four or more.
+        var compactAudioLanes = timelineAudioTrackCount + 1 > 3;
         // Filmstrip starts empty and is filled in by StartFilmstripLoad below.
         // Decoding it here meant a ~2844x160 JPEG decode on the UI thread on
         // every single open, blocking the editor from appearing - and for no
@@ -6084,7 +6089,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var label = track.Type == "audio"
                 ? AudioLaneLabel(track.Label, audioIndex)
                 : "Video";
-            var lane = new TrackLaneViewModel(track.Index, label, track.Type, color, track.Type == "audio", track.VolumePercent);
+            var lane = new TrackLaneViewModel(
+                track.Index,
+                label,
+                track.Type,
+                color,
+                track.Type == "audio",
+                track.VolumePercent,
+                compactAudioLanes && track.Type == "audio");
             if (track.Type == "video")
             {
                 hasVideo = true;
