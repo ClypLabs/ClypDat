@@ -155,13 +155,16 @@ public sealed partial class App : Application
             }
             finally
             {
+                AppLog.Info($"Startup: splash held the window for {clock.ElapsedMilliseconds}ms" +
+                            (mainWindow.PendingStartupUpdate is { } pending ? $"; update {pending.LatestVersion.ToString(3)} is available." : "."));
+                // Loader finishes and gets out of the way first, then the app
+                // arrives - rather than the window appearing under a splash
+                // that is still fading off it.
+                await splash.FadeOutAndCloseAsync();
                 mainWindow.Opened -= HideUntilReady;
                 mainWindow.ShowInTaskbar = true;
                 mainWindow.Show();
                 mainWindow.Activate();
-                AppLog.Info($"Startup: splash held the window for {clock.ElapsedMilliseconds}ms" +
-                            (mainWindow.PendingStartupUpdate is { } pending ? $"; update {pending.LatestVersion.ToString(3)} is available." : "."));
-                await splash.FadeOutAndCloseAsync();
             }
         });
     }

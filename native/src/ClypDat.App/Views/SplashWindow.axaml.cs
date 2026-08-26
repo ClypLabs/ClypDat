@@ -20,7 +20,12 @@ public sealed partial class SplashWindow : Window
     // GitHub check against a dead network, a library on a disconnected share.
     // Past this, the window opens with whatever is ready.
     private static readonly TimeSpan UpdateCheckBudget = TimeSpan.FromSeconds(6);
-    private static readonly TimeSpan TotalBudget = TimeSpan.FromSeconds(20);
+    // The library is explicitly NOT something the user waits on. This is only
+    // long enough for the cached first rows on a normal disk; a cache miss, a
+    // network share or a cold spinning disk hands over anyway and finishes
+    // filling the grid behind the open window.
+    private static readonly TimeSpan LibraryBudget = TimeSpan.FromSeconds(2.5);
+    private static readonly TimeSpan TotalBudget = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan FadeStep = TimeSpan.FromMilliseconds(16);
 
     public SplashWindow()
@@ -52,15 +57,15 @@ public sealed partial class SplashWindow : Window
         using var budget = new CancellationTokenSource(TotalBudget);
         var update = await CheckForUpdateAsync(budget.Token).ConfigureAwait(true);
 
-        SetStage("Loading your library");
+        SetStage("Preparing ClypDat");
         SetProgress(null);
         try
         {
-            await essentialsLoaded.WaitAsync(budget.Token).ConfigureAwait(true);
+            await essentialsLoaded.WaitAsync(LibraryBudget, budget.Token).ConfigureAwait(true);
         }
         catch (Exception error) when (error is OperationCanceledException or TimeoutException)
         {
-            AppLog.Info("Startup: library was still loading when the splash budget ran out; opening anyway.");
+            AppLog.Info("Startup: library was still loading; opening the window and letting it fill in behind.");
         }
         catch (Exception error)
         {
@@ -69,6 +74,8 @@ public sealed partial class SplashWindow : Window
 
         SetStage("Ready");
         SetProgress(1);
+        // Long enough to read, short enough that nobody waits on it.
+        await Task.Delay(TimeSpan.FromMilliseconds(250)).ConfigureAwait(true);
         return update;
     }
 
