@@ -10,11 +10,12 @@
         Background="#0B1016"
         Title="ClypDat">
 
-  <!-- Opaque on purpose. A transparent frameless window goes through the
-       platform's layered/ANGLE path, which is exactly the surface that has
-       been losing its device on this machine - and a splash that fails to
-       paint is worse than one with square corners. -->
-  <Border BorderBrush="#1C2836" BorderThickness="1">
+  <!-- Opaque on purpose: per-pixel transparency means the layered/ANGLE path,
+       which is the surface that keeps losing its device on this hardware. The
+       soft corners come from DWM rounding the composited frame instead (see
+       StartupWindowPresentation.TryRoundCorners), which costs nothing and is
+       what every other Windows 11 window uses. -->
+  <Border BorderBrush="#1C2836" BorderThickness="1" CornerRadius="8">
     <Grid RowDefinitions="*,Auto">
 
       <StackPanel Grid.Row="0" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="14">
@@ -81,8 +82,17 @@
       <StackPanel Grid.Row="1" Margin="24,0,24,22" Spacing="8">
         <ProgressBar x:Name="Bar" Height="4" Minimum="0" Maximum="1" IsIndeterminate="True"
                      Background="#16202C" Foreground="#4C8DE0" CornerRadius="2" />
-        <TextBlock x:Name="VersionText" Text="" Foreground="#5C6B7C" FontSize="10"
-                   HorizontalAlignment="Center" />
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock x:Name="VersionText" Text="" Foreground="#5C6B7C" FontSize="10"
+                     VerticalAlignment="Center" />
+          <!-- An update on a bad connection must never be the reason someone
+               cannot get into their clips. Skipping leaves the update for the
+               usual dialog after launch. -->
+          <Button x:Name="SkipButton" Grid.Column="1" Content="Not now"
+                  IsVisible="False" Padding="10,3" FontSize="11"
+                  Background="#16202C" Foreground="#9FB2C6" BorderBrush="#26333F" BorderThickness="1"
+                  CornerRadius="4" Click="SkipButton_OnClick" />
+        </Grid>
       </StackPanel>
     </Grid>
   </Border>

@@ -86,6 +86,10 @@ public sealed class AppSettings
     // ahead). Exact WASAPI/hardware-encoder latency varies too much by
     // machine to hardcode a correction.
     public string IgnoredUpdateVersion { get; set; } = string.Empty;
+    // When on, the startup loader installs an available update before the app
+    // opens, rather than opening first and offering it in a dialog. Off means
+    // the old behaviour: launch now, ask afterwards.
+    public bool InstallUpdatesOnLaunch { get; set; } = true;
     public string ChatAudioDeviceId { get; set; } = string.Empty;
     // Single-selection fields - still the persisted choice while the matching
     // Multi*Enabled toggle below is off, so most users (one mic, at most one

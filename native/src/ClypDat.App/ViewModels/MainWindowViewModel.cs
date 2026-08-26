@@ -3114,6 +3114,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public bool InstallUpdatesOnLaunch
+    {
+        get => Settings.InstallUpdatesOnLaunch;
+        set
+        {
+            if (Settings.InstallUpdatesOnLaunch == value) return;
+            Settings.InstallUpdatesOnLaunch = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
     public bool ShowRecordingPausedIndicator
     {
         get => Settings.ShowRecordingPausedIndicator;

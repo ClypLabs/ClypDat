@@ -6769,6 +6769,26 @@ public sealed partial class MainWindow : Window
     public AppUpdateInfo? PendingStartupUpdate { get; set; }
 
     /// <summary>
+    /// Exits for real so a downloaded installer can take over. The installer
+    /// Wait-Process-es on this PID before it swaps any files, and since
+    /// close-to-tray shipped, closing windows no longer ends the process - so
+    /// this has to go out the same way the tray's Quit item does.
+    /// </summary>
+    public async Task ExitForUpdateAsync()
+    {
+        AllowRealClose = true;
+        await ShutdownCaptureWorkerAsync();
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            desktop.Shutdown();
+        }
+        else
+        {
+            Environment.Exit(0);
+        }
+    }
+
+    /// <summary>
     /// Covers the window's contents while the startup loader is in front of it.
     /// Raised before the window is ever shown; only the loader lifts it.
     /// </summary>

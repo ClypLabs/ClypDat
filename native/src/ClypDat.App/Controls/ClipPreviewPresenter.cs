@@ -39,6 +39,7 @@ public sealed class ClipPreviewPresenter : Control, IClipPreviewPresenter
     // that. Two losses is enough to call it.
     private const int GpuLossesBeforeGivingUp = 2;
     private static int _gpuLosses;
+    private static int _gpuPathAnnounced;
 
     private readonly SoftwareClipPreviewAdapter _software;
     private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
@@ -151,6 +152,11 @@ public sealed class ClipPreviewPresenter : Control, IClipPreviewPresenter
             await gpu.SetAttachedAsync(_requestedAttached).ConfigureAwait(false);
             InvalidateVisual();
             AppLog.Debug("Clip hover preview GPU resources created.");
+            // Once per process, at Info: which path previews are actually on is
+            // the first question asked whenever they look wrong, and every
+            // other mention of it is Debug.
+            if (Interlocked.Exchange(ref _gpuPathAnnounced, 1) == 0)
+                AppLog.Info("Clip hover preview: GPU present path active.");
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception error)
@@ -423,7 +429,13 @@ internal sealed class GpuClipPreviewAdapter : IClipPreviewPresenter
             Format = DxgiFormat.R8G8B8A8_UNorm,
             SampleDescription = new SampleDescription(1, 0),
             Usage = ResourceUsage.Default,
-            BindFlags = BindFlags.ShaderResource,
+            // RenderTarget is not optional. ANGLE turns this texture into a
+            // pbuffer (eglCreatePbufferFromClientBuffer with
+            // EGL_D3D_TEXTURE_ANGLE), and a pbuffer is a render target - a
+            // texture without the flag is rejected with EGL_BAD_SURFACE, which
+            // is exactly what every failed import here was. Avalonia's own
+            // interop textures set both flags for the same reason.
+            BindFlags = BindFlags.ShaderResource | BindFlags.RenderTarget,
             CPUAccessFlags = CpuAccessFlags.None,
             MiscFlags = ResourceOptionFlags.SharedKeyedMutex
         });

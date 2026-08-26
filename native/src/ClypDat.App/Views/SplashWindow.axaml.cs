@@ -28,10 +28,16 @@ public sealed partial class SplashWindow : Window
     private static readonly TimeSpan TotalBudget = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan FadeStep = TimeSpan.FromMilliseconds(16);
 
+    private CancellationTokenSource? _skip;
+
     public SplashWindow()
     {
         InitializeComponent();
         VersionText.Text = $"v{AppUpdateService.CurrentVersion.ToString(3)}";
+        // DWM rounds the composited frame itself, so the corners come out
+        // smooth on an opaque window - no per-pixel transparency, and none of
+        // the layered/ANGLE surface trouble that comes with it.
+        Opened += (_, _) => StartupWindowPresentation.TryRoundCorners(this);
     }
 
     public void SetStage(string text) => StageText.Text = text;
@@ -52,10 +58,19 @@ public sealed partial class SplashWindow : Window
     /// Runs the startup stages, then hands back the update the check found (if
     /// any) so the main window can offer it without asking GitHub again.
     /// </summary>
-    public async Task<AppUpdateInfo?> RunAsync(Task essentialsLoaded)
+    public async Task<AppUpdateInfo?> RunAsync(Task essentialsLoaded,
+        Func<AppUpdateInfo, bool> shouldInstall, Func<Task> onInstallerStarted)
     {
         using var budget = new CancellationTokenSource(TotalBudget);
         var update = await CheckForUpdateAsync(budget.Token).ConfigureAwait(true);
+        if (update is not null && shouldInstall(update) && await InstallAsync(update).ConfigureAwait(true))
+        {
+            // The installer is running and waiting on this process to exit; the
+            // window behind this loader is never going to be shown.
+            SetStage("Restarting ClypDat");
+            await onInstallerStarted().ConfigureAwait(true);
+            return update;
+        }
 
         SetStage("Preparing ClypDat");
         SetProgress(null);
@@ -79,6 +94,56 @@ public sealed partial class SplashWindow : Window
         return update;
     }
 
+    private void SkipButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        SkipButton.IsEnabled = false;
+        _skip?.Cancel();
+    }
+
+    /// <summary>
+    /// Downloads and launches the installer, reporting real progress. Returns
+    /// false when the update did not happen - skipped, or it failed - in which
+    /// case startup carries on and the usual dialog offers it after launch.
+    /// </summary>
+    private async Task<bool> InstallAsync(AppUpdateInfo update)
+    {
+        // No budget here on purpose: an install is the user watching a real
+        // transfer, not the app being slow, and the Not now button is the way
+        // out of it.
+        _skip = new CancellationTokenSource();
+        SkipButton.IsVisible = true;
+        try
+        {
+            var progress = new Progress<UpdateDownloadProgress>(report =>
+            {
+                SetStage(report.Status);
+                SetProgress(report.Percentage);
+            });
+            SetStage($"Downloading update {update.LatestVersion.ToString(3)}");
+            SetProgress(0);
+            await AppUpdateService.DownloadAndRestartAsync(update, progress, _skip.Token).ConfigureAwait(true);
+            AppLog.Info($"Startup: loader installed update {update.LatestVersion.ToString(3)}; handing over to the installer.");
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            AppLog.Info("Startup: user skipped the update at launch.");
+            return false;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Startup: update install failed; continuing into the app.", error);
+            SetStage("Update failed - starting anyway");
+            return false;
+        }
+        finally
+        {
+            SkipButton.IsVisible = false;
+            _skip?.Dispose();
+            _skip = null;
+        }
+    }
+
     private async Task<AppUpdateInfo?> CheckForUpdateAsync(CancellationToken token)
     {
         SetStage("Checking for updates");
@@ -88,13 +153,7 @@ public sealed partial class SplashWindow : Window
             using var check = CancellationTokenSource.CreateLinkedTokenSource(token);
             check.CancelAfter(UpdateCheckBudget);
             var update = await AppUpdateService.CheckAsync(check.Token).ConfigureAwait(true);
-            if (update is not null)
-            {
-                // Reported, not installed. Replacing the running app is the
-                // user's call, and the main window already owns that dialog.
-                SetStage($"Update {update.LatestVersion.ToString(3)} available");
-                await Task.Delay(TimeSpan.FromMilliseconds(700), token).ConfigureAwait(true);
-            }
+            if (update is not null) SetStage($"Update {update.LatestVersion.ToString(3)} available");
             return update;
         }
         catch (Exception error) when (error is OperationCanceledException or TimeoutException)

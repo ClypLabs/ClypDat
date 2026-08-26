@@ -135,12 +135,19 @@ public sealed partial class App : Application
         {
             try
             {
-                var essentials = mainWindow.DataContext is MainWindowViewModel viewModel
-                    ? viewModel.InitialLibraryLoadTask
-                    : Task.CompletedTask;
+                var viewModel = mainWindow.DataContext as MainWindowViewModel;
+                var essentials = viewModel?.InitialLibraryLoadTask ?? Task.CompletedTask;
+                // Auto-install is a setting, and a version the user already
+                // told us to ignore is not one to install behind their back.
+                bool ShouldInstall(AppUpdateInfo candidate) =>
+                    viewModel?.Settings.InstallUpdatesOnLaunch == true &&
+                    !string.Equals(viewModel.Settings.IgnoredUpdateVersion, candidate.TagName, StringComparison.OrdinalIgnoreCase);
                 // Handed over rather than dropped: the window's own startup
                 // check would otherwise ask GitHub again seconds later.
-                mainWindow.PendingStartupUpdate = await splash.RunAsync(essentials);
+                mainWindow.PendingStartupUpdate = await splash.RunAsync(
+                    essentials,
+                    ShouldInstall,
+                    () => mainWindow.ExitForUpdateAsync());
             }
             catch (Exception error)
             {

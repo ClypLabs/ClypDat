@@ -2371,7 +2371,7 @@
                 </StackPanel>
               </Border>
 
-              <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Check for updates|Updates}">
+              <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Check for updates|Install updates while loading|Updates}">
                 <StackPanel Spacing="16">
                   <TextBlock Text="UPDATES" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" />
                   <Grid ColumnDefinitions="*,Auto">
@@ -2380,6 +2380,13 @@
                       <TextBlock Text="ClypDat also checks automatically on launch." Foreground="#6B7C8C" FontSize="12" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                     </StackPanel>
                     <Button Name="CheckNowButton" Grid.Column="1" Content="Check Now" Classes="primaryButton" Click="CheckUpdatesButton_OnClick" VerticalAlignment="Center" />
+                  </Grid>
+                  <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="Install Updates While Loading" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                      <TextBlock Text="The startup loader installs an available update before ClypDat opens. Off asks after launch instead." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding InstallUpdatesOnLaunch}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
                 </StackPanel>
               </Border>
