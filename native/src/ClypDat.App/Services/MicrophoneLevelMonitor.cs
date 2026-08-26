@@ -25,6 +25,8 @@ internal sealed class MicrophoneLevelMonitor : IDisposable
     private IWaveIn? _capture;
     private MMDevice? _device;
     private double _smoothedDb = FloorDb;
+    private long _packetsSeen;
+    private float _peakSinceLastLog;
 
     /// <summary>Latest level in dBFS, already smoothed. Raised off the capture thread.</summary>
     public event EventHandler<double>? LevelChanged;
@@ -45,6 +47,8 @@ internal sealed class MicrophoneLevelMonitor : IDisposable
                     : enumerator.GetDevice(deviceId);
 
                 _smoothedDb = FloorDb;
+                _packetsSeen = 0;
+                _peakSinceLastLog = 0;
                 var capture = MicrophoneNoiseSuppression.Wrap(
                     new MicrophoneWaveIn(_device),
                     noiseSuppression,
@@ -97,13 +101,19 @@ internal sealed class MicrophoneLevelMonitor : IDisposable
     {
         var format = (sender as IWaveIn)?.WaveFormat;
         if (format is null || e.BytesRecorded <= 0) return;
-        if (format.Encoding != WaveFormatEncoding.IeeeFloat || format.BitsPerSample != 32) return;
 
-        var peak = 0f;
-        for (var offset = 0; offset + 4 <= e.BytesRecorded; offset += 4)
+        if (!AudioSampleFormat.TryGetPeak(format, e.Buffer, e.BytesRecorded, out var peak))
         {
-            var value = Math.Abs(BitConverter.ToSingle(e.Buffer, offset));
-            if (value > peak) peak = value;
+            // Once per start, not per packet: an unreadable format does not
+            // fix itself, and this runs ~100 times a second.
+            if (Interlocked.Increment(ref _packetsSeen) == 1)
+            {
+                AppLog.Info(
+                    $"Mic test cannot read this capture format ({AudioSampleFormat.ResolveEncoding(format)}, " +
+                    $"{format.BitsPerSample}-bit); the meter will stay at its floor.");
+            }
+
+            return;
         }
 
         var db = peak <= 0 ? FloorDb : Math.Clamp(20 * Math.Log10(peak), FloorDb, 0);
@@ -114,6 +124,16 @@ internal sealed class MicrophoneLevelMonitor : IDisposable
         // user is checking the gate against.
         _smoothedDb = db > _smoothedDb ? db : _smoothedDb + (db - _smoothedDb) * 0.25;
         LevelChanged?.Invoke(this, _smoothedDb);
+
+        // Roughly once a second while the test runs. This is what makes "is
+        // the meter actually reading my microphone?" answerable from the log
+        // instead of by poking at private methods from outside the process.
+        if (peak > _peakSinceLastLog) _peakSinceLastLog = peak;
+        if (Interlocked.Increment(ref _packetsSeen) % 100 == 0)
+        {
+            AppLog.Debug($"Mic test level: peak={_peakSinceLastLog:0.####}, smoothed={_smoothedDb:0.#}dB.");
+            _peakSinceLastLog = 0;
+        }
     }
 
     public void Dispose() => Stop();

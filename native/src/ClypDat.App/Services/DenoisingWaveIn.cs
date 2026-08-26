@@ -75,15 +75,17 @@ internal sealed class DenoisingWaveIn : IWaveIn
     public event EventHandler<StoppedEventArgs>? RecordingStopped;
 
     /// <summary>
-    /// Whether this device's format can be piped at all. WASAPI shared mode
-    /// hands back the mix format, which is 32-bit float in every case seen -
-    /// but a driver offering something else would produce silence rather than
-    /// a diagnosable error if fed to ffmpeg as f32le, so it is checked instead
-    /// of assumed.
+    /// Whether this device's format can be piped at all. Anything not 32-bit
+    /// float would be reinterpreted as floats by the f32le input and come out
+    /// as noise, so it is checked rather than assumed.
+    ///
+    /// Goes through AudioSampleFormat for the same reason the meter does: a
+    /// driver reporting WAVE_FORMAT_EXTENSIBLE has an Encoding of Extensible,
+    /// not IeeeFloat, and testing Encoding directly silently refused to filter
+    /// an ordinary float microphone.
     /// </summary>
     public static bool CanWrap(WaveFormat format) =>
-        format.Encoding == WaveFormatEncoding.IeeeFloat
-        && format.BitsPerSample == 32
+        AudioSampleFormat.IsFloat32(format)
         && format.Channels is 1 or 2
         && format.SampleRate > 0;
 
