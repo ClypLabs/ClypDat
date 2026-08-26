@@ -31,6 +31,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      # ClypDat consumes its patched Avalonia packages from the sibling fork.
+      # A release runner is a clean checkout, so it must build that local feed
+      # before restoring the app; otherwise NuGet fails with NU1301 because the
+      # source named in NuGet.config does not exist yet.
+      - name: Checkout Avalonia fork
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ClypLabs/clypdat-avalonia
+          path: clypdat-avalonia
+          fetch-depth: 0
+
+      - name: Build pinned Avalonia packages
+        shell: pwsh
+        run: |
+          $forkRoot = Join-Path (Split-Path $env:GITHUB_WORKSPACE -Parent) 'clypdat-avalonia'
+          Move-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'clypdat-avalonia') -Destination $forkRoot
+          $pin = [xml](Get-Content -LiteralPath 'eng\AvaloniaPin.props' -Raw)
+          $commit = $pin.SelectSingleNode('//ClypDatAvaloniaStableCommit').InnerText.Trim()
+          git -C $forkRoot checkout --detach $commit
+          if ($LASTEXITCODE -ne 0) { throw "Could not check out pinned Avalonia commit $commit." }
+          .\publish.ps1 $env:GITHUB_SHA
+
       # Untrusted values reach PowerShell through env: only. Interpolating
       # ${{ inputs.* }} directly into a run: block splices the caller's text into
       # the script itself, so a dispatch input containing a quote can execute
