@@ -47,7 +47,21 @@ $requiredAvaloniaAnalyzerEntries = @(
     'analyzers/dotnet/cs/Avalonia.Generators.dll'
 )
 
-Add-Type -AssemblyName System.IO.Compression.FileSystem
+# Windows PowerShell 5.1 and PowerShell 7+ split these differently: 5.1 needs
+# System.IO.Compression for ZipArchiveMode/CompressionLevel and
+# System.IO.Compression.FileSystem for ZipFile, while 7+ has both in its default
+# assembly set and returns "assembly already loaded" for either. Loading both,
+# tolerating failure, is what makes the Avalonia repack path work on both hosts -
+# without it 5.1 dies with "Unable to find type [IO.Compression.ZipArchiveMode]"
+# the moment a fork rebuild is needed.
+foreach ($compressionAssembly in @('System.IO.Compression', 'System.IO.Compression.FileSystem')) {
+    try { Add-Type -AssemblyName $compressionAssembly -ErrorAction Stop } catch { }
+}
+
+if (-not ('System.IO.Compression.ZipFile' -as [type]) -or
+    -not ('System.IO.Compression.ZipArchiveMode' -as [type])) {
+    throw "This host cannot load System.IO.Compression. Run publish.ps1 under PowerShell 7 (pwsh) or Windows PowerShell 5.1."
+}
 
 function Invoke-Git {
     param(
