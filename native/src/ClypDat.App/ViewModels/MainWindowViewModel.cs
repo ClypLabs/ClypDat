@@ -4323,6 +4323,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 });
 
                 await ClipRepairSweep.RunAsync(libraryRoot, paths,
+                    // A refresh the moment the corrupt set is known, so the
+                    // affected tiles carry their overlay before any repair
+                    // starts rather than looking untouched until their turn.
+                    onDetected: async () => await Dispatcher.UIThread.InvokeAsync(RefreshLibraryAsync),
                     onRepaired: async repairedPath =>
                     {
                         // The cached thumbnail, filmstrip, waveform and probe
@@ -4378,15 +4382,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var average = progress.Average <= TimeSpan.Zero ? TimeSpan.FromSeconds(6) : progress.Average;
         var elapsed = DateTime.UtcNow - progress.CurrentStartedUtc;
         // Never count below one second: a repair that overruns its estimate
         // showing "0s" reads as stuck.
-        var remaining = average - elapsed;
+        var remaining = progress.CurrentEstimate - elapsed;
         if (remaining < TimeSpan.FromSeconds(1)) remaining = TimeSpan.FromSeconds(1);
 
-        var queuePosition = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        for (var i = 0; i < progress.Pending.Count; i++) queuePosition[progress.Pending[i]] = i;
+        // Each queued clip waits for everything ahead of it, and the estimates
+        // are per-file - repair time tracks size, so a 30MB clip behind a 200MB
+        // one must not claim the same wait.
+        var queueWait = new Dictionary<string, TimeSpan>(StringComparer.OrdinalIgnoreCase);
+        var wait = remaining;
+        foreach (var queued in progress.Pending)
+        {
+            queueWait[queued.Path] = wait;
+            wait += queued.Estimate;
+        }
 
         foreach (var clip in AllClips)
         {
@@ -4394,10 +4405,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 clip.RepairOverlayText = $"Repairing corrupted clip\n~{Describe(remaining)} left";
             }
-            else if (queuePosition.TryGetValue(clip.Path, out var position))
+            else if (queueWait.TryGetValue(clip.Path, out var startsIn))
             {
-                var wait = remaining + TimeSpan.FromTicks(average.Ticks * position);
-                clip.RepairOverlayText = $"Queued for repair\nstarts in ~{Describe(wait)}";
+                clip.RepairOverlayText = $"Queued for repair\nstarts in ~{Describe(startsIn)}";
             }
             else if (clip.IsRepairOverlayVisible)
             {
