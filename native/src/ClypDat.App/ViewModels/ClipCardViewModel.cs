@@ -308,7 +308,9 @@ public sealed class ClipCardViewModel : ViewModelBase
         {
             var wasVisible = IsVisibleInLibrary;
             if (!SetProperty(ref _isMatchedByGameFilter, value)) return;
-            if (wasVisible != IsVisibleInLibrary) OnPropertyChanged(nameof(IsVisibleInLibrary));
+            if (wasVisible == IsVisibleInLibrary) return;
+            Interlocked.Increment(ref _libraryVisibilityVersion);
+            OnPropertyChanged(nameof(IsVisibleInLibrary));
         }
     }
 
@@ -325,7 +327,9 @@ public sealed class ClipCardViewModel : ViewModelBase
         {
             var wasVisible = IsVisibleInLibrary;
             if (!SetProperty(ref _isMatchedByClipTypeFilter, value)) return;
-            if (wasVisible != IsVisibleInLibrary) OnPropertyChanged(nameof(IsVisibleInLibrary));
+            if (wasVisible == IsVisibleInLibrary) return;
+            Interlocked.Increment(ref _libraryVisibilityVersion);
+            OnPropertyChanged(nameof(IsVisibleInLibrary));
         }
     }
 
@@ -340,7 +344,9 @@ public sealed class ClipCardViewModel : ViewModelBase
         {
             var wasVisible = IsVisibleInLibrary;
             if (!SetProperty(ref _isMatchedBySearch, value)) return;
-            if (wasVisible != IsVisibleInLibrary) OnPropertyChanged(nameof(IsVisibleInLibrary));
+            if (wasVisible == IsVisibleInLibrary) return;
+            Interlocked.Increment(ref _libraryVisibilityVersion);
+            OnPropertyChanged(nameof(IsVisibleInLibrary));
         }
     }
 
@@ -348,6 +354,14 @@ public sealed class ClipCardViewModel : ViewModelBase
     // clip-type filter, and search box all have to match (AND across
     // groups; each checklist group's own set membership is an OR).
     public bool IsVisibleInLibrary => IsMatchedByGameFilter && IsMatchedByClipTypeFilter && IsMatchedBySearch;
+
+    // Bumped by the three setters above whenever any card's
+    // IsVisibleInLibrary actually flips. Callers that would otherwise count
+    // visible cards on every layout pass (the date scrubber's signature) can
+    // memoize against this instead of walking the whole library per frame.
+    internal static int LibraryVisibilityVersion => Volatile.Read(ref _libraryVisibilityVersion);
+
+    private static int _libraryVisibilityVersion;
 
     public string PreviewImagePath
     {
@@ -395,13 +409,11 @@ public sealed class ClipCardViewModel : ViewModelBase
         else
         {
             CancelPreviewLoad();
-            var old = _previewImage;
+            // Just an unbind. The bitmap stays alive in CardThumbnailCache so
+            // scrolling back finds it decoded, and cache eviction goes through
+            // DeferredBitmapDisposal rather than freeing pixels the compositor
+            // may still be drawing.
             PreviewImage = null;
-            // Deferred, not immediate - see DeferredBitmapDisposal. Opening a
-            // clip collapses the library scroller and runs this for every
-            // realized card in a single turn, while the compositor is still
-            // drawing the frame those bitmaps belong to.
-            DeferredBitmapDisposal.Release(old);
         }
     }
 
@@ -412,6 +424,10 @@ public sealed class ClipCardViewModel : ViewModelBase
     // whatever's actually on disk now.
     public void RefreshPreviewImage()
     {
+        // The bytes at this path changed, so the cached decode of them is
+        // wrong - without this the card would keep serving the pre-edit image
+        // out of CardThumbnailCache forever.
+        CardThumbnailCache.Invalidate(_previewImagePath);
         if (_isPreviewVisible) SetPreviewImage(_previewImagePath);
     }
 
@@ -598,12 +614,23 @@ public sealed class ClipCardViewModel : ViewModelBase
     private void SetPreviewImage(string path)
     {
         CancelPreviewLoad();
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+        if (string.IsNullOrWhiteSpace(path)) return;
+
+        var width = Volatile.Read(ref _previewDecodeWidth);
+        // Scrolling back over cards already seen is the common case, and it
+        // has to stay synchronous: hopping to a worker to re-read something
+        // already in memory would blank the card for a frame and put a wheel
+        // flick's worth of no-op work behind the decode semaphore.
+        var cached = CardThumbnailCache.Get(path, width);
+        if (cached is not null)
+        {
+            PreviewImage = cached;
+            return;
+        }
 
         var cancellation = new CancellationTokenSource();
         _previewLoadCts = cancellation;
         var version = _previewLoadVersion;
-        var width = Volatile.Read(ref _previewDecodeWidth);
         _ = LoadPreviewImageAsync(path, width, version, cancellation.Token);
     }
 
@@ -616,12 +643,9 @@ public sealed class ClipCardViewModel : ViewModelBase
         previous.Dispose();
     }
 
-    private void ClearPreviewImage()
-    {
-        var old = _previewImage;
-        PreviewImage = null;
-        DeferredBitmapDisposal.Release(old);
-    }
+    // Bitmaps belong to CardThumbnailCache, so unbinding one is just dropping
+    // a reference - never a Dispose.
+    private void ClearPreviewImage() => PreviewImage = null;
 
     private async Task LoadPreviewImageAsync(string path, int width, int version, CancellationToken cancellationToken)
     {
@@ -632,7 +656,12 @@ public sealed class ClipCardViewModel : ViewModelBase
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                bitmap = await Task.Run(() => DecodePreview(path, width), cancellationToken).ConfigureAwait(false);
+                // File.Exists is a disk hit, so it runs here rather than on
+                // the UI thread ahead of the hop - a wheel flick asks this
+                // question for every card it passes.
+                bitmap = await Task.Run(
+                    () => File.Exists(path) ? DecodePreview(path, width) : null,
+                    cancellationToken).ConfigureAwait(false);
             }
             finally
             {
@@ -644,24 +673,26 @@ public sealed class ClipCardViewModel : ViewModelBase
         finally
         {
             if (bitmap is not null)
-                Dispatcher.UIThread.Post(() => ApplyLoadedPreview(bitmap, path, version, cancellationToken));
+                Dispatcher.UIThread.Post(() => ApplyLoadedPreview(bitmap, path, width, version, cancellationToken));
         }
     }
 
-    private void ApplyLoadedPreview(Bitmap bitmap, string path, int version, CancellationToken cancellationToken)
+    private void ApplyLoadedPreview(Bitmap bitmap, string path, int width, int version, CancellationToken cancellationToken)
     {
+        // Cache it even when this card no longer wants it: the decode is
+        // already paid for, and the usual reason it is unwanted is that the
+        // card scrolled past, which is exactly what gets scrolled back to.
+        var shared = CardThumbnailCache.Store(path, width, bitmap);
+
         if (cancellationToken.IsCancellationRequested
             || version != _previewLoadVersion
             || !_isPreviewVisible
             || !string.Equals(path, _previewImagePath, StringComparison.Ordinal))
         {
-            DeferredBitmapDisposal.Release(bitmap);
             return;
         }
 
-        var old = _previewImage;
-        PreviewImage = bitmap;
-        if (old is not null && old != bitmap) DeferredBitmapDisposal.Release(old);
+        PreviewImage = shared;
     }
 
     private static Bitmap DecodePreview(string path, int width)

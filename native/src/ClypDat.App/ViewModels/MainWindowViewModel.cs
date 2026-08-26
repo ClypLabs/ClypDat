@@ -3729,6 +3729,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // Whether the hand-off below has already happened, so MainWindow's
+    // per-layout-pass probe can stop re-measuring once there is nothing left
+    // to hand off.
+    internal bool IsLibraryFirstViewportRendered => _libraryReadyForReveal.Task.IsCompleted;
+
     internal void NotifyLibraryFirstViewportRendered(int realizedRows)
     {
         if (_libraryReadyForReveal.TrySetResult())

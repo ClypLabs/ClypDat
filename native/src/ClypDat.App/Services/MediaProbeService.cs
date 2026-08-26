@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -579,6 +579,8 @@ public sealed class MediaProbeService
         // session (a trim-save regenerates the thumbnail at the SAME path).
         BitmapCache.Invalidate(GetThumbnailPath(filePath));
         BitmapCache.Invalidate(GetFilmstripPath(filePath));
+        // Library cards decode their own copy through CardThumbnailCache.
+        CardThumbnailCache.Invalidate(GetThumbnailPath(filePath));
     }
 
     public async Task<string> EnsureThumbnailAsync(string filePath, TimeSpan duration)
@@ -684,8 +686,9 @@ public sealed class MediaProbeService
             return string.Empty;
         }
 
-        // Same path, new content - the decoded copy in memory is now stale.
+        // Same path, new content - the decoded copies in memory are stale.
         BitmapCache.Invalidate(output);
+        CardThumbnailCache.Invalidate(output);
         return output;
     }
 

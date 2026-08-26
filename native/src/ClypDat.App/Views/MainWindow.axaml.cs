@@ -2067,6 +2067,28 @@ public sealed partial class MainWindow : Window
     private const double ScrubberTickTopInset = 5;
     private const double ScrubberTickRailOverlap = 3;
 
+    // RebuildDateScrubber runs off LayoutUpdated, so it is entered on every
+    // scroll frame and its "nothing changed" signature has to be cheap to
+    // build. Counting visible cards is O(library), which on a few thousand
+    // clips is real per-frame work spent to reach an early return - so it is
+    // memoized against the version ClipCardViewModel bumps when a card's
+    // visibility actually flips. AllClips.Count is part of the key too: a
+    // newly added card starts visible without flipping anything.
+    private (int Version, int Total, int Count) _visibleClipCountMemo = (-1, -1, 0);
+
+    private int VisibleLibraryClipCount()
+    {
+        if (ViewModel is null) return 0;
+        var version = ClipCardViewModel.LibraryVisibilityVersion;
+        var total = ViewModel.AllClips.Count;
+        if (_visibleClipCountMemo.Version == version && _visibleClipCountMemo.Total == total)
+            return _visibleClipCountMemo.Count;
+
+        var count = ViewModel.AllClips.Count(clip => clip.IsVisibleInLibrary);
+        _visibleClipCountMemo = (version, total, count);
+        return count;
+    }
+
     private void QueueDateScrubberRebuild()
     {
         if (_scrubberRebuildQueued) return;
@@ -2090,7 +2112,7 @@ public sealed partial class MainWindow : Window
 
         var usingProjection = ViewModel.LibraryProjection.Rows.Count > 0;
         var signature = (extentHeight, viewportHeight, trackHeight,
-            usingProjection ? ViewModel.LibraryProjection.Rows.Count : ViewModel.AllClips.Count(clip => clip.IsVisibleInLibrary));
+            usingProjection ? ViewModel.LibraryProjection.Rows.Count : VisibleLibraryClipCount());
         if (signature == _scrubberSignature) return;
         _scrubberSignature = signature;
 
@@ -2158,6 +2180,16 @@ public sealed partial class MainWindow : Window
     private void TryCompleteInitialLibraryLayout()
     {
         if (ViewModel is null) return;
+
+        // This runs on every LayoutUpdated, which means every scroll frame,
+        // and what follows walks realized containers and their visual
+        // descendants. Once the library has completed its first layout AND
+        // reported a painted viewport there is nothing left for it to
+        // decide, so bail before paying for that walk 60 times a second.
+        // Both halves below are one-shot (CompleteInitialLibraryLayout is
+        // already gated on !IsInitialLibraryLoadComplete, and the reveal
+        // hand-off is a TrySetResult), so nothing is lost by returning early.
+        if (ViewModel.IsInitialLibraryLoadComplete && ViewModel.IsLibraryFirstViewportRendered) return;
 
         var container = LibraryItemsControl.GetRealizedContainers()?
             .FirstOrDefault(control => control.DataContext is ClipCardViewModel or LibraryGridRow && control.Bounds.Height > 0);
