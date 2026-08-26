@@ -70,6 +70,10 @@ public sealed partial class SplashWindow : Window
         Func<AppUpdateInfo, bool> shouldInstall, Func<Task> onInstallerStarted)
     {
         using var budget = new CancellationTokenSource(TotalBudget);
+        // Let the stage label and indeterminate bar reach the compositor
+        // before the first network await begins. Without this yield the loader
+        // can appear frozen on its initial frame on a cold graphics path.
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
         var update = await CheckForUpdateAsync(budget.Token).ConfigureAwait(true);
         if (update is not null && shouldInstall(update) && await InstallAsync(update).ConfigureAwait(true))
         {
@@ -82,6 +86,7 @@ public sealed partial class SplashWindow : Window
 
         SetStage("Loading library");
         SetProgress(null);
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
         try
         {
             await essentialsLoaded.WaitAsync(LibraryBudget, budget.Token).ConfigureAwait(true);
