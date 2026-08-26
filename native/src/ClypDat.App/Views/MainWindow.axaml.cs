@@ -7920,71 +7920,6 @@ public sealed partial class MainWindow : Window
     // owned-window z-order behavior instead: always directly above its
     // owner, hidden/minimized together with it, never floating above
     // unrelated other windows.
-    /// <summary>
-    /// The same loader the clip tiles use while a corrupt clip is being repaired
-    /// (MainWindow.axaml, the repair overlay): a dim full ring with one bright
-    /// arc rotating over it. Built in code here because this overlay is.
-    /// </summary>
-    private static Panel BuildSpinner(double size, double thickness)
-    {
-        var radius = (size - thickness) / 2;
-        // StrokeDashArray is in multiples of the stroke thickness, so the arc's
-        // share of the circle holds at any size.
-        var circumference = 2 * Math.PI * radius / thickness;
-        var arcLength = circumference * 0.22;
-
-        var arc = new Avalonia.Controls.Shapes.Ellipse
-        {
-            Width = size,
-            Height = size,
-            Stroke = new SolidColorBrush(Color.Parse("#8FB6DC")),
-            StrokeThickness = thickness,
-            StrokeDashArray = new Avalonia.Collections.AvaloniaList<double> { arcLength, circumference - arcLength },
-            StrokeLineCap = PenLineCap.Round,
-            RenderTransform = new RotateTransform(),
-            RenderTransformOrigin = RelativePoint.Center,
-            Classes = { "spin" },
-        };
-
-        var spin = new Animation
-        {
-            Duration = TimeSpan.FromSeconds(0.9),
-            IterationCount = IterationCount.Infinite,
-            Easing = new Avalonia.Animation.Easings.LinearEasing(),
-            Children =
-            {
-                new KeyFrame { Cue = new Cue(0d), Setters = { new Setter(RotateTransform.AngleProperty, 0d) } },
-                new KeyFrame { Cue = new Cue(1d), Setters = { new Setter(RotateTransform.AngleProperty, 360d) } },
-            },
-        };
-
-        // Driven by a style rather than Animation.RunAsync: the overlay is built
-        // long before it is ever shown, and a style animation starts when the
-        // control is actually realised.
-        var panel = new Panel
-        {
-            Width = size,
-            Height = size,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Children =
-            {
-                new Avalonia.Controls.Shapes.Ellipse
-                {
-                    Width = size,
-                    Height = size,
-                    Stroke = new SolidColorBrush(Color.Parse("#33456079")),
-                    StrokeThickness = thickness,
-                },
-                arc,
-            },
-        };
-        panel.Styles.Add(new Style(selector => selector.OfType<Avalonia.Controls.Shapes.Ellipse>().Class("spin"))
-        {
-            Animations = { spin },
-        });
-        return panel;
-    }
-
     private Window EnsureRecordingPausedOverlay()
     {
         if (_recordingPausedOverlay is not null) return _recordingPausedOverlay;
@@ -8009,7 +7944,13 @@ public sealed partial class MainWindow : Window
                 Spacing = 14,
                 Children =
                 {
-                    BuildSpinner(44, 4),
+                    new ClypDatLoader
+                    {
+                        Width = 64,
+                        Height = 64,
+                        Foreground = Brushes.White,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                    },
                     new TextBlock
                     {
                         Text = "Recording/Capture Paused",
