@@ -1399,11 +1399,14 @@
                   <StackPanel Spacing="2">
                     <TextBlock Text="{Binding ReplayEncoderModeStatus}" Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" />
                     <TextBlock Text="{Binding ReplayVideoCodecStatus}" Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" />
-                    <Border Background="#2B2114" BorderBrush="#72561A" BorderThickness="1" CornerRadius="6" Padding="8,6" IsVisible="{Binding CpuEncoderHardwareWarningVisible}">
-                      <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6">
-                        <PathIcon Grid.Column="0" Classes="cautionIcon" VerticalAlignment="Top" />
-                        <TextBlock Grid.Column="1" Text="{Binding CpuEncoderHardwareWarning}" Foreground="#F4C76B" FontSize="10" TextWrapping="Wrap" />
-                      </Grid>
+                    <Border Background="#0D151C" BorderBrush="#263544" BorderThickness="1" CornerRadius="8" Padding="14,11" IsVisible="{Binding CpuEncoderHardwareWarningVisible}">
+                      <StackPanel Spacing="4">
+                        <TextBlock FontSize="12" TextWrapping="Wrap">
+                          <Run Text="Performance note: " Foreground="#FF8B8B" FontWeight="Bold" />
+                          <Run Text="{Binding CpuEncoderHardwareWarning}" Foreground="#B8C7D8" />
+                        </TextBlock>
+                        <TextBlock Text="• CPU mode is best reserved for troubleshooting or when GPU encoding is unavailable." Foreground="#93A6B8" FontSize="11" TextWrapping="Wrap" />
+                      </StackPanel>
                     </Border>
                     <TextBlock Text="Automatic encoder profile: chooses the fastest stable configuration for the available NVIDIA, AMD, Intel, or CPU encoder." Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" />
                     <TextBlock Text="{Binding ReplayFrameTimingMetrics}" Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" IsVisible="{Binding ReplayFrameTimingMetrics, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
