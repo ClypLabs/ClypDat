@@ -177,8 +177,6 @@ public sealed partial class MainWindow : Window
     private static readonly TimeSpan HoverControlsResizeSettle = TimeSpan.FromMilliseconds(220);
     private static readonly TimeSpan LibraryResizeAnchorSettle = TimeSpan.FromMilliseconds(220);
     private const double LibraryScrollOffsetTolerance = 0.01;
-    private const double DefaultMinimumWindowHeight = 852;
-    private double _editorTimelineHeightReduction;
     private DateTime _hoverControlsSuppressedUntilUtc = DateTime.MinValue;
     // The hover bar moves inside a fixed window, clipped at the video's lower
     // edge so it slips behind the timeline. On Server, native per-pixel
@@ -374,7 +372,6 @@ public sealed partial class MainWindow : Window
                         StartLibraryReturnTiming("Settings");
                     }
                     if (e.PropertyName == nameof(MainWindowViewModel.StartupLibraryIndexVersion)) QueueDateScrubberRebuild();
-                    if (e.PropertyName == nameof(MainWindowViewModel.EditorTimelineHeight)) SyncEditorTimelineWindowHeight();
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible)
                         or nameof(MainWindowViewModel.IsEditorVisible)
                         or nameof(MainWindowViewModel.SelectedVideoPath)
@@ -1650,31 +1647,13 @@ public sealed partial class MainWindow : Window
         UpdateTimelineChrome();
     }
 
-    // Compact audio lanes should make the app shorter, not hand their saved
-    // height to the video's star-sized row. Preserve the video area's current
-    // height by changing the normal window height by the exact lane reduction.
-    // A maximized window remains maximized; Windows owns that geometry.
-    private void SyncEditorTimelineWindowHeight()
-    {
-        if (ViewModel is null) return;
-
-        var heightReduction = ViewModel.TimelineTracks.Count(track => track.IsCompactAudioLane) *
-            TrackLaneViewModel.CompactAudioLaneHeightReduction;
-        var minimumHeight = Math.Max(1, DefaultMinimumWindowHeight - heightReduction);
-        MinHeight = minimumHeight;
-
-        if (WindowState != WindowState.Normal)
-        {
-            _editorTimelineHeightReduction = heightReduction;
-            return;
-        }
-
-        var heightDelta = heightReduction - _editorTimelineHeightReduction;
-        if (Math.Abs(heightDelta) < 0.01) return;
-
-        Height = Math.Max(minimumHeight, Bounds.Height - heightDelta);
-        _editorTimelineHeightReduction = heightReduction;
-    }
+    // The editor deliberately does NOT touch the window's size. It used to:
+    // collapsing audio lanes to their compact height shrank the window by the
+    // exact amount saved, so the video row kept its pixel height instead of
+    // growing. That meant opening a clip resized the app out from under the
+    // user, and dragged MinHeight down with it. The window is the user's to
+    // size - whatever height the lanes give back now goes to the star-sized
+    // video row, the same way every other panel in this window behaves.
 
     // TODO: Replace this with a proper layout-level anchor once the library
     // moves away from its non-virtualized WrapPanel. This deliberately hacky
