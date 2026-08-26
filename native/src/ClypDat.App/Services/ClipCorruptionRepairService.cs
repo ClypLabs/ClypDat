@@ -132,7 +132,15 @@ public sealed class ClipCorruptionRepairService
                 var verify = await DecodeProbeAsync(rebuiltPath, VerifyFrames, token).ConfigureAwait(false);
                 if (verify.Errors != 0 || verify.Frames == 0) continue;
 
-                await ReplaceInPlaceAsync(clipPath, rebuiltPath).ConfigureAwait(false);
+                if (!await ReplaceInPlaceAsync(clipPath, rebuiltPath, token).ConfigureAwait(false))
+                {
+                    // The app reads its own clips for thumbnails, hover previews
+                    // and playback, so the file can simply be open right now.
+                    // That is transient - report it as skipped so the sweep looks
+                    // again later instead of writing the clip off.
+                    AppLog.Info($"Clip repair: {Path.GetFileName(clipPath)} is in use; leaving it for a later pass.");
+                    return new RepairResult(RepairStatus.Skipped, "file in use");
+                }
                 AppLog.Info($"Clip repair: {Path.GetFileName(clipPath)} repaired ({label}).");
                 return new RepairResult(RepairStatus.Repaired, label);
             }
@@ -220,18 +228,64 @@ public sealed class ClipCorruptionRepairService
         }
     }
 
-    private static async Task ReplaceInPlaceAsync(string clipPath, string rebuiltPath)
+    /// <summary>
+    /// Swaps the rebuilt file in. Returns false when the clip stayed locked -
+    /// the caller treats that as "try again later", not as a failed repair.
+    /// </summary>
+    private static async Task<bool> ReplaceInPlaceAsync(string clipPath, string rebuiltPath, CancellationToken token)
     {
         // File.Replace writes the original aside before swapping, so a failure
         // mid-way can never leave the user with neither file. The aside copy is
         // only deleted once the replacement is in place.
         var backupPath = clipPath + ".corrupt";
-        await FileRetry.RunAsync(() =>
+        // The repaired clip is the same recording, so it has to keep the same
+        // timestamps: the library sorts and groups by creation time, and letting
+        // a repair restamp the file would jump the clip to the top of the
+        // library under today's date.
+        DateTime createdUtc, writtenUtc;
+        try
         {
-            if (File.Exists(backupPath)) File.Delete(backupPath);
-            File.Replace(rebuiltPath, clipPath, backupPath, ignoreMetadataErrors: true);
-            File.Delete(backupPath);
-        }, $"Clip repair replace: {Path.GetFileName(clipPath)}").ConfigureAwait(false);
+            createdUtc = File.GetCreationTimeUtc(clipPath);
+            writtenUtc = File.GetLastWriteTimeUtc(clipPath);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        // Longer and gentler than FileRetry's fixed 5x200ms: the lock here is the
+        // app's own thumbnail/preview/playback reader on the very clip being
+        // repaired, which can hold it for seconds. Nothing waits on this, so
+        // backing off is free.
+        var delay = TimeSpan.FromMilliseconds(250);
+        for (var attempt = 1; attempt <= 6; attempt++)
+        {
+            try
+            {
+                if (File.Exists(backupPath)) File.Delete(backupPath);
+                File.Replace(rebuiltPath, clipPath, backupPath, ignoreMetadataErrors: true);
+                File.Delete(backupPath);
+                try
+                {
+                    File.SetCreationTimeUtc(clipPath, createdUtc);
+                    File.SetLastWriteTimeUtc(clipPath, writtenUtc);
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                {
+                    // The repair itself succeeded; a wrong sort position is not
+                    // worth reporting it as failed.
+                    AppLog.Info($"Clip repair: {Path.GetFileName(clipPath)} repaired but its original timestamps could not be restored.");
+                }
+                return true;
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                if (attempt == 6) return false;
+                await Task.Delay(delay, token).ConfigureAwait(false);
+                delay += delay;
+            }
+        }
+        return false;
     }
 
     private static async Task<(int Errors, int Frames)> DecodeProbeAsync(

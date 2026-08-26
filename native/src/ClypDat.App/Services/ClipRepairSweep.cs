@@ -38,7 +38,7 @@ public static class ClipRepairSweep
     /// Inspects clips that have not been looked at before, repairing any that are
     /// corrupt. Safe to call on every library refresh; returns how many were fixed.
     /// </summary>
-    public static async Task<int> RunAsync(string libraryRoot, IReadOnlyList<string> clipPaths, CancellationToken token)
+    public static async Task<int> RunAsync(string libraryRoot, IReadOnlyList<string> clipPaths, Func<string, Task>? onRepaired, CancellationToken token)
     {
         if (string.IsNullOrWhiteSpace(libraryRoot) || clipPaths.Count == 0) return 0;
         if (!FfmpegPathResolver.IsAvailable) return 0;
@@ -88,6 +88,11 @@ public static class ClipRepairSweep
                         // new one has to be recorded against the new length.
                         try { inspected.Add(Key(clipPath, new FileInfo(clipPath).Length)); } catch (IOException) { }
                         added++;
+                        // Save immediately: a repair is expensive and must not be
+                        // repeated because the process closed before the batched
+                        // write.
+                        Save(libraryRoot, inspected);
+                        if (onRepaired is not null) await onRepaired(clipPath).ConfigureAwait(false);
                         break;
                     case ClipCorruptionRepairService.RepairStatus.Healthy:
                     case ClipCorruptionRepairService.RepairStatus.Unrepairable:
@@ -104,9 +109,11 @@ public static class ClipRepairSweep
 
                 if (added % 25 == 0 && added > 0) Save(libraryRoot, inspected);
 
-                // Yield the disk between clips. This is maintenance; nothing is
-                // waiting on it.
-                await Task.Delay(TimeSpan.FromMilliseconds(250), token).ConfigureAwait(false);
+                // A breath between clips so the sweep never monopolises the
+                // disk - but only a breath. The check itself is well under
+                // 100ms, and a long pause here just left corrupt clips sitting
+                // visibly broken in the library for minutes.
+                await Task.Delay(TimeSpan.FromMilliseconds(25), token).ConfigureAwait(false);
             }
 
             if (added > 0) Save(libraryRoot, inspected);

@@ -69,7 +69,20 @@ public sealed class MediaProbeService
 
     public static bool IsVideoFile(string path)
     {
-        return VideoExtensions.Contains(Path.GetExtension(path));
+        if (!VideoExtensions.Contains(Path.GetExtension(path))) return false;
+
+        // Anything under a dot-folder is ClypDat's own bookkeeping, not library
+        // content. ClipCorruptionRepairService stages a rebuilt clip in a
+        // ".clypdat-repair-*" folder beside the original (it has to be on the
+        // same volume for File.Replace), and without this the half-finished file
+        // surfaced in the library as a clip card of its own for a few seconds.
+        for (var directory = Path.GetDirectoryName(path); !string.IsNullOrEmpty(directory); directory = Path.GetDirectoryName(directory))
+        {
+            var name = Path.GetFileName(directory);
+            if (name.Length == 0) break;
+            if (name[0] == '.') return false;
+        }
+        return true;
     }
 
     // Returns FileInfo, not paths: the directory enumeration already carries

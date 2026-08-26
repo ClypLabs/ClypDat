@@ -4296,12 +4296,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             try
             {
-                // Cold boot already has the disk saturated by the library scan,
-                // thumbnail loads and hydration. This is maintenance work with no
-                // deadline; let all of that finish first.
-                await Task.Delay(TimeSpan.FromSeconds(30));
-                var repaired = await ClipRepairSweep.RunAsync(libraryRoot, paths, CancellationToken.None);
-                if (repaired > 0) await Dispatcher.UIThread.InvokeAsync(() => _ = RefreshLibraryAsync());
+                // Cold boot has the disk saturated by the library scan, thumbnail
+                // loads and hydration. Let the worst of that clear - but not for
+                // long: until this runs, a corrupt clip sits in the library
+                // looking broken.
+                await Task.Delay(TimeSpan.FromSeconds(5));
+                // Refresh per repair rather than once at the end, so a fixed clip
+                // and its thumbnail update as soon as it is fixed instead of the
+                // library appearing stuck until the whole sweep finishes.
+                await ClipRepairSweep.RunAsync(libraryRoot, paths,
+                    onRepaired: async repairedPath =>
+                    {
+                        // The cached thumbnail, filmstrip, waveform and probe
+                        // JSON were all built from the broken decode - a grey
+                        // frame - and the repair keeps the clip's path, size and
+                        // timestamps, so nothing else would ever invalidate them.
+                        try { _mediaProbe.DeleteCacheFor(repairedPath); }
+                        catch (Exception error) { AppLog.Error($"Clip repair: could not clear cached media for {repairedPath}", error); }
+                        await Dispatcher.UIThread.InvokeAsync(RefreshLibraryAsync);
+                    },
+                    CancellationToken.None);
             }
             catch (Exception error)
             {
