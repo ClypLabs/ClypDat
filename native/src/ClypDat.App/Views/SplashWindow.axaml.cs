@@ -95,7 +95,7 @@ public sealed partial class SplashWindow : Window
         }
 
         SetStage("Ready");
-        SetProgress(1);
+        SetProgress(null);
         // Long enough to read, short enough that nobody waits on it.
         await Task.Delay(TimeSpan.FromMilliseconds(250)).ConfigureAwait(true);
         return update;
