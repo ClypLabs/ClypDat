@@ -823,7 +823,8 @@ public sealed record ReplayBufferConfig(
     string FramePacingMode = "CFR",
     IReadOnlyDictionary<string, int>? AdditionalAudioProcesses = null,
     int GameAudioVolumePercent = 100,
-    int MicrophoneVolumePercent = 100);
+    int MicrophoneVolumePercent = 100,
+    string MicrophoneChannelMode = "Mono");
 
 internal sealed class AudioCaptureSession : IDisposable
 {

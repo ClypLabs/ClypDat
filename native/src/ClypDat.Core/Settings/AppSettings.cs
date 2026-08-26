@@ -106,6 +106,12 @@ public sealed class AppSettings
     public Dictionary<string, int> AdditionalAudioProcesses { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public int GameAudioVolumePercent { get; set; } = 100;
     public int MicrophoneVolumePercent { get; set; } = 100;
+    // "Mono" or "Stereo". Windows hands a mono microphone back through a
+    // stereo mix format, so capturing it as-is produced a two-channel track
+    // that is either duplicated or - on drivers that only fill the first
+    // channel - audible in one ear. Mono is the honest default; the option
+    // exists because genuine stereo microphones do exist.
+    public string MicrophoneChannelMode { get; set; } = "Mono";
     public List<string> MicrophoneDeviceIds { get; set; } = new();
     public List<string> GameAudioExcludedProcesses { get; set; } = new();
     public bool EnableEditorKeyboardShortcuts { get; set; } = true;

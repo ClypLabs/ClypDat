@@ -1090,7 +1090,7 @@ public sealed class AudioCapturePipeline : IDisposable
             LazyThreadSafetyMode.ExecutionAndPublication)).Value;
     }
 
-    private async Task<string> SnapshotAudioFileAsync(ReplayAudioCapture? capture, DateTime windowStartUtc, double durationSeconds, ICollection<string> snapshots, ConcurrentDictionary<ReplayAudioCapture, Lazy<Task<SourceSnapshot?>>> sourceSnapshotCache, DateTime? earliestNeededUtc, ReplayBufferConfig? config = null)
+    private async Task<string> SnapshotAudioFileAsync(ReplayAudioCapture? capture, DateTime windowStartUtc, double durationSeconds, ICollection<string> snapshots, ConcurrentDictionary<ReplayAudioCapture, Lazy<Task<SourceSnapshot?>>> sourceSnapshotCache, DateTime? earliestNeededUtc, ReplayBufferConfig? config = null, int channels = 2)
     {
         // BytesWritten, not IsUsableAudioFile(capture.Path) - a RAM-backed
         // capture (the plain replay-buffer window) never has a real file at
@@ -1134,7 +1134,10 @@ public sealed class AudioCapturePipeline : IDisposable
                 "-i", sourceSnapshotPath,
                 "-filter_complex", filters,
                 "-map", "[out]",
-                "-ac", "2",
+                // Track-dependent - the microphone track is mono unless the
+                // user says their mic really is stereo. See
+                // TrackChannelCount.
+                "-ac", channels.ToString(CultureInfo.InvariantCulture),
                 // f32, not s16, for every intermediate in the save chain (this,
                 // the silent filler, and the mix - concat is -c copy, so all
                 // three have to agree). Captures arrive as 32-bit float and a
@@ -1175,6 +1178,7 @@ public sealed class AudioCapturePipeline : IDisposable
         ReplayBufferConfig? config = null,
         int volumePercent = 100)
     {
+        var channels = TrackChannelCount(kind, config);
         // Segments are independent time windows, so they overlap rather than
         // running one ffmpeg spawn after another - but only as far as
         // FfmpegGate allows. Unbounded, a Full Session's hours of 60s segments
@@ -1196,7 +1200,7 @@ public sealed class AudioCapturePipeline : IDisposable
             }
 
             var clipPathResults = await Task.WhenAll(overlapping
-                .Select(capture => SnapshotAudioFileAsync(capture, startUtc, durationSeconds, snapshots, sourceSnapshotCache, earliestNeededUtc, config)));
+                .Select(capture => SnapshotAudioFileAsync(capture, startUtc, durationSeconds, snapshots, sourceSnapshotCache, earliestNeededUtc, config, channels)));
             var clipPaths = clipPathResults
                 .Where(IsUsableAudioFile)
                 .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
@@ -1204,7 +1208,7 @@ public sealed class AudioCapturePipeline : IDisposable
 
             if (clipPaths.Length == 0)
             {
-                return await CreateSilentClipAsync(durationSeconds, snapshots, cancellationToken);
+                return await CreateSilentClipAsync(durationSeconds, snapshots, cancellationToken, channels);
             }
             if (clipPaths.Length == 1)
             {
@@ -1219,7 +1223,7 @@ public sealed class AudioCapturePipeline : IDisposable
         if (segmentClips.Length == 0)
         {
             var totalDuration = segmentWindows.Sum(window => window.DurationSeconds);
-            return await CreateSilentClipAsync(totalDuration, snapshots, cancellationToken);
+            return await CreateSilentClipAsync(totalDuration, snapshots, cancellationToken, channels);
         }
 
         var outputPath = segmentClips.Length == 1
@@ -1228,6 +1232,15 @@ public sealed class AudioCapturePipeline : IDisposable
         return volumePercent == 100
             ? outputPath
             : await ApplyGainAsync(outputPath, volumePercent, snapshots, cancellationToken);
+    }
+
+    // Only the microphone is ever mono. Game and app tracks are loopback
+    // captures of real stereo mixes, so folding them down would throw away
+    // actual stereo content.
+    private static int TrackChannelCount(AudioCaptureKind kind, ReplayBufferConfig? config)
+    {
+        if (kind != AudioCaptureKind.Microphone) return 2;
+        return string.Equals(config?.MicrophoneChannelMode, "Stereo", StringComparison.OrdinalIgnoreCase) ? 2 : 1;
     }
 
     private async Task<string> ApplyGainAsync(string inputPath, int volumePercent, ICollection<string> snapshots, CancellationToken cancellationToken)
@@ -1246,13 +1259,17 @@ public sealed class AudioCapturePipeline : IDisposable
         return outputPath;
     }
 
-    private async Task<string> CreateSilentClipAsync(double durationSeconds, ICollection<string> snapshots, CancellationToken cancellationToken)
+    // channels has to match whatever the real segments of this track came out
+    // as: ConcatClipsAsync stitches silence and content together with -c copy,
+    // which cannot join a mono clip to a stereo one.
+    private async Task<string> CreateSilentClipAsync(double durationSeconds, ICollection<string> snapshots, CancellationToken cancellationToken, int channels = 2)
     {
         var path = Path.Combine(_bufferFolder, $"audio_silent_{Guid.NewGuid():N}.wav");
+        var layout = channels == 1 ? "mono" : "stereo";
         var result = await RunGatedProcessAsync("ffmpeg", new[]
         {
             "-y", "-v", "error",
-            "-f", "lavfi", "-t", FormatSeconds(durationSeconds), "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+            "-f", "lavfi", "-t", FormatSeconds(durationSeconds), "-i", $"anullsrc=channel_layout={layout}:sample_rate=48000",
             "-c:a", "pcm_f32le",
             path
         }, cancellationToken);

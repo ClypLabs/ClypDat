@@ -3281,6 +3281,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // Mono/Stereo for the microphone track. Almost every headset and desk mic
+    // is a single capsule that Windows presents through a stereo mix format,
+    // so recording it as stereo just doubles the data - or, on drivers that
+    // only fill the left channel, puts the whole track in one ear. Stereo is
+    // here for the microphones that genuinely have two capsules.
+    public IReadOnlyList<string> MicrophoneChannelModes { get; } = new[] { "Mono", "Stereo" };
+
+    public string MicrophoneChannelMode
+    {
+        get => Settings.MicrophoneChannelMode;
+        set
+        {
+            var mode = string.Equals(value, "Stereo", StringComparison.OrdinalIgnoreCase) ? "Stereo" : "Mono";
+            if (string.Equals(Settings.MicrophoneChannelMode, mode, StringComparison.Ordinal)) return;
+            Settings.MicrophoneChannelMode = mode;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
     private bool IsAudioProcessEligible(ActiveAudioProcess process)
     {
         if (process.ProcessId == Environment.ProcessId) return false;
@@ -5834,7 +5854,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SaveReplayHotkey: Settings.SaveReplayHotkey,
             AdditionalAudioProcesses: AudioProcessIdentity.NormalizeDictionary(Settings.AdditionalAudioProcesses),
             GameAudioVolumePercent: Settings.GameAudioVolumePercent,
-            MicrophoneVolumePercent: Settings.MicrophoneVolumePercent);
+            MicrophoneVolumePercent: Settings.MicrophoneVolumePercent,
+            MicrophoneChannelMode: Settings.MicrophoneChannelMode);
     }
 
     public void SetDuration(TimeSpan duration)
@@ -5953,7 +5974,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             foreach (var track in audioTracks)
             {
                 var label = $"a{track.StreamIndex}";
-                filter.Append($"[0:{track.StreamIndex}]volume={VolumeMultiplier(track.EffectiveVolumePercent):0.###}[{label}];");
+                // aformat before amix, not after: the microphone track can be
+                // mono (Settings > Audio > Microphone > Channels), and amix
+                // wants every input on the same layout. Stating it here beats
+                // relying on ffmpeg's automatic conversion to pick one.
+                filter.Append($"[0:{track.StreamIndex}]volume={VolumeMultiplier(track.EffectiveVolumePercent):0.###},aformat=channel_layouts=stereo[{label}];");
                 labels.Add($"[{label}]");
             }
 
@@ -6034,7 +6059,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             foreach (var track in audioTracks)
             {
                 var label = $"a{track.StreamIndex}";
-                filter.Append($"[0:{track.StreamIndex}]volume={VolumeMultiplier(track.EffectiveVolumePercent):0.###}[{label}];");
+                // aformat before amix, not after: the microphone track can be
+                // mono (Settings > Audio > Microphone > Channels), and amix
+                // wants every input on the same layout. Stating it here beats
+                // relying on ffmpeg's automatic conversion to pick one.
+                filter.Append($"[0:{track.StreamIndex}]volume={VolumeMultiplier(track.EffectiveVolumePercent):0.###},aformat=channel_layouts=stereo[{label}];");
                 labels.Add($"[{label}]");
             }
 

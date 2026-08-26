@@ -100,6 +100,9 @@ public static class AppSettingsStore
             settings.AdditionalAudioProcesses ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             settings.GameAudioVolumePercent = Math.Clamp(settings.GameAudioVolumePercent, 0, 150);
             settings.MicrophoneVolumePercent = Math.Clamp(settings.MicrophoneVolumePercent, 0, 150);
+            settings.MicrophoneChannelMode = string.Equals(settings.MicrophoneChannelMode, "Stereo", StringComparison.OrdinalIgnoreCase)
+                ? "Stereo"
+                : "Mono";
             settings.MicrophoneDeviceIds ??= new List<string>();
             settings.IgnoredGameExecutables ??= new List<string>();
             settings.GameCaptureOverrides ??= new List<GameCaptureOverride>();
