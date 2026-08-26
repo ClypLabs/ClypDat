@@ -156,7 +156,7 @@ public sealed class AudioCapturePipeline : IDisposable
 
         var trackJobs = new List<(string Label, Task<string> PathTask)>
         {
-            ("Game Audio", BuildAlignedTrackAsync(AudioCaptureKind.Game, captures, null, segmentWindows, allowMix: true, snapshots, sourceSnapshotCache, earliestNeededUtc, cancellationToken))
+            ("Game Audio", BuildAlignedTrackAsync(AudioCaptureKind.Game, captures, null, segmentWindows, allowMix: true, snapshots, sourceSnapshotCache, earliestNeededUtc, cancellationToken, volumePercent: Math.Clamp(config.GameAudioVolumePercent, 0, 150)))
         };
 
         // Derive application lanes from current configuration, not from the
@@ -197,7 +197,7 @@ public sealed class AudioCapturePipeline : IDisposable
         {
             micIndex++;
             var label = micIds.Length > 1 ? $"Microphone {micIndex}" : "Microphone";
-            trackJobs.Add((label, BuildAlignedTrackAsync(AudioCaptureKind.Microphone, captures, micId, segmentWindows, allowMix: false, snapshots, sourceSnapshotCache, earliestNeededUtc, cancellationToken, config)));
+            trackJobs.Add((label, BuildAlignedTrackAsync(AudioCaptureKind.Microphone, captures, micId, segmentWindows, allowMix: false, snapshots, sourceSnapshotCache, earliestNeededUtc, cancellationToken, config, Math.Clamp(config.MicrophoneVolumePercent, 0, 150))));
         }
 
         AddApplicationTracks(orderedApps.Where(name => !AudioProcessIdentity.IsSocial(name)));

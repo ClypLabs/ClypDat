@@ -2,7 +2,7 @@ namespace ClypDat.Core.Settings;
 
 public static class AppSettingsMigrations
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
 
     public static bool Apply(AppSettings settings)
     {
@@ -28,6 +28,14 @@ public static class AppSettingsMigrations
             settings.ChatAudioProcessName = AudioProcessIdentity.Normalize(settings.ChatAudioProcessName);
             settings.ChatAudioProcessNames = AudioProcessIdentity.NormalizeList(settings.ChatAudioProcessNames);
             settings.GameAudioExcludedProcesses = AudioProcessIdentity.NormalizeList(settings.GameAudioExcludedProcesses);
+        }
+
+        if (settings.SettingsSchemaVersion < 4)
+        {
+            // DXGI is now the only capture path. Keep legacy fields readable,
+            // but never let an old selection revive a retired implementation.
+            settings.ReplayBackend = "Native";
+            foreach (var game in settings.GameCaptureOverrides ?? []) game.CaptureBackend = "Native";
         }
 
         settings.SettingsSchemaVersion = CurrentSchemaVersion;

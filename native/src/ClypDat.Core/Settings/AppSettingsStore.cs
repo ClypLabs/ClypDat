@@ -18,6 +18,7 @@ public static class AppSettingsStore
 
     /// <summary>Path the previous settings file was preserved to when it could not be read.</summary>
     public static string? PreservedUnreadablePath { get; private set; }
+    public static string? LastSaveError { get; private set; }
 
     public static AppSettings Load()
     {
@@ -87,11 +88,6 @@ public static class AppSettingsStore
             }
             if (settings.ReplayMaxHeight <= 0) settings.ReplayMaxHeight = 1080;
             if (string.IsNullOrWhiteSpace(settings.ExportVideoCodec)) settings.ExportVideoCodec = "H.264";
-            // Replay capture is DXGI-only. Migrate the old backend selector and
-            // per-game overrides rather than allowing stale settings to revive
-            // a retired capture implementation.
-            settings.ReplayBackend = "Native";
-            foreach (var game in settings.GameCaptureOverrides ?? []) game.CaptureBackend = "Native";
             settings.ProcessPriority = settings.ProcessPriority switch
             {
                 "Idle" or "BelowNormal" or "Normal" or "AboveNormal" or "High" => settings.ProcessPriority,
@@ -100,6 +96,8 @@ public static class AppSettingsStore
             settings.ChatAudioProcessName ??= string.Empty;
             settings.ChatAudioProcessNames ??= new List<string>();
             settings.AdditionalAudioProcesses ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            settings.GameAudioVolumePercent = Math.Clamp(settings.GameAudioVolumePercent, 0, 150);
+            settings.MicrophoneVolumePercent = Math.Clamp(settings.MicrophoneVolumePercent, 0, 150);
             settings.MicrophoneDeviceIds ??= new List<string>();
             settings.IgnoredGameExecutables ??= new List<string>();
             settings.GameCaptureOverrides ??= new List<GameCaptureOverride>();
@@ -214,7 +212,7 @@ public static class AppSettingsStore
         };
     }
 
-    public static void Save(AppSettings settings)
+    public static bool Save(AppSettings settings)
     {
         try
         {
@@ -228,10 +226,14 @@ public static class AppSettingsStore
             var temporaryPath = SettingsPath + ".tmp";
             File.WriteAllText(temporaryPath, JsonSerializer.Serialize(settings, JsonOptions));
             File.Move(temporaryPath, SettingsPath, overwrite: true);
+            LastSaveError = null;
+            return true;
         }
-        catch
+        catch (Exception error)
         {
             // Settings persistence should not block the editor.
+            LastSaveError = error.Message;
+            return false;
         }
     }
 }

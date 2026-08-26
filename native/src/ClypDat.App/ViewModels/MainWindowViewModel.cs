@@ -104,7 +104,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _selectedReplayFrameRate;
     private ReplayQualityPreset? _selectedReplayQualityPreset;
     private ReplayEncoderModeOption? _selectedReplayEncoderMode;
-    private ReplayBackendPreset? _selectedReplayBackend;
     private string _selectedReplayCaptureSource = "Game";
     private DesktopMonitorOption? _selectedDesktopMonitor;
     private string _newCustomGameExecutable = string.Empty;
@@ -276,10 +275,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("H.264", "h264_nvenc", "libx264"),
             new("AV1", "av1_nvenc", "libaom-av1")
         };
-        ReplayBackends = new ObservableCollection<ReplayBackendPreset>
-        {
-            new("ClypDat", "Native", "Uses ClypDat's rolling memory buffer. Covered or background games freeze rather than exposing the desktop. No process hooks.")
-        };
         ReplayCaptureSources = new ObservableCollection<string> { "Game Capture", "Desktop Capture" };
         DesktopMonitors = new ObservableCollection<DesktopMonitorOption>();
         ClipOverlayPositions = new ObservableCollection<string> { "Top Left", "Top Right" };
@@ -337,7 +332,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _activeReplayEncoderSignature = EncoderSignature;
         SelectedExportCodec = ExportCodecs.FirstOrDefault(codec => string.Equals(codec.Label, Settings.ExportVideoCodec, StringComparison.OrdinalIgnoreCase)) ??
                               ExportCodecs.First(codec => codec.Label == "H.264");
-        _selectedReplayBackend = ReplayBackends[0];
         _selectedReplayCaptureSource = string.Equals(Settings.ReplayCaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase)
             ? "Desktop Capture"
             : "Game Capture";
@@ -501,7 +495,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<string> ReplayBitrateOptions { get; }
     public sealed record ReplayVideoCodecOption(string Label, string Value, string Description);
     public ObservableCollection<ReplayVideoCodecOption> ReplayVideoCodecs { get; }
-    public ObservableCollection<ReplayBackendPreset> ReplayBackends { get; }
     public ObservableCollection<string> ReplayCaptureSources { get; }
     public ObservableCollection<DesktopMonitorOption> DesktopMonitors { get; }
     public ObservableCollection<ExportCodecOption> ExportCodecs { get; }
@@ -1922,22 +1915,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public ReplayBackendPreset? SelectedReplayBackend
-    {
-        get => _selectedReplayBackend;
-        set
-        {
-            if (!SetProperty(ref _selectedReplayBackend, value) || value is null) return;
-            Settings.ReplayBackend = value.Value;
-            // The quality warning's TEXT depends on which backend is selected,
-            // not just on the quality being above default, so switching backends
-            // has to refresh it even though no quality setting moved.
-            OnPropertyChanged(nameof(ReplayQualityWarning));
-            OnPropertyChanged(nameof(ReplayVideoCodecStatus));
-            SaveSettings();
-        }
-    }
-
     public string SelectedClipOverlayPosition
     {
         get => _selectedClipOverlayPosition;
@@ -3271,6 +3248,32 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SaveSettings();
     }
 
+    public double GameAudioVolumePercent
+    {
+        get => Settings.GameAudioVolumePercent;
+        set
+        {
+            var volume = (int)Math.Round(Math.Clamp(value, 0, 150));
+            if (Settings.GameAudioVolumePercent == volume) return;
+            Settings.GameAudioVolumePercent = volume;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    public double MicrophoneVolumePercent
+    {
+        get => Settings.MicrophoneVolumePercent;
+        set
+        {
+            var volume = (int)Math.Round(Math.Clamp(value, 0, 150));
+            if (Settings.MicrophoneVolumePercent == volume) return;
+            Settings.MicrophoneVolumePercent = volume;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
     private bool IsAudioProcessEligible(ActiveAudioProcess process)
     {
         if (process.ProcessId == Environment.ProcessId) return false;
@@ -3999,7 +4002,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void SaveSettings()
     {
-        AppSettingsStore.Save(Settings);
+        if (!AppSettingsStore.Save(Settings))
+            AppLog.Error($"Settings persistence failed: {AppSettingsStore.LastSaveError}");
     }
 
     public async Task RenameAllClipsAsync()
@@ -5290,7 +5294,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private static readonly string[] OnboardingStepOrder =
     {
         "Replay Buffer",
-        "Capture Backend",
         "Startup",
         "Audio",
         "Game Audio Exclusions"
@@ -5551,7 +5554,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void RebuildGameCaptureRows()
     {
-        foreach (var row in GameCaptureRows) row.PropertyChanged -= GameCaptureRow_OnPropertyChanged;
         GameCaptureRows.Clear();
 
         var supplemental = Settings.GameCaptureOverrides
@@ -5563,9 +5565,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         foreach (var entry in supplemental.OrderBy(e => e.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
             var overrideEntry = Settings.GameCaptureOverrides.FirstOrDefault(g => string.Equals(g.ExecutableName, entry.ExecutableName, StringComparison.OrdinalIgnoreCase));
-            var backend = ReplayBackends[0];
-            var row = new GameBackendRowViewModel(entry.ExecutableName, entry.DisplayName, overrideEntry?.ProcessName ?? string.Empty, entry.IsCustom, backend);
-            row.PropertyChanged += GameCaptureRow_OnPropertyChanged;
+            var row = new GameBackendRowViewModel(entry.ExecutableName, entry.DisplayName, overrideEntry?.ProcessName ?? string.Empty, entry.IsCustom);
             GameCaptureRows.Add(row);
         }
 
@@ -5592,21 +5592,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             visibleRows[i].ShowDivider = i < visibleRows.Count - 1;
         }
-    }
-
-    private void GameCaptureRow_OnPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName != nameof(GameBackendRowViewModel.SelectedBackend) || sender is not GameBackendRowViewModel row) return;
-
-        var entry = Settings.GameCaptureOverrides.FirstOrDefault(g => string.Equals(g.ExecutableName, row.ExecutableName, StringComparison.OrdinalIgnoreCase));
-        if (entry is null)
-        {
-            entry = new GameCaptureOverride { ExecutableName = row.ExecutableName, DisplayName = row.IsCustom ? row.DisplayName : string.Empty, ProcessName = row.ProcessName, Origin = row.IsCustom ? "UserCustom" : "Backend" };
-            Settings.GameCaptureOverrides.Add(entry);
-        }
-
-        entry.CaptureBackend = row.SelectedBackend?.Value ?? "Auto";
-        SaveSettings();
     }
 
     public async Task RefreshAudioDevicesAsync()
@@ -5690,19 +5675,29 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OpenProcesses.Add(process);
         }
         ActiveAudioProcesses.Clear();
-        foreach (var process in audioProcesses
-                     .Where(IsAudioProcessEligible)
-                     .OrderBy(process => AudioProcessIdentity.TryGetValue(Settings.AdditionalAudioProcesses, process.Name, out _) ? 0 : 1)
-                     .ThenBy(process => AudioProcessIdentity.IsSocial(process.Name) ? 0 : 1)
-                     .ThenBy(process => process.Name, StringComparer.CurrentCultureIgnoreCase))
+        var activeByName = audioProcesses
+            .Where(IsAudioProcessEligible)
+            .GroupBy(process => AudioProcessIdentity.Normalize(process.Name), StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Key.Length > 0)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var listedNames = activeByName.Keys
+            .Concat(Settings.AdditionalAudioProcesses.Keys
+                .Where(name => IsAudioProcessEligible(new ActiveAudioProcess(name, 0, string.Empty)))
+                .Select(AudioProcessIdentity.Normalize))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in listedNames
+                     .OrderBy(name => AudioProcessIdentity.TryGetValue(Settings.AdditionalAudioProcesses, name, out _) ? 0 : 1)
+                     .ThenBy(AudioProcessIdentity.IsSocial)
+                     .ThenBy(name => name, StringComparer.CurrentCultureIgnoreCase))
         {
-            var enabled = AudioProcessIdentity.TryGetValue(Settings.AdditionalAudioProcesses, process.Name, out var volume);
-            var row = new AudioTrackProcessViewModel(process.Name, enabled, enabled ? volume : 100, SetAdditionalAudioProcess);
-            if (!string.IsNullOrWhiteSpace(process.ExecutablePath))
+            activeByName.TryGetValue(name, out var process);
+            var enabled = AudioProcessIdentity.TryGetValue(Settings.AdditionalAudioProcesses, name, out var volume);
+            var row = new AudioTrackProcessViewModel(name, enabled, enabled ? volume : 100, SetAdditionalAudioProcess);
+            if (process is not null && !string.IsNullOrWhiteSpace(process.ExecutablePath))
             {
-                GameIconService.EnsureCached($"audio-{process.Name}", process.ProcessId);
-                row.Icon = GameIconService.TryLoad($"audio-{process.Name}");
+                GameIconService.EnsureCached($"audio-{name}", process.ProcessId);
             }
+            row.Icon = GameIconService.TryLoad($"audio-{name}");
             ActiveAudioProcesses.Add(row);
         }
 
@@ -5795,7 +5790,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             CaptureCursor: desktopCapture && Settings.ReplayDesktopCaptureCursor,
             ProcessPriority: Settings.ProcessPriority,
             SaveReplayHotkey: Settings.SaveReplayHotkey,
-            AdditionalAudioProcesses: AudioProcessIdentity.NormalizeDictionary(Settings.AdditionalAudioProcesses));
+            AdditionalAudioProcesses: AudioProcessIdentity.NormalizeDictionary(Settings.AdditionalAudioProcesses),
+            GameAudioVolumePercent: Settings.GameAudioVolumePercent,
+            MicrophoneVolumePercent: Settings.MicrophoneVolumePercent);
     }
 
     public void SetDuration(TimeSpan duration)

@@ -52,7 +52,7 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         ["Replay Buffer"] = new[]
         {
             "Hotkey", "Save hotkey", "Recording", "Replay length", "Resolution", "Frame rate",
-            "Encoding", "Encoder Preset", "Rate control", "Quality", "Bitrate", "Capture backend",
+            "Encoding", "Encoder Preset", "Rate control", "Quality", "Bitrate",
             "Full session recording", "Destination folder", "Session codec",
             "Finalize in background", "Storage limit", "Custom limit"
         },

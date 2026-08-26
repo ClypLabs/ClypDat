@@ -329,7 +329,7 @@ public sealed partial class MainWindow : Window
                         or nameof(MainWindowViewModel.SelectedDesktopMonitor)
                         or nameof(MainWindowViewModel.ReplayDesktopCaptureCursor)
                         or nameof(MainWindowViewModel.ReplayAutoSwitchToGameCapture)
-                        or nameof(MainWindowViewModel.SelectedReplayBackend)) ScheduleReplayRestart();
+                        ) ScheduleReplayRestart();
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
                     if (e.PropertyName == nameof(MainWindowViewModel.IsSettingsVisible) && ViewModel.IsSettingsVisible) PauseEditorPlayback();
@@ -9308,9 +9308,9 @@ public sealed partial class MainWindow : Window
             Height = settings.WindowHeight;
         }
 
-        if (!double.IsNaN(settings.WindowX) && !double.IsNaN(settings.WindowY))
+        if (settings.WindowX is double windowX && settings.WindowY is double windowY)
         {
-            Position = new PixelPoint((int)settings.WindowX, (int)settings.WindowY);
+            Position = new PixelPoint((int)windowX, (int)windowY);
         }
 
         if (settings.IsWindowMaximized)

@@ -99,26 +99,14 @@
                           </ComboBox>
                         </StackPanel>
 
-                        <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
-                          <StackPanel Grid.Column="0" Spacing="4">
-                            <TextBlock Classes="flyoutLabel" Text="Capture backend" />
-                            <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayBackends}" SelectedItem="{Binding SelectedReplayBackend}" HorizontalAlignment="Stretch">
-                              <ComboBox.ItemTemplate>
-                                <DataTemplate>
-                                  <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Label}" />
-                                </DataTemplate>
-                              </ComboBox.ItemTemplate>
-                            </ComboBox>
-                          </StackPanel>
-                          <StackPanel Grid.Column="1" Spacing="4">
+                        <StackPanel Spacing="4">
                             <TextBlock Classes="flyoutLabel" Text="Length" />
                             <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}" HorizontalAlignment="Stretch">
                               <ComboBox.ItemTemplate>
                                 <DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate>
                               </ComboBox.ItemTemplate>
                             </ComboBox>
-                          </StackPanel>
-                        </Grid>
+                        </StackPanel>
 
                         <StackPanel Spacing="8" IsVisible="{Binding IsDesktopCapture}">
                           <StackPanel Spacing="4">
@@ -1421,21 +1409,6 @@
                 </StackPanel>
               </Border>
 
-              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Capture backend}">
-                <StackPanel Spacing="6">
-                  <TextBlock Text="CAPTURE BACKEND" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                    <TextBlock Text="Capture Backend" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                  <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayBackends}" SelectedItem="{Binding SelectedReplayBackend}">
-                    <ListBox.ItemTemplate>
-                      <DataTemplate>
-                        <TextBlock Text="{Binding Label}" />
-                      </DataTemplate>
-                    </ListBox.ItemTemplate>
-                  </ListBox>
-                  <TextBlock Text="{Binding SelectedReplayBackend.Description}" Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
-                </StackPanel>
-              </Border>
-
               <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Full session recording|Destination folder|Session codec|Finalize in background|Storage limit|Custom limit|Full Session Recording}">
                 <StackPanel Spacing="14">
                   <TextBlock Text="FULL SESSION RECORDING" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -1718,7 +1691,7 @@
 
               <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Clip Filenames}">
                 <StackPanel Spacing="12">
-                  <TextBlock Text="CLYP FILENAMES" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                  <TextBlock Text="Clip Filenames" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                   <TextBlock Text="Choose how newly saved clips are named. Windows replaces unsupported filename characters such as colons with hyphens." Foreground="#6B7C8C" FontSize="12" TextWrapping="Wrap" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                   <ComboBox Classes="settingsInput" ItemsSource="{Binding ClipFileNameSchemes}" SelectedValue="{Binding SelectedClipFileNameScheme}" SelectedValueBinding="{Binding Value}">
                     <ComboBox.ItemTemplate>
@@ -1814,7 +1787,7 @@
                       <DataTemplate>
                         <Border BorderThickness="0" Background="Transparent" Padding="12,6,12,10" VerticalAlignment="Top" IsVisible="{Binding IsVisible}">
                           <Grid RowDefinitions="*,Auto">
-                            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
                               <StackPanel Spacing="1" Margin="{Binding TitleMargin}" VerticalAlignment="Center">
                                 <TextBlock Text="{Binding DisplayName}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" />
                                 <!-- ExecutableName is the detection key (e.g.
@@ -1828,14 +1801,7 @@
                                      instead of sitting pinned above empty space. -->
                                 <TextBlock Text="{Binding ProcessName}" Foreground="#5C6D7E" FontSize="11" IsVisible="{Binding ProcessName, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
                               </StackPanel>
-                              <ComboBox Grid.Column="1" Classes="settingsInput" Width="210" ItemsSource="{Binding $parent[Window].DataContext.ReplayBackends}" SelectedItem="{Binding SelectedBackend}" VerticalAlignment="Center">
-                                <ComboBox.ItemTemplate>
-                                  <DataTemplate>
-                                    <TextBlock Text="{Binding Label}" />
-                                  </DataTemplate>
-                                </ComboBox.ItemTemplate>
-                              </ComboBox>
-                              <Button Grid.Column="2" Content="Remove" Padding="14,7" VerticalAlignment="Center" Click="RemoveGameButton_OnClick"
+                              <Button Grid.Column="1" Content="Remove" Padding="14,7" VerticalAlignment="Center" Click="RemoveGameButton_OnClick"
                                       ToolTip.Tip="Removes it from this list and stops ClypDat detecting it as a game again" />
                             </Grid>
                             <Border Grid.Row="1" Height="1" Background="#1B242D" Margin="0,10,0,0" IsVisible="{Binding ShowDivider}" />
@@ -2141,7 +2107,10 @@
                               <PathIcon Data="M4,19H20V21H4V19M6,3H18V17H6V3M8,5V15H16V5H8Z" Width="18" Height="18" Foreground="#78B8FF" HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Border>
                             <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center"><TextBlock Text="Game Audio" Foreground="#EDF4FB" FontWeight="SemiBold" /><TextBlock Text="Dedicated capture track" Foreground="#6B7C8C" FontSize="11" /></StackPanel>
-                            <TextBlock Grid.Column="3" Text="Always separate" TextAlignment="Right" HorizontalAlignment="Right" Foreground="#54D7A7" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <Grid Grid.Column="3" ColumnDefinitions="200,10,50" VerticalAlignment="Center">
+                              <Slider Width="200" Height="52" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" Foreground="{Binding GameAudioVolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding GameAudioVolumePercent}" />
+                              <TextBlock Grid.Column="2" Text="{Binding GameAudioVolumePercent, StringFormat={}{0:0}%}" TextAlignment="Right" Foreground="#DCE8F5" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            </Grid>
                           </Grid>
                         </Border>
                         <Border Classes="audioProcessRow enabledRow">
@@ -2151,7 +2120,10 @@
                               <PathIcon Data="M12,14C13.66,14 15,12.66 15,11V5C15,3.34 13.66,2 12,2C10.34,2 9,3.34 9,5V11C9,12.66 10.34,14 12,14M17.3,11C17.3,14 14.76,16.1 12,16.1C9.24,16.1 6.7,14 6.7,11H5C5,14.41 7.72,17.23 11,17.72V21H13V17.72C16.28,17.23 19,14.41 19,11H17.3Z" Width="18" Height="18" Foreground="#78B8FF" HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Border>
                             <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center"><TextBlock Text="Microphone" Foreground="#EDF4FB" FontWeight="SemiBold" /><TextBlock Text="Dedicated capture track" Foreground="#6B7C8C" FontSize="11" /></StackPanel>
-                            <TextBlock Grid.Column="3" Text="Always separate" TextAlignment="Right" HorizontalAlignment="Right" Foreground="#54D7A7" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <Grid Grid.Column="3" ColumnDefinitions="200,10,50" VerticalAlignment="Center">
+                              <Slider Width="200" Height="52" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" Foreground="{Binding MicrophoneVolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding MicrophoneVolumePercent}" />
+                              <TextBlock Grid.Column="2" Text="{Binding MicrophoneVolumePercent, StringFormat={}{0:0}%}" TextAlignment="Right" Foreground="#DCE8F5" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            </Grid>
                           </Grid>
                         </Border>
                         <ItemsControl ItemsSource="{Binding ActiveAudioProcesses}">
@@ -2178,7 +2150,7 @@
                         </ItemsControl>
                       </StackPanel>
                     </Border>
-                    <TextBlock Text="Only applications currently shown in Windows Volume Mixer appear here. Enabled apps are always separate tracks; volume supports 0–150% and starts at 100%." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    <TextBlock Text="Applications currently in Windows Volume Mixer appear here. Enabled apps stay listed and are always separate tracks; volume supports 0–150% and starts at 100%." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
                   </StackPanel>
 
                   <TextBlock Text="AUDIO SOURCES" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" IsVisible="False" />
@@ -2474,11 +2446,6 @@
                 <TextBlock Foreground="#D2DEEC" FontWeight="Bold" FontSize="16">
                   <Run Text="{Binding SelectedReplayResolution.Label}" /><Run Text=" @ " /><Run Text="{Binding SelectedReplayFrameRate}" /><Run Text="fps" />
                 </TextBlock>
-              </StackPanel>
-
-              <StackPanel Spacing="2" Margin="0,0,0,16">
-                <TextBlock Text="Capture backend" Foreground="#5C6D7E" FontSize="11" FontWeight="Bold" />
-                <TextBlock Text="{Binding SelectedReplayBackend.Label}" Foreground="#D2DEEC" FontWeight="Bold" FontSize="16" TextWrapping="Wrap" />
               </StackPanel>
 
               <Border Height="1" Background="#1B242D" Margin="0,0,0,16" />
@@ -3000,10 +2967,9 @@
 
           <StackPanel DockPanel.Dock="Bottom" Margin="24,0,24,20" Spacing="14">
             <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-              <TextBlock Text="{Binding OnboardingStepNumber, StringFormat='Step {0} of 5'}" Foreground="#A9C9E5" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
+              <TextBlock Text="{Binding OnboardingStepNumber, StringFormat='Step {0} of 4'}" Foreground="#A9C9E5" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
               <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
               <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Replay Buffer}" />
-              <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Capture Backend}" />
               <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Startup}" />
               <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Audio}" />
               <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Game Audio Exclusions}" />
@@ -3051,23 +3017,6 @@
                     </ListBox.ItemTemplate>
                   </ListBox>
                 </StackPanel>
-                </StackPanel>
-                </Border>
-              </StackPanel>
-
-              <StackPanel Spacing="16" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Capture Backend}">
-                <TextBlock Text="Capture backend" Foreground="#EDF4FB" FontWeight="Bold" FontSize="18" />
-                <TextBlock Text="Auto is recommended and works with anti-cheat. Change a game later in Settings if needed." Foreground="#B9C6D4" FontSize="13" TextWrapping="Wrap" />
-                <Border Classes="onboardingSettingCard">
-                <StackPanel Spacing="12">
-                <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayBackends}" SelectedItem="{Binding SelectedReplayBackend}">
-                  <ListBox.ItemTemplate>
-                    <DataTemplate>
-                      <TextBlock Text="{Binding Label}" />
-                    </DataTemplate>
-                  </ListBox.ItemTemplate>
-                </ListBox>
-                <TextBlock Text="{Binding SelectedReplayBackend.Description}" Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
                 </StackPanel>
                 </Border>
               </StackPanel>

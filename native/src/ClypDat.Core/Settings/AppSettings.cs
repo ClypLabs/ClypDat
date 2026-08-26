@@ -103,6 +103,8 @@ public sealed class AppSettings
     // Applications explicitly enabled in Recording Audio. Each becomes its
     // own clip track; the value is its capture gain in percent (0–150).
     public Dictionary<string, int> AdditionalAudioProcesses { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public int GameAudioVolumePercent { get; set; } = 100;
+    public int MicrophoneVolumePercent { get; set; } = 100;
     public List<string> MicrophoneDeviceIds { get; set; } = new();
     public List<string> GameAudioExcludedProcesses { get; set; } = new();
     public bool EnableEditorKeyboardShortcuts { get; set; } = true;
@@ -152,8 +154,8 @@ public sealed class AppSettings
     // ClipEditSettings), this is a single global preference like any media
     // player remembering your last volume across everything you play.
     public double EditorMasterVolume { get; set; } = 100;
-    public double WindowX { get; set; } = double.NaN;
-    public double WindowY { get; set; } = double.NaN;
+    public double? WindowX { get; set; }
+    public double? WindowY { get; set; }
     public double WindowWidth { get; set; } = 1180;
     public double WindowHeight { get; set; } = 780;
     public bool IsWindowMaximized { get; set; }
