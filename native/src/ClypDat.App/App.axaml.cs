@@ -141,6 +141,7 @@ public sealed partial class App : Application
             // Explicitly show it so Avalonia can measure the first virtualized
             // viewport while the splash remains in front.
             _mainWindow.Show();
+            _mainWindow.Activate();
             if (WindowsPlatformProfile.IsServer())
             {
                 _serverTrayMenuRenderer = new ServerTrayMenuRenderer("ClypDat");
