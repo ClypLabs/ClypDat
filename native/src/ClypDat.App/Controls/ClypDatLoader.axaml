@@ -1,0 +1,155 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ClypDat.App.Controls.ClypDatLoader"
+             x:CompileBindings="False"
+             Foreground="#FFFFFF">
+
+  <!-- The app's loading mark, used wherever something is in flight: the startup
+       loader, the clip-tile repair overlay, anywhere later.
+
+       This is assets/clypdat-loader.svg, drawn with the SAME numbers: one
+       304x304 space, the mark's own paths at the icon's own stroke widths
+       (25 and 15, haloed at 33 and 21), and the ring at r=140 stroked 9 over a
+       15 halo. Earlier versions here re-proportioned everything and stopped
+       looking like the file they were supposed to be. If one changes, change
+       both.
+
+       The hexagons counter-rotate, and nothing else about them changes. That
+       distinction is the whole trick to keeping it steady:
+
+         - The mark is 180-degree symmetric - every vertex has an exact opposite
+           - so a constant turn is smooth. What it is NOT is 60-degree
+           symmetric: its sides alternate 103.94 and 102.00 units. Earlier
+           versions turned it 0-60 per loop and it visibly snapped, so both
+           rings here run a full 0-360.
+         - SCALING is what actually wobbled. An earlier version breathed the
+           inner hexagon between 0.88 and 1.04 and the mark looked like it was
+           rocking. Nothing here scales except the glow, which has no edge to
+           betray it.
+         - Dashing the hexagons was the other failed idea: at tile size the
+           dashes read as loose sticks rather than a hexagon. Dashes belong on
+           the ring, which is a circle and holds its shape.
+
+       The ring carries one segment per side of the mark - six - so it echoes
+       the hexagon rather than contradicting it, and they tile the circumference
+       exactly (146.608 x 6 = 879.65) so nothing snaps at the loop point. Note the one thing that
+       cannot be copied between the two files verbatim: Avalonia measures
+       StrokeDashArray in multiples of the stroke's own thickness, SVG measures
+       stroke-dasharray in user units - so each pattern below is the SVG's
+       divided by its own stroke width, and the halo's differs from the mark's.
+
+       Vector throughout, so it is sharp at 24px and at 240px, and every stroke
+       draws in Foreground so one property retints all of it. -->
+  <Viewbox Stretch="Uniform">
+    <Canvas Width="304" Height="304">
+
+      <!-- Glow. The only thing that changes size. -->
+      <Ellipse Canvas.Left="22" Canvas.Top="22" Width="260" Height="260"
+               RenderTransformOrigin="50%,50%" Opacity="0.35">
+        <Ellipse.Fill>
+          <RadialGradientBrush>
+            <GradientStop Offset="0" Color="#40FFFFFF" />
+            <GradientStop Offset="1" Color="#00FFFFFF" />
+          </RadialGradientBrush>
+        </Ellipse.Fill>
+        <Ellipse.Styles>
+          <Style Selector="Ellipse">
+            <Style.Animations>
+              <Animation Duration="0:0:2.2" IterationCount="Infinite" PlaybackDirection="Alternate" Easing="SineEaseInOut">
+                <KeyFrame Cue="0%">
+                  <Setter Property="Opacity" Value="0.18" />
+                  <Setter Property="ScaleTransform.ScaleX" Value="0.8" />
+                  <Setter Property="ScaleTransform.ScaleY" Value="0.8" />
+                </KeyFrame>
+                <KeyFrame Cue="100%">
+                  <Setter Property="Opacity" Value="0.5" />
+                  <Setter Property="ScaleTransform.ScaleX" Value="1.1" />
+                  <Setter Property="ScaleTransform.ScaleY" Value="1.1" />
+                </KeyFrame>
+              </Animation>
+            </Style.Animations>
+          </Style>
+        </Ellipse.Styles>
+      </Ellipse>
+
+      <!-- Ring: SIX segments, one per side of the mark, so the ring echoes the
+           hexagon instead of contradicting it. They tile the circumference
+           exactly (146.608 x 6 = 879.65), so nothing snaps at the loop point.
+           Halo and mark rotate as one Panel so they can never separate. r=140
+           about the mark's centre, which is (152,152) here. -->
+      <Panel Canvas.Left="12" Canvas.Top="12" Width="280" Height="280"
+             RenderTransformOrigin="50%,50%">
+        <Ellipse Width="280" Height="280"
+                 Stroke="#000000" StrokeThickness="15"
+                 StrokeDashArray="5.864,3.910" StrokeLineCap="Round"
+                 Opacity="0.5" />
+        <Ellipse Width="280" Height="280"
+                 Stroke="{Binding $parent[UserControl].Foreground}" StrokeThickness="9"
+                 StrokeDashArray="9.774,6.516" StrokeLineCap="Round"
+                 Opacity="0.9" />
+        <Panel.Styles>
+          <Style Selector="Panel">
+            <Style.Animations>
+              <Animation Duration="0:0:1.6" IterationCount="Infinite" Easing="LinearEasing">
+                <KeyFrame Cue="0%">
+                  <Setter Property="RotateTransform.Angle" Value="0" />
+                </KeyFrame>
+                <KeyFrame Cue="100%">
+                  <Setter Property="RotateTransform.Angle" Value="360" />
+                </KeyFrame>
+              </Animation>
+            </Style.Animations>
+          </Style>
+        </Panel.Styles>
+      </Panel>
+
+      <!-- The mark, at the icon's own weights, offset by the same 24 units the
+           SVG's viewBox is padded by. Each hexagon is its own layer so its halo
+           turns with it. -->
+      <Canvas Canvas.Left="24" Canvas.Top="24" Width="256" Height="256">
+        <Canvas Classes="outer" Width="256" Height="256" RenderTransformOrigin="50%,50%">
+          <Path Data="M128 25 218 77v102l-90 52-90-52V77l90-52Z"
+                Stroke="#000000" StrokeThickness="33" StrokeJoin="Round" Opacity="0.5" />
+          <Path Data="M128 25 218 77v102l-90 52-90-52V77l90-52Z"
+                Stroke="{Binding $parent[UserControl].Foreground}"
+                StrokeThickness="25" StrokeJoin="Round" />
+        </Canvas>
+        <Canvas Classes="inner" Width="256" Height="256" RenderTransformOrigin="50%,50%">
+          <Path Data="m128 78 40 23v54l-40 23-40-23v-54l40-23Z"
+                Stroke="#000000" StrokeThickness="21" StrokeJoin="Round" Opacity="0.5" />
+          <Path Data="m128 78 40 23v54l-40 23-40-23v-54l40-23Z"
+                Stroke="{Binding $parent[UserControl].Foreground}"
+                StrokeThickness="15" StrokeJoin="Round" />
+        </Canvas>
+        <Canvas.Styles>
+          <!-- Opposite directions: two rings turning together just look like one
+               spinning logo. -->
+          <Style Selector="Canvas.outer">
+            <Style.Animations>
+              <Animation Duration="0:0:6" IterationCount="Infinite" Easing="LinearEasing">
+                <KeyFrame Cue="0%">
+                  <Setter Property="RotateTransform.Angle" Value="0" />
+                </KeyFrame>
+                <KeyFrame Cue="100%">
+                  <Setter Property="RotateTransform.Angle" Value="360" />
+                </KeyFrame>
+              </Animation>
+            </Style.Animations>
+          </Style>
+          <Style Selector="Canvas.inner">
+            <Style.Animations>
+              <Animation Duration="0:0:4.5" IterationCount="Infinite" Easing="LinearEasing">
+                <KeyFrame Cue="0%">
+                  <Setter Property="RotateTransform.Angle" Value="360" />
+                </KeyFrame>
+                <KeyFrame Cue="100%">
+                  <Setter Property="RotateTransform.Angle" Value="0" />
+                </KeyFrame>
+              </Animation>
+            </Style.Animations>
+          </Style>
+        </Canvas.Styles>
+      </Canvas>
+    </Canvas>
+  </Viewbox>
+</UserControl>

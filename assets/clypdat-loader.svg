@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ClypDat loader mark - the app's loading animation, for surfaces that are not
+  Avalonia. Inside the app the same mark is
+  native/src/ClypDat.App/Controls/ClypDatLoader.axaml, drawn with these exact
+  numbers. If one changes, change both.
+
+  Kept separate from the brand logo on purpose: clypdat.svg is the identity and
+  must not change to suit an animation. This file is free to.
+
+  Two layers:
+    mark  - the logo's hexagons, at the icon's own stroke weights,
+            counter-rotating.
+    ring  - six segments, one per side of the mark, tumbling around it. The
+            only motion.
+
+  The hexagons turn a full 0-360 and nothing about them scales. Both details
+  matter: the mark is 180-degree symmetric so a constant turn is smooth, but it
+  is NOT 60-degree symmetric - its sides alternate 103.94 and 102.00 units - so
+  an earlier 0-60 loop snapped every cycle. Scaling was what actually wobbled,
+  and dashing the hexagons made them read as loose sticks at tile size, so
+  dashes live on the ring, which is a circle and holds its shape.
+
+  The ring carries one segment per side of the mark - six - so it echoes the
+  hexagon rather than contradicting it, and they tile its circumference exactly
+  (146.608 x 6 = 879.65) so nothing snaps at the loop point.
+
+  Each stroke is drawn twice - black halo, then white on top - so the mark stays
+  readable on a white page as well as on the app's dark chrome.
+
+  The viewBox is padded past 0..256 so the ring clears the mark instead of being
+  clipped by the edge.
+-->
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  version="1.1"
+  width="304"
+  height="304"
+  viewBox="-24 -24 304 304"
+>
+  <title>ClypDat loader</title>
+  <desc>The ClypDat mark with a tumbling ring</desc>
+
+  <defs>
+    <radialGradient id="glow">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.25" />
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <circle cx="128" cy="128" r="130" fill="url(#glow)">
+    <animate attributeName="opacity" values="0.5;1;0.5"
+             dur="2.2s" repeatCount="indefinite" />
+  </circle>
+
+  <g fill="none" stroke-linejoin="round" stroke-linecap="round">
+
+    <g id="ring">
+      <animateTransform
+        attributeName="transform"
+        type="rotate"
+        from="0 128 128"
+        to="360 128 128"
+        dur="1.6s"
+        repeatCount="indefinite"
+      />
+      <circle cx="128" cy="128" r="140" stroke="#000000" stroke-opacity="0.5"
+              stroke-width="15" stroke-dasharray="87.965 58.643" />
+      <circle cx="128" cy="128" r="140" stroke="#FFFFFF" stroke-opacity="0.9"
+              stroke-width="9" stroke-dasharray="87.965 58.643" />
+    </g>
+
+    <g id="mark-outer">
+      <animateTransform attributeName="transform" type="rotate"
+                        from="0 128 128" to="360 128 128"
+                        dur="6s" repeatCount="indefinite" />
+      <path d="M128 25 218 77v102l-90 52-90-52V77l90-52Z"
+            stroke="#000000" stroke-opacity="0.5" stroke-width="33" />
+      <path d="M128 25 218 77v102l-90 52-90-52V77l90-52Z"
+            stroke="#FFFFFF" stroke-width="25" />
+    </g>
+
+    <g id="mark-inner">
+      <animateTransform attributeName="transform" type="rotate"
+                        from="360 128 128" to="0 128 128"
+                        dur="4.5s" repeatCount="indefinite" />
+      <path d="m128 78 40 23v54l-40 23-40-23v-54l40-23Z"
+            stroke="#000000" stroke-opacity="0.5" stroke-width="21" />
+      <path d="m128 78 40 23v54l-40 23-40-23v-54l40-23Z"
+            stroke="#FFFFFF" stroke-width="15" />
+    </g>
+  </g>
+</svg>
