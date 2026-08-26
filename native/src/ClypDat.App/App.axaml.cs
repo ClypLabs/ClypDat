@@ -80,11 +80,10 @@ public sealed partial class App : Application
                 desktop.Exit += (_, _) => _serverTrayMenuRenderer?.Dispose();
             }
             InitializeTrayIcon();
-            // A normal launch goes through the splash: it holds the window back
-            // until the update check has answered and the library's cached
-            // contents are in, so the first thing the user can click is a
-            // finished library rather than a shimmering one. The autostart
-            // launch has nobody watching and stays out of the way.
+            // A normal launch goes through the loader: it sits in front of a
+            // blank ClypDat and says what it is doing - checking for an update,
+            // getting the library's cached rows in - then uncovers the app. The
+            // autostart launch has nobody watching and stays out of the way.
             if (!minimized && !UiPreviewMode.Enabled) StartWithSplash(_mainWindow);
             if (minimized)
             {
@@ -126,16 +125,10 @@ public sealed partial class App : Application
             return;
         }
 
-        // The lifetime shows the main window for us the moment this method
-        // returns, so the only way to hold it back is to hide it as it opens -
-        // the same one-shot handler the autostart path uses, for the same
-        // reason: Opened fires again on every later Show().
-        void HideUntilReady(object? _, EventArgs __)
-        {
-            mainWindow.Opened -= HideUntilReady;
-            mainWindow.Hide();
-        }
-        mainWindow.Opened += HideUntilReady;
+        // The window opens as usual and sits behind the loader, blank: the
+        // curtain covers its contents so nothing half-built is on show, and
+        // it is raised before the lifetime shows the window.
+        mainWindow.RaiseStartupCurtain();
 
         var clock = Stopwatch.StartNew();
         _ = Dispatcher.UIThread.InvokeAsync(async () =>
@@ -155,16 +148,13 @@ public sealed partial class App : Application
             }
             finally
             {
-                AppLog.Info($"Startup: splash held the window for {clock.ElapsedMilliseconds}ms" +
+                AppLog.Info($"Startup: loader ran for {clock.ElapsedMilliseconds}ms" +
                             (mainWindow.PendingStartupUpdate is { } pending ? $"; update {pending.LatestVersion.ToString(3)} is available." : "."));
-                // Loader finishes and gets out of the way first, then the app
-                // arrives - rather than the window appearing under a splash
-                // that is still fading off it.
+                // Loader gets out of the way first, then the app it was
+                // loading is uncovered underneath it.
                 await splash.FadeOutAndCloseAsync();
-                mainWindow.Opened -= HideUntilReady;
-                mainWindow.ShowInTaskbar = true;
-                mainWindow.Show();
                 mainWindow.Activate();
+                await mainWindow.LiftStartupCurtainAsync();
             }
         });
     }

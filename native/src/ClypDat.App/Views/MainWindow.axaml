@@ -3333,5 +3333,16 @@
         </StackPanel>
       </Grid>
     </Border>
+
+    <!-- Held over the whole window while the startup loader is in front of it,
+         so what sits behind the loader is the app's own empty surface rather
+         than a library assembling itself in public. Lifted, with a short fade,
+         the moment the loader closes. -->
+    <Border x:Name="StartupCurtain"
+            Grid.Row="0" Grid.RowSpan="2"
+            Background="#0D1116"
+            IsVisible="False"
+            IsHitTestVisible="True"
+            ZIndex="1000" />
   </Grid>
 </Window>

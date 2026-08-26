@@ -6768,6 +6768,33 @@ public sealed partial class MainWindow : Window
     /// </summary>
     public AppUpdateInfo? PendingStartupUpdate { get; set; }
 
+    /// <summary>
+    /// Covers the window's contents while the startup loader is in front of it.
+    /// Raised before the window is ever shown; only the loader lifts it.
+    /// </summary>
+    public void RaiseStartupCurtain() => StartupCurtain.IsVisible = true;
+
+    public async Task LiftStartupCurtainAsync()
+    {
+        try
+        {
+            for (var opacity = 1d; opacity > 0; opacity -= 0.1)
+            {
+                StartupCurtain.Opacity = opacity;
+                await Task.Delay(TimeSpan.FromMilliseconds(16));
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Startup: curtain fade failed.", error);
+        }
+        finally
+        {
+            // Whatever happened to the fade, the window must not stay blank.
+            StartupCurtain.IsVisible = false;
+        }
+    }
+
     private async Task CheckForUpdatesAsync()
     {
         if (ViewModel is null || _updateDialogOpen) return;
