@@ -10,7 +10,7 @@ public static class DevChannelConstants
     public const long MaximumArchiveBytes = 1_073_741_824;
     public const int MaximumArchiveEntries = 100_000;
     public const string PublicKeySubjectPublicKeyInfoBase64 =
-        "MIIBojANBgkqhkiG9w0BAQEFAAOCAYEAwTbRg7gJ1dfCQhWNIyf5swpPVhM0+cZNiLciFJv+wOi8/3ONBtul2xQVLaKRanst8Q0/tw75lk2DfPlMmrHqXr9SJw3ZxlpOGgi2bIqC83hd5JFF9z8tQfwfe8I5Q/uRkYX1MBkupqGYYkErZdl+WF3fAwuF4QJ+xELEo4u76lb8+WmYrUIH/UAhlVGBf7IUVykCgVXNW0+BWreArJjckkYAfecqwIsC83PyEZklYxNGInf8olgFnCt0qaOwluPSJDBwJ1DTn7gmSZwOz5Uq9cVLTh61jMpBmmpBHg+errUUDJ3dboclIPzCO5NC+0pmiPZEI2qxVd5q4/5fRxnEoGlHZnPi+ueD4ZB/CmBMle6jdrAZzaRTFU8ZvJDIm7uqTLMGtrBdjfksv4ohGOrD9nIqQpRSJ9bCjp3kyqTICWoAvP3Ze7ZgZx6y4BEJ5gpsBd9i5Xiu/rBbQ8DPMwGuq9itVt9kxk4is4SDYLrUpLorFdQ6HGhyK1r1aEFrzympAgMBAAE=";
+        "MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA3pdnOojXKTMkBLORjybPbvL/BidFlMOzR0ttD3nVsxCQ4Pez9kayjxC96wXWzBEOs269gBjA+2Gq6tHpz6sbCLbLP4YN0VUxbb1J8ZJAiOszscJaxjKXIDCuJcix5x/gZ/ADCks6/FCGjJ3KJBWd702RaSMSvcOWyhblPi43zeBX8V5i0Qgz7gLwd2EJQCE23HxB6r22Z8Px9KQZss6TIr99SIVK77dsBcKFmGiaWBab1soiEC0ZeoH94uDXMbgMgBWI0fZunMyqT9K7tcmM07+rHv+OLrLP425kizdxD89JtDpy9MwSwcFfE57Ho++du8Oz0/TinKb6Jv/vJFT86mIWWFuxDLdsCWjYrgv/kfvFrAazC9nwI6zPiDBup8FXdjMRMywIoujpLk7W2uU9rQXBHZBatRYAK55atlJ8irM+mfOZy7dSqaIEF8+fivLSzB7JHSy/YFRmXsmi/PnL2qUCIslXapyBo8tvbWaE0WvWJ4QY8HL7xBx+lGW0JqPvAgMBAAE=";
 
     public static string PublicKeyPem =>
         "-----BEGIN PUBLIC KEY-----\n" +
