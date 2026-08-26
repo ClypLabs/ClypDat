@@ -8443,6 +8443,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (pending == 0)
             {
                 AppLog.Info($"Library hydration: nothing to do, all {clips.Count} clips served from cache.");
+                // Still start the idle sweeps. Probe and thumbnail results are
+                // cached per clip, so a returning user takes this branch on
+                // every launch - and the sweeps hang off the END of this method,
+                // which this return skips. Filmstrips got away with it because
+                // theirs is also kicked off when the editor closes; waveforms
+                // would simply never warm on a library that is fully hydrated,
+                // which is every library after its first run.
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (!_gameIsActive) StartBackgroundWaveformHydration();
+                });
                 return;
             }
 
