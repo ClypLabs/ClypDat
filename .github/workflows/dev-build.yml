@@ -134,7 +134,9 @@ jobs:
           [IO.File]::WriteAllBytes("ClypDat-Dev.manifest.json", $manifestBytes)
           $rsa = [Security.Cryptography.RSA]::Create(); $rsa.ImportFromPem($env:CLYPDAT_DEV_SIGNING_PRIVATE_KEY)
           $signature = $rsa.SignData($manifestBytes, [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pss)
-          [IO.File]::WriteAllText("ClypDat-Dev.manifest.sig", [Convert]::ToBase64String($signature), [Text.Encoding]::UTF8)
+          # [Text.Encoding]::UTF8 emits a BOM, which is not valid base64 and does not
+          # survive as whitespace on the reading side. The signature is plain ASCII.
+          [IO.File]::WriteAllBytes("ClypDat-Dev.manifest.sig", [Text.Encoding]::ASCII.GetBytes([Convert]::ToBase64String($signature)))
           $launcher = Join-Path $pwd "dev-launcher"
           .\dotnet.ps1 publish native\src\ClypDat.DevLauncher\ClypDat.DevLauncher.csproj -c Release -r win-x64 --self-contained true -o $launcher --nologo
           $installerSource = Join-Path $pwd "dev-installer"

@@ -112,15 +112,19 @@ public static class DevUpdateService
             if (response.Content.Headers.ContentLength is > DevChannelConstants.MaximumArchiveBytes)
                 throw new InvalidDataException("Dev archive is too large.");
             await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
-            await using var output = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.None);
-            var buffer = new byte[128 * 1024];
             long total = 0;
-            int read;
-            while ((read = await input.ReadAsync(buffer, cancellationToken)) > 0)
+            // The stream must be scoped tighter than the method: it holds the partial file
+            // with FileShare.None, so File.Move below cannot run while it is still open.
+            await using (var output = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.None))
             {
-                total = checked(total + read);
-                if (total > expectedSize || total > DevChannelConstants.MaximumArchiveBytes) throw new InvalidDataException("Dev archive exceeded its manifest size.");
-                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                var buffer = new byte[128 * 1024];
+                int read;
+                while ((read = await input.ReadAsync(buffer, cancellationToken)) > 0)
+                {
+                    total = checked(total + read);
+                    if (total > expectedSize || total > DevChannelConstants.MaximumArchiveBytes) throw new InvalidDataException("Dev archive exceeded its manifest size.");
+                    await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                }
             }
             if (total != expectedSize) throw new InvalidDataException("Dev archive download was incomplete.");
             File.Move(partial, path, overwrite: true);

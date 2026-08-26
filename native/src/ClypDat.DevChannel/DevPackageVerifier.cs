@@ -11,7 +11,9 @@ public static class DevPackageVerifier
         // signature check ran the JSON parser over attacker-supplied input for no
         // reason; the depth limit contained it, but the ordering was backwards.
         byte[] signature;
-        try { signature = Convert.FromBase64String(System.Text.Encoding.UTF8.GetString(signatureBytes).Trim()); }
+        // A UTF-8 BOM is not whitespace, so it survives Trim() and breaks the decode;
+        // strip it explicitly rather than trusting whatever wrote the file.
+        try { signature = Convert.FromBase64String(System.Text.Encoding.UTF8.GetString(signatureBytes).Trim().Trim('\uFEFF').Trim()); }
         catch (FormatException error) { throw new InvalidDataException("Dev manifest signature is not base64.", error); }
 
         using var rsa = RSA.Create();
