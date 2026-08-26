@@ -125,7 +125,11 @@ Section "ClypDat" SecMain
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "NoRepair" 1
 
   ${If} $UpdateProcessId != ""
-    Exec '"$INSTDIR\ClypDat.exe"'
+    ; The old UI process has exited before this point, but Windows can still
+    ; briefly retain its named single-instance mutex while process teardown
+    ; completes. --restart makes the new process retry that narrow handoff
+    ; window instead of treating itself as a duplicate and immediately exiting.
+    Exec '"$INSTDIR\ClypDat.exe" --restart'
   ${EndIf}
 SectionEnd
 
