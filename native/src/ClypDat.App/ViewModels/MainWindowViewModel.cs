@@ -4273,11 +4273,41 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var currentClips = AllClips.ToArray();
             StartLibraryHydration(currentClips);
             AppLog.Info($"Library refresh: {currentClips.Length} clips ({diff.Added.Length} added, {diff.Changed.Length} changed, {diff.Removed.Length} removed) in {scanClock.ElapsedMilliseconds}ms.");
+            StartClipRepairSweep(currentClips);
         }
         finally
         {
             _libraryRefreshLock.Release();
         }
+    }
+
+    // Clips saved by 1.3.0 could be muxed under the wrong encoder's H.264
+    // parameter sets and play back as flat grey with working audio (see
+    // ClipCorruptionRepairService). The slice data is intact, so those clips can
+    // be repaired without re-encoding - but only if something goes looking for
+    // them. Deliberately fire-and-forget and well behind the refresh: nothing in
+    // the UI waits on this, and ClipRepairSweep inspects each clip only once.
+    private void StartClipRepairSweep(ClipCardViewModel[] clips)
+    {
+        var libraryRoot = Settings.LibraryFolder;
+        if (string.IsNullOrWhiteSpace(libraryRoot) || clips.Length == 0) return;
+        var paths = clips.Select(clip => clip.Path).ToArray();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // Cold boot already has the disk saturated by the library scan,
+                // thumbnail loads and hydration. This is maintenance work with no
+                // deadline; let all of that finish first.
+                await Task.Delay(TimeSpan.FromSeconds(30));
+                var repaired = await ClipRepairSweep.RunAsync(libraryRoot, paths, CancellationToken.None);
+                if (repaired > 0) await Dispatcher.UIThread.InvokeAsync(() => _ = RefreshLibraryAsync());
+            }
+            catch (Exception error)
+            {
+                AppLog.Error("Clip repair sweep could not be started.", error);
+            }
+        });
     }
 
     private async Task MigrateLibraryLayoutAsync()

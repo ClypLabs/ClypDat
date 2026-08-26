@@ -113,8 +113,22 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private static int _activeBackgroundFinalizes;
     private volatile bool _sessionActive;
     private AVRational _timeBase = new() { num = 1, den = 1_000_000 };
-    private byte[]? _extraData;
+    // One entry per encoder generation, not one per session. A live encoder
+    // failover (see CaptureLoop's overload swap, and the rebind after a device
+    // rebuild) replaces the encoder without clearing the ring, and AV_CODEC_
+    // FLAG_GLOBAL_HEADER means the packets carry no in-band SPS/PPS to recover
+    // from. Muxing generation N's slices under generation 0's extradata is what
+    // produced whole clips of flat grey with working audio. Indexed by
+    // RingPacket.Generation; only ever appended to, and only under _bufferLock.
+    private readonly List<EncoderGenerationInfo> _encoderGenerations = new();
+    private int _encoderGeneration;
+    // Codec family only (H.264 vs AV1), used to pick the full-session export
+    // pass. Failover never crosses families, so this stays valid across a swap;
+    // the per-generation codec id used for muxing lives in _encoderGenerations.
     private AVCodecID _videoCodecId = AVCodecID.AV_CODEC_ID_H264;
+    // Set by the encode thread when it binds a replacement encoder, consumed by
+    // the pacing thread on its next frame.
+    private int _forceKeyframeRequested;
     private int _outputWidth;
     private int _outputHeight;
     // Ticks of the last moment genuinely new captured content was scaled into
@@ -124,8 +138,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // SaveReplayAsync on a different thread, so it goes through Volatile.
     private long _lastRealContentTicks;
     private volatile bool _lastSaveVideoWasFrozen;
+    // Seconds of buffered history the last save had to leave out because the
+    // encoder was replaced part-way through the window. Written under
+    // _bufferLock in BorrowWindowUnderLock, read once the save returns.
+    private double _lastSaveTrimmedBySeconds;
 
     public bool LastSaveVideoWasFrozen => _lastSaveVideoWasFrozen;
+    public double LastSaveTrimmedBySeconds => Volatile.Read(ref _lastSaveTrimmedBySeconds);
     // Encode-thread diagnostics (see EncodeLoop) - written with Interlocked from
     // that thread, read/reset from CaptureLoop's own periodic diag line. Plain
     // instance fields are safe here since only one capture session (and so only
@@ -218,15 +237,19 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         var config = _configProvider();
         Duration = TimeSpan.FromSeconds(Math.Clamp(config.DurationSeconds, 30, 1200));
 
-        // Captured once per session from the fresh encoder's SPS/PPS (see
-        // CaptureLoop) - without resetting it here, a resolution change +
+        // Captured per encoder generation from that encoder's own SPS/PPS (see
+        // DrainToRingBuffer) - without resetting here, a resolution change +
         // Restart Buffer opens a new encoder at the new size but keeps muxing
         // clips with the PREVIOUS session's stale extradata, which still
         // declares the old resolution. The container's declared size then
         // doesn't match the actual encoded frame data, producing exactly the
         // stride-mismatch smearing/corruption reported after a resolution
         // change.
-        _extraData = null;
+        lock (_bufferLock)
+        {
+            _encoderGenerations.Clear();
+            _encoderGeneration = 0;
+        }
         Interlocked.Exchange(ref _totalDroppedFrames, 0);
         Volatile.Write(ref _peakQueueDepth, 0);
         Volatile.Write(ref _pendingEncoderFrames, 0);
@@ -2743,7 +2766,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 // this reads as a dropped frame, not a slower clip.
                 if (lastHardwareFrame is null) return;
 
-                if (stopwatch.Elapsed - lastForcedKeyframe >= TimeSpan.FromSeconds(2))
+                if (stopwatch.Elapsed - lastForcedKeyframe >= TimeSpan.FromSeconds(2) ||
+                    Interlocked.Exchange(ref _forceKeyframeRequested, 0) == 1)
                 {
                     lastHardwareFrame->pict_type = AVPictureType.AV_PICTURE_TYPE_I;
                     lastForcedKeyframe = stopwatch.Elapsed;
@@ -2884,8 +2908,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
                 // Force a keyframe periodically so the ring buffer always has a nearby
                 // point to start a save-window at without waiting on the encoder's own
-                // GOP schedule.
-                if (stopwatch.Elapsed - lastForcedKeyframe >= TimeSpan.FromSeconds(2))
+                // GOP schedule. An encoder swap also asks for one immediately, so the
+                // new generation has a cut point right at its boundary.
+                if (stopwatch.Elapsed - lastForcedKeyframe >= TimeSpan.FromSeconds(2) ||
+                    Interlocked.Exchange(ref _forceKeyframeRequested, 0) == 1)
                 {
                     frame->pict_type = AVPictureType.AV_PICTURE_TYPE_I;
                     lastForcedKeyframe = stopwatch.Elapsed;
@@ -3968,6 +3994,26 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         pendingFrames.ReleaseAll();
                         Volatile.Write(ref _pendingEncoderFrames, 0);
                         codecContext = (AVCodecContext*)job.SwapCodecContext;
+                        // The drain above belongs to the outgoing encoder, so the
+                        // generation only advances once the new context is bound.
+                        // Everything after this point carries new SPS/PPS that
+                        // nothing already in the ring was encoded against.
+                        _encoderGeneration++;
+                        // Cutting a clip needs a keyframe from the new encoder.
+                        // Without asking for one now, the first is up to a full
+                        // GOP away and BorrowWindowUnderLock has to discard that
+                        // much more history to keep the clip decodable.
+                        Interlocked.Exchange(ref _forceKeyframeRequested, 1);
+                        if (fullSessionFormatContext is not null)
+                        {
+                            // The full-session file is one continuous track whose
+                            // header was already written from the outgoing
+                            // encoder's parameter sets, and it cannot be cut back
+                            // the way a replay window can. ClipRepairSweep repairs
+                            // it after the fact; say so here so the log explains
+                            // the repair when it happens.
+                            AppLog.Info("Native capture: encoder replaced mid-session - the full-session recording spans two encoders and will be repaired on the next library scan.");
+                        }
                     }
 
                     job.SwapCompleted?.Set();
@@ -4054,11 +4100,19 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             Interlocked.Add(ref _packetCopyMicrosAccum, (long)(copyTimer.Elapsed.TotalMilliseconds * 1000));
             Interlocked.Increment(ref _packetCopyCountAccum);
 
-            if (_extraData is null && codecContext->extradata_size > 0)
+            // Per generation, not per session, and captured from the context
+            // that actually produced this packet. The first packet out of each
+            // encoder is what defines the avcC every clip cut from that
+            // generation will be muxed under.
+            lock (_bufferLock)
             {
-                _extraData = new byte[codecContext->extradata_size];
-                Marshal.Copy((IntPtr)codecContext->extradata, _extraData, 0, codecContext->extradata_size);
-                _videoCodecId = codecContext->codec_id;
+                while (_encoderGenerations.Count <= _encoderGeneration) _encoderGenerations.Add(default);
+                if (_encoderGenerations[_encoderGeneration].ExtraData is null && codecContext->extradata_size > 0)
+                {
+                    var extraData = new byte[codecContext->extradata_size];
+                    Marshal.Copy((IntPtr)codecContext->extradata, extraData, 0, codecContext->extradata_size);
+                    _encoderGenerations[_encoderGeneration] = new EncoderGenerationInfo(extraData, codecContext->codec_id, _timeBase);
+                }
             }
 
             // Dequeues the real timestamp of whichever frame THIS packet
@@ -4074,7 +4128,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var insertTimer = System.Diagnostics.Stopwatch.StartNew();
             lock (_bufferLock)
             {
-                _packets.Add(new RingPacket(data, packet->size, packet->pts, isKeyframe, realWallClockUtc));
+                _packets.Add(new RingPacket(data, packet->size, packet->pts, isKeyframe, realWallClockUtc, _encoderGeneration));
                 _ringBufferBytes += packet->size;
                 _ringBufferCapacityBytes += data.Length;
             }
@@ -4522,6 +4576,33 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             }
             if (endIndex < startIndex) throw new InvalidOperationException("The requested replay window is no longer available.");
 
+            // A live encoder failover swaps SPS/PPS mid-ring while the packets
+            // themselves carry none (AV_CODEC_FLAG_GLOBAL_HEADER). One clip is
+            // one avcC, so a window that crosses a generation boundary can only
+            // be muxed correctly for one side of it - the whole other side would
+            // decode as garbage. Keep the newest generation and drop what came
+            // before it: a short clip that plays beats a full-length one that
+            // does not.
+            var latestGeneration = _packets[endIndex].Generation;
+            if (_packets[startIndex].Generation != latestGeneration)
+            {
+                var boundary = -1;
+                for (var i = endIndex; i >= startIndex; i--)
+                {
+                    if (_packets[i].Generation != latestGeneration) break;
+                    if (_packets[i].IsKeyframe) boundary = i;
+                }
+                if (boundary < 0) throw new InvalidOperationException("The encoder was just replaced. Try again in a second.");
+                var droppedSeconds = (_packets[boundary].WallClockUtc - _packets[startIndex].WallClockUtc).TotalSeconds;
+                AppLog.Info($"Native replay save: encoder changed mid-buffer - clip starts at the new encoder's first keyframe, {droppedSeconds:F1}s of older history left out.");
+                _lastSaveTrimmedBySeconds = droppedSeconds;
+                startIndex = boundary;
+            }
+            else
+            {
+                _lastSaveTrimmedBySeconds = 0;
+            }
+
             var window = new RingPacket[endIndex - startIndex + 1];
             _packets.CopyTo(startIndex, window, 0, window.Length);
             // Payloads are now referenced by this window as well as the ring.
@@ -4647,21 +4728,34 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
             var stream = ffmpeg.avformat_new_stream(formatContext, null);
             if (stream is null) throw new InvalidOperationException("avformat_new_stream failed.");
-            stream->time_base = _timeBase;
+
+            // The window is single-generation by construction (see
+            // BorrowWindowUnderLock), so the parameter sets that describe these
+            // exact slices are the ones recorded for that generation. Muxing any
+            // other generation's avcC here is what made whole clips undecodable.
+            var generation = window[0].Generation;
+            EncoderGenerationInfo info;
+            lock (_bufferLock)
+            {
+                info = generation >= 0 && generation < _encoderGenerations.Count
+                    ? _encoderGenerations[generation]
+                    : default;
+            }
+            if (info.ExtraData is null or { Length: 0 })
+                throw new InvalidOperationException($"No encoder parameter sets were recorded for generation {generation}.");
+
+            stream->time_base = info.TimeBase.den == 0 ? _timeBase : info.TimeBase;
             stream->codecpar->codec_type = AVMediaType.AVMEDIA_TYPE_VIDEO;
-            stream->codecpar->codec_id = _videoCodecId;
+            stream->codecpar->codec_id = info.CodecId;
             stream->codecpar->codec_tag = 0;
             stream->codecpar->width = _outputWidth;
             stream->codecpar->height = _outputHeight;
 
-            if (_extraData is { Length: > 0 })
-            {
-                var extraDataPtr = (byte*)ffmpeg.av_mallocz((ulong)_extraData.Length);
-                if (extraDataPtr is null) throw new InvalidOperationException("av_mallocz failed for codec extradata.");
-                Marshal.Copy(_extraData, 0, (IntPtr)extraDataPtr, _extraData.Length);
-                stream->codecpar->extradata = extraDataPtr;
-                stream->codecpar->extradata_size = _extraData.Length;
-            }
+            var extraDataPtr = (byte*)ffmpeg.av_mallocz((ulong)info.ExtraData.Length);
+            if (extraDataPtr is null) throw new InvalidOperationException("av_mallocz failed for codec extradata.");
+            Marshal.Copy(info.ExtraData, 0, (IntPtr)extraDataPtr, info.ExtraData.Length);
+            stream->codecpar->extradata = extraDataPtr;
+            stream->codecpar->extradata_size = info.ExtraData.Length;
 
             if ((formatContext->oformat->flags & ffmpeg.AVFMT_NOFILE) == 0)
             {
@@ -5451,7 +5545,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // Data comes from PacketPayloadPool and is usually longer than the packet.
     // it holds - Length, not Data.Length, is the packet. Every consumer must
     // respect that.
-    private readonly record struct RingPacket(byte[] Data, int Length, long PtsMs, bool IsKeyframe, DateTime WallClockUtc);
+    private readonly record struct RingPacket(byte[] Data, int Length, long PtsMs, bool IsKeyframe, DateTime WallClockUtc, int Generation);
+
+    // The SPS/PPS and codec id of one encoder generation, plus the time base its
+    // packet timestamps are expressed in. A clip is muxed entirely from one of
+    // these; BorrowWindowUnderLock guarantees the window never spans two.
+    private readonly record struct EncoderGenerationInfo(byte[]? ExtraData, AVCodecID CodecId, AVRational TimeBase);
 
     private readonly record struct PauseEvent(DateTime WallClockUtc, bool IsPaused);
 }
