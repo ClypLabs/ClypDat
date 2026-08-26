@@ -17,6 +17,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     private ClipEditSettings? _clipEdit;
     private bool _isVod;
     private bool _isPreviewVisible;
+    private string _repairOverlayText = string.Empty;
 
     public event EventHandler? PersistentStateChanged;
 
@@ -61,6 +62,22 @@ public sealed class ClipCardViewModel : ViewModelBase
     public MediaFileInfo Media => _media;
     public string Name => Media.Name;
     public string Path => Media.Path;
+
+    // Set while the background sweep has this clip queued for, or is actively
+    // performing, a parameter-set repair. The card dims its thumbnail and shows
+    // this text over it - the clip is unwatchable until the repair lands, so
+    // saying so on the tile itself beats a progress bar elsewhere on the page.
+    public string RepairOverlayText
+    {
+        get => _repairOverlayText;
+        set
+        {
+            if (!SetProperty(ref _repairOverlayText, value)) return;
+            OnPropertyChanged(nameof(IsRepairOverlayVisible));
+        }
+    }
+
+    public bool IsRepairOverlayVisible => !string.IsNullOrEmpty(RepairOverlayText);
     public DateTimeOffset CreatedAt => IsSteelSeriesImport && _clipInfo?.CapturedAt is { } capturedAt ? capturedAt : Media.CreatedAt;
     public TimeSpan Duration => Media.Duration;
     public long SizeBytes => Media.SizeBytes;

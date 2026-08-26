@@ -35,14 +35,14 @@ public static class ClipRepairSweep
     private static string Key(string clipPath, long length) =>
         clipPath.ToLowerInvariant() + "|" + length.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-    private static bool TryKey(string clipPath, out string key)
+    private static bool TryEntry(string clipPath, out (string Path, string Key, DateTime WrittenUtc) entry)
     {
-        key = string.Empty;
+        entry = default;
         try
         {
             var info = new FileInfo(clipPath);
             if (!info.Exists) return false;
-            key = Key(clipPath, info.Length);
+            entry = (clipPath, Key(clipPath, info.Length), info.LastWriteTimeUtc);
             return true;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
@@ -51,8 +51,42 @@ public static class ClipRepairSweep
         }
     }
 
-    /// <summary>Where the sweep is up to, for the library's progress strip.</summary>
-    public readonly record struct Progress(bool Checking, int Completed, int Total, int Repaired);
+    /// <summary>Removes staging folders a repair interrupted mid-flight.</summary>
+    private static void RemoveAbandonedWorkFolders(IReadOnlyList<string> clipPaths)
+    {
+        var folders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var clipPath in clipPaths)
+        {
+            var directory = Path.GetDirectoryName(clipPath);
+            if (!string.IsNullOrEmpty(directory)) folders.Add(directory);
+        }
+        foreach (var directory in folders)
+        {
+            try
+            {
+                foreach (var stale in Directory.EnumerateDirectories(directory, ".clypdat-repair-*"))
+                {
+                    try { Directory.Delete(stale, recursive: true); AppLog.Info($"Clip repair: removed an abandoned staging folder ({stale})."); }
+                    catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+                }
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or DirectoryNotFoundException) { }
+        }
+    }
+
+    /// <summary>
+    /// What the sweep is working on, for the per-clip overlays. <see cref="Current"/>
+    /// is the clip being repaired right now; <see cref="Pending"/> is the queue
+    /// behind it, in order. <see cref="Average"/> is the mean repair time
+    /// measured this session, which is what the tiles' estimates come from.
+    /// </summary>
+    public readonly record struct Progress(string? Current, DateTime CurrentStartedUtc, IReadOnlyList<string> Pending, TimeSpan Average);
+
+    // Detection is ffmpeg-bound, not disk-bound, and each check is well under
+    // 100ms. Running a few at once turns a 400-clip library from most of a
+    // minute into a few seconds, which is the difference between the user
+    // seeing a corrupt clip get fixed and seeing it just sit there broken.
+    private static readonly int DetectionConcurrency = Math.Clamp(Environment.ProcessorCount / 2, 2, 6);
 
     /// <summary>
     /// Inspects clips that have not been looked at before, repairing any that are
@@ -76,47 +110,78 @@ public static class ClipRepairSweep
             var repaired = 0;
             var added = 0;
 
-            var pending = new List<(string Path, string Key)>();
+            // A repair that was interrupted - the app closed, the machine slept -
+            // leaves its staging folder behind holding a full copy of the clip.
+            RemoveAbandonedWorkFolders(clipPaths);
+
+            var pending = new List<(string Path, string Key, DateTime WrittenUtc)>();
             foreach (var clipPath in clipPaths)
             {
-                if (TryKey(clipPath, out var key) && !inspected.Contains(key)) pending.Add((clipPath, key));
+                if (TryEntry(clipPath, out var entry) && !inspected.Contains(entry.Key)) pending.Add(entry);
             }
             if (pending.Count == 0) return 0;
 
-            // Phase 1 - detection. Read-only and well under 100ms per clip, and
-            // it is what gates the expensive part: only a clip whose decoder
-            // actually complains is ever rewritten.
+            // Newest first. Only builds from a narrow window produced these
+            // clips, so the ones worth finding are the recent ones - checking
+            // chronologically would spend a minute on years-old clips before
+            // reaching anything broken.
+            pending.Sort((left, right) => right.WrittenUtc.CompareTo(left.WrittenUtc));
+
+            // Phase 1 - detection. Read-only, and it is what gates the expensive
+            // part: only a clip whose decoder actually complains is ever
+            // rewritten. Ordered results, concurrent execution.
+            var verdicts = new bool[pending.Count];
+            var next = -1;
+            var workers = new Task[Math.Min(DetectionConcurrency, pending.Count)];
+            for (var w = 0; w < workers.Length; w++)
+            {
+                workers[w] = Task.Run(async () =>
+                {
+                    while (true)
+                    {
+                        var index = Interlocked.Increment(ref next);
+                        if (index >= pending.Count) return;
+                        token.ThrowIfCancellationRequested();
+                        verdicts[index] = await ClipCorruptionRepairService
+                            .IsCorruptAsync(pending[index].Path, token).ConfigureAwait(false);
+                    }
+                }, token);
+            }
+            await Task.WhenAll(workers).ConfigureAwait(false);
+
             var corrupt = new List<(string Path, string Key)>();
             for (var i = 0; i < pending.Count; i++)
             {
-                token.ThrowIfCancellationRequested();
-                progress?.Report(new Progress(Checking: true, i, pending.Count, repaired));
-                var (clipPath, key) = pending[i];
-                if (await ClipCorruptionRepairService.IsCorruptAsync(clipPath, token).ConfigureAwait(false))
-                {
-                    corrupt.Add((clipPath, key));
-                }
-                else
-                {
-                    inspected.Add(key);
-                    added++;
-                }
-                // A breath between clips so the sweep never monopolises the disk
-                // - but only a breath.
-                await Task.Delay(TimeSpan.FromMilliseconds(15), token).ConfigureAwait(false);
+                if (verdicts[i]) corrupt.Add((pending[i].Path, pending[i].Key));
+                else { inspected.Add(pending[i].Key); added++; }
             }
             if (added > 0) Save(libraryRoot, inspected);
             if (corrupt.Count == 0) return 0;
 
             AppLog.Info($"Clip repair sweep: {corrupt.Count} clip(s) need repair.");
 
-            // Phase 2 - repair, with a total the UI can show.
+            // Phase 2 - repair, one at a time, publishing the queue so each
+            // waiting clip can show its own estimate.
+            var elapsedTotal = TimeSpan.Zero;
+            var completedRepairs = 0;
             for (var i = 0; i < corrupt.Count; i++)
             {
                 token.ThrowIfCancellationRequested();
-                progress?.Report(new Progress(Checking: false, i, corrupt.Count, repaired));
                 var (clipPath, key) = corrupt[i];
+                var average = completedRepairs == 0
+                    ? TimeSpan.FromSeconds(6)
+                    : TimeSpan.FromTicks(elapsedTotal.Ticks / completedRepairs);
+                progress?.Report(new Progress(clipPath, DateTime.UtcNow,
+                    corrupt.Skip(i + 1).Select(entry => entry.Path).ToArray(), average));
+
+                var repairClock = System.Diagnostics.Stopwatch.StartNew();
                 var result = await ClipCorruptionRepairService.RepairAsync(clipPath, token).ConfigureAwait(false);
+                repairClock.Stop();
+                if (result.Status == ClipCorruptionRepairService.RepairStatus.Repaired)
+                {
+                    elapsedTotal += repairClock.Elapsed;
+                    completedRepairs++;
+                }
                 switch (result.Status)
                 {
                     case ClipCorruptionRepairService.RepairStatus.Repaired:
@@ -146,7 +211,7 @@ public static class ClipRepairSweep
 
             }
 
-            progress?.Report(new Progress(Checking: false, corrupt.Count, corrupt.Count, repaired));
+            progress?.Report(new Progress(null, DateTime.UtcNow, Array.Empty<string>(), TimeSpan.Zero));
             if (added > 0) Save(libraryRoot, inspected);
             if (repaired > 0) AppLog.Info($"Clip repair sweep: repaired {repaired} clip(s) with mismatched encoder parameter sets.");
             return repaired;

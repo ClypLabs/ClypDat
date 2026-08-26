@@ -864,30 +864,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool HasClipNotReadyMessage => !string.IsNullOrEmpty(ClipNotReadyMessage);
 
-    // Progress strip for the background clip-repair sweep (see
-    // StartClipRepairSweep). Only shown once the sweep has actually found
-    // something to fix - a library with nothing wrong should never see it.
-    private bool _isClipRepairActive;
-    private double _clipRepairPercent;
-    private string _clipRepairStatusText = string.Empty;
-
-    public bool IsClipRepairActive
-    {
-        get => _isClipRepairActive;
-        private set => SetProperty(ref _isClipRepairActive, value);
-    }
-
-    public double ClipRepairPercent
-    {
-        get => _clipRepairPercent;
-        private set => SetProperty(ref _clipRepairPercent, value);
-    }
-
-    public string ClipRepairStatusText
-    {
-        get => _clipRepairStatusText;
-        private set => SetProperty(ref _clipRepairStatusText, value);
-    }
+    // Live state of the background clip-repair sweep, painted onto the affected
+    // clip tiles themselves (see ApplyClipRepairProgress). A clip being repaired
+    // is unwatchable until it lands, so the tile says so rather than a banner
+    // elsewhere on the page.
+    private ClipRepairSweep.Progress _clipRepairProgress;
+    private DispatcherTimer? _clipRepairTicker;
 
     public string SelectionSummary
     {
@@ -4299,6 +4281,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             StartLibraryHydration(currentClips);
             AppLog.Info($"Library refresh: {currentClips.Length} clips ({diff.Added.Length} added, {diff.Changed.Length} changed, {diff.Removed.Length} removed) in {scanClock.ElapsedMilliseconds}ms.");
             StartClipRepairSweep(currentClips);
+            // A refresh rebuilds the card objects, so any overlay a repair in
+            // flight had painted is gone with them.
+            ApplyClipRepairProgress();
         }
         finally
         {
@@ -4329,18 +4314,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 // Refresh per repair rather than once at the end, so a fixed clip
                 // and its thumbnail update as soon as it is fixed instead of the
                 // library appearing stuck until the whole sweep finishes.
-                // Checking is silent. Only the repair phase - which has a real
-                // total to count against - puts anything on screen.
+                // Checking is silent - it finds nothing to say until it knows
+                // which clips are broken. Progress<T> posts to the UI thread.
                 var progress = new Progress<ClipRepairSweep.Progress>(update =>
                 {
-                    if (update.Checking)
-                    {
-                        IsClipRepairActive = false;
-                        return;
-                    }
-                    IsClipRepairActive = update.Completed < update.Total;
-                    ClipRepairPercent = update.Total == 0 ? 0 : 100.0 * update.Completed / update.Total;
-                    ClipRepairStatusText = $"Repairing corrupted clips - {update.Completed + 1} of {update.Total}";
+                    _clipRepairProgress = update;
+                    ApplyClipRepairProgress();
                 });
 
                 await ClipRepairSweep.RunAsync(libraryRoot, paths,
@@ -4356,13 +4335,79 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     },
                     progress,
                     CancellationToken.None);
-                await Dispatcher.UIThread.InvokeAsync(() => IsClipRepairActive = false);
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    _clipRepairProgress = default;
+                    ApplyClipRepairProgress();
+                });
             }
             catch (Exception error)
             {
                 AppLog.Error("Clip repair sweep could not be started.", error);
             }
         });
+    }
+
+    // Paints the sweep's queue onto the affected tiles: the clip being repaired
+    // counts down, the ones behind it show how long until their turn. Re-run
+    // once a second while a repair is in flight, and again after every library
+    // refresh, since a refresh rebuilds the card objects.
+    private void ApplyClipRepairProgress()
+    {
+        var progress = _clipRepairProgress;
+        var active = !string.IsNullOrEmpty(progress.Current);
+
+        if (active && _clipRepairTicker is null)
+        {
+            _clipRepairTicker = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _clipRepairTicker.Tick += (_, _) => ApplyClipRepairProgress();
+            _clipRepairTicker.Start();
+        }
+        else if (!active && _clipRepairTicker is not null)
+        {
+            _clipRepairTicker.Stop();
+            _clipRepairTicker = null;
+        }
+
+        if (!active)
+        {
+            foreach (var clip in AllClips)
+            {
+                if (clip.IsRepairOverlayVisible) clip.RepairOverlayText = string.Empty;
+            }
+            return;
+        }
+
+        var average = progress.Average <= TimeSpan.Zero ? TimeSpan.FromSeconds(6) : progress.Average;
+        var elapsed = DateTime.UtcNow - progress.CurrentStartedUtc;
+        // Never count below one second: a repair that overruns its estimate
+        // showing "0s" reads as stuck.
+        var remaining = average - elapsed;
+        if (remaining < TimeSpan.FromSeconds(1)) remaining = TimeSpan.FromSeconds(1);
+
+        var queuePosition = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < progress.Pending.Count; i++) queuePosition[progress.Pending[i]] = i;
+
+        foreach (var clip in AllClips)
+        {
+            if (string.Equals(clip.Path, progress.Current, StringComparison.OrdinalIgnoreCase))
+            {
+                clip.RepairOverlayText = $"Repairing corrupted clip\n~{Describe(remaining)} left";
+            }
+            else if (queuePosition.TryGetValue(clip.Path, out var position))
+            {
+                var wait = remaining + TimeSpan.FromTicks(average.Ticks * position);
+                clip.RepairOverlayText = $"Queued for repair\nstarts in ~{Describe(wait)}";
+            }
+            else if (clip.IsRepairOverlayVisible)
+            {
+                clip.RepairOverlayText = string.Empty;
+            }
+        }
+
+        static string Describe(TimeSpan value) => value.TotalSeconds < 60
+            ? $"{Math.Max(1, (int)Math.Round(value.TotalSeconds))}s"
+            : $"{(int)Math.Round(value.TotalMinutes)} min";
     }
 
     private async Task MigrateLibraryLayoutAsync()
