@@ -149,7 +149,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          gh release view dev-channel 2>$null
-          if ($LASTEXITCODE -ne 0) { gh release create dev-channel --prerelease --title "ClypDat Dev channel" --notes "Automated signed Dev builds." }
-          gh release upload dev-channel ClypDat-Dev.zip ClypDat-Dev.manifest.json ClypDat-Dev.manifest.sig ClypDat-Dev-Setup.exe --clobber
-          gh release edit dev-channel --target "${{ github.sha }}" --prerelease --title "ClypDat Dev channel"
+          gh release view dev 2>$null
+          if ($LASTEXITCODE -ne 0) { gh release create dev --prerelease --title "ClypDat Dev channel" --notes "Automated signed Dev builds." }
+          gh release upload dev ClypDat-Dev.zip ClypDat-Dev.manifest.json ClypDat-Dev.manifest.sig ClypDat-Dev-Setup.exe --clobber
+          gh release edit dev --target "${{ github.sha }}" --prerelease --title "ClypDat Dev channel"

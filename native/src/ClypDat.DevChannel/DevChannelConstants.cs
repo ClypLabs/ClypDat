@@ -3,7 +3,9 @@ namespace ClypDat.DevChannel;
 public static class DevChannelConstants
 {
     public const string ChannelName = "Dev";
-    public const string ReleaseTag = "dev-channel";
+    // "dev-channel" is permanently unusable: an immutable release claimed the name,
+    // and GitHub keeps the tag reserved even after that release is deleted.
+    public const string ReleaseTag = "dev";
     public const string ManifestAssetName = "ClypDat-Dev.manifest.json";
     public const string SignatureAssetName = "ClypDat-Dev.manifest.sig";
     public const string ArchiveAssetName = "ClypDat-Dev.zip";

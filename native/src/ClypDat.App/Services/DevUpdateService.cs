@@ -8,9 +8,12 @@ namespace ClypDat.App.Services;
 
 public static class DevUpdateService
 {
-    private const string ReleaseApiUrl = "https://api.github.com/repos/ClypLabs/ClypDat/releases/tags/dev-channel";
     private const string Owner = "ClypLabs";
     private const string Repository = "ClypDat";
+
+    // Derived from the shared constant so the tag can never drift out of sync again.
+    private static readonly string ReleaseApiUrl =
+        $"https://api.github.com/repos/{Owner}/{Repository}/releases/tags/{DevChannelConstants.ReleaseTag}";
 
     public static void StartBackgroundCheck()
     {
