@@ -2105,7 +2105,7 @@
                         <TextBlock Text="Choose the Windows mixer apps to capture. Every enabled app is saved as its own editable track." Foreground="#93A6B8" TextWrapping="Wrap" />
               </StackPanel>
 
-              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording Audio|Audio Processes|Microphone}">
+              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording Audio|Audio Processes}">
                 <StackPanel Spacing="18">
                   <StackPanel Spacing="10" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording Audio|Audio Processes}">
                     <Grid ColumnDefinitions="*,Auto">
@@ -2210,9 +2210,12 @@
                     </StackPanel>
                   </StackPanel>
 
-                  <Border Height="1" Background="#1B242D" IsVisible="{Binding !IsSettingsSearchActive}" />
+                </StackPanel>
+              </Border>
 
-                  <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Microphone}">
+              <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Microphone}">
+                <StackPanel Spacing="18">
+                  <StackPanel Spacing="6">
                     <Grid ColumnDefinitions="*,Auto">
                       <TextBlock Text="Microphone" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                       <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
