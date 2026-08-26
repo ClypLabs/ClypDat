@@ -110,3 +110,18 @@ in `licenses/GPL-2.0.txt` in this repository.
 A copy of the GNU Lesser General Public License v2.1 is available at
 https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html and is reproduced
 in `licenses/LGPL-2.1.txt` in this repository.
+
+## RNNoise model `lq.rnnn` (public domain)
+
+`rnnoise/lq.rnnn` is the "leavened-quisling" model from
+https://github.com/GregorR/rnnoise-models, trained with the rnnoise-nu tools
+for a voice signal against general background noise. It is loaded by ffmpeg's
+`arnndn` filter to drive microphone noise suppression.
+
+That repository's README states: "With the exception of the tools/ directory
+and this file, none of this work is creative and thus none of it is subject to
+copyright." The model file is shipped unmodified.
+
+RNNoise itself (Xiph.Org / Jean-Marc Valin) is BSD-3-Clause; the `arnndn`
+filter that consumes the model is part of ffmpeg's libavfilter, already covered
+by the ffmpeg entry above.

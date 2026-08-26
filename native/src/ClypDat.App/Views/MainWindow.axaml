@@ -2245,20 +2245,55 @@
                       </ItemsControl>
                     </StackPanel>
 
-                    <!-- Applies to the saved track, not to capture, so it
-                         takes effect on the next saved clip without needing
-                         the replay buffer restarted. -->
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10" Margin="0,4,0,0">
-                      <StackPanel Spacing="2" VerticalAlignment="Center">
-                        <TextBlock Text="Channels" Foreground="#D8E4F2" FontWeight="SemiBold" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                        <TextBlock Text="Mono suits almost every headset and desk mic. Switch to Stereo only if your microphone genuinely records two channels."
-                                   Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap"
-                                   opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                    <Border Classes="settingsCard" Padding="16" Margin="0,6,0,0">
+                      <StackPanel Spacing="16">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                          <StackPanel Spacing="2">
+                            <TextBlock Text="Mic Test" Foreground="#EDF4FB" FontWeight="Bold" FontSize="15" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                            <TextBlock Text="Check the level and noise gate before recording." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                          </StackPanel>
+                          <Button Grid.Column="1" Content="{Binding MicTestButtonLabel}" Click="ToggleMicTestButton_OnClick" VerticalAlignment="Center" />
+                        </Grid>
+
+                        <controls:MicLevelMeter Height="22"
+                                                LevelDb="{Binding MicTestLevelDb}"
+                                                ThresholdDb="{Binding MicrophoneNoiseGateThresholdDb}"
+                                                FloorDb="{Binding MicrophoneNoiseGateFloorDb}"
+                                                IsActive="{Binding IsMicTestActive}"
+                                                ToolTip.Tip="Green shows the current microphone level. The vertical line marks the noise gate threshold." />
+
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                          <StackPanel Spacing="2" VerticalAlignment="Center">
+                            <TextBlock Text="Noise suppression" Foreground="#D8E4F2" FontWeight="SemiBold" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                            <TextBlock Text="Uses RNNoise to reduce steady background noise before the microphone is saved." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                          </StackPanel>
+                          <ToggleSwitch Grid.Column="1" IsChecked="{Binding MicrophoneNoiseSuppressionEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                        </Grid>
+
+                        <StackPanel Spacing="6" IsEnabled="{Binding MicrophoneNoiseSuppressionEnabled}">
+                          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                            <StackPanel Spacing="2">
+                              <TextBlock Text="Noise gate" Foreground="#D8E4F2" FontWeight="SemiBold" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                              <TextBlock Text="Mutes audio below this level after noise suppression. Leave it off unless background sound still gets through." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <TextBlock Grid.Column="1" Text="{Binding MicrophoneNoiseGateThresholdDisplay}" Foreground="#B8C7D8" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
+                          </Grid>
+                          <Slider Classes="volumeSlider" Minimum="{Binding MicrophoneNoiseGateFloorDb}" Maximum="{Binding MicrophoneNoiseGateMaximumDb}"
+                                  SmallChange="1" LargeChange="5" Value="{Binding MicrophoneNoiseGateThresholdDb}" />
+                        </StackPanel>
+
+                        <!-- Applies to the saved track, not to capture, so it
+                             takes effect on the next saved clip without needing
+                             the replay buffer restarted. -->
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                          <StackPanel Spacing="2" VerticalAlignment="Center">
+                            <TextBlock Text="Mono microphone" Foreground="#D8E4F2" FontWeight="SemiBold" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                            <TextBlock Text="On records mono, which suits most headsets and desk mics. Turn off only for a genuine two-channel microphone." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                          </StackPanel>
+                          <ToggleSwitch Grid.Column="1" IsChecked="{Binding MicrophoneMonoInput}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                        </Grid>
                       </StackPanel>
-                      <ComboBox Grid.Column="1" Classes="settingsInput" MinWidth="150" VerticalAlignment="Center"
-                                ItemsSource="{Binding MicrophoneChannelModes}"
-                                SelectedItem="{Binding MicrophoneChannelMode}" />
-                    </Grid>
+                    </Border>
                   </StackPanel>
                 </StackPanel>
               </Border>

@@ -112,6 +112,14 @@ public sealed class AppSettings
     // channel - audible in one ear. Mono is the honest default; the option
     // exists because genuine stereo microphones do exist.
     public string MicrophoneChannelMode { get; set; } = "Mono";
+    // RNNoise (ffmpeg's arnndn) on the microphone stream as it is captured, so
+    // what lands in the replay buffer is already clean. Off by default: it
+    // changes what gets recorded, and that is not a decision to make for
+    // somebody silently.
+    public bool MicrophoneNoiseSuppressionEnabled { get; set; }
+    // Threshold of the noise gate that runs after the denoiser, in dBFS. At the
+    // floor (-100) the gate is left out of the filter graph altogether.
+    public double MicrophoneNoiseGateThresholdDb { get; set; } = -100;
     public List<string> MicrophoneDeviceIds { get; set; } = new();
     public List<string> GameAudioExcludedProcesses { get; set; } = new();
     public bool EnableEditorKeyboardShortcuts { get; set; } = true;

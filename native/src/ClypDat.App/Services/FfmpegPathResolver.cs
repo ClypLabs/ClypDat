@@ -26,6 +26,15 @@ public static class FfmpegPathResolver
     /// <summary>Absolute path to the bundled ffprobe.exe. Empty until <see cref="EnsureBundledFfmpeg"/> succeeds.</summary>
     public static string FfprobePath { get; private set; } = string.Empty;
 
+    /// <summary>
+    /// Absolute path to the bundled RNNoise model that ffmpeg's `arnndn` filter
+    /// loads for microphone noise suppression. Empty when the model is missing,
+    /// which callers treat as "noise suppression unavailable" rather than an
+    /// error - arnndn has no built-in model and refuses to build the filter
+    /// without a path, so there is nothing to fall back to.
+    /// </summary>
+    public static string RnnoiseModelPath { get; private set; } = string.Empty;
+
     /// <summary>Directory the child processes run in - never the caller's working directory.</summary>
     public static string WorkingDirectory => AppContext.BaseDirectory;
 
@@ -52,6 +61,12 @@ public static class FfmpegPathResolver
 
         FfmpegPath = ffmpeg;
         FfprobePath = ffprobe;
+
+        // Separate from the ffmpeg check above on purpose: a missing model
+        // disables one optional filter, it does not break media support.
+        var model = Path.Combine(AppContext.BaseDirectory, "rnnoise", "lq.rnnn");
+        if (File.Exists(model)) RnnoiseModelPath = model;
+        else AppLog.Info($"RNNoise model missing from {model}; microphone noise suppression is unavailable.");
     }
 
     /// <summary>

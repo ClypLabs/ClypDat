@@ -3225,6 +3225,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (!SetProperty(ref _selectedMicrophoneDevice, value)) return;
             Settings.MicrophoneDeviceId = value?.Id ?? string.Empty;
             SaveSettings();
+            // A running Mic Test is pointed at the old device's endpoint.
+            RestartMicTestIfRunning();
         }
     }
 
@@ -3313,8 +3315,134 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (string.Equals(Settings.MicrophoneChannelMode, mode, StringComparison.Ordinal)) return;
             Settings.MicrophoneChannelMode = mode;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(MicrophoneMonoInput));
             SaveSettings();
         }
+    }
+
+    // Toggle face of MicrophoneChannelMode, which is what Settings > Audio
+    // actually shows. Kept as a string underneath because the save pipeline
+    // reads it as one and a third mode is a plausible future.
+    public bool MicrophoneMonoInput
+    {
+        get => !string.Equals(Settings.MicrophoneChannelMode, "Stereo", StringComparison.OrdinalIgnoreCase);
+        set => MicrophoneChannelMode = value ? "Mono" : "Stereo";
+    }
+
+    public double MicrophoneNoiseGateFloorDb => MicrophoneNoiseSuppression.MinimumGateThresholdDb;
+    public double MicrophoneNoiseGateMaximumDb => MicrophoneNoiseSuppression.MaximumGateThresholdDb;
+
+    public bool MicrophoneNoiseSuppressionEnabled
+    {
+        get => Settings.MicrophoneNoiseSuppressionEnabled;
+        set
+        {
+            if (Settings.MicrophoneNoiseSuppressionEnabled == value) return;
+            Settings.MicrophoneNoiseSuppressionEnabled = value;
+            OnPropertyChanged();
+            SaveSettings();
+            // Applied inside the live capture, so the running buffer has to
+            // rebuild its microphone before this means anything. The audio
+            // route timer picks it up from the config on its next pass.
+            RestartMicTestIfRunning();
+        }
+    }
+
+    public double MicrophoneNoiseGateThresholdDb
+    {
+        get => Settings.MicrophoneNoiseGateThresholdDb;
+        set
+        {
+            var threshold = Math.Round(MicrophoneNoiseSuppression.ClampGateThresholdDb(value), 1);
+            if (Math.Abs(Settings.MicrophoneNoiseGateThresholdDb - threshold) < 0.05) return;
+            Settings.MicrophoneNoiseGateThresholdDb = threshold;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(MicrophoneNoiseGateThresholdDisplay));
+            SaveSettings();
+            RestartMicTestIfRunning();
+        }
+    }
+
+    public string MicrophoneNoiseGateThresholdDisplay =>
+        Settings.MicrophoneNoiseGateThresholdDb <= MicrophoneNoiseSuppression.MinimumGateThresholdDb
+            ? "Gate off"
+            : $"{Settings.MicrophoneNoiseGateThresholdDb:0} dB";
+
+    // Mic Test - a short-lived capture of the selected device, filtered exactly
+    // the way the replay buffer would filter it, feeding the level meter.
+    private readonly MicrophoneLevelMonitor _micLevelMonitor = new();
+    private bool _isMicTestActive;
+    private double _micTestLevelDb = MicrophoneLevelMonitor.FloorDb;
+
+    public bool IsMicTestActive
+    {
+        get => _isMicTestActive;
+        private set
+        {
+            if (!SetProperty(ref _isMicTestActive, value)) return;
+            OnPropertyChanged(nameof(MicTestButtonLabel));
+        }
+    }
+
+    public string MicTestButtonLabel => IsMicTestActive ? "Stop Test" : "Start Test";
+
+    public double MicTestLevelDb
+    {
+        get => _micTestLevelDb;
+        private set => SetProperty(ref _micTestLevelDb, value);
+    }
+
+    public void ToggleMicTest()
+    {
+        if (IsMicTestActive) StopMicTest();
+        else StartMicTest();
+    }
+
+    private void StartMicTest()
+    {
+        try
+        {
+            _micLevelMonitor.LevelChanged -= MicLevelMonitor_OnLevelChanged;
+            _micLevelMonitor.LevelChanged += MicLevelMonitor_OnLevelChanged;
+            _micLevelMonitor.Start(
+                SelectedMicrophoneDevice?.Id ?? AudioDeviceOption.DefaultDeviceId,
+                Settings.MicrophoneNoiseSuppressionEnabled,
+                Settings.MicrophoneNoiseGateThresholdDb);
+            IsMicTestActive = true;
+        }
+        catch
+        {
+            // MicrophoneLevelMonitor already logged the reason. The meter
+            // simply stays idle rather than the settings page throwing.
+            IsMicTestActive = false;
+        }
+    }
+
+    public void StopMicTest()
+    {
+        _micLevelMonitor.LevelChanged -= MicLevelMonitor_OnLevelChanged;
+        _micLevelMonitor.Stop();
+        IsMicTestActive = false;
+        MicTestLevelDb = MicrophoneLevelMonitor.FloorDb;
+    }
+
+    // The filter lives inside the capture object, so a settings change while
+    // the test is running only shows up on a fresh one.
+    private void RestartMicTestIfRunning()
+    {
+        if (!IsMicTestActive) return;
+        StopMicTest();
+        StartMicTest();
+    }
+
+    private void MicLevelMonitor_OnLevelChanged(object? sender, double levelDb)
+    {
+        // Raised off the capture thread, at roughly one packet every 10ms.
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!IsMicTestActive) return;
+            MicTestLevelDb = levelDb;
+        }, DispatcherPriority.Background);
     }
 
     private bool IsAudioProcessEligible(ActiveAudioProcess process)
@@ -4866,6 +4994,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public void Dispose()
     {
         CaptureBackgroundWorkGate.StateChanged -= CaptureBackgroundWorkGate_OnStateChanged;
+        _micLevelMonitor.LevelChanged -= MicLevelMonitor_OnLevelChanged;
+        _micLevelMonitor.Dispose();
         try { _gameIconSweepCts?.Cancel(); } catch (ObjectDisposedException) { }
         _gameIconSweepCts?.Dispose();
         _gameIconSweepCts = null;
@@ -5462,6 +5592,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // means Library specifically, so it passes false.
     public void CloseSettings(bool returnToEditor = true)
     {
+        // The test holds an open capture on the microphone. Leaving settings
+        // is the clearest "done with it" signal there is, and a forgotten test
+        // would otherwise keep the device busy for the rest of the session.
+        StopMicTest();
         IsSettingsVisible = false;
         IsEditorVisible = returnToEditor && _wasEditorVisibleBeforeSettings && !string.IsNullOrWhiteSpace(SelectedVideoPath);
     }
@@ -5870,7 +6004,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             AdditionalAudioProcesses: AudioProcessIdentity.NormalizeDictionary(Settings.AdditionalAudioProcesses),
             GameAudioVolumePercent: Settings.GameAudioVolumePercent,
             MicrophoneVolumePercent: Settings.MicrophoneVolumePercent,
-            MicrophoneChannelMode: Settings.MicrophoneChannelMode);
+            MicrophoneChannelMode: Settings.MicrophoneChannelMode,
+            MicrophoneNoiseSuppressionEnabled: Settings.MicrophoneNoiseSuppressionEnabled,
+            MicrophoneNoiseGateThresholdDb: Settings.MicrophoneNoiseGateThresholdDb);
     }
 
     public void SetDuration(TimeSpan duration)

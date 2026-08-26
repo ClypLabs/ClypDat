@@ -824,7 +824,9 @@ public sealed record ReplayBufferConfig(
     IReadOnlyDictionary<string, int>? AdditionalAudioProcesses = null,
     int GameAudioVolumePercent = 100,
     int MicrophoneVolumePercent = 100,
-    string MicrophoneChannelMode = "Mono");
+    string MicrophoneChannelMode = "Mono",
+    bool MicrophoneNoiseSuppressionEnabled = false,
+    double MicrophoneNoiseGateThresholdDb = -100);
 
 internal sealed class AudioCaptureSession : IDisposable
 {

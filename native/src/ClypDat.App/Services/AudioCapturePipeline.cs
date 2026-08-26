@@ -47,6 +47,7 @@ public sealed class AudioCapturePipeline : IDisposable
     private int _stableRoutePasses;
     private TimeSpan _routeInterval = TimeSpan.FromSeconds(2);
     private ReplayBufferConfig? _activeConfig;
+    private string _micFilterSignature = string.Empty;
 
     public AudioCapturePipeline(string bufferFolder)
     {
@@ -221,6 +222,24 @@ public sealed class AudioCapturePipeline : IDisposable
         AppLog.Info(
             $"Audio route resolved: chatApps={routes.ChatRoutes.Length}, exclusions='{string.Join(",", config.GameAudioExcludedProcesses)}', excludedPids={FormatIds(routes.ExcludedProcessIds)}, gamePids={FormatIds(routes.GameProcessIds)}, mics={resolvedMicDeviceIds.Length}.");
         StopStaleAudioCaptures(routes);
+        // StopStaleAudioCaptures keeps a microphone whose device is still
+        // selected, which is right for a device change and wrong for a filter
+        // change - the filter lives inside the capture object, so the only way
+        // to apply a new one is to build a new capture.
+        var micFilterSignature = MicrophoneFilterSignature(config);
+        if (!string.Equals(_micFilterSignature, micFilterSignature, StringComparison.Ordinal))
+        {
+            if (_micFilterSignature.Length > 0)
+            {
+                AppLog.Info($"Microphone filtering changed ({_micFilterSignature} -> {micFilterSignature}); restarting microphone captures.");
+                ReplayAudioCapture[] mics;
+                lock (_lock) mics = _audioCaptures.Where(capture => capture.Kind == AudioCaptureKind.Microphone && capture.EndedAtUtc is null).ToArray();
+                foreach (var capture in mics) StopAudioCapture(capture);
+            }
+
+            _micFilterSignature = micFilterSignature;
+        }
+
         if (routes.UseProcessRouting)
         {
             foreach (var pid in routes.GameProcessIds)
@@ -275,7 +294,7 @@ public sealed class AudioCapturePipeline : IDisposable
             try
             {
                 var micDevice = scope.Enumerator.GetDevice(micId);
-                StartMicrophoneCapture(micDevice, $"Microphone - {micDevice.FriendlyName}", micId);
+                StartMicrophoneCapture(micDevice, $"Microphone - {micDevice.FriendlyName}", micId, config);
             }
             catch (Exception error)
             {
@@ -304,13 +323,21 @@ public sealed class AudioCapturePipeline : IDisposable
         AppLog.Debug($"Audio capture started: {title}, pid={processId}, mode={mode}.");
     }
 
-    private void StartMicrophoneCapture(MMDevice device, string title, string sourceKey)
+    private void StartMicrophoneCapture(MMDevice device, string title, string sourceKey, ReplayBufferConfig config)
     {
         var path = Path.Combine(_bufferFolder, $"{AudioKindPrefix(AudioCaptureKind.Microphone)}_{Guid.NewGuid():N}.wav");
         TryDelete(path);
-        var capture = new MicrophoneWaveIn(device);
+        // Noise suppression sits between the device and the session writer, so
+        // the replay buffer holds already-filtered audio. Wrap returns the raw
+        // capture untouched whenever it cannot run - a microphone that records
+        // unfiltered beats a microphone that does not record.
+        var capture = MicrophoneNoiseSuppression.Wrap(
+            new MicrophoneWaveIn(device),
+            config.MicrophoneNoiseSuppressionEnabled,
+            config.MicrophoneNoiseGateThresholdDb,
+            device.FriendlyName);
         lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(StartSession(capture, path, title), path, title, AudioCaptureKind.Microphone, null, MonotonicClock.UtcNow, sourceKey, device.ID));
-        AppLog.Debug($"Audio capture started: {title}, device={device.FriendlyName}.");
+        AppLog.Debug($"Audio capture started: {title}, device={device.FriendlyName}, denoise={config.MicrophoneNoiseSuppressionEnabled}.");
     }
 
     // Full Session needs disk (a recording that can run for hours can't
@@ -366,6 +393,14 @@ public sealed class AudioCapturePipeline : IDisposable
     {
         lock (_lock) return _audioCaptures.Any(capture => capture.EndedAtUtc is null && capture.Kind == kind && string.Equals(capture.SourceKey, sourceKey, StringComparison.OrdinalIgnoreCase));
     }
+
+    // Everything about a live microphone capture that cannot be changed
+    // without rebuilding it. Rounded to the slider's own resolution so a
+    // round-tripped double never reads as a change on its own.
+    private static string MicrophoneFilterSignature(ReplayBufferConfig config) =>
+        config.MicrophoneNoiseSuppressionEnabled
+            ? $"rnnoise@{config.MicrophoneNoiseGateThresholdDb:0.#}dB"
+            : "off";
 
     private void StopStaleAudioCaptures(AudioRoutes routes)
     {
@@ -707,7 +742,11 @@ public sealed class AudioCapturePipeline : IDisposable
         {
             AppLog.Info($"Game audio pids collapsed to tree roots: raw={FormatIds(rawGamePids)}, roots={FormatIds(gamePids)}.");
         }
-        var key = $"{useProcessRouting}|{string.Join(',', chatRoutes.OrderBy(route => route.AppName, StringComparer.OrdinalIgnoreCase).Select(route => $"{route.AppName}:{route.ProcessId}"))}|{string.Join(',', excludedPids)}|{string.Join(',', gamePids)}|{string.Join(',', resolvedMicDeviceIds.OrderBy(id => id, StringComparer.Ordinal))}";
+        // Microphone filtering is part of the key even though it names no
+        // device: it is applied live, inside the capture, so changing it has to
+        // make the refresh timer see the route as changed and rebuild. Without
+        // this the toggle would appear to do nothing until the next launch.
+        var key = $"{useProcessRouting}|{string.Join(',', chatRoutes.OrderBy(route => route.AppName, StringComparer.OrdinalIgnoreCase).Select(route => $"{route.AppName}:{route.ProcessId}"))}|{string.Join(',', excludedPids)}|{string.Join(',', gamePids)}|{string.Join(',', resolvedMicDeviceIds.OrderBy(id => id, StringComparer.Ordinal))}|{MicrophoneFilterSignature(config)}";
         return new AudioRoutes(chatRoutes.ToArray(), excludedPids, gamePids, useProcessRouting, key, resolvedMicDeviceIds);
     }
 

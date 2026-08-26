@@ -193,6 +193,28 @@
           SkipUnchangedFiles="true" />
   </Target>
 
+  <!-- The RNNoise model the microphone noise suppression filter loads. It is
+       a data file, not code: arnndn has no built-in model and refuses to
+       create the filter without a path to one, so a build missing this folder
+       simply reports noise suppression as unavailable rather than failing. -->
+  <Target Name="CopyRnnoiseToPublish" AfterTargets="Publish" Condition="Exists('..\..\vendor\rnnoise')">
+    <ItemGroup>
+      <RnnoiseFiles Include="..\..\vendor\rnnoise\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(RnnoiseFiles)"
+          DestinationFiles="@(RnnoiseFiles->'$(PublishDir)rnnoise\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyRnnoiseToOutput" AfterTargets="Build" Condition="Exists('..\..\vendor\rnnoise')">
+    <ItemGroup>
+      <RnnoiseOutputFiles Include="..\..\vendor\rnnoise\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(RnnoiseOutputFiles)"
+          DestinationFiles="@(RnnoiseOutputFiles->'$(OutDir)rnnoise\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
   <!-- LibVLC (LGPL-2.1) is bundled in every distributed
        build; their licenses require these notices/texts to ship alongside
        the binaries. See THIRD-PARTY-LICENSES.md at the repo root. -->

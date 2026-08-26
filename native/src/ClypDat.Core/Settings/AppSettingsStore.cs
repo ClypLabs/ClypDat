@@ -103,6 +103,9 @@ public static class AppSettingsStore
             settings.MicrophoneChannelMode = string.Equals(settings.MicrophoneChannelMode, "Stereo", StringComparison.OrdinalIgnoreCase)
                 ? "Stereo"
                 : "Mono";
+            settings.MicrophoneNoiseGateThresholdDb = double.IsFinite(settings.MicrophoneNoiseGateThresholdDb)
+                ? Math.Clamp(settings.MicrophoneNoiseGateThresholdDb, -100, -25)
+                : -100;
             settings.MicrophoneDeviceIds ??= new List<string>();
             settings.IgnoredGameExecutables ??= new List<string>();
             settings.GameCaptureOverrides ??= new List<GameCaptureOverride>();

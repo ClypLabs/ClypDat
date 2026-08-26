@@ -5596,6 +5596,11 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void ToggleMicTestButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel?.ToggleMicTest();
+    }
+
 
     private void MainWindow_OnKeyDown(object? sender, KeyEventArgs e)
     {
