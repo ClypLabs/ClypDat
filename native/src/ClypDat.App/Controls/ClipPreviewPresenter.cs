@@ -338,11 +338,12 @@ internal sealed class GpuClipPreviewAdapter : IClipPreviewPresenter
 
     public ValueTask ActivateSessionAsync(CancellationToken cancellationToken) => ValueTask.CompletedTask;
 
-    public ValueTask SetAttachedAsync(bool attached)
+    public async ValueTask SetAttachedAsync(bool attached)
     {
         _attached = attached;
-        _visual.Opacity = attached ? 1 : 0;
-        return ValueTask.CompletedTask;
+        // Composition objects are UI-thread affine, and this is reachable from
+        // the present pipeline, which no longer runs there.
+        await Dispatcher.UIThread.InvokeAsync(() => _visual.Opacity = attached ? 1 : 0);
     }
 
     public void Resize(Size size) => _visual.Size = ToVector(size);
@@ -459,10 +460,13 @@ internal sealed class GpuClipPreviewAdapter : IClipPreviewPresenter
     {
         if (_disposed) return;
         _disposed = true;
-        _visual.Opacity = 0;
-        ElementComposition.SetElementChildVisual(_owner, null);
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            _visual.Opacity = 0;
+            ElementComposition.SetElementChildVisual(_owner, null);
+        });
         await DisposeSlotsAsync();
-        _surface.Dispose();
+        await Dispatcher.UIThread.InvokeAsync(_surface.Dispose);
         _context.Dispose();
         _device.Dispose();
     }
@@ -483,7 +487,9 @@ internal sealed class GpuClipPreviewAdapter : IClipPreviewPresenter
         public async ValueTask DisposeAsync()
         {
             try { await LastPresent.ConfigureAwait(false); } catch { }
-            await Imported.DisposeAsync();
+            // Imported is a composition object, so releasing it belongs on the
+            // UI thread even when the teardown was started off it.
+            await Dispatcher.UIThread.InvokeAsync(async () => await Imported.DisposeAsync());
             Mutex.Dispose();
             Texture.Dispose();
         }

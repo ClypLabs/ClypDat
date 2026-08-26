@@ -6762,18 +6762,32 @@ public sealed partial class MainWindow : Window
         textBox.Text = string.Empty;
     }
 
+    /// <summary>
+    /// What the splash's own check found, handed over so the first startup check
+    /// does not repeat it. Consumed once.
+    /// </summary>
+    public AppUpdateInfo? PendingStartupUpdate { get; set; }
+
     private async Task CheckForUpdatesAsync()
     {
         if (ViewModel is null || _updateDialogOpen) return;
         AppUpdateInfo? update;
-        try
+        if (PendingStartupUpdate is { } fromSplash)
         {
-            update = await AppUpdateService.CheckAsync();
+            PendingStartupUpdate = null;
+            update = fromSplash;
         }
-        catch (Exception error)
+        else
         {
-            AppLog.Error("Update check failed", error);
-            return;
+            try
+            {
+                update = await AppUpdateService.CheckAsync();
+            }
+            catch (Exception error)
+            {
+                AppLog.Error("Update check failed", error);
+                return;
+            }
         }
 
         if (update is null)

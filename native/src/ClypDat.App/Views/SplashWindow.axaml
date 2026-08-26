@@ -1,0 +1,89 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="ClypDat.App.Views.SplashWindow"
+        Width="380" Height="240"
+        CanResize="False"
+        ShowInTaskbar="True"
+        SystemDecorations="None"
+        WindowStartupLocation="CenterScreen"
+        Topmost="True"
+        Background="#0B1016"
+        Title="ClypDat">
+
+  <!-- Opaque on purpose. A transparent frameless window goes through the
+       platform's layered/ANGLE path, which is exactly the surface that has
+       been losing its device on this machine - and a splash that fails to
+       paint is worse than one with square corners. -->
+  <Border BorderBrush="#1C2836" BorderThickness="1">
+    <Grid RowDefinitions="*,Auto">
+
+      <StackPanel Grid.Row="0" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="14">
+        <Panel Width="96" Height="96" HorizontalAlignment="Center">
+
+          <!-- Glow behind the mark, breathing a half-cycle behind it so the
+               logo looks lit rather than simply scaled. -->
+          <Ellipse Width="96" Height="96" RenderTransformOrigin="50%,50%">
+            <Ellipse.Fill>
+              <RadialGradientBrush>
+                <GradientStop Offset="0" Color="#553F7FD4" />
+                <GradientStop Offset="1" Color="#003F7FD4" />
+              </RadialGradientBrush>
+            </Ellipse.Fill>
+            <Ellipse.Styles>
+              <Style Selector="Ellipse">
+                <Style.Animations>
+                  <Animation Duration="0:0:2.2" IterationCount="Infinite" PlaybackDirection="Alternate" Easing="SineEaseInOut">
+                    <KeyFrame Cue="0%">
+                      <Setter Property="Opacity" Value="0.25" />
+                      <Setter Property="ScaleTransform.ScaleX" Value="0.85" />
+                      <Setter Property="ScaleTransform.ScaleY" Value="0.85" />
+                    </KeyFrame>
+                    <KeyFrame Cue="100%">
+                      <Setter Property="Opacity" Value="0.9" />
+                      <Setter Property="ScaleTransform.ScaleX" Value="1.25" />
+                      <Setter Property="ScaleTransform.ScaleY" Value="1.25" />
+                    </KeyFrame>
+                  </Animation>
+                </Style.Animations>
+              </Style>
+            </Ellipse.Styles>
+          </Ellipse>
+
+          <Image Source="avares://ClypDat/Assets/clypdat-icon-256.png"
+                 Width="72" Height="72"
+                 HorizontalAlignment="Center" VerticalAlignment="Center"
+                 RenderTransformOrigin="50%,50%">
+            <Image.Styles>
+              <Style Selector="Image">
+                <Style.Animations>
+                  <Animation Duration="0:0:2.2" IterationCount="Infinite" PlaybackDirection="Alternate" Easing="SineEaseInOut">
+                    <KeyFrame Cue="0%">
+                      <Setter Property="ScaleTransform.ScaleX" Value="0.94" />
+                      <Setter Property="ScaleTransform.ScaleY" Value="0.94" />
+                    </KeyFrame>
+                    <KeyFrame Cue="100%">
+                      <Setter Property="ScaleTransform.ScaleX" Value="1.06" />
+                      <Setter Property="ScaleTransform.ScaleY" Value="1.06" />
+                    </KeyFrame>
+                  </Animation>
+                </Style.Animations>
+              </Style>
+            </Image.Styles>
+          </Image>
+        </Panel>
+
+        <TextBlock Text="ClypDat" Foreground="#EAF1F9" FontSize="21" FontWeight="Bold"
+                   HorizontalAlignment="Center" />
+        <TextBlock x:Name="StageText" Text="Starting" Foreground="#8FA3B8" FontSize="12"
+                   HorizontalAlignment="Center" TextAlignment="Center" />
+      </StackPanel>
+
+      <StackPanel Grid.Row="1" Margin="24,0,24,22" Spacing="8">
+        <ProgressBar x:Name="Bar" Height="4" Minimum="0" Maximum="1" IsIndeterminate="True"
+                     Background="#16202C" Foreground="#4C8DE0" CornerRadius="2" />
+        <TextBlock x:Name="VersionText" Text="" Foreground="#5C6B7C" FontSize="10"
+                   HorizontalAlignment="Center" />
+      </StackPanel>
+    </Grid>
+  </Border>
+</Window>

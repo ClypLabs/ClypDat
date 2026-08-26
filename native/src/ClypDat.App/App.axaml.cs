@@ -80,6 +80,12 @@ public sealed partial class App : Application
                 desktop.Exit += (_, _) => _serverTrayMenuRenderer?.Dispose();
             }
             InitializeTrayIcon();
+            // A normal launch goes through the splash: it holds the window back
+            // until the update check has answered and the library's cached
+            // contents are in, so the first thing the user can click is a
+            // finished library rather than a shimmering one. The autostart
+            // launch has nobody watching and stays out of the way.
+            if (!minimized && !UiPreviewMode.Enabled) StartWithSplash(_mainWindow);
             if (minimized)
             {
                 // Opened re-fires on every subsequent Show() after a Hide(), not
@@ -103,6 +109,61 @@ public sealed partial class App : Application
             Dispatcher.UIThread.Post(DevHealthSignal.SignalIfRequested, DispatcherPriority.ApplicationIdle);
             DevUpdateService.StartBackgroundCheck();
         }
+    }
+
+    private void StartWithSplash(MainWindow mainWindow)
+    {
+        SplashWindow splash;
+        try
+        {
+            splash = new SplashWindow();
+            splash.Show();
+        }
+        catch (Exception error)
+        {
+            // Never let the splash be the reason the app does not start.
+            AppLog.Error("Startup: splash could not be shown.", error);
+            return;
+        }
+
+        // The lifetime shows the main window for us the moment this method
+        // returns, so the only way to hold it back is to hide it as it opens -
+        // the same one-shot handler the autostart path uses, for the same
+        // reason: Opened fires again on every later Show().
+        void HideUntilReady(object? _, EventArgs __)
+        {
+            mainWindow.Opened -= HideUntilReady;
+            mainWindow.Hide();
+        }
+        mainWindow.Opened += HideUntilReady;
+
+        var clock = Stopwatch.StartNew();
+        _ = Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            try
+            {
+                var essentials = mainWindow.DataContext is MainWindowViewModel viewModel
+                    ? viewModel.InitialLibraryLoadTask
+                    : Task.CompletedTask;
+                // Handed over rather than dropped: the window's own startup
+                // check would otherwise ask GitHub again seconds later.
+                mainWindow.PendingStartupUpdate = await splash.RunAsync(essentials);
+            }
+            catch (Exception error)
+            {
+                AppLog.Error("Startup: splash sequence failed.", error);
+            }
+            finally
+            {
+                mainWindow.Opened -= HideUntilReady;
+                mainWindow.ShowInTaskbar = true;
+                mainWindow.Show();
+                mainWindow.Activate();
+                AppLog.Info($"Startup: splash held the window for {clock.ElapsedMilliseconds}ms" +
+                            (mainWindow.PendingStartupUpdate is { } pending ? $"; update {pending.LatestVersion.ToString(3)} is available." : "."));
+                await splash.FadeOutAndCloseAsync();
+            }
+        });
     }
 
     // Without this, ANY unhandled exception on the UI thread - a timer tick,
