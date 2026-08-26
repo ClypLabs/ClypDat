@@ -73,6 +73,11 @@ public sealed partial class App : Application
                 ShowInTaskbar = !minimized
             };
             _mainWindow.ApplySavedWindowBounds();
+            var useSplash = !minimized && !UiPreviewMode.Enabled;
+            // The desktop lifetime can show MainWindow as soon as it is assigned.
+            // Raise this before that hand-off so no populated library frame can
+            // race the updater window onto screen.
+            if (useSplash) _mainWindow.RaiseStartupCurtain();
             desktop.MainWindow = _mainWindow;
             if (WindowsPlatformProfile.IsServer())
             {
@@ -84,7 +89,7 @@ public sealed partial class App : Application
             // blank ClypDat and says what it is doing - checking for an update,
             // getting the library's cached rows in - then uncovers the app. The
             // autostart launch has nobody watching and stays out of the way.
-            if (!minimized && !UiPreviewMode.Enabled) StartWithSplash(_mainWindow);
+            if (useSplash) StartWithSplash(_mainWindow);
             if (minimized)
             {
                 // Opened re-fires on every subsequent Show() after a Hide(), not
@@ -125,10 +130,7 @@ public sealed partial class App : Application
             return;
         }
 
-        // The window opens as usual and sits behind the loader, blank: the
-        // curtain covers its contents so nothing half-built is on show, and
-        // it is raised before the lifetime shows the window.
-        mainWindow.RaiseStartupCurtain();
+        // Already raised before MainWindow was handed to the desktop lifetime.
 
         var clock = Stopwatch.StartNew();
         _ = Dispatcher.UIThread.InvokeAsync(async () =>

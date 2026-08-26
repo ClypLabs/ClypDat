@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Threading;
 using ClypDat.App.Services;
@@ -34,6 +35,13 @@ public sealed partial class SplashWindow : Window
     {
         InitializeComponent();
         VersionText.Text = $"v{AppUpdateService.CurrentVersion.ToString(3)}";
+        // WindowStartupLocation can use the monitor of the last active window.
+        // The updater is launch-critical, so it always belongs on Windows'
+        // primary display instead.
+        var primary = DesktopMonitorService.Resolve(null);
+        Position = new PixelPoint(
+            primary.X + Math.Max(0, (primary.Width - (int)Width) / 2),
+            primary.Y + Math.Max(0, (primary.Height - (int)Height) / 2));
         // DWM rounds the composited frame itself, so the corners come out
         // smooth on an opaque window - no per-pixel transparency, and none of
         // the layered/ANGLE surface trouble that comes with it.
