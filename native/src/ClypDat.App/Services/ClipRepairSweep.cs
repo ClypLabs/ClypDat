@@ -79,9 +79,13 @@ public static class ClipRepairSweep
     /// is the clip being repaired right now, started at <see cref="CurrentStartedUtc"/>
     /// and expected to take <see cref="CurrentEstimate"/>; <see cref="Pending"/> is
     /// the queue behind it, in order, each entry carrying its own estimate so a
-    /// waiting tile can say when its turn comes.
+    /// waiting tile can say when its turn comes. <see cref="CurrentFraction"/> is
+    /// how far through the current repair ffmpeg says it is, which is what lets
+    /// the estimate correct itself as the clip goes rather than counting down a
+    /// number fixed when it started.
     /// </summary>
-    public readonly record struct Progress(string? Current, DateTime CurrentStartedUtc, TimeSpan CurrentEstimate, IReadOnlyList<QueuedClip> Pending);
+    public readonly record struct Progress(string? Current, DateTime CurrentStartedUtc, TimeSpan CurrentEstimate,
+        double CurrentFraction, IReadOnlyList<QueuedClip> Pending);
 
     /// <summary>A clip waiting its turn, with how long its own repair should take.</summary>
     public readonly record struct QueuedClip(string Path, TimeSpan Estimate);
@@ -96,6 +100,15 @@ public static class ClipRepairSweep
 
     // Never estimate below a second: a countdown starting at "0s" reads as stuck
     // rather than nearly done.
+    /// <summary>
+    /// Reports on the calling thread, so a fraction can never arrive out of
+    /// order the way Progress&lt;T&gt;'s thread-pool posts can.
+    /// </summary>
+    private sealed class InlineProgress(Action<double> report) : IProgress<double>
+    {
+        public void Report(double value) => report(value);
+    }
+
     private static TimeSpan Estimate(long lengthBytes, double bytesPerSecond) =>
         TimeSpan.FromSeconds(Math.Max(1d, lengthBytes / Math.Max(1d, bytesPerSecond)));
 
@@ -187,30 +200,46 @@ public static class ClipRepairSweep
             var repairedSeconds = 0d;
             var bytesPerSecond = SeedBytesPerSecond;
 
-            void Publish(int index)
+            var currentIndex = 0;
+            var currentStartedUtc = DateTime.UtcNow;
+            var currentFraction = 0d;
+
+            void Publish()
             {
                 if (progress is null) return;
-                var queued = new List<QueuedClip>(Math.Max(0, corrupt.Count - index - 1));
-                for (var j = index + 1; j < corrupt.Count; j++)
+                var queued = new List<QueuedClip>(Math.Max(0, corrupt.Count - currentIndex - 1));
+                for (var j = currentIndex + 1; j < corrupt.Count; j++)
                     queued.Add(new QueuedClip(corrupt[j].Path, Estimate(corrupt[j].Length, bytesPerSecond)));
-                progress.Report(new Progress(corrupt[index].Path, DateTime.UtcNow,
-                    Estimate(corrupt[index].Length, bytesPerSecond), queued));
+                progress.Report(new Progress(corrupt[currentIndex].Path, currentStartedUtc,
+                    Estimate(corrupt[currentIndex].Length, bytesPerSecond), currentFraction, queued));
             }
 
             // Publish and refresh before the first repair starts, so a corrupt
             // clip is marked as such the moment it is found instead of sitting
             // there looking untouched until its turn comes round.
-            Publish(0);
+            Publish();
             if (onDetected is not null) await onDetected().ConfigureAwait(false);
 
             for (var i = 0; i < corrupt.Count; i++)
             {
                 token.ThrowIfCancellationRequested();
                 var (clipPath, key, length) = corrupt[i];
-                Publish(i);
+                currentIndex = i;
+                currentStartedUtc = DateTime.UtcNow;
+                currentFraction = 0;
+                Publish();
 
                 var repairClock = System.Diagnostics.Stopwatch.StartNew();
-                var result = await ClipCorruptionRepairService.RepairAsync(clipPath, token).ConfigureAwait(false);
+                // Republish on every whole percent: ffmpeg reports about twice a
+                // second, and a tile that only redraws on a stage boundary looks
+                // stalled through the long passes.
+                var fraction = new InlineProgress(value =>
+                {
+                    if (value <= currentFraction + 0.01 && value < 1) return;
+                    currentFraction = Math.Clamp(value, 0, 1);
+                    Publish();
+                });
+                var result = await ClipCorruptionRepairService.RepairAsync(clipPath, fraction, token).ConfigureAwait(false);
                 repairClock.Stop();
                 if (result.Status == ClipCorruptionRepairService.RepairStatus.Repaired)
                 {
@@ -247,7 +276,7 @@ public static class ClipRepairSweep
 
             }
 
-            progress?.Report(new Progress(null, DateTime.UtcNow, TimeSpan.Zero, Array.Empty<QueuedClip>()));
+            progress?.Report(new Progress(null, DateTime.UtcNow, TimeSpan.Zero, 0, Array.Empty<QueuedClip>()));
             if (added > 0) Save(libraryRoot, inspected);
             if (repaired > 0) AppLog.Info($"Clip repair sweep: repaired {repaired} clip(s) with mismatched encoder parameter sets.");
             return repaired;

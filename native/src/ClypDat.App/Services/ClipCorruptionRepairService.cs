@@ -31,6 +31,14 @@ public sealed class ClipCorruptionRepairService
 
     private static readonly TimeSpan ProcessTimeout = TimeSpan.FromMinutes(4);
 
+    // How far through a repair each stage leaves the clip. The two ffmpeg passes
+    // dominate and both report their own position, so they get the wide bands and
+    // fill smoothly; the candidate search between them is a handful of small
+    // writes and 8-frame decodes whose count is not knowable in advance.
+    private const double ExtractDone = 0.40;
+    private const double SearchDone = 0.55;
+    private const double RemuxDone = 0.90;
+
     /// <summary>
     /// Read-only check. Decodes a few frames and reports whether the stream is
     /// self-consistent; never touches the file.
@@ -52,8 +60,13 @@ public sealed class ClipCorruptionRepairService
     /// Rebuilds the clip's H.264 parameter sets and re-muxes in place. Only the
     /// container is rewritten - no frame is ever re-encoded, and audio is copied
     /// straight from the original.
+    ///
+    /// <paramref name="progress"/> receives a 0..1 fraction as the repair runs,
+    /// driven by ffmpeg's own reported position rather than a guess, so the
+    /// caller can show an estimate that reacts to how the file is actually
+    /// going.
     /// </summary>
-    public static async Task<RepairResult> RepairAsync(string clipPath, CancellationToken token)
+    public static async Task<RepairResult> RepairAsync(string clipPath, IProgress<double>? progress, CancellationToken token)
     {
         if (!FfmpegPathResolver.IsAvailable) return new RepairResult(RepairStatus.Skipped, "ffmpeg unavailable");
         if (!File.Exists(clipPath)) return new RepairResult(RepairStatus.Skipped, "file missing");
@@ -74,11 +87,18 @@ public sealed class ClipCorruptionRepairService
         var rebuiltPath = Path.Combine(workFolder, "rebuilt.mp4");
         try
         {
+            progress?.Report(0);
+            // Both ffmpeg passes walk the whole clip, so their reported position
+            // over the clip's duration is real progress, not an extrapolation.
+            var durationSeconds = await ProbeDurationAsync(clipPath, token).ConfigureAwait(false);
+
             // -c copy: the slices are never re-encoded, only re-framed from
             // length-prefixed to Annex-B so the parameter sets become editable.
             await RunAsync(FfmpegPathResolver.FfmpegPath,
-                $"-v error -y -i \"{clipPath}\" -map 0:v:0 -c copy -bsf:v h264_mp4toannexb -f h264 \"{rawPath}\"", token)
+                $"-v error -y -i \"{clipPath}\" -map 0:v:0 -c copy -bsf:v h264_mp4toannexb -f h264 \"{rawPath}\"", token,
+                position: Band(progress, 0, ExtractDone, durationSeconds))
                 .ConfigureAwait(false);
+            progress?.Report(ExtractDone);
             if (!File.Exists(rawPath) || new FileInfo(rawPath).Length == 0)
                 return new RepairResult(RepairStatus.Unrepairable, "could not extract the video stream");
 
@@ -106,9 +126,15 @@ public sealed class ClipCorruptionRepairService
             }
             if (sps is null || pps is null) return new RepairResult(RepairStatus.Unrepairable, "no parameter sets in the stream");
 
+            var attempts = 0;
             foreach (var (candidateSps, candidatePps, label) in Candidates(sps, pps))
             {
                 token.ThrowIfCancellationRequested();
+                // The search has no length it can promise - the first candidate
+                // usually wins, and the thousandth is still possible - so it
+                // creeps towards the end of its band instead of claiming steps.
+                attempts++;
+                progress?.Report(ExtractDone + (SearchDone - ExtractDone) * (1d - 1d / (1d + attempts * 0.4)));
                 await WriteCandidateStreamAsync(candidatePath, stream, nals,
                     H264ParameterSets.WriteSps(candidateSps), H264ParameterSets.WritePps(candidatePps), token).ConfigureAwait(false);
 
@@ -120,11 +146,14 @@ public sealed class ClipCorruptionRepairService
                 // a box inside an MP4 invalidates every chunk offset after it.
                 // Audio and metadata come straight off the original file.
                 var frameRate = await ProbeFrameRateAsync(clipPath, token).ConfigureAwait(false);
+                progress?.Report(SearchDone);
                 await RunAsync(FfmpegPathResolver.FfmpegPath,
                     $"-v error -y -fflags +genpts -r {frameRate} -f h264 -i \"{candidatePath}\" -i \"{clipPath}\" " +
-                    $"-map 0:v:0 -map 1:a? -c copy -movflags +faststart -map_metadata 1 \"{rebuiltPath}\"", token)
+                    $"-map 0:v:0 -map 1:a? -c copy -movflags +faststart -map_metadata 1 \"{rebuiltPath}\"", token,
+                    position: Band(progress, SearchDone, RemuxDone, durationSeconds))
                     .ConfigureAwait(false);
                 if (!File.Exists(rebuiltPath) || new FileInfo(rebuiltPath).Length == 0) continue;
+                progress?.Report(RemuxDone);
 
                 // Verify the finished file, not just the elementary stream: a
                 // clean decode here is the only thing that authorises
@@ -142,6 +171,7 @@ public sealed class ClipCorruptionRepairService
                     return new RepairResult(RepairStatus.Skipped, "file in use");
                 }
                 AppLog.Info($"Clip repair: {Path.GetFileName(clipPath)} repaired ({label}).");
+                progress?.Report(1);
                 return new RepairResult(RepairStatus.Repaired, label);
             }
 
@@ -305,6 +335,42 @@ public sealed class ClipCorruptionRepairService
         return (errors, result.StandardOutput.Length / ThumbnailBytes);
     }
 
+    /// <summary>
+    /// Maps one ffmpeg pass's reported position onto the slice of the whole
+    /// repair that pass occupies. Null when the duration is unknown, which
+    /// leaves that pass reporting nothing rather than reporting nonsense.
+    /// </summary>
+    private static IProgress<double>? Band(IProgress<double>? progress, double from, double to, double durationSeconds)
+    {
+        if (progress is null || durationSeconds <= 0) return null;
+        return new InlineProgress<double>(seconds =>
+        {
+            var share = Math.Clamp(seconds / durationSeconds, 0d, 1d);
+            progress.Report(from + (to - from) * share);
+        });
+    }
+
+    /// <summary>
+    /// Reports on the calling thread. Progress&lt;T&gt; posts to a captured
+    /// context - which off the UI thread is the thread pool, so reports can land
+    /// out of order and a fraction could go backwards.
+    /// </summary>
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
+    }
+
+    private static async Task<double> ProbeDurationAsync(string clipPath, CancellationToken token)
+    {
+        var result = await RunAsync(FfmpegPathResolver.FfprobePath,
+            $"-v error -show_entries format=duration -of csv=p=0 \"{clipPath}\"",
+            token, captureStdout: true).ConfigureAwait(false);
+        var text = System.Text.Encoding.UTF8.GetString(result.StandardOutput).Trim();
+        return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds) && seconds > 0
+            ? seconds
+            : 0;
+    }
+
     private static async Task<string> ProbeFrameRateAsync(string clipPath, CancellationToken token)
     {
         var result = await RunAsync(FfmpegPathResolver.FfprobePath,
@@ -325,8 +391,12 @@ public sealed class ClipCorruptionRepairService
 
     private readonly record struct ProcessResult(byte[] StandardOutput, string StandardError);
 
-    private static async Task<ProcessResult> RunAsync(string executable, string arguments, CancellationToken token, bool captureStdout = false)
+    private static async Task<ProcessResult> RunAsync(string executable, string arguments, CancellationToken token,
+        bool captureStdout = false, IProgress<double>? position = null)
     {
+        // -progress writes machine-readable key=value blocks; stdout is free
+        // here because every pass that asks for progress writes to a file.
+        if (position is not null) arguments = "-progress pipe:1 -nostats " + arguments;
         using var process = new Process
         {
             StartInfo = new ProcessStartInfo
@@ -344,7 +414,9 @@ public sealed class ClipCorruptionRepairService
 
         var stdoutTask = captureStdout
             ? ReadAllAsync(process.StandardOutput.BaseStream, token)
-            : Task.Run(async () => { await process.StandardOutput.BaseStream.CopyToAsync(Stream.Null, token).ConfigureAwait(false); return Array.Empty<byte>(); }, token);
+            : position is not null
+                ? ReadPositionAsync(process.StandardOutput, position, token)
+                : Task.Run(async () => { await process.StandardOutput.BaseStream.CopyToAsync(Stream.Null, token).ConfigureAwait(false); return Array.Empty<byte>(); }, token);
         var stderrTask = process.StandardError.ReadToEndAsync(token);
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -360,6 +432,26 @@ public sealed class ClipCorruptionRepairService
         }
 
         return new ProcessResult(await stdoutTask.ConfigureAwait(false), await stderrTask.ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Drains an ffmpeg -progress stream, reporting the output position in
+    /// seconds as each block arrives (roughly twice a second).
+    /// </summary>
+    private static async Task<byte[]> ReadPositionAsync(StreamReader stdout, IProgress<double> position, CancellationToken token)
+    {
+        while (await stdout.ReadLineAsync(token).ConfigureAwait(false) is { } line)
+        {
+            // out_time_us is microseconds, and is "N/A" until the first frame
+            // is written.
+            if (!line.StartsWith("out_time_us=", StringComparison.Ordinal)) continue;
+            if (long.TryParse(line.AsSpan("out_time_us=".Length), NumberStyles.Integer, CultureInfo.InvariantCulture, out var microseconds) &&
+                microseconds > 0)
+            {
+                position.Report(microseconds / 1_000_000d);
+            }
+        }
+        return Array.Empty<byte>();
     }
 
     private static async Task<byte[]> ReadAllAsync(Stream stream, CancellationToken token)

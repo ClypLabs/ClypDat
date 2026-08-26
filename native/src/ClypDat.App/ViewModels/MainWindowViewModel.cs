@@ -4316,11 +4316,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 // library appearing stuck until the whole sweep finishes.
                 // Checking is silent - it finds nothing to say until it knows
                 // which clips are broken. Progress<T> posts to the UI thread.
+                // Explicitly onto the UI thread: Progress<T> captures the context
+                // it was built on, and this was built inside Task.Run - where
+                // there is none, so its callbacks would run on the thread pool
+                // and touch cards and a DispatcherTimer off-thread.
                 var progress = new Progress<ClipRepairSweep.Progress>(update =>
-                {
-                    _clipRepairProgress = update;
-                    ApplyClipRepairProgress();
-                });
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        _clipRepairProgress = update;
+                        ApplyClipRepairProgress();
+                    }));
 
                 await ClipRepairSweep.RunAsync(libraryRoot, paths,
                     // A refresh the moment the corrupt set is known, so the
@@ -4383,9 +4388,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         var elapsed = DateTime.UtcNow - progress.CurrentStartedUtc;
+        if (elapsed < TimeSpan.Zero) elapsed = TimeSpan.Zero;
+        // Once ffmpeg has reported real position, the clip's own pace beats the
+        // size estimate it started from - so the number on the tile corrects
+        // itself as it goes instead of counting down a guess made at the start.
+        // Below a twentieth through, that extrapolation is still noise.
+        var estimate = progress.CurrentFraction >= 0.05
+            ? TimeSpan.FromSeconds(elapsed.TotalSeconds / progress.CurrentFraction)
+            : progress.CurrentEstimate;
         // Never count below one second: a repair that overruns its estimate
         // showing "0s" reads as stuck.
-        var remaining = progress.CurrentEstimate - elapsed;
+        var remaining = estimate - elapsed;
         if (remaining < TimeSpan.FromSeconds(1)) remaining = TimeSpan.FromSeconds(1);
 
         // Each queued clip waits for everything ahead of it, and the estimates
@@ -4403,7 +4416,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (string.Equals(clip.Path, progress.Current, StringComparison.OrdinalIgnoreCase))
             {
-                clip.RepairOverlayText = $"Repairing corrupted clip\n~{Describe(remaining)} left";
+                var percent = (int)Math.Clamp(Math.Round(progress.CurrentFraction * 100), 0, 99);
+                clip.RepairOverlayText = $"Repairing corrupted clip\n{percent}% - ~{Describe(remaining)} left";
             }
             else if (queueWait.TryGetValue(clip.Path, out var startsIn))
             {
