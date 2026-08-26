@@ -2303,7 +2303,7 @@
                     <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,4,0,0">
                       <TextBlock Text="{Binding AppVersionDisplay}" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
                       <TextBlock Text="·" Foreground="#3E4C5A" FontSize="12" FontWeight="Bold" />
-                      <TextBlock Text="Made by Arashii" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
+                      <TextBlock Text="Made by ClypLabs" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
                       <TextBlock Text="·" Foreground="#3E4C5A" FontSize="12" FontWeight="Bold" IsVisible="{Binding HasAppCommit}" />
                       <TextBlock Text="{Binding AppCommitDisplay}"
                                  ToolTip.Tip="View this build's commit on GitHub"
