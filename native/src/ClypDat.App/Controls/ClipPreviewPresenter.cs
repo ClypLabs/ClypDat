@@ -41,6 +41,16 @@ public sealed class ClipPreviewPresenter : Control, IClipPreviewPresenter
     private static int _gpuLosses;
     private static int _gpuPathAnnounced;
 
+    // The GPU present path is off while its lifetime is being fixed. It never
+    // actually ran until the D3D11_BIND_RENDER_TARGET fix (every ANGLE import
+    // failed with EGL_BAD_SURFACE and fell back here), and the first evening it
+    // did run brought stalled library hydration, disappearing sidebar icons and
+    // GPU load jumping from ~30% to ~80% - a device built and destroyed per
+    // hover, and an upload that can silently write a texture the compositor is
+    // reading. Software is what shipped for weeks; it stays until those are
+    // fixed and measured.
+    private static readonly bool GpuPreviewEnabled = false;
+
     private readonly SoftwareClipPreviewAdapter _software;
     private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
     private IClipPreviewPresenter? _adapter;
@@ -132,6 +142,7 @@ public sealed class ClipPreviewPresenter : Control, IClipPreviewPresenter
 
     private async Task InitializeGpuAsync(CancellationToken cancellationToken)
     {
+        if (!GpuPreviewEnabled) return;
         if (Volatile.Read(ref _gpuLosses) >= GpuLossesBeforeGivingUp) return;
         try
         {
