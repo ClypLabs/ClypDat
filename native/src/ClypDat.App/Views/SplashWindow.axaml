@@ -19,8 +19,8 @@
   <Border BorderBrush="#1C2836" BorderThickness="1" CornerRadius="8">
     <Grid RowDefinitions="*,Auto">
 
-      <StackPanel Grid.Row="0" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="14">
-        <controls:ClypDatLoader Width="112" Height="112" HorizontalAlignment="Center" />
+      <StackPanel Grid.Row="0" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="14" Margin="0,14,0,0">
+        <controls:ClypDatLoader Width="96" Height="96" HorizontalAlignment="Center" />
 
         <TextBlock Text="ClypDat" Foreground="#EAF1F9" FontSize="21" FontWeight="Bold"
                    HorizontalAlignment="Center" />
