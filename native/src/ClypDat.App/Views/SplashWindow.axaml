@@ -29,7 +29,7 @@
       </StackPanel>
 
       <StackPanel Grid.Row="1" Margin="24,0,24,22" Spacing="8">
-        <ProgressBar x:Name="Bar" Height="4" Minimum="0" Maximum="1" IsIndeterminate="True"
+        <ProgressBar x:Name="Bar" Height="4" Minimum="0" Maximum="1" IsVisible="False"
                      Background="#16202C" Foreground="#4C8DE0" CornerRadius="2" />
         <Grid ColumnDefinitions="*,Auto">
           <TextBlock x:Name="VersionText" Text="" Foreground="#5C6B7C" FontSize="10"
