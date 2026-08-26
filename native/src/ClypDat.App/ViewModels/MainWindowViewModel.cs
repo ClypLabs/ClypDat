@@ -346,6 +346,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _ = Task.Run(() => ExportEncoderProbe.Av1Family).ContinueWith(_ =>
             Dispatcher.UIThread.Post(() => OnPropertyChanged(nameof(ReplayVideoCodecStatus))),
             TaskScheduler.Default);
+        _ = Task.Run(() => ExportEncoderProbe.Family).ContinueWith(_ =>
+            Dispatcher.UIThread.Post(() => OnPropertyChanged(nameof(CpuEncoderHardwareWarningVisible))),
+            TaskScheduler.Default);
         RefreshDesktopMonitors();
         _libraryRefreshDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
         _libraryRefreshDebounce.Tick += async (_, _) =>
@@ -1599,6 +1602,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsReplayEncoderCpu));
+            OnPropertyChanged(nameof(CpuEncoderHardwareWarningVisible));
             NotifyReplayBitrateRecommendation();
             SaveSettings();
             UpdateReplayQualityRestartRequired();
@@ -1606,6 +1610,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public bool IsReplayEncoderCpu => string.Equals(Settings.ReplayEncoderMode, "CPU", StringComparison.OrdinalIgnoreCase);
+
+    // The probe runs a small real encode, so this means a hardware encoder is
+    // usable, not merely that Windows reports a graphics adapter. Keep CPU-only
+    // systems free of a warning that they cannot act on.
+    public bool CpuEncoderHardwareWarningVisible =>
+        IsReplayEncoderCpu &&
+        ExportEncoderProbe.HardwareProbeCompleted &&
+        ExportEncoderProbe.Family is not null;
+
+    public string CpuEncoderHardwareWarning =>
+        "Hardware video encoding is available. GPU mode reduces CPU use and is recommended unless you are troubleshooting capture.";
 
     public string ReplayEncoderModeStatus
     {

@@ -1399,6 +1399,12 @@
                   <StackPanel Spacing="2">
                     <TextBlock Text="{Binding ReplayEncoderModeStatus}" Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" />
                     <TextBlock Text="{Binding ReplayVideoCodecStatus}" Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" />
+                    <Border Background="#2B2114" BorderBrush="#72561A" BorderThickness="1" CornerRadius="6" Padding="8,6" IsVisible="{Binding CpuEncoderHardwareWarningVisible}">
+                      <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6">
+                        <PathIcon Grid.Column="0" Classes="cautionIcon" VerticalAlignment="Top" />
+                        <TextBlock Grid.Column="1" Text="{Binding CpuEncoderHardwareWarning}" Foreground="#F4C76B" FontSize="10" TextWrapping="Wrap" />
+                      </Grid>
+                    </Border>
                     <TextBlock Text="Automatic encoder profile: chooses the fastest stable configuration for the available NVIDIA, AMD, Intel, or CPU encoder." Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" />
                     <TextBlock Text="{Binding ReplayFrameTimingMetrics}" Foreground="#93A6B8" FontSize="10" TextWrapping="Wrap" IsVisible="{Binding ReplayFrameTimingMetrics, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
                   </StackPanel>
