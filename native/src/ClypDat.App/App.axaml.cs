@@ -74,6 +74,7 @@ public sealed partial class App : Application
             };
             _mainWindow.ApplySavedWindowBounds();
             var useSplash = !minimized && !UiPreviewMode.Enabled;
+            _mainWindow.SetStartupLoaderActive(useSplash);
             // The desktop lifetime can show MainWindow as soon as it is assigned.
             // Raise this before that hand-off so no populated library frame can
             // race the updater window onto screen.
@@ -162,6 +163,7 @@ public sealed partial class App : Application
                 // Loader gets out of the way first, then the app it was
                 // loading is uncovered underneath it.
                 await splash.FadeOutAndCloseAsync();
+                mainWindow.RevealFromStartupLoader();
                 mainWindow.Activate();
                 await mainWindow.LiftStartupCurtainAsync();
             }

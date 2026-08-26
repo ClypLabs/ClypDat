@@ -220,6 +220,7 @@ public sealed partial class MainWindow : Window
     // frame callbacks have passed, leaving a dark rendered surface to reveal.
     private bool _awaitingFirstDarkFrame = true;
     private bool _startupWindowCloaked;
+    private bool _startupLoaderActive;
     private bool _startupInitialized;
     private const double ScrollToTopButtonThreshold = 320;
     private static readonly TimeSpan ScrollToTopDuration = TimeSpan.FromMilliseconds(380);
@@ -241,6 +242,11 @@ public sealed partial class MainWindow : Window
         // Window_OnSizeChanged.
         LibraryScrollViewer.LayoutUpdated += (_, _) =>
         {
+            if (LibraryScrollViewer.Bounds.Width > 0)
+            {
+                var layout = LibraryCardLayoutCalculator.Calculate(LibraryScrollViewer.Bounds.Width, ViewModel?.ScaleClipsWithWindow == true);
+                ViewModel?.UpdateCardLayout(layout);
+            }
             CompleteLibraryLayoutPass();
             TryCompleteLibraryReturnTiming();
             TryCompleteInitialLibraryLayout();
@@ -533,6 +539,7 @@ public sealed partial class MainWindow : Window
 
     private void RevealAfterFirstDarkFrame()
     {
+        if (_startupLoaderActive) return;
         if (!_awaitingFirstDarkFrame) return;
         _awaitingFirstDarkFrame = false;
 
@@ -553,6 +560,19 @@ public sealed partial class MainWindow : Window
         fallback = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
         fallback.Tick += (_, _) => Reveal();
         fallback.Start();
+    }
+
+    internal void SetStartupLoaderActive(bool active)
+    {
+        _startupLoaderActive = active;
+        if (active) ShowInTaskbar = false;
+    }
+
+    internal void RevealFromStartupLoader()
+    {
+        _startupLoaderActive = false;
+        ShowInTaskbar = true;
+        RevealAfterFirstDarkFrame();
     }
 
     private async void UpdateDetectedGame()
@@ -1691,7 +1711,13 @@ public sealed partial class MainWindow : Window
 
         foreach (var container in itemsControl.GetRealizedContainers() ?? Enumerable.Empty<Control>())
         {
-            if (container.DataContext is not ClipCardViewModel clip || !clip.IsVisibleInLibrary || !container.IsVisible || container.Bounds.Height <= 0) continue;
+            var clip = container.DataContext switch
+            {
+                ClipCardViewModel direct => direct,
+                LibraryGridRow row => row.Clips.FirstOrDefault(),
+                _ => null
+            };
+            if (clip is null || !clip.IsVisibleInLibrary || !container.IsVisible || container.Bounds.Height <= 0) continue;
 
             var point = container.TranslatePoint(default, itemsControl);
             if (point is null) continue;
@@ -1883,9 +1909,12 @@ public sealed partial class MainWindow : Window
         if (itemsControl is null || LibraryScrollViewer.Viewport.Height <= 0) return false;
 
         var anchorContainer = (itemsControl.GetRealizedContainers() ?? Enumerable.Empty<Control>())
-            .FirstOrDefault(container => container.DataContext is ClipCardViewModel clip
-                && clip.IsVisibleInLibrary
-                && string.Equals(clip.Path, anchorPath, StringComparison.OrdinalIgnoreCase));
+            .FirstOrDefault(container => container.DataContext switch
+            {
+                ClipCardViewModel clip => clip.IsVisibleInLibrary && string.Equals(clip.Path, anchorPath, StringComparison.OrdinalIgnoreCase),
+                LibraryGridRow row => row.Clips.Any(clip => clip.IsVisibleInLibrary && string.Equals(clip.Path, anchorPath, StringComparison.OrdinalIgnoreCase)),
+                _ => false
+            });
         if (anchorContainer is null) return false;
 
         var point = anchorContainer.TranslatePoint(default, itemsControl);
@@ -1984,9 +2013,9 @@ public sealed partial class MainWindow : Window
         var extentHeight = LibraryScrollViewer.Extent.Height;
         var viewportHeight = LibraryScrollViewer.Viewport.Height;
 
-        var usingStartupIndex = ViewModel.HasStartupLibraryIndex;
+        var usingProjection = ViewModel.LibraryProjection.Rows.Count > 0;
         var signature = (extentHeight, viewportHeight, trackHeight,
-            usingStartupIndex ? ViewModel.StartupLibraryIndexVersion : ViewModel.AllClips.Count(clip => clip.IsVisibleInLibrary));
+            usingProjection ? ViewModel.LibraryProjection.Rows.Count : ViewModel.AllClips.Count(clip => clip.IsVisibleInLibrary));
         if (signature == _scrubberSignature) return;
         _scrubberSignature = signature;
 
@@ -1997,13 +2026,10 @@ public sealed partial class MainWindow : Window
         // Nothing to scrub through - everything already fits on screen.
         if (trackHeight <= 0 || extentHeight <= 0 || viewportHeight >= extentHeight) return;
 
-        if (usingStartupIndex)
+        if (usingProjection)
         {
-            foreach (var marker in ViewModel.StartupLibraryDateMarkers)
-            {
-                var row = marker.FirstVisibleIndex / Math.Max(1, ViewModel.CardColumns);
-                _scrubberDates.Add((marker.Text, row * ViewModel.StartupLibraryRowPitch, marker.Count));
-            }
+            foreach (var marker in ViewModel.LibraryProjection.DateMarkers)
+                _scrubberDates.Add((marker.Text, marker.RowIndex * ViewModel.StartupLibraryRowPitch, marker.Count));
 
             if (_scrubberHovered) RebuildScrubberTicks();
             HighlightCurrentScrubberDate();
@@ -2058,7 +2084,7 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null) return;
 
         var container = LibraryItemsControl.GetRealizedContainers()?
-            .FirstOrDefault(control => control.DataContext is ClipCardViewModel && control.Bounds.Height > 0);
+            .FirstOrDefault(control => control.DataContext is ClipCardViewModel or LibraryGridRow && control.Bounds.Height > 0);
         if (container is not null)
         {
             var cardSurface = container.GetVisualDescendants()

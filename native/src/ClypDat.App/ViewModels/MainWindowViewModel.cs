@@ -417,6 +417,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // RefreshLibraryAsync deliberately continues after this completes.
     public Task LibraryReadyForRevealTask => _libraryReadyForReveal.Task;
     public ObservableCollection<ClipCardViewModel> AllClips { get; }
+    public ObservableCollection<LibraryGridRow> LibraryRows { get; } = new();
+    internal LibraryGridProjectionResult LibraryProjection { get; private set; } =
+        new([], [], 0, new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
     public bool IsRestoringLibraryCache => _isRestoringCachedLibrary;
     public bool ShowLibraryLoadingTiles => !IsInitialLibraryLoadComplete || IsRestoringLibraryCache;
     public int LibraryLoadingTileCount => HasStartupLibraryIndex ? _startupVisibleClipCount : 12;
@@ -3971,6 +3974,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void AttachClip(ClipCardViewModel clip) => clip.PersistentStateChanged += Clip_OnPersistentStateChanged;
 
+    private void RebuildLibraryProjection()
+    {
+        var projection = LibraryGridProjection.Build(AllClips, CardColumns);
+        LibraryProjection = projection;
+        LibraryRows.Clear();
+        foreach (var row in projection.Rows) LibraryRows.Add(row);
+        OnPropertyChanged(nameof(LibraryProjection));
+    }
+
     private void DetachClip(ClipCardViewModel clip) => clip.PersistentStateChanged -= Clip_OnPersistentStateChanged;
 
     private void Clip_OnPersistentStateChanged(object? sender, EventArgs e) => MarkLibraryCacheDirty();
@@ -4902,6 +4914,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         CardColumns = layout.Columns;
         CardWidth = layout.Width;
         CardImageHeight = layout.ImageHeight;
+        RebuildLibraryProjection();
         OnPropertyChanged(nameof(LibraryLoadingRowPitch));
         OnPropertyChanged(nameof(LibraryLoadingTileHeight));
         if (HasStartupLibraryIndex) UpdateReservedLibraryExtent();
@@ -6501,6 +6514,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // replace that complete sidebar with a partial one until restore ends.
         if (!_isRestoringCachedLibrary) RecomputeGameFilterBadges();
         UpdateFirstOfDateFlags();
+        RebuildLibraryProjection();
     }
 
     // AllClips is always sorted newest-first, so the first clip encountered
@@ -7553,6 +7567,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
         OnPropertyChanged(nameof(IsLibraryHeaderSelected));
         OnPropertyChanged(nameof(LibraryReservedContentHeight));
+        RebuildLibraryProjection();
     }
 
     private void ApplyClipTypeFilters()
@@ -7565,6 +7580,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
         OnPropertyChanged(nameof(IsLibraryHeaderSelected));
         OnPropertyChanged(nameof(LibraryReservedContentHeight));
+        RebuildLibraryProjection();
     }
 
     private string _settingsSearchText = string.Empty;
@@ -7656,6 +7672,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         UpdateFirstOfDateFlags();
         if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
         OnPropertyChanged(nameof(IsLibraryHeaderSelected));
+        RebuildLibraryProjection();
     }
 
     private static bool MatchesSearch(ClipCardViewModel clip, string query) =>

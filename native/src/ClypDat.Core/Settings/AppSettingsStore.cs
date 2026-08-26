@@ -44,6 +44,8 @@ public static class AppSettingsStore
                 Save(settings);
             }
             settings.ClipEdits ??= new Dictionary<string, ClipEditSettings>(StringComparer.OrdinalIgnoreCase);
+            settings.GameRailFolders ??= new List<GameRailFolder>();
+            settings.GameRailOrder ??= new List<string>();
             settings.GameAudioExcludedProcesses ??= new List<string>();
             if (string.IsNullOrWhiteSpace(settings.ClipFileNameScheme)) settings.ClipFileNameScheme = "Standard";
             if (string.IsNullOrWhiteSpace(settings.CustomClipFileNameTemplate)) settings.CustomClipFileNameTemplate = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}";
@@ -126,8 +128,32 @@ public static class AppSettingsStore
             // Preserve whatever is there before anything overwrites it, and record why.
             LastLoadError = error.Message;
             PreservedUnreadablePath = TryPreserveUnreadableSettings();
+            foreach (var candidate in RecoveryCandidates())
+            {
+                try
+                {
+                    if (!File.Exists(candidate)) continue;
+                    var recovered = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(candidate));
+                    if (recovered is null) continue;
+                    File.Copy(candidate, SettingsPath, overwrite: true);
+                    return recovered;
+                }
+                catch
+                {
+                    // Try next preserved snapshot.
+                }
+            }
             return new AppSettings();
         }
+    }
+
+    private static IEnumerable<string> RecoveryCandidates()
+    {
+        yield return SettingsPath + ".backup.json";
+        var folder = Path.GetDirectoryName(SettingsPath);
+        if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) yield break;
+        foreach (var path in Directory.EnumerateFiles(folder, "settings.unreadable-*.json")
+                     .OrderByDescending(File.GetLastWriteTimeUtc)) yield return path;
     }
 
     // Moves an unreadable settings.json aside so the next Save cannot destroy it.
@@ -225,6 +251,7 @@ public static class AppSettingsStore
             // reset every setting. Same shape MedalImportHistoryStore already uses.
             var temporaryPath = SettingsPath + ".tmp";
             File.WriteAllText(temporaryPath, JsonSerializer.Serialize(settings, JsonOptions));
+            if (File.Exists(SettingsPath)) File.Copy(SettingsPath, SettingsPath + ".backup.json", overwrite: true);
             File.Move(temporaryPath, SettingsPath, overwrite: true);
             LastSaveError = null;
             return true;

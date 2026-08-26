@@ -74,7 +74,8 @@ public sealed class AppSettings
     // compositor, which reads as system-wide stutter on every clip save.
     // Raise it manually if capture drops frames under load.
     public string ProcessPriority { get; set; } = "Normal";
-    public bool IsStatusAreaVisible { get; set; } = true;
+    // Hidden on new installs. Existing serialized values remain authoritative.
+    public bool IsStatusAreaVisible { get; set; }
     public bool ShowRecordingPausedIndicator { get; set; } = true;
     // On by default - MainWindowViewModel.UpdateCardLayout targets a fixed
     // card width and lets the column count itself grow on wider windows

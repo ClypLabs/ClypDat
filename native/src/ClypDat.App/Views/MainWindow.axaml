@@ -862,20 +862,27 @@
                scrollbar, so hide the ScrollViewer's own. -->
           <ScrollViewer Grid.Column="0" x:Name="LibraryScrollViewer" Margin="-4,0,-24,0" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled">
             <ItemsControl x:Name="LibraryItemsControl"
-                          ItemsSource="{Binding AllClips}"
+                          ItemsSource="{Binding LibraryRows}"
                           Opacity="{Binding LibraryCardGridOpacity}"
                           IsHitTestVisible="{Binding IsInitialLibraryLoadComplete}"
                           VerticalAlignment="Top">
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
-                  <controls:LibraryCardPanel ScaleWithWindow="{Binding ScaleClipsWithWindow}"
-                                             ReservedHeight="{Binding LibraryReservedContentHeight}"
-                                             MetricsChanged="LibraryCardPanel_OnMetricsChanged" />
+                  <VirtualizingStackPanel CacheLength="1" />
                 </ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
+                  <ItemsControl ItemsSource="{Binding Clips}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal" />
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
                   <StackPanel HorizontalAlignment="Stretch"
+                              Width="{Binding $parent[Window].DataContext.CardWidth}"
                               Margin="4,2,20,4"
                               EffectiveViewportChanged="ClipCard_OnEffectiveViewportChanged">
                     <!-- Per-card date header, replacing the old shared
@@ -1077,6 +1084,9 @@
                           </Border>
                     </Border>
                   </StackPanel>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
