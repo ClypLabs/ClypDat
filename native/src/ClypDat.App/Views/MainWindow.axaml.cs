@@ -224,6 +224,11 @@ public sealed partial class MainWindow : Window
     private bool _startupInitialized;
     private const double ScrollToTopButtonThreshold = 320;
     private static readonly TimeSpan ScrollToTopDuration = TimeSpan.FromMilliseconds(380);
+    private static readonly TimeSpan LibraryWheelDuration = TimeSpan.FromMilliseconds(140);
+    private const double LibraryWheelDistance = 50;
+    private int _libraryWheelAnimationId;
+    private bool _libraryWheelAnimationActive;
+    private double _libraryWheelTargetOffsetY;
     public MainWindow()
     {
         Background = Brushes.Black;
@@ -236,6 +241,7 @@ public sealed partial class MainWindow : Window
         RootLayout.Margin = OffScreenMargin;
         UpdateViewNavButtons();
         LibraryScrollViewer.ScrollChanged += LibraryScrollViewer_OnScrollChanged;
+        LibraryScrollViewer.AddHandler(PointerWheelChangedEvent, LibraryScrollViewer_OnPointerWheelChanged, RoutingStrategies.Tunnel, true);
         // Card visibility flips (filtering) and hydration both change the
         // scroll extent without a size change on this window, so the marker
         // positions have to be recomputed off layout rather than only off
@@ -927,6 +933,7 @@ public sealed partial class MainWindow : Window
 
     private void ResetLibraryFilterScroll()
     {
+        CancelLibraryWheelAnimation();
         ClearLibraryResizeAnchor();
         _libraryResizeExpectedOffsetY = null;
         if (LibraryScrollViewer.Offset.Y != 0)
@@ -1831,6 +1838,69 @@ public sealed partial class MainWindow : Window
 
     private void ScrollToTopButton_OnClick(object? sender, RoutedEventArgs e) => AnimateLibraryScrollToTop();
 
+    private void LibraryScrollViewer_OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
+    {
+        if (ViewModel?.IsLibraryVisible != true || _draggingScrubber || e.Delta.Y == 0) return;
+
+        var maxOffset = Math.Max(0, LibraryScrollViewer.Extent.Height - LibraryScrollViewer.Viewport.Height);
+        if (maxOffset <= 0) return;
+
+        // Preserve Avalonia's existing 50-DIP wheel distance, only spread it
+        // over compositor frames. Start from the live offset so a reversal
+        // mid-glide never snaps back to an obsolete starting point.
+        var baseOffset = _libraryWheelAnimationActive ? _libraryWheelTargetOffsetY : LibraryScrollViewer.Offset.Y;
+        _libraryWheelTargetOffsetY = Math.Clamp(baseOffset - e.Delta.Y * LibraryWheelDistance, 0, maxOffset);
+        e.Handled = true;
+        StartLibraryWheelAnimation();
+    }
+
+    private void StartLibraryWheelAnimation()
+    {
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel is null)
+        {
+            SetLibraryWheelOffset(_libraryWheelTargetOffsetY);
+            return;
+        }
+
+        var startOffsetY = LibraryScrollViewer.Offset.Y;
+        var targetOffsetY = _libraryWheelTargetOffsetY;
+        var animationId = ++_libraryWheelAnimationId;
+        _libraryWheelAnimationActive = true;
+        TimeSpan? startTime = null;
+
+        void Step(TimeSpan frameTime)
+        {
+            if (animationId != _libraryWheelAnimationId) return;
+            startTime ??= frameTime;
+            var progress = Math.Min(1, (frameTime - startTime.Value).TotalMilliseconds / LibraryWheelDuration.TotalMilliseconds);
+            var eased = 1 - Math.Pow(1 - progress, 3);
+            SetLibraryWheelOffset(startOffsetY + (targetOffsetY - startOffsetY) * eased);
+            if (progress < 1)
+            {
+                topLevel.RequestAnimationFrame(Step);
+            }
+            else
+            {
+                _libraryWheelAnimationActive = false;
+            }
+        }
+
+        topLevel.RequestAnimationFrame(Step);
+    }
+
+    private void SetLibraryWheelOffset(double offsetY)
+    {
+        LibraryScrollViewer.Offset = new Vector(LibraryScrollViewer.Offset.X, offsetY);
+    }
+
+    private void CancelLibraryWheelAnimation()
+    {
+        if (!_libraryWheelAnimationActive) return;
+        _libraryWheelAnimationId++;
+        _libraryWheelAnimationActive = false;
+    }
+
     // Eased Offset animation, stepped off TopLevel.RequestAnimationFrame
     // rather than a plain DispatcherTimer - a fixed-interval timer isn't
     // synced to the compositor's actual frame clock (and assumes 60Hz),
@@ -1842,6 +1912,7 @@ public sealed partial class MainWindow : Window
 
     private void AnimateLibraryScrollToTop()
     {
+        CancelLibraryWheelAnimation();
         var startOffsetY = LibraryScrollViewer.Offset.Y;
         if (startOffsetY <= 0) return;
 
@@ -1946,6 +2017,7 @@ public sealed partial class MainWindow : Window
             return true;
         }
 
+        CancelLibraryWheelAnimation();
         var maxOffset = Math.Max(0, LibraryScrollViewer.Extent.Height - LibraryScrollViewer.Viewport.Height);
         LibraryScrollViewer.Offset = new Vector(
             LibraryScrollViewer.Offset.X,
@@ -1973,6 +2045,9 @@ public sealed partial class MainWindow : Window
     // every card has a container to measure.
     private bool _scrubberRebuildQueued;
     private bool _draggingScrubber;
+    private bool _scrubberOffsetQueued;
+    private double _pendingScrubberOffsetY;
+    private int _activeScrubberDateIndex = -1;
     // Where inside the thumb the drag started, so the thumb keeps its grab
     // point under the cursor instead of snapping its top (or center) there.
     private double _scrubberGrabOffset;
@@ -2020,6 +2095,7 @@ public sealed partial class MainWindow : Window
         _scrubberSignature = signature;
 
         _scrubberDates.Clear();
+        _activeScrubberDateIndex = -1;
 
         UpdateDateScrubberThumb();
 
@@ -2200,15 +2276,15 @@ public sealed partial class MainWindow : Window
 
         if (trackHeight <= 0 || extentHeight <= 0 || viewportHeight >= extentHeight)
         {
-            DateScrubberThumb.IsVisible = false;
-            if (DateScrubberTrack is not null) DateScrubberTrack.IsVisible = false;
+            if (DateScrubberThumb.IsVisible) DateScrubberThumb.IsVisible = false;
+            if (DateScrubberTrack is { IsVisible: true }) DateScrubberTrack.IsVisible = false;
             return;
         }
 
-        DateScrubberThumb.IsVisible = true;
-        if (DateScrubberTrack is not null) DateScrubberTrack.IsVisible = true;
+        if (!DateScrubberThumb.IsVisible) DateScrubberThumb.IsVisible = true;
+        if (DateScrubberTrack is { IsVisible: false }) DateScrubberTrack.IsVisible = true;
         var thumbHeight = Math.Min(trackHeight, Math.Max(28, viewportHeight / extentHeight * trackHeight));
-        DateScrubberThumb.Height = thumbHeight;
+        if (Math.Abs(DateScrubberThumb.Height - thumbHeight) > 0.01) DateScrubberThumb.Height = thumbHeight;
         var maxOffset = Math.Max(0, extentHeight - viewportHeight);
         var maxThumbTop = Math.Max(0, trackHeight - thumbHeight);
         var top = maxOffset <= 0 ? 0 : LibraryScrollViewer.Offset.Y / maxOffset * maxThumbTop;
@@ -2227,17 +2303,22 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var offsetY = LibraryScrollViewer.Offset.Y;
-        var currentIndex = -1;
-        for (var i = 0; i < _scrubberDates.Count; i++)
+        var offsetY = LibraryScrollViewer.Offset.Y + 1;
+        var low = 0;
+        var high = _scrubberDates.Count - 1;
+        while (low < high)
         {
-            // Added in content order, so the last one at or above the
-            // viewport top is the date currently on screen.
-            if (_scrubberDates[i].ContentY <= offsetY + 1) currentIndex = i;
+            var middle = (low + high + 1) / 2;
+            if (_scrubberDates[middle].ContentY <= offsetY) low = middle;
+            else high = middle - 1;
         }
-        if (currentIndex < 0) currentIndex = 0;
 
-        if (DateScrubberBubbleText is not null) DateScrubberBubbleText.Text = FormatScrubberBubbleText(_scrubberDates[currentIndex]);
+        var currentIndex = low;
+        if (_activeScrubberDateIndex != currentIndex)
+        {
+            _activeScrubberDateIndex = currentIndex;
+            if (DateScrubberBubbleText is not null) DateScrubberBubbleText.Text = FormatScrubberBubbleText(_scrubberDates[currentIndex]);
+        }
         PositionDateScrubberBubble();
     }
 
@@ -2294,6 +2375,7 @@ public sealed partial class MainWindow : Window
     // flush with the rail bottom only when the final library rows are shown.
     private void SeekLibraryToThumbTop(double y)
     {
+        CancelLibraryWheelAnimation();
         var trackHeight = DateScrubberHost.Bounds.Height;
         var extentHeight = LibraryScrollViewer.Extent.Height;
         var viewportHeight = LibraryScrollViewer.Viewport.Height;
@@ -2304,11 +2386,35 @@ public sealed partial class MainWindow : Window
             ? DateScrubberThumb.Bounds.Height
             : Math.Min(trackHeight, Math.Max(28, viewportHeight / extentHeight * trackHeight));
         var maxThumbTop = Math.Max(0, trackHeight - thumbHeight);
-        var target = maxThumbTop <= 0 ? 0 : Math.Clamp(y, 0, maxThumbTop) / maxThumbTop * maxOffset;
-        LibraryScrollViewer.Offset = new Vector(
-            LibraryScrollViewer.Offset.X,
-            Math.Clamp(target, 0, maxOffset));
-        UpdateDateScrubberThumb();
+        var thumbTop = Math.Clamp(y, 0, maxThumbTop);
+        var target = maxThumbTop <= 0 ? 0 : thumbTop / maxThumbTop * maxOffset;
+        // Keep handle under pointer now. Offset work waits for next compositor
+        // frame, coalescing high-rate pointer moves into one layout update.
+        Canvas.SetTop(DateScrubberThumb, thumbTop);
+        PositionDateScrubberBubble();
+        QueueScrubberOffset(target);
+    }
+
+    private void QueueScrubberOffset(double target)
+    {
+        _pendingScrubberOffsetY = target;
+        if (_scrubberOffsetQueued) return;
+        _scrubberOffsetQueued = true;
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel is null)
+        {
+            ApplyQueuedScrubberOffset();
+            return;
+        }
+
+        topLevel.RequestAnimationFrame(_ => ApplyQueuedScrubberOffset());
+    }
+
+    private void ApplyQueuedScrubberOffset()
+    {
+        if (!_scrubberOffsetQueued) return;
+        _scrubberOffsetQueued = false;
+        LibraryScrollViewer.Offset = new Vector(LibraryScrollViewer.Offset.X, _pendingScrubberOffsetY);
     }
 
     private void DateScrubber_OnPointerPressed(object? sender, PointerPressedEventArgs e)
@@ -2388,6 +2494,7 @@ public sealed partial class MainWindow : Window
     private void DateScrubber_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
         if (!_draggingScrubber) return;
+        ApplyQueuedScrubberOffset();
         _draggingScrubber = false;
         e.Pointer.Capture(null);
         // Still under the cursor right after releasing, so settle into hover

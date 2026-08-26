@@ -1,5 +1,6 @@
 using Avalonia.Media.Imaging;
 using Avalonia.Media;
+using Avalonia.Threading;
 using ClypDat.App.Services;
 using ClypDat.Core.Settings;
 
@@ -18,6 +19,9 @@ public sealed class ClipCardViewModel : ViewModelBase
     private bool _isVod;
     private bool _isPreviewVisible;
     private string _repairOverlayText = string.Empty;
+    private CancellationTokenSource? _previewLoadCts;
+    private int _previewLoadVersion;
+    private static readonly SemaphoreSlim PreviewDecodeSlots = new(2, 2);
 
     public event EventHandler? PersistentStateChanged;
 
@@ -351,6 +355,8 @@ public sealed class ClipCardViewModel : ViewModelBase
         private set
         {
             if (!SetProperty(ref _previewImagePath, value)) return;
+            CancelPreviewLoad();
+            ClearPreviewImage();
             if (_isPreviewVisible) SetPreviewImage(value);
         }
     }
@@ -388,6 +394,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         }
         else
         {
+            CancelPreviewLoad();
             var old = _previewImage;
             PreviewImage = null;
             // Deferred, not immediate - see DeferredBitmapDisposal. Opening a
@@ -582,7 +589,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         if (!double.IsFinite(width) || width < MinimumPreviewDecodeWidth) width = MinimumPreviewDecodeWidth;
         // Never decode LARGER than the source - DecodeToWidth would upscale,
         // spending memory to add no detail.
-        _previewDecodeWidth = Math.Min(ThumbnailSourceWidth, (int)Math.Round(width));
+        Volatile.Write(ref _previewDecodeWidth, Math.Min(ThumbnailSourceWidth, (int)Math.Round(width)));
     }
 
     // Matches MediaProbeService's thumbnail scale.
@@ -590,29 +597,79 @@ public sealed class ClipCardViewModel : ViewModelBase
 
     private void SetPreviewImage(string path)
     {
+        CancelPreviewLoad();
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+
+        var cancellation = new CancellationTokenSource();
+        _previewLoadCts = cancellation;
+        var version = _previewLoadVersion;
+        var width = Volatile.Read(ref _previewDecodeWidth);
+        _ = LoadPreviewImageAsync(path, width, version, cancellation.Token);
+    }
+
+    private void CancelPreviewLoad()
+    {
+        _previewLoadVersion++;
+        var previous = Interlocked.Exchange(ref _previewLoadCts, null);
+        if (previous is null) return;
+        previous.Cancel();
+        previous.Dispose();
+    }
+
+    private void ClearPreviewImage()
+    {
         var old = _previewImage;
+        PreviewImage = null;
+        DeferredBitmapDisposal.Release(old);
+    }
+
+    private async Task LoadPreviewImageAsync(string path, int width, int version, CancellationToken cancellationToken)
+    {
+        Bitmap? bitmap = null;
         try
         {
-            PreviewImage = !string.IsNullOrWhiteSpace(path) && File.Exists(path)
-                ? DecodePreview(path)
-                : null;
+            await PreviewDecodeSlots.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                bitmap = await Task.Run(() => DecodePreview(path, width), cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                PreviewDecodeSlots.Release();
+            }
         }
-        catch
-        {
-            PreviewImage = null;
-        }
+        catch (OperationCanceledException) { return; }
+        catch { return; }
         finally
         {
-            if (old is not null && old != _previewImage) DeferredBitmapDisposal.Release(old);
+            if (bitmap is not null)
+                Dispatcher.UIThread.Post(() => ApplyLoadedPreview(bitmap, path, version, cancellationToken));
         }
     }
 
-    private static Bitmap DecodePreview(string path)
+    private void ApplyLoadedPreview(Bitmap bitmap, string path, int version, CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested
+            || version != _previewLoadVersion
+            || !_isPreviewVisible
+            || !string.Equals(path, _previewImagePath, StringComparison.Ordinal))
+        {
+            DeferredBitmapDisposal.Release(bitmap);
+            return;
+        }
+
+        var old = _previewImage;
+        PreviewImage = bitmap;
+        if (old is not null && old != bitmap) DeferredBitmapDisposal.Release(old);
+    }
+
+    private static Bitmap DecodePreview(string path, int width)
     {
         using var stream = File.OpenRead(path);
         try
         {
-            return Bitmap.DecodeToWidth(stream, _previewDecodeWidth, BitmapInterpolationMode.MediumQuality);
+            return Bitmap.DecodeToWidth(stream, width, BitmapInterpolationMode.MediumQuality);
         }
         catch
         {
