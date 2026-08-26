@@ -409,10 +409,22 @@ public sealed class MediaProbeService
     // LoadWaveformsAsync minus the onPartial publishing (nothing is on screen to
     // paint into) and run off the background gate at BelowNormal, so it can
     // never sit in front of the editor's own decode.
-    public async Task EnsureWaveformsAsync(MediaFileInfo media, CancellationToken cancellationToken)
+    public async Task EnsureWaveformsAsync(MediaFileInfo media, bool keepResident, CancellationToken cancellationToken)
     {
-        await LoadWaveformsAsync(media, cancellationToken, onPartial: null, foreground: false, populateMemoryCache: false).ConfigureAwait(false);
+        // Already warmed this session, so the file on disk is known good and
+        // there is nothing to re-read. The sweep restarts from the top every
+        // time the editor closes, and without this each restart re-read and
+        // re-parsed every cache file it had already written.
+        var warmKey = $"{media.SizeBytes}|{media.LastWriteTimeUtc.Ticks}|{media.Path.ToLowerInvariant()}";
+        if (!keepResident && !_warmedWaveforms.TryAdd(warmKey, 0)) return;
+
+        await LoadWaveformsAsync(media, cancellationToken, onPartial: null, foreground: false, populateMemoryCache: keepResident).ConfigureAwait(false);
     }
+
+    // Path|size|mtime of every clip the idle sweep has warmed since launch.
+    // Bounded by the sweep's own candidate cap, and only ever grows by one
+    // entry per clip.
+    private readonly ConcurrentDictionary<string, byte> _warmedWaveforms = new();
 
     public async Task<IReadOnlyDictionary<int, IReadOnlyList<double>>> LoadWaveformsAsync(
         MediaFileInfo media,

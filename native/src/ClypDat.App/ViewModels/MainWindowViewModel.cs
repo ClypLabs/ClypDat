@@ -7843,6 +7843,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // both at once just means the user's next click lands on a busier disk, and
     // the waveform is the one that has to be ready the instant the editor
     // opens.
+    // See StartBackgroundWaveformHydration's MaxWarmClips comment.
+    private const int ResidentWarmClips = 40;
+
     private void StartBackgroundWaveformHydration()
     {
         if (_gameIsActive || IsEditorVisible || _backgroundWaveformCts is not null) return;
@@ -7860,6 +7863,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // warming the 900th-newest clip of a big library writes a JSON nobody
         // reads before it ages out.
         const int MaxWarmClips = 250;
+        // The newest handful are additionally kept in WaveformPeakCache, so
+        // opening a clip recorded today paints on the editor's FIRST frame with
+        // no disk read and no dispatcher hop at all. The rest only get the JSON
+        // written: a few hundred entries pushed through the LRU would evict the
+        // ones the user is actually about to open, and reading one 10KB cache
+        // file is already fast enough to land well inside the editor's own
+        // ~260ms to first frame.
         var clips = AllClips
             .Where(clip => clip.Duration > TimeSpan.Zero)
             .Where(clip => clip.Media.Tracks.Any(track => track.Type == "audio"))
@@ -7871,6 +7881,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             .Take(MaxWarmClips)
             .Select(clip => clip.Media)
             .ToArray();
+        AppLog.Debug($"Idle waveform hydration queue: {clips.Length} clip(s), {Math.Min(clips.Length, ResidentWarmClips)} kept resident.");
 
         _ = Task.Run(() => HydrateMissingWaveformsAsync(clips, cts.Token));
     }
@@ -7889,7 +7900,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 // before the unit of work starts, so an editor open never has
                 // to interrupt a decode already in flight.
                 await EditorForegroundWork.ParkWhileActiveAsync(cancellationToken).ConfigureAwait(false);
-                await _mediaProbe.EnsureWaveformsAsync(media, cancellationToken).ConfigureAwait(false);
+                await _mediaProbe.EnsureWaveformsAsync(media, warmed < ResidentWarmClips, cancellationToken).ConfigureAwait(false);
                 warmed++;
             }
 
