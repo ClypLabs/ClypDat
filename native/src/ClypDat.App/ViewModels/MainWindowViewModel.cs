@@ -4307,10 +4307,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             try
             {
                 // Cold boot has the disk saturated by the library scan, thumbnail
-                // loads and hydration. Let the worst of that clear - but not for
-                // long: until this runs, a corrupt clip sits in the library
-                // looking broken.
-                await Task.Delay(TimeSpan.FromSeconds(5));
+                // loads and hydration. Let the first wave of that clear - but
+                // barely: until this runs, a corrupt clip sits in the library
+                // looking broken with nothing to say why.
+                await Task.Delay(TimeSpan.FromSeconds(1));
                 // Refresh per repair rather than once at the end, so a fixed clip
                 // and its thumbnail update as soon as it is fixed instead of the
                 // library appearing stuck until the whole sweep finishes.
@@ -4364,7 +4364,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private void ApplyClipRepairProgress()
     {
         var progress = _clipRepairProgress;
-        var active = !string.IsNullOrEmpty(progress.Current);
+        var repairing = !string.IsNullOrEmpty(progress.Current);
+        // Detection announces each corrupt clip as it finds one, before any
+        // repair has started - so a queue with no current clip is still an
+        // active state worth painting.
+        var active = repairing || progress.Pending is { Count: > 0 };
 
         if (active && _clipRepairTicker is null)
         {
@@ -4404,17 +4408,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // Each queued clip waits for everything ahead of it, and the estimates
         // are per-file - repair time tracks size, so a 30MB clip behind a 200MB
         // one must not claim the same wait.
+        // While detection is still running there is no clip in flight to count
+        // from, so those tiles say they are queued without inventing a time.
         var queueWait = new Dictionary<string, TimeSpan>(StringComparer.OrdinalIgnoreCase);
+        var queued = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var wait = remaining;
-        foreach (var queued in progress.Pending)
+        foreach (var entry in progress.Pending)
         {
-            queueWait[queued.Path] = wait;
-            wait += queued.Estimate;
+            queued.Add(entry.Path);
+            if (!repairing) continue;
+            queueWait[entry.Path] = wait;
+            wait += entry.Estimate;
         }
 
         foreach (var clip in AllClips)
         {
-            if (string.Equals(clip.Path, progress.Current, StringComparison.OrdinalIgnoreCase))
+            if (repairing && string.Equals(clip.Path, progress.Current, StringComparison.OrdinalIgnoreCase))
             {
                 var percent = (int)Math.Clamp(Math.Round(progress.CurrentFraction * 100), 0, 99);
                 clip.RepairOverlayText = $"Repairing corrupted clip\n{percent}% - ~{Describe(remaining)} left";
@@ -4422,6 +4431,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             else if (queueWait.TryGetValue(clip.Path, out var startsIn))
             {
                 clip.RepairOverlayText = $"Queued for repair\nstarts in ~{Describe(startsIn)}";
+            }
+            else if (queued.Contains(clip.Path))
+            {
+                clip.RepairOverlayText = "Corrupted clip found\nqueued for repair";
             }
             else if (clip.IsRepairOverlayVisible)
             {

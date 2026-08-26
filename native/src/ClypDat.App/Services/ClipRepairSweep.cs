@@ -164,6 +164,11 @@ public static class ClipRepairSweep
             // rewritten. Ordered results, concurrent execution.
             var verdicts = new bool[pending.Count];
             var next = -1;
+            // Announced as they are found, not once the whole library has been
+            // checked: on a big library detection outlasts the first repair, and
+            // a clip already known to be broken should say so immediately.
+            var found = new List<QueuedClip>();
+            var announced = false;
             var workers = new Task[Math.Min(DetectionConcurrency, pending.Count)];
             for (var w = 0; w < workers.Length; w++)
             {
@@ -174,8 +179,25 @@ public static class ClipRepairSweep
                         var index = Interlocked.Increment(ref next);
                         if (index >= pending.Count) return;
                         token.ThrowIfCancellationRequested();
-                        verdicts[index] = await ClipCorruptionRepairService
+                        var corruptClip = await ClipCorruptionRepairService
                             .IsCorruptAsync(pending[index].Path, token).ConfigureAwait(false);
+                        verdicts[index] = corruptClip;
+                        if (!corruptClip) continue;
+
+                        bool first;
+                        QueuedClip[] snapshot;
+                        lock (found)
+                        {
+                            found.Add(new QueuedClip(pending[index].Path,
+                                Estimate(pending[index].Length, SeedBytesPerSecond)));
+                            first = !announced;
+                            announced = true;
+                            snapshot = found.ToArray();
+                        }
+                        // No Current yet - nothing is being repaired while the
+                        // rest of the library is still being checked.
+                        progress?.Report(new Progress(null, DateTime.UtcNow, TimeSpan.Zero, 0, snapshot));
+                        if (first && onDetected is not null) await onDetected().ConfigureAwait(false);
                     }
                 }, token);
             }
@@ -214,11 +236,10 @@ public static class ClipRepairSweep
                     Estimate(corrupt[currentIndex].Length, bytesPerSecond), currentFraction, queued));
             }
 
-            // Publish and refresh before the first repair starts, so a corrupt
-            // clip is marked as such the moment it is found instead of sitting
-            // there looking untouched until its turn comes round.
+            // Detection already announced and refreshed on its first find; this
+            // only covers the case where nothing did.
             Publish();
-            if (onDetected is not null) await onDetected().ConfigureAwait(false);
+            if (!announced && onDetected is not null) await onDetected().ConfigureAwait(false);
 
             for (var i = 0; i < corrupt.Count; i++)
             {
