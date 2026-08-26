@@ -45,6 +45,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly DispatcherTimer _libraryCacheWriteTimer;
     private readonly DispatcherTimer _relativeDateRefreshTimer;
     private CancellationTokenSource? _cachedLibraryRestoreCts;
+    private readonly TaskCompletionSource _libraryReadyForReveal = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private bool _isRestoringCachedLibrary;
     private bool _isInitialLibraryLoadComplete;
     private IReadOnlyList<CachedClipState> _startupLibraryStates = Array.Empty<CachedClipState>();
@@ -412,6 +413,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool HasStartupRegistrationError => !string.IsNullOrWhiteSpace(StartupRegistrationError);
     public Task InitialLibraryLoadTask { get; }
+    // Startup loader waits for one usable library frame, not a filesystem scan.
+    // RefreshLibraryAsync deliberately continues after this completes.
+    public Task LibraryReadyForRevealTask => _libraryReadyForReveal.Task;
     public ObservableCollection<ClipCardViewModel> AllClips { get; }
     public bool IsRestoringLibraryCache => _isRestoringCachedLibrary;
     public bool ShowLibraryLoadingTiles => !IsInitialLibraryLoadComplete || IsRestoringLibraryCache;
@@ -3644,21 +3648,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string RightShadeWidth => $"{Math.Max(0, 100 - PercentValue(TrimEnd)):0.###}%";
     public string ExportButtonText => IsExporting ? "Exporting..." : "Export";
 
-    // A cache hit must not wait for the SMB directory walk. Restore enough
-    // cards for several rows immediately, then let the UI breathe between
-    // bounded batches while the remaining cached cards arrive.
+    // Cached state is authoritative for first paint. Read, normalize and build
+    // every model away from the dispatcher, then make one observable commit.
+    // Disk reconciliation follows and must never hold startup hostage.
     private async Task StartInitialLibraryLoadAsync()
     {
         try
         {
             var root = Settings.LibraryFolder;
             var clock = System.Diagnostics.Stopwatch.StartNew();
-            // Load is a synchronous SQLite read + per-row JSON deserialize; offload
-            // it so a large cached library doesn't block the window from showing.
+            // SQLite read, filesystem normalization and model construction all
+            // stay off the UI thread. Cached constructors do not decode images.
             var cached = (await Task.Run(() => _libraryCache.Load(root)))
                 .OrderByDescending(state => state.Media.CreatedAt)
                 .ThenBy(state => state.Media.Path, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
+            AppLog.Info($"Library cache: read {cached.Length} entries in {clock.ElapsedMilliseconds}ms.");
             if (!string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase))
             {
                 // Library folder changed again while this load was in flight.
@@ -3666,47 +3671,61 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
             if (cached.Length == 0)
             {
-                await RefreshLibraryAsync();
+                _ = ReconcileLibraryAfterCacheAsync(root);
                 return;
             }
 
-            _isRestoringCachedLibrary = true;
-            _startupLibraryStates = cached;
-            _loadedStartupClipCount = 0;
-            RefreshStartupLibraryIndex();
+            var models = await Task.Run(() => NormalizeCachedStates(cached)
+                .Select(state => new ClipCardViewModel(state, root)).ToArray());
+            AppLog.Info($"Library cache: constructed {models.Length} models in {clock.ElapsedMilliseconds}ms.");
+
+            // One dispatcher transaction: no staged cards, placeholder extent,
+            // per-batch filtering, or intentional frame delays.
+            _restoredClipPaths.Clear();
+            foreach (var clip in models)
+            {
+                if (!_restoredClipPaths.Add(clip.Path)) continue;
+                AttachClip(clip);
+                AllClips.Add(clip);
+            }
             PopulateGameFilterOptionsFromCache(cached);
             PopulateClipTypeFilterOptionsFromCache(cached);
-            _restoredClipPaths.Clear();
-            foreach (var clip in AllClips) _restoredClipPaths.Add(clip.Path);
-            OnPropertyChanged(nameof(IsRestoringLibraryCache));
-            OnPropertyChanged(nameof(ShowLibraryLoadingTiles));
-            OnPropertyChanged(nameof(LibraryTitle));
-            const int initialCardCount = 6;
-            // Existence checks for every row's thumbnail/filmstrip run off the UI
-            // thread - see NormalizeCachedStates. Two stat calls per clip against
-            // a cold media-cache folder is not something the first paint should
-            // wait on, and it is the same disk the probe/thumbnail hydration
-            // passes are hammering at that exact moment.
-            var firstStates = cached.Take(initialCardCount).ToArray();
-            var firstBatch = await Task.Run(() => NormalizeCachedStates(firstStates));
-            foreach (var state in firstBatch) AddCachedClip(state);
             ApplyGameFilters();
             ApplyClipTypeFilters();
             ApplySearchFilter();
             NotifyLibraryChrome();
-            AppLog.Info($"Library cache: restored {Math.Min(initialCardCount, cached.Length)}/{cached.Length} cards in {clock.ElapsedMilliseconds}ms.");
-
-            // MainWindow reveals this measured grid only after it reserves the
-            // cached library's full extent. Until then the shimmer is the only
-            // visible tile surface, so the scrollbar never grows card-by-card.
-            _cachedLibraryRestoreCts = new CancellationTokenSource();
-            _ = RestoreRemainingCachedClipsAsync(cached.Skip(initialCardCount).ToArray(), root, _cachedLibraryRestoreCts.Token);
+            IsInitialLibraryLoadComplete = true;
+            AppLog.Info($"Library cache: committed {AllClips.Count} models in one UI transaction at {clock.ElapsedMilliseconds}ms.");
+            _ = ReconcileLibraryAfterCacheAsync(root);
         }
         finally
         {
-            // Cache misses and errors have no hidden first card to measure.
-            // Do not leave their library behind the startup shimmer forever.
-            if (!HasStartupLibraryIndex) IsInitialLibraryLoadComplete = true;
+            // Cache misses reveal on timeout; an empty/failed cache has no
+            // first card to render, so its readiness is the completed commit.
+            if (!IsInitialLibraryLoadComplete) IsInitialLibraryLoadComplete = true;
+        }
+    }
+
+    private async Task ReconcileLibraryAfterCacheAsync(string root)
+    {
+        try
+        {
+            AppLog.Info($"Library reconciliation: starting for '{root}'.");
+            await RefreshLibraryAsync();
+            await PersistLibraryCacheSnapshotAsync();
+            AppLog.Info($"Library reconciliation: complete for '{root}'.");
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Library reconciliation: failed.", error);
+        }
+    }
+
+    internal void NotifyLibraryFirstViewportRendered(int realizedRows)
+    {
+        if (_libraryReadyForReveal.TrySetResult())
+        {
+            AppLog.Info($"Library first viewport: realized={realizedRows}, total={AllClips.Count}.");
         }
     }
 

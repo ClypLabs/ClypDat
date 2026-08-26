@@ -138,7 +138,7 @@ public sealed partial class App : Application
             try
             {
                 var viewModel = mainWindow.DataContext as MainWindowViewModel;
-                var essentials = viewModel?.InitialLibraryLoadTask ?? Task.CompletedTask;
+                var essentials = viewModel?.LibraryReadyForRevealTask ?? Task.CompletedTask;
                 // Auto-install is a setting, and a version the user already
                 // told us to ignore is not one to install behind their back.
                 bool ShouldInstall(AppUpdateInfo candidate) =>

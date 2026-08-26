@@ -2055,17 +2055,37 @@ public sealed partial class MainWindow : Window
 
     private void TryCompleteInitialLibraryLayout()
     {
-        if (ViewModel is not { IsInitialLibraryLoadComplete: false, HasStartupLibraryIndex: true }) return;
+        if (ViewModel is null) return;
 
         var container = LibraryItemsControl.GetRealizedContainers()?
             .FirstOrDefault(control => control.DataContext is ClipCardViewModel && control.Bounds.Height > 0);
-        if (container is null) return;
+        if (container is not null)
+        {
+            var cardSurface = container.GetVisualDescendants()
+                .OfType<Border>()
+                .FirstOrDefault(border => border.Name == "LibraryClipCardSurface" && border.Bounds.Height > 0);
+            var surfaceTop = cardSurface?.TranslatePoint(default, container)?.Y ?? 0;
+            if (!ViewModel.IsInitialLibraryLoadComplete && ViewModel.HasStartupLibraryIndex)
+            {
+                ViewModel.CompleteInitialLibraryLayout(container.Bounds.Height, surfaceTop, cardSurface?.Bounds.Height ?? 0);
+            }
+        }
 
-        var cardSurface = container.GetVisualDescendants()
-            .OfType<Border>()
-            .FirstOrDefault(border => border.Name == "LibraryClipCardSurface" && border.Bounds.Height > 0);
-        var surfaceTop = cardSurface?.TranslatePoint(default, container)?.Y ?? 0;
-        ViewModel.CompleteInitialLibraryLayout(container.Bounds.Height, surfaceTop, cardSurface?.Bounds.Height ?? 0);
+        // GetRealizedContainers can lag this LayoutUpdated callback by one
+        // dispatcher turn. Layout itself still completed, so do not turn that
+        // bookkeeping delay into a splash timeout.
+        if (ViewModel.AllClips.Count == 0) return;
+
+        // RequestAnimationFrame runs after the layout which realized this
+        // card. It is the splash hand-off gate: cache commit alone is not a
+        // usable library until one viewport has painted.
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel is null) return;
+        topLevel.RequestAnimationFrame(_ =>
+        {
+            var realized = LibraryItemsControl.GetRealizedContainers()?.Count(control => control.Bounds.Height > 0) ?? 0;
+            if (realized > 0) ViewModel?.NotifyLibraryFirstViewportRendered(realized);
+        });
     }
 
     private bool _scrubberHovered;

@@ -80,7 +80,7 @@ public sealed partial class SplashWindow : Window
             return update;
         }
 
-        SetStage("Preparing ClypDat");
+        SetStage("Loading library");
         SetProgress(null);
         try
         {
@@ -88,7 +88,7 @@ public sealed partial class SplashWindow : Window
         }
         catch (Exception error) when (error is OperationCanceledException or TimeoutException)
         {
-            AppLog.Info("Startup: library was still loading; opening the window and letting it fill in behind.");
+            AppLog.Info("Startup: library reveal timed out; opening window while loading continues behind it.");
         }
         catch (Exception error)
         {
