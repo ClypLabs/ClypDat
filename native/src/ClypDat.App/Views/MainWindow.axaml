@@ -2261,7 +2261,11 @@
                                                 FloorDb="{Binding MicrophoneNoiseGateFloorDb}"
                                                 IsActive="{Binding IsMicTestActive}"
                                                 ToolTip.Tip="Green shows the current microphone level. The vertical line marks the noise gate threshold." />
+                      </StackPanel>
+                    </Border>
 
+                    <Border Classes="settingsCard" Padding="16" Margin="0,6,0,0">
+                      <StackPanel Spacing="16">
                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                           <StackPanel Spacing="2" VerticalAlignment="Center">
                             <TextBlock Text="Noise suppression" Foreground="#D8E4F2" FontWeight="SemiBold" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
