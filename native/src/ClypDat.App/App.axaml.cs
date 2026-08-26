@@ -136,6 +136,11 @@ public sealed partial class App : Application
             _mainWindow.SetStartupLoaderActive(true);
             _mainWindow.RaiseStartupCurtain();
             desktop.MainWindow = _mainWindow;
+            // Replacing the desktop lifetime's MainWindow after the splash is
+            // already running does not implicitly open the new window.
+            // Explicitly show it so Avalonia can measure the first virtualized
+            // viewport while the splash remains in front.
+            _mainWindow.Show();
             if (WindowsPlatformProfile.IsServer())
             {
                 _serverTrayMenuRenderer = new ServerTrayMenuRenderer("ClypDat");
