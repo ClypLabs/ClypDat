@@ -87,6 +87,14 @@ public static class ClipRepairSweep
     public readonly record struct Progress(string? Current, DateTime CurrentStartedUtc, TimeSpan CurrentEstimate,
         double CurrentFraction, IReadOnlyList<QueuedClip> Pending);
 
+    /// <summary>
+    /// Whether an invocation acquired the sweep gate and therefore owns the
+    /// progress it was given. A refresh may ask for another sweep while one is
+    /// already finding or repairing clips; that caller must leave the active
+    /// sweep's presentation alone.
+    /// </summary>
+    public readonly record struct RunResult(bool OwnsProgress, int Repaired);
+
     /// <summary>A clip waiting its turn, with how long its own repair should take.</summary>
     public readonly record struct QueuedClip(string Path, TimeSpan Estimate);
 
@@ -120,21 +128,22 @@ public static class ClipRepairSweep
 
     /// <summary>
     /// Inspects clips that have not been looked at before, repairing any that are
-    /// corrupt. Safe to call on every library refresh; returns how many were fixed.
+    /// corrupt. Safe to call on every library refresh. <see cref="RunResult.OwnsProgress"/>
+    /// is false when another invocation already owns this library's sweep.
     ///
     /// Detection runs over everything first so the repair phase knows how many
     /// clips it is about to fix - which is what lets each tile show a real
     /// estimate instead of an open-ended spinner. <paramref name="onDetected"/>
     /// fires once, after detection and before the first repair.
     /// </summary>
-    public static async Task<int> RunAsync(string libraryRoot, IReadOnlyList<string> clipPaths,
+    public static async Task<RunResult> RunAsync(string libraryRoot, IReadOnlyList<string> clipPaths,
         Func<Task>? onDetected, Func<string, Task>? onRepaired, IProgress<Progress>? progress,
         CancellationToken token)
     {
-        if (string.IsNullOrWhiteSpace(libraryRoot) || clipPaths.Count == 0) return 0;
-        if (!FfmpegPathResolver.IsAvailable) return 0;
+        if (string.IsNullOrWhiteSpace(libraryRoot) || clipPaths.Count == 0) return new RunResult(false, 0);
+        if (!FfmpegPathResolver.IsAvailable) return new RunResult(false, 0);
         // A second refresh landing mid-sweep must not start a competing pass.
-        if (!await Gate.WaitAsync(0, token).ConfigureAwait(false)) return 0;
+        if (!await Gate.WaitAsync(0, token).ConfigureAwait(false)) return new RunResult(false, 0);
 
         try
         {
@@ -151,7 +160,7 @@ public static class ClipRepairSweep
             {
                 if (TryEntry(clipPath, out var entry) && !inspected.Contains(entry.Key)) pending.Add(entry);
             }
-            if (pending.Count == 0) return 0;
+            if (pending.Count == 0) return new RunResult(true, 0);
 
             // Newest first. Only builds from a narrow window produced these
             // clips, so the ones worth finding are the recent ones - checking
@@ -210,7 +219,7 @@ public static class ClipRepairSweep
                 else { inspected.Add(pending[i].Key); added++; }
             }
             if (added > 0) Save(libraryRoot, inspected);
-            if (corrupt.Count == 0) return 0;
+            if (corrupt.Count == 0) return new RunResult(true, 0);
 
             AppLog.Info($"Clip repair sweep: {corrupt.Count} clip(s) need repair.");
 
@@ -300,16 +309,16 @@ public static class ClipRepairSweep
             progress?.Report(new Progress(null, DateTime.UtcNow, TimeSpan.Zero, 0, Array.Empty<QueuedClip>()));
             if (added > 0) Save(libraryRoot, inspected);
             if (repaired > 0) AppLog.Info($"Clip repair sweep: repaired {repaired} clip(s) with mismatched encoder parameter sets.");
-            return repaired;
+            return new RunResult(true, repaired);
         }
         catch (OperationCanceledException)
         {
-            return 0;
+            return new RunResult(true, 0);
         }
         catch (Exception error)
         {
             AppLog.Error("Clip repair sweep failed.", error);
-            return 0;
+            return new RunResult(true, 0);
         }
         finally
         {

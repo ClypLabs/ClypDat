@@ -4563,7 +4563,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                         ApplyClipRepairProgress();
                     }));
 
-                await ClipRepairSweep.RunAsync(libraryRoot, paths,
+                var result = await ClipRepairSweep.RunAsync(libraryRoot, paths,
                     // A refresh the moment the corrupt set is known, so the
                     // affected tiles carry their overlay before any repair
                     // starts rather than looking untouched until their turn.
@@ -4580,6 +4580,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     },
                     progress,
                     CancellationToken.None);
+                // Refreshes triggered by detection also schedule a sweep. That
+                // follow-up normally loses ClipRepairSweep's gate, and used to
+                // clear the real sweep's overlay anyway. Its next progress tick
+                // then painted the tile again, producing the alarming flicker.
+                if (!result.OwnsProgress) return;
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     _clipRepairProgress = default;
