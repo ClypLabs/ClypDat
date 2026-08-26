@@ -66,46 +66,38 @@ public sealed partial class App : Application
                 var warmupDelay = minimized ? TimeSpan.FromSeconds(12) : TimeSpan.FromSeconds(1);
                 _ = Task.Delay(warmupDelay).ContinueWith(_ => PlaybackSession.WarmUp(), TaskScheduler.Default);
             }
-            _mainWindow = new MainWindow
-            {
-                DataContext = new MainWindowViewModel(),
-                WindowState = WindowState.Normal,
-                ShowInTaskbar = !minimized
-            };
-            _mainWindow.ApplySavedWindowBounds();
             var useSplash = !minimized && !UiPreviewMode.Enabled;
-            _mainWindow.SetStartupLoaderActive(useSplash);
-            // The desktop lifetime can show MainWindow as soon as it is assigned.
-            // Raise this before that hand-off so no populated library frame can
-            // race the updater window onto screen.
-            if (useSplash) _mainWindow.RaiseStartupCurtain();
-            desktop.MainWindow = _mainWindow;
-            if (WindowsPlatformProfile.IsServer())
+            if (useSplash)
             {
-                _serverTrayMenuRenderer = new ServerTrayMenuRenderer("ClypDat");
-                desktop.Exit += (_, _) => _serverTrayMenuRenderer?.Dispose();
+                // Paint the loader before constructing the large Avalonia tree
+                // and view model. Their synchronous setup otherwise steals the
+                // loader's first frame, which looks like a startup freeze.
+                var splash = new SplashWindow();
+                splash.Show();
+                desktop.MainWindow = splash;
+                _ = InitializeMainWindowAfterSplashAsync(desktop, splash);
             }
-            InitializeTrayIcon();
-            // A normal launch goes through the loader: it sits in front of a
-            // blank ClypDat and says what it is doing - checking for an update,
-            // getting the library's cached rows in - then uncovers the app. The
-            // autostart launch has nobody watching and stays out of the way.
-            if (useSplash) StartWithSplash(_mainWindow);
-            if (minimized)
+            else
             {
-                // Opened re-fires on every subsequent Show() after a Hide(), not
-                // just the first launch - must unsubscribe after firing once or
-                // this keeps hiding the window every time the user reopens it
-                // from the tray.
-                void HideOnFirstOpen(object? _, EventArgs __)
+                _mainWindow = CreateMainWindow(minimized);
+                desktop.MainWindow = _mainWindow;
+                if (WindowsPlatformProfile.IsServer())
                 {
-                    _mainWindow.Opened -= HideOnFirstOpen;
-                    _mainWindow.Hide();
+                    _serverTrayMenuRenderer = new ServerTrayMenuRenderer("ClypDat");
+                    desktop.Exit += (_, _) => _serverTrayMenuRenderer?.Dispose();
                 }
-                _mainWindow.Opened += HideOnFirstOpen;
+                InitializeTrayIcon();
+                if (minimized)
+                {
+                    void HideOnFirstOpen(object? _, EventArgs __)
+                    {
+                        _mainWindow.Opened -= HideOnFirstOpen;
+                        _mainWindow.Hide();
+                    }
+                    _mainWindow.Opened += HideOnFirstOpen;
+                }
+                InitializeAccentColor();
             }
-
-            InitializeAccentColor();
         }
 
         base.OnFrameworkInitializationCompleted();
@@ -116,13 +108,57 @@ public sealed partial class App : Application
         }
     }
 
-    private void StartWithSplash(MainWindow mainWindow)
+    private MainWindow CreateMainWindow(bool minimized)
+    {
+        var mainWindow = new MainWindow
+        {
+            DataContext = new MainWindowViewModel(),
+            WindowState = WindowState.Normal,
+            ShowInTaskbar = !minimized
+        };
+        mainWindow.ApplySavedWindowBounds();
+        mainWindow.SetStartupLoaderActive(false);
+        return mainWindow;
+    }
+
+    private async Task InitializeMainWindowAfterSplashAsync(
+        IClassicDesktopStyleApplicationLifetime desktop,
+        SplashWindow splash)
+    {
+        try
+        {
+            // Let Avalonia/DWM present at least one loader frame before the
+            // synchronous MainWindow/ViewModel construction starts.
+            await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
+            await Task.Yield();
+
+            _mainWindow = CreateMainWindow(minimized: false);
+            _mainWindow.SetStartupLoaderActive(true);
+            _mainWindow.RaiseStartupCurtain();
+            desktop.MainWindow = _mainWindow;
+            if (WindowsPlatformProfile.IsServer())
+            {
+                _serverTrayMenuRenderer = new ServerTrayMenuRenderer("ClypDat");
+                desktop.Exit += (_, _) => _serverTrayMenuRenderer?.Dispose();
+            }
+            InitializeTrayIcon();
+            InitializeAccentColor();
+            StartWithSplash(_mainWindow, splash);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Startup: deferred main-window construction failed.", error);
+            await splash.FadeOutAndCloseAsync();
+        }
+    }
+
+    private void StartWithSplash(MainWindow mainWindow, SplashWindow? existingSplash = null)
     {
         SplashWindow splash;
         try
         {
-            splash = new SplashWindow();
-            splash.Show();
+            splash = existingSplash ?? new SplashWindow();
+            if (existingSplash is null) splash.Show();
         }
         catch (Exception error)
         {
