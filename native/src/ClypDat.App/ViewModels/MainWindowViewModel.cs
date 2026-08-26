@@ -864,6 +864,31 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool HasClipNotReadyMessage => !string.IsNullOrEmpty(ClipNotReadyMessage);
 
+    // Progress strip for the background clip-repair sweep (see
+    // StartClipRepairSweep). Only shown once the sweep has actually found
+    // something to fix - a library with nothing wrong should never see it.
+    private bool _isClipRepairActive;
+    private double _clipRepairPercent;
+    private string _clipRepairStatusText = string.Empty;
+
+    public bool IsClipRepairActive
+    {
+        get => _isClipRepairActive;
+        private set => SetProperty(ref _isClipRepairActive, value);
+    }
+
+    public double ClipRepairPercent
+    {
+        get => _clipRepairPercent;
+        private set => SetProperty(ref _clipRepairPercent, value);
+    }
+
+    public string ClipRepairStatusText
+    {
+        get => _clipRepairStatusText;
+        private set => SetProperty(ref _clipRepairStatusText, value);
+    }
+
     public string SelectionSummary
     {
         get
@@ -4304,6 +4329,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 // Refresh per repair rather than once at the end, so a fixed clip
                 // and its thumbnail update as soon as it is fixed instead of the
                 // library appearing stuck until the whole sweep finishes.
+                // Checking is silent. Only the repair phase - which has a real
+                // total to count against - puts anything on screen.
+                var progress = new Progress<ClipRepairSweep.Progress>(update =>
+                {
+                    if (update.Checking)
+                    {
+                        IsClipRepairActive = false;
+                        return;
+                    }
+                    IsClipRepairActive = update.Completed < update.Total;
+                    ClipRepairPercent = update.Total == 0 ? 0 : 100.0 * update.Completed / update.Total;
+                    ClipRepairStatusText = $"Repairing corrupted clips - {update.Completed + 1} of {update.Total}";
+                });
+
                 await ClipRepairSweep.RunAsync(libraryRoot, paths,
                     onRepaired: async repairedPath =>
                     {
@@ -4315,7 +4354,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                         catch (Exception error) { AppLog.Error($"Clip repair: could not clear cached media for {repairedPath}", error); }
                         await Dispatcher.UIThread.InvokeAsync(RefreshLibraryAsync);
                     },
+                    progress,
                     CancellationToken.None);
+                await Dispatcher.UIThread.InvokeAsync(() => IsClipRepairActive = false);
             }
             catch (Exception error)
             {
