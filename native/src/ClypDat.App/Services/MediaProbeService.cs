@@ -392,17 +392,56 @@ public sealed class MediaProbeService
     // progressively-growing waveform instead of nothing until the whole file
     // has been decoded. Segments are interleaved across tracks so every lane
     // grows together rather than one completing before the next starts.
+    // Memory-only, no IO of any kind: no File.Exists, no stat, no JSON read.
+    // Deliberately safe to call from OpenMedia on the UI thread while it builds
+    // the timeline lanes, which is the entire point - peaks assigned before
+    // TimelineTracks.Add means the lane's FIRST render already draws the
+    // waveform, instead of a flat lane that wipes in a few hundred milliseconds
+    // later at 8Hz.
+    public bool TryGetCachedWaveforms(MediaFileInfo media, out IReadOnlyDictionary<int, IReadOnlyList<double>> peaks)
+    {
+        var hit = WaveformPeakCache.Get(media.Path, media.SizeBytes, media.LastWriteTimeUtc);
+        peaks = hit ?? new Dictionary<int, IReadOnlyList<double>>();
+        return hit is not null;
+    }
+
+    // Warm-only entry point for the idle background sweep: same work as
+    // LoadWaveformsAsync minus the onPartial publishing (nothing is on screen to
+    // paint into) and run off the background gate at BelowNormal, so it can
+    // never sit in front of the editor's own decode.
+    public async Task EnsureWaveformsAsync(MediaFileInfo media, CancellationToken cancellationToken)
+    {
+        await LoadWaveformsAsync(media, cancellationToken, onPartial: null, foreground: false, populateMemoryCache: false).ConfigureAwait(false);
+    }
+
     public async Task<IReadOnlyDictionary<int, IReadOnlyList<double>>> LoadWaveformsAsync(
         MediaFileInfo media,
         CancellationToken cancellationToken,
-        Action<int, IReadOnlyList<double>>? onPartial = null)
+        Action<int, IReadOnlyList<double>>? onPartial = null,
+        bool foreground = true,
+        // The warm sweep writes the JSON but deliberately stays OUT of the
+        // memory cache: pushing a few hundred swept clips through an LRU sized
+        // for a session's worth of opens would evict exactly the entries that
+        // make the editor paint instantly. OpenMedia promotes disk to memory on
+        // the first real open.
+        bool populateMemoryCache = true)
     {
         var audioTracks = media.Tracks.Where(track => track.Type == "audio").ToArray();
         if (audioTracks.Length == 0) return new Dictionary<int, IReadOnlyList<double>>();
 
+        // Memory before disk: the warm sweep and an editor open can both want
+        // the same clip, and a second consumer should not re-read and re-parse
+        // the JSON that is already sitting decoded in RAM.
+        var resident = WaveformPeakCache.Get(media.Path, media.SizeBytes, media.LastWriteTimeUtc);
+        if (resident is not null) return resident;
+
         var cachePath = GetWaveformPath(media.Path);
-        var cached = await TryReadWaveformCacheAsync(cachePath, cancellationToken).ConfigureAwait(false);
-        if (cached.Count > 0) return cached;
+        var cached = await TryReadWaveformCacheAsync(cachePath, media.SizeBytes, media.LastWriteTimeUtc, cancellationToken).ConfigureAwait(false);
+        if (cached.Count > 0)
+        {
+            if (populateMemoryCache) WaveformPeakCache.Store(media.Path, media.SizeBytes, media.LastWriteTimeUtc, cached);
+            return cached;
+        }
 
         // On a network drive, waveform decoding competes with LibVLC's video
         // stream and the audio chunk extractor for the same remote file the
@@ -413,7 +452,11 @@ public sealed class MediaProbeService
         // the cache check above - an already-cached waveform is just a local
         // JSON read and has nothing to contend with, so it used to eat this
         // same 4s delay for no reason even on a clip opened many times before.
-        if (PlaybackSession.IsNetworkPath(media.Path))
+        //
+        // The background warm sweep skips it: nothing is playing for it to
+        // stand aside from, and paying four seconds per network clip would make
+        // a sweep over a network library take longer than the decoding does.
+        if (foreground && PlaybackSession.IsNetworkPath(media.Path))
         {
             await Task.Delay(TimeSpan.FromSeconds(4), cancellationToken).ConfigureAwait(false);
         }
@@ -434,7 +477,8 @@ public sealed class MediaProbeService
                 onPartial?.Invoke(track.Index, wholeWaveforms[track.Index]);
             }
 
-            await TryWriteWaveformCacheAsync(cachePath, wholeWaveforms, cancellationToken).ConfigureAwait(false);
+            await TryWriteWaveformCacheAsync(cachePath, wholeWaveforms, media.SizeBytes, media.LastWriteTimeUtc, cancellationToken).ConfigureAwait(false);
+            if (populateMemoryCache) WaveformPeakCache.Store(media.Path, media.SizeBytes, media.LastWriteTimeUtc, wholeWaveforms);
             return wholeWaveforms;
         }
 
@@ -442,12 +486,14 @@ public sealed class MediaProbeService
         // TryStreamWaveformsAsync. The segmented path below is the fallback.
         var streamClock = System.Diagnostics.Stopwatch.StartNew();
         var streamed = await TryStreamWaveformsAsync(
-            media.Path, audioTracks, totalSeconds, BucketCount, onPartial, cancellationToken).ConfigureAwait(false);
+            media.Path, audioTracks, totalSeconds, BucketCount, onPartial, foreground, cancellationToken).ConfigureAwait(false);
         if (streamed is not null)
         {
-            AppLog.Debug($"Waveform decoded (single pass): tracks={audioTracks.Length}, totalMs={streamClock.ElapsedMilliseconds}, path={media.Path}");
+            var ranges = DecodeRangeCount(totalSeconds, foreground);
+            AppLog.Debug($"Waveform decoded ({(ranges > 1 ? $"ranged x{ranges}" : "single pass")}): tracks={audioTracks.Length}, seconds={totalSeconds:0.#}, totalMs={streamClock.ElapsedMilliseconds}, path={media.Path}");
             var streamedWaveforms = streamed.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<double>)pair.Value);
-            await TryWriteWaveformCacheAsync(cachePath, streamedWaveforms, cancellationToken).ConfigureAwait(false);
+            await TryWriteWaveformCacheAsync(cachePath, streamedWaveforms, media.SizeBytes, media.LastWriteTimeUtc, cancellationToken).ConfigureAwait(false);
+            if (populateMemoryCache) WaveformPeakCache.Store(media.Path, media.SizeBytes, media.LastWriteTimeUtc, streamedWaveforms);
             return streamedWaveforms;
         }
 
@@ -517,8 +563,13 @@ public sealed class MediaProbeService
         // shows whether the share's throughput is the bottleneck.
         AppLog.Debug($"Waveform decoded: segments={segments.Count}x{audioTracks.Length}tracks, firstSegmentMs={firstSegmentMs}, totalMs={decodeClock.ElapsedMilliseconds}, path={media.Path}");
 
+        // Only this finished copy is cached. The peaksByTrack arrays above are
+        // mutated in place across segments while partials are published from
+        // copies of them, and WaveformPeakCache hands its arrays out to every
+        // lane that asks - a live array in there would redraw under them.
         var waveforms = peaksByTrack.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<double>)pair.Value);
-        await TryWriteWaveformCacheAsync(cachePath, waveforms, cancellationToken).ConfigureAwait(false);
+        await TryWriteWaveformCacheAsync(cachePath, waveforms, media.SizeBytes, media.LastWriteTimeUtc, cancellationToken).ConfigureAwait(false);
+        if (populateMemoryCache) WaveformPeakCache.Store(media.Path, media.SizeBytes, media.LastWriteTimeUtc, waveforms);
         return waveforms;
     }
 
@@ -533,6 +584,11 @@ public sealed class MediaProbeService
         var oldKey = CacheKey(oldFilePath);
         var newKey = CacheKey(newFilePath);
         if (string.Equals(oldKey, newKey, StringComparison.Ordinal)) return;
+
+        // The JSON follows the rename below and re-populates under the new path
+        // on next use. The in-memory entry is keyed by the old path and would
+        // otherwise just sit there holding bytes nothing can reach.
+        WaveformPeakCache.Invalidate(oldFilePath);
 
         foreach (var oldPath in Directory.EnumerateFiles(_cacheFolder, $"{oldKey}*.*"))
         {
@@ -581,6 +637,8 @@ public sealed class MediaProbeService
         BitmapCache.Invalidate(GetFilmstripPath(filePath));
         // Library cards decode their own copy through CardThumbnailCache.
         CardThumbnailCache.Invalidate(GetThumbnailPath(filePath));
+        // Editor timeline lanes hold peaks through WaveformPeakCache.
+        WaveformPeakCache.Invalidate(filePath);
     }
 
     public async Task<string> EnsureThumbnailAsync(string filePath, TimeSpan duration)
@@ -828,22 +886,63 @@ public sealed class MediaProbeService
         return Path.Combine(_cacheFolder, $"{CacheKey(filePath)}-v3.jpg");
     }
 
+    // -v2 because the v1 payload was a bare Dictionary<int,double[]>: there is
+    // nowhere in that shape to put the size/mtime the entry has to be validated
+    // against without adding a sibling key that would deserialize as a stream
+    // index. Same reason -filmstrip-v2.jpg and -v3.jpg were bumped. v1 files
+    // are still caught by the {key}*.* globs in MoveCacheFor/DeleteCacheFor and
+    // otherwise age out through PruneStaleCache.
     private string GetWaveformPath(string filePath)
     {
-        return Path.Combine(_cacheFolder, $"{CacheKey(filePath)}-waveforms.json");
+        return Path.Combine(_cacheFolder, $"{CacheKey(filePath)}-waveforms-v2.json");
     }
 
     private static async Task<Dictionary<int, IReadOnlyList<double>>> TryReadWaveformCacheAsync(
         string cachePath,
+        long sizeBytes,
+        DateTime lastWriteUtc,
         CancellationToken cancellationToken)
     {
         try
         {
             if (!File.Exists(cachePath)) return new Dictionary<int, IReadOnlyList<double>>();
-            await using var stream = File.OpenRead(cachePath);
-            var data = await JsonSerializer.DeserializeAsync<Dictionary<int, double[]>>(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
-            return data?.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<double>)pair.Value)
-                ?? new Dictionary<int, IReadOnlyList<double>>();
+            WaveformCacheEntry? entry;
+            await using (var stream = File.OpenRead(cachePath))
+            {
+                entry = await JsonSerializer.DeserializeAsync<WaveformCacheEntry>(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+            }
+
+            if (entry?.Peaks is null || entry.Peaks.Count == 0) return new Dictionary<int, IReadOnlyList<double>>();
+
+            // Same validation TryReadProbeCache does, and for the same reason:
+            // the clip can be rewritten in place under the same path (a
+            // trim-save, a repair), and serving the pre-edit shape for the rest
+            // of that file's life is worse than paying a re-decode.
+            if (entry.SizeBytes != sizeBytes || entry.LastWriteTimeUtcTicks != lastWriteUtc.Ticks)
+            {
+                return new Dictionary<int, IReadOnlyList<double>>();
+            }
+
+            // Recency marker for PruneStaleCache - same one-day resolution and
+            // the same reasoning as the thumbnail touch in CreateLibraryStub. A
+            // clip opened every week must not have its waveform evicted at day
+            // 30 and pay a fresh decode. This touches the CACHE file's mtime,
+            // which is unrelated to the media file mtime stored inside the
+            // payload, so it cannot make a stale entry validate.
+            try
+            {
+                if (DateTime.UtcNow - File.GetLastWriteTimeUtc(cachePath) > TimeSpan.FromDays(1))
+                {
+                    File.SetLastWriteTimeUtc(cachePath, DateTime.UtcNow);
+                }
+            }
+            catch
+            {
+                // Retention is a nice-to-have; a failed touch only means this
+                // entry ages out on its original schedule.
+            }
+
+            return entry.Peaks.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<double>)pair.Value);
         }
         catch
         {
@@ -854,13 +953,22 @@ public sealed class MediaProbeService
     private static async Task TryWriteWaveformCacheAsync(
         string cachePath,
         Dictionary<int, IReadOnlyList<double>> waveforms,
+        long sizeBytes,
+        DateTime lastWriteUtc,
         CancellationToken cancellationToken)
     {
         try
         {
-            var serializable = waveforms.ToDictionary(pair => pair.Key, pair => pair.Value.ToArray());
+            // Rounded to three decimals. At 700 buckets drawn a few hundred
+            // pixels wide that is far below one pixel of amplitude, and it cuts
+            // the file from ~40KB of full-precision doubles to under 10KB - a
+            // cost the idle warm sweep pays once for every clip in the library.
+            var serializable = waveforms.ToDictionary(
+                pair => pair.Key,
+                pair => pair.Value.Select(value => Math.Round(value, 3)).ToArray());
+            var entry = new WaveformCacheEntry(sizeBytes, lastWriteUtc.Ticks, serializable);
             await using var stream = File.Create(cachePath);
-            await JsonSerializer.SerializeAsync(stream, serializable, cancellationToken: cancellationToken).ConfigureAwait(false);
+            await JsonSerializer.SerializeAsync(stream, entry, cancellationToken: cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -893,10 +1001,192 @@ public sealed class MediaProbeService
         double totalSeconds,
         int bucketCount,
         Action<int, IReadOnlyList<double>>? onPartial,
+        bool foreground,
+        CancellationToken cancellationToken)
+    {
+        // The editor's own waveform used to queue behind the idle filmstrip
+        // sweep and library hydration on ProbeProcessGate, which is held for
+        // the WHOLE decode rather than just the process spawn - so the measured
+        // decode time included waiting on background work the user is not
+        // looking at. One slot, because there is one editor; it exists only to
+        // stop a clip-to-clip click storm stacking decodes.
+        var gate = foreground ? ForegroundWaveformGate : ProbeProcessGate;
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var peaks = CreateEmptyPeaks(audioTracks, bucketCount);
+            var publishLock = new object();
+            var lastPublish = System.Diagnostics.Stopwatch.StartNew();
+
+            void Publish(bool force)
+            {
+                if (onPartial is null) return;
+                // Ranges publish concurrently, so the throttle and the copy
+                // both have to be serialized - otherwise eight ranges each fire
+                // a full publish per pipe read and the UI thread drowns in
+                // dispatcher posts.
+                lock (publishLock)
+                {
+                    if (!force && lastPublish.ElapsedMilliseconds < 120) return;
+                    lastPublish.Restart();
+                    foreach (var track in audioTracks) onPartial(track.Index, peaks[track.Index].ToArray());
+                }
+            }
+
+            var rangeCount = DecodeRangeCount(totalSeconds, foreground);
+            if (rangeCount > 1)
+            {
+                var ranged = await DecodeAllRangesAsync(
+                    filePath, audioTracks, totalSeconds, bucketCount, rangeCount, peaks, Publish, foreground, cancellationToken).ConfigureAwait(false);
+                if (ranged)
+                {
+                    Publish(true);
+                    return peaks;
+                }
+
+                // Whatever went wrong with the split decode (an -ss the
+                // container will not honour, a range that produced no output),
+                // one pass over the whole file is still worth trying before
+                // dropping to the much slower per-track segmented path. Peaks
+                // are reset because the failed ranges left their own slices
+                // half written.
+                AppLog.Debug($"Waveform ranged decode unavailable, retrying single pass: ranges={rangeCount}, path={filePath}");
+                peaks = CreateEmptyPeaks(audioTracks, bucketCount);
+            }
+
+            var single = await DecodeWaveformRangeAsync(
+                filePath, audioTracks, totalSeconds, bucketCount,
+                rangeStartSeconds: 0, rangeLengthSeconds: 0,
+                ownedStartBucket: 0, ownedEndBucket: bucketCount,
+                peaks, Publish, foreground, cancellationToken).ConfigureAwait(false);
+            if (!single) return null;
+
+            Publish(true);
+            return peaks;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception error)
+        {
+            AppLog.Debug($"Waveform single-pass decode failed: {error.Message}");
+            return null;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private static Dictionary<int, double[]> CreateEmptyPeaks(IReadOnlyList<MediaTrackInfo> audioTracks, int bucketCount)
+    {
+        return audioTracks.ToDictionary(track => track.Index, _ =>
+        {
+            var values = new double[bucketCount];
+            // Undecoded stretches sit at the silence floor so a partially
+            // painted waveform reads as "still loading", not as silence.
+            Array.Fill(values, 0.02);
+            return values;
+        });
+    }
+
+    // One ffmpeg reading the file start to finish at -threads 1 costs the same
+    // per second of audio whatever the clip's length, so a full-session VOD ran
+    // for tens of seconds while every other core sat idle. Disjoint time ranges
+    // decoded at once turn that into roughly wall-clock/N.
+    //
+    // Short clips deliberately keep the single pass: it already lands in a few
+    // hundred milliseconds, and eight process spawns to save nothing is worse
+    // than not splitting at all.
+    private const double RangedDecodeMinimumSeconds = 240;
+    private const double RangedDecodeSecondsPerRange = 120;
+
+    private static int DecodeRangeCount(double totalSeconds, bool foreground)
+    {
+        if (!double.IsFinite(totalSeconds) || totalSeconds <= RangedDecodeMinimumSeconds) return 1;
+        // The background warm sweep splits far less aggressively. It already
+        // holds one of ProbeProcessGate's two slots, so eight ranges there
+        // would mean sixteen ffmpeg processes competing with whatever the user
+        // is actually doing - the exact fan-out that gate exists to cap.
+        var maxRanges = foreground ? 8 : 3;
+        return Math.Clamp((int)Math.Ceiling(totalSeconds / RangedDecodeSecondsPerRange), 2, maxRanges);
+    }
+
+    private static async Task<bool> DecodeAllRangesAsync(
+        string filePath,
+        IReadOnlyList<MediaTrackInfo> audioTracks,
+        double totalSeconds,
+        int bucketCount,
+        int rangeCount,
+        Dictionary<int, double[]> peaks,
+        Action<bool> publish,
+        bool foreground,
+        CancellationToken cancellationToken)
+    {
+        var tasks = new List<Task<bool>>(rangeCount);
+        for (var index = 0; index < rangeCount; index++)
+        {
+            var startSeconds = totalSeconds * index / rangeCount;
+            var endSeconds = totalSeconds * (index + 1) / rangeCount;
+
+            // Each range owns a disjoint slice of the bucket array, so no two
+            // of them ever write the same slot and a boundary bucket belongs to
+            // exactly one range. Without that, concurrent ranges would race on
+            // the shared arrays for one bucket at every seam.
+            var startBucket = (int)Math.Floor(startSeconds / totalSeconds * bucketCount);
+            var endBucket = index == rangeCount - 1
+                ? bucketCount
+                : (int)Math.Floor(endSeconds / totalSeconds * bucketCount);
+            if (endBucket <= startBucket) continue;
+
+            // A quarter second past the seam so the last bucket of a range is
+            // filled from real audio rather than left sitting at the silence
+            // floor. Samples past the owned window are discarded on the way in.
+            var lengthSeconds = endSeconds - startSeconds + 0.25;
+            tasks.Add(DecodeWaveformRangeAsync(
+                filePath, audioTracks, totalSeconds, bucketCount,
+                startSeconds, lengthSeconds, startBucket, endBucket,
+                peaks, publish, foreground, cancellationToken));
+        }
+
+        if (tasks.Count == 0) return false;
+        var results = await Task.WhenAll(tasks).ConfigureAwait(false);
+        return results.All(ok => ok);
+    }
+
+    // Decodes one time window of the file - every audio track at once, amerged
+    // into one interleaved f32le stream - and writes its peaks into its own
+    // slice of the shared arrays. rangeLengthSeconds <= 0 means the whole file,
+    // which is the short-clip path and behaves exactly as it did before ranges
+    // existed.
+    private static async Task<bool> DecodeWaveformRangeAsync(
+        string filePath,
+        IReadOnlyList<MediaTrackInfo> audioTracks,
+        double totalSeconds,
+        int bucketCount,
+        double rangeStartSeconds,
+        double rangeLengthSeconds,
+        int ownedStartBucket,
+        int ownedEndBucket,
+        Dictionary<int, double[]> peaks,
+        Action<bool> publish,
+        bool foreground,
         CancellationToken cancellationToken)
     {
         var channels = audioTracks.Count;
-        var args = new List<string> { "-y", "-v", "error", "-threads", "1", "-i", filePath, "-vn", "-sn" };
+        var args = new List<string> { "-y", "-v", "error", "-threads", "1" };
+        if (rangeLengthSeconds > 0)
+        {
+            // Input options, so ffmpeg byte-seeks to the range instead of
+            // decoding from the top and throwing the front away. With -vn and
+            // audio-only maps the landing point is within a frame or two, which
+            // is nothing against buckets that are totalSeconds/700 wide.
+            args.AddRange(new[] { "-ss", rangeStartSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) });
+            args.AddRange(new[] { "-t", rangeLengthSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) });
+        }
+
+        args.AddRange(new[] { "-i", filePath, "-vn", "-sn" });
         if (channels == 1)
         {
             args.AddRange(new[] { "-map", $"0:{audioTracks[0].Index}" });
@@ -911,161 +1201,143 @@ public sealed class MediaProbeService
 
         args.AddRange(new[] { "-ac", channels.ToString(), "-ar", WaveformSampleRate.ToString(), "-f", "f32le", "-" });
 
-        await ProbeProcessGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var startInfo = new ProcessStartInfo(FfmpegPathResolver.FfmpegPath)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = FfmpegPathResolver.WorkingDirectory,
+        };
+        foreach (var argument in args) startInfo.ArgumentList.Add(argument);
+
+        using var process = Process.Start(startInfo);
+        if (process is null) return false;
         try
         {
-            var startInfo = new ProcessStartInfo(FfmpegPathResolver.FfmpegPath)
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                WorkingDirectory = FfmpegPathResolver.WorkingDirectory,
-            };
-            foreach (var argument in args) startInfo.ArgumentList.Add(argument);
+            // Background warming stays out of the way exactly like the rest of
+            // the idle sweeps. A foreground decode is the thing the user is
+            // sitting and waiting for, so it does not get demoted.
+            process.PriorityClass = foreground ? ProcessPriorityClass.Normal : ProcessPriorityClass.BelowNormal;
+        }
+        catch
+        {
+            // Priority is a nice-to-have.
+        }
 
-            using var process = Process.Start(startInfo);
-            if (process is null) return null;
-            try
+        var errorTask = process.StandardError.ReadToEndAsync();
+
+        var frameBytes = channels * sizeof(float);
+        var buffer = new byte[64 * 1024];
+        var carry = new byte[frameBytes];
+        var carryLength = 0;
+        var running = new double[channels];
+        var frameIndex = 0L;
+        var currentBucket = ownedStartBucket;
+        var decodedAny = false;
+        var sawOwnedSample = false;
+
+        void FlushBucket(int bucket)
+        {
+            if (bucket < ownedStartBucket || bucket >= ownedEndBucket)
             {
-                // Same reason as RunProcessCoreAsync: the waveform is the
-                // least urgent thing the editor is doing with this file.
-                process.PriorityClass = ProcessPriorityClass.BelowNormal;
+                Array.Clear(running);
+                return;
             }
-            catch
+
+            for (var slot = 0; slot < channels; slot++)
             {
-                // Priority is a nice-to-have.
+                peaks[audioTracks[slot].Index][bucket] = Math.Clamp(running[slot], 0, 1);
+                running[slot] = 0;
             }
+        }
 
-            var errorTask = process.StandardError.ReadToEndAsync();
-            var peaks = audioTracks.ToDictionary(track => track.Index, _ =>
+        try
+        {
+            var stdout = process.StandardOutput.BaseStream;
+            while (true)
             {
-                var values = new double[bucketCount];
-                // Undecoded stretches sit at the silence floor so a partially
-                // painted waveform reads as "still loading", not as silence.
-                Array.Fill(values, 0.02);
-                return values;
-            });
+                var read = await stdout.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
+                if (read <= 0) break;
+                decodedAny = true;
 
-            var totalFrames = Math.Max(1L, (long)(totalSeconds * WaveformSampleRate));
-            var frameBytes = channels * sizeof(float);
-            var buffer = new byte[64 * 1024];
-            var carry = new byte[frameBytes];
-            var carryLength = 0;
-            var running = new double[channels];
-            var frameIndex = 0L;
-            var currentBucket = 0;
-            var decodedAny = false;
-            var lastPublish = System.Diagnostics.Stopwatch.StartNew();
-
-            void FlushBucket(int bucket)
-            {
-                for (var slot = 0; slot < channels; slot++)
+                var offset = 0;
+                while (offset < read)
                 {
-                    peaks[audioTracks[slot].Index][bucket] = Math.Clamp(running[slot], 0, 1);
-                    running[slot] = 0;
-                }
-            }
-
-            void Publish()
-            {
-                if (onPartial is null) return;
-                foreach (var track in audioTracks) onPartial(track.Index, peaks[track.Index].ToArray());
-            }
-
-            try
-            {
-                var stdout = process.StandardOutput.BaseStream;
-                while (true)
-                {
-                    var read = await stdout.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
-                    if (read <= 0) break;
-                    decodedAny = true;
-
-                    var offset = 0;
-                    while (offset < read)
+                    // Reassemble frames across pipe-read boundaries - a
+                    // 64KB read is not guaranteed to land on a frame edge.
+                    if (carryLength > 0)
                     {
-                        // Reassemble frames across pipe-read boundaries - a
-                        // 64KB read is not guaranteed to land on a frame edge.
-                        if (carryLength > 0)
-                        {
-                            var need = Math.Min(frameBytes - carryLength, read - offset);
-                            Buffer.BlockCopy(buffer, offset, carry, carryLength, need);
-                            carryLength += need;
-                            offset += need;
-                            if (carryLength < frameBytes) break;
-                            carryLength = 0;
-                            Accumulate(carry, 0);
-                            continue;
-                        }
-
-                        if (read - offset < frameBytes)
-                        {
-                            carryLength = read - offset;
-                            Buffer.BlockCopy(buffer, offset, carry, 0, carryLength);
-                            break;
-                        }
-
-                        Accumulate(buffer, offset);
-                        offset += frameBytes;
+                        var need = Math.Min(frameBytes - carryLength, read - offset);
+                        Buffer.BlockCopy(buffer, offset, carry, carryLength, need);
+                        carryLength += need;
+                        offset += need;
+                        if (carryLength < frameBytes) break;
+                        carryLength = 0;
+                        Accumulate(carry, 0);
+                        continue;
                     }
 
-                    if (lastPublish.ElapsedMilliseconds >= 120)
+                    if (read - offset < frameBytes)
                     {
-                        Publish();
-                        lastPublish.Restart();
+                        carryLength = read - offset;
+                        Buffer.BlockCopy(buffer, offset, carry, 0, carryLength);
+                        break;
                     }
+
+                    Accumulate(buffer, offset);
+                    offset += frameBytes;
                 }
 
-                await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                TryKill(process);
-                throw;
+                publish(false);
             }
 
-            if (process.ExitCode != 0 || !decodedAny)
-            {
-                var error = (await errorTask.ConfigureAwait(false)).Trim();
-                AppLog.Debug($"Waveform single-pass decode unavailable (exit={process.ExitCode}): {error}");
-                return null;
-            }
-
-            FlushBucket(Math.Min(currentBucket, bucketCount - 1));
-            Publish();
-            return peaks;
-
-            void Accumulate(byte[] source, int offset)
-            {
-                var bucket = (int)Math.Min(bucketCount - 1, frameIndex * bucketCount / totalFrames);
-                if (bucket != currentBucket)
-                {
-                    FlushBucket(currentBucket);
-                    currentBucket = bucket;
-                }
-
-                for (var slot = 0; slot < channels; slot++)
-                {
-                    var value = Math.Abs(BitConverter.ToSingle(source, offset + slot * sizeof(float)));
-                    if (value > running[slot]) running[slot] = value;
-                }
-
-                frameIndex++;
-            }
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
+            TryKill(process);
             throw;
         }
-        catch (Exception error)
+
+        if (process.ExitCode != 0 || !decodedAny || !sawOwnedSample)
         {
-            AppLog.Debug($"Waveform single-pass decode failed: {error.Message}");
-            return null;
+            var error = (await errorTask.ConfigureAwait(false)).Trim();
+            AppLog.Debug($"Waveform decode range unavailable (exit={process.ExitCode}, start={rangeStartSeconds:0.#}s): {error}");
+            return false;
         }
-        finally
+
+        FlushBucket(Math.Min(currentBucket, ownedEndBucket - 1));
+        return true;
+
+        void Accumulate(byte[] source, int offset)
         {
-            ProbeProcessGate.Release();
+            // Mapped from ABSOLUTE time, not from the range's own frame count,
+            // so every range lands in the same global bucket grid the whole-file
+            // pass would have produced.
+            var seconds = rangeStartSeconds + frameIndex / (double)WaveformSampleRate;
+            frameIndex++;
+
+            var bucket = (int)(seconds / totalSeconds * bucketCount);
+            if (bucket < ownedStartBucket || bucket >= ownedEndBucket)
+            {
+                // The quarter-second of overlap past the seam, or a seek that
+                // landed slightly early. Not this range's to write.
+                return;
+            }
+
+            sawOwnedSample = true;
+            if (bucket != currentBucket)
+            {
+                FlushBucket(currentBucket);
+                currentBucket = bucket;
+            }
+
+            for (var slot = 0; slot < channels; slot++)
+            {
+                var value = Math.Abs(BitConverter.ToSingle(source, offset + slot * sizeof(float)));
+                if (value > running[slot]) running[slot] = value;
+            }
         }
     }
 
@@ -1277,6 +1549,10 @@ public sealed class MediaProbeService
     // already do for their own ffmpeg work.
     private static readonly SemaphoreSlim ProbeProcessGate = new(2, 2);
 
+    // See TryStreamWaveformsAsync: the editor's own waveform decode does not
+    // belong behind background hydration on the gate above.
+    private static readonly SemaphoreSlim ForegroundWaveformGate = new(1, 1);
+
     private static async Task<ProcessResult> RunProcessAsync(
         string fileName,
         IReadOnlyList<string> arguments,
@@ -1431,6 +1707,14 @@ public sealed record MediaFileInfo(
     bool HasVideo = true);
 
 public sealed record MediaTrackInfo(int Index, string Type, string Codec, string Label, double VolumePercent = 100);
+
+// Persisted shape of {key}-waveforms-v2.json. Carries the source file's size and
+// mtime so an entry can be rejected once the clip has been rewritten in place -
+// something the v1 format had no room to express.
+internal sealed record WaveformCacheEntry(
+    long SizeBytes,
+    long LastWriteTimeUtcTicks,
+    Dictionary<int, double[]> Peaks);
 
 internal sealed record ProbeCacheEntry(
     TimeSpan Duration,

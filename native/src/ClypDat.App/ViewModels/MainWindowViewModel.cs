@@ -32,6 +32,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private CancellationTokenSource? _thumbnailRegenCts;
     private CancellationTokenSource? _filmstripCts;
     private CancellationTokenSource? _backgroundFilmstripCts;
+    private CancellationTokenSource? _backgroundWaveformCts;
+    // Which clip the live _waveformCts belongs to. Without it, the re-entrant
+    // OpenMedia calls (see isSameClipRebuild there) cancelled a decode that was
+    // most of the way through for the SAME clip and started it over, so the
+    // waveform restarted from empty every time hydration caught up with the
+    // open clip.
+    private string _waveformLoadPath = string.Empty;
     // Start paused until first detector result arrives, so startup cannot
     // briefly launch ffmpeg before a foreground game is known.
     private bool _gameIsActive = true;
@@ -1039,8 +1046,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // the same cold disk - the "editor takes forever to appear" half
             // of this. Editing beats pre-generating strips for clips nobody
             // is looking at; the sweep resumes when the editor closes.
-            if (value) _backgroundFilmstripCts?.Cancel();
-            else StartBackgroundFilmstripHydration();
+            // The waveform sweep is chained ahead of the filmstrip sweep (see
+            // StartBackgroundWaveformHydration), so starting it starts both.
+            if (value)
+            {
+                _backgroundFilmstripCts?.Cancel();
+                _backgroundWaveformCts?.Cancel();
+            }
+            else
+            {
+                StartBackgroundWaveformHydration();
+            }
             OnPropertyChanged(nameof(IsLibraryVisible));
             OnPropertyChanged(nameof(IsSettingsVisible));
             OnPropertyChanged(nameof(ShowLibraryActions));
@@ -4860,9 +4876,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _backgroundFilmstripCts?.Cancel();
         _backgroundFilmstripCts?.Dispose();
         _backgroundFilmstripCts = null;
-        _waveformCts?.Cancel();
-        _waveformCts?.Dispose();
-        _waveformCts = null;
+        _backgroundWaveformCts?.Cancel();
+        _backgroundWaveformCts?.Dispose();
+        _backgroundWaveformCts = null;
+        CancelWaveformLoad();
         _libraryRefreshDebounce.Stop();
         _libraryCacheWriteTimer.Stop();
         _relativeDateRefreshTimer.Stop();
@@ -5303,9 +5320,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </param>
     public void CloseEditor(bool refreshLibraryCard = true)
     {
-        _waveformCts?.Cancel();
-        _waveformCts?.Dispose();
-        _waveformCts = null;
+        CancelWaveformLoad();
         IsPlaying = false;
         IsEditorVisible = false;
         CloseEditorSidebar();
@@ -6335,6 +6350,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private void OpenMedia(MediaFileInfo media, bool preserveEditorText = false, bool showEditor = true)
     {
         ResetVideoZoom();
+        // Answered BEFORE SelectedVideoPath is overwritten one line down.
+        // HydrateSelectedMediaAsync, HydrateOpenClipAsync and
+        // AddOrUpdateLibraryClipAsync all re-enter here for the clip that is
+        // ALREADY open, and TimelineTracks.Clear() below throws away peaks that
+        // are already painted - so a waveform that had finished drawing visibly
+        // blanked and refilled for no reason the user could see.
+        var isSameClipRebuild = string.Equals(SelectedVideoPath, media.Path, StringComparison.OrdinalIgnoreCase);
         SelectedVideoName = media.Name;
         SelectedVideoPath = media.Path;
         _selectedVideoCodec = media.Tracks.FirstOrDefault(track => track.Type == "video")?.Codec ?? string.Empty;
@@ -6380,6 +6402,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         TrimStart = TimeSpan.Zero;
         TrimEnd = media.Duration;
         IsPlaying = false;
+        var carriedPeaks = isSameClipRebuild
+            ? TimelineTracks
+                .Where(track => track.IsAudio && track.WaveformPeaks.Count > 0)
+                .ToDictionary(track => track.StreamIndex, track => track.WaveformPeaks)
+            : null;
         TimelineTracks.Clear();
 
         var hasVideo = false;
@@ -6413,6 +6440,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // gain, since EnsureFilmstripAsync short-circuits on an existing file,
         // so the cached strip still lands about a dispatcher hop later.
         Avalonia.Media.Imaging.Bitmap? filmstrip = null;
+        // Unlike the filmstrip this costs nothing to apply here - it is a
+        // double[] out of a dictionary, not a 2844x160 JPEG decode - so peaks
+        // are applied SYNCHRONOUSLY rather than a dispatcher hop later. That
+        // hop is exactly the empty first frame this exists to remove.
+        _mediaProbe.TryGetCachedWaveforms(media, out var cachedPeaks);
         foreach (var track in media.Tracks)
         {
             if (track.Type == "subtitle") continue;
@@ -6444,6 +6476,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 hasVideo = true;
                 lane.Filmstrip = filmstrip;
             }
+            else if (track.Type == "audio")
+            {
+                // Memory cache first - it is authoritative for this exact
+                // size+mtime - then whatever the lane being replaced was
+                // already showing.
+                if (cachedPeaks.TryGetValue(track.Index, out var peaks)) lane.WaveformPeaks = peaks;
+                else if (carriedPeaks is not null && carriedPeaks.TryGetValue(track.Index, out var carried)) lane.WaveformPeaks = carried;
+            }
             TimelineTracks.Add(lane);
             if (track.Type == "audio") audioIndex++;
         }
@@ -6466,7 +6506,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         IsEditorVisible = showEditor;
         if (showEditor) OpenEditorSidebar(EditorSidebarSection.Info);
         StartFilmstripLoad(media);
-        StartWaveformLoad(media);
+        // Checked against the LANES, not against media.Tracks: the Medal
+        // pre-mix skip above means the lane set can be a strict subset of the
+        // audio streams, and a track with no lane has nothing to paint.
+        var everyAudioLanePainted = TimelineTracks.Where(track => track.IsAudio).All(track => track.WaveformPeaks.Count > 0);
+        StartWaveformLoad(media, everyAudioLanePainted, isSameClipRebuild);
     }
 
     private void ApplyClipEditState(string path, bool restoreDescription = true)
@@ -7531,6 +7575,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         UpdateFirstOfDateFlags();
         UpdateDaySelectionStates();
         if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
+        // The grid renders LibraryRows, NOT the per-clip match flags -
+        // LibraryGridProjection.Build is what reads IsVisibleInLibrary, and
+        // nothing re-runs it on its own. ApplyGameFilters, ApplyClipTypeFilters
+        // and ApplySearchFilter all end with this call; this method predates
+        // the row projection and never got it, so "All Clips" restored every
+        // clip's flags and updated the header count while the grid kept
+        // rendering the rows built for the game filter the user just left.
+        RebuildLibraryProjection();
         OnPropertyChanged(nameof(IsGameFilterActive));
         OnPropertyChanged(nameof(IsClipTypeFilterActive));
         OnPropertyChanged(nameof(IsAllClipsActive));
@@ -7781,7 +7833,96 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             StartLibraryHydration(AllClips.ToArray());
         }
 
-        StartBackgroundFilmstripHydration();
+        StartBackgroundWaveformHydration();
+    }
+
+    // Waveforms are swept BEFORE filmstrips and the two never run together.
+    // One waveform decode is a single ffmpeg reading audio; one filmstrip is up
+    // to eleven frame grabs, which the IsEditorVisible setter above already
+    // documents as the heaviest thing the app does to the library disk. Running
+    // both at once just means the user's next click lands on a busier disk, and
+    // the waveform is the one that has to be ready the instant the editor
+    // opens.
+    private void StartBackgroundWaveformHydration()
+    {
+        if (_gameIsActive || IsEditorVisible || _backgroundWaveformCts is not null) return;
+        var cts = new CancellationTokenSource();
+        _backgroundWaveformCts = cts;
+
+        // Snapshotted HERE, on the UI thread, for the same reason the filmstrip
+        // sweep does it: AllClips is an ObservableCollection the library refresh
+        // mutates, and enumerating it from a background thread races that into
+        // an InvalidOperationException.
+        //
+        // AllClips is already newest-first, which IS "most likely to be opened
+        // next" - people open the clip they just recorded. Capped rather than
+        // unbounded because WaveformPeakCache holds a few hundred entries:
+        // warming the 900th-newest clip of a big library writes a JSON nobody
+        // reads before it ages out.
+        const int MaxWarmClips = 250;
+        var clips = AllClips
+            .Where(clip => clip.Duration > TimeSpan.Zero)
+            .Where(clip => clip.Media.Tracks.Any(track => track.Type == "audio"))
+            // Network clips decode over SMB, which is the whole reason
+            // LoadWaveformsAsync has a 4s head-start delay for them at all.
+            // Warm the local library first; network clips only if it gets that
+            // far.
+            .OrderBy(clip => PlaybackSession.IsNetworkPath(clip.Path))
+            .Take(MaxWarmClips)
+            .Select(clip => clip.Media)
+            .ToArray();
+
+        _ = Task.Run(() => HydrateMissingWaveformsAsync(clips, cts.Token));
+    }
+
+    private async Task HydrateMissingWaveformsAsync(IReadOnlyList<MediaFileInfo> clips, CancellationToken cancellationToken)
+    {
+        var wasCancelled = false;
+        var warmed = 0;
+        try
+        {
+            if (clips.Count > 0) AppLog.Info($"Idle waveform hydration: {clips.Count} clip(s).");
+            foreach (var media in clips)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                // Same placement and reasoning as the hydration pass: park
+                // before the unit of work starts, so an editor open never has
+                // to interrupt a decode already in flight.
+                await EditorForegroundWork.ParkWhileActiveAsync(cancellationToken).ConfigureAwait(false);
+                await _mediaProbe.EnsureWaveformsAsync(media, cancellationToken).ConfigureAwait(false);
+                warmed++;
+            }
+
+            if (clips.Count > 0) AppLog.Info($"Idle waveform hydration complete: {warmed} clip(s).");
+        }
+        catch (OperationCanceledException)
+        {
+            wasCancelled = true;
+            AppLog.Info($"Idle waveform hydration paused after {warmed} clip(s) ({(_gameIsActive ? "active game" : "editor open")}).");
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Idle waveform hydration failed", error);
+        }
+        finally
+        {
+            // Back to the UI thread before touching _backgroundWaveformCts or
+            // starting the next sweep - both read/write ViewModel state the
+            // rest of the app only ever touches from the dispatcher, and this
+            // method no longer runs there.
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (_backgroundWaveformCts?.Token != cancellationToken) return;
+                _backgroundWaveformCts.Dispose();
+                _backgroundWaveformCts = null;
+                if (_gameIsActive || IsEditorVisible) return;
+                // Cancelled mid-flight and the interruption is already over:
+                // pick the waveforms back up. Otherwise this sweep is done and
+                // the filmstrip sweep gets the disk.
+                if (wasCancelled) StartBackgroundWaveformHydration();
+                else StartBackgroundFilmstripHydration();
+            });
+        }
     }
 
     private void StartBackgroundFilmstripHydration()
@@ -8101,17 +8242,49 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private void StartWaveformLoad(MediaFileInfo media)
+    private void StartWaveformLoad(MediaFileInfo media, bool alreadyPainted, bool isSameClipRebuild)
     {
-        _waveformCts?.Cancel();
-        _waveformCts?.Dispose();
+        if (alreadyPainted)
+        {
+            // Nothing to decode and nothing to restart. Republishing an
+            // equal-but-different double[] would also blow
+            // TimelineLaneControl's ReferenceEquals-keyed geometry cache and
+            // retessellate ~1400 segments per lane to draw the identical shape.
+            CancelWaveformLoad();
+            _waveformLoadPath = media.Path;
+            AppLog.Debug($"Waveform paint: source=cache, path={media.Path}");
+            return;
+        }
+
+        if (isSameClipRebuild
+            && _waveformCts is { IsCancellationRequested: false }
+            && string.Equals(_waveformLoadPath, media.Path, StringComparison.OrdinalIgnoreCase))
+        {
+            // Already decoding this exact clip - let it finish. OnPartial looks
+            // the lane up by StreamIndex on every publish, so it lands on the
+            // freshly rebuilt lane objects with no rewiring.
+            return;
+        }
+
+        CancelWaveformLoad();
         _waveformCts = new CancellationTokenSource();
+        _waveformLoadPath = media.Path;
         var token = _waveformCts.Token;
+        AppLog.Debug($"Waveform paint: source=decode, path={media.Path}");
         // Same reason as StartFilmstripLoad, and it matters more here: the
         // waveform path's synchronous prefix includes a DriveInfo.DriveType
         // probe (PlaybackSession.IsNetworkPath), which can block for seconds on
         // a dead mapped share.
         _ = Task.Run(() => LoadWaveformsAsync(media, token));
+    }
+
+    // Extracted so _waveformLoadPath can never outlive the token it describes.
+    private void CancelWaveformLoad()
+    {
+        _waveformCts?.Cancel();
+        _waveformCts?.Dispose();
+        _waveformCts = null;
+        _waveformLoadPath = string.Empty;
     }
 
     private async Task LoadWaveformsAsync(MediaFileInfo media, CancellationToken cancellationToken)
@@ -8294,7 +8467,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(clip.Media with { ThumbnailPath = path }, reloadSidecars: false));
                 });
 
-            if (!_gameIsActive) StartBackgroundFilmstripHydration();
+            if (!_gameIsActive) StartBackgroundWaveformHydration();
         }
         catch (OperationCanceledException)
         {
