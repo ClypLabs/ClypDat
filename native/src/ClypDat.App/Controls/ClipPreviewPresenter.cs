@@ -399,10 +399,28 @@ internal sealed class GpuClipPreviewAdapter : IClipPreviewPresenter
         // whole timeout, and the app simply stops responding.
         await Task.Run(() => UploadFrame(slot, rgba, size), cancellationToken).ConfigureAwait(false);
 
-        // Composition objects are UI-thread affine, so the present itself goes
-        // back - but it only queues a job, it does not block.
-        await Dispatcher.UIThread.InvokeAsync(
-            () => slot.LastPresent = _surface.UpdateWithKeyedMutexAsync(slot.Imported, 1, 0));
+        // Publish an incomplete task before dispatching the composition work.
+        // Otherwise the next slot acquisition can see the preceding completed
+        // task while this UI-thread job is still waiting to queue its present.
+        var queuedPresent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        slot.LastPresent = queuedPresent.Task;
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            try
+            {
+                _ = _surface.UpdateWithKeyedMutexAsync(slot.Imported, 1, 0).ContinueWith(task =>
+                {
+                    if (task.IsCanceled) queuedPresent.TrySetCanceled();
+                    else if (task.IsFaulted) queuedPresent.TrySetException(task.Exception!.InnerExceptions);
+                    else queuedPresent.TrySetResult();
+                }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            }
+            catch (Exception error)
+            {
+                queuedPresent.TrySetException(error);
+                throw;
+            }
+        });
         return new PreviewPresentResult(Path, Stopwatch.GetElapsedTime(started));
     }
 
