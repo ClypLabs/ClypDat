@@ -67,37 +67,33 @@ public sealed partial class App : Application
                 _ = Task.Delay(warmupDelay).ContinueWith(_ => PlaybackSession.WarmUp(), TaskScheduler.Default);
             }
             var useSplash = !minimized && !UiPreviewMode.Enabled;
-            if (useSplash)
+            _mainWindow = new MainWindow
             {
-                // Paint the loader before constructing the large Avalonia tree
-                // and view model. Their synchronous setup otherwise steals the
-                // loader's first frame, which looks like a startup freeze.
-                var splash = new SplashWindow();
-                splash.Show();
-                desktop.MainWindow = splash;
-                _ = InitializeMainWindowAfterSplashAsync(desktop, splash);
-            }
-            else
+                DataContext = new MainWindowViewModel(),
+                WindowState = WindowState.Normal,
+                ShowInTaskbar = !minimized
+            };
+            _mainWindow.ApplySavedWindowBounds();
+            _mainWindow.SetStartupLoaderActive(useSplash);
+            if (useSplash) _mainWindow.RaiseStartupCurtain();
+            desktop.MainWindow = _mainWindow;
+            if (WindowsPlatformProfile.IsServer())
             {
-                _mainWindow = CreateMainWindow(minimized);
-                desktop.MainWindow = _mainWindow;
-                if (WindowsPlatformProfile.IsServer())
-                {
-                    _serverTrayMenuRenderer = new ServerTrayMenuRenderer("ClypDat");
-                    desktop.Exit += (_, _) => _serverTrayMenuRenderer?.Dispose();
-                }
-                InitializeTrayIcon();
-                if (minimized)
-                {
-                    void HideOnFirstOpen(object? _, EventArgs __)
-                    {
-                        _mainWindow.Opened -= HideOnFirstOpen;
-                        _mainWindow.Hide();
-                    }
-                    _mainWindow.Opened += HideOnFirstOpen;
-                }
-                InitializeAccentColor();
+                _serverTrayMenuRenderer = new ServerTrayMenuRenderer("ClypDat");
+                desktop.Exit += (_, _) => _serverTrayMenuRenderer?.Dispose();
             }
+            InitializeTrayIcon();
+            if (useSplash) StartWithSplash(_mainWindow);
+            if (minimized)
+            {
+                void HideOnFirstOpen(object? _, EventArgs __)
+                {
+                    _mainWindow.Opened -= HideOnFirstOpen;
+                    _mainWindow.Hide();
+                }
+                _mainWindow.Opened += HideOnFirstOpen;
+            }
+            InitializeAccentColor();
         }
 
         base.OnFrameworkInitializationCompleted();
@@ -108,63 +104,13 @@ public sealed partial class App : Application
         }
     }
 
-    private MainWindow CreateMainWindow(bool minimized)
-    {
-        var mainWindow = new MainWindow
-        {
-            DataContext = new MainWindowViewModel(),
-            WindowState = WindowState.Normal,
-            ShowInTaskbar = !minimized
-        };
-        mainWindow.ApplySavedWindowBounds();
-        mainWindow.SetStartupLoaderActive(false);
-        return mainWindow;
-    }
-
-    private async Task InitializeMainWindowAfterSplashAsync(
-        IClassicDesktopStyleApplicationLifetime desktop,
-        SplashWindow splash)
-    {
-        try
-        {
-            // Let Avalonia/DWM present at least one loader frame before the
-            // synchronous MainWindow/ViewModel construction starts.
-            await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
-            await Task.Yield();
-
-            _mainWindow = CreateMainWindow(minimized: false);
-            _mainWindow.SetStartupLoaderActive(true);
-            _mainWindow.RaiseStartupCurtain();
-            desktop.MainWindow = _mainWindow;
-            // Replacing the desktop lifetime's MainWindow after the splash is
-            // already running does not implicitly open the new window.
-            // Explicitly show it so Avalonia can measure the first virtualized
-            // viewport while the splash remains in front.
-            _mainWindow.Show();
-            _mainWindow.Activate();
-            if (WindowsPlatformProfile.IsServer())
-            {
-                _serverTrayMenuRenderer = new ServerTrayMenuRenderer("ClypDat");
-                desktop.Exit += (_, _) => _serverTrayMenuRenderer?.Dispose();
-            }
-            InitializeTrayIcon();
-            InitializeAccentColor();
-            StartWithSplash(_mainWindow, splash);
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Startup: deferred main-window construction failed.", error);
-            await splash.FadeOutAndCloseAsync();
-        }
-    }
-
-    private void StartWithSplash(MainWindow mainWindow, SplashWindow? existingSplash = null)
+    private void StartWithSplash(MainWindow mainWindow)
     {
         SplashWindow splash;
         try
         {
-            splash = existingSplash ?? new SplashWindow();
-            if (existingSplash is null) splash.Show();
+            splash = new SplashWindow();
+            splash.Show();
         }
         catch (Exception error)
         {

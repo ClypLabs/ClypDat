@@ -3683,21 +3683,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             AppLog.Info($"Library cache: constructed {models.Length} models in {clock.ElapsedMilliseconds}ms.");
 
             // One dispatcher transaction: no staged cards, placeholder extent,
-            // per-batch filtering, or intentional frame delays.
-            _restoredClipPaths.Clear();
-            foreach (var clip in models)
+            // per-batch filtering, or intentional frame delays. Run it at
+            // Background priority so the splash gets its first render frame
+            // before this deliberately bounded observable commit.
+            await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                if (!_restoredClipPaths.Add(clip.Path)) continue;
-                AttachClip(clip);
-                AllClips.Add(clip);
-            }
-            PopulateGameFilterOptionsFromCache(cached);
-            PopulateClipTypeFilterOptionsFromCache(cached);
-            ApplyGameFilters();
-            ApplyClipTypeFilters();
-            ApplySearchFilter();
-            NotifyLibraryChrome();
-            IsInitialLibraryLoadComplete = true;
+                _restoredClipPaths.Clear();
+                foreach (var clip in models)
+                {
+                    if (!_restoredClipPaths.Add(clip.Path)) continue;
+                    AttachClip(clip);
+                    AllClips.Add(clip);
+                }
+                PopulateGameFilterOptionsFromCache(cached);
+                PopulateClipTypeFilterOptionsFromCache(cached);
+                ApplyGameFilters();
+                ApplyClipTypeFilters();
+                ApplySearchFilter();
+                NotifyLibraryChrome();
+                IsInitialLibraryLoadComplete = true;
+            }, DispatcherPriority.Background);
             AppLog.Info($"Library cache: committed {AllClips.Count} models in one UI transaction at {clock.ElapsedMilliseconds}ms.");
             _ = ReconcileLibraryAfterCacheAsync(root);
         }
