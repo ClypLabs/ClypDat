@@ -19,7 +19,14 @@ public static class ClipRepairSweep
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     private static readonly SemaphoreSlim Gate = new(1, 1);
 
-    private sealed record SweepState(List<string> Inspected);
+    // Bumped when a bug made previous results untrustworthy, so the fixed build
+    // re-examines everything instead of trusting entries written by the broken
+    // one. Version 2: repairs were recorded as done while every File.Replace was
+    // failing across volumes, and healthy clips opening on a black frame were
+    // being flagged.
+    private const int StateVersion = 2;
+
+    private sealed record SweepState(int Version, List<string> Inspected);
 
     // Identity has to survive the repair rewriting the file, so the key is the
     // path plus the original length - not a hash of contents, and not the write
@@ -62,14 +69,40 @@ public static class ClipRepairSweep
                 var key = Key(clipPath, length);
                 if (inspected.Contains(key)) continue;
 
-                RepairAndRecord(inspected, key, clipPath);
-                var result = await ClipCorruptionRepairService.InspectAndRepairAsync(clipPath, token).ConfigureAwait(false);
-                if (result.Status == ClipCorruptionRepairService.RepairStatus.Repaired) repaired++;
-                // A clip that could not be read this time (locked, on a
-                // disconnected share) is worth another look on the next refresh.
-                if (result.Status == ClipCorruptionRepairService.RepairStatus.Skipped) inspected.Remove(key);
+                // Detection is read-only and cheap, so it is what gates the
+                // expensive part: only a clip whose decoder actually complains
+                // is ever rewritten.
+                if (!await ClipCorruptionRepairService.IsCorruptAsync(clipPath, token).ConfigureAwait(false))
+                {
+                    inspected.Add(key);
+                    added++;
+                    continue;
+                }
 
-                if (++added % 25 == 0) Save(libraryRoot, inspected);
+                var result = await ClipCorruptionRepairService.RepairAsync(clipPath, token).ConfigureAwait(false);
+                switch (result.Status)
+                {
+                    case ClipCorruptionRepairService.RepairStatus.Repaired:
+                        repaired++;
+                        // The file changed, so its old key is meaningless and the
+                        // new one has to be recorded against the new length.
+                        try { inspected.Add(Key(clipPath, new FileInfo(clipPath).Length)); } catch (IOException) { }
+                        added++;
+                        break;
+                    case ClipCorruptionRepairService.RepairStatus.Healthy:
+                    case ClipCorruptionRepairService.RepairStatus.Unrepairable:
+                        // Conclusive: nothing further to try on this file, so
+                        // stop looking at it every launch.
+                        inspected.Add(key);
+                        added++;
+                        break;
+                    case ClipCorruptionRepairService.RepairStatus.Skipped:
+                        // Locked, missing, on a disconnected share - worth
+                        // another look next refresh, so record nothing.
+                        break;
+                }
+
+                if (added % 25 == 0 && added > 0) Save(libraryRoot, inspected);
 
                 // Yield the disk between clips. This is maintenance; nothing is
                 // waiting on it.
@@ -95,10 +128,6 @@ public static class ClipRepairSweep
         }
     }
 
-    // Recorded before the attempt, not after: a clip that crashes or hangs the
-    // decoder must not be retried on every launch forever.
-    private static void RepairAndRecord(HashSet<string> inspected, string key, string clipPath) => inspected.Add(key);
-
     private static HashSet<string> Load(string libraryRoot)
     {
         var inspected = new HashSet<string>(StringComparer.Ordinal);
@@ -107,7 +136,8 @@ public static class ClipRepairSweep
         try
         {
             var state = JsonSerializer.Deserialize<SweepState>(File.ReadAllText(path));
-            if (state?.Inspected is not null) inspected.UnionWith(state.Inspected.Where(k => !string.IsNullOrWhiteSpace(k)));
+            if (state?.Version != StateVersion) return inspected;
+            if (state.Inspected is not null) inspected.UnionWith(state.Inspected.Where(k => !string.IsNullOrWhiteSpace(k)));
         }
         catch (Exception error)
         {
@@ -123,7 +153,7 @@ public static class ClipRepairSweep
         try
         {
             LibraryLayout.EnsureClipInfoRoot(libraryRoot);
-            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(new SweepState(inspected.ToList()), JsonOptions));
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(new SweepState(StateVersion, inspected.ToList()), JsonOptions));
             File.Move(temporaryPath, path, overwrite: true);
         }
         catch (Exception error)

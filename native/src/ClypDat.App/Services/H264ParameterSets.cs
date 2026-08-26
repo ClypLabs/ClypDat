@@ -286,27 +286,37 @@ internal static class H264ParameterSets
         pps.ConstrainedIntraPredFlag = reader.U(1);
         pps.RedundantPicCntPresentFlag = reader.U(1);
 
-        // more_rbsp_data(): anything past the stop bit means the High-profile
-        // extension is present.
-        var remaining = reader.BitLength - reader.Position;
-        if (remaining > 0)
+        // more_rbsp_data(): the RBSP ends with a single set stop bit followed by
+        // zero padding to the byte boundary, so the last set bit in the whole
+        // buffer IS the stop bit. Anything still unread before it is the
+        // High-profile extension.
+        //
+        // Scanning forward for the first set bit instead - which an earlier
+        // version did - cannot tell the stop bit from the extension's first
+        // flag, so a PPS with no extension was read as having one and the
+        // parse ran off the end of the buffer.
+        if (reader.Position < LastSetBitIndex(rbsp))
         {
-            var probe = new BitReader(rbsp);
-            probe.U(reader.Position);
-            var hasMore = false;
-            for (var i = 0; i < remaining; i++)
-            {
-                if (probe.U(1) != 0) { hasMore = i + 1 < remaining; break; }
-            }
-            if (hasMore)
-            {
-                pps.HasExtension = true;
-                pps.Transform8x8ModeFlag = reader.U(1);
-                if (reader.U(1) != 0) throw new InvalidDataException("PPS carries scaling matrices.");
-                pps.SecondChromaQpIndexOffset = reader.Se();
-            }
+            pps.HasExtension = true;
+            pps.Transform8x8ModeFlag = reader.U(1);
+            if (reader.U(1) != 0) throw new InvalidDataException("PPS carries scaling matrices.");
+            pps.SecondChromaQpIndexOffset = reader.Se();
         }
         return pps;
+    }
+
+    /// <summary>Bit index of the rbsp_stop_bit, or -1 when the buffer is all zero.</summary>
+    private static int LastSetBitIndex(byte[] rbsp)
+    {
+        for (var i = rbsp.Length - 1; i >= 0; i--)
+        {
+            if (rbsp[i] == 0) continue;
+            for (var bit = 0; bit < 8; bit++)
+            {
+                if ((rbsp[i] & (1 << bit)) != 0) return i * 8 + (7 - bit);
+            }
+        }
+        return -1;
     }
 
     internal static byte[] WritePps(PictureParameterSet pps)

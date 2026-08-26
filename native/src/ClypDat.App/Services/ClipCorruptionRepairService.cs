@@ -24,34 +24,50 @@ public sealed class ClipCorruptionRepairService
 
     public readonly record struct RepairResult(RepairStatus Status, string Detail);
 
-    // A whole 1080p frame is 2MP; sampling every 997th byte is a prime-strided
-    // spread over the plane, enough to tell real content from a flat fill
-    // without paying for the full comparison.
-    private const int SampleStride = 997;
     private const int InspectFrames = 8;
     private const int VerifyFrames = 24;
-    // A frame that decodes correctly has real tonal spread. The broken decode is
-    // uniform grey; even a near-black gameplay frame clears this comfortably.
-    private const int MinimumSpread = 24;
+    private const int ThumbnailEdge = 64;
+    private const int ThumbnailBytes = ThumbnailEdge * ThumbnailEdge;
 
     private static readonly TimeSpan ProcessTimeout = TimeSpan.FromMinutes(4);
 
-    public static async Task<RepairResult> InspectAndRepairAsync(string clipPath, CancellationToken token)
+    /// <summary>
+    /// Read-only check. Decodes a few frames and reports whether the stream is
+    /// self-consistent; never touches the file.
+    /// </summary>
+    public static async Task<bool> IsCorruptAsync(string clipPath, CancellationToken token)
+    {
+        if (!FfmpegPathResolver.IsAvailable || !File.Exists(clipPath)) return false;
+        var (errors, frames) = await DecodeProbeAsync(clipPath, InspectFrames, token).ConfigureAwait(false);
+        // Decoder errors are the whole signal. An earlier version also required
+        // tonal spread, on the theory that the broken decode is flat grey - but
+        // real corrupt clips here measured spreads of 0, 30, 52 and 70, while a
+        // perfectly healthy clip that opens on a black frame measured 0. Spread
+        // says nothing either way; mismatched parameter sets cannot be parsed
+        // without complaint, and a clip that decodes silently is fine.
+        return frames > 0 && errors > 0;
+    }
+
+    /// <summary>
+    /// Rebuilds the clip's H.264 parameter sets and re-muxes in place. Only the
+    /// container is rewritten - no frame is ever re-encoded, and audio is copied
+    /// straight from the original.
+    /// </summary>
+    public static async Task<RepairResult> RepairAsync(string clipPath, CancellationToken token)
     {
         if (!FfmpegPathResolver.IsAvailable) return new RepairResult(RepairStatus.Skipped, "ffmpeg unavailable");
         if (!File.Exists(clipPath)) return new RepairResult(RepairStatus.Skipped, "file missing");
 
-        var (errors, spread, frames) = await DecodeProbeAsync(clipPath, InspectFrames, token).ConfigureAwait(false);
+        var (errors, frames) = await DecodeProbeAsync(clipPath, InspectFrames, token).ConfigureAwait(false);
         if (frames == 0) return new RepairResult(RepairStatus.Skipped, "no frames decoded");
-        if (errors == 0 && spread >= MinimumSpread) return new RepairResult(RepairStatus.Healthy, string.Empty);
+        if (errors == 0) return new RepairResult(RepairStatus.Healthy, string.Empty);
+        AppLog.Info($"Clip repair: {Path.GetFileName(clipPath)} decodes with {errors} error(s) - rebuilding its parameter sets.");
 
-        AppLog.Info($"Clip repair: {Path.GetFileName(clipPath)} decodes with {errors} error(s), spread {spread} - attempting parameter-set repair.");
-        return await RepairAsync(clipPath, token).ConfigureAwait(false);
-    }
-
-    private static async Task<RepairResult> RepairAsync(string clipPath, CancellationToken token)
-    {
-        var workFolder = Path.Combine(Path.GetTempPath(), "ClypDat-repair-" + Guid.NewGuid().ToString("N"));
+        // Beside the clip, not in %TEMP%: File.Replace cannot move across
+        // volumes, and a library on D: with a temp folder on C: made every
+        // repair fail with "Unable to move the replacement file to the file to
+        // be replaced".
+        var workFolder = Path.Combine(Path.GetDirectoryName(clipPath)!, ".clypdat-repair-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(workFolder);
         var rawPath = Path.Combine(workFolder, "raw.h264");
         var candidatePath = Path.Combine(workFolder, "candidate.h264");
@@ -74,8 +90,18 @@ public sealed class ClipCorruptionRepairService
             {
                 if (length <= 0) continue;
                 var type = stream[start] & 0x1F;
-                if (type == 7 && sps is null) sps = H264ParameterSets.ParseSps(stream.AsSpan(start, length));
-                else if (type == 8 && pps is null) pps = H264ParameterSets.ParsePps(stream.AsSpan(start, length));
+                try
+                {
+                    if (type == 7 && sps is null) sps = H264ParameterSets.ParseSps(stream.AsSpan(start, length));
+                    else if (type == 8 && pps is null) pps = H264ParameterSets.ParsePps(stream.AsSpan(start, length));
+                }
+                catch (InvalidDataException error)
+                {
+                    // Something this rewriter does not model (scaling matrices,
+                    // an encoder shape we have never produced). Leave the file
+                    // exactly as it is rather than guess at it.
+                    return new RepairResult(RepairStatus.Unrepairable, error.Message);
+                }
                 if (sps is not null && pps is not null) break;
             }
             if (sps is null || pps is null) return new RepairResult(RepairStatus.Unrepairable, "no parameter sets in the stream");
@@ -86,8 +112,8 @@ public sealed class ClipCorruptionRepairService
                 await WriteCandidateStreamAsync(candidatePath, stream, nals,
                     H264ParameterSets.WriteSps(candidateSps), H264ParameterSets.WritePps(candidatePps), token).ConfigureAwait(false);
 
-                var (errors, spread, frames) = await DecodeProbeAsync(candidatePath, InspectFrames, token, rawH264: true).ConfigureAwait(false);
-                if (errors != 0 || frames == 0 || spread < MinimumSpread) continue;
+                var candidateProbe = await DecodeProbeAsync(candidatePath, InspectFrames, token, rawH264: true).ConfigureAwait(false);
+                if (candidateProbe.Errors != 0 || candidateProbe.Frames == 0) continue;
 
                 // Re-mux rather than patch the original in place: the corrected
                 // SPS is not always the same length as the stale one, and growing
@@ -100,8 +126,11 @@ public sealed class ClipCorruptionRepairService
                     .ConfigureAwait(false);
                 if (!File.Exists(rebuiltPath) || new FileInfo(rebuiltPath).Length == 0) continue;
 
+                // Verify the finished file, not just the elementary stream: a
+                // clean decode here is the only thing that authorises
+                // overwriting the user's clip.
                 var verify = await DecodeProbeAsync(rebuiltPath, VerifyFrames, token).ConfigureAwait(false);
-                if (verify.Errors != 0 || verify.Spread < MinimumSpread) continue;
+                if (verify.Errors != 0 || verify.Frames == 0) continue;
 
                 await ReplaceInPlaceAsync(clipPath, rebuiltPath).ConfigureAwait(false);
                 AppLog.Info($"Clip repair: {Path.GetFileName(clipPath)} repaired ({label}).");
@@ -205,32 +234,21 @@ public sealed class ClipCorruptionRepairService
         }, $"Clip repair replace: {Path.GetFileName(clipPath)}").ConfigureAwait(false);
     }
 
-    private static async Task<(int Errors, int Spread, int Frames)> DecodeProbeAsync(
+    private static async Task<(int Errors, int Frames)> DecodeProbeAsync(
         string path, int frames, CancellationToken token, bool rawH264 = false)
     {
-        // gray output is one byte per pixel: no chroma to allocate, no scaler,
-        // and luma alone is what distinguishes a flat fill from real content.
+        // Scaled to a fixed tiny size so one decoded frame is exactly
+        // ThumbnailBytes regardless of the clip's resolution - that makes the
+        // frame count exact without having to probe the dimensions first, and
+        // keeps the piped output to a few KB.
         var input = rawH264 ? $"-f h264 -i \"{path}\"" : $"-i \"{path}\" -map 0:v:0";
-        var arguments = $"-hide_banner -v error {input} -frames:v {frames} -f rawvideo -pix_fmt gray -";
+        var arguments = $"-hide_banner -v error {input} -frames:v {frames} " +
+                        $"-vf scale={ThumbnailEdge}:{ThumbnailEdge} -f rawvideo -pix_fmt gray -";
         var result = await RunAsync(FfmpegPathResolver.FfmpegPath, arguments, token, captureStdout: true).ConfigureAwait(false);
 
         var errors = result.StandardError
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Length;
-        var bytes = result.StandardOutput;
-        if (bytes.Length == 0) return (errors, 0, 0);
-
-        var spread = 0;
-        var minimum = byte.MaxValue;
-        var maximum = byte.MinValue;
-        for (var i = 0; i < bytes.Length; i += SampleStride)
-        {
-            if (bytes[i] < minimum) minimum = bytes[i];
-            if (bytes[i] > maximum) maximum = bytes[i];
-        }
-        if (maximum >= minimum) spread = maximum - minimum;
-        // Frame count is only used to tell "decoded nothing" from "decoded
-        // something", so an approximate divisor is fine.
-        return (errors, spread, Math.Max(1, bytes.Length / (1920 * 1080)));
+        return (errors, result.StandardOutput.Length / ThumbnailBytes);
     }
 
     private static async Task<string> ProbeFrameRateAsync(string clipPath, CancellationToken token)
