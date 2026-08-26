@@ -74,10 +74,17 @@ public sealed class ClipCardViewModel : ViewModelBase
         {
             if (!SetProperty(ref _repairOverlayText, value)) return;
             OnPropertyChanged(nameof(IsRepairOverlayVisible));
+            OnPropertyChanged(nameof(RepairOverlayContent));
         }
     }
 
     public bool IsRepairOverlayVisible => !string.IsNullOrEmpty(RepairOverlayText);
+
+    // Null, not empty, when there is nothing to say: the overlay's content is
+    // realised from a template, and a template that is never realised cannot run
+    // the spinner's animation. Otherwise every card in the library would drive a
+    // rotation sixty times a second behind a hidden layer.
+    public string? RepairOverlayContent => IsRepairOverlayVisible ? RepairOverlayText : null;
     public DateTimeOffset CreatedAt => IsSteelSeriesImport && _clipInfo?.CapturedAt is { } capturedAt ? capturedAt : Media.CreatedAt;
     public TimeSpan Duration => Media.Duration;
     public long SizeBytes => Media.SizeBytes;

@@ -33,6 +33,13 @@ internal readonly record struct PreviewPresentResult(PreviewPresentationPath Pat
 
 public sealed class ClipPreviewPresenter : Control, IClipPreviewPresenter
 {
+    // Process-wide, not per-card: every card builds its own presenter, so a
+    // machine whose composition device keeps dying would otherwise re-arm the
+    // GPU path on the next hover, lose it again, and spend the session doing
+    // that. Two losses is enough to call it.
+    private const int GpuLossesBeforeGivingUp = 2;
+    private static int _gpuLosses;
+
     private readonly SoftwareClipPreviewAdapter _software;
     private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
     private IClipPreviewPresenter? _adapter;
@@ -106,7 +113,10 @@ public sealed class ClipPreviewPresenter : Control, IClipPreviewPresenter
             {
                 // Device loss/import failures must not discard this frame. Switch
                 // immediately, then render the same decoded bytes through software.
-                AppLog.Info($"Clip hover preview GPU path lost; switching to software: {error.Message}");
+                var losses = Interlocked.Increment(ref _gpuLosses);
+                AppLog.Info($"Clip hover preview GPU path lost ({losses}); switching to software: {error.Message}");
+                if (losses == GpuLossesBeforeGivingUp)
+                    AppLog.Info("Clip hover preview: staying on the software path for the rest of this session.");
                 _adapter = _software;
                 await _software.SetAttachedAsync(_requestedAttached).ConfigureAwait(false);
                 await adapter.ReleaseResourcesAsync().ConfigureAwait(false);
@@ -121,6 +131,7 @@ public sealed class ClipPreviewPresenter : Control, IClipPreviewPresenter
 
     private async Task InitializeGpuAsync(CancellationToken cancellationToken)
     {
+        if (Volatile.Read(ref _gpuLosses) >= GpuLossesBeforeGivingUp) return;
         try
         {
             var element = ElementComposition.GetElementVisual(this);
@@ -273,8 +284,11 @@ internal sealed class GpuClipPreviewAdapter : IClipPreviewPresenter
     private readonly ICompositionGpuInterop _interop;
     private readonly List<TextureSlot> _slots = [];
     private int _nextSlot;
+    private int _importFailed;
     private bool _attached;
     private bool _disposed;
+
+    private const int MutexWaitMilliseconds = 250;
 
     private GpuClipPreviewAdapter(ClipPreviewPresenter owner, Compositor compositor, ICompositionGpuInterop interop,
         ID3D11Device device, ID3D11DeviceContext context)
@@ -350,21 +364,42 @@ internal sealed class GpuClipPreviewAdapter : IClipPreviewPresenter
         }
 
         if (_disposed || _interop.IsLost) throw new InvalidOperationException("Avalonia composition device is unavailable.");
+        // An import that failed on the render thread leaves a texture the
+        // compositor will never read. Fail here so the caller drops to the
+        // software path once, instead of feeding frames into nothing.
+        if (Volatile.Read(ref _importFailed) != 0) throw new InvalidOperationException("Preview texture import failed.");
         if (!_attached) return new PreviewPresentResult(Path, TimeSpan.Zero);
         var started = Stopwatch.GetTimestamp();
         var slot = await AcquireSlotAsync(size, cancellationToken).ConfigureAwait(false);
-        slot.Mutex.AcquireSync(0, 2_000);
+        if (slot.Imported.IsLost) throw new InvalidOperationException("Preview texture was lost.");
+
+        // Off the UI thread deliberately. Hover previews are started from a
+        // pointer event and nothing in this pipeline calls ConfigureAwait(false),
+        // so every continuation lands back on the UI thread - which put a keyed
+        // mutex wait and a full-frame copy, sixty times a second, on the thread
+        // that draws the window. When the GPU path is unhealthy that wait is the
+        // whole timeout, and the app simply stops responding.
+        await Task.Run(() => UploadFrame(slot, rgba, size), cancellationToken).ConfigureAwait(false);
+
+        // Composition objects are UI-thread affine, so the present itself goes
+        // back - but it only queues a job, it does not block.
+        await Dispatcher.UIThread.InvokeAsync(
+            () => slot.LastPresent = _surface.UpdateWithKeyedMutexAsync(slot.Imported, 1, 0));
+        return new PreviewPresentResult(Path, Stopwatch.GetElapsedTime(started));
+    }
+
+    private unsafe void UploadFrame(TextureSlot slot, ReadOnlyMemory<byte> rgba, PixelSize size)
+    {
+        // Shorter than the two seconds this used to wait: the compositor reads a
+        // slot in one frame, so anything beyond a few hundred milliseconds means
+        // the GPU path is wedged, and stalling the pipeline does not unwedge it.
+        slot.Mutex.AcquireSync(0, MutexWaitMilliseconds);
         try
         {
-            unsafe
-            {
-                fixed (byte* source = rgba.Span)
-                    _context.UpdateSubresource(slot.Texture, 0, null, (nint)source, (uint)(size.Width * 4), 0);
-            }
+            fixed (byte* source = rgba.Span)
+                _context.UpdateSubresource(slot.Texture, 0, null, (nint)source, (uint)(size.Width * 4), 0);
         }
         finally { slot.Mutex.ReleaseSync(1); }
-        slot.LastPresent = _surface.UpdateWithKeyedMutexAsync(slot.Imported, 1, 0);
-        return new PreviewPresentResult(Path, Stopwatch.GetElapsedTime(started));
     }
 
     private async ValueTask<TextureSlot> AcquireSlotAsync(PixelSize size, CancellationToken cancellationToken)
@@ -396,6 +431,16 @@ internal sealed class GpuClipPreviewAdapter : IClipPreviewPresenter
         var imported = _interop.ImportImage(
             new PlatformHandle(resource.SharedHandle, KnownPlatformGraphicsExternalImageHandleTypes.D3D11TextureGlobalSharedHandle),
             new PlatformGraphicsExternalImageProperties { Width = size.Width, Height = size.Height, Format = PlatformGraphicsExternalImageFormat.R8G8B8A8UNorm, TopLeftOrigin = true });
+        // The import runs on the render thread and nothing here awaits it, so a
+        // failure - a lost ANGLE context, a shared handle the driver rejects -
+        // used to surface only as an unobserved exception rethrown by the
+        // finalizer, hundreds of them, while this path kept importing more.
+        _ = imported.ImportCompleted.ContinueWith(task =>
+        {
+            if (!task.IsFaulted) return;
+            if (Interlocked.Exchange(ref _importFailed, 1) == 0)
+                AppLog.Info($"Clip hover preview: GPU texture import failed ({task.Exception?.GetBaseException().Message}).");
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         return new TextureSlot(size, texture, mutex, imported);
     }
 

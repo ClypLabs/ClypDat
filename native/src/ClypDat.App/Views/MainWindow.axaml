@@ -957,36 +957,46 @@
                                         IsVisible="{Binding IsRepairOverlayVisible}"
                                         IsHitTestVisible="False"
                                         ZIndex="5">
-                                  <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
-                                    <!-- Track plus a rotating arc: a repair has no
-                                         percentage worth drawing as a ring, so the
-                                         spinner only says work is in flight and the
-                                         text below carries the estimate. -->
-                                    <Panel Width="30" Height="30" HorizontalAlignment="Center">
-                                      <Ellipse Width="30" Height="30" Stroke="#33456079" StrokeThickness="3" />
-                                      <Ellipse Width="30" Height="30" Stroke="#8FB6DC" StrokeThickness="3"
-                                               StrokeDashArray="6.5,22" StrokeLineCap="Round"
-                                               RenderTransformOrigin="50%,50%">
-                                        <Ellipse.Styles>
-                                          <Style Selector="Ellipse">
-                                            <Style.Animations>
-                                              <Animation Duration="0:0:0.9" IterationCount="Infinite" Easing="LinearEasing">
-                                                <KeyFrame Cue="0%">
-                                                  <Setter Property="RotateTransform.Angle" Value="0" />
-                                                </KeyFrame>
-                                                <KeyFrame Cue="100%">
-                                                  <Setter Property="RotateTransform.Angle" Value="360" />
-                                                </KeyFrame>
-                                              </Animation>
-                                            </Style.Animations>
-                                          </Style>
-                                        </Ellipse.Styles>
-                                      </Ellipse>
-                                    </Panel>
-                                    <TextBlock Text="{Binding RepairOverlayText}"
-                                               Foreground="#DCE7F3" FontSize="13" FontWeight="Bold"
-                                               HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
-                                  </StackPanel>
+                                  <!-- Content is null unless a repair concerns this
+                                       clip, so the template - and the spinner's
+                                       animation with it - is only ever realised on
+                                       the handful of cards that need it. -->
+                                  <ContentControl Content="{Binding RepairOverlayContent}">
+                                    <ContentControl.ContentTemplate>
+                                      <DataTemplate>
+                                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+                                          <!-- Track plus a rotating arc: a repair has no
+                                               percentage worth drawing as a ring, so the
+                                               spinner only says work is in flight and the
+                                               text below carries the estimate. -->
+                                          <Panel Width="30" Height="30" HorizontalAlignment="Center">
+                                            <Ellipse Width="30" Height="30" Stroke="#33456079" StrokeThickness="3" />
+                                            <Ellipse Width="30" Height="30" Stroke="#8FB6DC" StrokeThickness="3"
+                                                     StrokeDashArray="6.5,22" StrokeLineCap="Round"
+                                                     RenderTransformOrigin="50%,50%">
+                                              <Ellipse.Styles>
+                                                <Style Selector="Ellipse">
+                                                  <Style.Animations>
+                                                    <Animation Duration="0:0:0.9" IterationCount="Infinite" Easing="LinearEasing">
+                                                      <KeyFrame Cue="0%">
+                                                        <Setter Property="RotateTransform.Angle" Value="0" />
+                                                      </KeyFrame>
+                                                      <KeyFrame Cue="100%">
+                                                        <Setter Property="RotateTransform.Angle" Value="360" />
+                                                      </KeyFrame>
+                                                    </Animation>
+                                                  </Style.Animations>
+                                                </Style>
+                                              </Ellipse.Styles>
+                                            </Ellipse>
+                                          </Panel>
+                                          <TextBlock Text="{Binding}"
+                                                     Foreground="#DCE7F3" FontSize="13" FontWeight="Bold"
+                                                     HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                      </DataTemplate>
+                                    </ContentControl.ContentTemplate>
+                                  </ContentControl>
                                 </Border>
                                 <TextBlock Text="{Binding SelectionOrder}"
                                            IsVisible="{Binding HasSelectionOrder}"
