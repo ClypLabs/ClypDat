@@ -6356,16 +6356,28 @@ public sealed partial class MainWindow : Window
             ViewModel.Settings.CustomClipFileNameTemplate,
             game);
 
-        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        // The shell picker is a top-level native window. Keep the editor's
+        // own top-level hover bar down for its whole lifetime; otherwise it
+        // stays above the picker because it is not a child of this window.
+        CoverEditorSurface();
+        IStorageFile? file;
+        try
         {
-            Title = "Export clip",
-            SuggestedFileName = suggestedFileName,
-            SuggestedStartLocation = suggestedStartLocation,
-            FileTypeChoices = new[]
+            file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
             {
-                new FilePickerFileType("MP4 video") { Patterns = new[] { "*.mp4" } }
-            }
-        });
+                Title = "Export clip",
+                SuggestedFileName = suggestedFileName,
+                SuggestedStartLocation = suggestedStartLocation,
+                FileTypeChoices = new[]
+                {
+                    new FilePickerFileType("MP4 video") { Patterns = new[] { "*.mp4" } }
+                }
+            });
+        }
+        finally
+        {
+            UncoverEditorSurface();
+        }
         if (file?.Path.LocalPath is not { Length: > 0 } outputPath) return;
         if (string.IsNullOrWhiteSpace(Path.GetExtension(outputPath)))
         {
