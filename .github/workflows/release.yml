@@ -51,7 +51,9 @@ jobs:
           $commit = $pin.SelectSingleNode('//ClypDatAvaloniaStableCommit').InnerText.Trim()
           git -C $forkRoot checkout --detach $commit
           if ($LASTEXITCODE -ne 0) { throw "Could not check out pinned Avalonia commit $commit." }
-          .\publish.ps1 $env:GITHUB_SHA
+          # The fork package closure includes Avalonia.Controls.Media. `local`
+          # selects that exact closure while keeping this tag checkout intact.
+          .\publish.ps1 local
 
       # Untrusted values reach PowerShell through env: only. Interpolating
       # ${{ inputs.* }} directly into a run: block splices the caller's text into
