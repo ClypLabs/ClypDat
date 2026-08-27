@@ -5969,31 +5969,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         if (!armed) return "Not recording";
 
+        // Resolved per game, not global: Custom Game Settings can give a game
+        // its own quality, so the status describes what is actually being
+        // captured rather than what the settings page happens to show.
         var detectionKey = string.IsNullOrWhiteSpace(ActiveGameDetection.DetectionKey)
             ? ActiveGameDetection.ExeName
             : ActiveGameDetection.DetectionKey;
         var effective = CustomGameSettingsResolver.Resolve(Settings, detectionKey);
-        if (effective.FullSessionRecordingEnabled) return "Recording the full session";
-
-        // Same precedence CreateReplayConfig uses, so the status cannot claim a
-        // buffer length the recorder is not actually keeping.
-        var seconds = SelectedReplayDurationPreset?.Seconds ?? effective.ReplayDurationSeconds;
-        return $"Keeping the last {DescribeDuration(seconds)}";
-    }
-
-    private static string DescribeDuration(int seconds)
-    {
-        if (seconds < 60) return $"{seconds} seconds";
-        var minutes = seconds / 60d;
-        // Whole minutes read as minutes; anything else keeps its seconds rather
-        // than rounding to a length that was never configured.
-        if (Math.Abs(minutes - Math.Round(minutes)) < 0.01)
-        {
-            var whole = (int)Math.Round(minutes);
-            return whole == 1 ? "minute" : $"{whole} minutes";
-        }
-
-        return $"{seconds} seconds";
+        return $"{effective.ReplayMaxHeight}p · {effective.ReplayFrameRate} fps";
     }
 
     public bool DiscordRichPresenceEnabled
