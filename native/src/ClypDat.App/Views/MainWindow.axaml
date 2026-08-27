@@ -1687,10 +1687,14 @@
                     <StackPanel Spacing="4" IsVisible="{Binding IsClipCropActive}">
                       <TextBlock Text="Horizontal position" Foreground="#8EA1B6" FontSize="12" Margin="0,4,0,0" />
                       <Slider Minimum="0" Maximum="1" TickFrequency="0.01" IsSnapToTickEnabled="True"
-                              Value="{Binding ClipCropOffsetX, Mode=TwoWay}" />
+                              Value="{Binding ClipCropOffsetX, Mode=TwoWay}"
+                              PointerPressed="CropPositionSlider_OnPointerPressed"
+                              PointerReleased="CropPositionSlider_OnPointerReleased" />
                       <TextBlock Text="Vertical position" Foreground="#8EA1B6" FontSize="12" />
                       <Slider Minimum="0" Maximum="1" TickFrequency="0.01" IsSnapToTickEnabled="True"
-                              Value="{Binding ClipCropOffsetY, Mode=TwoWay}" />
+                              Value="{Binding ClipCropOffsetY, Mode=TwoWay}"
+                              PointerPressed="CropPositionSlider_OnPointerPressed"
+                              PointerReleased="CropPositionSlider_OnPointerReleased" />
                     </StackPanel>
                   </StackPanel>
                 </Border>

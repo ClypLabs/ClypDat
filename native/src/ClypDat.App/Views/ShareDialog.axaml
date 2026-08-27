@@ -37,15 +37,16 @@
         <StackPanel Margin="28,24,28,28" Spacing="18">
           <StackPanel Spacing="10">
             <TextBlock Text="Choose a file size" Foreground="#93A6B8" FontSize="13" FontWeight="Bold" />
-            <!-- 10 MB is Discord's free-tier cap, 50 MB Nitro Basic, 100 MB
-                 covers Nitro and most other upload targets. -->
-            <StackPanel Orientation="Horizontal" Spacing="1">
-              <RadioButton x:Name="ShareSizeOriginal" Classes="sizePill" GroupName="ShareSize" Content="Original" Tag="0" CornerRadius="7,0,0,7" Click="SizePreset_OnClick" />
-              <RadioButton x:Name="ShareSize10" Classes="sizePill" GroupName="ShareSize" Content="10 MB" Tag="10" CornerRadius="0" Click="SizePreset_OnClick" />
-              <RadioButton x:Name="ShareSize50" Classes="sizePill" GroupName="ShareSize" Content="50 MB" Tag="50" CornerRadius="0" Click="SizePreset_OnClick" />
-              <RadioButton x:Name="ShareSize100" Classes="sizePill" GroupName="ShareSize" Content="100 MB" Tag="100" CornerRadius="0" Click="SizePreset_OnClick" />
-              <RadioButton x:Name="ShareSizeCustom" Classes="sizePill" GroupName="ShareSize" Content="Custom" CornerRadius="0,7,7,0" Click="SizePreset_OnClick" />
-            </StackPanel>
+            <!-- 10 MB is Discord's free-tier cap, 20 MB suits smaller chat
+                 uploads, 50 MB Nitro Basic, and 100 MB covers most others. -->
+            <Grid ColumnDefinitions="*,*,*,*,*,*" ColumnSpacing="1">
+              <RadioButton Grid.Column="0" x:Name="ShareSizeOriginal" Classes="sizePill" GroupName="ShareSize" Content="Original" Tag="0" Padding="5,10" CornerRadius="7,0,0,7" Click="SizePreset_OnClick" />
+              <RadioButton Grid.Column="1" x:Name="ShareSize10" Classes="sizePill" GroupName="ShareSize" Content="10 MB" Tag="10" Padding="5,10" CornerRadius="0" Click="SizePreset_OnClick" />
+              <RadioButton Grid.Column="2" x:Name="ShareSize20" Classes="sizePill" GroupName="ShareSize" Content="20 MB" Tag="20" Padding="5,10" CornerRadius="0" Click="SizePreset_OnClick" />
+              <RadioButton Grid.Column="3" x:Name="ShareSize50" Classes="sizePill" GroupName="ShareSize" Content="50 MB" Tag="50" Padding="5,10" CornerRadius="0" Click="SizePreset_OnClick" />
+              <RadioButton Grid.Column="4" x:Name="ShareSize100" Classes="sizePill" GroupName="ShareSize" Content="100 MB" Tag="100" Padding="5,10" CornerRadius="0" Click="SizePreset_OnClick" />
+              <RadioButton Grid.Column="5" x:Name="ShareSizeCustom" Classes="sizePill" GroupName="ShareSize" Content="Custom" Padding="5,10" CornerRadius="0,7,7,0" Click="SizePreset_OnClick" />
+            </Grid>
             <TextBox x:Name="ShareCustomSizeBox" PlaceholderText="Size in MB" IsVisible="False" Width="140"
                      HorizontalAlignment="Left" KeyDown="CustomSizeBox_OnKeyDown" />
             <CheckBox x:Name="ShareAv1Toggle" Content="Smaller file (AV1)" Foreground="#93A6B8" FontSize="12" IsChecked="True"

@@ -30,7 +30,9 @@ public static class CropMaskImage
     // letterbox: the part being cut has to remain readable so it can be aimed.
     private const byte ShadeAlpha = 0x66;
     private const int OutlineThickness = 2;
-    private static readonly uint OutlineColor = Bgra(0xFF, 0x7F, 0xB4, 0xE8);
+    // ClypDat green. The opaque guide stays legible over both the dimmed and
+    // retained parts of the frame.
+    private static readonly uint OutlineColor = Bgra(0xFF, 0x38, 0xD9, 0x96);
 
     /// <summary>
     /// Writes (or reuses) the mask PNG for this crop and returns its path.
@@ -46,7 +48,12 @@ public static class CropMaskImage
             // Keyed by the geometry itself, so dragging a position slider back
             // and forth re-uses files already written instead of re-encoding a
             // full-resolution image for a crop that has been seen before.
-            if (File.Exists(path)) return path;
+            if (File.Exists(path))
+            {
+                // Reused masks participate in the bounded recency cache too.
+                try { File.SetLastWriteTimeUtc(path, DateTime.UtcNow); } catch { }
+                return path;
+            }
 
             using var bitmap = new WriteableBitmap(
                 new PixelSize(sourceWidth, sourceHeight),
@@ -70,19 +77,22 @@ public static class CropMaskImage
     }
 
     /// <summary>
-    /// Drops mask files this session is no longer using. They are flat-colour
-    /// PNGs, but at a 4K clip's resolution they still add up over a long editing
-    /// session.
+    /// Bounds the recency cache. They are flat-colour PNGs, but at a 4K clip's
+    /// resolution they still add up over a long editing session.
     /// </summary>
-    public static void Prune(string directory, string? keepPath)
+    public static void Prune(string directory, string? keepPath, int maximumFiles = 32)
     {
         try
         {
             if (!Directory.Exists(directory)) return;
-            foreach (var file in Directory.EnumerateFiles(directory, "crop-*.png"))
+            var files = Directory.EnumerateFiles(directory, "crop-*.png")
+                .Select(path => new FileInfo(path))
+                .OrderByDescending(file => string.Equals(file.FullName, keepPath, StringComparison.OrdinalIgnoreCase))
+                .ThenByDescending(file => file.LastWriteTimeUtc)
+                .ToArray();
+            foreach (var file in files.Skip(Math.Max(0, maximumFiles)))
             {
-                if (string.Equals(file, keepPath, StringComparison.OrdinalIgnoreCase)) continue;
-                try { File.Delete(file); } catch { }
+                try { file.Delete(); } catch { }
             }
         }
         catch (Exception error)
@@ -139,7 +149,7 @@ public static class CropMaskImage
 
     private static string Key(ClipRenderFilters.CropRect crop, int width, int height)
     {
-        var input = $"{width}x{height}|{crop.X},{crop.Y},{crop.Width},{crop.Height}|{ShadeAlpha}";
+        var input = $"{width}x{height}|{crop.X},{crop.Y},{crop.Width},{crop.Height}|{ShadeAlpha}|{OutlineColor:X8}";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(input)))[..16].ToLowerInvariant();
     }
 }

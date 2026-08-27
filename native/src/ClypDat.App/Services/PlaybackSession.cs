@@ -41,6 +41,10 @@ public sealed class PlaybackSession : IDisposable
     private bool _shouldPlay;
     private long _seekVersion;
     private long _playVersion;
+    // Invalidates a queued slow-rate recovery when the user changes speed again.
+    // This is separate from play/seek versions: rate changes do not otherwise
+    // alter either transport intent or media position.
+    private long _rateVersion;
     private TimeSpan _lastRequestedPosition = TimeSpan.Zero;
     private readonly SemaphoreSlim _seekLock = new(1, 1);
     private readonly object _transportLock = new();
@@ -798,31 +802,26 @@ public sealed class PlaybackSession : IDisposable
         var normalized = ClipRenderFilters.NormalizeSpeed(rate);
         if (Math.Abs(_playbackRate - normalized) < 0.0001) return false;
         _playbackRate = normalized;
+        var rateVersion = Interlocked.Increment(ref _rateVersion);
+        var startPosition = Position;
+        var playVersion = Interlocked.Read(ref _playVersion);
+        var seekVersion = Interlocked.Read(ref _seekVersion);
 
-        // VLC can leave its picture clock stalled after a direct slow-rate
-        // change. Briefly parking and resuming an already-running transport
-        // makes it rebase that clock without seeking or rebuilding audio.
-        var rebaseRunningTransport = normalized < 1 && _shouldPlay && VideoPlayer.IsPlaying;
+        // A direct rate change is the only path with no intentional visible
+        // pause. VLC normally reclocks the picture immediately; the watchdog
+        // below handles the exceptional stalled clock without taxing every
+        // normal 0.25x/0.5x transition.
+        var watchSlowRate = normalized < 1 && _shouldPlay && VideoPlayer.IsPlaying && !_isSeeking;
         try
         {
             lock (_transportLock)
             {
-                if (rebaseRunningTransport) VideoPlayer.SetPause(true);
                 VideoPlayer.SetRate((float)normalized);
-                if (rebaseRunningTransport) VideoPlayer.SetPause(false);
             }
         }
         catch (Exception error)
         {
             AppLog.Error($"Editor playback rate failed: {normalized:0.###}x", error);
-            if (rebaseRunningTransport)
-            {
-                try
-                {
-                    lock (_transportLock) VideoPlayer.SetPause(false);
-                }
-                catch (Exception resumeError) { AppLog.Error("Editor playback rate resume failed", resumeError); }
-            }
         }
 
         // Discard interpolation from the previous ratio before the audio thread
@@ -832,7 +831,57 @@ public sealed class PlaybackSession : IDisposable
         ReanchorAudioClock();
 
         AppLog.Debug($"Editor playback rate: {normalized:0.###}x.");
+        if (watchSlowRate)
+        {
+            _ = RecoverStalledSlowRateAsync(rateVersion, playVersion, seekVersion, normalized, startPosition);
+        }
         return true;
+    }
+
+    // VLC occasionally accepts a slow rate while leaving its picture clock
+    // parked. Do not reproduce the old unconditional pause/resume: wait until
+    // the clock should have published a meaningful amount of media time, then
+    // rebase only a still-current, genuinely stalled transport.
+    private async Task RecoverStalledSlowRateAsync(
+        long rateVersion,
+        long playVersion,
+        long seekVersion,
+        double rate,
+        TimeSpan startPosition)
+    {
+        var delay = TimeSpan.FromMilliseconds(Math.Max(500, Math.Ceiling(300 / rate)));
+        try
+        {
+            await Task.Delay(delay).ConfigureAwait(false);
+            if (_disposed || !_shouldPlay || _isSeeking || IsEnded ||
+                rateVersion != Interlocked.Read(ref _rateVersion) ||
+                playVersion != Interlocked.Read(ref _playVersion) ||
+                seekVersion != Interlocked.Read(ref _seekVersion) ||
+                Math.Abs(_playbackRate - rate) >= 0.0001 ||
+                (Duration > TimeSpan.Zero && startPosition >= Duration - TimeSpan.FromMilliseconds(400))) return;
+
+            var currentPosition = Position;
+            if (currentPosition - startPosition >= TimeSpan.FromMilliseconds(100)) return;
+
+            lock (_transportLock)
+            {
+                if (_disposed || !_shouldPlay || _isSeeking || IsEnded ||
+                    rateVersion != Interlocked.Read(ref _rateVersion) ||
+                    playVersion != Interlocked.Read(ref _playVersion) ||
+                    seekVersion != Interlocked.Read(ref _seekVersion) ||
+                    Math.Abs(_playbackRate - rate) >= 0.0001) return;
+
+                if (!VideoPlayer.IsPlaying) VideoPlayer.Play();
+                VideoPlayer.SetPause(true);
+                VideoPlayer.SetPause(false);
+            }
+
+            AppLog.Debug($"Editor slow-rate recovery: rate={rate:0.###}x, start={startPosition.TotalSeconds:0.###}s, current={currentPosition.TotalSeconds:0.###}s, waitMs={delay.TotalMilliseconds:0}.");
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Editor slow-rate recovery failed: {rate:0.###}x", error);
+        }
     }
 
     public void SetTrackVolume(int streamIndex, double percent)

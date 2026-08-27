@@ -73,6 +73,16 @@ public sealed partial class MainWindow : Window
     // throttle here just caps how often that cancel-and-restart happens rather
     // than needing any new synchronization of its own.
     private readonly Stopwatch _timelineScrubThrottle = new();
+    // VLC reloads a logo image synchronously inside its video filter. Keep crop
+    // input live, but never turn a slider's pointer-move flood into a matching
+    // flood of full-resolution PNG encodes and filter reloads.
+    private readonly DispatcherTimer _cropPreviewTimer;
+    private readonly Stopwatch _cropPreviewThrottle = new();
+    private CropPreviewRequest? _pendingCropPreview;
+    private bool _cropPreviewRenderInFlight;
+    private bool _cropPreviewDragActive;
+    private int _cropPreviewGeneration;
+    private static readonly TimeSpan CropPreviewMinimumInterval = TimeSpan.FromMilliseconds(100);
     // True only while a settling (non-preview) seek is awaiting confirmation -
     // see ApplyTimelineSeekAsync and SyncPlaybackPosition.
     private bool _editorSeekInFlight;
@@ -273,6 +283,12 @@ public sealed partial class MainWindow : Window
                 AppLog.Error("Playback position sync failed (recovered)", error);
             }
         };
+        _cropPreviewTimer = new DispatcherTimer { Interval = CropPreviewMinimumInterval };
+        _cropPreviewTimer.Tick += (_, _) =>
+        {
+            _cropPreviewTimer.Stop();
+            StartPendingCropPreview();
+        };
         // Restarted on every arrow-key seek, so it only fires once the key has
         // actually stopped repeating - see ApplyKeyboardSeek. 220ms sits above
         // Windows' fastest key-repeat interval (~30ms) with margin, and is
@@ -370,10 +386,10 @@ public sealed partial class MainWindow : Window
                         StartLibraryReturnTiming("Settings");
                     }
                     if (e.PropertyName == nameof(MainWindowViewModel.StartupLibraryIndexVersion)) QueueDateScrubberRebuild();
-                    if (e.PropertyName is nameof(MainWindowViewModel.ClipSpeed)
-                        or nameof(MainWindowViewModel.ClipCropMode)
+                    if (e.PropertyName == nameof(MainWindowViewModel.ClipSpeed)) ApplyEditorSpeedPreview();
+                    if (e.PropertyName is nameof(MainWindowViewModel.ClipCropMode)
                         or nameof(MainWindowViewModel.ClipCropOffsetX)
-                        or nameof(MainWindowViewModel.ClipCropOffsetY)) ApplyEditorEffectPreview();
+                        or nameof(MainWindowViewModel.ClipCropOffsetY)) QueueEditorCropPreview();
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible)
                         or nameof(MainWindowViewModel.IsEditorVisible)
                         or nameof(MainWindowViewModel.SelectedVideoPath)
@@ -6570,10 +6586,15 @@ public sealed partial class MainWindow : Window
     // of it would simply not be visible.
     private void ApplyEditorEffectPreview()
     {
+        ApplyEditorSpeedPreview();
+        QueueEditorCropPreview(flush: true);
+    }
+
+    private void ApplyEditorSpeedPreview()
+    {
         if (_playback is not { } playback || ViewModel is not { } viewModel) return;
         var rateChanged = playback.SetPlaybackRate(viewModel.ClipSpeed);
         if (viewModel.IsPlaying && rateChanged) RebasePlayheadClock(viewModel.CurrentTime);
-        ApplyEditorCropPreview();
     }
 
     // Shows what a crop will KEEP by dimming what it will cut, rather than
@@ -6590,25 +6611,99 @@ public sealed partial class MainWindow : Window
     // flip-model swapchain, which bypasses DWM's redirection for that region.
     // No amount of z-order guarding touches it; only drawing inside the picture
     // does. See CropMaskImage.
-    private void ApplyEditorCropPreview()
+    private void QueueEditorCropPreview(bool flush = false)
     {
         if (_playback is not { } playback) return;
         if (ViewModel is not { } viewModel || !viewModel.IsClipCropActive ||
             viewModel.ActiveCropRect is not { } crop)
         {
+            _cropPreviewGeneration++;
+            _pendingCropPreview = null;
+            _cropPreviewTimer.Stop();
             playback.SetCropMaskImage(null);
-            CropMaskImage.Prune(EditorCropMaskDirectory, keepPath: null);
             return;
         }
 
-        var path = CropMaskImage.TryWrite(
-            EditorCropMaskDirectory, crop, viewModel.SelectedSourceWidth, viewModel.SelectedSourceHeight);
-        playback.SetCropMaskImage(path);
-        CropMaskImage.Prune(EditorCropMaskDirectory, path);
+        _pendingCropPreview = new CropPreviewRequest(
+            ++_cropPreviewGeneration,
+            crop,
+            viewModel.SelectedSourceWidth,
+            viewModel.SelectedSourceHeight);
+        if (_cropPreviewRenderInFlight) return;
+
+        var elapsed = _cropPreviewThrottle.Elapsed;
+        if (flush || !_cropPreviewThrottle.IsRunning || elapsed >= CropPreviewMinimumInterval)
+        {
+            StartPendingCropPreview();
+            return;
+        }
+
+        _cropPreviewTimer.Interval = CropPreviewMinimumInterval - elapsed;
+        _cropPreviewTimer.Start();
+    }
+
+    private void StartPendingCropPreview()
+    {
+        if (_cropPreviewRenderInFlight || _pendingCropPreview is not { } request) return;
+        _pendingCropPreview = null;
+        _cropPreviewTimer.Stop();
+        _cropPreviewRenderInFlight = true;
+        _cropPreviewThrottle.Restart();
+        _ = RenderAndApplyCropPreviewAsync(request);
+    }
+
+    private async Task RenderAndApplyCropPreviewAsync(CropPreviewRequest request)
+    {
+        var renderClock = Stopwatch.StartNew();
+        var path = await Task.Run(() => CropMaskImage.TryWrite(
+            EditorCropMaskDirectory, request.Crop, request.SourceWidth, request.SourceHeight)).ConfigureAwait(false);
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            _cropPreviewRenderInFlight = false;
+            // A completed in-drag mask is useful feedback even when a newer
+            // position is already queued. Outside a drag, only the latest
+            // geometry may land; aspect clicks and Reset must not flash stale.
+            var isCurrent = request.Generation == _cropPreviewGeneration;
+            if ((_cropPreviewDragActive || isCurrent) &&
+                _playback is { } playback && ViewModel is { IsClipCropActive: true })
+            {
+                playback.SetCropMaskImage(path);
+                _ = Task.Run(() => CropMaskImage.Prune(EditorCropMaskDirectory, path));
+                AppLog.Debug($"Editor crop preview: renderMs={renderClock.ElapsedMilliseconds}, current={isCurrent}, drag={_cropPreviewDragActive}.");
+            }
+
+            if (_pendingCropPreview is not null) StartPendingCropPreview();
+        });
+    }
+
+    private void CropPositionSlider_OnPointerPressed(object? sender, PointerPressedEventArgs e) =>
+        _cropPreviewDragActive = true;
+
+    private void CropPositionSlider_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        _cropPreviewDragActive = false;
+        QueueEditorCropPreview(flush: true);
+    }
+
+    private void ResetEditorCropPreview()
+    {
+        _cropPreviewGeneration++;
+        _pendingCropPreview = null;
+        _cropPreviewTimer.Stop();
+        _cropPreviewDragActive = false;
+        _playback?.SetCropMaskImage(null);
+        _ = Task.Run(() => CropMaskImage.Prune(EditorCropMaskDirectory, keepPath: null, maximumFiles: 0));
     }
 
     private static string EditorCropMaskDirectory =>
         Path.Combine(Path.GetTempPath(), "ClypDat", "crop-mask");
+
+    private readonly record struct CropPreviewRequest(
+        int Generation,
+        ClipRenderFilters.CropRect Crop,
+        int SourceWidth,
+        int SourceHeight);
 
     private async Task ShareCurrentClipAsync()
     {
@@ -8030,6 +8125,7 @@ public sealed partial class MainWindow : Window
         _keyboardSeekActive = false;
         _editorSeekInFlight = false;
         _endedAtTrimBoundary = false;
+        ResetEditorCropPreview();
         // Stop and detach the view instead of disposing - the session (and its
         // underlying LibVLC engine) stays alive and gets reused on the next
         // editor open instead of being torn down and rebuilt from scratch.
