@@ -545,7 +545,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         new("Avalonia", "https://github.com/AvaloniaUI/Avalonia", "MIT License", "https://opensource.org/license/mit"),
         new("NAudio", "https://github.com/naudio/NAudio", "MIT License", "https://opensource.org/license/mit"),
         new("Vortice.Windows", "https://github.com/amerkoleci/Vortice.Windows", "MIT License", "https://opensource.org/license/mit"),
-        new("FFmpeg.AutoGen", "https://github.com/Ruslan-B/FFmpeg.AutoGen", "MIT License", "https://opensource.org/license/mit")
+        new("FFmpeg.AutoGen", "https://github.com/Ruslan-B/FFmpeg.AutoGen", "MIT License", "https://opensource.org/license/mit"),
+        // The microphone noise suppression model shipped in rnnoise/lq.rnnn is
+        // a data file rather than a library, but it is bundled in every build
+        // and so belongs in the same list as the code is.
+        new("RNNoise", "https://github.com/xiph/rnnoise", "BSD 3-Clause", "https://opensource.org/license/bsd-3-clause"),
+        new("rnnoise-models", "https://github.com/GregorR/rnnoise-models", "Public Domain", "https://github.com/GregorR/rnnoise-models#readme")
     };
 
     public int ReplayCaptureX { get; set; }
@@ -5858,16 +5863,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void ApplyDiscordSettings()
     {
-        DiscordRichPresenceService.Configure(Settings.DiscordRichPresenceEnabled, ResolvedDiscordApplicationId);
+        DiscordRichPresenceService.Configure(Settings.DiscordRichPresenceEnabled);
         UpdateDiscordPresence();
     }
-
-    // Settings override first so a fork can point at its own application, then
-    // the built-in id.
-    private string ResolvedDiscordApplicationId =>
-        string.IsNullOrWhiteSpace(Settings.DiscordApplicationId)
-            ? DiscordRichPresenceService.DefaultApplicationId
-            : Settings.DiscordApplicationId.Trim();
 
     public void UpdateDiscordPresence()
     {
@@ -5929,19 +5927,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public string DiscordApplicationId
-    {
-        get => Settings.DiscordApplicationId;
-        set
-        {
-            var id = (value ?? string.Empty).Trim();
-            if (string.Equals(Settings.DiscordApplicationId, id, StringComparison.Ordinal)) return;
-            Settings.DiscordApplicationId = id;
-            OnPropertyChanged();
-            SaveSettings();
-            ApplyDiscordSettings();
-        }
-    }
+
 
     /// <summary>
     /// False when the game in the foreground has its Recording Mode set to

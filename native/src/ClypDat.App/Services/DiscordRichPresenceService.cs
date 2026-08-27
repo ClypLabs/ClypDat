@@ -31,12 +31,14 @@ internal static class DiscordRichPresenceService
     private const int MaxPipeIndex = 9;
 
     /// <summary>
-    /// ClypDat's own Discord application. Used unless a build overrides it in
-    /// settings - the id is not a secret (every client that shows the presence
-    /// sends it in the clear), it just has to match the application whose name
-    /// and artwork should appear.
+    /// ClypDat's own Discord application - the identity the status is published
+    /// under. Fixed rather than configurable: pointing it at another
+    /// application would show that application's name and artwork while still
+    /// broadcasting ClypDat's activity, which is not something to leave as a
+    /// text box. Not a secret either way; every client showing the presence
+    /// receives it in the clear.
     /// </summary>
-    public const string DefaultApplicationId = "1542340384418439189";
+    private const string ApplicationId = "1542340384418439189";
 
     // SET_ACTIVITY is rate limited by Discord to roughly five updates per
     // twenty seconds. Updates are coalesced to comfortably inside that: going
@@ -51,7 +53,6 @@ internal static class DiscordRichPresenceService
     private static readonly object Sync = new();
     private static readonly SemaphoreSlim Wake = new(0, 1);
 
-    private static string _applicationId = string.Empty;
     private static bool _enabled;
     private static DiscordPresence _desired = DiscordPresence.None;
     private static DiscordPresence? _sent;
@@ -62,17 +63,15 @@ internal static class DiscordRichPresenceService
     /// Applies the user's settings. Safe to call on every settings save: it
     /// only restarts the worker when something it actually depends on changed.
     /// </summary>
-    public static void Configure(bool enabled, string? applicationId)
+    public static void Configure(bool enabled)
     {
-        var id = (applicationId ?? string.Empty).Trim();
         lock (Sync)
         {
-            if (_enabled == enabled && string.Equals(_applicationId, id, StringComparison.Ordinal)) return;
+            if (_enabled == enabled) return;
             _enabled = enabled;
-            _applicationId = id;
         }
 
-        if (!enabled || id.Length == 0)
+        if (!enabled)
         {
             Stop();
             return;
@@ -174,10 +173,6 @@ internal static class DiscordRichPresenceService
 
     private static async Task<NamedPipeClientStream?> ConnectAsync(CancellationToken cancellationToken)
     {
-        string applicationId;
-        lock (Sync) applicationId = _applicationId;
-        if (applicationId.Length == 0) return null;
-
         for (var index = 0; index <= MaxPipeIndex; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -202,7 +197,7 @@ internal static class DiscordRichPresenceService
             try
             {
                 await WriteFrameAsync(pipe, Opcode.Handshake,
-                    JsonSerializer.Serialize(new { v = 1, client_id = applicationId }), cancellationToken).ConfigureAwait(false);
+                    JsonSerializer.Serialize(new { v = 1, client_id = ApplicationId }), cancellationToken).ConfigureAwait(false);
                 AppLog.Info($"Discord Rich Presence: connected on discord-ipc-{index}.");
                 return pipe;
             }

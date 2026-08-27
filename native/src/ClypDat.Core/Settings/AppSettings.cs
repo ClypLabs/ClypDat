@@ -198,9 +198,6 @@ public sealed class AppSettings
     // application id resolves - so an install where Discord is not running, or
     // where the id has been cleared, is simply silent.
     public bool DiscordRichPresenceEnabled { get; set; } = true;
-    // Overridable so a fork or a self-hosted build can point at its own Discord
-    // application without a code change; empty means "use the built-in id".
-    public string DiscordApplicationId { get; set; } = string.Empty;
     // Separate from EnableClipOverlay - "clipping started" is a distinct
     // notification kind (fires when the buffer actually starts recording a
     // detected game) from the clip-saved family, and a user may want one
