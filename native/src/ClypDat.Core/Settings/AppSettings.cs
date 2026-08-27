@@ -270,6 +270,20 @@ public sealed class ClipEditSettings
     // it and closing the editor silently threw the text away. Sidecars written
     // before this simply deserialize it as empty.
     public string Description { get; set; } = string.Empty;
+    // Editor effects. Defaults are deliberately "no effect" values rather than
+    // type defaults - a sidecar written before these existed deserializes
+    // SpeedMultiplier as 0, which would mean "infinitely long clip" everywhere
+    // it divides. Load normalizes it (see ApplyClipEditState).
+    public double SpeedMultiplier { get; set; } = 1.0;
+    // "None", or an aspect key from ClipRenderFilters.CropModes ("16:9",
+    // "9:16", "1:1", "4:5"). Stored as the key rather than a computed pixel
+    // rect so the same sidecar still means the right thing if the clip is ever
+    // re-encoded at a different resolution.
+    public string CropMode { get; set; } = "None";
+    // Where the crop window sits within the source frame, 0..1 on each axis.
+    // 0.5 is centred, which is what an aspect crop should default to.
+    public double CropOffsetX { get; set; } = 0.5;
+    public double CropOffsetY { get; set; } = 0.5;
 }
 
 // One game's overrides. Values are seeded from the user's current global

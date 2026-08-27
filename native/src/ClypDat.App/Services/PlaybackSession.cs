@@ -25,6 +25,10 @@ public sealed class PlaybackSession : IDisposable
     // startup - stays applied across every clip opened afterward in this
     // session, not just the one that was loaded when it was set.
     private double _masterVolumePercent = 100;
+    // Editor clip-speed preview. Survives RebuildAudioOutput for the same
+    // reason _masterVolumePercent does - the chain is torn down and rebuilt on
+    // every clip load, and the rate the user set has to come back with it.
+    private double _playbackRate = 1.0;
     private Media? _videoMedia;
     private volatile bool _disposed;
     // Generous on purpose: a preview decode holding _seekLock is bounded work, and
@@ -232,6 +236,11 @@ public sealed class PlaybackSession : IDisposable
         VideoPlayer.Media = _videoMedia;
         VideoPlayer.Mute = true;
         VideoPlayer.Volume = 0;
+        // A fresh Media drops libvlc's rate back to 1x, so the cached value has
+        // to go with it - otherwise the editor's re-apply for the newly opened
+        // clip would see "already 2x" and skip itself, leaving the picture at 1x
+        // while the sidebar says 2x.
+        _playbackRate = 1.0;
 
         // Network-drive diagnostics: size + storage type up front, so slow
         // opens in the log can immediately be attributed (or not) to the file
@@ -697,6 +706,63 @@ public sealed class PlaybackSession : IDisposable
         if (_masterVolume is not null) _masterVolume.Volume = VolumeCurve(percent);
     }
 
+    /// <summary>
+    /// Editor clip-speed preview: libvlc's own rate for the picture, and the
+    /// editor's mixed audio held silent for as long as the rate is not 1x.
+    /// </summary>
+    /// <remarks>
+    /// Time-stretching this audio in the preview was tried and removed. The
+    /// editor does not play sound through libvlc - it decodes each track itself
+    /// into a NAudio mixer (see RebuildAudioOutput) and keeps that mixer aligned
+    /// to libvlc's clock by comparing the output device's hardware position
+    /// against MediaPlayer.Time (ObserveAudioDrift). Re-timing the audio breaks
+    /// both halves of that arrangement at once: the tempo stage has to be spliced
+    /// mid-chain, which NAudio can only do by rebuilding the graph - tearing down
+    /// a WasapiOut mid-playback, off the load gate that every other path holds -
+    /// and every byte the device consumes then covers a different amount of media
+    /// time, so the drift corrector starts issuing seeks against a clock that no
+    /// longer means what it did. Stuttering, garbled audio and a picture that
+    /// jumps around were the result.
+    ///
+    /// Silence is the honest trade. The rate change is about seeing the motion,
+    /// the export carries the real re-timed audio (ffmpeg's atempo, see
+    /// ClipRenderFilters.BuildAudioSpeedFilter), and nothing in the running
+    /// pipeline has to be rebuilt to get there.
+    /// </remarks>
+    public void SetPlaybackRate(double rate)
+    {
+        var normalized = ClipRenderFilters.NormalizeSpeed(rate);
+        if (Math.Abs(_playbackRate - normalized) < 0.0001) return;
+        var wasSilenced = ClipRenderFilters.IsSpeedActive(_playbackRate);
+        _playbackRate = normalized;
+
+        try { VideoPlayer.SetRate((float)normalized); }
+        catch (Exception error) { AppLog.Error($"Editor playback rate failed: {normalized:0.###}x", error); }
+
+        if (ClipRenderFilters.IsSpeedActive(normalized))
+        {
+            SilenceAudioForRate();
+        }
+        else if (wasSilenced && _shouldPlay)
+        {
+            // Back at 1x: pick the audio up from where the picture actually got
+            // to, not from where it was when the rate changed.
+            var resumeAt = Position;
+            SeekAudio(resumeAt);
+            StartAudioAt(resumeAt, Interlocked.Read(ref _seekVersion));
+        }
+
+        AppLog.Debug($"Editor playback rate: {normalized:0.###}x, audio={(ClipRenderFilters.IsSpeedActive(normalized) ? "silenced" : "live")}.");
+    }
+
+    private void SilenceAudioForRate()
+    {
+        StopAudioClockMonitoring();
+        if (_audioOutput is null) return;
+        try { _audioOutput.Pause(); }
+        catch (Exception error) { AppLog.Error("Editor audio pause for rate change failed (recovered)", error); }
+    }
+
     public void SetTrackVolume(int streamIndex, double percent)
     {
         _audioVolumes[streamIndex] = percent;
@@ -845,6 +911,14 @@ public sealed class PlaybackSession : IDisposable
     private void StartAudioAt(TimeSpan anchor, long generation)
     {
         if (_audioOutput is null) return;
+        // Every play/seek/resume path funnels through here, so gating the rate
+        // once at this point covers all of them - rather than each caller having
+        // to remember that a sped-up clip plays silent (see SetPlaybackRate).
+        if (ClipRenderFilters.IsSpeedActive(_playbackRate))
+        {
+            SilenceAudioForRate();
+            return;
+        }
         StopAudioClockMonitoring();
         _audioOutput.Play();
         _audioAnchorMediaTime = anchor;

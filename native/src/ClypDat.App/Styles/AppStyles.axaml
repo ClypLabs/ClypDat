@@ -1241,6 +1241,58 @@
     <Setter Property="Background" Value="{StaticResource AccentBrushHover}" />
   </Style>
 
+  <!-- Pills sized for the editor sidebar rather than for the onboarding pages
+       the base style was drawn for: six speed presets have to sit in a 340px
+       column without wrapping to three rows. -->
+  <Style Selector="ListBox.pillGroup.compactPills ListBoxItem">
+    <Setter Property="Padding" Value="11,6" />
+    <Setter Property="Margin" Value="0,0,6,6" />
+    <Setter Property="FontSize" Value="12.5" />
+  </Style>
+
+  <!-- Effect cards in the editor sidebar. editorCardLabel is the heading inside
+       one; effectPending is a card for a tool that is named but not built yet,
+       dimmed and inert so it reads as a roadmap entry rather than a broken
+       control. -->
+  <Style Selector="TextBlock.editorCardLabel">
+    <Setter Property="Foreground" Value="#9EC6F0" />
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+  <Style Selector="Border.editorInspectorCard.effectPending">
+    <Setter Property="Opacity" Value="0.55" />
+    <Setter Property="IsHitTestVisible" Value="False" />
+  </Style>
+  <Style Selector="Border.comingSoonTag">
+    <Setter Property="Background" Value="#1D2B38" />
+    <Setter Property="BorderBrush" Value="#31546A" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="5" />
+    <Setter Property="Padding" Value="6,2" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.comingSoonTag TextBlock">
+    <Setter Property="Foreground" Value="#72B9EA" />
+    <Setter Property="FontSize" Value="9.5" />
+    <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+
+  <!-- Reads as state, not as a button: the effects are set in the Effects
+       section, this only says what is currently on. -->
+  <Style Selector="Border.effectsBadge">
+    <Setter Property="Background" Value="#1B2E24" />
+    <Setter Property="BorderBrush" Value="#2F5B45" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="Padding" Value="7,2" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.effectsBadge TextBlock">
+    <Setter Property="Foreground" Value="#8BD9AE" />
+    <Setter Property="FontSize" Value="10.5" />
+    <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+
   <Style Selector="Border.audioProcessList">
     <Setter Property="Background" Value="#111923" />
     <Setter Property="BorderBrush" Value="#263644" />
@@ -1625,14 +1677,19 @@
   <!-- Editor rail swaps library filters for larger labelled tools. The label
        makes the mode readable at a glance while the 64px hit area stays easy
        to use on touchpads and high-DPI displays. -->
+  <!-- 48 wide and centred, not 64 wide with a left margin: the rail itself is
+       64 (EditorSidebarWidth), so a 64-wide button pushed 8px right hung 8px
+       off the other edge - the highlight sat visibly closer to the left of the
+       rail than the right, and the right corner radius was clipped away. -->
   <Style Selector="Button.editorRailButton">
     <Setter Property="Background" Value="#0026323D" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="10" />
-    <Setter Property="Width" Value="64" />
-    <Setter Property="Height" Value="62" />
+    <Setter Property="Width" Value="48" />
+    <Setter Property="Height" Value="58" />
     <Setter Property="Padding" Value="0" />
-    <Setter Property="Margin" Value="8,0,0,0" />
+    <Setter Property="Margin" Value="0" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
     <Setter Property="Foreground" Value="#AAB8C8" />

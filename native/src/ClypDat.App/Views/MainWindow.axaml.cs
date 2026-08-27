@@ -120,6 +120,10 @@ public sealed partial class MainWindow : Window
     public bool AllowRealClose { get; set; }
     private List<(double StartSeconds, double EndSeconds)> _pausedRanges = new();
     private Window? _recordingPausedOverlay;
+    private Window? _editorCropOverlay;
+    private Canvas? _editorCropCanvas;
+    private readonly Border[] _editorCropShades = new Border[4];
+    private Border? _editorCropOutline;
     // Top-level dialogs need their own native window to cover VLC's video
     // surface. While one is up, editor-owned overlays must stay down rather
     // than polling/repositioning themselves back above the dialog.
@@ -160,7 +164,6 @@ public sealed partial class MainWindow : Window
         "Intermission. Please admire the silence."
     };
     private Window? _editorHoverControlsWindow;
-    private Window? _editorToolsPanelWindow;
     private DispatcherTimer? _hoverControlsHideTimer;
     // Grace between the pointer leaving the video (and the bar) and the bar
     // going away. Short enough to still read as "leaves as soon as you do",
@@ -192,7 +195,6 @@ public sealed partial class MainWindow : Window
     private int _hoverControlsAnimationId;
     private bool _hoverControlsAnimationRunning;
     private bool _hoverControlsSlidingOut;
-    private DispatcherTimer? _editorToolsPanelResizeSettleTimer;
     private string? _libraryResizeAnchorPath;
     private DispatcherTimer? _libraryResizeAnchorSettleTimer;
     private int _libraryResizeAnchorGeneration;
@@ -372,13 +374,15 @@ public sealed partial class MainWindow : Window
                         StartLibraryReturnTiming("Settings");
                     }
                     if (e.PropertyName == nameof(MainWindowViewModel.StartupLibraryIndexVersion)) QueueDateScrubberRebuild();
+                    if (e.PropertyName is nameof(MainWindowViewModel.ClipSpeed)
+                        or nameof(MainWindowViewModel.ClipCropMode)
+                        or nameof(MainWindowViewModel.ClipCropOffsetX)
+                        or nameof(MainWindowViewModel.ClipCropOffsetY)) ApplyEditorEffectPreview();
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible)
                         or nameof(MainWindowViewModel.IsEditorVisible)
                         or nameof(MainWindowViewModel.SelectedVideoPath)
                         or nameof(MainWindowViewModel.IsGameFilterActive)
                         or nameof(MainWindowViewModel.IsClipTypeFilterActive)) OnViewHistoryStateChanged();
-                    if (e.PropertyName is nameof(MainWindowViewModel.IsEditorVisible)
-                        or nameof(MainWindowViewModel.ActiveEditorSidebarSection)) SyncEditorToolsPanel();
                 };
                 foreach (var autoClipGame in ViewModel.AutoClipGames)
                 {
@@ -451,7 +455,6 @@ public sealed partial class MainWindow : Window
                 // Closing to tray is a navigation reset, not a suspended
                 // editor. Reopening ClypDat must always return to Library.
                 ViewModel?.CloseEditor();
-                HideEditorToolsPanel();
                 Hide();
                 ShowInTaskbar = false;
             }
@@ -475,9 +478,8 @@ public sealed partial class MainWindow : Window
             _replayBuffer?.Dispose();
             _playback?.Dispose();
             _recordingPausedOverlay?.Close();
+            _editorCropOverlay?.Close();
             _editorHoverControlsWindow?.Close();
-            _editorToolsPanelWindow?.Close();
-            _editorToolsPanelResizeSettleTimer?.Stop();
             EditorVideoView.DisposeClickHandling();
             ViewModel?.Dispose();
         };
@@ -1628,7 +1630,6 @@ public sealed partial class MainWindow : Window
         // brings it straight back, correctly placed, once the drag stops and
         // the layout has settled.
         SuspendHoverControlsForResize();
-        SuspendEditorToolsPanelForResize();
         CaptureLibraryResizeAnchor();
         if (ViewModel?.IsLibraryVisible == true && _libraryResizeAnchorPath is not null)
         {
@@ -3155,6 +3156,10 @@ public sealed partial class MainWindow : Window
 
     private void NewClipsCloseButton_OnClick(object? sender, RoutedEventArgs e) => DismissNewClipsDialog();
 
+    // Gates PollEditorHoverControls - the floating bar is a separate always-on-top
+    // window over the video, so with Share up it punched through the dimmed
+    // backdrop and sat on top of the dialog. Down for as long as Share is
+    // open, back on its own the moment the poll sees this clear again.
     private bool IsEditorSurfaceCovered => _editorSurfaceCoverCount > 0;
 
     private void CoverEditorSurface()
@@ -3162,11 +3167,13 @@ public sealed partial class MainWindow : Window
         _editorSurfaceCoverCount++;
         HideEditorHoverControls(immediate: true);
         _recordingPausedOverlay?.Hide();
+        _editorCropOverlay?.Hide();
     }
 
     private void UncoverEditorSurface()
     {
         if (_editorSurfaceCoverCount > 0) _editorSurfaceCoverCount--;
+        if (_editorSurfaceCoverCount == 0) SyncEditorCropOverlay();
     }
 
     private void CoverEditorSurfaceForNewClips()
@@ -4842,11 +4849,7 @@ public sealed partial class MainWindow : Window
             // trusting IsVisible state the OS invalidated while minimized.
             HideEditorHoverControls(immediate: true);
             _recordingPausedOverlay?.Hide();
-            SyncEditorToolsPanel();
-        }
-        else if (change.Property == WindowStateProperty && WindowState == WindowState.Minimized)
-        {
-            HideEditorToolsPanel();
+            _editorCropOverlay?.Hide();
         }
 
         if (change.Property == WindowStateProperty && MaximizeRestoreButton?.Content is PathIcon icon)
@@ -5006,7 +5009,6 @@ public sealed partial class MainWindow : Window
         _preFullscreenWindowState = WindowState;
         WindowState = WindowState.FullScreen;
         ViewModel?.SetVideoFullscreen(true);
-        HideEditorToolsPanel();
         HideEditorHoverControls(immediate: true);
         // Same reparent hazard as the hover bar above - hide the badge before
         // the Remove/Add below instead of leaving it to reposition itself
@@ -5014,6 +5016,7 @@ public sealed partial class MainWindow : Window
         // (and re-shown if still applicable) by the next timer tick or layout
         // event once the view has settled into FullscreenVideoHost.
         _recordingPausedOverlay?.Hide();
+        _editorCropOverlay?.Hide();
 
         // Move the SAME EditorVideoView (already playing) into the
         // fullscreen host instead of hot-swapping MediaPlayer onto a second
@@ -5074,7 +5077,6 @@ public sealed partial class MainWindow : Window
         FullscreenVideoHost.Children.Remove(EditorVideoView);
         EditorVideoHost.Children.Insert(0, EditorVideoView);
         Dispatcher.UIThread.Post(EditorVideoView.RefreshClickHook, DispatcherPriority.Loaded);
-        Dispatcher.UIThread.Post(SyncEditorToolsPanel, DispatcherPriority.Loaded);
         AppLog.Info("Video fullscreen exited: EditorVideoView reparented back into EditorVideoHost.");
     }
 
@@ -6548,109 +6550,6 @@ public sealed partial class MainWindow : Window
     // of. A separate window sized/positioned to exactly cover this one
     // (done in ShareDialog itself) sits above that airspace the same way the
     // floating hover bar already does.
-    // Gates PollEditorHoverControls - the floating bar is a separate always-on-top
-    // window over the video, so with Share up it punched through the dimmed
-    // backdrop and sat on top of the dialog. Down for as long as Share is
-    // open, back on its own the moment the poll sees this clear again.
-    private const double EditorToolsPanelWidth = 340;
-
-    private void SyncEditorToolsPanel()
-    {
-        // Clip Details is now a permanent child of the editor grid. Keeping it
-        // in-process avoids a separate native window that could be hidden or
-        // detached from the layout during resize.
-    }
-
-    private void HideEditorToolsPanel()
-    {
-        if (_editorToolsPanelWindow?.IsVisible == true) _editorToolsPanelWindow.Hide();
-    }
-
-    // A native owned window cannot follow a changing Avalonia layout frame by
-    // frame without tearing. Keep the selected drawer section open, hide the
-    // native surface during the drag, then restore it once the video rect has
-    // settled.
-    private void SuspendEditorToolsPanelForResize()
-    {
-        if (ViewModel?.ActiveEditorSidebarSection is null) return;
-        HideEditorToolsPanel();
-        _editorToolsPanelResizeSettleTimer ??= new DispatcherTimer
-        {
-            Interval = HoverControlsResizeSettle
-        };
-        _editorToolsPanelResizeSettleTimer.Stop();
-        _editorToolsPanelResizeSettleTimer.Tick -= EditorToolsPanelResizeSettleTimer_OnTick;
-        _editorToolsPanelResizeSettleTimer.Tick += EditorToolsPanelResizeSettleTimer_OnTick;
-        _editorToolsPanelResizeSettleTimer.Start();
-    }
-
-    private void EditorToolsPanelResizeSettleTimer_OnTick(object? sender, EventArgs e)
-    {
-        _editorToolsPanelResizeSettleTimer?.Stop();
-        SyncEditorToolsPanel();
-    }
-
-    private void RepositionEditorToolsPanelSafe(bool force = false)
-    {
-        if (_editorToolsPanelWindow is not { IsVisible: true } panel) return;
-        try { RepositionEditorToolsPanel(panel, force); }
-        catch (Exception error) { AppLog.Error("Editor tools panel reposition failed (recovered)", error); }
-    }
-
-    private void RepositionEditorToolsPanel(Window panel, bool force)
-    {
-        if (EditorVideoHost.Bounds.Width <= 0 || EditorVideoHost.Bounds.Height <= 0) return;
-        var topLeft = EditorVideoHost.PointToScreen(new Point(0, 0));
-        var bottomRight = EditorVideoHost.PointToScreen(new Point(EditorVideoHost.Bounds.Width, EditorVideoHost.Bounds.Height));
-        var height = Math.Max(1, bottomRight.Y - topLeft.Y);
-        var scaling = RenderScaling > 0 ? RenderScaling : 1;
-        var nativeWidth = Math.Max(1, (int)Math.Round(EditorToolsPanelWidth * scaling, MidpointRounding.AwayFromZero));
-        var handle = NativeHandleOf(panel);
-        if (!force && handle != IntPtr.Zero && GetWindowRect(handle, out var rect) &&
-            rect.Left == topLeft.X && rect.Top == topLeft.Y &&
-            rect.Right - rect.Left == nativeWidth && rect.Bottom == bottomRight.Y) return;
-
-        panel.Position = topLeft;
-        panel.Width = EditorToolsPanelWidth;
-        panel.Height = height / scaling;
-        // PointToScreen and native bounds are physical pixels. Drive this
-        // window with that same coordinate system so its lower edge exactly
-        // meets the video/timeline separator at every DPI scale.
-        if (handle != IntPtr.Zero)
-            SetWindowPos(handle, HwndTop, topLeft.X, topLeft.Y, nativeWidth, height, SwpNoActivate);
-    }
-
-    private Window EnsureEditorToolsPanelWindow()
-    {
-        if (_editorToolsPanelWindow is not null) return _editorToolsPanelWindow;
-
-        var tools = new EditorToolsPanel { DataContext = DataContext };
-        tools.CloseRequested += (_, _) => ViewModel?.CloseEditorSidebar();
-        tools.TitleSubmitted += async (_, _) => await SubmitEditorTitleAsync();
-        tools.SaveTrimRequested += async (_, _) => await SaveTrimToOriginalAsync();
-        tools.ExportRequested += async (_, _) => await ExportCurrentClipAsync();
-        tools.ShareRequested += async (_, _) => await ShareCurrentClipAsync();
-        var window = new Window
-        {
-            WindowDecorations = WindowDecorations.None,
-            ShowInTaskbar = false,
-            CanResize = false,
-            ShowActivated = false,
-            Topmost = false,
-            Background = Brushes.Transparent,
-            TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
-            DataContext = DataContext,
-            Content = tools
-        };
-        window.Opened += (_, _) =>
-        {
-            RepositionEditorToolsPanel(window, force: true);
-            ApplyCaptureExclusion(window, exclude: false);
-        };
-        _editorToolsPanelWindow = window;
-        return window;
-    }
-
     private async void ShareButton_OnClick(object? sender, RoutedEventArgs e)
     {
         await ShareCurrentClipAsync();
@@ -6668,12 +6567,188 @@ public sealed partial class MainWindow : Window
     private async void EditorShareSidebarButton_OnClick(object? sender, RoutedEventArgs e) =>
         await ShareCurrentClipAsync();
 
+    private void ResetClipEffectsButton_OnClick(object? sender, RoutedEventArgs e) =>
+        ViewModel?.ResetClipEffects();
+
+    private void ResetClipCropPositionButton_OnClick(object? sender, RoutedEventArgs e) =>
+        ViewModel?.ResetClipCropPosition();
+
+    // Effects are previewed by libvlc itself, not by anything Avalonia draws:
+    // the picture is a native child window that paints over every sibling
+    // regardless of z-order (see ClickableVideoView), so a crop mask laid on top
+    // of it would simply not be visible.
+    private void ApplyEditorEffectPreview()
+    {
+        if (_playback is not { } playback || ViewModel is not { } viewModel) return;
+        playback.SetPlaybackRate(viewModel.ClipSpeed);
+        SyncEditorCropOverlay();
+    }
+
+    // Shows what a crop will KEEP by dimming what it will cut, rather than
+    // actually cropping the picture. Cropping the preview outright (libvlc's
+    // own CropGeometry, which is what this did first) answers "what will the
+    // output look like" but destroys the only thing the position sliders need
+    // to be usable: you cannot aim a crop window at something you can no longer
+    // see. The dim edges are the frame being thrown away.
+    //
+    // It has to be an owned window for the same reason the hover bar and the
+    // paused badge are: the picture is a native child HWND that paints over
+    // every Avalonia sibling regardless of z-order, so a mask drawn in this
+    // window's own visual tree would simply be invisible.
+    private Window EnsureEditorCropOverlay()
+    {
+        if (_editorCropOverlay is not null) return _editorCropOverlay;
+
+        var canvas = new Canvas();
+        // Deliberately light. This is a guide, not a letterbox: the whole point
+        // of shading instead of cropping the preview is that the part being cut
+        // stays readable, so you can see what you are about to lose and move the
+        // crop window onto what matters.
+        var shade = new SolidColorBrush(Color.FromArgb(0x66, 0, 0, 0));
+        for (var index = 0; index < _editorCropShades.Length; index++)
+        {
+            var border = new Border { Background = shade, IsHitTestVisible = false };
+            _editorCropShades[index] = border;
+            canvas.Children.Add(border);
+        }
+
+        _editorCropOutline = new Border
+        {
+            BorderBrush = new SolidColorBrush(Color.Parse("#7FB4E8")),
+            BorderThickness = new Thickness(1),
+            IsHitTestVisible = false,
+        };
+        canvas.Children.Add(_editorCropOutline);
+
+        var overlay = new Window
+        {
+            WindowDecorations = WindowDecorations.None,
+            ShowInTaskbar = false,
+            CanResize = false,
+            ShowActivated = false,
+            Topmost = false,
+            Background = Brushes.Transparent,
+            TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
+            Content = canvas,
+        };
+        overlay.Opened += (_, _) =>
+        {
+            OverlayTransparencyDiagnostics.Log(overlay, "editor-crop");
+            // Purely a readout - clicking the dimmed area still has to reach the
+            // video underneath and play/pause it, exactly as it does with no
+            // crop set.
+            MakeWindowNonActivating(overlay);
+            MakeWindowClickThrough(overlay);
+        };
+
+        _editorCropOverlay = overlay;
+        _editorCropCanvas = canvas;
+        return overlay;
+    }
+
+    private void SyncEditorCropOverlay()
+    {
+        if (ViewModel is not { } viewModel || !viewModel.IsEditorVisible || viewModel.IsVideoFullscreen ||
+            !viewModel.IsClipCropActive || viewModel.ActiveCropRect is not { } crop || IsEditorSurfaceCovered)
+        {
+            _editorCropOverlay?.Hide();
+            return;
+        }
+
+        var overlay = EnsureEditorCropOverlay();
+        var wasHidden = !overlay.IsVisible;
+        if (!LayoutEditorCropOverlay(overlay, crop, viewModel)) return;
+        if (wasHidden)
+        {
+            overlay.Show(this);
+            ApplyCaptureExclusion(overlay, exclude: false);
+        }
+        // The mask claims the top of the owner's z-band when it shows, so the
+        // hover bar has to be put back above it - same handshake the paused
+        // badge does.
+        RepositionEditorHoverControlsSafe(force: true);
+    }
+
+    private bool LayoutEditorCropOverlay(Window overlay, ClipRenderFilters.CropRect crop, MainWindowViewModel viewModel)
+    {
+        // PointToScreen throws while EditorVideoView is momentarily detached
+        // (the fullscreen reparent), and this runs from plain layout events with
+        // no recovery of their own.
+        try
+        {
+            var topLeft = EditorVideoView.PointToScreen(new Point(0, 0));
+            var bottomRight = EditorVideoView.PointToScreen(new Point(EditorVideoView.Bounds.Width, EditorVideoView.Bounds.Height));
+            var scaling = overlay.RenderScaling > 0 ? overlay.RenderScaling : 1;
+            var viewWidth = Math.Max(1, (bottomRight.X - topLeft.X) / scaling);
+            var viewHeight = Math.Max(1, (bottomRight.Y - topLeft.Y) / scaling);
+
+            var sourceWidth = viewModel.SelectedSourceWidth;
+            var sourceHeight = viewModel.SelectedSourceHeight;
+            if (sourceWidth <= 0 || sourceHeight <= 0) return false;
+
+            // The video is letterboxed inside its view, and the crop is a
+            // fraction of the PICTURE, not of the view - shading against the
+            // view's own bounds would put the mask edges in the wrong place on
+            // any clip whose aspect does not match the pane.
+            var sourceAspect = (double)sourceWidth / sourceHeight;
+            double pictureWidth, pictureHeight;
+            if (viewWidth / viewHeight > sourceAspect)
+            {
+                pictureHeight = viewHeight;
+                pictureWidth = viewHeight * sourceAspect;
+            }
+            else
+            {
+                pictureWidth = viewWidth;
+                pictureHeight = viewWidth / sourceAspect;
+            }
+
+            var pictureLeft = (viewWidth - pictureWidth) / 2;
+            var pictureTop = (viewHeight - pictureHeight) / 2;
+            var keepLeft = pictureLeft + pictureWidth * crop.X / sourceWidth;
+            var keepTop = pictureTop + pictureHeight * crop.Y / sourceHeight;
+            var keepWidth = pictureWidth * crop.Width / sourceWidth;
+            var keepHeight = pictureHeight * crop.Height / sourceHeight;
+
+            overlay.Position = topLeft;
+            overlay.Width = viewWidth;
+            overlay.Height = viewHeight;
+            if (_editorCropCanvas is { } canvas)
+            {
+                canvas.Width = viewWidth;
+                canvas.Height = viewHeight;
+            }
+
+            PlaceShade(_editorCropShades[0], 0, 0, viewWidth, keepTop);
+            PlaceShade(_editorCropShades[1], 0, keepTop + keepHeight, viewWidth, viewHeight - (keepTop + keepHeight));
+            PlaceShade(_editorCropShades[2], 0, keepTop, keepLeft, keepHeight);
+            PlaceShade(_editorCropShades[3], keepLeft + keepWidth, keepTop, viewWidth - (keepLeft + keepWidth), keepHeight);
+            if (_editorCropOutline is { } outline) PlaceShade(outline, keepLeft, keepTop, keepWidth, keepHeight);
+
+            var handle = NativeHandleOf(overlay);
+            if (handle != IntPtr.Zero) SetWindowPos(handle, HwndTop, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
+            return true;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Editor crop overlay layout failed (recovered)", error);
+            return false;
+        }
+    }
+
+    private static void PlaceShade(Border border, double left, double top, double width, double height)
+    {
+        Canvas.SetLeft(border, left);
+        Canvas.SetTop(border, top);
+        border.Width = Math.Max(0, width);
+        border.Height = Math.Max(0, height);
+    }
+
     private async Task ShareCurrentClipAsync()
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
         _playback?.Pause();
         ViewModel.IsPlaying = false;
-        HideEditorToolsPanel();
         CoverEditorSurface();
         try
         {
@@ -6682,7 +6757,6 @@ public sealed partial class MainWindow : Window
         finally
         {
             UncoverEditorSurface();
-            SyncEditorToolsPanel();
         }
     }
 
@@ -7862,6 +7936,7 @@ public sealed partial class MainWindow : Window
             // (EditorVideoView's bounds) may not have settled yet either,
             // which is exactly the "flickers over the library grid" symptom.
             _recordingPausedOverlay?.Hide();
+            _editorCropOverlay?.Hide();
             AppLog.Info($"Editor open: {ViewModel.SelectedVideoPath}");
             EditorVideoView.MediaPlayer = playback.VideoPlayer;
             EditorVideoView.WatchMediaPlayer(playback.VideoPlayer);
@@ -8012,6 +8087,11 @@ public sealed partial class MainWindow : Window
             await videoReady.WaitAsync(cancellationToken).ConfigureAwait(false);
             if (cancellationToken.IsCancellationRequested || _playback != playback) return;
             playback.SyncAndPlayMixedAudio();
+            // The clip's saved effects were restored into the view model while
+            // this media was still loading, and loading a new Media resets
+            // libvlc's rate and crop - so the preview has to be re-asserted once
+            // there is something to assert it against.
+            await Dispatcher.UIThread.InvokeAsync(ApplyEditorEffectPreview);
         }
         catch (OperationCanceledException)
         {
@@ -8115,6 +8195,7 @@ public sealed partial class MainWindow : Window
         EditorVideoView.WatchMediaPlayer(null);
         EditorVideoView.MediaPlayer = null;
         _recordingPausedOverlay?.Hide();
+        _editorCropOverlay?.Hide();
         HideEditorHoverControls(immediate: true);
         if (ViewModel is not null)
         {
@@ -8320,6 +8401,7 @@ public sealed partial class MainWindow : Window
         if (!shouldShow || ViewModel is null || !ViewModel.IsEditorVisible || IsEditorSurfaceCovered)
         {
             _recordingPausedOverlay?.Hide();
+            _editorCropOverlay?.Hide();
             return;
         }
 
@@ -8414,18 +8496,18 @@ public sealed partial class MainWindow : Window
         PositionChanged += (_, _) =>
         {
             var pausedRaised = _recordingPausedOverlay is { IsVisible: true } overlay && RepositionPausedOverlay(overlay);
+            SyncEditorCropOverlay();
             // A paused-overlay move claims the top of the owner's z-band.
             // Re-raise the hover bar even if its geometry did not change, so
             // its Server per-pixel mirror remains between the input window and
             // paused overlay instead of being covered by the paused scrim.
             RepositionEditorHoverControlsSafe(force: pausedRaised);
-            RepositionEditorToolsPanelSafe(force: true);
         };
         EditorVideoView.LayoutUpdated += (_, _) =>
         {
             var pausedRaised = _recordingPausedOverlay is { IsVisible: true } overlay && RepositionPausedOverlay(overlay);
+            SyncEditorCropOverlay();
             RepositionEditorHoverControlsSafe(force: pausedRaised);
-            RepositionEditorToolsPanelSafe();
             // Covers window resize AND the fullscreen reparent (both change
             // EditorVideoView's rendered height, which the pan-range math
             // depends on) without needing separate handlers for each.
@@ -8882,20 +8964,8 @@ public sealed partial class MainWindow : Window
         if (handle != IntPtr.Zero)
         {
             SetWindowPos(handle, HwndTop, position.X, position.Y, 0, 0, SwpNoSize | SwpNoActivate);
-            RaiseEditorToolsPanelAboveHoverBar();
             _hoverControlsPerPixelOverlay?.Refresh();
         }
-    }
-
-    // Both are owned windows. The hover bar reasserts its z-order whenever it
-    // shows or moves, so restore the open drawer immediately afterwards while
-    // leaving every uncovered part of the hover bar interactive.
-    private void RaiseEditorToolsPanelAboveHoverBar()
-    {
-        if (_editorToolsPanelWindow is not { IsVisible: true } panel) return;
-        var handle = NativeHandleOf(panel);
-        if (handle != IntPtr.Zero)
-            SetWindowPos(handle, HwndTop, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
     }
 
     // Contents of the floating hover bar - the editor's only playback controls.
@@ -9184,20 +9254,12 @@ public sealed partial class MainWindow : Window
             _hoverControlsPerPixelOverlay = null;
             _hoverControlsTranslate = null;
         };
-        window.AddHandler(PointerPressedEvent, EditorHoverControls_OnPointerPressed, RoutingStrategies.Tunnel, true);
         _editorHoverControlsWindow = window;
         return window;
     }
 
-    private void EditorHoverControls_OnPointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        if (e.GetCurrentPoint((Visual)sender!).Properties.IsLeftButtonPressed)
-            ViewModel?.CloseEditorSidebar();
-    }
-
     private void EditorVideoView_OnVideoClicked(object? sender, EventArgs e)
     {
-        ViewModel?.CloseEditorSidebar();
         PlayPauseButton_OnClick(this, new RoutedEventArgs());
     }
 

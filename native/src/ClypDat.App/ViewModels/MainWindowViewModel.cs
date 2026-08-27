@@ -96,7 +96,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isReplayRecording;
     private bool _isFirstRunOnboarding;
     private bool _isEditorVisible;
-    private EditorSidebarSection? _activeEditorSidebarSection;
+    private EditorSidebarSection _activeEditorSidebarSection = EditorSidebarSection.Info;
     private bool _isSettingsVisible;
     private bool _hasAvailableUpdate;
     private string _selectedSettingsSection = "General";
@@ -185,6 +185,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private TimeSpan _duration = TimeSpan.Zero;
     private TimeSpan _trimStart = TimeSpan.Zero;
     private TimeSpan _trimEnd = TimeSpan.Zero;
+    private double _clipSpeed = 1.0;
+    private string _clipCropMode = ClipRenderFilters.NoCrop;
+    private double _clipCropOffsetX = 0.5;
+    private double _clipCropOffsetY = 0.5;
+    // Set while ApplyClipEditState is pushing a sidecar back into the view model,
+    // so restoring a clip's saved effects does not immediately write the same
+    // values back out again (and, worse, write them against whichever clip
+    // SelectedVideoPath happens to point at mid-load).
+    private bool _suppressClipEditSave;
     private bool _isPlaying;
     private bool _isExporting;
     private double _cardWidth = 368;
@@ -1146,26 +1155,27 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public double EditorSidebarWidth => 64;
 
-    public EditorSidebarSection? ActiveEditorSidebarSection
+    // Always one section showing - there is no collapsed state. The sidebar
+    // column keeps a fixed width whichever section is up, so the video rect never
+    // moves, and the owned windows pinned to it (the hover bar, the paused badge)
+    // never have to chase a resize.
+    public EditorSidebarSection ActiveEditorSidebarSection
     {
         get => _activeEditorSidebarSection;
         private set
         {
             if (!SetProperty(ref _activeEditorSidebarSection, value)) return;
-            OnPropertyChanged(nameof(IsEditorSidebarOpen));
             OnPropertyChanged(nameof(IsEditorInfoSidebarActive));
             OnPropertyChanged(nameof(IsEditorEffectsSidebarActive));
             OnPropertyChanged(nameof(IsEditorExportSidebarActive));
         }
     }
 
-    public bool IsEditorSidebarOpen => ActiveEditorSidebarSection is not null;
     public bool IsEditorInfoSidebarActive => ActiveEditorSidebarSection == EditorSidebarSection.Info;
     public bool IsEditorEffectsSidebarActive => ActiveEditorSidebarSection == EditorSidebarSection.Effects;
     public bool IsEditorExportSidebarActive => ActiveEditorSidebarSection == EditorSidebarSection.Export;
 
     public void OpenEditorSidebar(EditorSidebarSection section) => ActiveEditorSidebarSection = section;
-    public void CloseEditorSidebar() => ActiveEditorSidebarSection = null;
 
     private bool _isVideoFullscreen;
 
@@ -3823,6 +3833,143 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // ---- Editor effects --------------------------------------------------
+    // Non-destructive: nothing here touches the clip on disk until Export, Share
+    // or Save Trim renders it. The values live in the clip's own sidecar, so
+    // reopening a clip brings its effects back with it, and the preview applies
+    // them through libvlc (see MainWindow's ApplyEditorEffectPreview).
+
+    public IReadOnlyList<double> ClipSpeedPresets => ClipRenderFilters.SpeedPresets;
+    public IReadOnlyList<string> ClipCropModes => ClipRenderFilters.CropModes;
+
+    public double ClipSpeed
+    {
+        get => _clipSpeed;
+        set
+        {
+            var normalized = ClipRenderFilters.NormalizeSpeed(value);
+            if (!SetProperty(ref _clipSpeed, normalized)) return;
+            OnEditorEffectsChanged();
+        }
+    }
+
+    public string ClipCropMode
+    {
+        get => _clipCropMode;
+        set
+        {
+            var normalized = ClipRenderFilters.NormalizeCropMode(value);
+            if (!SetProperty(ref _clipCropMode, normalized)) return;
+            OnPropertyChanged(nameof(IsClipCropActive));
+            OnEditorEffectsChanged();
+        }
+    }
+
+    public double ClipCropOffsetX
+    {
+        get => _clipCropOffsetX;
+        set
+        {
+            if (!SetProperty(ref _clipCropOffsetX, Math.Clamp(value, 0, 1))) return;
+            OnEditorEffectsChanged();
+        }
+    }
+
+    public double ClipCropOffsetY
+    {
+        get => _clipCropOffsetY;
+        set
+        {
+            if (!SetProperty(ref _clipCropOffsetY, Math.Clamp(value, 0, 1))) return;
+            OnEditorEffectsChanged();
+        }
+    }
+
+    public bool IsClipCropActive => !string.Equals(ClipCropMode, ClipRenderFilters.NoCrop, StringComparison.Ordinal);
+    public bool IsClipSpeedActive => ClipRenderFilters.IsSpeedActive(ClipSpeed);
+    public bool HasClipEffects => IsClipCropActive || IsClipSpeedActive;
+
+    public string ClipSpeedLabel => $"{ClipSpeed.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}x";
+
+    // What the crop actually produces, so the sidebar can say "1080 x 1920"
+    // rather than making the user work it out from the aspect and the source.
+    public ClipRenderFilters.CropRect? ActiveCropRect =>
+        ClipRenderFilters.ComputeCrop(ClipCropMode, ClipCropOffsetX, ClipCropOffsetY, SelectedSourceWidth, SelectedSourceHeight);
+
+    public string ClipCropSizeLabel
+    {
+        get
+        {
+            // Dimensions arrive with the probe, which can land after the clip is
+            // already on screen; say nothing rather than "0 x 0".
+            if (SelectedSourceWidth <= 0 || SelectedSourceHeight <= 0) return "Reading clip...";
+            if (!IsClipCropActive) return $"{SelectedSourceWidth} x {SelectedSourceHeight} (source)";
+            var rect = ActiveCropRect;
+            return rect is { } crop ? $"{crop.Width} x {crop.Height}" : "Source is already this shape";
+        }
+    }
+
+    public string ClipEffectsSummary
+    {
+        get
+        {
+            if (!HasClipEffects) return "No effects applied";
+            var parts = new List<string>();
+            if (IsClipCropActive) parts.Add(ClipCropMode);
+            if (IsClipSpeedActive) parts.Add(ClipSpeedLabel);
+            return string.Join("  ·  ", parts);
+        }
+    }
+
+    // Just the framing, not the aspect: having picked 9:16 and then dragged the
+    // window off target, the wanted undo is "put it back in the middle", not
+    // "throw away the crop".
+    public bool IsClipCropPositionMoved =>
+        IsClipCropActive && (Math.Abs(ClipCropOffsetX - 0.5) > 0.001 || Math.Abs(ClipCropOffsetY - 0.5) > 0.001);
+
+    public void ResetClipCropPosition()
+    {
+        ClipCropOffsetX = 0.5;
+        ClipCropOffsetY = 0.5;
+    }
+
+    public void ResetClipEffects()
+    {
+        ClipSpeed = 1.0;
+        ClipCropMode = ClipRenderFilters.NoCrop;
+        ClipCropOffsetX = 0.5;
+        ClipCropOffsetY = 0.5;
+    }
+
+    // One notification point for everything downstream of an effect: the export
+    // length changes with speed, the output dimensions change with crop, and both
+    // belong in the clip's sidecar so reopening restores them.
+    private void OnEditorEffectsChanged()
+    {
+        OnPropertyChanged(nameof(HasClipEffects));
+        OnPropertyChanged(nameof(IsClipSpeedActive));
+        OnPropertyChanged(nameof(ClipSpeedLabel));
+        OnPropertyChanged(nameof(ClipCropSizeLabel));
+        OnPropertyChanged(nameof(ClipEffectsSummary));
+        OnPropertyChanged(nameof(IsClipCropPositionMoved));
+        OnPropertyChanged(nameof(ActiveCropRect));
+        OnPropertyChanged(nameof(ExportDuration));
+        OnPropertyChanged(nameof(ExportLengthLabel));
+        if (_suppressClipEditSave) return;
+        SaveSelectedClipEditState();
+    }
+
+    public string ExportLengthLabel => FormatTime(ExportDuration);
+
+    // A video filter has to be skipped outright on an audio-only clip: the
+    // multi-track path labels it as [0:v:0], and a filter_complex label for a
+    // stream that does not exist fails the whole encode (unlike "-map 0:v:0?",
+    // there is no optional form of a filter input).
+    private string? BuildRenderVideoFilter(string? tail = null) =>
+        SelectedSourceWidth > 0 && SelectedSourceHeight > 0
+            ? ClipRenderFilters.BuildVideoFilter(ActiveCropRect, ClipSpeed, tail)
+            : tail;
+
     public bool IsPlaying
     {
         get => _isPlaying;
@@ -4375,7 +4522,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             TrackVolumes = TimelineTracks
                 .Where(track => track.IsAudio)
                 .ToDictionary(track => track.StreamIndex, track => Math.Clamp(track.VolumePercent, 0, 150)),
-            Description = EditorDescription ?? string.Empty
+            Description = EditorDescription ?? string.Empty,
+            SpeedMultiplier = ClipSpeed,
+            CropMode = ClipCropMode,
+            CropOffsetX = ClipCropOffsetX,
+            CropOffsetY = ClipCropOffsetY
         };
         ClipEditSidecar.Save(Settings.LibraryFolder, SelectedVideoPath, edit);
 
@@ -5440,6 +5591,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         _mediaProbe.DeleteCacheFor(path);
         ClipEditSidecar.Delete(Settings.LibraryFolder, path);
+        // Same reasoning as the trim above, and the same hazard: the file on disk
+        // is now already cropped and already re-timed, so leaving the effects set
+        // would bake them in a second time on the next export - a 2x clip saved
+        // and exported would come out at 4x. Suppressed while resetting so this
+        // does not immediately write a fresh sidecar over the one just deleted.
+        _suppressClipEditSave = true;
+        try { ResetClipEffects(); }
+        finally { _suppressClipEditSave = false; }
         await AddOrUpdateLibraryClipAsync(path);
     }
 
@@ -5511,7 +5670,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         CancelWaveformLoad();
         IsPlaying = false;
         IsEditorVisible = false;
-        CloseEditorSidebar();
+        // Back to Info for the next clip: whichever section the last clip was
+        // left on, opening a new one starts at its details.
+        OpenEditorSidebar(EditorSidebarSection.Info);
         IsVideoFullscreen = false;
         SelectedCaptureBackend = string.Empty;
 
@@ -6392,7 +6553,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         get
         {
             var end = TrimEnd > TrimStart ? TrimEnd : Duration;
-            return TimeSpan.FromSeconds(Math.Max(0.1, (end - TrimStart).TotalSeconds));
+            // Clip speed shortens (or lengthens) the encode, and the export
+            // progress popup divides ffmpeg's out_time by this - leave the speed
+            // out and a 2x export reports 200% and sits there.
+            return TimeSpan.FromSeconds(ClipRenderFilters.AdjustDuration(
+                Math.Max(0.1, (end - TrimStart).TotalSeconds), ClipSpeed));
         }
     }
 
@@ -6425,6 +6590,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // streams by default; this keeps container-level metadata too.
             "-map_metadata", "0"
         };
+        // Every audio stream stays discrete here, so nothing owns a
+        // filter_complex and the effects can ride on plain -vf/-af (-af applies
+        // to each output audio stream in turn, which is exactly what is wanted:
+        // Game Audio, Chat and Mic all have to be re-timed by the same amount or
+        // they drift apart from each other).
+        var trimVideoFilter = BuildRenderVideoFilter();
+        if (trimVideoFilter is not null)
+        {
+            args.Add("-vf");
+            args.Add(trimVideoFilter);
+        }
+        var trimAudioSpeed = ClipRenderFilters.BuildAudioSpeedFilter(ClipSpeed);
+        if (trimAudioSpeed.Length > 0)
+        {
+            args.Add("-af");
+            args.Add(trimAudioSpeed);
+        }
+
         args.AddRange(BuildExportCodecArguments(useHardwareEncoder));
         args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k" });
         args.Add("-movflags");
@@ -6463,20 +6646,41 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // contained them. Mix every audio track down to one, applying each
         // track's current volume, the same way editor playback already sounds.
         var audioTracks = TimelineTracks.Where(track => track.Type == "audio").ToArray();
-        args.Add("-map");
-        args.Add("0:v:0?");
+        AppendRenderMapsAndFilters(args, audioTracks);
+
+        args.AddRange(BuildExportCodecArguments(useHardwareEncoder));
+        if (audioTracks.Length > 0)
+        {
+            args.AddRange(new[] { "-c:a", "aac" });
+        }
+
+        args.Add("-movflags");
+        args.Add("+faststart");
+        args.Add(outputPath);
+        return args;
+    }
+
+    // Stream maps plus every filter that applies to them, for Export and Share.
+    // Both mix the clip's discrete audio streams down to one (most players and
+    // upload targets only play a file's first audio track) and both have to
+    // apply the editor's effects on top of that.
+    //
+    // The awkward part is that ffmpeg will not let -vf and -filter_complex both
+    // touch the same stream. As soon as there is more than one audio track the
+    // mixdown owns a filter_complex, so a video filter has to join that graph as
+    // a labelled chain rather than ride on -vf. With one track or none, -vf is
+    // fine and simpler.
+    private void AppendRenderMapsAndFilters(List<string> args, IReadOnlyList<TrackLaneViewModel> audioTracks, string? videoFilterTail = null)
+    {
+        var videoFilter = BuildRenderVideoFilter(videoFilterTail);
+        var audioSpeed = ClipRenderFilters.BuildAudioSpeedFilter(ClipSpeed);
         args.Add("-sn");
 
-        if (audioTracks.Length == 1)
-        {
-            args.Add("-map");
-            args.Add($"0:{audioTracks[0].StreamIndex}?");
-            args.Add("-af");
-            args.Add($"volume={VolumeMultiplier(audioTracks[0].EffectiveVolumePercent):0.###}");
-        }
-        else if (audioTracks.Length > 1)
+        if (audioTracks.Count > 1)
         {
             var filter = new System.Text.StringBuilder();
+            if (videoFilter is not null) filter.Append($"[0:v:0]{videoFilter}[vout];");
+
             var labels = new List<string>();
             foreach (var track in audioTracks)
             {
@@ -6489,23 +6693,39 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 labels.Add($"[{label}]");
             }
 
-            filter.Append($"{string.Join(string.Empty, labels)}amix=inputs={audioTracks.Length}:normalize=0[aout]");
+            // atempo after amix, not per input: one instance on the mixed result
+            // instead of one per track, and the tracks stay aligned with each
+            // other whatever the rate is.
+            filter.Append($"{string.Join(string.Empty, labels)}amix=inputs={audioTracks.Count}:normalize=0");
+            if (audioSpeed.Length > 0) filter.Append($",{audioSpeed}");
+            filter.Append("[aout]");
+
             args.Add("-filter_complex");
             args.Add(filter.ToString());
             args.Add("-map");
+            args.Add(videoFilter is null ? "0:v:0?" : "[vout]");
+            args.Add("-map");
             args.Add("[aout]");
+            return;
         }
 
-        args.AddRange(BuildExportCodecArguments(useHardwareEncoder));
-        if (audioTracks.Length > 0)
+        args.Add("-map");
+        args.Add("0:v:0?");
+        if (videoFilter is not null)
         {
-            args.AddRange(new[] { "-c:a", "aac" });
+            args.Add("-vf");
+            args.Add(videoFilter);
         }
 
-        args.Add("-movflags");
-        args.Add("+faststart");
-        args.Add(outputPath);
-        return args;
+        if (audioTracks.Count == 1)
+        {
+            args.Add("-map");
+            args.Add($"0:{audioTracks[0].StreamIndex}?");
+            var audioFilter = $"volume={VolumeMultiplier(audioTracks[0].EffectiveVolumePercent):0.###}";
+            if (audioSpeed.Length > 0) audioFilter += $",{audioSpeed}";
+            args.Add("-af");
+            args.Add(audioFilter);
+        }
     }
 
     // Share defaults to AV1/AAC/mp4, independent of SelectedExportCodec - AV1
@@ -6523,7 +6743,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var startSeconds = Math.Max(0, TrimStart.TotalSeconds);
         var end = TrimEnd > TrimStart ? TrimEnd : Duration;
         var durationSeconds = Math.Max(0.1, (end - TrimStart).TotalSeconds);
-        var spec = ComputeShareEncodeSpec(durationSeconds, SelectedSourceWidth, SelectedSourceHeight, SelectedSourceFps, targetBytes, useAv1);
+        // The size cap is a bitrate budget over the length of the FILE THAT COMES
+        // OUT, at the dimensions it comes out at. A 2x clip is half as long and a
+        // 9:16 crop is a fraction of the pixels, so feeding the source numbers
+        // here would budget for a file that is not the one being made - under-
+        // spending badly on a cropped clip, and blowing the cap on a slowed one.
+        var croppedWidth = ActiveCropRect?.Width ?? SelectedSourceWidth;
+        var croppedHeight = ActiveCropRect?.Height ?? SelectedSourceHeight;
+        var outputSeconds = ClipRenderFilters.AdjustDuration(durationSeconds, ClipSpeed);
+        var spec = ComputeShareEncodeSpec(outputSeconds, croppedWidth, croppedHeight, SelectedSourceFps, targetBytes, useAv1);
         // Scales both directions now - down when a previous attempt overshot
         // the cap, up when it undershot with headroom to spare (easy-to-
         // compress content can legitimately land well under the VBR target).
@@ -6547,39 +6775,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         // Same multi-track-to-one-track audio mixdown as BuildExportArguments -
         // Discord (like most players) only plays a file's first audio track.
+        // Share's downscale rides along as the tail of the same video chain: the
+        // crop has to happen before the scale, or the scale sizes the uncropped
+        // frame and the crop then cuts the wrong amount off the result.
+        //
+        // lanczos rather than ffmpeg's default bilinear - a downscale is exactly
+        // where a good resampler shows, and it costs nothing here. fps as a
+        // filter rather than "-r": the filter drops frames on a proper timeline,
+        // where -r as an output option can duplicate them and hand the encoder
+        // repeated frames to pay for.
         var audioTracks = TimelineTracks.Where(track => track.Type == "audio").ToArray();
-        args.Add("-map");
-        args.Add("0:v:0?");
-        args.Add("-sn");
-
-        if (audioTracks.Length == 1)
-        {
-            args.Add("-map");
-            args.Add($"0:{audioTracks[0].StreamIndex}?");
-            args.Add("-af");
-            args.Add($"volume={VolumeMultiplier(audioTracks[0].EffectiveVolumePercent):0.###}");
-        }
-        else if (audioTracks.Length > 1)
-        {
-            var filter = new System.Text.StringBuilder();
-            var labels = new List<string>();
-            foreach (var track in audioTracks)
-            {
-                var label = $"a{track.StreamIndex}";
-                // aformat before amix, not after: the microphone track can be
-                // mono (Settings > Audio > Microphone > Channels), and amix
-                // wants every input on the same layout. Stating it here beats
-                // relying on ffmpeg's automatic conversion to pick one.
-                filter.Append($"[0:{track.StreamIndex}]volume={VolumeMultiplier(track.EffectiveVolumePercent):0.###},aformat=channel_layouts=stereo[{label}];");
-                labels.Add($"[{label}]");
-            }
-
-            filter.Append($"{string.Join(string.Empty, labels)}amix=inputs={audioTracks.Length}:normalize=0[aout]");
-            args.Add("-filter_complex");
-            args.Add(filter.ToString());
-            args.Add("-map");
-            args.Add("[aout]");
-        }
+        var downscaleTail = spec.Downscaled
+            ? $"scale={spec.Width}:{spec.Height}:flags=lanczos,fps={spec.Fps.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}"
+            : null;
+        AppendRenderMapsAndFilters(args, audioTracks, downscaleTail);
 
         // Quality-first encoder settings. The old ones (veryfast, no B-frames,
         // no AQ, single-pass) threw away a large chunk of the bitrate budget
@@ -6682,16 +6891,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             args.AddRange(new[] { "-b:v", $"{spec.VideoBitrateKbps}k", "-maxrate", $"{maxRateKbps}k", "-bufsize", $"{bufSizeKbps}k" });
         }
 
-        if (spec.Downscaled)
-        {
-            args.Add("-vf");
-            // lanczos rather than ffmpeg's default bilinear - a downscale is
-            // exactly where a good resampler shows, and it costs nothing here.
-            // fps as a filter rather than "-r": the filter drops frames on a
-            // proper timeline, where -r as an output option can duplicate
-            // them and hand the encoder repeated frames to pay for.
-            args.Add($"scale={spec.Width}:{spec.Height}:flags=lanczos,fps={spec.Fps.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}");
-        }
         args.AddRange(new[] { "-c:a", "aac", "-b:a", $"{ShareAudioBps / 1000}k" });
 
         args.Add("-movflags");
@@ -7033,6 +7232,27 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 track.VolumePercent = Math.Clamp(volume, 0, 150);
             }
+        }
+
+        // NormalizeSpeed turns a sidecar written before effects existed - where
+        // SpeedMultiplier deserializes as 0 - back into 1x rather than into a
+        // divide that produces an infinite export length.
+        _suppressClipEditSave = true;
+        try
+        {
+            ClipSpeed = ClipRenderFilters.NormalizeSpeed(edit.SpeedMultiplier);
+            ClipCropMode = ClipRenderFilters.NormalizeCropMode(edit.CropMode);
+            ClipCropOffsetX = edit.CropOffsetX;
+            ClipCropOffsetY = edit.CropOffsetY;
+            // Unconditional, not left to the setters: opening a second clip with
+            // the same effects as the first changes no property, but the source
+            // dimensions behind ActiveCropRect and the duration behind
+            // ExportDuration are the new clip's.
+            OnEditorEffectsChanged();
+        }
+        finally
+        {
+            _suppressClipEditSave = false;
         }
 
         // OpenMedia clears this to empty before calling in, so a clip with no
@@ -8662,14 +8882,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _thumbnailRegenCts?.Dispose();
         var cts = new CancellationTokenSource();
         _thumbnailRegenCts = cts;
-        _ = RegenerateThumbnailAtTrimStartAsync(SelectedVideoPath, TrimStart, cts.Token);
+        // The card should show the clip as it will be, not as the source is: a
+         // 9:16 crop that still shows a 16:9 thumbnail reads as the crop not
+         // having taken.
+        var cropFilter = ActiveCropRect is { } crop ? $"crop={crop.Width}:{crop.Height}:{crop.X}:{crop.Y}" : null;
+        _ = RegenerateThumbnailAtTrimStartAsync(SelectedVideoPath, TrimStart, cropFilter, cts.Token);
     }
 
-    private async Task RegenerateThumbnailAtTrimStartAsync(string path, TimeSpan trimStart, CancellationToken cancellationToken)
+    private async Task RegenerateThumbnailAtTrimStartAsync(string path, TimeSpan trimStart, string? cropFilter, CancellationToken cancellationToken)
     {
         try
         {
-            var thumbnailPath = await _mediaProbe.RegenerateThumbnailAsync(path, trimStart);
+            var thumbnailPath = await _mediaProbe.RegenerateThumbnailAsync(path, trimStart, cropFilter);
             if (cancellationToken.IsCancellationRequested || string.IsNullOrWhiteSpace(thumbnailPath)) return;
             await Dispatcher.UIThread.InvokeAsync(() =>
             {

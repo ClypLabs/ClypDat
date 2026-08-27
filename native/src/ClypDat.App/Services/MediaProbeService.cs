@@ -734,9 +734,14 @@ public sealed class MediaProbeService
     // from before the trim. Unlike EnsureThumbnailAsync, there's no
     // black-frame retry chain here: the user explicitly chose this exact
     // position, so it's shown as-is even if it happens to be black.
-    public async Task<string> RegenerateThumbnailAsync(string filePath, TimeSpan atTime)
+    public async Task<string> RegenerateThumbnailAsync(string filePath, TimeSpan atTime, string? cropFilter = null)
     {
         var output = GetThumbnailPath(filePath);
+        // Crop before scale, so 960 is the width of the CROPPED frame - scaling
+        // first and cropping after would cut a 960-wide picture down to a
+        // fraction of it, and the library card would show a thumbnail far
+        // smaller than every other card's.
+        var videoFilter = string.IsNullOrWhiteSpace(cropFilter) ? "scale=960:-2" : $"{cropFilter},scale=960:-2";
         var result = await RunProcessAsync("ffmpeg", new[]
         {
             "-y",
@@ -745,7 +750,7 @@ public sealed class MediaProbeService
             "-frames:v", "1",
             // Same -2 rounding as EnsureThumbnailAsync - an odd height from
             // preserving aspect exactly fails the JPEG encoder's 4:2:0 output.
-            "-vf", "scale=960:-2",
+            "-vf", videoFilter,
             "-q:v", "4",
             output
         }).ConfigureAwait(false);

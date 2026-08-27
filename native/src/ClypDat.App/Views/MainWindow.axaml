@@ -297,7 +297,11 @@
     <Grid Grid.Row="1" ColumnDefinitions="Auto,*">
       <Border x:Name="EditorSidebarRail" Grid.Column="0" Width="{Binding EditorSidebarWidth}" Background="#0D1116" BorderBrush="#1E2A33" BorderThickness="0,0,1,0">
         <Grid RowDefinitions="*,Auto">
-          <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Hidden">
+          <!-- The rail is one column serving two modes. The library's filters
+               and the editor's sections share row 0 and swap, rather than the
+               rail growing a second column - a 64px strip is the width the
+               editor's video rect is measured against. -->
+          <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Hidden" IsVisible="{Binding !IsEditorVisible}">
             <StackPanel Margin="0,16,0,16" Spacing="2">
               <Button x:Name="AllClipsFilterButton" Classes="railIconButton" Classes.active="{Binding IsAllClipsActive}" Click="AllClipsFilterButton_OnClick" ToolTip.Tip="All Clips">
                 <PathIcon Data="M4,4h4v4H4V4z M10,4h4v4h-4V4z M16,4h4v4h-4V4z M4,10h4v4H4v-4z M10,10h4v4h-4v-4z M16,10h4v4h-4v-4z M4,16h4v4H4v-4z M10,16h4v4h-4v-4z M16,16h4v4h-4v-4z" Width="18" Height="18" />
@@ -570,7 +574,7 @@
           <!-- Implies more content below without a visible scrollbar track -
                a thin fade from transparent to the rail's own background,
                always present (harmless when nothing's actually clipped). -->
-          <Border Grid.Row="0" Height="22" VerticalAlignment="Bottom" IsHitTestVisible="False">
+          <Border Grid.Row="0" Height="22" VerticalAlignment="Bottom" IsHitTestVisible="False" IsVisible="{Binding !IsEditorVisible}">
             <Border.Background>
               <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
                 <GradientStop Color="#000D1116" Offset="0" />
@@ -579,7 +583,7 @@
             </Border.Background>
           </Border>
 
-          <StackPanel Grid.Row="0" Margin="0,16,0,16" Spacing="6" IsVisible="False">
+          <StackPanel Grid.Row="0" Margin="0,16,0,16" Spacing="6" IsVisible="{Binding IsEditorVisible}">
             <Button Classes="editorRailButton" Classes.active="{Binding IsEditorInfoSidebarActive}" Click="EditorInfoSidebarButton_OnClick" ToolTip.Tip="Info">
               <StackPanel Spacing="4">
                 <PathIcon Data="M11,17H13V11H11V17M12,2C6.48,2 2,6.48 2,12C2,17.52 6.48,22 12,22C17.52,22 22,17.52 22,12C22,6.48 17.52,2 12,2M12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4M11,9H13V7H11V9Z" Width="21" Height="21" />
@@ -1587,44 +1591,164 @@
           <Border Height="104" Classes="editorInspectorHeader">
             <Grid Margin="24,14,20,14" RowDefinitions="Auto,Auto" RowSpacing="8" VerticalAlignment="Center">
               <StackPanel Spacing="4">
-                <TextBlock Text="CLIP DETAILS" Classes="editorTimelineEyebrow" />
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Text="{Binding ActiveEditorSidebarSection, Converter={x:Static opconv:EditorSidebarSectionTitleConverter.Instance}}"
+                             Classes="editorTimelineEyebrow" VerticalAlignment="Center" />
+                  <!-- The effect state has to be visible from every section, not
+                       just from Effects - a crop set an hour ago changes what
+                       Export produces, and finding that out from the exported
+                       file is finding out too late. -->
+                  <Border Grid.Column="1" Classes="effectsBadge" IsVisible="{Binding HasClipEffects}">
+                    <TextBlock Text="{Binding ClipEffectsSummary}" />
+                  </Border>
+                </Grid>
                 <TextBlock Text="{Binding EditorTitle}" Classes="editorInspectorTitle" TextTrimming="CharacterEllipsis" />
               </StackPanel>
               <TextBlock Grid.Row="1" Text="{Binding SelectedQuality}" Classes="editorInspectorQuality" TextTrimming="CharacterEllipsis" />
             </Grid>
           </Border>
 
+          <!-- One scroller, three section bodies stacked in it, exactly one of
+               them visible. Deliberately not a TabControl or a swapped
+               ContentControl: the Details boxes below are addressed by name from
+               code-behind (EditorDetailsCard, EditorDescriptionBox) and their
+               Enter handling is wired there, so the elements have to stay put in
+               this tree rather than being built and thrown away per section. -->
           <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="20,18" Spacing="14">
-              <!-- Focusable so Enter in either box below has somewhere to put
-                   focus: committing has no visible effect otherwise, and the
-                   still-highlighted caret reads as "not saved yet". -->
-              <Border x:Name="EditorDetailsCard" Focusable="True" Classes="editorInspectorCard">
-                <StackPanel Spacing="8">
-                  <TextBlock Text="DETAILS" Foreground="#9EC6F0" FontSize="11" FontWeight="Bold" />
-                  <TextBlock Text="Title" Foreground="#8EA1B6" FontSize="12" />
-                  <TextBox Text="{Binding EditorTitle, Mode=TwoWay}" Foreground="#EDF4FB" FontSize="14" FontWeight="SemiBold"
-                           Background="#0D151C" BorderBrush="#263743" KeyDown="EditorTitle_OnKeyDown" />
-                  <TextBlock Text="Description" Foreground="#8EA1B6" FontSize="12" Margin="0,2,0,0" />
-                  <!-- KeyDown is wired in code-behind as a TUNNEL handler, not
-                       here: AcceptsReturn makes TextBox's own class handler
-                       consume Enter to insert a newline, and a class handler
-                       runs before an instance handler on the same element - so
-                       a KeyDown="..." attribute here never fired at all. -->
-                  <TextBox x:Name="EditorDescriptionBox"
-                           Text="{Binding EditorDescription, Mode=TwoWay}" MinHeight="78" AcceptsReturn="True" TextWrapping="Wrap"
-                           PlaceholderText="Add a description" Background="#0D151C" BorderBrush="#263743" Foreground="#D6E2F0" />
-                </StackPanel>
-              </Border>
+            <Grid Margin="20,18">
+              <StackPanel Spacing="14" IsVisible="{Binding IsEditorInfoSidebarActive}">
+                <!-- Focusable so Enter in either box below has somewhere to put
+                     focus: committing has no visible effect otherwise, and the
+                     still-highlighted caret reads as "not saved yet". -->
+                <Border x:Name="EditorDetailsCard" Focusable="True" Classes="editorInspectorCard">
+                  <StackPanel Spacing="8">
+                    <TextBlock Text="DETAILS" Classes="editorCardLabel" />
+                    <TextBlock Text="Title" Foreground="#8EA1B6" FontSize="12" />
+                    <TextBox Text="{Binding EditorTitle, Mode=TwoWay}" Foreground="#EDF4FB" FontSize="14" FontWeight="SemiBold"
+                             Background="#0D151C" BorderBrush="#263743" KeyDown="EditorTitle_OnKeyDown" />
+                    <TextBlock Text="Description" Foreground="#8EA1B6" FontSize="12" Margin="0,2,0,0" />
+                    <!-- KeyDown is wired in code-behind as a TUNNEL handler, not
+                         here: AcceptsReturn makes TextBox's own class handler
+                         consume Enter to insert a newline, and a class handler
+                         runs before an instance handler on the same element - so
+                         a KeyDown="..." attribute here never fired at all. -->
+                    <TextBox x:Name="EditorDescriptionBox"
+                             Text="{Binding EditorDescription, Mode=TwoWay}" MinHeight="78" AcceptsReturn="True" TextWrapping="Wrap"
+                             PlaceholderText="Add a description" Background="#0D151C" BorderBrush="#263743" Foreground="#D6E2F0" />
+                  </StackPanel>
+                </Border>
 
-              <Border Classes="editorInspectorCard">
-                <StackPanel Spacing="9">
-                  <TextBlock Text="Export codec" Foreground="#8EA1B6" FontSize="12" />
-                  <ComboBox Classes="settingsInput" ItemsSource="{Binding ExportCodecs}" SelectedItem="{Binding SelectedExportCodec}"
-                            HorizontalAlignment="Stretch" />
-                </StackPanel>
-              </Border>
-            </StackPanel>
+                <Border Classes="editorInspectorCard">
+                  <StackPanel Spacing="6">
+                    <TextBlock Text="EFFECTS" Classes="editorCardLabel" />
+                    <TextBlock Text="{Binding ClipEffectsSummary}" Foreground="#C8D6E6" FontSize="13" TextWrapping="Wrap" />
+                    <TextBlock Text="Nothing is written to the clip until you export, share or save the trim."
+                               Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+
+              <StackPanel Spacing="14" IsVisible="{Binding IsEditorEffectsSidebarActive}">
+                <Border Classes="editorInspectorCard">
+                  <StackPanel Spacing="9">
+                    <TextBlock Text="CLIP SPEED" Classes="editorCardLabel" />
+                    <ListBox Classes="pillGroup compactPills" SelectionMode="Single"
+                             ItemsSource="{Binding ClipSpeedPresets}" SelectedItem="{Binding ClipSpeed, Mode=TwoWay}">
+                      <ListBox.ItemTemplate>
+                        <DataTemplate>
+                          <TextBlock Text="{Binding StringFormat=\{0\}x}" />
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                    </ListBox>
+                    <TextBlock Text="{Binding ExportLengthLabel, StringFormat=Renders as \{0\}}"
+                               Foreground="#8EA1B6" FontSize="11" />
+                    <TextBlock Text="Preview is silent off 1x. The export keeps full, re-timed audio."
+                               Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap"
+                               IsVisible="{Binding IsClipSpeedActive}" />
+                  </StackPanel>
+                </Border>
+
+                <Border Classes="editorInspectorCard">
+                  <StackPanel Spacing="9">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Text="CROP &amp; ASPECT" Classes="editorCardLabel" VerticalAlignment="Center" />
+                      <!-- Disabled rather than hidden at the centre position:
+                           collapsing it would shift the heading every time the
+                           slider passed through the middle. -->
+                      <Button Grid.Column="1" Classes="linkButton" Content="Reset" FontSize="11" Padding="6,1"
+                              VerticalAlignment="Center" IsVisible="{Binding IsClipCropActive}"
+                              IsEnabled="{Binding IsClipCropPositionMoved}"
+                              ToolTip.Tip="Re-centre the crop window"
+                              Click="ResetClipCropPositionButton_OnClick" />
+                    </Grid>
+                    <ListBox Classes="pillGroup compactPills" SelectionMode="Single"
+                             ItemsSource="{Binding ClipCropModes}" SelectedItem="{Binding ClipCropMode, Mode=TwoWay}" />
+                    <TextBlock Text="{Binding ClipCropSizeLabel}" Foreground="#8EA1B6" FontSize="11" />
+                    <StackPanel Spacing="4" IsVisible="{Binding IsClipCropActive}">
+                      <TextBlock Text="Horizontal position" Foreground="#8EA1B6" FontSize="12" Margin="0,4,0,0" />
+                      <Slider Minimum="0" Maximum="1" TickFrequency="0.01" IsSnapToTickEnabled="True"
+                              Value="{Binding ClipCropOffsetX, Mode=TwoWay}" />
+                      <TextBlock Text="Vertical position" Foreground="#8EA1B6" FontSize="12" />
+                      <Slider Minimum="0" Maximum="1" TickFrequency="0.01" IsSnapToTickEnabled="True"
+                              Value="{Binding ClipCropOffsetY, Mode=TwoWay}" />
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+
+                <!-- Disabled rather than absent. The editor has advertised
+                     "crop, blur, text, speed" for a while; naming what is not
+                     here yet beats a sidebar that silently has less in it than
+                     the last screenshot the user saw. -->
+                <Border Classes="editorInspectorCard effectPending">
+                  <StackPanel Spacing="4">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Text="TEXT" Classes="editorCardLabel" VerticalAlignment="Center" />
+                      <Border Grid.Column="1" Classes="comingSoonTag"><TextBlock Text="SOON" /></Border>
+                    </Grid>
+                    <TextBlock Text="Burned-in captions and callouts." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Border>
+
+                <Border Classes="editorInspectorCard effectPending">
+                  <StackPanel Spacing="4">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Text="BLUR" Classes="editorCardLabel" VerticalAlignment="Center" />
+                      <Border Grid.Column="1" Classes="comingSoonTag"><TextBlock Text="SOON" /></Border>
+                    </Grid>
+                    <TextBlock Text="Hide a name, a stream key, or a corner of the HUD." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Border>
+
+                <Button Content="Reset effects" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                        Height="34" IsEnabled="{Binding HasClipEffects}" Click="ResetClipEffectsButton_OnClick" />
+              </StackPanel>
+
+              <StackPanel Spacing="14" IsVisible="{Binding IsEditorExportSidebarActive}">
+                <Border Classes="editorInspectorCard">
+                  <StackPanel Spacing="9">
+                    <TextBlock Text="FORMAT" Classes="editorCardLabel" />
+                    <TextBlock Text="Video codec" Foreground="#8EA1B6" FontSize="12" />
+                    <ComboBox Classes="settingsInput" ItemsSource="{Binding ExportCodecs}" SelectedItem="{Binding SelectedExportCodec}"
+                              HorizontalAlignment="Stretch" />
+                  </StackPanel>
+                </Border>
+
+                <Border Classes="editorInspectorCard">
+                  <StackPanel Spacing="6">
+                    <TextBlock Text="OUTPUT" Classes="editorCardLabel" />
+                    <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="4" ColumnSpacing="10">
+                      <TextBlock Text="Range" Foreground="#8EA1B6" FontSize="12" />
+                      <TextBlock Grid.Column="1" Text="{Binding TrimRangeLabel}" Foreground="#D6E2F0" FontSize="12" FontFamily="Consolas" />
+                      <TextBlock Grid.Row="1" Text="Length" Foreground="#8EA1B6" FontSize="12" />
+                      <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding ExportLengthLabel}" Foreground="#D6E2F0" FontSize="12" FontFamily="Consolas" />
+                      <TextBlock Grid.Row="2" Text="Size" Foreground="#8EA1B6" FontSize="12" />
+                      <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding ClipCropSizeLabel}" Foreground="#D6E2F0" FontSize="12" FontFamily="Consolas" />
+                    </Grid>
+                    <TextBlock Text="Save Trim replaces this clip. Export writes a new file." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+            </Grid>
           </ScrollViewer>
 
           <Border Grid.Row="2" Classes="editorInspectorActions">
