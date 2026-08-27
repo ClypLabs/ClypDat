@@ -207,7 +207,10 @@ jobs:
           & "$wixBin\light.exe" @lightArgs
           if ($LASTEXITCODE -ne 0) { throw "light.exe failed with exit code $LASTEXITCODE" }
 
-      # NOTE: the release is not fully published until its signed manifest is uploaded.
+      # Create a draft rather than publishing an incomplete release. GitHub immutable
+      # releases cannot accept assets after publication, while ClypDat's updater refuses
+      # a release until its signed manifest is present. The offline signer uploads both
+      # manifest files to this draft, sets the final notes, then publishes it.
       # ClypDat's updater verifies ClypDat-Release.manifest.json against a key pinned in
       # the binary, and once that key is set a release without the manifest is REFUSED by
       # the updater. Signing is deliberately not done here: the private key must never
@@ -225,23 +228,8 @@ jobs:
         shell: pwsh
         run: |
           $tag = "${{ steps.version.outputs.tag }}"
-          gh release create $tag `
-            ClypDat-win-x64.zip ClypDat-Portable.exe ClypDat-Setup.exe ClypDat.msi `
-            --title "ClypDat $tag" `
-            --generate-notes
-
-      # Tells the webapp repo to push this release to the R2 mirror, which is
-      # what keeps downloads and in-app updates alive when GitHub is not serving
-      # this repo. The mirror also syncs on a 6-hour schedule, so a failure here
-      # delays the mirror rather than losing it - hence continue-on-error.
-      - name: Trigger mirror sync
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.MIRROR_DISPATCH_TOKEN }}
-        shell: pwsh
-        run: |
-          if (-not $env:GH_TOKEN) {
-            Write-Host "MIRROR_DISPATCH_TOKEN not set; the scheduled sync will pick this up."
-            exit 0
-          }
-          gh api repos/ClypLabs/webapp/dispatches -f event_type=release-published
+           gh release create $tag `
+             ClypDat-win-x64.zip ClypDat-Portable.exe ClypDat-Setup.exe ClypDat.msi `
+             --title "ClypDat $tag" `
+             --generate-notes `
+             --draft
