@@ -50,8 +50,11 @@
            panel top while Custom Game Settings content scrolls underneath. -->
       <Border Grid.Column="1" Grid.Row="0" Background="{StaticResource PanelBgBrush}"
               IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Custom Game Settings}">
-        <Border Classes="settingsNotice" Margin="36,16,36,4"
-                IsVisible="{Binding SelectedCustomGameTab.QualityWarningVisible}">
+        <!-- Notice and its underline collapse together. Putting the underline
+             on the wrapper instead left a stray hairline across the panel
+             whenever this section was open with nothing to warn about. -->
+        <StackPanel IsVisible="{Binding SelectedCustomGameTab.QualityWarningVisible}">
+        <Border Classes="settingsNotice stickyNotice">
           <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
             <PathIcon Classes="cautionIcon" VerticalAlignment="Center" Margin="0" />
             <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
@@ -62,14 +65,25 @@
               <TextBlock Classes="settingsRowDescSm" Text="Higher quality can increase encoder load, RAM use, and dropped frames during gameplay." />
             </StackPanel>
             <!-- One recommended action, one dismissal, one opt-out - three
-                 identical buttons made the user read all three to find it. -->
+                 identical buttons made the user read all three to find it.
+                 The opt-out is the X: it is the rarest choice and the only
+                 permanent one, so it earns an icon and a tooltip, not a
+                 word-heavy button competing with Fix Now. -->
             <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
               <Button Classes="primaryButton" Content="Fix Now" Click="FixCustomGameQualityWarningButton_OnClick" />
               <Button Content="Acknowledge" Click="AcknowledgeCustomGameQualityWarningButton_OnClick" />
-              <Button Classes="linkButton" Content="Don't Show Again" Click="HideCustomGameQualityWarningButton_OnClick" />
+              <Button Classes="searchClear" Margin="4,0,0,0" ToolTip.Tip="Don't Show Again"
+                      Click="HideCustomGameQualityWarningButton_OnClick">
+                <Canvas Width="12" Height="12">
+                  <Line StartPoint="1,1" EndPoint="11,11" Stroke="{StaticResource TextSubtleBrush}" StrokeThickness="1.6" StrokeLineCap="Round" />
+                  <Line StartPoint="11,1" EndPoint="1,11" Stroke="{StaticResource TextSubtleBrush}" StrokeThickness="1.6" StrokeLineCap="Round" />
+                </Canvas>
+              </Button>
             </StackPanel>
           </Grid>
         </Border>
+        <Border Height="1" Background="{StaticResource EdgeBrush}" />
+        </StackPanel>
       </Border>
 
       <ScrollViewer x:Name="SettingsScrollViewer" Grid.Column="1" Grid.Row="1" Classes="settingsScroll">

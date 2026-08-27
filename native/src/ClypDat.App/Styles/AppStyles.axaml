@@ -1957,6 +1957,13 @@
     <Setter Property="CornerRadius" Value="10" />
     <Setter Property="Padding" Value="16,13" />
   </Style>
+  <!-- The sticky variant spans the panel edge to edge, so it drops the
+       rounding and the margins: a floating rounded card pinned to the top of
+       a scroller reads as loose, not as a header. -->
+  <Style Selector="Border.settingsNotice.stickyNotice">
+    <Setter Property="CornerRadius" Value="0" />
+    <Setter Property="Padding" Value="33,13,36,13" />
+  </Style>
   <Style Selector="Border.settingsNotice PathIcon.cautionIcon">
     <Setter Property="Width" Value="15" />
     <Setter Property="Height" Value="15" />
