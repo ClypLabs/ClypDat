@@ -510,7 +510,7 @@ public sealed partial class MainWindow : Window
         // editor's own shortcuts work again without a detour through the mouse.
         AddHandler(PointerPressedEvent, SearchBox_OnAnyPointerPressed, RoutingStrategies.Tunnel);
         LibrarySearchBox.AddHandler(KeyDownEvent, SearchBox_OnKeyDown, RoutingStrategies.Tunnel);
-        SettingsSearchBox.AddHandler(KeyDownEvent, SearchBox_OnKeyDown, RoutingStrategies.Tunnel);
+        SettingsPanelView.SearchBox.AddHandler(KeyDownEvent, SearchBox_OnKeyDown, RoutingStrategies.Tunnel);
         // Game-rail drag - same reasoning as KeyDown/KeyUp above: a plain
         // (bubble) PointerPressed wired directly on a rail Button never saw
         // the press at all, because Button's OWN internal press handling (it
@@ -718,7 +718,7 @@ public sealed partial class MainWindow : Window
         flyout.ShowAt(button);
     }
 
-    private void RemoveIgnoredGameButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void RemoveIgnoredGameButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button { DataContext: IgnoredGameRowViewModel row } || ViewModel is null) return;
         var executableName = row.Key;
@@ -1566,7 +1566,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void RefreshGameIconsButton_OnClick(object? sender, RoutedEventArgs e)
+    internal async void RefreshGameIconsButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
         await ViewModel.RefreshGameIconsAsync();
@@ -2544,7 +2544,7 @@ public sealed partial class MainWindow : Window
         await ViewModel.RefreshOpenProcessesAsync();
     }
 
-    private void ApplyReplayBitrateRecommendationButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void ApplyReplayBitrateRecommendationButton_OnClick(object? sender, RoutedEventArgs e)
     {
         ViewModel?.ApplyReplayBitrateRecommendation();
     }
@@ -4629,9 +4629,9 @@ public sealed partial class MainWindow : Window
     private void SearchBox_OnAnyPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is not Visual focused) return;
-        if (focused != LibrarySearchBox && focused != SettingsSearchBox) return;
+        if (focused != LibrarySearchBox && focused != SettingsPanelView.SearchBox) return;
         // A click on the box itself (or its clear button) is not "done".
-        if (e.Source is Visual source && (LibrarySearchBox.IsVisualAncestorOf(source) || SettingsSearchBox.IsVisualAncestorOf(source))) return;
+        if (e.Source is Visual source && (LibrarySearchBox.IsVisualAncestorOf(source) || SettingsPanelView.SearchBox.IsVisualAncestorOf(source))) return;
         DropFocus();
     }
 
@@ -4773,7 +4773,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void RenameAllClipsButton_OnClick(object? sender, RoutedEventArgs e)
+    internal async void RenameAllClipsButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || !ViewModel.CanRenameAllClips) return;
         var dialog = CreateDialog("Rename all clips?", "This renames every video in the current library to the selected filename scheme. Existing files are never overwritten.", true, "Rename", destructive: false);
@@ -5131,7 +5131,7 @@ public sealed partial class MainWindow : Window
     }
 
 
-    private void ClearSettingsSearchButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void ClearSettingsSearchButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is not null) ViewModel.SettingsSearchText = string.Empty;
     }
@@ -5141,7 +5141,7 @@ public sealed partial class MainWindow : Window
         if (ViewModel is not null) ViewModel.LibrarySearchText = string.Empty;
     }
 
-    private void SettingsNavButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void SettingsNavButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: string section } && ViewModel is not null)
         {
@@ -5150,12 +5150,12 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void ChooseImportSourceButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void ChooseImportSourceButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: string source }) ViewModel?.SelectImportSource(source);
     }
 
-    private void BackToImportSourcesButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void BackToImportSourcesButton_OnClick(object? sender, RoutedEventArgs e)
     {
         ViewModel?.BackToImportSources();
     }
@@ -5175,19 +5175,19 @@ public sealed partial class MainWindow : Window
         if (ViewModel?.IsSettingsSearchActive != true) return;
         Dispatcher.UIThread.Post(() =>
         {
-            var target = SettingsScrollViewer.GetVisualDescendants()
+            var target = SettingsPanelView.ScrollViewer.GetVisualDescendants()
                 .OfType<StackPanel>()
-                .FirstOrDefault(panel => panel.Tag as string == section && panel.IsVisible);
+                .FirstOrDefault(panel => panel.Tag as string == section && panel.IsEffectivelyVisible);
             target?.BringIntoView();
         }, DispatcherPriority.Loaded);
     }
 
-    private void OpenLogsButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void OpenLogsButton_OnClick(object? sender, RoutedEventArgs e)
     {
         AppLog.OpenFolder();
     }
 
-    private void ExportCaptureDiagnosticsButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void ExportCaptureDiagnosticsButton_OnClick(object? sender, RoutedEventArgs e)
     {
         try
         {
@@ -5210,41 +5210,41 @@ public sealed partial class MainWindow : Window
         if (ViewModel is not null) ViewModel.Cs2AllKillsExpanded = !ViewModel.Cs2AllKillsExpanded;
     }
 
-    private async void ScanMedalButton_OnClick(object? sender, RoutedEventArgs e)
+    internal async void ScanMedalButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is not null) await ViewModel.ScanForMedalClipsAsync();
     }
 
-    private async void ImportMedalButton_OnClick(object? sender, RoutedEventArgs e)
+    internal async void ImportMedalButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
         await EnsureLibraryFolderAsync();
         await ViewModel.ImportSelectedMedalClipsAsync();
     }
 
-    private void ToggleMedalImportSelection_OnClick(object? sender, RoutedEventArgs e)
+    internal void ToggleMedalImportSelection_OnClick(object? sender, RoutedEventArgs e)
     {
         ViewModel?.ToggleMedalImportSelection();
     }
 
-    private async void ScanSteelSeriesButton_OnClick(object? sender, RoutedEventArgs e)
+    internal async void ScanSteelSeriesButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is not null) await ViewModel.ScanForSteelSeriesClipsAsync();
     }
 
-    private async void ImportSteelSeriesButton_OnClick(object? sender, RoutedEventArgs e)
+    internal async void ImportSteelSeriesButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
         await EnsureLibraryFolderAsync();
         await ViewModel.ImportSelectedSteelSeriesClipsAsync();
     }
 
-    private void ToggleSteelSeriesImportSelection_OnClick(object? sender, RoutedEventArgs e)
+    internal void ToggleSteelSeriesImportSelection_OnClick(object? sender, RoutedEventArgs e)
     {
         ViewModel?.ToggleSteelSeriesImportSelection();
     }
 
-    private async void BrowseCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
+    internal async void BrowseCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
 
@@ -5266,12 +5266,12 @@ public sealed partial class MainWindow : Window
         ViewModel.AddCustomGame();
     }
 
-    private void AddGameFromProcessButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void AddGameFromProcessButton_OnClick(object? sender, RoutedEventArgs e)
     {
         ViewModel?.AddGameFromProcess();
     }
 
-    private void RemoveGameButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void RemoveGameButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is Button { DataContext: GameBackendRowViewModel row } && ViewModel is not null)
         {
@@ -5378,7 +5378,7 @@ public sealed partial class MainWindow : Window
         Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(request.Title, new ReplayClipWindow(request.StartUtc, request.EndUtc), request.GameName, request.EventType));
     }
 
-    private void SetupDotaAutoClipButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void SetupDotaAutoClipButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
         var port = ViewModel.Settings.AutoClipping.Games["dota2"].ListenerPort;
@@ -5386,12 +5386,12 @@ public sealed partial class MainWindow : Window
         if (ViewModel.FindAutoClipGame("dota2") is { } game) game.StatusText = status;
     }
 
-    private void AutoClipGroupToggleButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void AutoClipGroupToggleButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is Button { DataContext: AutoClipGroupViewModel group }) group.Toggle();
     }
 
-    private async void CheckUpdatesButton_OnClick(object? sender, RoutedEventArgs e)
+    internal async void CheckUpdatesButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || _updateDialogOpen) return;
 
@@ -5429,7 +5429,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void OpenGitHubButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void OpenGitHubButton_OnClick(object? sender, RoutedEventArgs e)
     {
         try
         {
@@ -5441,7 +5441,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void OpenLicensesButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void OpenLicensesButton_OnClick(object? sender, RoutedEventArgs e)
     {
         var path = Path.Combine(AppContext.BaseDirectory, "THIRD-PARTY-LICENSES.md");
         try
@@ -5454,7 +5454,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void LicenseLinkText_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    internal void LicenseLinkText_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (sender is not TextBlock { Tag: string url } || string.IsNullOrWhiteSpace(url)) return;
         try
@@ -5473,7 +5473,7 @@ public sealed partial class MainWindow : Window
         ExplorerService.Open(ViewModel.SelectedVideoPath, selectFile: true);
     }
 
-    private void HotkeyCaptureButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void HotkeyCaptureButton_OnClick(object? sender, RoutedEventArgs e)
     {
         EndHotkeyCapture();
         if (ViewModel is null) return;
@@ -5545,20 +5545,12 @@ public sealed partial class MainWindow : Window
         if (ViewModel is not null) ViewModel.IsCapturingHotkey = false;
     }
 
-    private void AddExcludedProcessButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        if (ViewModel is null) return;
-        if (this.FindControl<TextBox>("ExcludedProcessTextBox") is not { } textBox) return;
-        ViewModel.AddExcludedProcess(textBox.Text ?? string.Empty);
-        textBox.Text = string.Empty;
-    }
-
-    private void AddSelectedProcessButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void AddSelectedProcessButton_OnClick(object? sender, RoutedEventArgs e)
     {
         ViewModel?.AddSelectedProcessExclusion();
     }
 
-    private async void RefreshProcessesButton_OnClick(object? sender, RoutedEventArgs e)
+    internal async void RefreshProcessesButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is not null)
         {
@@ -5566,7 +5558,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void RemoveExcludedProcessButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void RemoveExcludedProcessButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is Button { DataContext: string processName })
         {
@@ -5574,12 +5566,12 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void AddSelectedChatProcessButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void AddSelectedChatProcessButton_OnClick(object? sender, RoutedEventArgs e)
     {
         ViewModel?.AddSelectedChatProcess();
     }
 
-    private void RemoveChatAudioAppButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void RemoveChatAudioAppButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is Button { DataContext: string appName })
         {
@@ -5587,12 +5579,12 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void AddSelectedMicrophoneButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void AddSelectedMicrophoneButton_OnClick(object? sender, RoutedEventArgs e)
     {
         ViewModel?.AddSelectedMicrophone();
     }
 
-    private void RemoveMicrophoneButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void RemoveMicrophoneButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is Button { DataContext: AudioDeviceOption device })
         {
@@ -5602,7 +5594,7 @@ public sealed partial class MainWindow : Window
 
     // ---- Custom Game Settings -------------------------------------------
 
-    private void AddCustomGameComboBox_OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    internal void AddCustomGameComboBox_OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (sender is not ComboBox combo || ViewModel is null) return;
         if (combo.SelectedItem is not GameBackendRowViewModel row) return;
@@ -5615,7 +5607,7 @@ public sealed partial class MainWindow : Window
         ViewModel.AddCustomGame(row.ExecutableName, row.DisplayName);
     }
 
-    private void CustomGameTab_OnClick(object? sender, RoutedEventArgs e)
+    internal void CustomGameTab_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is Control { DataContext: CustomGameTabViewModel tab } && ViewModel is not null)
         {
@@ -5623,19 +5615,19 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void AddCustomGameSettingButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void AddCustomGameSettingButton_OnClick(object? sender, RoutedEventArgs e)
     {
         // The button's own MenuFlyout does the work; this exists so the flyout
         // opens on a plain left click rather than only on right click.
         if (sender is Button button) button.Flyout?.ShowAt(button);
     }
 
-    private void AddCustomGameGroupMenuItem_OnClick(object? sender, RoutedEventArgs e)
+    internal void AddCustomGameGroupMenuItem_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is MenuItem { Tag: string group }) SetCustomGameGroup(group, true);
     }
 
-    private void RemoveCustomGameGroupButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void RemoveCustomGameGroupButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: string group }) SetCustomGameGroup(group, false);
     }
@@ -5654,7 +5646,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void DeleteCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
+    internal async void DeleteCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
     {
         var tab = ViewModel?.SelectedCustomGameTab;
         if (tab is null || ViewModel is null) return;
@@ -5670,7 +5662,7 @@ public sealed partial class MainWindow : Window
         ViewModel.RemoveCustomGame(tab.DetectionKey);
     }
 
-    private void ToggleMicTestButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void ToggleMicTestButton_OnClick(object? sender, RoutedEventArgs e)
     {
         ViewModel?.ToggleMicTest();
     }
@@ -6967,7 +6959,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void ShowWalkthroughButton_OnClick(object? sender, RoutedEventArgs e)
+    internal void ShowWalkthroughButton_OnClick(object? sender, RoutedEventArgs e)
     {
         ViewModel?.StartOnboarding();
     }

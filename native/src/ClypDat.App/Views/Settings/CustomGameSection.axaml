@@ -1,0 +1,363 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ClypDat.App.ViewModels"
+             xmlns:controls="using:ClypDat.App.Controls"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             xmlns:opconv="using:ClypDat.App.Converters"
+             x:Class="ClypDat.App.Views.Settings.CustomGameSection"
+             x:DataType="vm:MainWindowViewModel">
+  <UserControl.IsVisible>
+    <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Custom Game Settings">
+      <Binding Path="SettingsSearchText" />
+      <Binding Path="SelectedSettingsSection" />
+    </MultiBinding>
+  </UserControl.IsVisible>
+  <!-- Custom Game Settings. Sits under CAPTURE directly beneath
+       Replay Buffer, because everything it overrides lives in the
+       sections around it. Layout is Add Game -> tab strip of added
+       games -> the selected game's enabled groups -> Add Setting ->
+       Delete. A game starts with NO groups enabled: adding a game
+       means "I want to customise this one", not "change how it
+       records right now". -->
+  <StackPanel Spacing="18" Tag="Custom Game Settings">
+    <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
+    <StackPanel Spacing="4">
+      <TextBlock Classes="settingsSectionTitle" Text="Custom Game Settings" />
+      <TextBlock Classes="settingsSectionDesc" Text="Record specific games differently - quality, replay length, audio or full-session recording. Anything you do not override here keeps using your normal settings."
+                 />
+    </StackPanel>
+
+    <!-- Add Game. One row, no title band or divider: it is a single
+         control and every pixel it takes is a pixel of the game's
+         actual settings pushed off screen. -->
+    <Border Classes="settingsCard" Padding="16,12">
+      <StackPanel Spacing="0">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+          <StackPanel Spacing="1" VerticalAlignment="Center">
+            <TextBlock Classes="settingsRowTitle" Text="Add Game"
+                       opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <TextBlock Classes="settingsRowDescSm" Text="Pick from the games ClypDat has already detected."
+                       />
+          </StackPanel>
+          <ComboBox Grid.Column="1" Classes="settingsInput" MinWidth="280" VerticalAlignment="Center"
+                    PlaceholderText="Search for a game to add..."
+                    ItemsSource="{Binding CustomGameCandidates}"
+                    SelectionChanged="AddCustomGameComboBox_OnSelectionChanged">
+            <ComboBox.ItemTemplate>
+              <DataTemplate>
+                <StackPanel Spacing="1">
+                  <TextBlock Text="{Binding DisplayName}" />
+                  <TextBlock Text="{Binding ProcessName}" Foreground="{StaticResource TextMutedBrush}" FontSize="10" IsVisible="{Binding ProcessName, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+                </StackPanel>
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+        </Grid>
+        <TextBlock Classes="settingsRowDescSm" Text="Every detected game already has custom settings."
+                   Margin="0,8,0,0"
+                   IsVisible="{Binding !CustomGameCandidates.Count}" />
+      </StackPanel>
+    </Border>
+
+    <!-- Tab strip -->
+    <StackPanel Spacing="0" IsVisible="{Binding HasCustomGameTabs}">
+      <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+        <ItemsControl ItemsSource="{Binding CustomGameTabs}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Orientation="Horizontal" Spacing="4" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Button Classes="customGameTab" Classes.active="{Binding IsSelected}" Click="CustomGameTab_OnClick">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Border Width="18" Height="18" CornerRadius="4" Background="{StaticResource EdgeBrush}" VerticalAlignment="Center">
+                    <Grid>
+                      <TextBlock Text="{Binding Initial}" FontSize="10" FontWeight="Bold" Foreground="{StaticResource LinkBrush}"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center"
+                                 IsVisible="{Binding !HasIcon}" />
+                      <Image Source="{Binding Icon}" Stretch="Uniform" IsVisible="{Binding HasIcon}" />
+                    </Grid>
+                  </Border>
+                  <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" />
+                </StackPanel>
+              </Button>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+      <Border Classes="settingsDivider" />
+    </StackPanel>
+
+    <!-- Selected game. DataContext is the tab, so everything below
+         binds straight to its own values; the handlers reach the
+         window's view model for anything that is not per-tab. -->
+    <!-- IsVisible and DataContext are on SEPARATE elements: with
+         compiled bindings, both resolve against the DataContext set
+         on their own element, so putting them together made
+         HasSelectedCustomGame resolve against the tab rather than
+         against the window's view model. -->
+    <ContentControl IsVisible="{Binding HasSelectedCustomGame}" HorizontalAlignment="Stretch">
+    <StackPanel Spacing="18" DataContext="{Binding SelectedCustomGameTab}">
+
+      <!-- Recording Mode. The one group a newly added game starts
+           with, and the only three-way choice here - it is not a
+           toggle because "record clips by hotkey", "record the whole
+           session" and "do not record this at all" are three
+           positions on one dial, not three switches. -->
+      <Border Classes="settingsCard" IsVisible="{Binding HasRecordingMode}">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Classes="settingsRowTitle" Text="Recording Mode" VerticalAlignment="Center" />
+            <Button Grid.Column="1" Classes="linkButton" Content="Remove" Tag="RecordingMode" Click="RemoveCustomGameGroupButton_OnClick" />
+          </Grid>
+
+          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="16">
+            <!-- Cover art earns its place by making the card belong
+                 to a game at a glance; it is skipped entirely when
+                 none could be found rather than showing a grey box. -->
+            <Border Grid.Column="0" Width="112" Height="150" CornerRadius="8" ClipToBounds="True"
+                    VerticalAlignment="Top" IsVisible="{Binding HasPortrait}">
+              <Image Source="{Binding Portrait}" Stretch="UniformToFill" />
+            </Border>
+            <StackPanel Grid.Column="1" Spacing="12" VerticalAlignment="Center">
+          <RadioButton GroupName="CustomGameRecordingMode" IsChecked="{Binding IsManualCapture}">
+            <StackPanel Spacing="2" Margin="4,0,0,0">
+              <TextBlock Text="Manual capture" Foreground="{StaticResource TextStrongBrush}" FontWeight="SemiBold" />
+              <TextBlock Classes="settingsRowDescSm" Text="Keep the replay buffer running and save clips with your hotkey." />
+            </StackPanel>
+          </RadioButton>
+          <RadioButton GroupName="CustomGameRecordingMode" IsChecked="{Binding IsFullSessionCapture}">
+            <StackPanel Spacing="2" Margin="4,0,0,0">
+              <TextBlock Text="Automatically record entire game session" Foreground="{StaticResource TextStrongBrush}" FontWeight="SemiBold" />
+              <TextBlock Classes="settingsRowDescSm" Text="Starts recording as soon as this game opens. Your hotkey still saves clips." />
+            </StackPanel>
+          </RadioButton>
+          <RadioButton GroupName="CustomGameRecordingMode" IsChecked="{Binding IsRecordingOff}">
+            <StackPanel Spacing="2" Margin="4,0,0,0">
+              <TextBlock Text="Recording off" Foreground="{StaticResource TextStrongBrush}" FontWeight="SemiBold" />
+              <TextBlock Classes="settingsRowDescSm" Text="This game is never recorded, even while the buffer is armed for everything else." />
+            </StackPanel>
+          </RadioButton>
+            </StackPanel>
+          </Grid>
+        </StackPanel>
+      </Border>
+
+      <!-- Same preset cards and dropdowns as the global Recording
+           Quality card, deliberately: a per-game override that looked
+           nothing like the setting it overrides is harder to read,
+           and the row of sliders this replaced took four times the
+           height to say less. -->
+      <Border Classes="settingsCard" IsVisible="{Binding HasQuality}">
+        <StackPanel Spacing="11">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Classes="settingsRowTitle" Text="Recording Quality" VerticalAlignment="Center" />
+            <Button Grid.Column="1" Classes="linkButton" Content="Remove" Tag="Quality" Click="RemoveCustomGameGroupButton_OnClick" />
+          </Grid>
+          <TextBlock Text="Higher settings use more resources and storage." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
+
+          <ListBox Classes="qualityPresetCards"
+                   ItemsSource="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).ReplayQualityPresets}"
+                   SelectedItem="{Binding SelectedQualityPreset}">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <StackPanel Spacing="3" HorizontalAlignment="Left" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding Label}" FontSize="15" FontWeight="Bold" />
+                  <TextBlock Text="{Binding Description}" Foreground="{StaticResource TextBrush}" FontSize="11" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding Summary}" Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <Grid ColumnDefinitions="170,96,96" ColumnSpacing="12" HorizontalAlignment="Left" IsVisible="{Binding IsCustomQuality}">
+            <StackPanel Spacing="3">
+              <TextBlock Text="Resolution" Foreground="{StaticResource TextBrush}" FontSize="12" />
+              <ComboBox Classes="settingsInput" Width="170"
+                        ItemsSource="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).ReplayResolutions}"
+                        DisplayMemberBinding="{Binding Label}"
+                        SelectedValueBinding="{Binding Height}"
+                        SelectedValue="{Binding ReplayMaxHeight}" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Spacing="3">
+              <TextBlock Text="FPS" Foreground="{StaticResource TextBrush}" FontSize="12" />
+              <ComboBox Classes="settingsInput" Width="96"
+                        ItemsSource="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).ReplayFrameRates}"
+                        SelectedItem="{Binding ReplayFrameRate}" />
+            </StackPanel>
+            <StackPanel Grid.Column="2" Spacing="3">
+              <TextBlock Text="Bitrate" Foreground="{StaticResource TextBrush}" FontSize="12" />
+              <ComboBox Classes="settingsInput" Width="96"
+                        ItemsSource="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).ReplayBitrateOptions}"
+                        SelectedItem="{Binding SelectedBitrateOption}" />
+            </StackPanel>
+          </Grid>
+
+          <Grid ColumnDefinitions="170,*" ColumnSpacing="12" HorizontalAlignment="Left">
+            <StackPanel Spacing="3">
+              <TextBlock Text="Video codec" Foreground="{StaticResource TextBrush}" FontSize="12" />
+              <ComboBox Classes="settingsInput" Width="170"
+                        ItemsSource="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).ReplayVideoCodecs}"
+                        DisplayMemberBinding="{Binding Label}"
+                        SelectedValueBinding="{Binding Value}"
+                        SelectedValue="{Binding ReplayVideoCodec}" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Spacing="3">
+              <TextBlock Text="Encoder" Foreground="{StaticResource TextBrush}" FontSize="12" />
+              <ComboBox Classes="settingsInput" Width="192"
+                        ItemsSource="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).ReplayEncoderModes}"
+                        DisplayMemberBinding="{Binding Label}"
+                        SelectedValueBinding="{Binding Value}"
+                        SelectedValue="{Binding ReplayEncoderMode}" />
+            </StackPanel>
+          </Grid>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="settingsCard" IsVisible="{Binding HasReplay}">
+        <StackPanel Spacing="11">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Classes="settingsRowTitle" Text="Replay Length" VerticalAlignment="Center" />
+            <Button Grid.Column="1" Classes="linkButton" Content="Remove" Tag="Replay" Click="RemoveCustomGameGroupButton_OnClick" />
+          </Grid>
+          <TextBlock Text="How much of this game the replay buffer keeps." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
+          <!-- Same pill group the global Replay Buffer card uses, so
+               the two read as the same control rather than as a
+               slider that happens to mean the same thing. -->
+          <ListBox Classes="pillGroup"
+                   ItemsSource="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).ReplayDurationPresets}"
+                   SelectedItem="{Binding SelectedDurationPreset}" />
+        </StackPanel>
+      </Border>
+
+      <!-- Same shape as the global Recording Audio card: one row per
+           track, toggle + icon + name + gain. Built from that card's
+           own process list (SyncAudioProcesses) so both always offer
+           the same apps, and so this does not run a second process
+           enumeration of its own. -->
+      <Border Classes="settingsCard" IsVisible="{Binding HasAudio}">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="settingsRowTitle" Text="Recording Audio" />
+              <TextBlock Text="Audio Processes" Foreground="{StaticResource TextSubtleBrush}" FontSize="11" FontWeight="Bold" />
+            </StackPanel>
+            <Button Grid.Column="1" Classes="linkButton" Content="Remove" Tag="Audio" Click="RemoveCustomGameGroupButton_OnClick" VerticalAlignment="Center" />
+          </Grid>
+
+          <Border Classes="audioProcessList">
+            <StackPanel Spacing="0">
+              <Border Classes="audioProcessRow enabledRow">
+                <Grid ColumnDefinitions="40,32,*,Auto" ColumnSpacing="14" MinHeight="54">
+                  <ToggleSwitch Grid.Column="0" Width="40" IsChecked="True" IsEnabled="False" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                  <Border Grid.Column="1" Width="32" Height="32" Background="{StaticResource EdgeBrush}" CornerRadius="9" VerticalAlignment="Center">
+                    <PathIcon Data="M4,19H20V21H4V19M6,3H18V17H6V3M8,5V15H16V5H8Z" Width="18" Height="18" Foreground="{StaticResource LinkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </Border>
+                  <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="Game Audio" Foreground="{StaticResource TextStrongBrush}" FontWeight="SemiBold" />
+                    <TextBlock Classes="settingsRowDescSm" Text="Dedicated capture track" />
+                  </StackPanel>
+                  <Grid Grid.Column="3" ColumnDefinitions="200,10,50" VerticalAlignment="Center">
+                    <Slider Width="200" Height="52" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" Foreground="{Binding GameAudioVolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding GameAudioVolumePercent}" />
+                    <TextBlock Grid.Column="2" Text="{Binding GameAudioVolumePercent, StringFormat={}{0:0}%}" TextAlignment="Right" Foreground="{StaticResource TextStrongBrush}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
+                  </Grid>
+                </Grid>
+              </Border>
+
+              <Border Classes="audioProcessRow enabledRow">
+                <Grid ColumnDefinitions="40,32,*,Auto" ColumnSpacing="14" MinHeight="54">
+                  <ToggleSwitch Grid.Column="0" Width="40" IsChecked="True" IsEnabled="False" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                  <Border Grid.Column="1" Width="32" Height="32" Background="{StaticResource EdgeBrush}" CornerRadius="9" VerticalAlignment="Center">
+                    <PathIcon Data="M12,14C13.66,14 15,12.66 15,11V5C15,3.34 13.66,2 12,2C10.34,2 9,3.34 9,5V11C9,12.66 10.34,14 12,14M17.3,11C17.3,14 14.76,16.1 12,16.1C9.24,16.1 6.7,14 6.7,11H5C5,14.41 7.72,17.23 11,17.72V21H13V17.72C16.28,17.23 19,14.41 19,11H17.3Z" Width="18" Height="18" Foreground="{StaticResource LinkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </Border>
+                  <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="Microphone" Foreground="{StaticResource TextStrongBrush}" FontWeight="SemiBold" />
+                    <TextBlock Classes="settingsRowDescSm" Text="Dedicated capture track" />
+                  </StackPanel>
+                  <Grid Grid.Column="3" ColumnDefinitions="200,10,50" VerticalAlignment="Center">
+                    <Slider Width="200" Height="52" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" Foreground="{Binding MicrophoneVolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding MicrophoneVolumePercent}" />
+                    <TextBlock Grid.Column="2" Text="{Binding MicrophoneVolumePercent, StringFormat={}{0:0}%}" TextAlignment="Right" Foreground="{StaticResource TextStrongBrush}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
+                  </Grid>
+                </Grid>
+              </Border>
+
+              <ItemsControl ItemsSource="{Binding AudioProcesses}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Border Classes="audioProcessRow" Classes.enabledRow="{Binding IsEnabled}">
+                      <Grid ColumnDefinitions="40,32,*,Auto" ColumnSpacing="14" MinHeight="54">
+                        <ToggleSwitch Grid.Column="0" Width="40" IsChecked="{Binding IsEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                        <Border Grid.Column="1" Width="32" Height="32" Background="{StaticResource EdgeBrush}" CornerRadius="9" VerticalAlignment="Center">
+                          <Grid>
+                            <TextBlock Text="{Binding Initial}" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource LinkBrush}" FontWeight="Bold" />
+                            <Image Source="{Binding Icon}" Stretch="Uniform" />
+                          </Grid>
+                        </Border>
+                        <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center">
+                          <TextBlock Text="{Binding Name}" Foreground="{StaticResource TextStrongBrush}" FontWeight="SemiBold" />
+                          <TextBlock Classes="settingsRowDescSm" Text="Separate app track" />
+                        </StackPanel>
+                        <Grid Grid.Column="3" ColumnDefinitions="200,10,50" VerticalAlignment="Center" IsEnabled="{Binding IsEnabled}">
+                          <Slider Width="200" Height="52" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" Foreground="{Binding VolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding VolumePercent}" />
+                          <TextBlock Grid.Column="2" Text="{Binding VolumePercent, StringFormat={}{0:0}%}" TextAlignment="Right" Foreground="{StaticResource TextStrongBrush}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        </Grid>
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+
+        </StackPanel>
+      </Border>
+
+      <!-- Add Setting. Sits BELOW whatever is already enabled, so the
+           card list grows downward toward it. Hidden once all four
+           groups are on, because there is then nothing to add. -->
+      <Button Classes="addSettingCard" Click="AddCustomGameSettingButton_OnClick" HorizontalAlignment="Stretch" Height="88"
+              IsVisible="{Binding CanAddGroup}">
+        <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center">
+          <!-- Two rectangles, not a "+" glyph. A text plus carries
+               the font's own side bearings and line height, so it
+               sits off-centre inside a circle no matter what margin
+               is nudged at it; these are centred by layout and are
+               exact at any size. -->
+          <!-- One filled geometry, not a stroked ring with two
+               rectangles laid over it. Separate shapes meant the ring
+               and the two bars each had their own sub-pixel width
+               (1.4 and 1.6), so on a fractionally scaled display the
+               horizontal bar, the vertical bar and the circle all
+               antialiased to different apparent weights. A single
+               path is symmetric by construction and scales as one
+               piece, which is why every other icon in the app is
+               drawn this way. -->
+          <PathIcon Width="18" Height="18" Foreground="{StaticResource TextSubtleBrush}" VerticalAlignment="Center"
+                    Data="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M17,13H13V17H11V13H7V11H11V7H13V11H17V13Z" />
+          <TextBlock Text="Add Setting" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" VerticalAlignment="Center" />
+        </StackPanel>
+        <Button.Flyout>
+          <MenuFlyout Placement="Top">
+            <MenuItem Header="Recording Mode" Tag="RecordingMode" Click="AddCustomGameGroupMenuItem_OnClick" IsVisible="{Binding !HasRecordingMode}" />
+            <MenuItem Header="Recording Quality" Tag="Quality" Click="AddCustomGameGroupMenuItem_OnClick" IsVisible="{Binding !HasQuality}" />
+            <MenuItem Header="Replay Length and Hotkey" Tag="Replay" Click="AddCustomGameGroupMenuItem_OnClick" IsVisible="{Binding !HasReplay}" />
+            <MenuItem Header="Audio" Tag="Audio" Click="AddCustomGameGroupMenuItem_OnClick" IsVisible="{Binding !HasAudio}" />
+          </MenuFlyout>
+        </Button.Flyout>
+      </Button>
+
+      <Border Classes="settingsCard">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+          <StackPanel Spacing="2" VerticalAlignment="Center">
+            <TextBlock Text="{Binding DisplayName, StringFormat='Delete all Custom Game Settings for {0}'}" Foreground="{StaticResource TextStrongBrush}" FontWeight="Bold" FontSize="15" TextWrapping="Wrap" />
+            <TextBlock Classes="settingsRowDescSm" Text="Revert this game to your normal recording settings." />
+          </StackPanel>
+          <Button Grid.Column="1" Classes="dangerButton" Content="Delete Settings" VerticalAlignment="Center" Click="DeleteCustomGameButton_OnClick" />
+        </Grid>
+      </Border>
+    </StackPanel>
+    </ContentControl>
+  </StackPanel>
+</UserControl>

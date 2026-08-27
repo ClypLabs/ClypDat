@@ -1,0 +1,177 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ClypDat.App.ViewModels"
+             xmlns:controls="using:ClypDat.App.Controls"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             xmlns:opconv="using:ClypDat.App.Converters"
+             x:Class="ClypDat.App.Views.Settings.AboutSection"
+             x:DataType="vm:MainWindowViewModel">
+  <UserControl.IsVisible>
+    <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="About">
+      <Binding Path="SettingsSearchText" />
+      <Binding Path="SelectedSettingsSection" />
+    </MultiBinding>
+  </UserControl.IsVisible>
+  <StackPanel Spacing="18" Tag="About">
+    <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
+    <StackPanel Spacing="4">
+      <TextBlock Classes="settingsSectionTitle" Text="About" />
+      <TextBlock Classes="settingsSectionDesc" Text="Version, updates, source, and open source licenses." />
+    </StackPanel>
+    <Border Classes="settingsDivider" />
+
+    <Border Classes="settingsCard">
+      <StackPanel Orientation="Horizontal" Spacing="16">
+        <Border Width="52" Height="52" CornerRadius="12" Background="{StaticResource SurfaceRaisedBrush}">
+          <Image Source="/Assets/clypdat-icon-24.png" Width="30" Height="30" HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Border>
+        <StackPanel Spacing="3" VerticalAlignment="Center">
+          <TextBlock Text="ClypDat" Foreground="{StaticResource TextStrongBrush}" FontWeight="Bold" FontSize="20" />
+          <TextBlock Text="A clip recorder and editor, made to be fast and to stay out of your way." Foreground="{StaticResource TextSubtleBrush}" FontSize="12" TextWrapping="Wrap" />
+          <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,4,0,0">
+            <TextBlock Classes="settingsCardLabel" Text="{Binding AppVersionDisplay}" />
+            <TextBlock Text="·" Foreground="{StaticResource LabelBrush}" FontSize="11" FontWeight="Bold" />
+            <TextBlock Classes="settingsCardLabel" Text="Made by ClypLabs" />
+            <TextBlock Text="·" Foreground="{StaticResource LabelBrush}" FontSize="11" FontWeight="Bold" IsVisible="{Binding HasAppCommit}" />
+            <TextBlock Text="{Binding AppCommitDisplay}"
+                       ToolTip.Tip="View this build's commit on GitHub"
+                       Foreground="{StaticResource LinkBrush}"
+                       FontSize="12"
+                       FontWeight="Bold"
+                       TextDecorations="Underline"
+                       Cursor="Hand"
+                       IsVisible="{Binding HasAppCommit}"
+                       Tag="{Binding AppCommitUrl}"
+                       PointerPressed="LicenseLinkText_OnPointerPressed" />
+          </StackPanel>
+        </StackPanel>
+      </StackPanel>
+    </Border>
+
+    <!-- Below the identity card, not above it: this section is about
+         the build first, and a feature toggle should not be the
+         first thing between the heading and the app's own name. -->
+    <Border Classes="settingsCard">
+      <StackPanel Spacing="14">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+          <StackPanel Spacing="2" VerticalAlignment="Center">
+            <TextBlock Classes="settingsRowTitle" Text="Discord Rich Presence"
+                       opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <TextBlock Classes="settingsRowDescSm" Text="Shows what you are recording, editing or browsing on your Discord profile. Anyone who can see your profile can see the game name."
+                       />
+          </StackPanel>
+          <ToggleSwitch Grid.Column="1" VerticalAlignment="Center"
+                        IsChecked="{Binding DiscordRichPresenceEnabled}"
+                        OnContent="{x:Null}" OffContent="{x:Null}" />
+        </Grid>
+        <Border Height="1" Background="{StaticResource SurfaceHoverBrush}" />
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+          <StackPanel Spacing="2" VerticalAlignment="Center">
+            <TextBlock Text="Show “Get ClypDat” Link" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="14"
+                       opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <TextBlock Classes="settingsRowDescSm" Text="Adds a clypdat.xyz button to your Rich Presence for people viewing your profile."
+                       />
+          </StackPanel>
+          <ToggleSwitch Grid.Column="1" VerticalAlignment="Center"
+                        IsChecked="{Binding DiscordRichPresenceShowGetClypDatButton}"
+                        IsEnabled="{Binding DiscordRichPresenceEnabled}"
+                        OnContent="{x:Null}" OffContent="{x:Null}" />
+        </Grid>
+      </StackPanel>
+    </Border>
+
+    <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Check for updates|Install updates while loading|Updates}">
+      <StackPanel Spacing="16">
+        <TextBlock Classes="settingsCardLabel" Text="UPDATES" />
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel Spacing="2">
+        <TextBlock Classes="settingsRowTitle" Text="Check for Updates" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <TextBlock Classes="settingsRowDesc" Text="ClypDat also checks automatically on launch." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          </StackPanel>
+          <Button Name="CheckNowButton" Grid.Column="1" Content="Check Now" Classes="primaryButton" Click="CheckUpdatesButton_OnClick" VerticalAlignment="Center" />
+        </Grid>
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel Spacing="2">
+            <TextBlock Classes="settingsRowTitle" Text="Install Updates While Loading" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <TextBlock Classes="settingsRowDesc" Text="The startup loader installs an available update before ClypDat opens. Off asks after launch instead." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          </StackPanel>
+          <ToggleSwitch Grid.Column="1" IsChecked="{Binding InstallUpdatesOnLaunch}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+        </Grid>
+      </StackPanel>
+    </Border>
+
+    <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=View on GitHub|Source and Licenses}">
+      <StackPanel Spacing="16">
+        <TextBlock Classes="settingsCardLabel" Text="SOURCE AND LICENSES" />
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel Spacing="2">
+            <TextBlock Classes="settingsRowTitle" Text="View on GitHub" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <TextBlock Classes="settingsRowDesc" Text="Source code, releases, and issue tracker." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          </StackPanel>
+          <Button Grid.Column="1" Content="Open GitHub" Click="OpenGitHubButton_OnClick" VerticalAlignment="Center" />
+        </Grid>
+      </StackPanel>
+    </Border>
+
+    <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Log folder|Diagnostics}">
+      <StackPanel Spacing="16">
+        <TextBlock Classes="settingsCardLabel" Text="DIAGNOSTICS" />
+        <Grid ColumnDefinitions="*,Auto,Auto">
+          <StackPanel Spacing="2">
+        <TextBlock Classes="settingsRowTitle" Text="Log Folder" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <TextBlock Classes="settingsRowDesc" Text="Open ClypDat's log files for troubleshooting a crash or capture issue." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          </StackPanel>
+          <Button Grid.Column="1" Content="Export Bundle" Click="ExportCaptureDiagnosticsButton_OnClick" VerticalAlignment="Center" Margin="0,0,8,0" />
+          <Button Grid.Column="2" Content="Open Logs" Click="OpenLogsButton_OnClick" VerticalAlignment="Center" />
+        </Grid>
+      </StackPanel>
+    </Border>
+
+    <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Setup walkthrough|Get Started}">
+      <StackPanel Spacing="16">
+        <TextBlock Classes="settingsCardLabel" Text="GET STARTED" />
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel Spacing="2">
+        <TextBlock Classes="settingsRowTitle" Text="Setup Walkthrough" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <TextBlock Classes="settingsRowDesc" Text="Replay the first-time setup guide for library, capture, hotkey, and audio settings." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          </StackPanel>
+          <Button Grid.Column="1" Content="Show Walkthrough" Click="ShowWalkthroughButton_OnClick" VerticalAlignment="Center" />
+        </Grid>
+      </StackPanel>
+    </Border>
+
+    <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="10" Padding="18">
+      <StackPanel Spacing="10">
+        <TextBlock Classes="settingsCardLabel" Text="LICENSES" Margin="0,0,0,4" />
+
+        <ItemsControl ItemsSource="{Binding ThirdPartyLicenseEntries}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Spacing="10" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <WrapPanel>
+                <TextBlock Text="This software uses libraries from the " Foreground="{StaticResource TextSubtleBrush}" FontSize="13" />
+                <TextBlock Text="{Binding ProjectName}" Foreground="{StaticResource LinkBrush}" TextDecorations="Underline" FontSize="13" Cursor="Hand" Tag="{Binding ProjectUrl}" PointerPressed="LicenseLinkText_OnPointerPressed" />
+                <TextBlock Text=" project under the " Foreground="{StaticResource TextSubtleBrush}" FontSize="13" />
+                <TextBlock Text="{Binding LicenseName}" Foreground="{StaticResource LinkBrush}" TextDecorations="Underline" FontSize="13" Cursor="Hand" Tag="{Binding LicenseUrl}" PointerPressed="LicenseLinkText_OnPointerPressed" />
+                <TextBlock Text="." Foreground="{StaticResource TextSubtleBrush}" FontSize="13" />
+              </WrapPanel>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <Border Classes="settingsDivider" Margin="0,4,0,0" />
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel Spacing="2">
+        <TextBlock Classes="settingsRowTitle" Text="Full License Text" />
+            <TextBlock Classes="settingsRowDesc" Text="Complete notices and source links for every bundled component." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          </StackPanel>
+          <Button Grid.Column="1" Content="View Licenses" Click="OpenLicensesButton_OnClick" VerticalAlignment="Center" />
+        </Grid>
+      </StackPanel>
+    </Border>
+  </StackPanel>
+</UserControl>

@@ -1,0 +1,33 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- The settings UI used to carry 42 distinct hex values inline - six greys
+       for muted text, five for surfaces, three for dividers - so nothing lined
+       up. These are that palette collapsed into one ramp. Same dark family, far
+       fewer steps. Accent colours are NOT here: they live in App.axaml because
+       App.ApplyAccentColor mutates them in place from the Windows accent, and
+       the Resources indexer it uses does not reach into merged dictionaries. -->
+
+  <!-- Surfaces, darkest to lightest -->
+  <SolidColorBrush x:Key="AppBgBrush" Color="#0D1116" />
+  <SolidColorBrush x:Key="PanelBgBrush" Color="#101820" />
+  <SolidColorBrush x:Key="SurfaceBrush" Color="#141D24" />
+  <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="#1A242E" />
+  <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#22303D" />
+
+  <!-- Lines -->
+  <SolidColorBrush x:Key="EdgeBrush" Color="#232F3A" />
+  <SolidColorBrush x:Key="EdgeStrongBrush" Color="#2C3B48" />
+  <SolidColorBrush x:Key="DividerBrush" Color="#1B242D" />
+
+  <!-- Text, brightest to dimmest -->
+  <SolidColorBrush x:Key="TextStrongBrush" Color="#EDF4FB" />
+  <SolidColorBrush x:Key="TextBrush" Color="#D2DEEC" />
+  <SolidColorBrush x:Key="TextSubtleBrush" Color="#9FB2C6" />
+  <SolidColorBrush x:Key="TextMutedBrush" Color="#6B7C8C" />
+  <SolidColorBrush x:Key="LabelBrush" Color="#5C6D7E" />
+
+  <!-- Semantic -->
+  <SolidColorBrush x:Key="LinkBrush" Color="#78B8FF" />
+  <SolidColorBrush x:Key="CautionBrush" Color="#E5A00D" />
+  <SolidColorBrush x:Key="DangerBrush" Color="#D85E61" />
+</ResourceDictionary>

@@ -2,21 +2,26 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="ClypDat.App.App">
   <Application.Resources>
-    <!-- Fallback colors; overwritten at startup in App.axaml.cs with the live
-         Windows accent color when available (Settings > Personalization > Colors). -->
-    <SolidColorBrush x:Key="AccentBrush" Color="#5864E8" />
-    <SolidColorBrush x:Key="AccentBrushHover" Color="#6D77F0" />
-    <!-- Sidebar selection tints, derived from the accent above (see
-         ApplyAccentColor) so they track the Windows colour too. -->
-    <SolidColorBrush x:Key="AccentSelectedBrush" Color="#2A3350" />
-    <SolidColorBrush x:Key="AccentSelectedHoverBrush" Color="#222A43" />
-    <SolidColorBrush x:Key="AccentSelectedIconBrush" Color="#A8B4F5" />
-    <SolidColorBrush x:Key="AccentGameHoverBrush" Color="#222A43" />
-    <!-- Folder tiles use the former brighter rail tint while idle. -->
-    <SolidColorBrush x:Key="AccentFolderBrush" Color="#2C3568" />
-    <!-- Hovering a rail button uses a darker version of its selection tint,
-         keeping selected state visually stronger than pointer-over state. -->
-    <SolidColorBrush x:Key="AccentHoverBrush" Color="#222A43" />
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://ClypDat/Styles/Tokens.axaml" />
+      </ResourceDictionary.MergedDictionaries>
+      <!-- Fallback colors; overwritten at startup in App.axaml.cs with the live
+           Windows accent color when available (Settings > Personalization > Colors). -->
+      <SolidColorBrush x:Key="AccentBrush" Color="#5864E8" />
+      <SolidColorBrush x:Key="AccentBrushHover" Color="#6D77F0" />
+      <!-- Sidebar selection tints, derived from the accent above (see
+           ApplyAccentColor) so they track the Windows colour too. -->
+      <SolidColorBrush x:Key="AccentSelectedBrush" Color="#2A3350" />
+      <SolidColorBrush x:Key="AccentSelectedHoverBrush" Color="#222A43" />
+      <SolidColorBrush x:Key="AccentSelectedIconBrush" Color="#A8B4F5" />
+      <SolidColorBrush x:Key="AccentGameHoverBrush" Color="#222A43" />
+      <!-- Folder tiles use the former brighter rail tint while idle. -->
+      <SolidColorBrush x:Key="AccentFolderBrush" Color="#2C3568" />
+      <!-- Hovering a rail button uses a darker version of its selection tint,
+           keeping selected state visually stronger than pointer-over state. -->
+      <SolidColorBrush x:Key="AccentHoverBrush" Color="#222A43" />
+    </ResourceDictionary>
   </Application.Resources>
   <Application.Styles>
     <FluentTheme />

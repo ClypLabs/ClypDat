@@ -1,0 +1,119 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ClypDat.App.ViewModels"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             xmlns:opconv="using:ClypDat.App.Converters"
+             xmlns:settings="using:ClypDat.App.Views.Settings"
+             x:Class="ClypDat.App.Views.Settings.SettingsPanel"
+             x:DataType="vm:MainWindowViewModel">
+  <Border Background="{StaticResource PanelBgBrush}">
+    <Grid ColumnDefinitions="240,*,Auto">
+      <Border Grid.Column="0" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="0,0,1,0">
+        <StackPanel Margin="0,18,16,24" Spacing="2">
+          <TextBox x:Name="SettingsSearchBox" Classes="settingsInput appSearchBox" Text="{Binding SettingsSearchText}" PlaceholderText="Search settings" Margin="14,0,0,14" VerticalContentAlignment="Center">
+            <TextBox.InnerLeftContent>
+              <Canvas Width="16" Height="16" Margin="10,0,2,0" VerticalAlignment="Center">
+                <Ellipse Canvas.Left="0" Canvas.Top="0" Width="11" Height="11" Stroke="{StaticResource TextMutedBrush}" StrokeThickness="1.6" />
+                <Line StartPoint="9,9" EndPoint="15,15" Stroke="{StaticResource TextMutedBrush}" StrokeThickness="1.6" StrokeLineCap="Round" />
+              </Canvas>
+            </TextBox.InnerLeftContent>
+            <TextBox.InnerRightContent>
+              <Button Classes="searchClear" Click="ClearSettingsSearchButton_OnClick"
+                      IsVisible="{Binding SettingsSearchText, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
+                      ToolTip.Tip="Clear search">
+                <Canvas Width="12" Height="12">
+                  <Line StartPoint="1,1" EndPoint="11,11" Stroke="{StaticResource TextSubtleBrush}" StrokeThickness="1.6" StrokeLineCap="Round" />
+                  <Line StartPoint="11,1" EndPoint="1,11" Stroke="{StaticResource TextSubtleBrush}" StrokeThickness="1.6" StrokeLineCap="Round" />
+                </Canvas>
+              </Button>
+            </TextBox.InnerRightContent>
+          </TextBox>
+          <TextBlock Classes="settingsSectionLabel" Text="GENERAL" Margin="22,0,0,14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter='General|Game Detection|Import Clips'}" />
+          <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=General}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=General}" Tag="General" Content="General" Click="SettingsNavButton_OnClick" />
+          <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Detection}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Game Detection}" Tag="Game Detection" Content="Game Detection" Click="SettingsNavButton_OnClick" />
+          <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Import Clips}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Import Clips}" Tag="Import Clips" Content="Import Clips" Click="SettingsNavButton_OnClick" />
+
+          <TextBlock Classes="settingsSectionLabel" Text="CAPTURE" Margin="22,20,0,14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter='Replay Buffer|Custom Game Settings|Overlays and Notifications|Auto-Clip|Audio|Game Audio Exclusions'}" />
+          <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Replay Buffer}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Replay Buffer}" Tag="Replay Buffer" Content="Replay Buffer" Click="SettingsNavButton_OnClick" />
+          <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Custom Game Settings}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Custom Game Settings}" Tag="Custom Game Settings" Content="Custom Game Settings" Click="SettingsNavButton_OnClick" />
+          <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Overlays and Notifications}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Overlays and Notifications}" Tag="Overlays and Notifications" Content="Overlays and Notifications" Click="SettingsNavButton_OnClick" />
+          <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Auto-Clip}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Auto-Clip}" Tag="Auto-Clip" Content="Auto-Clipping" Click="SettingsNavButton_OnClick" />
+          <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Audio}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Audio}" Tag="Audio" Content="Audio" Click="SettingsNavButton_OnClick" />
+          <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Audio Exclusions}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Game Audio Exclusions}" Tag="Game Audio Exclusions" Content="Game Audio Exclusions" Click="SettingsNavButton_OnClick" />
+
+          <TextBlock Classes="settingsSectionLabel" Text="ABOUT" Margin="22,20,0,14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=About}" />
+          <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=About}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=About}" Tag="About" Content="About" Click="SettingsNavButton_OnClick" />
+        </StackPanel>
+      </Border>
+
+      <ScrollViewer x:Name="SettingsScrollViewer" Grid.Column="1" Classes="settingsScroll">
+        <StackPanel Margin="36,28,36,40" Spacing="22">
+
+          <settings:ReplayBufferSection />
+          <settings:OverlaysSection />
+          <settings:GeneralSection />
+          <settings:GameDetectionSection />
+          <settings:ImportClipsSection />
+          <settings:AutoClipSection />
+          <settings:AudioSection />
+          <settings:CustomGameSection />
+          <settings:GameAudioExclusionsSection />
+          <settings:AboutSection />
+
+        </StackPanel>
+      </ScrollViewer>
+
+      <Border Grid.Column="2" Width="280" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1,0,0,0" IsVisible="{Binding IsStatusAreaVisible}">
+        <ScrollViewer>
+          <StackPanel Margin="22,28,22,20">
+            <TextBlock Classes="settingsSectionLabel" Text="STATUS" Margin="0,0,0,4" />
+            <Border Classes="settingsDivider" Margin="0,10,0,14" />
+
+            <StackPanel Spacing="2" Margin="0,0,0,16">
+            <TextBlock Classes="settingsCardLabel" Text="Replay Buffer" />
+              <TextBlock Text="{Binding RecorderStatus}" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="16" />
+            </StackPanel>
+
+            <StackPanel Spacing="2" Margin="0,0,0,16">
+              <TextBlock Classes="settingsCardLabel" Text="Save hotkey" />
+              <TextBlock Text="{Binding HotkeyDisplay}" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="16" />
+            </StackPanel>
+
+            <Border Classes="settingsDivider" Margin="0,0,0,16" />
+
+            <StackPanel Spacing="2" Margin="0,0,0,16">
+              <TextBlock Classes="settingsCardLabel" Text="Replay length" />
+              <TextBlock Text="{Binding SelectedReplayDurationPreset.Label}" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="16" />
+            </StackPanel>
+
+            <StackPanel Spacing="2" Margin="0,0,0,16">
+              <TextBlock Classes="settingsCardLabel" Text="Resolution / FPS" />
+              <TextBlock Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="16">
+                <Run Text="{Binding SelectedReplayResolution.Label}" /><Run Text=" @ " /><Run Text="{Binding SelectedReplayFrameRate}" /><Run Text="fps" />
+              </TextBlock>
+            </StackPanel>
+
+            <StackPanel Spacing="2" Margin="0,0,0,16">
+              <TextBlock Classes="settingsCardLabel" Text="Bitrate" />
+              <TextBlock Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="16">
+                <Run Text="{Binding SelectedReplayBitrateOption}" /><Run Text="bps" />
+              </TextBlock>
+            </StackPanel>
+
+            <StackPanel Spacing="2" Margin="0,0,0,16">
+              <TextBlock Classes="settingsCardLabel" Text="Codec" />
+              <TextBlock Text="{Binding SelectedReplayVideoCodec.Label}" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="16" />
+            </StackPanel>
+
+            <Border Classes="settingsDivider" Margin="0,0,0,16" />
+
+            <StackPanel Spacing="2">
+              <TextBlock Classes="settingsCardLabel" Text="Library folder" />
+              <TextBlock Text="{Binding LibraryLocationText}" Foreground="{StaticResource TextSubtleBrush}" FontSize="12" TextWrapping="Wrap" />
+            </StackPanel>
+          </StackPanel>
+        </ScrollViewer>
+      </Border>
+    </Grid>
+  </Border>
+</UserControl>

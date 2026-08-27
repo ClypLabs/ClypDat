@@ -67,8 +67,8 @@
     from turning into one giant scroll once there are 30+ rows.
   -->
   <Style Selector="Border.listPane">
-    <Setter Property="Background" Value="#10171D" />
-    <Setter Property="BorderBrush" Value="#232F3A" />
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
   </Style>
@@ -367,7 +367,7 @@
     </Setter>
   </Style>
   <Style Selector="Button.customGameTab:not(ToggleSwitch):pointerover">
-    <Setter Property="Foreground" Value="#D8E4F2" />
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
   </Style>
   <Style Selector="Button.customGameTab.active">
     <Setter Property="Foreground" Value="#FFFFFF" />
@@ -1040,14 +1040,14 @@
   </Style>
 
   <Style Selector="ComboBox.settingsInput, TextBox.settingsInput">
-    <Setter Property="Background" Value="#1D2A36" />
-    <Setter Property="Foreground" Value="#D8E4F2" />
-    <Setter Property="BorderBrush" Value="#2C3B48" />
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="7" />
-    <Setter Property="Padding" Value="14,10" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Padding" Value="13,8" />
     <Setter Property="FontSize" Value="14" />
-    <Setter Property="MinHeight" Value="42" />
+    <Setter Property="MinHeight" Value="38" />
   </Style>
   <!-- The app's search boxes borrow settingsInput's behaviour but not its
        proportions. A settings field is a 42px form control on a page of form
@@ -1068,12 +1068,12 @@
   </Style>
 
   <Style Selector="TextBox.appSearchBox">
-    <Setter Property="MinHeight" Value="32" />
-    <Setter Property="Height" Value="32" />
+    <Setter Property="MinHeight" Value="34" />
+    <Setter Property="Height" Value="34" />
     <Setter Property="FontSize" Value="13" />
-    <Setter Property="CornerRadius" Value="16" />
+    <Setter Property="CornerRadius" Value="17" />
     <Setter Property="Padding" Value="6,0" />
-    <Setter Property="Background" Value="#141D25" />
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
     <Setter Property="BorderBrush" Value="#243240" />
   </Style>
   <Style Selector="TextBox.appSearchBox:pointerover /template/ Border#PART_BorderElement">
@@ -1120,21 +1120,21 @@
     the OS accent colour like the rest of the app.
   -->
   <Style Selector="TextBox.settingsInput /template/ Border#PART_BorderElement">
-    <Setter Property="Background" Value="#1D2A36" />
-    <Setter Property="BorderBrush" Value="#2C3B48" />
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
     <Setter Property="BorderThickness" Value="1" />
   </Style>
   <Style Selector="TextBox.settingsInput:pointerover /template/ Border#PART_BorderElement">
-    <Setter Property="Background" Value="#22303D" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
     <Setter Property="BorderBrush" Value="#3A4C5C" />
   </Style>
   <Style Selector="TextBox.settingsInput:focus /template/ Border#PART_BorderElement">
-    <Setter Property="Background" Value="#22303D" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
     <Setter Property="BorderThickness" Value="1" />
   </Style>
   <Style Selector="TextBox.settingsInput /template/ TextBlock#PART_Watermark">
-    <Setter Property="Foreground" Value="#5C6D7E" />
+    <Setter Property="Foreground" Value="{StaticResource LabelBrush}" />
   </Style>
 
   <!-- A short numeric field sitting at the right-hand end of a settings row,
@@ -1167,30 +1167,42 @@
     <Setter Property="Background" Value="#2A3640" />
   </Style>
   <Style Selector="Border.settingsCard">
-    <Setter Property="Background" Value="#141D24" />
-    <Setter Property="BorderBrush" Value="#232F3A" />
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="10" />
-    <Setter Property="Padding" Value="18" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Padding" Value="20" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+        <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <!-- The page is a long column of near-identical cards; lifting the one under
+       the pointer is what tells you which row your click will land in. -->
+  <Style Selector="Border.settingsCard:pointerover">
+    <Setter Property="Background" Value="#16212B" />
+    <Setter Property="BorderBrush" Value="#2A3947" />
   </Style>
   <Style Selector="ComboBox.settingsInput /template/ Border#PopupBorder">
-    <Setter Property="Background" Value="#141D24" />
-    <Setter Property="BorderBrush" Value="#2C3B48" />
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="10" />
     <Setter Property="Padding" Value="6" />
   </Style>
   <Style Selector="ComboBox.settingsInput ComboBoxItem">
     <Setter Property="Background" Value="Transparent" />
-    <Setter Property="Foreground" Value="#B8C7D8" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
     <Setter Property="CornerRadius" Value="6" />
     <Setter Property="Padding" Value="10,8" />
     <Setter Property="Margin" Value="0,1" />
     <Setter Property="FontSize" Value="13" />
   </Style>
   <Style Selector="ComboBox.settingsInput ComboBoxItem:pointerover">
-    <Setter Property="Background" Value="#263544" />
-    <Setter Property="Foreground" Value="#D8E4F2" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
   </Style>
   <Style Selector="ComboBox.settingsInput ComboBoxItem:selected">
     <Setter Property="Background" Value="{StaticResource AccentBrush}" />
@@ -1207,9 +1219,9 @@
     </Setter>
   </Style>
   <Style Selector="ListBox.pillGroup ListBoxItem">
-    <Setter Property="Background" Value="#1D2A36" />
-    <Setter Property="Foreground" Value="#B8C7D8" />
-    <Setter Property="BorderBrush" Value="#2C3B48" />
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="7" />
     <Setter Property="Padding" Value="16,10" />
@@ -1219,7 +1231,7 @@
     <Setter Property="HorizontalContentAlignment" Value="Center" />
   </Style>
   <Style Selector="ListBox.pillGroup ListBoxItem:pointerover">
-    <Setter Property="Background" Value="#263544" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
   </Style>
   <Style Selector="ListBox.pillGroup ListBoxItem:selected">
     <Setter Property="Background" Value="{StaticResource AccentBrush}" />
@@ -1276,9 +1288,9 @@
     <Setter Property="MinHeight" Value="88" />
     <Setter Property="Margin" Value="0,0,10,8" />
     <Setter Property="Padding" Value="14" />
-    <Setter Property="Background" Value="#141D24" />
-    <Setter Property="Foreground" Value="#D2DEEC" />
-    <Setter Property="BorderBrush" Value="#2C3B48" />
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="9" />
     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -1334,13 +1346,13 @@
          on the way back out. Zero-alpha version of the hover color, so only
          alpha animates. Same fix as linkButton above. -->
     <Setter Property="Background" Value="#00182029" />
-    <Setter Property="Foreground" Value="#93A6B8" />
+    <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
     <Setter Property="BorderThickness" Value="2,0,0,0" />
     <Setter Property="BorderBrush" Value="Transparent" />
-    <Setter Property="CornerRadius" Value="0,7,7,0" />
-    <Setter Property="Padding" Value="20,9,12,9" />
-    <Setter Property="Margin" Value="0,0,0,2" />
-    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="CornerRadius" Value="0,8,8,0" />
+    <Setter Property="Padding" Value="18,8,12,8" />
+    <Setter Property="Margin" Value="0,0,0,3" />
+    <Setter Property="FontWeight" Value="Medium" />
     <Setter Property="HorizontalAlignment" Value="Stretch" />
     <Setter Property="HorizontalContentAlignment" Value="Left" />
     <Setter Property="FontSize" Value="13.5" />
@@ -1355,15 +1367,18 @@
   </Style>
   <Style Selector="Button.settingsNavButton:pointerover">
     <Setter Property="Background" Value="#182029" />
-    <Setter Property="Foreground" Value="#D8E4F2" />
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
   </Style>
+  <!-- Selected reads the way a selected game in the rail does: the accent
+       mixed down into the surface, not the accent at full strength. -->
   <Style Selector="Button.settingsNavButton.active">
-    <Setter Property="Background" Value="#1B2A3D" />
-    <Setter Property="Foreground" Value="#EDF4FB" />
+    <Setter Property="Background" Value="{StaticResource AccentSelectedBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
   <Style Selector="Button.settingsNavButton.active:pointerover">
-    <Setter Property="Background" Value="#1B2A3D" />
+    <Setter Property="Background" Value="{StaticResource AccentSelectedHoverBrush}" />
   </Style>
   <!-- Library sidebar's persistent icon rail (Sections/Games/bottom
        shortcuts). Hover/active read as a circular backdrop behind the icon
@@ -1776,7 +1791,7 @@
       <CornerRadius x:Key="ControlCornerRadius">2.25</CornerRadius>
     </Style.Resources>
     <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
-    <Setter Property="Background" Value="#26313C" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
   </Style>
   <Style Selector="Slider.volumeSlider /template/ Thumb">
     <Setter Property="Width" Value="16" />
@@ -1863,5 +1878,147 @@
   <Style Selector="Border.trimHandle:pointerover > Border.trimBar">
     <Setter Property="Background" Value="#2EE3CE" />
     <Setter Property="BorderBrush" Value="#66FFFFFF" />
+  </Style>
+
+  <!-- ===================================================================
+       Settings typography and controls.
+
+       Every settings row used to spell out Foreground/FontSize/FontWeight by
+       hand - roughly two hundred copies of the same three attributes, drifting
+       a shade apart each time. These classes are that ramp, once.
+       =================================================================== -->
+
+  <!-- The all-caps label at the top of a card. -->
+  <Style Selector="TextBlock.settingsCardLabel">
+    <Setter Property="Foreground" Value="{StaticResource LabelBrush}" />
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="LetterSpacing" Value="0.7" />
+  </Style>
+
+  <!-- The name of the section you are looking at. This used to be another
+       all-caps 12px label, indistinguishable from the card labels below it, so
+       the page had no visible top. -->
+  <Style Selector="TextBlock.settingsSectionTitle">
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
+    <Setter Property="FontSize" Value="22" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <!-- The all-caps label that opens a whole section, one step up from a card's. -->
+  <Style Selector="TextBlock.settingsSectionLabel">
+    <Setter Property="Foreground" Value="{StaticResource LabelBrush}" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="LetterSpacing" Value="0.7" />
+  </Style>
+  <Style Selector="TextBlock.settingsSectionDesc">
+    <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+
+  <!-- A row: its name, then what it does underneath. SemiBold rather than
+       Bold - at 15px Bold is what made the page read as heavy and dated. -->
+  <Style Selector="TextBlock.settingsRowTitle">
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    <Setter Property="FontSize" Value="15" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="TextBlock.settingsRowDesc">
+    <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="LineHeight" Value="17" />
+  </Style>
+
+  <!-- The smaller scale, for rows nested inside an already-titled group. -->
+  <Style Selector="TextBlock.settingsRowTitleSm">
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="TextBlock.settingsRowDescSm">
+    <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="LineHeight" Value="16" />
+  </Style>
+
+  <!-- Hairline between two rows of the same card. -->
+  <Style Selector="Border.settingsDivider">
+    <Setter Property="Height" Value="1" />
+    <Setter Property="Background" Value="{StaticResource DividerBrush}" />
+  </Style>
+
+  <!-- ToggleSwitch. Until now the app had no style for one at all, so all
+       ~60 of them rendered in bare Fluent colours against a hand-painted dark
+       UI. Colour comes from the theme keys; the geometry is bumped from
+       Fluent's 40x20 track / 10px knob to 44x24 / 16px.
+
+       The knob's travel is the width of the PART_SwitchKnob canvas
+       (ToggleSwitch.cs: Canvas.SetLeft(_knobsPanel, _switchKnob.Bounds.Width)),
+       so the track has to stay exactly twice that width or the "on" position
+       lands short of the right edge. 44 = 2 x 22. -->
+  <Style Selector="ToggleSwitch">
+    <Style.Resources>
+      <SolidColorBrush x:Key="ToggleSwitchFillOff" Color="#22303D" />
+      <SolidColorBrush x:Key="ToggleSwitchFillOffPointerOver" Color="#2A3947" />
+      <SolidColorBrush x:Key="ToggleSwitchFillOffPressed" Color="#31414F" />
+      <SolidColorBrush x:Key="ToggleSwitchFillOffDisabled" Color="#18222B" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOff" Color="#33434F" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOffPointerOver" Color="#3E5162" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOffPressed" Color="#3E5162" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOffDisabled" Color="#232F3A" />
+
+      <StaticResource x:Key="ToggleSwitchFillOn" ResourceKey="AccentBrush" />
+      <StaticResource x:Key="ToggleSwitchFillOnPointerOver" ResourceKey="AccentBrushHover" />
+      <StaticResource x:Key="ToggleSwitchFillOnPressed" ResourceKey="AccentBrushHover" />
+      <SolidColorBrush x:Key="ToggleSwitchFillOnDisabled" Color="#2A3350" />
+      <StaticResource x:Key="ToggleSwitchStrokeOn" ResourceKey="AccentBrush" />
+      <StaticResource x:Key="ToggleSwitchStrokeOnPointerOver" ResourceKey="AccentBrushHover" />
+      <StaticResource x:Key="ToggleSwitchStrokeOnPressed" ResourceKey="AccentBrushHover" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOnDisabled" Color="#2A3350" />
+
+      <SolidColorBrush x:Key="ToggleSwitchKnobFillOff" Color="#9FB2C6" />
+      <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPointerOver" Color="#C4D3E2" />
+      <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPressed" Color="#C4D3E2" />
+      <SolidColorBrush x:Key="ToggleSwitchKnobFillOffDisabled" Color="#4A5A69" />
+      <SolidColorBrush x:Key="ToggleSwitchKnobFillOn" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPointerOver" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPressed" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="ToggleSwitchKnobFillOnDisabled" Color="#7C86C0" />
+
+      <Thickness x:Key="ToggleSwitchOuterBorderStrokeThickness">1</Thickness>
+      <Thickness x:Key="ToggleSwitchOnStrokeThickness">1</Thickness>
+      <x:Double x:Key="ToggleSwitchThemeMinWidth">44</x:Double>
+    </Style.Resources>
+    <Setter Property="MinWidth" Value="44" />
+  </Style>
+  <Style Selector="ToggleSwitch /template/ Border#OuterBorder">
+    <Setter Property="Width" Value="44" />
+    <Setter Property="Height" Value="24" />
+    <Setter Property="CornerRadius" Value="12" />
+  </Style>
+  <Style Selector="ToggleSwitch /template/ Border#SwitchKnobBounds">
+    <Setter Property="Width" Value="44" />
+    <Setter Property="Height" Value="24" />
+    <Setter Property="CornerRadius" Value="12" />
+  </Style>
+  <Style Selector="ToggleSwitch /template/ Canvas#PART_SwitchKnob">
+    <Setter Property="Width" Value="22" />
+    <Setter Property="Height" Value="24" />
+  </Style>
+  <Style Selector="ToggleSwitch /template/ Grid#PART_MovingKnobs">
+    <Setter Property="Width" Value="22" />
+    <Setter Property="Height" Value="24" />
+  </Style>
+  <Style Selector="ToggleSwitch /template/ Ellipse#SwitchKnobOn">
+    <Setter Property="Width" Value="16" />
+    <Setter Property="Height" Value="16" />
+  </Style>
+  <Style Selector="ToggleSwitch /template/ Ellipse#SwitchKnobOff">
+    <Setter Property="Width" Value="16" />
+    <Setter Property="Height" Value="16" />
   </Style>
 </Styles>

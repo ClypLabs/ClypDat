@@ -1,0 +1,54 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ClypDat.App.ViewModels"
+             xmlns:controls="using:ClypDat.App.Controls"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             xmlns:opconv="using:ClypDat.App.Converters"
+             x:Class="ClypDat.App.Views.Settings.GameAudioExclusionsSection"
+             x:DataType="vm:MainWindowViewModel">
+  <UserControl.IsVisible>
+    <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Game Audio Exclusions">
+      <Binding Path="SettingsSearchText" />
+      <Binding Path="SelectedSettingsSection" />
+    </MultiBinding>
+  </UserControl.IsVisible>
+  <StackPanel Spacing="18" Tag="Game Audio Exclusions">
+    <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
+    <StackPanel Spacing="4">
+      <TextBlock Classes="settingsSectionTitle" Text="Game Audio Exclusions" />
+      <TextBlock Classes="settingsSectionDesc" Text="Apps here are removed from Game Audio. Chat Audio captures the selected app above." />
+    </StackPanel>
+
+    <Border Classes="settingsCard">
+      <StackPanel Spacing="14">
+        <TextBlock Classes="settingsCardLabel" Text="EXCLUDED APPS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+          <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedProcessExclusion}" HorizontalAlignment="Stretch" />
+          <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
+          <Button Grid.Column="2" Content="Add" Click="AddSelectedProcessButton_OnClick" />
+        </Grid>
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+          <TextBox Name="ExcludedProcessTextBox" Classes="settingsInput" PlaceholderText="discord.exe" />
+          <Button Grid.Column="1" Content="Add Manual" Click="AddExcludedProcessButton_OnClick" />
+        </Grid>
+      </StackPanel>
+    </Border>
+
+    <Border Classes="listPane">
+      <ScrollViewer Classes="listScrollCompact">
+        <ItemsControl ItemsSource="{Binding ExcludedProcesses}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Border BorderThickness="0,0,0,1" BorderBrush="{StaticResource DividerBrush}" Background="Transparent" Padding="12,6,12,10" VerticalAlignment="Top">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Text="{Binding}" Foreground="{StaticResource TextStrongBrush}" VerticalAlignment="Center" />
+                  <Button Grid.Column="1" Content="Remove" VerticalAlignment="Center" Click="RemoveExcludedProcessButton_OnClick" />
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+    </Border>
+  </StackPanel>
+</UserControl>

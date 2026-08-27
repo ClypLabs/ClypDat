@@ -1,0 +1,141 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ClypDat.App.ViewModels"
+             xmlns:controls="using:ClypDat.App.Controls"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             xmlns:opconv="using:ClypDat.App.Converters"
+             x:Class="ClypDat.App.Views.Settings.GeneralSection"
+             x:DataType="vm:MainWindowViewModel">
+  <UserControl.IsVisible>
+    <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="General">
+      <Binding Path="SettingsSearchText" />
+      <Binding Path="SelectedSettingsSection" />
+    </MultiBinding>
+  </UserControl.IsVisible>
+  <StackPanel Spacing="22" Tag="General">
+    <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
+    <StackPanel Spacing="4">
+      <TextBlock Classes="settingsSectionTitle" Text="General" />
+      <TextBlock Classes="settingsSectionDesc" Text="Startup behavior, layout, and clip filenames." />
+    </StackPanel>
+
+    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Launch ClypDat on Windows boot|Start minimized on boot|Process priority|Automatically Focus ClypDat|Game exit|Startup'}">
+      <StackPanel Spacing="18">
+        <TextBlock Classes="settingsCardLabel" Text="STARTUP" />
+        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Launch ClypDat on Windows boot|Startup}">
+          <StackPanel Spacing="2">
+            <TextBlock Classes="settingsRowTitle" Text="Launch ClypDat on Windows Boot" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <TextBlock Classes="settingsRowDesc" Text="Starts ClypDat automatically when you sign in to Windows." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          </StackPanel>
+          <ToggleSwitch Grid.Column="1" IsChecked="{Binding LaunchOnWindowsStartup}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+        </Grid>
+        <TextBlock Text="{Binding StartupRegistrationError}" Foreground="{StaticResource DangerBrush}" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding HasStartupRegistrationError}" />
+        <Border Classes="settingsDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
+        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Automatically Focus ClypDat|Game exit}">
+          <StackPanel Spacing="2">
+            <TextBlock Classes="settingsRowTitle" Text="Automatically Focus ClypDat" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <TextBlock Classes="settingsRowDesc" Text="Automatically show ClypDat when you exit your game." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          </StackPanel>
+          <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutomaticallyFocusOnGameExit}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+        </Grid>
+        <Border Classes="settingsDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
+        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Start minimized on boot|Startup}">
+          <StackPanel Spacing="2">
+            <TextBlock Classes="settingsRowTitle" Text="Start Minimized on Boot" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <TextBlock Classes="settingsRowDesc" Text="Opens straight to the tray instead of showing the main window." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          </StackPanel>
+          <ToggleSwitch Grid.Column="1" IsChecked="{Binding StartMinimizedToTray}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+        </Grid>
+        <Border Classes="settingsDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
+        <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Process priority}">
+          <TextBlock Classes="settingsRowTitle" Text="Process Priority" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          <TextBlock Classes="settingsRowDesc" Text="Gives ClypDat's capture work more CPU scheduling priority when a demanding game is running. Changes apply immediately." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          <ComboBox Classes="settingsInput" ItemsSource="{Binding ProcessPriorityOptions}" SelectedValue="{Binding SelectedProcessPriority}" SelectedValueBinding="{Binding Value}" HorizontalAlignment="Stretch">
+            <ComboBox.ItemTemplate>
+              <DataTemplate>
+                <TextBlock Text="{Binding Label}" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+        </StackPanel>
+      </StackPanel>
+    </Border>
+
+    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Show status panel|Show &quot;Playback Paused&quot; indicator|Scale clips with window size|Hoverbar|Video preview|Combine sidebar filters|Layout'}">
+      <StackPanel Spacing="18">
+        <TextBlock Classes="settingsCardLabel" Text="LAYOUT" />
+        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show status panel|Layout}">
+          <StackPanel Spacing="2">
+            <TextBlock Classes="settingsRowTitle" Text="Show Status Panel" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <TextBlock Classes="settingsRowDesc" Text="The right-hand panel here in Settings showing replay buffer status, hotkey, and active game." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          </StackPanel>
+          <ToggleSwitch Grid.Column="1" IsChecked="{Binding IsStatusAreaVisible}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+        </Grid>
+        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Show &quot;Playback Paused&quot; indicator|Layout'}">
+          <StackPanel Spacing="2">
+            <TextBlock Classes="settingsRowTitle" Text="Show &quot;Playback Paused&quot; Indicator" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <TextBlock Classes="settingsRowDesc" Text="Shows a badge over the video in Editor during moments the game window wasn't in focus while recording." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          </StackPanel>
+          <ToggleSwitch Grid.Column="1" IsChecked="{Binding ShowRecordingPausedIndicator}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+        </Grid>
+        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Scale clips with window size|Layout}">
+          <StackPanel Spacing="2">
+            <TextBlock Classes="settingsRowTitle" Text="Scale Clips with Window Size" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <TextBlock Classes="settingsRowDesc" Text="Library cards target a fixed size and more columns fit on a wider window (e.g. ~6 across at 1440p), instead of always 3 columns that just grow or shrink with the window." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          </StackPanel>
+          <ToggleSwitch Grid.Column="1" IsChecked="{Binding ScaleClipsWithWindow}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+        </Grid>
+        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Hoverbar|Layout}">
+          <StackPanel Spacing="2">
+            <TextBlock Classes="settingsRowTitle" Text="Hoverbar" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <TextBlock Classes="settingsRowDesc" Text="Floats the Editor's playback controls over the bottom of the video, appearing while the pointer is in the Editor. Off keeps them docked under the video, always visible." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          </StackPanel>
+          <ToggleSwitch Grid.Column="1" IsChecked="{Binding EditorHoverBarEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+        </Grid>
+        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Video preview|hovering over a clip|Layout'}">
+          <StackPanel Spacing="2">
+            <TextBlock Classes="settingsRowTitle" Text="Play a Video Preview when Hovering over a Clip" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <TextBlock Classes="settingsRowDesc" Text="Shows a muted full-quality preview after a short hover delay." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          </StackPanel>
+          <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableClipHoverPreview}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+        </Grid>
+        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Combine sidebar filters|Layout}">
+          <StackPanel Spacing="2">
+            <TextBlock Classes="settingsRowTitle" Text="Combine Sidebar Filters" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <TextBlock Classes="settingsRowDesc" Text="Hold one game and one section at the same time, e.g. Fortnite plus Auto-Clips. Off, picking either one clears the other. Selecting several games at once is still done from the Game Filters dropdown." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          </StackPanel>
+          <ToggleSwitch Grid.Column="1" IsChecked="{Binding CombineSidebarFilters}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+        </Grid>
+      </StackPanel>
+    </Border>
+
+    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Clip Filenames}">
+      <StackPanel Spacing="12">
+        <TextBlock Classes="settingsCardLabel" Text="Clip Filenames" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <TextBlock Classes="settingsRowDesc" Text="Choose how newly saved clips are named. Windows replaces unsupported filename characters such as colons with hyphens." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <ComboBox Classes="settingsInput" ItemsSource="{Binding ClipFileNameSchemes}" SelectedValue="{Binding SelectedClipFileNameScheme}" SelectedValueBinding="{Binding Value}">
+          <ComboBox.ItemTemplate>
+            <DataTemplate>
+              <TextBlock Text="{Binding Label}" />
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+        <StackPanel Spacing="6" IsVisible="{Binding IsCustomClipFileNameScheme}">
+          <TextBlock Foreground="{StaticResource TextSubtleBrush}" FontSize="12">Template: {title}, {game}, {datetime:format}</TextBlock>
+          <TextBox Classes="settingsInput" Text="{Binding CustomClipFileNameTemplate}" PlaceholderText="{}{datetime:yyyy-MM-dd HH-mm-ss} - {title}" />
+          <TextBlock Text="{Binding ClipFileNameTemplateError}" Foreground="{StaticResource DangerBrush}" FontSize="12" IsVisible="{Binding HasClipFileNameTemplateError}" TextWrapping="Wrap" />
+          <TextBlock Text="Date/Time Format Help: Microsoft Learn" Tag="https://learn.microsoft.com/en-us/dotnet/standard/base-types/custom-date-and-time-format-strings" PointerPressed="LicenseLinkText_OnPointerPressed" Foreground="{StaticResource LinkBrush}" FontSize="12" />
+        </StackPanel>
+        <TextBlock Text="Preview" Foreground="{StaticResource TextSubtleBrush}" FontSize="12" />
+        <Border Background="{StaticResource SurfaceRaisedBrush}" BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1" CornerRadius="7" Padding="14,10">
+          <TextBlock Text="{Binding ClipFileNamePreview}" Foreground="{StaticResource TextBrush}" FontSize="13" TextWrapping="Wrap" />
+        </Border>
+        <Grid ColumnDefinitions="*,Auto,Auto">
+          <TextBlock Classes="settingsRowDesc" Text="Apply the current scheme to every video in this library, including imports and Full Sessions stored here." VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          <Button Grid.Column="1" Content="Rename" Click="RenameAllClipsButton_OnClick" IsEnabled="{Binding CanRenameAllClips}" VerticalAlignment="Center" />
+        </Grid>
+        <TextBlock Text="{Binding RenameAllClipsStatus}" Foreground="{StaticResource TextSubtleBrush}" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding HasRenameAllClipsStatus}" />
+      </StackPanel>
+    </Border>
+  </StackPanel>
+</UserControl>

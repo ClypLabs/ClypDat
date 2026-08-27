@@ -1,0 +1,77 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ClypDat.App.ViewModels"
+             xmlns:controls="using:ClypDat.App.Controls"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             xmlns:opconv="using:ClypDat.App.Converters"
+             x:Class="ClypDat.App.Views.Settings.AutoClipSection"
+             x:DataType="vm:MainWindowViewModel">
+  <UserControl.IsVisible>
+    <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Auto-Clip">
+      <Binding Path="SettingsSearchText" />
+      <Binding Path="SelectedSettingsSection" />
+    </MultiBinding>
+  </UserControl.IsVisible>
+  <StackPanel Spacing="18" Tag="Auto-Clip">
+    <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
+    <StackPanel Spacing="4">
+      <TextBlock Classes="settingsSectionTitle" Text="Auto-Clipping" />
+      <TextBlock Classes="settingsSectionDesc" Text="Have ClypDat save the important moments from supported games using their local event feeds." />
+      <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6" Margin="0,4,0,0">
+        <PathIcon Classes="cautionIcon" />
+        <TextBlock Grid.Column="1" Text="Experimental - still being worked on and can miss events, mislabel clips, or misbehave."
+                   Foreground="{StaticResource CautionBrush}" FontSize="11" FontWeight="Bold" TextWrapping="Wrap" />
+      </Grid>
+    </StackPanel>
+
+    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Auto Capture Events}">
+      <StackPanel Spacing="14">
+        <TextBlock Classes="settingsCardLabel" Text="AUTO CAPTURE" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+          <StackPanel Spacing="2">
+            <TextBlock Classes="settingsRowTitle" Text="Auto Capture Events" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <TextBlock Classes="settingsRowDescSm" Text="Turn this off to pause every game without losing your event choices." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          </StackPanel>
+          <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutoClippingEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+        </Grid>
+      </StackPanel>
+    </Border>
+
+    <TextBox Classes="settingsInput" Text="{Binding AutoClipSearchText}" PlaceholderText="Search auto-clipping games or events" />
+    <ItemsControl ItemsSource="{Binding AutoClipGames}">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate>
+          <Grid ColumnDefinitions="84,*,Auto" ColumnSpacing="16" Margin="0,0,0,18" IsVisible="{Binding IsSearchMatch}">
+            <Border Width="84" Height="120" CornerRadius="8" ClipToBounds="True" Background="#1F3341" VerticalAlignment="Top">
+              <Image Source="{Binding CoverImage}" Stretch="UniformToFill" />
+            </Border>
+            <StackPanel Grid.Column="1" Spacing="8">
+              <TextBlock Text="{Binding Name}" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="16" opconv:SettingsHighlight.Query="{Binding SearchQuery}" />
+              <TextBlock Classes="settingsRowDescSm" Text="{Binding StatusText}" />
+            <Button Content="Set Up Dota 2" Click="SetupDotaAutoClipButton_OnClick" IsVisible="{Binding IsSetupRequired}" HorizontalAlignment="Left" />
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" IsVisible="{Binding IsCs2}">
+                <StackPanel Spacing="2">
+                  <TextBlock Text="Deathmatch Clipping" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="14" />
+                  <TextBlock Classes="settingsRowDescSm" Text="CS2 auto-clips save in Competitive matches. Enable this to also save Deathmatch clips." />
+                </StackPanel>
+                <ToggleSwitch Grid.Column="1" IsChecked="{Binding DeathmatchClipping}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+              </Grid>
+              <ItemsControl ItemsSource="{Binding Groups}">
+                <ItemsControl.ItemTemplate><DataTemplate><StackPanel Spacing="6"><Button Classes="autoClipGroupToggle" Click="AutoClipGroupToggleButton_OnClick"><Grid ColumnDefinitions="20,*" ColumnSpacing="7"><Grid Width="20" Height="20"><Border BorderBrush="{StaticResource TextMutedBrush}" BorderThickness="1" CornerRadius="4" Background="Transparent" /><Border IsVisible="{Binding IsAllEnabled}" BorderBrush="{DynamicResource CheckBoxCheckBackgroundFillChecked}" BorderThickness="1" CornerRadius="4" Background="{DynamicResource CheckBoxCheckBackgroundFillChecked}" /><Border IsVisible="{Binding IsIndeterminate}" BorderBrush="{DynamicResource CheckBoxCheckBackgroundFillChecked}" BorderThickness="1" CornerRadius="4" Background="{DynamicResource CheckBoxCheckBackgroundFillChecked}" /><TextBlock Text="?" IsVisible="{Binding IsAllEnabled}" Foreground="{DynamicResource CheckBoxCheckGlyphForegroundChecked}" FontSize="14" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" /><TextBlock Text="-" IsVisible="{Binding IsIndeterminate}" Foreground="{DynamicResource CheckBoxCheckGlyphForegroundChecked}" FontSize="17" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" /></Grid><TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" VerticalAlignment="Center" /></Grid></Button><ItemsControl ItemsSource="{Binding Events}" Margin="26,0,0,0"><ItemsControl.ItemTemplate><DataTemplate><CheckBox Content="{Binding Name}" IsChecked="{Binding IsEnabled}" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></DataTemplate></ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <ItemsControl ItemsSource="{Binding UngroupedEvents}"><ItemsControl.ItemTemplate><DataTemplate><CheckBox Content="{Binding Name}" IsChecked="{Binding IsEnabled}" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+            </StackPanel>
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+              <TextBlock Text="ON" Foreground="{StaticResource TextSubtleBrush}" FontSize="11" VerticalAlignment="Center" />
+              <ToggleSwitch IsChecked="{Binding IsEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+            </StackPanel>
+            <Border Grid.ColumnSpan="3" Height="1" Background="{StaticResource SurfaceHoverBrush}" VerticalAlignment="Bottom" Margin="0,18,0,0" />
+          </Grid>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+    <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="8" Padding="14">
+      <StackPanel Spacing="8"><TextBlock Classes="settingsSectionLabel" Text="COMING SOON" /><TextBlock Classes="settingsRowDescSm" Text="More game integrations are planned. These are not enabled until ClypDat can reliably detect their events." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" /><ItemsControl ItemsSource="{Binding ComingSoonAutoClipGames}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource SurfaceRaisedBrush}" CornerRadius="5" Padding="8,4" Margin="0,0,6,6"><TextBlock Text="{Binding}" Foreground="{StaticResource TextSubtleBrush}" FontSize="11" /></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+    </Border>
+  </StackPanel>
+</UserControl>
