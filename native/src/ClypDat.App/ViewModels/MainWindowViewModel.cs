@@ -4939,6 +4939,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // the event to fire, not after this method's own (slower) probe work
         // finishes.
         _recentlySelfAddedPaths[filePath] = DateTime.UtcNow;
+        // Counted here rather than at save time so imports and exports land in
+        // it too - it is "clips this session", not "clips recorded".
+        _clipsAddedThisSession++;
         var clock = System.Diagnostics.Stopwatch.StartNew();
         ClipCardViewModel clip;
         await _libraryRefreshLock.WaitAsync();
@@ -5912,6 +5915,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             details = armed
                 ? $"Recording {ActiveGameDetection.DisplayName}"
                 : $"Playing {ActiveGameDetection.DisplayName}";
+            // The library total says nothing about what is happening right
+            // now, which is the whole point of the line while a game is up.
+            // What the buffer is holding does, and a session tally does once
+            // there is one to report.
+            state = RecordingStateLine(armed);
         }
         else if (IsGameFilterActive || IsClipTypeFilterActive)
         {
@@ -5938,6 +5946,47 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         DiscordRichPresenceService.SetPresence(new DiscordPresence(details, state, _discordActivityStartedUtc));
+    }
+
+    // Clips added to the library since launch. Not persisted: it describes
+    // this sitting, which is what makes it worth showing next to an elapsed
+    // timer.
+    private int _clipsAddedThisSession;
+
+    private string RecordingStateLine(bool armed)
+    {
+        if (_clipsAddedThisSession > 0)
+        {
+            return _clipsAddedThisSession == 1 ? "1 clip this session" : $"{_clipsAddedThisSession:N0} clips this session";
+        }
+
+        if (!armed) return "Not recording";
+
+        var detectionKey = string.IsNullOrWhiteSpace(ActiveGameDetection.DetectionKey)
+            ? ActiveGameDetection.ExeName
+            : ActiveGameDetection.DetectionKey;
+        var effective = CustomGameSettingsResolver.Resolve(Settings, detectionKey);
+        if (effective.FullSessionRecordingEnabled) return "Recording the full session";
+
+        // Same precedence CreateReplayConfig uses, so the status cannot claim a
+        // buffer length the recorder is not actually keeping.
+        var seconds = SelectedReplayDurationPreset?.Seconds ?? effective.ReplayDurationSeconds;
+        return $"Keeping the last {DescribeDuration(seconds)}";
+    }
+
+    private static string DescribeDuration(int seconds)
+    {
+        if (seconds < 60) return $"{seconds} seconds";
+        var minutes = seconds / 60d;
+        // Whole minutes read as minutes; anything else keeps its seconds rather
+        // than rounding to a length that was never configured.
+        if (Math.Abs(minutes - Math.Round(minutes)) < 0.01)
+        {
+            var whole = (int)Math.Round(minutes);
+            return whole == 1 ? "minute" : $"{whole} minutes";
+        }
+
+        return $"{seconds} seconds";
     }
 
     public bool DiscordRichPresenceEnabled
