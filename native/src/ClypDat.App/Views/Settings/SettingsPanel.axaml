@@ -53,7 +53,11 @@
         <!-- Notice and its underline collapse together. Putting the underline
              on the wrapper instead left a stray hairline across the panel
              whenever this section was open with nothing to warn about. -->
-        <StackPanel IsVisible="{Binding SelectedCustomGameTab.QualityWarningVisible}">
+        <!-- FallbackValue: deleting the last custom game leaves the selected
+             tab null, and a broken path binding leaves IsVisible at its
+             default of true - the notice stayed pinned with no game behind
+             it and an empty summary line. -->
+        <StackPanel IsVisible="{Binding SelectedCustomGameTab.QualityWarningVisible, FallbackValue=False, TargetNullValue=False}">
         <Border Classes="settingsNotice stickyNotice">
           <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
             <PathIcon Classes="cautionIcon" VerticalAlignment="Center" Margin="0" />
