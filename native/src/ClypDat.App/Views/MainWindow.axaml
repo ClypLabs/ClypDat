@@ -2545,8 +2545,16 @@
                      groups are on, because there is then nothing to add. -->
                 <Button Classes="addSettingCard" Click="AddCustomGameSettingButton_OnClick" HorizontalAlignment="Stretch">
                   <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
+                    <!-- Two rectangles, not a "+" glyph. A text plus carries
+                         the font's own side bearings and line height, so it
+                         sits off-centre inside a circle no matter what margin
+                         is nudged at it; these are centred by layout and are
+                         exact at any size. -->
                     <Border Width="20" Height="20" CornerRadius="10" BorderThickness="1.4" BorderBrush="#8FA6BD">
-                      <TextBlock Text="+" Foreground="#8FA6BD" FontSize="14" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" />
+                      <Panel>
+                        <Rectangle Width="9" Height="1.6" RadiusX="0.8" RadiusY="0.8" Fill="#8FA6BD" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        <Rectangle Width="1.6" Height="9" RadiusX="0.8" RadiusY="0.8" Fill="#8FA6BD" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                      </Panel>
                     </Border>
                     <TextBlock Text="Add Setting" Foreground="#B8C7D8" FontWeight="SemiBold" VerticalAlignment="Center" />
                   </StackPanel>
