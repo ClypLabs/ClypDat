@@ -2772,17 +2772,32 @@
                    the build first, and a feature toggle should not be the
                    first thing between the heading and the app's own name. -->
               <Border Classes="settingsCard">
-                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-                  <StackPanel Spacing="2" VerticalAlignment="Center">
-                    <TextBlock Text="Discord Rich Presence" Foreground="#EDF4FB" FontWeight="Bold" FontSize="15"
-                               opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                    <TextBlock Text="Shows what you are recording, editing or browsing on your Discord profile. Anyone who can see your profile can see the game name."
-                               Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
-                  </StackPanel>
-                  <ToggleSwitch Grid.Column="1" VerticalAlignment="Center"
-                                IsChecked="{Binding DiscordRichPresenceEnabled}"
-                                OnContent="{x:Null}" OffContent="{x:Null}" />
-                </Grid>
+                <StackPanel Spacing="14">
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                      <TextBlock Text="Discord Rich Presence" Foreground="#EDF4FB" FontWeight="Bold" FontSize="15"
+                                 opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                      <TextBlock Text="Shows what you are recording, editing or browsing on your Discord profile. Anyone who can see your profile can see the game name."
+                                 Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" VerticalAlignment="Center"
+                                  IsChecked="{Binding DiscordRichPresenceEnabled}"
+                                  OnContent="{x:Null}" OffContent="{x:Null}" />
+                  </Grid>
+                  <Border Height="1" Background="#263544" />
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                      <TextBlock Text="Show “Get ClypDat” link" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14"
+                                 opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                      <TextBlock Text="Adds a clypdat.xyz button to your Rich Presence for people viewing your profile."
+                                 Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" VerticalAlignment="Center"
+                                  IsChecked="{Binding DiscordRichPresenceShowGetClypDatButton}"
+                                  IsEnabled="{Binding DiscordRichPresenceEnabled}"
+                                  OnContent="{x:Null}" OffContent="{x:Null}" />
+                  </Grid>
+                </StackPanel>
               </Border>
 
               <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Check for updates|Install updates while loading|Updates}">
@@ -3577,6 +3592,14 @@
                       <TextBlock Text="Keep ClypDat out of the way while it records." Foreground="#6B7C8C" FontSize="11" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding StartMinimizedToTray}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                  </Grid>
+                  <Border Height="1" Background="#263544" />
+                  <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Spacing="3">
+                      <TextBlock Text="Discord Rich Presence" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" />
+                      <TextBlock Text="Show your ClypDat activity on Discord. Anyone who can see your profile can see the game name." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordRichPresenceEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
                 </StackPanel>
                 </Border>

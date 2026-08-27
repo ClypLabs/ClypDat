@@ -5877,7 +5877,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void ApplyDiscordSettings()
     {
-        DiscordRichPresenceService.Configure(Settings.DiscordRichPresenceEnabled);
+        DiscordRichPresenceService.Configure(
+            Settings.DiscordRichPresenceEnabled,
+            Settings.DiscordRichPresenceShowGetClypDatButton);
         UpdateDiscordPresence();
     }
 
@@ -5988,6 +5990,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (Settings.DiscordRichPresenceEnabled == value) return;
             Settings.DiscordRichPresenceEnabled = value;
+            OnPropertyChanged();
+            SaveSettings();
+            ApplyDiscordSettings();
+        }
+    }
+
+    public bool DiscordRichPresenceShowGetClypDatButton
+    {
+        get => Settings.DiscordRichPresenceShowGetClypDatButton;
+        set
+        {
+            if (Settings.DiscordRichPresenceShowGetClypDatButton == value) return;
+            Settings.DiscordRichPresenceShowGetClypDatButton = value;
             OnPropertyChanged();
             SaveSettings();
             ApplyDiscordSettings();

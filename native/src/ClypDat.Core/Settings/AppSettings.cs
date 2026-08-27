@@ -198,6 +198,10 @@ public sealed class AppSettings
     // to anyone who can see your Discord profile, and that is a decision to be
     // asked for rather than assumed.
     public bool DiscordRichPresenceEnabled { get; set; }
+    // Presence buttons are visible to other people viewing the profile, not
+    // the account publishing it. Keep ClypDat's link on by default for
+    // existing users, but make promotion separate from presence itself.
+    public bool DiscordRichPresenceShowGetClypDatButton { get; set; } = true;
     // Separate from EnableClipOverlay - "clipping started" is a distinct
     // notification kind (fires when the buffer actually starts recording a
     // detected game) from the clip-saved family, and a user may want one

@@ -83,7 +83,7 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         {
             "Updates", "Check for updates", "Source and Licenses", "View on GitHub", "Diagnostics",
             "Log folder", "Get Started", "Setup walkthrough", "License",
-            "Discord", "Rich Presence", "Discord Rich Presence"
+            "Discord", "Rich Presence", "Discord Rich Presence", "Get ClypDat", "Profile link"
         },
     };
 

@@ -61,6 +61,7 @@ internal static class DiscordRichPresenceService
     private static readonly SemaphoreSlim Wake = new(0, 1);
 
     private static bool _enabled;
+    private static bool _showGetClypDatButton = true;
     private static DiscordPresence _desired = DiscordPresence.None;
     private static DiscordPresence? _sent;
     private static Task? _worker;
@@ -70,12 +71,21 @@ internal static class DiscordRichPresenceService
     /// Applies the user's settings. Safe to call on every settings save: it
     /// only restarts the worker when something it actually depends on changed.
     /// </summary>
-    public static void Configure(bool enabled)
+    public static void Configure(bool enabled, bool showGetClypDatButton)
     {
+        var enabledChanged = false;
+        var buttonChanged = false;
         lock (Sync)
         {
-            if (_enabled == enabled) return;
+            enabledChanged = _enabled != enabled;
+            buttonChanged = _showGetClypDatButton != showGetClypDatButton;
+            if (!enabledChanged && !buttonChanged) return;
             _enabled = enabled;
+            _showGetClypDatButton = showGetClypDatButton;
+
+            // Same activity needs sending again when only its Discord button
+            // changes; otherwise SetPresence correctly coalesces it away.
+            if (buttonChanged) _sent = null;
         }
 
         if (!enabled)
@@ -84,7 +94,8 @@ internal static class DiscordRichPresenceService
             return;
         }
 
-        Start();
+        if (enabledChanged) Start();
+        try { Wake.Release(); } catch (SemaphoreFullException) { }
     }
 
     /// <summary>
@@ -276,7 +287,9 @@ internal static class DiscordRichPresenceService
                     ? new { start = new DateTimeOffset(DateTime.SpecifyKind(started, DateTimeKind.Utc)).ToUnixTimeSeconds() }
                     : null,
                 assets = new { large_image = "clypdat", large_text = "ClypDat" },
-                buttons = new[] { new { label = ButtonLabel, url = ButtonUrl } }
+                buttons = _showGetClypDatButton
+                    ? new[] { new { label = ButtonLabel, url = ButtonUrl } }
+                    : null
             };
 
         var payload = JsonSerializer.Serialize(new
