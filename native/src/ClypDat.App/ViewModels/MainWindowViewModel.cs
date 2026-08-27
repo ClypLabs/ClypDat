@@ -4216,6 +4216,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         LibraryRows.Clear();
         foreach (var row in projection.Rows) LibraryRows.Add(row);
         OnPropertyChanged(nameof(LibraryProjection));
+        // The presence quotes a clip count, and it is first composed at startup
+        // - before the library has loaded, when that count is still zero. This
+        // is the choke point every library change already runs through, so it
+        // is where the status finds out the library exists. Cheap to call often:
+        // SetPresence compares the whole presence and ignores an unchanged one.
+        UpdateDiscordPresence();
     }
 
     private void DetachClip(ClipCardViewModel clip) => clip.PersistentStateChanged -= Clip_OnPersistentStateChanged;
