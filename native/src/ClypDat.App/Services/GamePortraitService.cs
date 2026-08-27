@@ -162,41 +162,64 @@ public static class GamePortraitService
     // portrait. Matched on the exact title because a Fortnite library also
     // contains "Fortnite Crew", "2800 Fortnite Points" and a dozen other
     // entries a fuzzy match would happily return instead.
-    private static string? EpicPortraitUrl(string displayName)
+    private static string? EpicPortraitUrl(string displayName) =>
+        EpicPortraits().TryGetValue(displayName, out var url) ? url : null;
+
+    // Parsed once and kept, re-read only when the launcher rewrites the file.
+    // The catalogue is a 350KB base64 blob holding a few hundred entries, and
+    // decoding plus parsing it per lookup was most of the ~1.6s an Epic game's
+    // portrait took to appear - the download itself is a fraction of that.
+    private static readonly object EpicSync = new();
+    private static Dictionary<string, string>? _epicPortraits;
+    private static DateTime _epicStampUtc;
+
+    private static Dictionary<string, string> EpicPortraits()
     {
+        var path = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "Epic", "EpicGamesLauncher", "Data", "Catalog", "catcache.bin");
+
         try
         {
-            var path = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                "Epic", "EpicGamesLauncher", "Data", "Catalog", "catcache.bin");
-            if (!File.Exists(path)) return null;
+            var file = new FileInfo(path);
+            if (!file.Exists) return _epicPortraits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-            var json = Convert.FromBase64String(File.ReadAllText(path));
-            using var document = System.Text.Json.JsonDocument.Parse(json);
-            if (document.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array) return null;
-
-            foreach (var entry in document.RootElement.EnumerateArray())
+            lock (EpicSync)
             {
-                if (!entry.TryGetProperty("title", out var titleElement)) continue;
-                if (!string.Equals(titleElement.GetString(), displayName, StringComparison.OrdinalIgnoreCase)) continue;
-                if (!entry.TryGetProperty("keyImages", out var images)) continue;
+                if (_epicPortraits is not null && file.LastWriteTimeUtc == _epicStampUtc) return _epicPortraits;
 
-                foreach (var image in images.EnumerateArray())
+                var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var json = Convert.FromBase64String(File.ReadAllText(path));
+                using var document = System.Text.Json.JsonDocument.Parse(json);
+                if (document.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array)
                 {
-                    if (!image.TryGetProperty("type", out var typeElement)) continue;
-                    if (!string.Equals(typeElement.GetString(), "DieselGameBoxTall", StringComparison.Ordinal)) continue;
-                    if (!image.TryGetProperty("url", out var urlElement)) continue;
-                    var url = urlElement.GetString();
-                    if (!string.IsNullOrWhiteSpace(url)) return url;
-                }
-            }
+                    foreach (var entry in document.RootElement.EnumerateArray())
+                    {
+                        if (!entry.TryGetProperty("title", out var titleElement)) continue;
+                        var title = titleElement.GetString();
+                        if (string.IsNullOrWhiteSpace(title) || map.ContainsKey(title)) continue;
+                        if (!entry.TryGetProperty("keyImages", out var images)) continue;
 
-            return null;
+                        foreach (var image in images.EnumerateArray())
+                        {
+                            if (!image.TryGetProperty("type", out var typeElement)) continue;
+                            if (!string.Equals(typeElement.GetString(), "DieselGameBoxTall", StringComparison.Ordinal)) continue;
+                            if (!image.TryGetProperty("url", out var urlElement)) continue;
+                            var url = urlElement.GetString();
+                            if (!string.IsNullOrWhiteSpace(url)) map[title] = url;
+                            break;
+                        }
+                    }
+                }
+
+                _epicStampUtc = file.LastWriteTimeUtc;
+                return _epicPortraits = map;
+            }
         }
         catch (Exception error)
         {
-            AppLog.Error($"Epic portrait lookup failed for '{displayName}'", error);
-            return null;
+            AppLog.Error("Epic portrait catalogue parse failed", error);
+            return _epicPortraits ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }
     }
 
