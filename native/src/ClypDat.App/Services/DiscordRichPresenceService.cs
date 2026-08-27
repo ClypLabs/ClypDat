@@ -198,11 +198,26 @@ internal static class DiscordRichPresenceService
             {
                 await WriteFrameAsync(pipe, Opcode.Handshake,
                     JsonSerializer.Serialize(new { v = 1, client_id = ApplicationId }), cancellationToken).ConfigureAwait(false);
+
+                // Read the reply here, before anything else uses the pipe.
+                // Writing the handshake only proves the pipe accepted bytes -
+                // Discord still has to answer READY, and doing that read on
+                // this thread means a refusal is seen immediately instead of
+                // looking like a healthy connection that never shows anything.
+                var reply = await ReadFrameAsync(pipe, cancellationToken).ConfigureAwait(false);
+                if (reply is null || !IsReady(reply))
+                {
+                    AppLog.Error($"Discord Rich Presence: handshake refused on discord-ipc-{index}: {Shorten(reply ?? "no reply")}");
+                    pipe.Dispose();
+                    continue;
+                }
+
                 AppLog.Info($"Discord Rich Presence: connected on discord-ipc-{index}.");
                 return pipe;
             }
-            catch
+            catch (Exception error)
             {
+                AppLog.Info($"Discord Rich Presence: handshake failed on discord-ipc-{index} ({error.GetType().Name}).");
                 pipe.Dispose();
             }
         }
@@ -300,12 +315,84 @@ internal static class DiscordRichPresenceService
                 if (length <= 0 || length > 64 * 1024) return;
                 var body = new byte[length];
                 if (!await ReadExactlyAsync(pipe, body, cancellationToken).ConfigureAwait(false)) return;
+                LogReply(Encoding.UTF8.GetString(body));
             }
+        }
+        catch (Exception error)
+        {
+            // Not silent: a read that dies here is exactly the failure that
+            // made a connected-but-invisible presence impossible to explain.
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                AppLog.Info($"Discord Rich Presence: reply stream ended ({error.GetType().Name}).");
+            }
+        }
+    }
+
+    // Replies are the only place Discord ever explains a refusal - an unknown
+    // application id, a malformed activity and a working connection all look
+    // identical from the writing side, which is why "connected" was logged
+    // while nothing appeared on the profile.
+    private static void LogReply(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            var evt = root.TryGetProperty("evt", out var evtElement) ? evtElement.GetString() : null;
+
+            if (string.Equals(evt, "ERROR", StringComparison.Ordinal))
+            {
+                var code = root.TryGetProperty("data", out var errorData) && errorData.TryGetProperty("code", out var codeElement)
+                    ? codeElement.GetRawText()
+                    : "?";
+                var message = root.TryGetProperty("data", out var messageData) && messageData.TryGetProperty("message", out var messageElement)
+                    ? messageElement.GetString()
+                    : json;
+                AppLog.Error($"Discord Rich Presence rejected (code {code}): {message}");
+                return;
+            }
+
+            if (string.Equals(evt, "READY", StringComparison.Ordinal))
+            {
+                AppLog.Info("Discord Rich Presence: handshake accepted.");
+                return;
+            }
+
+            AppLog.Debug($"Discord Rich Presence reply: {Shorten(json)}");
         }
         catch
         {
-            // The write side reports the disconnection; this one just stops.
+            AppLog.Debug($"Discord Rich Presence reply (unparsed): {Shorten(json)}");
         }
+    }
+
+    private static string Shorten(string value) => value.Length <= 400 ? value : value[..400] + "...";
+
+    private static bool IsReady(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.TryGetProperty("evt", out var evt)
+                   && string.Equals(evt.GetString(), "READY", StringComparison.Ordinal);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Reads one whole frame, or null when the pipe ends.</summary>
+    private static async Task<string?> ReadFrameAsync(NamedPipeClientStream pipe, CancellationToken cancellationToken)
+    {
+        var header = new byte[8];
+        if (!await ReadExactlyAsync(pipe, header, cancellationToken).ConfigureAwait(false)) return null;
+        var length = BitConverter.ToInt32(header, 4);
+        if (length <= 0 || length > 64 * 1024) return null;
+        var body = new byte[length];
+        if (!await ReadExactlyAsync(pipe, body, cancellationToken).ConfigureAwait(false)) return null;
+        return Encoding.UTF8.GetString(body);
     }
 
     private static async Task<bool> ReadExactlyAsync(NamedPipeClientStream pipe, byte[] buffer, CancellationToken cancellationToken)

@@ -194,10 +194,10 @@ public sealed class AppSettings
     // captured. Without it the only way to find out is to go and look in the
     // library afterwards, which is easy to forget doing.
     public bool ShowNewClipsOnGameClose { get; set; } = true;
-    // Discord Rich Presence. On by default, but it broadcasts nothing until an
-    // application id resolves - so an install where Discord is not running, or
-    // where the id has been cleared, is simply silent.
-    public bool DiscordRichPresenceEnabled { get; set; } = true;
+    // Discord Rich Presence. Off by default: it publishes what you are playing
+    // to anyone who can see your Discord profile, and that is a decision to be
+    // asked for rather than assumed.
+    public bool DiscordRichPresenceEnabled { get; set; }
     // Separate from EnableClipOverlay - "clipping started" is a distinct
     // notification kind (fires when the buffer actually starts recording a
     // detected game) from the clip-saved family, and a user may want one
