@@ -136,9 +136,22 @@ public sealed class EncoderTuningService
 
     private void RecordSustainedOverload(ReplayCaptureHealth health, DateTime now, int severeCount)
     {
-        AppLog.Info($"Encoder tuning: sustained overload detected, preserving selected {_configuredFrameRate} fps. " +
-                    $"{severeCount}/{WindowSize} windows severe, queue={health.QueueDepth}/{health.EncodeQueueCapacity}, " +
-                    $"outputFps={health.OutputFrameRate:0.0}/{health.TargetFrameRate}.");
+        var next = _activeFrameRate switch
+        {
+            > 90 => 90,
+            > 60 => 60,
+            > 30 => 30,
+            _ => _activeFrameRate
+        };
+        if (next < _activeFrameRate)
+        {
+            var previous = _activeFrameRate;
+            _activeFrameRate = next;
+            FrameRateChangeRequested?.Invoke(this, new EncoderFrameRateChange(previous, next));
+            AppLog.Info($"Encoder tuning: sustained overload requested {previous}->{next} fps. " +
+                        $"{severeCount}/{WindowSize} windows severe, queue={health.QueueDepth}/{health.EncodeQueueCapacity}, " +
+                        $"outputFps={health.OutputFrameRate:0.0}/{health.TargetFrameRate}.");
+        }
         _lastDecisionUtc = now;
         _recentSevere.Clear();
         _recentOutputs.Clear();

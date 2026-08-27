@@ -100,7 +100,8 @@ public sealed class ClipCardViewModel : ViewModelBase
     // handler tell the user to wait instead of opening an editor with no
     // duration/tracks to work with.
     public bool IsHydrated => Duration > TimeSpan.Zero && Media.Tracks.Count > 0;
-    public string DateLabel => CreatedAt.ToString("MMM d, yyyy h:mm tt");
+    private DateTimeOffset CreatedAtLocal => CreatedAt.ToLocalTime();
+    public string DateLabel => CreatedAtLocal.ToString("MMM d, yyyy h:mm tt");
 
     // Per-card date header shown above the thumbnail (replaces the old
     // shared per-day group header's Label - same format, "SAT, JUL 11").
@@ -113,8 +114,8 @@ public sealed class ClipCardViewModel : ViewModelBase
     public string GameNameLabel => NormalizeGameDisplayName(_clipInfo?.FileTitle ?? ClipFileNaming.StripTimestampSuffix(Name));
 
     public string ClipFromLabel => _clipInfo?.IsExport == true
-        ? $"Exported clip from: {CreatedAt:MMM d, yyyy}"
-        : $"Clip from {CreatedAt:MMM d, yyyy}";
+        ? $"Exported clip from: {CreatedAtLocal:MMM d, yyyy}"
+        : $"Clip from {CreatedAtLocal:MMM d, yyyy}";
 
     // User-set label shown instead of ClipFromLabel on a non-auto-clip's
     // tile - kept separate from GameNameLabel/FileTitle so renaming never
@@ -215,7 +216,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         if (age.TotalMinutes < 60) return $"{(int)age.TotalMinutes} min{((int)age.TotalMinutes == 1 ? "" : "s")} ago";
         if (age.TotalHours < 24) return $"{(int)age.TotalHours} hour{((int)age.TotalHours == 1 ? "" : "s")} ago";
         if (age.TotalDays < 30) return $"{(int)age.TotalDays} day{((int)age.TotalDays == 1 ? "" : "s")} ago";
-        return createdAt.ToString("MMM d, yyyy");
+        return createdAt.ToLocalTime().ToString("MMM d, yyyy");
     }
 
     internal void RefreshRelativeDateLabel() => OnPropertyChanged(nameof(RelativeDateLabel));

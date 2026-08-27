@@ -346,8 +346,6 @@ public sealed partial class MainWindow : Window
                 {
                     if (e.PropertyName == nameof(MainWindowViewModel.AutoClippingEnabled)) UpdateAutoClipStates();
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayBufferEnabled)) _ = ApplyReplayBufferEnabledAsync();
-                    if (e.PropertyName == nameof(MainWindowViewModel.ReplayAdaptiveFrameRateEnabled))
-                        _encoderTuning.SetEnabled(ViewModel.ReplayAdaptiveFrameRateEnabled);
                     if (e.PropertyName is nameof(MainWindowViewModel.SelectedReplayCaptureSource)
                         or nameof(MainWindowViewModel.SelectedDesktopMonitor)
                         or nameof(MainWindowViewModel.ReplayDesktopCaptureCursor)
@@ -827,7 +825,8 @@ public sealed partial class MainWindow : Window
 
     private void ApplyEncoderFrameRateChange(EncoderFrameRateChange change)
     {
-        AppLog.Info($"Encoder tuning: detected pressure at {change.FrameRate} FPS; selected capture cadence is immutable, so no live adjustment was applied.");
+        if (_replayBuffer is IAdaptiveCaptureFrameRate adaptive)
+            adaptive.RequestFrameRate(change.FrameRate);
     }
 
     private void InitializeReplayServices()
@@ -2736,7 +2735,7 @@ public sealed partial class MainWindow : Window
             _activeReplayConfigSnapshot = activeConfig;
             _activeReplayTargetIdentity = ReplayTargetIdentity(activeConfig);
             _encoderTuning.BeginSession(activeConfig.EncoderProfile, activeConfig.FrameRate, activeConfig.MaxHeight,
-                ViewModel.Settings.ReplayAdaptiveFrameRateEnabled);
+                enabled: true);
             // Fresh session, fresh list - but only for a GENUINELY new session
             // (a game was just detected). A quality restart is left open (not
             // cleared here either) so a Full Session VOD that finalizes minutes
@@ -3053,8 +3052,6 @@ public sealed partial class MainWindow : Window
             entry.ShowCheckBox = multiple;
             entry.SelectionChanged += (_, _) => SyncNewClipsDeleteButton();
         }
-        SyncNewClipsDeleteButton();
-
         foreach (var entry in entries)
         {
             // The library only decodes a card's thumbnail while it is actually
@@ -3063,10 +3060,17 @@ public sealed partial class MainWindow : Window
             entry.Clip.SetPreviewVisible(true);
         }
 
-        const int cardWidth = 300;
+        var single = entries.Count == 1;
+        var cardWidth = single ? 472 : 300;
         const int cardSpacing = 16;
         var editorDialog = presentation == NewClipsPresentation.EditorWindow;
         var cardsPanel = editorDialog ? EnsureEditorNewClipsDialog().Cards : NewClipsCardsPanel;
+        // The editor presentation is created lazily.  Sync only after it
+        // exists so its Delete button cannot be born with empty content.
+        SyncNewClipsDeleteButton();
+        var primaryAction = single ? "View Clip" : "View All Clips";
+        NewClipsViewAllButton.Content = primaryAction;
+        _editorNewClipsDialog?.SetPrimaryAction(primaryAction);
         cardsPanel.Children.Clear();
         var entryIndex = 0;
         foreach (var rowLength in NewClipsCardLayoutPolicy.CreateRowLengths(entries.Count))
@@ -3078,26 +3082,28 @@ public sealed partial class MainWindow : Window
             };
             for (var cardIndex = 0; cardIndex < rowLength; cardIndex++)
             {
-                var card = BuildNewClipCard(entries[entryIndex++]);
+                var card = BuildNewClipCard(entries[entryIndex++], single);
                 card.Width = cardWidth;
                 card.Margin = new Thickness(0, 0, cardIndex == rowLength - 1 ? 0 : cardSpacing, cardSpacing);
                 row.Children.Add(card);
             }
             cardsPanel.Children.Add(row);
         }
-        // +20 for the vertical scrollbar the ScrollViewer reserves once there
-        // are enough clips to actually need one (see UpdateCardLayout for the
-        // same allowance in the library grid) - dropped when this width moved
-        // from the old Window to this embedded Border's own Width, which
-        // reintroduced the exact "third card wraps to its own row with a
-        // card-sized gap of dead space" bug fixed earlier.
-        const int scrollbarAllowance = 20;
-        NewClipsDialogCard.Width = 3 * (cardWidth + cardSpacing) + 44 + scrollbarAllowance;
+        // Size to what is visible, not to a permanently-empty three-card row.
+        // A one-clip save becomes a deliberate preview instead of a mostly
+        // blank modal; multi-card saves still grow to their actual columns.
+        var columns = single ? 1 : Math.Min(3, entries.Count);
+        var dialogWidth = single
+            ? 520d
+            : 48d + columns * cardWidth + (columns - 1) * cardSpacing;
+        dialogWidth = Math.Min(dialogWidth, Math.Max(320d, Bounds.Width - 32));
+        NewClipsDialogCard.Width = dialogWidth;
 
         if (editorDialog)
         {
             NewClipsOverlay.IsVisible = false;
             _editorNewClipsDialog!.SetTitle(dialogTitle);
+            _editorNewClipsDialog.SetCardWidth(dialogWidth);
             _editorNewClipsDialog.RefreshOwnerBounds();
             CoverEditorSurfaceForNewClips();
             _editorNewClipsDialog.Show(this);
@@ -3218,10 +3224,15 @@ public sealed partial class MainWindow : Window
         ShowNewClipsDialog(_currentNewClipsEntries.Select(entry => entry.Path).ToList());
     }
 
-    private void NewClipsViewAllButton_OnClick(object? sender, RoutedEventArgs e)
+    private async void NewClipsViewAllButton_OnClick(object? sender, RoutedEventArgs e)
     {
         DismissNewClipsDialog();
         if (ViewModel is null) return;
+        if (_currentNewClipsEntries.Count == 1)
+        {
+            await OpenClipCardAsync(_currentNewClipsEntries[0].Clip);
+            return;
+        }
         // Land on the library regardless of which view was open underneath -
         // same "close whatever's open first" approach ApplyViewHistoryEntryAsync
         // uses for its own Settings case.
@@ -3248,13 +3259,13 @@ public sealed partial class MainWindow : Window
         return $"{(int)elapsed.TotalDays} DAYS AGO";
     }
 
-    private Border BuildNewClipCard(NewClipEntryViewModel entry)
+    private Border BuildNewClipCard(NewClipEntryViewModel entry, bool largePreview)
     {
         var thumbnail = new Image
         {
             Source = entry.Clip.PreviewImage,
             Stretch = Avalonia.Media.Stretch.UniformToFill,
-            Height = 169
+            Height = largePreview ? 266 : 169
         };
         // The decode is asynchronous, so a card built before it finishes has to
         // pick the bitmap up when it lands.

@@ -66,6 +66,7 @@ namespace ClypDat.App.Services;
 [SupportedOSPlatform("windows10.0.17763.0")]
 public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics, IAdaptiveCaptureFrameRate
 {
+    private static readonly int[] ReplayFrameRateLadder = [120, 90, 60, 30];
     // How long teardown waits for the pacing thread before giving up and leaking its
     // native resources instead of freeing them underneath it. Generous because
     // RunPacingTick contends on _bufferLock, does filesystem deletes, and can encode a
@@ -175,6 +176,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private int _peakQueueDepth;
     private int _pendingEncoderFrames;
     private int _peakPendingEncoderFrames;
+    // Requests are applied by the pacing thread, the sole owner of the cadence
+    // clock.  Keeping this separate from settings lets overload recovery lower
+    // the active rate without rewriting the user's selected rate.
+    private int _requestedFrameRate;
+    private int _activeFrameRate;
+    private int _configuredFrameRate;
+    private int _frameRateProtectionActive;
     private DateTime? _lastDegradedUtc;
     private ReplayCaptureHealth _health = ReplayCaptureHealth.Unknown("Native");
 
@@ -187,14 +195,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
     public bool IsRecording => _sessionActive;
 
-    // Capture quality is selected by the user, not a health heuristic. Keep
-    // this compatibility entry point for worker protocol clients, but never
-    // alter a running session's cadence: doing so silently changes the CFR
-    // contract and makes diagnostics conceal the actual transport problem.
     public void RequestFrameRate(int frameRate)
     {
-        if (_sessionActive)
-            AppLog.Info($"Native capture: ignored adaptive frame-rate request ({frameRate} FPS); selected cadence remains fixed for this session.");
+        if (!_sessionActive) return;
+        var configured = Volatile.Read(ref _configuredFrameRate);
+        if (configured <= 0) return;
+        var requested = ClampReplayFrameRate(frameRate, configured);
+        Interlocked.Exchange(ref _requestedFrameRate, requested);
+        Interlocked.Exchange(ref _frameRateProtectionActive, requested < configured ? 1 : 0);
+        AppLog.Info($"Native capture: requested active cadence {requested} FPS (selected {configured} FPS).");
     }
 
     public TimeSpan Duration { get; private set; } = TimeSpan.FromSeconds(60);
@@ -220,6 +229,25 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
     }
 
+    private static int ClampReplayFrameRate(int requested, int configured)
+    {
+        var ceiling = Math.Clamp(configured, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
+        return ReplayFrameRateLadder.FirstOrDefault(rate => rate <= ceiling && requested >= rate, ReplayFrameTimingPolicy.MinimumFrameRate);
+    }
+
+    private static int NextLowerReplayFrameRate(int current)
+        => ReplayFrameRateLadder.FirstOrDefault(rate => rate < current, current);
+
+    private static int NextHigherReplayFrameRate(int current, int configured)
+    {
+        for (var index = ReplayFrameRateLadder.Length - 1; index >= 0; index--)
+        {
+            var candidate = ReplayFrameRateLadder[index];
+            if (candidate > current && candidate <= configured) return candidate;
+        }
+        return current;
+    }
+
     public Task StartAsync(CancellationToken cancellationToken = default)
     {
         if (_sessionActive) return Task.CompletedTask;
@@ -235,6 +263,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
 
         var config = _configProvider();
+        var configuredFrameRate = Math.Clamp(config.FrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
+        Volatile.Write(ref _configuredFrameRate, configuredFrameRate);
+        Volatile.Write(ref _requestedFrameRate, configuredFrameRate);
+        Volatile.Write(ref _activeFrameRate, configuredFrameRate);
+        Volatile.Write(ref _frameRateProtectionActive, 0);
         Duration = TimeSpan.FromSeconds(Math.Clamp(config.DurationSeconds, 30, 1200));
 
         // Captured per encoder generation from that encoder's own SPS/PPS (see
@@ -937,6 +970,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 EncoderProfile = config.EncoderProfile,
                 EncodeQueueCapacity = encodeQueueCapacity,
                 FrameRateMode = ReplayFrameTimingPolicy.Normalize(config.FrameRateMode),
+                ConfiguredFrameRate = config.FrameRate,
+                EncoderInputPath = hardwareFramesActive ? "D3D11 zero-copy" : "System memory",
+                FrameRateProtectionActive = false,
                 StartupPhase = ReplayCaptureStartupPhase.WaitingForForeground
             });
             ready.TrySetResult();
@@ -947,7 +983,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var lastForcedKeyframe = TimeSpan.Zero;
             var lastTargetRefresh = TimeSpan.Zero;
             var lastEncodedAt = TimeSpan.Zero;
-            var targetFrameInterval = TimeSpan.FromSeconds(1.0 / Math.Clamp(config.FrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate));
+            var activeFrameRate = Volatile.Read(ref _activeFrameRate);
+            var targetFrameInterval = TimeSpan.FromSeconds(1.0 / activeFrameRate);
             var variableFrameTiming = ReplayFrameTimingPolicy.IsVariable(config.FrameRateMode);
             // Counts encoded frames (including duplicate/padding ones) so
             // frame->pts can be assigned an IDEAL, constant-rate timestamp
@@ -961,8 +998,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // clock exact without accumulating floating-point rounding error.
             var nextPtsMicroseconds = 0.0;
             long lastVariablePtsMicroseconds = -1;
-            var idealFrameIntervalMicroseconds = 1_000_000.0 / Math.Clamp(config.FrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
-            var activeFrameRate = Math.Clamp(config.FrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
+            var idealFrameIntervalMicroseconds = 1_000_000.0 / activeFrameRate;
             var cropSamplingBudget = new PresentSamplingBudget(activeFrameRate);
             // The real capture-moment timestamp FIFO (one per avcodec_send_frame
             // call, dequeued one-for-one as packets actually come out - see
@@ -1123,6 +1159,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var startupValidationComplete = false;
             var consecutiveOverloadWindows = 0;
             var consecutiveTransportShortfallWindows = 0;
+            DateTime? cleanRecoverySinceUtc = null;
             var activeEncoderCandidate = default(ReplayEncoderCandidate);
             var attemptedEncoderCandidates = new HashSet<ReplayEncoderCandidate>();
             // See the content-write sites above and the pacing gate below -
@@ -1185,6 +1222,23 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // ProcessLoopbackWaveIn's capture thread). Its lateness is directly
             // visible in the output - as padsSkipped, and as a clip that reads
             // under its configured frame rate - so it also runs AboveNormal.
+            void RequestAutomaticLowerFrameRate(string reason)
+            {
+                var active = Volatile.Read(ref _activeFrameRate);
+                var lower = NextLowerReplayFrameRate(active);
+                if (lower >= active) return;
+
+                while (true)
+                {
+                    var requested = Volatile.Read(ref _requestedFrameRate);
+                    if (lower >= requested) return;
+                    if (Interlocked.CompareExchange(ref _requestedFrameRate, lower, requested) != requested) continue;
+                    Interlocked.Exchange(ref _frameRateProtectionActive, 1);
+                    AppLog.Info($"Native capture: frame-rate protection {active}->{lower} FPS ({reason}).");
+                    return;
+                }
+            }
+
             pacingThread = new Thread(() =>
             {
                 var nextTickAt = stopwatch.Elapsed;
@@ -1200,6 +1254,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
                     try
                     {
+                        var requestedRate = Volatile.Read(ref _requestedFrameRate);
+                        if (requestedRate != activeFrameRate)
+                        {
+                            activeFrameRate = requestedRate;
+                            targetFrameInterval = TimeSpan.FromSeconds(1.0 / activeFrameRate);
+                            idealFrameIntervalMicroseconds = 1_000_000.0 / activeFrameRate;
+                            cropSamplingBudget = new PresentSamplingBudget(activeFrameRate);
+                            Volatile.Write(ref _activeFrameRate, activeFrameRate);
+                            if (activeFrameRate >= Volatile.Read(ref _configuredFrameRate))
+                                Interlocked.Exchange(ref _frameRateProtectionActive, 0);
+                            AppLog.Info($"Native capture: active cadence is now {activeFrameRate} FPS (selected {config.FrameRate} FPS).");
+                        }
                         // NOT locked at this level. Holding gpuLock across the whole
                         // tick was the first attempt and it cost far more than it
                         // looked like it would: the acquire thread then waited on a
@@ -1392,19 +1458,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         outputFrameRate >= activeFrameRate * ReplayEncoderQualificationPolicy.TargetThreshold;
                     if (!startupValidationComplete && hasCapturedRealFrame)
                     {
-                        // Count each startup observation exactly once. A slow
-                        // first second is useful evidence, but resetting to
-                        // zero made the UI appear to re-enter validation at
-                        // random times and could prolong startup indefinitely.
-                        startupValidationWindows = Math.Min(
-                            startupValidationWindows + 1,
-                            ReplayEncoderQualificationPolicy.RequiredWindows);
                         if (validationWindowPasses)
                         {
+                            startupValidationWindows = Math.Min(
+                                startupValidationWindows + 1,
+                                ReplayEncoderQualificationPolicy.RequiredWindows);
                             AppLog.Info($"Native replay startup: {encoderName} live output validation window {startupValidationWindows}/{ReplayEncoderQualificationPolicy.RequiredWindows} reached {outputFrameRate:0.0}/{activeFrameRate} FPS.");
                         }
                         else
                         {
+                            startupValidationWindows = 0;
                             AppLog.Info($"Native replay startup: {encoderName} validation window {startupValidationWindows}/{ReplayEncoderQualificationPolicy.RequiredWindows} below target (output={outputFrameRate:0.0}/{activeFrameRate} FPS, dropped={droppedSinceLog}, queue={encodeQueue.Count}/{encodeQueueCapacity}).");
                         }
 
@@ -1440,54 +1503,90 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     else if (!overloaded || saveInProgress)
                         consecutiveOverloadWindows = 0;
 
+                    var cleanForRecovery = hasCapturedRealFrame && !saveInProgress && !isStalled && !transportDegraded &&
+                        !overloaded && outputFrameRate >= activeFrameRate * ReplayEncoderQualificationPolicy.TargetThreshold &&
+                        encodeQueue.Count * 4 < encodeQueueCapacity;
+                    if (Volatile.Read(ref _frameRateProtectionActive) != 0 && cleanForRecovery)
+                    {
+                        cleanRecoverySinceUtc ??= DateTime.UtcNow;
+                        if (DateTime.UtcNow - cleanRecoverySinceUtc >= TimeSpan.FromMinutes(10))
+                        {
+                            var higher = NextHigherReplayFrameRate(activeFrameRate, Volatile.Read(ref _configuredFrameRate));
+                            if (higher > activeFrameRate)
+                            {
+                                Interlocked.Exchange(ref _requestedFrameRate, higher);
+                                cleanRecoverySinceUtc = null;
+                                AppLog.Info($"Native capture: frame-rate protection restoring {activeFrameRate}->{higher} FPS after ten clean minutes.");
+                            }
+                        }
+                    }
+                    else if (!cleanForRecovery)
+                    {
+                        cleanRecoverySinceUtc = null;
+                    }
+
                     if (hasCapturedRealFrame && consecutiveOverloadWindows >= ReplayEncoderFailoverPolicy.RequiredOverloadWindows &&
                         !string.IsNullOrEmpty(activeEncoderCandidate.Name))
                     {
-                        var switched = false;
-                        foreach (var candidate in ReplayEncoderFailoverPolicy.CandidatesAfter(
-                                     config.VideoCodec, config.EncoderMode, activeEncoderCandidate, attemptedEncoderCandidates))
+                        // A stable lower cadence is preferable to exchanging a
+                        // working encoder mid-ring.  Only investigate another
+                        // input path after the current path also fails at the
+                        // safer rate.
+                        if (NextLowerReplayFrameRate(activeFrameRate) < activeFrameRate)
                         {
-                            attemptedEncoderCandidates.Add(candidate);
-                            try
+                            RequestAutomaticLowerFrameRate($"{consecutiveOverloadWindows} overloaded diagnostic windows");
+                            consecutiveOverloadWindows = 0;
+                            startupValidationWindows = 0;
+                            startupValidationComplete = false;
+                        }
+                        else
+                        {
+                            var switched = false;
+                            foreach (var candidate in ReplayEncoderFailoverPolicy.CandidatesAfter(
+                                         config.VideoCodec, config.EncoderMode, activeEncoderCandidate, attemptedEncoderCandidates))
                             {
-                                var replacement = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, device,
-                                    out var replacementTimeBase, out var replacementName, out var replacementHardware,
-                                    candidateOrder: new[] { candidate });
-                                var swapped = new ManualResetEventSlim(false);
-                                lock (encodeQueueGate)
-                                    encodeQueue!.Add(new EncodeJob(0, DateTime.UtcNow, (nint)replacement, swapped));
-                                if (!swapped.Wait(TimeSpan.FromSeconds(5)))
+                                attemptedEncoderCandidates.Add(candidate);
+                                try
                                 {
+                                    var replacement = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, device,
+                                        out var replacementTimeBase, out var replacementName, out var replacementHardware,
+                                        candidateOrder: new[] { candidate });
+                                    var swapped = new ManualResetEventSlim(false);
+                                    lock (encodeQueueGate)
+                                        encodeQueue!.Add(new EncodeJob(0, DateTime.UtcNow, (nint)replacement, swapped));
+                                    if (!swapped.Wait(TimeSpan.FromSeconds(5)))
+                                    {
+                                        swapped.Dispose();
+                                        // The encode thread may still consume the control
+                                        // job after this timeout. Keep the new context alive
+                                        // until it has joined rather than racing a late swap.
+                                        retiredCodecContexts.Add((nint)replacement);
+                                        AppLog.Info($"Native capture: encoder failover to {candidate.Name}/{candidate.InputPath} timed out.");
+                                        break;
+                                    }
                                     swapped.Dispose();
-                                    // The encode thread may still consume the control
-                                    // job after this timeout. Keep the new context alive
-                                    // until it has joined rather than racing a late swap.
-                                    retiredCodecContexts.Add((nint)replacement);
-                                    AppLog.Info($"Native capture: encoder failover to {candidate.Name}/{candidate.InputPath} timed out.");
+                                    retiredCodecContexts.Add((nint)codecContext);
+                                    codecContext = replacement;
+                                    _timeBase = replacementTimeBase;
+                                    encoderName = replacementName;
+                                    hardwareFramesActive = replacementHardware;
+                                    requiresDistinctAmfSoftwareFrame = !replacementHardware && replacementName.Contains("amf", StringComparison.OrdinalIgnoreCase);
+                                    activeEncoderCandidate = ResolveEncoderCandidate(config, replacementName, replacementHardware);
+                                    consecutiveOverloadWindows = 0;
+                                    switched = true;
+                                    AppLog.Info($"Native capture: sustained encoder overload switched to {replacementName}/{activeEncoderCandidate.InputPath}; replay history remains buffered.");
                                     break;
                                 }
-                                swapped.Dispose();
-                                retiredCodecContexts.Add((nint)codecContext);
-                                codecContext = replacement;
-                                _timeBase = replacementTimeBase;
-                                encoderName = replacementName;
-                                hardwareFramesActive = replacementHardware;
-                                requiresDistinctAmfSoftwareFrame = !replacementHardware && replacementName.Contains("amf", StringComparison.OrdinalIgnoreCase);
-                                activeEncoderCandidate = candidate;
-                                consecutiveOverloadWindows = 0;
-                                switched = true;
-                                AppLog.Info($"Native capture: sustained encoder overload switched to {replacementName}/{candidate.InputPath}; replay history remains buffered.");
-                                break;
+                                catch (Exception error)
+                                {
+                                    AppLog.Info($"Native capture: encoder failover candidate {candidate.Name}/{candidate.InputPath} unavailable ({error.Message}).");
+                                }
                             }
-                            catch (Exception error)
+                            if (!switched)
                             {
-                                AppLog.Info($"Native capture: encoder failover candidate {candidate.Name}/{candidate.InputPath} unavailable ({error.Message}).");
+                                consecutiveOverloadWindows = 0;
+                                AppLog.Info("Native capture: every remaining encoder candidate was exhausted; keeping the best available encoder.");
                             }
-                        }
-                        if (!switched)
-                        {
-                            consecutiveOverloadWindows = 0;
-                            AppLog.Info("Native capture: every remaining encoder candidate was exhausted; keeping the best available encoder.");
                         }
                     }
                     // A stall is worse than an overload and reads nothing like one:
@@ -1534,6 +1633,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         EncoderProfile = config.EncoderProfile,
                         EncodeQueueCapacity = encodeQueueCapacity,
                         FrameRateMode = ReplayFrameTimingPolicy.Normalize(config.FrameRateMode),
+                        ConfiguredFrameRate = Volatile.Read(ref _configuredFrameRate),
+                        EncoderInputPath = hardwareFramesActive ? "D3D11 zero-copy" : "System memory",
+                        FrameRateProtectionActive = Volatile.Read(ref _frameRateProtectionActive) != 0,
                         // See ReplayCaptureHealth.SaveInProgress. A save backs
                         // the queue up for a second or two by design; it is not
                         // evidence the settings are unsustainable.
@@ -3036,6 +3138,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // FillFrameBlack placeholder into the ring buffer/full
             void RunPacingTick()
             {
+                // Act before the bounded queue starts evicting video work.  The
+                // queue is deliberately small to keep latency bounded, so at
+                // 90 FPS a full queue is already too late to wait for the next
+                // one-second diagnostic window.
+                if (hasCapturedRealFrame && !isPaused && !isStalled &&
+                    encodeQueue!.Count * 4 >= encodeQueueCapacity * 3)
+                {
+                    RequestAutomaticLowerFrameRate($"encode queue {encodeQueue.Count}/{encodeQueueCapacity}");
+                }
+
                 if (hasCapturedRealFrame && variableFrameTiming)
                 {
                     var now = stopwatch.Elapsed;
@@ -4034,6 +4146,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 {
                     var sendTimer = System.Diagnostics.Stopwatch.StartNew();
                     var sendResult = ffmpeg.avcodec_send_frame(codecContext, jobFrame);
+                    // FFmpeg's send/receive API requires us to drain output and
+                    // retry THIS input frame on EAGAIN.  Freeing it here created
+                    // a real hole in the capture timeline whenever a hardware
+                    // encoder briefly filled its internal queue.
+                    while (sendResult == ffmpeg.AVERROR(ffmpeg.EAGAIN))
+                    {
+                        Interlocked.Increment(ref _sendRefusedEagainCount);
+                        DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrames);
+                        sendResult = ffmpeg.avcodec_send_frame(codecContext, jobFrame);
+                    }
                     Interlocked.Add(ref _encodeInputMicrosAccum, (long)(sendTimer.Elapsed.TotalMilliseconds * 1000));
                     Interlocked.Increment(ref _encodeInputCountAccum);
                     if (sendResult == 0)
@@ -4043,12 +4165,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         Volatile.Write(ref _pendingEncoderFrames, pendingFrames.Count);
                         UpdatePeak(ref _peakPendingEncoderFrames, pendingFrames.PeakCount);
                         DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrames);
-                    }
-                    else if (sendResult == ffmpeg.AVERROR(ffmpeg.EAGAIN))
-                    {
-                        // Counted, not handled - see the field declaration. The
-                        // frame is still discarded exactly as before.
-                        Interlocked.Increment(ref _sendRefusedEagainCount);
                     }
                     else
                     {
@@ -5335,6 +5451,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 var codec = ffmpeg.avcodec_find_encoder_by_name(candidate.Name);
                 if (codec is null) continue;
                 var hardware = candidate.IsD3D11 && hardwareFramesRef != 0;
+                if (candidate.IsD3D11 && !hardware)
+                {
+                    AppLog.Info($"Native replay startup: {candidate.Name}/{candidate.InputPath} unavailable - D3D11 pool unavailable.");
+                    continue;
+                }
                 var context = TryOpen(codec, candidate.Name, candidate.InputPath == ReplayEncoderInputPath.LowPower, hardware);
                 if (context is null) continue;
                 encoderName = candidate.Name;

@@ -150,12 +150,11 @@
           <TextBlock Text="{Binding ReplayFrameTimingDescription}" Foreground="{StaticResource TextSubtleBrush}" FontSize="10" TextWrapping="Wrap" MaxWidth="520" />
         </StackPanel>
 
-        <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
+        <Grid ColumnDefinitions="*" Margin="0,4,0,0">
           <StackPanel Spacing="3">
-            <TextBlock Classes="settingsRowTitleSm" Text="Monitor Encoder Load" />
-            <TextBlock Classes="settingsRowDescSm" Text="Lower FPS after sustained encoder overload, then restore it after recovery." />
+            <TextBlock Classes="settingsRowTitleSm" Text="Frame-rate Protection" />
+            <TextBlock Classes="settingsRowDescSm" Text="ClypDat automatically lowers capture FPS under encoder pressure, then restores your selected FPS after sustained recovery." />
           </StackPanel>
-          <ToggleSwitch Grid.Column="1" IsChecked="{Binding ReplayAdaptiveFrameRateEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
         </Grid>
 
         <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding ReplayQualityRestartRequired}">

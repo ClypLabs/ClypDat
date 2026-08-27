@@ -104,6 +104,13 @@ public sealed record ReplayCaptureHealth(
     public ReplayCaptureStartupPhase StartupPhase { get; init; }
     public int StartupValidationWindow { get; init; }
     public int StartupValidationWindowCount { get; init; }
+    // The FPS selected in settings stays stable for the session while the
+    // native backend may temporarily run a lower cadence to protect frames.
+    // TargetFrameRate is the active cadence so existing consumers keep showing
+    // the value that is actually being encoded.
+    public int ConfiguredFrameRate { get; init; }
+    public string EncoderInputPath { get; init; } = string.Empty;
+    public bool FrameRateProtectionActive { get; init; }
 
     // WGC and hook transport counters remain separate from InputFrameRate so a
     // support bundle can distinguish compositor cadence from a game-present

@@ -14,6 +14,8 @@ internal sealed class NewClipsDialog : Window
 {
     private readonly Window _owner;
     private readonly TextBlock _title;
+    private readonly Border _card;
+    private readonly Button _primaryButton;
     public StackPanel Cards { get; } = new() { Margin = new Thickness(24, 20, 24, 4) };
     public Button DeleteButton { get; } = new() { MinWidth = 150, Height = 40 };
 
@@ -37,10 +39,13 @@ internal sealed class NewClipsDialog : Window
 
         _title = new TextBlock { Foreground = Brush.Parse("#D8E4F2"), FontSize = 17, FontWeight = FontWeight.Bold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         var closeButton = new Button { Content = "✕", Width = 52, Height = 56 };
+        closeButton.Classes.Add("dialogClose");
         closeButton.Click += close;
+        DeleteButton.Classes.Add("deleteButton");
         DeleteButton.Click += delete;
-        var viewAllButton = new Button { Content = "View All Clips", MinWidth = 180, Height = 40 };
-        viewAllButton.Click += viewAll;
+        _primaryButton = new Button { Content = "View All Clips", MinWidth = 180, Height = 40 };
+        _primaryButton.Classes.Add("primaryButton");
+        _primaryButton.Click += viewAll;
 
         var header = new Grid { Height = 56, Background = Brush.Parse("#0C1319"), ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
         header.Children.Add(_title);
@@ -49,16 +54,16 @@ internal sealed class NewClipsDialog : Window
         Grid.SetColumn(closeButton, 2);
         var footer = new Grid { Margin = new Thickness(24, 16), ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
         footer.Children.Add(DeleteButton);
-        footer.Children.Add(viewAllButton);
-        Grid.SetColumn(viewAllButton, 2);
+        footer.Children.Add(_primaryButton);
+        Grid.SetColumn(_primaryButton, 2);
         var dock = new DockPanel();
         dock.Children.Add(header);
         DockPanel.SetDock(header, Dock.Top);
         dock.Children.Add(footer);
         DockPanel.SetDock(footer, Dock.Bottom);
         dock.Children.Add(new ScrollViewer { Content = Cards, MaxHeight = 620 });
-        var card = new Border { Width = 1012, MaxHeight = 860, CornerRadius = new CornerRadius(12), Background = Brush.Parse("#111920"), BorderBrush = Brush.Parse("#232F3A"), BorderThickness = new Thickness(1), ClipToBounds = true, Child = dock, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        var scrim = new Border { Background = Brush.Parse("#DD000000"), Child = card };
+        _card = new Border { Width = 520, MaxHeight = 860, CornerRadius = new CornerRadius(12), Background = Brush.Parse("#111920"), BorderBrush = Brush.Parse("#232F3A"), BorderThickness = new Thickness(1), ClipToBounds = true, Child = dock, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var scrim = new Border { Background = Brush.Parse("#DD000000"), Child = _card };
         Content = scrim;
         Opened += (_, _) =>
         {
@@ -69,6 +74,8 @@ internal sealed class NewClipsDialog : Window
     }
 
     public void SetTitle(string title) => _title.Text = title;
+    public void SetCardWidth(double width) => _card.Width = Math.Clamp(width, 320, Math.Max(320, _owner.Bounds.Width - 32));
+    public void SetPrimaryAction(string label) => _primaryButton.Content = label;
 
     public void RefreshOwnerBounds() => PositionOverOwner(_owner);
 
