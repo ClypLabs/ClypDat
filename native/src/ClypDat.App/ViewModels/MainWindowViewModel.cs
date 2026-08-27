@@ -5576,10 +5576,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private static readonly string[] OnboardingStepOrder =
     {
-        "Replay Buffer",
-        "Startup",
+        "Capture",
+        "Quality",
         "Audio",
-        "Game Audio Exclusions"
+        "Game Settings",
+        "Startup"
     };
 
     public bool IsOnboardingVisible
@@ -5601,6 +5602,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (!SetProperty(ref _onboardingStep, value)) return;
             OnPropertyChanged(nameof(OnboardingStepNumber));
+            OnPropertyChanged(nameof(OnboardingProgressLabel));
             OnPropertyChanged(nameof(OnboardingBackEnabled));
             OnPropertyChanged(nameof(OnboardingNextLabel));
         }
@@ -5608,6 +5610,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public int OnboardingStepNumber => Array.IndexOf(OnboardingStepOrder, OnboardingStep) + 1;
     public int OnboardingStepCount => OnboardingStepOrder.Length;
+    public string OnboardingProgressLabel => $"Step {OnboardingStepNumber} of {OnboardingStepCount}";
     public bool OnboardingBackEnabled => OnboardingStepNumber > 1;
     public string OnboardingNextLabel => OnboardingStepNumber == OnboardingStepCount ? "Finish" : "Next";
 
