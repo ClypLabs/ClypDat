@@ -1,0 +1,65 @@
+name: Submit WinGet manifest
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Stable release tag to submit or retry, for example v1.3.5
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  submit:
+    # Draft and prerelease assets are not WinGet releases. A manual dispatch
+    # performs this same check below, so retries cannot submit a prerelease.
+    if: github.event_name == 'workflow_dispatch' || (github.event.release.draft == false && github.event.release.prerelease == false)
+    runs-on: windows-latest
+    steps:
+      - name: Check out manifest generator
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Resolve stable release asset
+        id: release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          $tag = $env:INPUT_TAG
+          if ([string]::IsNullOrWhiteSpace($tag)) { $tag = $env:EVENT_TAG }
+          if ($tag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw "Refusing WinGet tag '$tag': expected stable vMAJOR.MINOR.PATCH." }
+          $release = gh release view $tag --repo $env:GITHUB_REPOSITORY --json isDraft,isPrerelease,assets | ConvertFrom-Json
+          if ($release.isDraft -or $release.isPrerelease) { throw "Release $tag is not a published stable release." }
+          $asset = @($release.assets | Where-Object { $_.name -eq 'ClypDat-Setup.exe' })
+          if ($asset.Count -ne 1 -or [string]::IsNullOrWhiteSpace($asset[0].url)) { throw "Release $tag has no unique ClypDat-Setup.exe asset." }
+          if ($asset[0].url -ne "https://github.com/ClypLabs/ClypDat/releases/download/$tag/ClypDat-Setup.exe") { throw 'Release setup URL is not the expected immutable GitHub release URL.' }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "installer_url=$($asset[0].url)" >> $env:GITHUB_OUTPUT
+
+      - name: Download pinned WingetCreate
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/microsoft/winget-create/releases/download/v1.12.13.0/wingetcreate.exe'
+          $expectedSha256 = '24042bd37915805615e6cf969ac57c6439124c3fe85823327f5f3fb24bd9ffea'
+          Invoke-WebRequest -Uri $url -OutFile wingetcreate.exe
+          $actualSha256 = (Get-FileHash wingetcreate.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) { throw "WingetCreate checksum mismatch: expected $expectedSha256, got $actualSha256." }
+
+      - name: Generate, validate, and submit manifest
+        shell: pwsh
+        env:
+          WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag }}
+          INSTALLER_URL: ${{ steps.release.outputs.installer_url }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINGET_CREATE_GITHUB_TOKEN)) { throw 'WINGET_CREATE_GITHUB_TOKEN is not configured.' }
+          $manifestDirectory = .\eng\New-WinGetManifest.ps1 -Tag $env:TAG -InstallerUrl $env:INSTALLER_URL -OutputDirectory .\winget-manifests
+          winget validate --manifest $manifestDirectory --disable-interactivity
+          if ($LASTEXITCODE -ne 0) { throw "winget validate failed with exit code $LASTEXITCODE." }
+          .\eng\New-WinGetManifest.ps1 -Tag $env:TAG -InstallerUrl $env:INSTALLER_URL -OutputDirectory .\winget-manifests -Submit -WingetCreatePath .\wingetcreate.exe

@@ -15,7 +15,7 @@
            Name="ClypDat"
            Language="1033"
            Version="$(var.ClypDatVersion)"
-           Manufacturer="Stormanzanii"
+           Manufacturer="ClypLabs"
            UpgradeCode="6F6E2261-C978-4F49-AF7A-ACD933CF33FD">
     <Package InstallerVersion="500" Compressed="yes" InstallScope="perUser" />
     <MajorUpgrade DowngradeErrorMessage="A newer version of ClypDat is already installed." />

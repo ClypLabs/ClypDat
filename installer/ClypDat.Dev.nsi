@@ -35,6 +35,7 @@ Unicode true
 
 VIProductVersion "${CLYPDAT_VERSION}.0"
 VIAddVersionKey "ProductName" "ClypDat Dev"
+VIAddVersionKey "CompanyName" "ClypLabs"
 VIAddVersionKey "FileVersion" "${CLYPDAT_VERSION}"
 VIAddVersionKey "ProductVersion" "${CLYPDAT_VERSION}"
 VIAddVersionKey "FileDescription" "ClypDat Dev Channel Setup"
@@ -51,6 +52,7 @@ Section "ClypDat Dev" SecMain
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat-Dev" "DisplayName" "ClypDat Dev"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat-Dev" "DisplayIcon" "$INSTDIR\ClypDat-Dev.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat-Dev" "DisplayVersion" "${CLYPDAT_VERSION}"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat-Dev" "Publisher" "ClypLabs"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat-Dev" "UninstallString" "$INSTDIR\Uninstall.exe"
 SectionEnd
 

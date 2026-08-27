@@ -149,6 +149,10 @@ jobs:
           installer\ClypDat.nsi
         shell: pwsh
 
+      - name: Verify NSIS installer icon
+        shell: pwsh
+        run: .\eng\Test-InstallerIcon.ps1 -InstallerPath .\ClypDat-Setup.exe -IconPath .\assets\clypdat-icon.ico
+
       - name: Locate WiX toolset
         id: wix
         shell: pwsh

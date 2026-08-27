@@ -94,11 +94,26 @@ FunctionEnd
 
 VIProductVersion "${CLYPDAT_VERSION}.0"
 VIAddVersionKey "ProductName" "ClypDat"
+VIAddVersionKey "CompanyName" "ClypLabs"
 VIAddVersionKey "FileVersion" "${CLYPDAT_VERSION}"
 VIAddVersionKey "ProductVersion" "${CLYPDAT_VERSION}"
 VIAddVersionKey "FileDescription" "ClypDat Setup"
 
 Section "ClypDat" SecMain
+  ; Ask a current ClypDat to stop recording and exit before replacing any
+  ; files. Older versions have no IPC listener, so the helper waits ten
+  ; seconds and then stops only processes it can prove belong to ClypDat.
+  ; A remaining verified process means a locked install: abort rather than
+  ; copying a partial update over it.
+  SetOutPath "$PLUGINSDIR"
+  File /oname=ClypDatInstallerShutdown.ps1 "ClypDatInstallerShutdown.ps1"
+  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\ClypDatInstallerShutdown.ps1"'
+  Pop $0
+  ${If} $0 != "0"
+    MessageBox MB_ICONSTOP "ClypDat is still running and could not be stopped. Close ClypDat, then run this installer again."
+    Abort
+  ${EndIf}
+
   ; 1.1.0 temporarily installed machine-wide. Its elevated uninstaller is
   ; launched here so updates return to the per-user install location without
   ; leaving a duplicate application copy behind.
@@ -118,7 +133,7 @@ Section "ClypDat" SecMain
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "DisplayName" "ClypDat"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "DisplayIcon" "$INSTDIR\ClypDat.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "DisplayVersion" "${CLYPDAT_VERSION}"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "Publisher" "Stormanzanii"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "Publisher" "ClypLabs"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "UninstallString" "$INSTDIR\Uninstall.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "InstallLocation" "$INSTDIR"
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClypDat" "NoModify" 1

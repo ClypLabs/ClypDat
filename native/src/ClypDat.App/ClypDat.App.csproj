@@ -4,6 +4,8 @@
     <OutputType>WinExe</OutputType>
     <AssemblyName>ClypDat</AssemblyName>
     <RootNamespace>ClypDat.App</RootNamespace>
+    <Company>ClypLabs</Company>
+    <Product>ClypDat</Product>
     <ApplicationIcon>..\..\..\assets\clypdat-icon.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- Windows-versioned TFM (overriding Directory.Build.props' plain net8.0, scoped
@@ -139,6 +141,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="..\..\..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\game-catalog.json" Link="game-catalog.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\game-icons.json" Link="game-icons.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>

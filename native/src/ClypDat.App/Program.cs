@@ -25,6 +25,11 @@ internal static class Program
     private static readonly string UserScopeSuffix = GetUserScopeSuffix();
     private static readonly string SingleInstanceMutexName = $"ClypDat-Recorder-SingleInstance-9F3D2A61-{UserScopeSuffix}";
     private static readonly string ShowRequestEventName = $"ClypDat-Recorder-ShowRequest-9F3D2A61-{UserScopeSuffix}";
+    // The NSIS installer opens this existing event before replacing a stable
+    // installation. It deliberately uses the same per-user scope as the
+    // single-instance IPC: another user on the machine must never be able to
+    // close this user's recorder while updating their own installation.
+    private static readonly string UpdateShutdownRequestEventName = $"ClypDat-Recorder-UpdateShutdownRequest-9F3D2A61-{UserScopeSuffix}";
 
     private static string GetUserScopeSuffix()
     {
@@ -111,6 +116,7 @@ internal static class Program
         }
 
         using var showRequestListener = new EventWaitHandle(false, EventResetMode.AutoReset, ShowRequestEventName);
+        using var updateShutdownRequestListener = new EventWaitHandle(false, EventResetMode.AutoReset, UpdateShutdownRequestEventName);
         var listenerThread = new Thread(() =>
         {
             while (true)
@@ -121,6 +127,17 @@ internal static class Program
         })
         { IsBackground = true, Name = "ClypDat Single-Instance Listener" };
         listenerThread.Start();
+
+        var updateShutdownListenerThread = new Thread(() =>
+        {
+            while (true)
+            {
+                updateShutdownRequestListener.WaitOne();
+                if (Application.Current is App app) app.ShutdownForInstallerRequest();
+            }
+        })
+        { IsBackground = true, Name = "ClypDat Update-Shutdown Listener" };
+        updateShutdownListenerThread.Start();
 
         // Reconcile on every normal UI launch. Updates and local publishes can
         // move the executable, while users can delete Run values externally.

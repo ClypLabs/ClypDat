@@ -18,6 +18,7 @@ public sealed partial class App : Application
     private MainWindow? _mainWindow;
     private Stream? _trayIconStream;
     private ServerTrayMenuRenderer? _serverTrayMenuRenderer;
+    private int _installerShutdownRequested;
 
     public override void Initialize()
     {
@@ -292,6 +293,38 @@ public sealed partial class App : Application
     // the UI thread, so this has to marshal over instead of touching the
     // window directly.
     public void ShowMainWindowFromExternalRequest() => Avalonia.Threading.Dispatcher.UIThread.Post(RestoreMainWindow);
+
+    // Called by Program's named-event listener. Multiple installer launches
+    // can signal at once, but capture shutdown and desktop lifetime shutdown
+    // must happen exactly once.
+    public void ShutdownForInstallerRequest() => Dispatcher.UIThread.Post(async () =>
+    {
+        if (Interlocked.Exchange(ref _installerShutdownRequested, 1) != 0) return;
+
+        AppLog.Info("Installer requested graceful shutdown.");
+        try
+        {
+            if (_mainWindow is not null)
+            {
+                await _mainWindow.ExitForUpdateAsync();
+                return;
+            }
+
+            if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+            {
+                desktop.Shutdown();
+            }
+            else
+            {
+                Environment.Exit(0);
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Installer-requested graceful shutdown failed.", error);
+            Environment.Exit(0);
+        }
+    });
 
     public void FocusMainWindow() => RestoreMainWindow();
 

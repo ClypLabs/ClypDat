@@ -145,6 +145,8 @@ jobs:
           Copy-Item "$payload\*" "$installerSource\versions\$buildId" -Recurse -Force
           Copy-Item "installer\License.txt" $installerSource
           & "C:\Program Files (x86)\NSIS\makensis.exe" /DCLYPDAT_VERSION=0.0.0 /DCLYPDAT_BUILD_ID=$buildId /DCLYPDAT_SOURCE_DIR=$installerSource /DCLYPDAT_OUTPUT_FILE=$pwd\ClypDat-Dev-Setup.exe installer\ClypDat.Dev.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis.exe failed with exit code $LASTEXITCODE" }
+          .\eng\Test-InstallerIcon.ps1 -InstallerPath .\ClypDat-Dev-Setup.exe -IconPath .\assets\clypdat-icon.ico
 
       - name: Publish moving signed Dev prerelease
         env:
