@@ -30,6 +30,7 @@ public sealed class PlaybackSession : IDisposable
     // reason _masterVolumePercent does - the chain is torn down and rebuilt on
     // every clip load, and the rate the user set has to come back with it.
     private double _playbackRate = 1.0;
+    private string? _cropMaskPath;
     private Media? _videoMedia;
     private volatile bool _disposed;
     // Generous on purpose: a preview decode holding _seekLock is bounded work, and
@@ -88,6 +89,64 @@ public sealed class PlaybackSession : IDisposable
         }
     }
     public bool IsPlaying => VideoPlayer.IsPlaying;
+
+    /// <summary>
+    /// Shows the editor's crop guide by handing libvlc a PNG to composite into
+    /// the picture. Null clears it.
+    /// </summary>
+    /// <remarks>
+    /// The logo sub-filter, not an overlay window: see CropMaskImage for why
+    /// nothing drawn above the video can stay put. Enabling it here rather than
+    /// as a media option means it can be turned on and off without reloading the
+    /// clip.
+    /// </remarks>
+    public void SetCropMaskImage(string? pngPath)
+    {
+        if (string.Equals(_cropMaskPath, pngPath, StringComparison.OrdinalIgnoreCase)) return;
+        _cropMaskPath = pngPath;
+        try
+        {
+            if (string.IsNullOrEmpty(pngPath))
+            {
+                VideoPlayer.SetLogoInt(VideoLogoOption.Enable, 0);
+                return;
+            }
+
+            VideoPlayer.SetLogoString(VideoLogoOption.File, pngPath);
+            VideoPlayer.SetLogoInt(VideoLogoOption.X, 0);
+            VideoPlayer.SetLogoInt(VideoLogoOption.Y, 0);
+            VideoPlayer.SetLogoInt(VideoLogoOption.Opacity, 255);
+            // Repeat 0 = show it once and leave it up; the default cycles it.
+            VideoPlayer.SetLogoInt(VideoLogoOption.Repeat, 0);
+            VideoPlayer.SetLogoInt(VideoLogoOption.Enable, 1);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Editor crop mask failed: '{pngPath}'", error);
+        }
+    }
+
+    // Moves the drift corrector's reference point without touching the audio
+    // stream itself. A rate change alters what one output second means (see
+    // ObserveAudioDrift), so the old anchor would read as a large, growing
+    // offset and the corrector would "fix" it by seeking.
+    //
+    // The first version re-anchored by seeking and restarting the audio, which
+    // is what made a speed change mid-playback stutter: stopping and restarting
+    // the stream costs a beat that the picture does not take, so the two came
+    // back out of step - and the seek used Position, which falls back to the
+    // last REQUESTED position when libvlc has not published a time yet, so it
+    // could also jump the audio somewhere else entirely.
+    private void ReanchorAudioClock()
+    {
+        if (_audioOutput is null || !_shouldPlay) return;
+        var generation = Interlocked.Read(ref _seekVersion);
+        _audioAnchorMediaTime = Position;
+        try { _audioAnchorDevicePosition = _audioOutput.GetPosition(); }
+        catch { return; }
+        _audioAnchorTimestamp = Stopwatch.GetTimestamp();
+        _audioClockPolicy.Begin(generation);
+    }
     public bool IsEnded => _ended || VideoPlayer.State == VLCState.Ended;
     public bool IsSeeking => _isSeeking;
 
@@ -242,6 +301,7 @@ public sealed class PlaybackSession : IDisposable
         // clip would see "already 2x" and skip itself, leaving the picture at 1x
         // while the sidebar says 2x.
         _playbackRate = 1.0;
+        _cropMaskPath = null;
 
         // Network-drive diagnostics: size + storage type up front, so slow
         // opens in the log can immediately be attributed (or not) to the file
@@ -742,15 +802,7 @@ public sealed class PlaybackSession : IDisposable
 
         if (_rateStage is { } stage) stage.Rate = normalized;
 
-        // Re-anchor rather than leave the drift corrector comparing against a
-        // clock whose meaning just changed underneath it: one output second now
-        // covers a different amount of the clip (see ObserveAudioDrift).
-        if (_shouldPlay && _audioOutput is not null)
-        {
-            var resumeAt = Position;
-            SeekAudio(resumeAt);
-            StartAudioAt(resumeAt, Interlocked.Read(ref _seekVersion));
-        }
+        ReanchorAudioClock();
 
         AppLog.Debug($"Editor playback rate: {normalized:0.###}x.");
     }

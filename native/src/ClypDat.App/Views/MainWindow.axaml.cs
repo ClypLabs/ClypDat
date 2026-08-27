@@ -120,13 +120,6 @@ public sealed partial class MainWindow : Window
     public bool AllowRealClose { get; set; }
     private List<(double StartSeconds, double EndSeconds)> _pausedRanges = new();
     private Window? _recordingPausedOverlay;
-    private Window? _editorCropOverlay;
-    private Canvas? _editorCropCanvas;
-    private readonly Border[] _editorCropShades = new Border[4];
-    private Border? _editorCropOutline;
-    // Last geometry actually pushed to the mask window, so a layout pass that
-    // changed nothing can return without touching it (see SyncEditorCropOverlay).
-    private (PixelPoint Origin, double Width, double Height, ClipRenderFilters.CropRect Crop)? _editorCropLayout;
     // Top-level dialogs need their own native window to cover VLC's video
     // surface. While one is up, editor-owned overlays must stay down rather
     // than polling/repositioning themselves back above the dialog.
@@ -481,7 +474,6 @@ public sealed partial class MainWindow : Window
             _replayBuffer?.Dispose();
             _playback?.Dispose();
             _recordingPausedOverlay?.Close();
-            _editorCropOverlay?.Close();
             _editorHoverControlsWindow?.Close();
             EditorVideoView.DisposeClickHandling();
             ViewModel?.Dispose();
@@ -3170,13 +3162,11 @@ public sealed partial class MainWindow : Window
         _editorSurfaceCoverCount++;
         HideEditorHoverControls(immediate: true);
         _recordingPausedOverlay?.Hide();
-        _editorCropOverlay?.Hide();
     }
 
     private void UncoverEditorSurface()
     {
         if (_editorSurfaceCoverCount > 0) _editorSurfaceCoverCount--;
-        if (_editorSurfaceCoverCount == 0) SyncEditorCropOverlay();
     }
 
     private void CoverEditorSurfaceForNewClips()
@@ -4852,7 +4842,6 @@ public sealed partial class MainWindow : Window
             // trusting IsVisible state the OS invalidated while minimized.
             HideEditorHoverControls(immediate: true);
             _recordingPausedOverlay?.Hide();
-            _editorCropOverlay?.Hide();
         }
 
         if (change.Property == WindowStateProperty && MaximizeRestoreButton?.Content is PathIcon icon)
@@ -5019,7 +5008,6 @@ public sealed partial class MainWindow : Window
         // (and re-shown if still applicable) by the next timer tick or layout
         // event once the view has settled into FullscreenVideoHost.
         _recordingPausedOverlay?.Hide();
-        _editorCropOverlay?.Hide();
 
         // Move the SAME EditorVideoView (already playing) into the
         // fullscreen host instead of hot-swapping MediaPlayer onto a second
@@ -6584,197 +6572,42 @@ public sealed partial class MainWindow : Window
     {
         if (_playback is not { } playback || ViewModel is not { } viewModel) return;
         playback.SetPlaybackRate(viewModel.ClipSpeed);
-        SyncEditorCropOverlay();
+        ApplyEditorCropPreview();
     }
 
     // Shows what a crop will KEEP by dimming what it will cut, rather than
-    // actually cropping the picture. Cropping the preview outright (libvlc's
-    // own CropGeometry, which is what this did first) answers "what will the
-    // output look like" but destroys the only thing the position sliders need
-    // to be usable: you cannot aim a crop window at something you can no longer
-    // see. The dim edges are the frame being thrown away.
+    // actually cropping the picture: cropping the preview outright answers "what
+    // will the output look like" but destroys the only thing the position
+    // sliders need to be usable - you cannot aim a crop window at something you
+    // can no longer see.
     //
-    // It has to be an owned window for the same reason the hover bar and the
-    // paused badge are: the picture is a native child HWND that paints over
-    // every Avalonia sibling regardless of z-order, so a mask drawn in this
-    // window's own visual tree would simply be invisible.
-    private Window EnsureEditorCropOverlay()
+    // The guide is handed to libvlc as an image to composite, NOT drawn in a
+    // window above the video. An overlay window was the first attempt and it
+    // flickered badly, in a very specific way: its opaque outline sat perfectly
+    // still while the translucent shading blinked on and off. That is per-pixel
+    // alpha with nothing stable to blend against - libvlc presents through a
+    // flip-model swapchain, which bypasses DWM's redirection for that region.
+    // No amount of z-order guarding touches it; only drawing inside the picture
+    // does. See CropMaskImage.
+    private void ApplyEditorCropPreview()
     {
-        if (_editorCropOverlay is not null) return _editorCropOverlay;
-
-        var canvas = new Canvas();
-        // Deliberately light. This is a guide, not a letterbox: the whole point
-        // of shading instead of cropping the preview is that the part being cut
-        // stays readable, so you can see what you are about to lose and move the
-        // crop window onto what matters.
-        var shade = new SolidColorBrush(Color.FromArgb(0x66, 0, 0, 0));
-        for (var index = 0; index < _editorCropShades.Length; index++)
+        if (_playback is not { } playback) return;
+        if (ViewModel is not { } viewModel || !viewModel.IsClipCropActive ||
+            viewModel.ActiveCropRect is not { } crop)
         {
-            var border = new Border { Background = shade, IsHitTestVisible = false };
-            _editorCropShades[index] = border;
-            canvas.Children.Add(border);
-        }
-
-        _editorCropOutline = new Border
-        {
-            BorderBrush = new SolidColorBrush(Color.Parse("#7FB4E8")),
-            BorderThickness = new Thickness(1),
-            IsHitTestVisible = false,
-        };
-        canvas.Children.Add(_editorCropOutline);
-
-        var overlay = new Window
-        {
-            WindowDecorations = WindowDecorations.None,
-            ShowInTaskbar = false,
-            CanResize = false,
-            ShowActivated = false,
-            Topmost = false,
-            Background = Brushes.Transparent,
-            TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
-            Content = canvas,
-        };
-        overlay.Opened += (_, _) =>
-        {
-            OverlayTransparencyDiagnostics.Log(overlay, "editor-crop");
-            // Purely a readout - clicking the dimmed area still has to reach the
-            // video underneath and play/pause it, exactly as it does with no
-            // crop set.
-            MakeWindowNonActivating(overlay);
-            MakeWindowClickThrough(overlay);
-        };
-
-        _editorCropOverlay = overlay;
-        _editorCropCanvas = canvas;
-        return overlay;
-    }
-
-    // Called from EditorVideoView.LayoutUpdated, which fires constantly while a
-    // clip plays. Everything past the cheap checks here has to be conditional on
-    // something having actually MOVED: the first version re-ran SetWindowPos and
-    // re-raised the hover bar on every one of those passes, and two owned windows
-    // being re-ordered dozens of times a second over a native video surface that
-    // is itself repainting is what made the picture flicker - the same failure
-    // the paused badge's own skip-if-unchanged guard exists to avoid.
-    private void SyncEditorCropOverlay()
-    {
-        if (ViewModel is not { } viewModel || !viewModel.IsEditorVisible || viewModel.IsVideoFullscreen ||
-            !viewModel.IsClipCropActive || viewModel.ActiveCropRect is not { } crop || IsEditorSurfaceCovered)
-        {
-            if (_editorCropOverlay is { IsVisible: true } hidden)
-            {
-                hidden.Hide();
-                _editorCropLayout = null;
-            }
+            playback.SetCropMaskImage(null);
+            CropMaskImage.Prune(EditorCropMaskDirectory, keepPath: null);
             return;
         }
 
-        var overlay = EnsureEditorCropOverlay();
-        var wasHidden = !overlay.IsVisible;
-        var moved = LayoutEditorCropOverlay(overlay, crop, viewModel);
-        if (!wasHidden && !moved) return;
-
-        if (wasHidden)
-        {
-            overlay.Show(this);
-            ApplyCaptureExclusion(overlay, exclude: false);
-        }
-
-        // Showing or moving this window claims the top of the owner's z-band, so
-        // the hover bar has to be put back above it - but only then, never on a
-        // pass where nothing changed.
-        RepositionEditorHoverControlsSafe(force: true);
+        var path = CropMaskImage.TryWrite(
+            EditorCropMaskDirectory, crop, viewModel.SelectedSourceWidth, viewModel.SelectedSourceHeight);
+        playback.SetCropMaskImage(path);
+        CropMaskImage.Prune(EditorCropMaskDirectory, path);
     }
 
-    private bool LayoutEditorCropOverlay(Window overlay, ClipRenderFilters.CropRect crop, MainWindowViewModel viewModel)
-    {
-        // PointToScreen throws while EditorVideoView is momentarily detached
-        // (the fullscreen reparent), and this runs from plain layout events with
-        // no recovery of their own.
-        try
-        {
-            var topLeft = EditorVideoView.PointToScreen(new Point(0, 0));
-            var bottomRight = EditorVideoView.PointToScreen(new Point(EditorVideoView.Bounds.Width, EditorVideoView.Bounds.Height));
-            var scaling = overlay.RenderScaling > 0 ? overlay.RenderScaling : 1;
-            var viewWidth = Math.Max(1, (bottomRight.X - topLeft.X) / scaling);
-            var viewHeight = Math.Max(1, (bottomRight.Y - topLeft.Y) / scaling);
-
-            var sourceWidth = viewModel.SelectedSourceWidth;
-            var sourceHeight = viewModel.SelectedSourceHeight;
-            if (sourceWidth <= 0 || sourceHeight <= 0) return false;
-
-            // The video is letterboxed inside its view, and the crop is a
-            // fraction of the PICTURE, not of the view - shading against the
-            // view's own bounds would put the mask edges in the wrong place on
-            // any clip whose aspect does not match the pane.
-            var sourceAspect = (double)sourceWidth / sourceHeight;
-            double pictureWidth, pictureHeight;
-            if (viewWidth / viewHeight > sourceAspect)
-            {
-                pictureHeight = viewHeight;
-                pictureWidth = viewHeight * sourceAspect;
-            }
-            else
-            {
-                pictureWidth = viewWidth;
-                pictureHeight = viewWidth / sourceAspect;
-            }
-
-            var pictureLeft = (viewWidth - pictureWidth) / 2;
-            var pictureTop = (viewHeight - pictureHeight) / 2;
-            var keepLeft = pictureLeft + pictureWidth * crop.X / sourceWidth;
-            var keepTop = pictureTop + pictureHeight * crop.Y / sourceHeight;
-            var keepWidth = pictureWidth * crop.Width / sourceWidth;
-            var keepHeight = pictureHeight * crop.Height / sourceHeight;
-
-            // Compared against what was last pushed rather than against the
-            // window's own Position, which only echoes back the last assignment
-            // and would report "unchanged" even after the OS moved the window.
-            var layout = (topLeft, viewWidth, viewHeight, crop);
-            if (_editorCropLayout is { } previous &&
-                previous.Origin == topLeft &&
-                Math.Abs(previous.Width - viewWidth) < 0.5 &&
-                Math.Abs(previous.Height - viewHeight) < 0.5 &&
-                previous.Crop.Equals(crop) &&
-                overlay.IsVisible)
-            {
-                return false;
-            }
-            _editorCropLayout = layout;
-
-            overlay.Position = topLeft;
-            overlay.Width = viewWidth;
-            overlay.Height = viewHeight;
-            if (_editorCropCanvas is { } canvas)
-            {
-                canvas.Width = viewWidth;
-                canvas.Height = viewHeight;
-            }
-
-            PlaceShade(_editorCropShades[0], 0, 0, viewWidth, keepTop);
-            PlaceShade(_editorCropShades[1], 0, keepTop + keepHeight, viewWidth, viewHeight - (keepTop + keepHeight));
-            PlaceShade(_editorCropShades[2], 0, keepTop, keepLeft, keepHeight);
-            PlaceShade(_editorCropShades[3], keepLeft + keepWidth, keepTop, viewWidth - (keepLeft + keepWidth), keepHeight);
-            if (_editorCropOutline is { } outline) PlaceShade(outline, keepLeft, keepTop, keepWidth, keepHeight);
-
-            var handle = NativeHandleOf(overlay);
-            if (handle != IntPtr.Zero) SetWindowPos(handle, HwndTop, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
-            return true;
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Editor crop overlay layout failed (recovered)", error);
-            return false;
-        }
-    }
-
-    private static void PlaceShade(Border border, double left, double top, double width, double height)
-    {
-        Canvas.SetLeft(border, left);
-        Canvas.SetTop(border, top);
-        border.Width = Math.Max(0, width);
-        border.Height = Math.Max(0, height);
-    }
+    private static string EditorCropMaskDirectory =>
+        Path.Combine(Path.GetTempPath(), "ClypDat", "crop-mask");
 
     private async Task ShareCurrentClipAsync()
     {
@@ -7968,7 +7801,6 @@ public sealed partial class MainWindow : Window
             // (EditorVideoView's bounds) may not have settled yet either,
             // which is exactly the "flickers over the library grid" symptom.
             _recordingPausedOverlay?.Hide();
-            _editorCropOverlay?.Hide();
             AppLog.Info($"Editor open: {ViewModel.SelectedVideoPath}");
             EditorVideoView.MediaPlayer = playback.VideoPlayer;
             EditorVideoView.WatchMediaPlayer(playback.VideoPlayer);
@@ -8227,7 +8059,6 @@ public sealed partial class MainWindow : Window
         EditorVideoView.WatchMediaPlayer(null);
         EditorVideoView.MediaPlayer = null;
         _recordingPausedOverlay?.Hide();
-        _editorCropOverlay?.Hide();
         HideEditorHoverControls(immediate: true);
         if (ViewModel is not null)
         {
@@ -8433,7 +8264,6 @@ public sealed partial class MainWindow : Window
         if (!shouldShow || ViewModel is null || !ViewModel.IsEditorVisible || IsEditorSurfaceCovered)
         {
             _recordingPausedOverlay?.Hide();
-            _editorCropOverlay?.Hide();
             return;
         }
 
@@ -8528,7 +8358,6 @@ public sealed partial class MainWindow : Window
         PositionChanged += (_, _) =>
         {
             var pausedRaised = _recordingPausedOverlay is { IsVisible: true } overlay && RepositionPausedOverlay(overlay);
-            SyncEditorCropOverlay();
             // A paused-overlay move claims the top of the owner's z-band.
             // Re-raise the hover bar even if its geometry did not change, so
             // its Server per-pixel mirror remains between the input window and
@@ -8538,7 +8367,6 @@ public sealed partial class MainWindow : Window
         EditorVideoView.LayoutUpdated += (_, _) =>
         {
             var pausedRaised = _recordingPausedOverlay is { IsVisible: true } overlay && RepositionPausedOverlay(overlay);
-            SyncEditorCropOverlay();
             RepositionEditorHoverControlsSafe(force: pausedRaised);
             // Covers window resize AND the fullscreen reparent (both change
             // EditorVideoView's rendered height, which the pan-range math
