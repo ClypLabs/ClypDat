@@ -124,6 +124,9 @@ public sealed partial class MainWindow : Window
     private Canvas? _editorCropCanvas;
     private readonly Border[] _editorCropShades = new Border[4];
     private Border? _editorCropOutline;
+    // Last geometry actually pushed to the mask window, so a layout pass that
+    // changed nothing can return without touching it (see SyncEditorCropOverlay).
+    private (PixelPoint Origin, double Width, double Height, ClipRenderFilters.CropRect Crop)? _editorCropLayout;
     // Top-level dialogs need their own native window to cover VLC's video
     // surface. While one is up, editor-owned overlays must stay down rather
     // than polling/repositioning themselves back above the dialog.
@@ -6646,26 +6649,40 @@ public sealed partial class MainWindow : Window
         return overlay;
     }
 
+    // Called from EditorVideoView.LayoutUpdated, which fires constantly while a
+    // clip plays. Everything past the cheap checks here has to be conditional on
+    // something having actually MOVED: the first version re-ran SetWindowPos and
+    // re-raised the hover bar on every one of those passes, and two owned windows
+    // being re-ordered dozens of times a second over a native video surface that
+    // is itself repainting is what made the picture flicker - the same failure
+    // the paused badge's own skip-if-unchanged guard exists to avoid.
     private void SyncEditorCropOverlay()
     {
         if (ViewModel is not { } viewModel || !viewModel.IsEditorVisible || viewModel.IsVideoFullscreen ||
             !viewModel.IsClipCropActive || viewModel.ActiveCropRect is not { } crop || IsEditorSurfaceCovered)
         {
-            _editorCropOverlay?.Hide();
+            if (_editorCropOverlay is { IsVisible: true } hidden)
+            {
+                hidden.Hide();
+                _editorCropLayout = null;
+            }
             return;
         }
 
         var overlay = EnsureEditorCropOverlay();
         var wasHidden = !overlay.IsVisible;
-        if (!LayoutEditorCropOverlay(overlay, crop, viewModel)) return;
+        var moved = LayoutEditorCropOverlay(overlay, crop, viewModel);
+        if (!wasHidden && !moved) return;
+
         if (wasHidden)
         {
             overlay.Show(this);
             ApplyCaptureExclusion(overlay, exclude: false);
         }
-        // The mask claims the top of the owner's z-band when it shows, so the
-        // hover bar has to be put back above it - same handshake the paused
-        // badge does.
+
+        // Showing or moving this window claims the top of the owner's z-band, so
+        // the hover bar has to be put back above it - but only then, never on a
+        // pass where nothing changed.
         RepositionEditorHoverControlsSafe(force: true);
     }
 
@@ -6709,6 +6726,21 @@ public sealed partial class MainWindow : Window
             var keepTop = pictureTop + pictureHeight * crop.Y / sourceHeight;
             var keepWidth = pictureWidth * crop.Width / sourceWidth;
             var keepHeight = pictureHeight * crop.Height / sourceHeight;
+
+            // Compared against what was last pushed rather than against the
+            // window's own Position, which only echoes back the last assignment
+            // and would report "unchanged" even after the OS moved the window.
+            var layout = (topLeft, viewWidth, viewHeight, crop);
+            if (_editorCropLayout is { } previous &&
+                previous.Origin == topLeft &&
+                Math.Abs(previous.Width - viewWidth) < 0.5 &&
+                Math.Abs(previous.Height - viewHeight) < 0.5 &&
+                previous.Crop.Equals(crop) &&
+                overlay.IsVisible)
+            {
+                return false;
+            }
+            _editorCropLayout = layout;
 
             overlay.Position = topLeft;
             overlay.Width = viewWidth;

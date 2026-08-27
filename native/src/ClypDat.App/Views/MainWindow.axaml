@@ -1662,7 +1662,7 @@
                     </ListBox>
                     <TextBlock Text="{Binding ExportLengthLabel, StringFormat=Renders as \{0\}}"
                                Foreground="#8EA1B6" FontSize="11" />
-                    <TextBlock Text="Preview is silent off 1x. The export keeps full, re-timed audio."
+                    <TextBlock Text="Preview pitch rises and falls with speed. The export keeps the original pitch."
                                Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap"
                                IsVisible="{Binding IsClipSpeedActive}" />
                   </StackPanel>

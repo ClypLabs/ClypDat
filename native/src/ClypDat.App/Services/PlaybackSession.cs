@@ -19,6 +19,7 @@ public sealed class PlaybackSession : IDisposable
     private WasapiOut? _audioOutput;
     private MixingSampleProvider? _audioMixer;
     private VolumeSampleProvider? _masterVolume;
+    private PlaybackRateSampleProvider? _rateStage;
     // Survives RebuildAudioOutput (called on every clip load, which tears
     // down and recreates _masterVolume itself) so a volume set once via
     // SetMasterVolume - e.g. restored from AppSettings.EditorMasterVolume at
@@ -337,7 +338,11 @@ public sealed class PlaybackSession : IDisposable
         // 100% still gets caught by SoftLimiterSampleProvider instead of
         // clipping the final output unprotected.
         _masterVolume = new VolumeSampleProvider(normalized) { Volume = VolumeCurve(_masterVolumePercent) };
-        var limited = new SoftLimiterSampleProvider(_masterVolume);
+        // Permanent member of the chain, transparent at 1x. Clip speed changes
+        // its ratio in place - see SetPlaybackRate for why it must never be
+        // spliced in and out.
+        _rateStage = new PlaybackRateSampleProvider(_masterVolume) { Rate = _playbackRate };
+        var limited = new SoftLimiterSampleProvider(_rateStage);
         // The one place that genuinely needs the previous endpoint gone. By now
         // the release started at load time has almost always finished already,
         // so this is normally a no-op; the timeout is only so a WasapiOut whose
@@ -707,60 +712,47 @@ public sealed class PlaybackSession : IDisposable
     }
 
     /// <summary>
-    /// Editor clip-speed preview: libvlc's own rate for the picture, and the
-    /// editor's mixed audio held silent for as long as the rate is not 1x.
+    /// Editor clip-speed preview: libvlc's rate for the picture, and a ratio
+    /// change on the always-present rate stage for the audio.
     /// </summary>
     /// <remarks>
-    /// Time-stretching this audio in the preview was tried and removed. The
-    /// editor does not play sound through libvlc - it decodes each track itself
-    /// into a NAudio mixer (see RebuildAudioOutput) and keeps that mixer aligned
-    /// to libvlc's clock by comparing the output device's hardware position
-    /// against MediaPlayer.Time (ObserveAudioDrift). Re-timing the audio breaks
-    /// both halves of that arrangement at once: the tempo stage has to be spliced
-    /// mid-chain, which NAudio can only do by rebuilding the graph - tearing down
-    /// a WasapiOut mid-playback, off the load gate that every other path holds -
-    /// and every byte the device consumes then covers a different amount of media
-    /// time, so the drift corrector starts issuing seeks against a clock that no
-    /// longer means what it did. Stuttering, garbled audio and a picture that
-    /// jumps around were the result.
+    /// The one rule here is that a rate change must not touch the running audio
+    /// graph. The first attempt rebuilt the chain to splice a tempo stage in,
+    /// which meant tearing down a live WasapiOut from the UI thread, outside the
+    /// load gate every other path holds - and that is what made the audio
+    /// stutter and the picture jump. So the rate stage is built once with the
+    /// chain, sits transparent at 1x, and a speed change only assigns a number
+    /// to it. Nothing is constructed, disposed or re-ordered.
     ///
-    /// Silence is the honest trade. The rate change is about seeing the motion,
-    /// the export carries the real re-timed audio (ffmpeg's atempo, see
-    /// ClipRenderFilters.BuildAudioSpeedFilter), and nothing in the running
-    /// pipeline has to be rebuilt to get there.
+    /// The preview resamples rather than time-stretches, so pitch rises and falls
+    /// with speed. That is a deliberate trade for a preview that cannot glitch:
+    /// a phase vocoder in this position costs real CPU on the render thread and
+    /// adds latency the A/V drift corrector then has to argue with. The export
+    /// is pitch-preserving either way - ffmpeg's atempo, see
+    /// ClipRenderFilters.BuildAudioSpeedFilter.
     /// </remarks>
     public void SetPlaybackRate(double rate)
     {
         var normalized = ClipRenderFilters.NormalizeSpeed(rate);
         if (Math.Abs(_playbackRate - normalized) < 0.0001) return;
-        var wasSilenced = ClipRenderFilters.IsSpeedActive(_playbackRate);
         _playbackRate = normalized;
 
         try { VideoPlayer.SetRate((float)normalized); }
         catch (Exception error) { AppLog.Error($"Editor playback rate failed: {normalized:0.###}x", error); }
 
-        if (ClipRenderFilters.IsSpeedActive(normalized))
+        if (_rateStage is { } stage) stage.Rate = normalized;
+
+        // Re-anchor rather than leave the drift corrector comparing against a
+        // clock whose meaning just changed underneath it: one output second now
+        // covers a different amount of the clip (see ObserveAudioDrift).
+        if (_shouldPlay && _audioOutput is not null)
         {
-            SilenceAudioForRate();
-        }
-        else if (wasSilenced && _shouldPlay)
-        {
-            // Back at 1x: pick the audio up from where the picture actually got
-            // to, not from where it was when the rate changed.
             var resumeAt = Position;
             SeekAudio(resumeAt);
             StartAudioAt(resumeAt, Interlocked.Read(ref _seekVersion));
         }
 
-        AppLog.Debug($"Editor playback rate: {normalized:0.###}x, audio={(ClipRenderFilters.IsSpeedActive(normalized) ? "silenced" : "live")}.");
-    }
-
-    private void SilenceAudioForRate()
-    {
-        StopAudioClockMonitoring();
-        if (_audioOutput is null) return;
-        try { _audioOutput.Pause(); }
-        catch (Exception error) { AppLog.Error("Editor audio pause for rate change failed (recovered)", error); }
+        AppLog.Debug($"Editor playback rate: {normalized:0.###}x.");
     }
 
     public void SetTrackVolume(int streamIndex, double percent)
@@ -890,6 +882,10 @@ public sealed class PlaybackSession : IDisposable
     private void SeekAudio(TimeSpan time)
     {
         _lastRequestedPosition = time < TimeSpan.Zero ? TimeSpan.Zero : time;
+        // The interpolator carries the last frame of the previous read across
+        // Read calls; after a seek that frame is from somewhere else entirely and
+        // would be smeared into the first frame at the new position.
+        _rateStage?.Reset();
         foreach (var source in _audioSources.Values)
         {
             source.Reader.CurrentTime = time < TimeSpan.Zero ? TimeSpan.Zero : time;
@@ -911,14 +907,6 @@ public sealed class PlaybackSession : IDisposable
     private void StartAudioAt(TimeSpan anchor, long generation)
     {
         if (_audioOutput is null) return;
-        // Every play/seek/resume path funnels through here, so gating the rate
-        // once at this point covers all of them - rather than each caller having
-        // to remember that a sped-up clip plays silent (see SetPlaybackRate).
-        if (ClipRenderFilters.IsSpeedActive(_playbackRate))
-        {
-            SilenceAudioForRate();
-            return;
-        }
         StopAudioClockMonitoring();
         _audioOutput.Play();
         _audioAnchorMediaTime = anchor;
@@ -938,7 +926,12 @@ public sealed class PlaybackSession : IDisposable
         try { devicePosition = _audioOutput.GetPosition(); }
         catch { return; }
 
-        var audible = EditorAvClockPolicy.ToMediaTime(_audioAnchorMediaTime, _audioAnchorDevicePosition, devicePosition, 48_000 * 2 * sizeof(float));
+        // Bytes per second of MEDIA, not of hardware output. The device always
+        // drains 48kHz, but at 2x each of those seconds covers two seconds of the
+        // clip, so the rate has to divide out here or the drift corrector starts
+        // "fixing" an offset that is really just the rate.
+        var mediaBytesPerSecond = (int)Math.Round(48_000 * 2 * sizeof(float) / _playbackRate);
+        var audible = EditorAvClockPolicy.ToMediaTime(_audioAnchorMediaTime, _audioAnchorDevicePosition, devicePosition, mediaBytesPerSecond);
         var elapsed = Stopwatch.GetElapsedTime(_audioAnchorTimestamp);
         if (!_audioClockPolicy.TryGetCorrection(generation, elapsed, audible, videoTime, out var correction)) return;
 
@@ -1126,6 +1119,7 @@ public sealed class PlaybackSession : IDisposable
             _audioOutput = null;
             _audioMixer = null;
             _masterVolume = null;
+            _rateStage = null;
 
             foreach (var source in _audioSources.Values)
             {
@@ -1194,6 +1188,124 @@ public sealed class PlaybackSession : IDisposable
     }
 
     private sealed record AudioTrackSource(ChunkedAudioReader Reader, VolumeSampleProvider Volume);
+
+    // Variable-ratio resampler for the editor's clip-speed preview: reads Rate
+    // input frames per output frame and interpolates between them, so the output
+    // device (which always runs at its own fixed rate) drains the clip faster or
+    // slower.
+    //
+    // Ratio is mutable BY DESIGN. NAudio wires a provider's parameters at
+    // construction, so the off-the-shelf resampler would have to be replaced to
+    // change speed - and replacing anything mid-chain means rebuilding the graph
+    // and the output device under a playing stream, which is exactly the thing
+    // that made clip speed unusable. At 1x it hands the source through untouched,
+    // so it costs nothing when nobody is using it.
+    private sealed class PlaybackRateSampleProvider : ISampleProvider
+    {
+        private readonly ISampleProvider _source;
+        private readonly int _channels;
+        private float[] _input = Array.Empty<float>();
+        // Frames read but not yet consumed, carried to the next Read. Without
+        // this the leftover between the last output sample and the end of the
+        // block would be dropped every buffer, and the audio would run steadily
+        // ahead of the picture instead of merely sounding wrong.
+        private float[] _tail = Array.Empty<float>();
+        private int _tailFrames;
+        // Where the next output sample falls within the tail, as a fraction of a
+        // frame. Carried for the same reason: restarting at zero each block puts
+        // a discontinuity at every buffer boundary, which is audible as a buzz at
+        // any ratio that is not a whole number of frames per sample.
+        private double _phase;
+
+        public PlaybackRateSampleProvider(ISampleProvider source)
+        {
+            _source = source;
+            _channels = Math.Max(1, source.WaveFormat.Channels);
+            WaveFormat = source.WaveFormat;
+        }
+
+        public WaveFormat WaveFormat { get; }
+
+        public double Rate { get; set; } = 1.0;
+
+        public void Reset()
+        {
+            _tailFrames = 0;
+            _phase = 0;
+        }
+
+        public int Read(float[] buffer, int offset, int count)
+        {
+            var rate = Rate;
+            if (!ClipRenderFilters.IsSpeedActive(rate))
+            {
+                // Straight through at 1x, and the carried state is dropped so
+                // returning to a non-1x rate starts clean rather than splicing in
+                // a frame from before.
+                if (_tailFrames != 0 || _phase != 0) Reset();
+                return _source.Read(buffer, offset, count);
+            }
+
+            var outputFrames = count / _channels;
+            if (outputFrames <= 0) return 0;
+
+            // +2, not +1: the last output sample interpolates towards the frame
+            // after the one it sits on, and the frame it sits on has to survive
+            // into the next block as the tail.
+            var neededFrames = (int)Math.Floor(_phase + rate * (outputFrames - 1)) + 2;
+            EnsureInput(neededFrames);
+
+            if (_tailFrames > 0) Array.Copy(_tail, 0, _input, 0, _tailFrames * _channels);
+            var wantedFrames = neededFrames - _tailFrames;
+            var read = wantedFrames > 0
+                ? _source.Read(_input, _tailFrames * _channels, wantedFrames * _channels)
+                : 0;
+            var availableFrames = _tailFrames + read / _channels;
+            if (availableFrames < 2) return 0;
+
+            var written = 0;
+            var position = _phase;
+            for (var frame = 0; frame < outputFrames; frame++)
+            {
+                var index = (int)position;
+                if (index + 1 >= availableFrames) break;
+
+                var fraction = (float)(position - index);
+                var left = index * _channels;
+                var right = left + _channels;
+                for (var channel = 0; channel < _channels; channel++)
+                {
+                    var a = _input[left + channel];
+                    var b = _input[right + channel];
+                    buffer[offset + written++] = a + (b - a) * fraction;
+                }
+
+                position += rate;
+            }
+
+            // Keep everything from the frame the next sample sits on onwards.
+            var keepFrom = Math.Min((int)position, availableFrames - 1);
+            if (keepFrom < 0) keepFrom = 0;
+            _tailFrames = availableFrames - keepFrom;
+            EnsureTail(_tailFrames);
+            Array.Copy(_input, keepFrom * _channels, _tail, 0, _tailFrames * _channels);
+            _phase = position - keepFrom;
+
+            return written;
+        }
+
+        private void EnsureInput(int frames)
+        {
+            var samples = frames * _channels;
+            if (_input.Length < samples) _input = new float[samples];
+        }
+
+        private void EnsureTail(int frames)
+        {
+            var samples = frames * _channels;
+            if (_tail.Length < samples) _tail = new float[samples];
+        }
+    }
 
     private sealed class SoftLimiterSampleProvider : ISampleProvider
     {
