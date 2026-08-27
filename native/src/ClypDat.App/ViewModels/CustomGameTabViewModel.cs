@@ -14,6 +14,7 @@ public sealed class CustomGameTabViewModel : ViewModelBase
     private readonly AppSettings _settings;
     private readonly Action _save;
     private bool _isSelected;
+    private bool _qualityWarningAcknowledged;
 
     public CustomGameTabViewModel(string detectionKey, CustomGameProfile profile, AppSettings settings, Action save)
     {
@@ -142,6 +143,7 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasAudio));
         OnPropertyChanged(nameof(HasAnyGroup));
         OnPropertyChanged(nameof(CanAddGroup));
+        NotifyQualityWarning();
         RaiseAllValues();
         _save();
     }
@@ -229,6 +231,7 @@ public sealed class CustomGameTabViewModel : ViewModelBase
             if (!int.TryParse(value.TrimEnd('M', 'm'), out var mbps)) return;
             if (Profile.ReplayBitrateMbps == mbps) return;
             Profile.ReplayBitrateMbps = mbps;
+            _qualityWarningAcknowledged = false;
             OnPropertyChanged();
             OnPropertyChanged(nameof(ReplayBitrateMbps));
             RaiseQualityPreset();
@@ -252,10 +255,12 @@ public sealed class CustomGameTabViewModel : ViewModelBase
                 Profile.ReplayMaxHeight = value.Height;
                 Profile.ReplayFrameRate = value.FrameRate;
                 Profile.ReplayBitrateMbps = value.Bitrate;
+                _qualityWarningAcknowledged = false;
                 OnPropertyChanged(nameof(ReplayMaxHeight));
                 OnPropertyChanged(nameof(ReplayFrameRate));
                 OnPropertyChanged(nameof(ReplayBitrateMbps));
                 OnPropertyChanged(nameof(SelectedBitrateOption));
+                NotifyQualityWarning();
                 _save();
             }
 
@@ -265,6 +270,56 @@ public sealed class CustomGameTabViewModel : ViewModelBase
     }
 
     public bool IsCustomQuality => SelectedQualityPreset?.IsCustom ?? true;
+
+    public bool QualityAboveRecommended =>
+        HasQuality &&
+        (Profile.ReplayMaxHeight > 1080 || Profile.ReplayFrameRate > 60 || Profile.ReplayBitrateMbps > 20);
+
+    public bool QualityWarningVisible =>
+        QualityAboveRecommended && !Profile.HideQualityWarning && !_qualityWarningAcknowledged;
+
+    public string QualityWarningSummary
+    {
+        get
+        {
+            var exceeded = new List<string>();
+            if (Profile.ReplayMaxHeight > 1080) exceeded.Add($"{Profile.ReplayMaxHeight}p");
+            if (Profile.ReplayFrameRate > 60) exceeded.Add($"{Profile.ReplayFrameRate} FPS");
+            if (Profile.ReplayBitrateMbps > 20) exceeded.Add($"{Profile.ReplayBitrateMbps} Mbps");
+            return $"{DisplayName} exceeds ClypDat's recommended maximums: {string.Join(", ", exceeded)}.";
+        }
+    }
+
+    public void FixQualityWarning()
+    {
+        if (!QualityAboveRecommended) return;
+
+        Profile.ReplayMaxHeight = Math.Min(Profile.ReplayMaxHeight, 1080);
+        Profile.ReplayFrameRate = Math.Min(Profile.ReplayFrameRate, 60);
+        Profile.ReplayBitrateMbps = Math.Min(Profile.ReplayBitrateMbps, 20);
+        _qualityWarningAcknowledged = false;
+        OnPropertyChanged(nameof(ReplayMaxHeight));
+        OnPropertyChanged(nameof(ReplayFrameRate));
+        OnPropertyChanged(nameof(ReplayBitrateMbps));
+        OnPropertyChanged(nameof(SelectedBitrateOption));
+        RaiseQualityPreset();
+        _save();
+    }
+
+    public void AcknowledgeQualityWarning()
+    {
+        if (!QualityWarningVisible) return;
+        _qualityWarningAcknowledged = true;
+        NotifyQualityWarning();
+    }
+
+    public void HideQualityWarning()
+    {
+        if (Profile.HideQualityWarning) return;
+        Profile.HideQualityWarning = true;
+        NotifyQualityWarning();
+        _save();
+    }
 
     private MainWindowViewModel.ReplayQualityPreset? MatchPreset()
     {
@@ -280,6 +335,14 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         _selectedQualityPreset = MatchPreset();
         OnPropertyChanged(nameof(SelectedQualityPreset));
         OnPropertyChanged(nameof(IsCustomQuality));
+        NotifyQualityWarning();
+    }
+
+    private void NotifyQualityWarning()
+    {
+        OnPropertyChanged(nameof(QualityAboveRecommended));
+        OnPropertyChanged(nameof(QualityWarningVisible));
+        OnPropertyChanged(nameof(QualityWarningSummary));
     }
 
     public string ReplayFrameRateMode
@@ -379,6 +442,7 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         OnPropertyChanged(property);
         if (property is nameof(ReplayMaxHeight) or nameof(ReplayFrameRate) or nameof(ReplayBitrateMbps))
         {
+            _qualityWarningAcknowledged = false;
             OnPropertyChanged(nameof(SelectedBitrateOption));
             RaiseQualityPreset();
         }

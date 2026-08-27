@@ -311,6 +311,9 @@ public sealed class CustomGameProfile
     public int ReplayFrameRate { get; set; } = 60;
     public int ReplayMaxHeight { get; set; } = 1080;
     public string ReplayFrameRateMode { get; set; } = "CFR";
+    // Per-game opt-out: accepting intentional 4K capture for one game must
+    // not suppress the warning for another game's separate override.
+    public bool HideQualityWarning { get; set; }
 
     // Replay length and save hotkey
     public int ReplayDurationSeconds { get; set; } = 60;

@@ -5632,6 +5632,21 @@ public sealed partial class MainWindow : Window
         if (sender is Button { Tag: string group }) SetCustomGameGroup(group, false);
     }
 
+    internal void FixCustomGameQualityWarningButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel?.SelectedCustomGameTab?.FixQualityWarning();
+    }
+
+    internal void AcknowledgeCustomGameQualityWarningButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel?.SelectedCustomGameTab?.AcknowledgeQualityWarning();
+    }
+
+    internal void HideCustomGameQualityWarningButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel?.SelectedCustomGameTab?.HideQualityWarning();
+    }
+
     private void SetCustomGameGroup(string group, bool enabled)
     {
         var tab = ViewModel?.SelectedCustomGameTab;
