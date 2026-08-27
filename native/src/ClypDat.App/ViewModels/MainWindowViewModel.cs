@@ -980,6 +980,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsEffectiveDesktopCapture));
             OnPropertyChanged(nameof(EffectiveReplayCaptureSource));
             OnPropertyChanged(nameof(ReplayBufferStateSummary));
+            UpdateDiscordPresence();
         }
     }
 
@@ -1085,6 +1086,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // the same cold disk - the "editor takes forever to appear" half
             // of this. Editing beats pre-generating strips for clips nobody
             // is looking at; the sweep resumes when the editor closes.
+            UpdateDiscordPresence();
             // The waveform sweep is chained ahead of the filmstrip sweep (see
             // StartBackgroundWaveformHydration), so starting it starts both.
             if (value)
@@ -1360,6 +1362,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (Settings.ReplayBufferEnabled == value) return;
             Settings.ReplayBufferEnabled = value;
+            UpdateDiscordPresence();
             OnPropertyChanged();
             OnPropertyChanged(nameof(ReplayBufferStateSummary));
             SaveSettings();
@@ -5844,6 +5847,101 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public bool HasSelectedCustomGame => SelectedCustomGameTab is not null;
+
+    // ---- Discord Rich Presence ------------------------------------------
+    // What the status is describing right now. Kept so the elapsed timer only
+    // restarts when the activity actually changes - re-sending the same kind
+    // with a fresh start time would make Discord show a clock that resets
+    // every time anything in the app moved.
+    private string _discordActivityKind = string.Empty;
+    private DateTime _discordActivityStartedUtc = DateTime.UtcNow;
+
+    public void ApplyDiscordSettings()
+    {
+        DiscordRichPresenceService.Configure(Settings.DiscordRichPresenceEnabled, ResolvedDiscordApplicationId);
+        UpdateDiscordPresence();
+    }
+
+    // Settings override first so a fork can point at its own application, then
+    // the built-in id.
+    private string ResolvedDiscordApplicationId =>
+        string.IsNullOrWhiteSpace(Settings.DiscordApplicationId)
+            ? DiscordRichPresenceService.DefaultApplicationId
+            : Settings.DiscordApplicationId.Trim();
+
+    public void UpdateDiscordPresence()
+    {
+        if (!Settings.DiscordRichPresenceEnabled)
+        {
+            DiscordRichPresenceService.SetPresence(DiscordPresence.None);
+            return;
+        }
+
+        var clips = AllClips.Count;
+        var clipLine = clips == 1 ? "1 clip in library" : $"{clips:N0} clips in library";
+
+        string kind;
+        string details;
+        var state = clipLine;
+
+        if (IsEditorVisible && !string.IsNullOrWhiteSpace(SelectedVideoPath))
+        {
+            kind = "editing";
+            details = "Editing a clip";
+            // The clip's own game is more useful than the library total while
+            // the editor is open.
+            var game = AllClips.FirstOrDefault(clip => string.Equals(clip.Path, SelectedVideoPath, StringComparison.OrdinalIgnoreCase))?.GameNameLabel;
+            if (!string.IsNullOrWhiteSpace(game)) state = game;
+        }
+        else if (ActiveGameDetection.IsDetected && !string.IsNullOrWhiteSpace(ActiveGameDetection.DisplayName))
+        {
+            var armed = Settings.ReplayBufferEnabled && IsRecordingEnabledForActiveGame;
+            kind = armed ? "recording" : "playing";
+            details = armed
+                ? $"Recording {ActiveGameDetection.DisplayName}"
+                : $"Playing {ActiveGameDetection.DisplayName}";
+        }
+        else
+        {
+            kind = "library";
+            details = "Browsing the library";
+        }
+
+        if (!string.Equals(kind, _discordActivityKind, StringComparison.Ordinal))
+        {
+            _discordActivityKind = kind;
+            _discordActivityStartedUtc = DateTime.UtcNow;
+        }
+
+        DiscordRichPresenceService.SetPresence(new DiscordPresence(details, state, _discordActivityStartedUtc));
+    }
+
+    public bool DiscordRichPresenceEnabled
+    {
+        get => Settings.DiscordRichPresenceEnabled;
+        set
+        {
+            if (Settings.DiscordRichPresenceEnabled == value) return;
+            Settings.DiscordRichPresenceEnabled = value;
+            OnPropertyChanged();
+            SaveSettings();
+            ApplyDiscordSettings();
+        }
+    }
+
+    public string DiscordApplicationId
+    {
+        get => Settings.DiscordApplicationId;
+        set
+        {
+            var id = (value ?? string.Empty).Trim();
+            if (string.Equals(Settings.DiscordApplicationId, id, StringComparison.Ordinal)) return;
+            Settings.DiscordApplicationId = id;
+            OnPropertyChanged();
+            SaveSettings();
+            ApplyDiscordSettings();
+        }
+    }
 
     /// <summary>
     /// False when the game in the foreground has its Recording Mode set to

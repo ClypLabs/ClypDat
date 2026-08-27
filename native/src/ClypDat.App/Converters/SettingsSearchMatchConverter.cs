@@ -82,7 +82,8 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         ["About"] = new[]
         {
             "Updates", "Check for updates", "Source and Licenses", "View on GitHub", "Diagnostics",
-            "Log folder", "Get Started", "Setup walkthrough", "License"
+            "Log folder", "Get Started", "Setup walkthrough", "License",
+            "Discord", "Rich Presence", "Discord Rich Presence", "Application ID"
         },
     };
 

@@ -2740,6 +2740,36 @@
               </StackPanel>
               <Border Height="1" Background="#1B242D" />
 
+              <!-- Discord Rich Presence lives here for now rather than under
+                   General - it is one toggle plus a field most people will
+                   never touch, and About is where the "what is this build"
+                   things already sit. -->
+              <Border Classes="settingsCard">
+                <StackPanel Spacing="14">
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                      <TextBlock Text="Discord Rich Presence" Foreground="#EDF4FB" FontWeight="Bold" FontSize="15"
+                                 opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                      <TextBlock Text="Shows what you are recording, editing or browsing on your Discord profile. Anyone who can see your profile can see the game name."
+                                 Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" VerticalAlignment="Center"
+                                  IsChecked="{Binding DiscordRichPresenceEnabled}"
+                                  OnContent="{x:Null}" OffContent="{x:Null}" />
+                  </Grid>
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsEnabled="{Binding DiscordRichPresenceEnabled}">
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                      <TextBlock Text="Application ID" Foreground="#D8E4F2" FontWeight="SemiBold" />
+                      <TextBlock Text="Leave empty to use ClypDat's own Discord application. Only change this if you are running your own."
+                                 Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <TextBox Grid.Column="1" Classes="settingsInput" MinWidth="260" VerticalAlignment="Center"
+                             PlaceholderText="Use the built-in application"
+                             Text="{Binding DiscordApplicationId}" />
+                  </Grid>
+                </StackPanel>
+              </Border>
+
               <Border Background="#141D24" BorderBrush="#232F3A" BorderThickness="1" CornerRadius="10" Padding="20">
                 <StackPanel Orientation="Horizontal" Spacing="16">
                   <Border Width="52" Height="52" CornerRadius="12" Background="#1D2A36">

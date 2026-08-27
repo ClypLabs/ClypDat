@@ -97,6 +97,18 @@ public sealed partial class App : Application
         }
 
         base.OnFrameworkInitializationCompleted();
+        // Started after the window exists so the first presence describes real
+        // state rather than an empty library. Dormant unless enabled AND an
+        // application id resolves, so this costs nothing when it is off.
+        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime discordLifetime)
+        {
+            discordLifetime.Exit += (_, _) => DiscordRichPresenceService.Shutdown();
+            if (discordLifetime.MainWindow?.DataContext is ViewModels.MainWindowViewModel viewModel)
+            {
+                viewModel.ApplyDiscordSettings();
+            }
+        }
+
         if (DevChannelMode.Enabled)
         {
             Dispatcher.UIThread.Post(DevHealthSignal.SignalIfRequested, DispatcherPriority.ApplicationIdle);
