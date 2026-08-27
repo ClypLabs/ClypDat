@@ -1121,6 +1121,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         private set
         {
             if (!SetProperty(ref _isSettingsVisible, value)) return;
+            UpdateDiscordPresence();
             OnPropertyChanged(nameof(IsLibraryVisible));
             OnPropertyChanged(nameof(ShowLibraryActions));
             OnPropertyChanged(nameof(ShowLibraryStatus));
@@ -5890,7 +5891,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         string details;
         var state = clipLine;
 
-        if (IsEditorVisible && !string.IsNullOrWhiteSpace(SelectedVideoPath))
+        if (IsSettingsVisible)
+        {
+            kind = "settings";
+            details = "Adjusting settings";
+        }
+        else if (IsEditorVisible && !string.IsNullOrWhiteSpace(SelectedVideoPath))
         {
             kind = "editing";
             details = "Editing a clip";
@@ -5906,6 +5912,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             details = armed
                 ? $"Recording {ActiveGameDetection.DisplayName}"
                 : $"Playing {ActiveGameDetection.DisplayName}";
+        }
+        else if (IsGameFilterActive || IsClipTypeFilterActive)
+        {
+            // A filtered library is a more useful thing to say than "browsing"
+            // - it names what the user is actually looking through. The count
+            // is the filtered one, not the library total, so it matches what is
+            // on screen.
+            var filterName = ActiveGameFilterKey ?? ActiveClipTypeFilterKey ?? "filtered";
+            var shown = AllClips.Count(clip => clip.IsVisibleInLibrary);
+            kind = $"filter:{filterName}";
+            details = $"Browsing {filterName}";
+            state = shown == 1 ? "1 clip" : $"{shown:N0} clips";
         }
         else
         {
