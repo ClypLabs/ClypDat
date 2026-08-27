@@ -1006,6 +1006,29 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 existing.ProcessName = detection.ExeName;
                 changed = true;
             }
+            // Rows migrated from settings written before display names were
+            // stored carry Origin "Backend" and an EMPTY name (see
+            // AppSettingsStore). Every list in the app filters nameless rows
+            // out, so those games were invisible in Game Detection and in the
+            // Custom Game Settings picker no matter how often they were played
+            // - which read as "only Steam games are detected", because Steam
+            // titles resolve to a steam-{appid} key and get a fresh, named row
+            // instead of matching one of these. Name it the moment a real
+            // detection can.
+            if (string.IsNullOrWhiteSpace(existing.DisplayName) && !string.IsNullOrWhiteSpace(detection.DisplayName))
+            {
+                existing.DisplayName = detection.DisplayName;
+                if (string.Equals(existing.Origin, "Backend", StringComparison.OrdinalIgnoreCase))
+                {
+                    // No longer just a stored backend choice: it is a game the
+                    // user plays, and Game Detection should treat it as one.
+                    existing.Origin = "UserCustom";
+                }
+
+                changed = true;
+                AppLog.Info($"Game detection: named legacy row '{existing.ExecutableName}' as '{detection.DisplayName}'.");
+            }
+
             // A name saved before the SteamGameLibrary encoding fix landed can
             // still carry a U+FFFD replacement character baked in permanently
             // (the original bytes are already gone) - if a fresh detection
@@ -1019,6 +1042,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 SaveSettings();
                 RebuildGameCaptureRows();
+                RebuildCustomGameCandidates();
             }
             return;
         }

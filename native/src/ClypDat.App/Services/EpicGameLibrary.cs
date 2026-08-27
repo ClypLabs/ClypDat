@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace ClypDat.App.Services;
 
-public sealed record EpicGameInstall(string DisplayName, string InstallPath);
+public sealed record EpicGameInstall(string DisplayName, string InstallPath, bool IsPlayable = true);
 
 // Same idea as SteamGameLibrary, for Epic: its .item manifests already name
 // both the display name and the install folder, so a running exe just needs
@@ -54,7 +54,14 @@ public sealed class EpicGameLibrary
                 if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(location)) continue;
                 if (!Directory.Exists(location)) continue;
 
-                games.Add(new EpicGameInstall(name, location));
+                // Fortnite ships alongside "LEGO Fortnite Content" and
+                // "Fortnite Save the World Content", all three pointing at the
+                // SAME install folder. Only the real game names an executable,
+                // so that is what separates it from its content packs.
+                var launchExecutable = root.TryGetProperty("LaunchExecutable", out var launchElement)
+                    ? launchElement.GetString() ?? string.Empty
+                    : string.Empty;
+                games.Add(new EpicGameInstall(name, location, launchExecutable.Length > 0));
             }
             catch
             {
@@ -62,7 +69,13 @@ public sealed class EpicGameLibrary
             }
         }
 
-        return games.OrderByDescending(game => game.InstallPath.Length).ToArray();
+        // Longest path first so a game installed inside another game's folder
+        // still wins, then playable entries ahead of content-only ones so a
+        // path shared by both resolves to the game rather than to a DLC entry.
+        return games
+            .OrderByDescending(game => game.InstallPath.Length)
+            .ThenByDescending(game => game.IsPlayable)
+            .ToArray();
     }
 
     private static bool IsUnderPath(string candidate, string root)
