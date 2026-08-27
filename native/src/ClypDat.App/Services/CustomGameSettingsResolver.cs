@@ -173,8 +173,15 @@ internal static class CustomGameSettingsResolver
             AdditionalAudioProcesses: audio?.AdditionalAudioProcesses ?? settings.AdditionalAudioProcesses,
             GameAudioVolumePercent: audio?.GameAudioVolumePercent ?? settings.GameAudioVolumePercent,
             MicrophoneVolumePercent: audio?.MicrophoneVolumePercent ?? settings.MicrophoneVolumePercent,
-            MicrophoneNoiseSuppressionEnabled: audio?.MicrophoneNoiseSuppressionEnabled ?? settings.MicrophoneNoiseSuppressionEnabled,
-            MicrophoneNoiseGateThresholdDb: audio?.MicrophoneNoiseGateThresholdDb ?? settings.MicrophoneNoiseGateThresholdDb,
+            // Noise suppression is deliberately NOT overridable per game right
+            // now - its two controls were pulled from the Audio card. The
+            // profile still carries and seeds the fields so restoring them is
+            // just the card markup, but nothing may READ them while there is
+            // no way to see or change what is stored: a value left behind from
+            // when the controls existed would otherwise keep applying to a
+            // game with nothing in the UI to explain it.
+            MicrophoneNoiseSuppressionEnabled: settings.MicrophoneNoiseSuppressionEnabled,
+            MicrophoneNoiseGateThresholdDb: settings.MicrophoneNoiseGateThresholdDb,
             FullSessionRecordingEnabled: recordingEnabled && fullSession,
             FullSessionVideoCodec: settings.FullSessionVideoCodec,
             FullSessionQuotaGb: settings.FullSessionQuotaGb,

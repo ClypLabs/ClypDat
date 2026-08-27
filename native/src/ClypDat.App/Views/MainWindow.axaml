@@ -2630,18 +2630,6 @@
                       </StackPanel>
                     </Border>
 
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-                      <StackPanel Spacing="2" VerticalAlignment="Center">
-                        <TextBlock Text="Noise suppression" Foreground="#EDF4FB" FontWeight="SemiBold" />
-                        <TextBlock Text="RNNoise on the microphone while this game is recording." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
-                      </StackPanel>
-                      <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding MicrophoneNoiseSuppressionEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" />
-                    </Grid>
-                    <Grid ColumnDefinitions="*,Auto,70" ColumnSpacing="12" IsEnabled="{Binding MicrophoneNoiseSuppressionEnabled}">
-                      <TextBlock Text="Noise gate" Foreground="#D8E4F2" VerticalAlignment="Center" />
-                      <Slider Grid.Column="1" Width="220" Classes="volumeSlider" Minimum="-100" Maximum="-25" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding MicrophoneNoiseGateThresholdDb}" />
-                      <TextBlock Grid.Column="2" Text="{Binding MicrophoneNoiseGateThresholdDb, StringFormat={}{0:0} dB}" Foreground="#B8C7D8" FontSize="11" TextAlignment="Right" VerticalAlignment="Center" />
-                    </Grid>
                   </StackPanel>
                 </Border>
 
