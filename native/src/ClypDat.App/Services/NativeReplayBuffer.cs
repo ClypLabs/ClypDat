@@ -1320,6 +1320,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var dxgiTransportedCount = 0L;
                     var dxgiSlotOverwrites = 0L;
                     var dxgiBusySlotSkips = 0L;
+                    var dxgiAllBusyDrops = 0L;
+                    var dxgiAcquireDuration = TimeSpan.Zero;
                     var dxgiPointerTransportedCount = 0L;
                     var dxgiProducerDuration = TimeSpan.Zero;
                     var dxgiLeaseDuration = TimeSpan.Zero;
@@ -1355,6 +1357,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         dxgiPointerTransportedCount = current.TransportedPointerFrames >= previousDxgiTelemetry.TransportedPointerFrames
                             ? current.TransportedPointerFrames - previousDxgiTelemetry.TransportedPointerFrames
                             : current.TransportedPointerFrames;
+                        dxgiAllBusyDrops = current.AllBusyDrops >= previousDxgiTelemetry.AllBusyDrops
+                            ? current.AllBusyDrops - previousDxgiTelemetry.AllBusyDrops
+                            : current.AllBusyDrops;
+                        dxgiAcquireDuration = current.AcquireTotal >= previousDxgiTelemetry.AcquireTotal
+                            ? current.AcquireTotal - previousDxgiTelemetry.AcquireTotal
+                            : current.AcquireTotal;
                         var producerTicks = current.ProducerCopyTotal >= previousDxgiTelemetry.ProducerCopyTotal
                             ? current.ProducerCopyTotal - previousDxgiTelemetry.ProducerCopyTotal
                             : current.ProducerCopyTotal;
@@ -1372,7 +1380,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         : $", wgcCallbackArrivals={wgcCallbackCount}, wgcInputFps={wgcInputRate:0.0}, wgcUniqueFps={wgcUniqueRate:0.0}, wgcPublished={wgcTelemetry.Value.PublishedFrames}, wgcTaken={wgcTelemetry.Value.TakenFrames}, wgcOverwritten={wgcTelemetry.Value.OverwrittenFrames}, wgcCallbackMs={wgcTelemetry.Value.CallbackDurationTotal.TotalMilliseconds:0.0}, wgcGpuLockWaitMs={wgcTelemetry.Value.GpuLockWaitTotal.TotalMilliseconds:0.0}, wgcTimestampGaps={wgcTelemetry.Value.SourceTimestampGapCount}, wgcMaxTimestampGapMs={wgcTelemetry.Value.SourceTimestampGapMaximum.TotalMilliseconds:0.0}, wgcResizeEvents={wgcTelemetry.Value.ResizeEvents}, wgcMinUpdateIntervalAvailable={wgcTelemetry.Value.MinimumUpdateInterval.InterfaceAvailable}, wgcMinUpdateIntervalRequestedMs={wgcTelemetry.Value.MinimumUpdateInterval.Requested.TotalMilliseconds:0.###}, wgcMinUpdateIntervalAppliedMs={wgcTelemetry.Value.MinimumUpdateInterval.Applied?.TotalMilliseconds:0.###}";
                     var dxgiTelemetryText = dxgiTelemetry is null
                         ? string.Empty
-                        : $", dxgiSourcePresents={dxgiTelemetry.Value.SourceFrames}, dxgiAcquired={dxgiAcquiredCount}, dxgiTransported={dxgiTransportedCount}, dxgiPublished={dxgiTelemetry.Value.PublishedFrames}, dxgiTaken={dxgiTelemetry.Value.TakenFrames}, dxgiOverwritten={dxgiSlotOverwrites}, dxgiBusySlotSkips={dxgiBusySlotSkips}, dxgiProducerMs={dxgiProducerDuration.TotalMilliseconds:0.0}, dxgiLeaseMs={dxgiLeaseDuration.TotalMilliseconds:0.00}, dxgiAccumulatedPresents={dxgiTelemetry.Value.AccumulatedPresents}, dxgiZeroPresentSkips={dxgiTelemetry.Value.ZeroPresentFrames}, dxgiPointerUpdates={dxgiTelemetry.Value.PointerUpdates}, dxgiPointerTransported={dxgiPointerTransportedCount}";
+                        : $", dxgiSourcePresents={dxgiTelemetry.Value.SourceFrames}, dxgiAcquired={dxgiAcquiredCount}, dxgiTransported={dxgiTransportedCount}, dxgiPublished={dxgiTelemetry.Value.PublishedFrames}, dxgiTaken={dxgiTelemetry.Value.TakenFrames}, dxgiOverwritten={dxgiSlotOverwrites}, dxgiBusySlotSkips={dxgiBusySlotSkips}, dxgiAllBusyDrops={dxgiAllBusyDrops}, dxgiReleaseLagFrames={dxgiTelemetry.Value.ReleaseLagFrames}, dxgiSlots={dxgiTelemetry.Value.SlotCount}, dxgiAcquireMs={(dxgiAcquiredCount == 0 ? 0 : dxgiAcquireDuration.TotalMilliseconds / dxgiAcquiredCount):0.00}, dxgiProducerMs={dxgiProducerDuration.TotalMilliseconds:0.0}, dxgiLeaseMs={dxgiLeaseDuration.TotalMilliseconds:0.00}, dxgiAccumulatedPresents={dxgiTelemetry.Value.AccumulatedPresents}, dxgiZeroPresentSkips={dxgiTelemetry.Value.ZeroPresentFrames}, dxgiPointerUpdates={dxgiTelemetry.Value.PointerUpdates}, dxgiPointerTransported={dxgiPointerTransportedCount}";
                     var outputFrameRate = packetsOutSinceLog / diagElapsed;
                     // A live production window must prove both throughput and
                     // absence of queue pressure. A static/startup burst can

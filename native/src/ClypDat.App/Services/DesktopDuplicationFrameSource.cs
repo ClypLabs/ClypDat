@@ -12,7 +12,21 @@ namespace ClypDat.App.Services;
 // Shared fences express GPU ownership; CPU code never Flushes or waits.
 internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposable
 {
-    private const int SurfaceCount = 3;
+    // Ring depth is latency tolerance, not throughput: a slot stays
+    // unavailable until the PROCESSING device's release fence clears it, and
+    // that fence sits behind crop, GPU downscale and the encoder readback. With
+    // a game in the foreground that queue runs 100ms+ deep, so three slots left
+    // the producer finding every one busy and throwing the frame away - measured
+    // on a 4K90 recording, 84 of every 129 acquired frames died at this gate,
+    // which is what leaves ~20 real frames a second inside a 90fps file and pads
+    // the rest with duplicates. Each extra slot buys another frame interval
+    // before that happens.
+    private const int MinimumSurfaceCount = 3;
+    private const int MaximumSurfaceCount = 8;
+    // Sized from the source frame, so a 4K desktop (33MB a surface) gets 5 and a
+    // 1080p one gets the full 8 rather than the same VRAM bill at every
+    // resolution.
+    private const long SurfaceBudgetBytes = 192L * 1024 * 1024;
     private readonly ID3D11Device _captureDevice, _processingDevice;
     private readonly ID3D11Device5 _captureDevice5, _processingDevice5;
     private readonly ID3D11DeviceContext4 _captureContext, _processingContext;
@@ -21,7 +35,11 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
     private readonly object _stateLock = new();
     private readonly CancellationTokenSource _stopping = new();
     private readonly LatestFrameSignal _signal = new();
-    private readonly SurfaceSlot[] _slots = new SurfaceSlot[SurfaceCount];
+    // Allocated at the maximum and used up to _activeSlots: a SurfaceSlot holds
+    // no GPU memory until EnsureSurface gives it a texture, so the unused tail
+    // costs nothing.
+    private readonly SurfaceSlot[] _slots = new SurfaceSlot[MaximumSurfaceCount];
+    private int _activeSlots = MinimumSurfaceCount;
     private readonly Thread _producer;
     // Sampling belongs on the acquisition device.  Keeping it downstream
     // meant every desktop-sized BGRA frame crossed devices before we decided
@@ -35,6 +53,12 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
     private string? _failure;
     private bool _disposed;
     private long _sourcePresents, _acquiredFrames, _transportedFrames, _busySlotSkips, _producerCopyTicks, _leaseTicks, _leaseCount, _accumulatedPresents, _zeroPresentFrames, _pointerUpdates, _transportedPointerFrames;
+    // _busySlotSkips counts slot EXAMINATIONS (up to one per slot per frame), so
+    // it cannot be read as a frame count. _allBusyDrops is the frame that was
+    // actually thrown away, and _releaseLagFrames is how far the processing
+    // device's fence was behind when that happened - a lag larger than the ring
+    // says the queue, not the ring depth, is the remaining wall.
+    private long _allBusyDrops, _releaseLagFrames, _acquireTicks;
 
     private DesktopDuplicationFrameSource(ID3D11Device captureDevice, ID3D11Device processingDevice, IDXGIOutputDuplication duplication, int frameRate, bool captureCursor)
     {
@@ -54,7 +78,7 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
             _releasedFenceOnCapture = _captureDevice5.OpenSharedFence<ID3D11Fence>(releasedHandle);
         }
         finally { CloseHandle(readyHandle); CloseHandle(releasedHandle); }
-        for (var i = 0; i < SurfaceCount; i++) _slots[i] = new SurfaceSlot();
+        for (var i = 0; i < _slots.Length; i++) _slots[i] = new SurfaceSlot();
         _transportSamplingBudget = new PresentSamplingBudget(frameRate);
         _producer = new Thread(Produce) { IsBackground = true, Priority = ThreadPriority.AboveNormal, Name = "ClypDat-GameCapture-Producer" };
         _producer.Start();
@@ -94,7 +118,7 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
     internal DesktopDuplicationTelemetry GetTelemetrySnapshot()
     {
         var signal = _signal.Snapshot;
-        return new(_sourcePresents, _acquiredFrames, _transportedFrames, signal.Taken, signal.Overwritten, _busySlotSkips, _accumulatedPresents, _zeroPresentFrames, _pointerUpdates, _transportedPointerFrames, TimeSpan.FromTicks(_producerCopyTicks), _leaseCount == 0 ? TimeSpan.Zero : TimeSpan.FromTicks(_leaseTicks / _leaseCount), _failure);
+        return new(_sourcePresents, _acquiredFrames, _transportedFrames, signal.Taken, signal.Overwritten, _busySlotSkips, _accumulatedPresents, _zeroPresentFrames, _pointerUpdates, _transportedPointerFrames, TimeSpan.FromTicks(_producerCopyTicks), _leaseCount == 0 ? TimeSpan.Zero : TimeSpan.FromTicks(_leaseTicks / _leaseCount), _failure, _allBusyDrops, _releaseLagFrames, Volatile.Read(ref _activeSlots), TimeSpan.FromTicks(_acquireTicks));
     }
 
     private void Produce()
@@ -108,9 +132,15 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
             var pendingPointerTimestamp = 0L;
             while (!_stopping.IsCancellationRequested)
             {
+                var acquireStarted = Stopwatch.GetTimestamp();
                 var result = _duplication.AcquireNextFrame(100, out var info, out var resource);
                 if (result.Code == Vortice.DXGI.ResultCode.WaitTimeout.Code) continue;
                 if (!result.Success || resource is null) { resource?.Dispose(); Fail($"AcquireNextFrame failed with 0x{result.Code:X8}."); return; }
+                // Timeouts are excluded above on purpose: this measures what a
+                // productive acquire costs, so the gap between the desktop's
+                // present rate and this loop's rate is attributable rather than
+                // inferred.
+                Interlocked.Add(ref _acquireTicks, Stopwatch.GetElapsedTime(acquireStarted).Ticks);
                 Interlocked.Increment(ref _acquiredFrames);
                 try
                 {
@@ -139,15 +169,21 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
                     lock (_stateLock)
                     {
                         if (_disposed) return;
-                        for (var i = 0; i < SurfaceCount; i++)
+                        EnsureSlotCount(source.Description);
+                        for (var i = 0; i < _activeSlots; i++)
                         {
-                            var candidate = _slots[_nextSlot]; _nextSlot = (_nextSlot + 1) % SurfaceCount;
+                            var candidate = _slots[_nextSlot]; _nextSlot = (_nextSlot + 1) % _activeSlots;
                             if (candidate.Leased || _releasedFenceOnCapture.CompletedValue < candidate.ReleaseValue) { Interlocked.Increment(ref _busySlotSkips); continue; }
                             EnsureSurface(candidate, source.Description);
                             slot = candidate;
                             break;
                         }
-                        if (slot is null) continue;
+                        if (slot is null)
+                        {
+                            _allBusyDrops++;
+                            _releaseLagFrames = (long)(_releasedValue - _releasedFenceOnCapture.CompletedValue);
+                            continue;
+                        }
                     }
                     lock (_stateLock) { if (_disposed) return; }
                     var timer = Stopwatch.StartNew();
@@ -180,6 +216,40 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
         }
         catch (Exception error) { if (!_stopping.IsCancellationRequested) Fail(error.Message, error); }
     }
+
+    // Called with _stateLock held, on every transported frame - a no-op after
+    // the first, and after a resolution change until the new size settles.
+    private void EnsureSlotCount(Texture2DDescription description)
+    {
+        var resolved = ResolveSlotCount(description);
+        if (resolved == _activeSlots) return;
+        // Shrinking releases the surfaces past the new end, but never one the
+        // consumer is still holding - that texture is live GPU memory it is
+        // reading from.
+        for (var i = resolved; i < _slots.Length; i++)
+        {
+            if (!_slots[i].Leased) _slots[i].Dispose();
+        }
+        Volatile.Write(ref _activeSlots, resolved);
+        if (_nextSlot >= resolved) _nextSlot = 0;
+        AppLog.Info($"Native capture: game capture ring sized to {resolved} shared {description.Width}x{description.Height} surfaces.");
+    }
+
+    private static int ResolveSlotCount(Texture2DDescription description)
+    {
+        var frameBytes = (long)description.Width * description.Height * BytesPerPixel(description.Format);
+        if (frameBytes <= 0) return MinimumSurfaceCount;
+        return (int)Math.Clamp(SurfaceBudgetBytes / frameBytes, MinimumSurfaceCount, MaximumSurfaceCount);
+    }
+
+    // Desktop Duplication hands out BGRA8 for an SDR desktop and a 10-bit or
+    // half-float format for an HDR one; anything unrecognised is assumed to be
+    // 32-bit, which only costs a slot or two of budget if it is wider.
+    private static int BytesPerPixel(Format format) => format switch
+    {
+        Format.R16G16B16A16_Float or Format.R16G16B16A16_UNorm => 8,
+        _ => 4
+    };
 
     private void EnsureSurface(SurfaceSlot slot, Texture2DDescription description)
     {
@@ -248,5 +318,5 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
     private static extern bool CloseHandle(IntPtr handle);
 }
 
-internal readonly record struct DesktopDuplicationTelemetry(long SourceFrames, long AcquiredFrames, long PublishedFrames, long TakenFrames, long OverwrittenFrames, long BusySlotSkips, long AccumulatedPresents, long ZeroPresentFrames, long PointerUpdates, long TransportedPointerFrames, TimeSpan ProducerCopyTotal, TimeSpan AverageLeaseDuration, string? Failure)
+internal readonly record struct DesktopDuplicationTelemetry(long SourceFrames, long AcquiredFrames, long PublishedFrames, long TakenFrames, long OverwrittenFrames, long BusySlotSkips, long AccumulatedPresents, long ZeroPresentFrames, long PointerUpdates, long TransportedPointerFrames, TimeSpan ProducerCopyTotal, TimeSpan AverageLeaseDuration, string? Failure, long AllBusyDrops, long ReleaseLagFrames, int SlotCount, TimeSpan AcquireTotal)
 { public long TransportedFrames => PublishedFrames; }
