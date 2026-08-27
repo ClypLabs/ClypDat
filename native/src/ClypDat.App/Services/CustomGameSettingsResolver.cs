@@ -133,6 +133,7 @@ internal static class CustomGameSettingsResolver
                 break;
 
             case AudioGroup:
+                profile.AdditionalAudioProcesses = new Dictionary<string, int>(settings.AdditionalAudioProcesses, StringComparer.OrdinalIgnoreCase);
                 profile.GameAudioVolumePercent = settings.GameAudioVolumePercent;
                 profile.MicrophoneVolumePercent = settings.MicrophoneVolumePercent;
                 profile.MicrophoneNoiseSuppressionEnabled = settings.MicrophoneNoiseSuppressionEnabled;
@@ -169,6 +170,7 @@ internal static class CustomGameSettingsResolver
             ReplayFrameRateMode: quality?.ReplayFrameRateMode ?? settings.ReplayFrameRateMode,
             ReplayDurationSeconds: replay?.ReplayDurationSeconds ?? settings.ReplayDurationSeconds,
             SaveReplayHotkey: settings.SaveReplayHotkey,
+            AdditionalAudioProcesses: audio?.AdditionalAudioProcesses ?? settings.AdditionalAudioProcesses,
             GameAudioVolumePercent: audio?.GameAudioVolumePercent ?? settings.GameAudioVolumePercent,
             MicrophoneVolumePercent: audio?.MicrophoneVolumePercent ?? settings.MicrophoneVolumePercent,
             MicrophoneNoiseSuppressionEnabled: audio?.MicrophoneNoiseSuppressionEnabled ?? settings.MicrophoneNoiseSuppressionEnabled,
@@ -196,6 +198,7 @@ internal static class CustomGameSettingsResolver
 
 internal sealed record EffectiveRecordingSettings(
     bool RecordingEnabled,
+    IReadOnlyDictionary<string, int> AdditionalAudioProcesses,
     string ReplayVideoCodec,
     string ReplayEncoderMode,
     int ReplayBitrateMbps,

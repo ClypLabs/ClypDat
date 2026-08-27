@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using ClypDat.App.Services;
@@ -113,6 +114,13 @@ public sealed class CustomGameTabViewModel : ViewModelBase
 
     public bool HasAnyGroup => Profile.Groups.Count > 0;
 
+    /// <summary>
+    /// False once every group is switched on. The Add Setting button hides
+    /// rather than opening an empty menu - a control whose only outcome is
+    /// "nothing to choose" is worse than no control.
+    /// </summary>
+    public bool CanAddGroup => Profile.Groups.Count < CustomGameSettingsResolver.AllGroups.Count;
+
     private bool Has(string group) => CustomGameSettingsResolver.HasGroup(Profile, group);
 
     private void SetGroup(string group, bool enabled)
@@ -133,6 +141,7 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasReplay));
         OnPropertyChanged(nameof(HasAudio));
         OnPropertyChanged(nameof(HasAnyGroup));
+        OnPropertyChanged(nameof(CanAddGroup));
         RaiseAllValues();
         _save();
     }
@@ -304,6 +313,36 @@ public sealed class CustomGameTabViewModel : ViewModelBase
     }
 
     // --- audio ------------------------------------------------------------
+
+    /// <summary>
+    /// Per-app tracks for this game, mirroring the global Recording Audio
+    /// list. Rebuilt from that list rather than discovered separately, so the
+    /// two always offer the same apps in the same order - and so this does not
+    /// need its own copy of the process enumeration.
+    /// </summary>
+    public ObservableCollection<AudioTrackProcessViewModel> AudioProcesses { get; } = new();
+
+    public void SyncAudioProcesses(IEnumerable<AudioTrackProcessViewModel> template)
+    {
+        AudioProcesses.Clear();
+        foreach (var source in template)
+        {
+            var enabled = Profile.AdditionalAudioProcesses.TryGetValue(source.Name, out var volume);
+            var row = new AudioTrackProcessViewModel(source.Name, enabled, enabled ? volume : 100, OnAudioProcessChanged)
+            {
+                Icon = source.Icon
+            };
+            AudioProcesses.Add(row);
+        }
+    }
+
+    private void OnAudioProcessChanged(AudioTrackProcessViewModel row)
+    {
+        if (row.IsEnabled) Profile.AdditionalAudioProcesses[row.Name] = (int)Math.Round(row.VolumePercent);
+        else Profile.AdditionalAudioProcesses.Remove(row.Name);
+        _save();
+    }
+
 
     public double GameAudioVolumePercent
     {

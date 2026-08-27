@@ -5889,7 +5889,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         foreach (var entry in Settings.CustomGameSettings.OrderBy(pair => pair.Value.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
-            CustomGameTabs.Add(new CustomGameTabViewModel(entry.Key, entry.Value, Settings, SaveSettings));
+            var tab = new CustomGameTabViewModel(entry.Key, entry.Value, Settings, SaveSettings);
+            tab.SyncAudioProcesses(ActiveAudioProcesses);
+            CustomGameTabs.Add(tab);
         }
 
         SelectedCustomGameTab = CustomGameTabs.FirstOrDefault(tab => string.Equals(tab.DetectionKey, previousKey, StringComparison.OrdinalIgnoreCase))
@@ -6104,6 +6106,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ActiveAudioProcesses.Add(row);
         }
 
+        // Every per-game Audio card offers the same apps this list does.
+        foreach (var tab in CustomGameTabs) tab.SyncAudioProcesses(ActiveAudioProcesses);
+
         SelectedChatProcess = string.IsNullOrWhiteSpace(selectedChatName)
             ? null
             : OpenProcesses.FirstOrDefault(process => string.Equals(process.Name, selectedChatName, StringComparison.OrdinalIgnoreCase));
@@ -6204,7 +6209,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             CaptureCursor: desktopCapture && Settings.ReplayDesktopCaptureCursor,
             ProcessPriority: Settings.ProcessPriority,
             SaveReplayHotkey: effective.SaveReplayHotkey,
-            AdditionalAudioProcesses: AudioProcessIdentity.NormalizeDictionary(Settings.AdditionalAudioProcesses),
+            AdditionalAudioProcesses: AudioProcessIdentity.NormalizeDictionary(effective.AdditionalAudioProcesses),
             GameAudioVolumePercent: effective.GameAudioVolumePercent,
             MicrophoneVolumePercent: effective.MicrophoneVolumePercent,
             MicrophoneChannelMode: Settings.MicrophoneChannelMode,

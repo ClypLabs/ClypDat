@@ -308,7 +308,11 @@ public sealed class CustomGameProfile
     public int ReplayDurationSeconds { get; set; } = 60;
     public string SaveReplayHotkey { get; set; } = "Ctrl+Shift+F9";
 
-    // Audio
+    // Audio. Mirrors the global AdditionalAudioProcesses: which apps get their
+    // own track for this game, and at what gain. Present-but-empty is a real
+    // state and means "no app tracks for this game", which is why it is only
+    // consulted when the Audio group is switched on.
+    public Dictionary<string, int> AdditionalAudioProcesses { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public int GameAudioVolumePercent { get; set; } = 100;
     public int MicrophoneVolumePercent { get; set; } = 100;
     public bool MicrophoneNoiseSuppressionEnabled { get; set; }

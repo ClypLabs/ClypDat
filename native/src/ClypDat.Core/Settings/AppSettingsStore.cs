@@ -114,6 +114,7 @@ public static class AppSettingsStore
             {
                 if (profile is null) continue;
                 profile.Groups ??= new List<string>();
+                profile.AdditionalAudioProcesses ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                 profile.ReplayBitrateMbps = Math.Clamp(profile.ReplayBitrateMbps, 1, 200);
                 profile.ReplayFrameRate = Math.Clamp(profile.ReplayFrameRate, 10, 480);
                 profile.ReplayMaxHeight = Math.Clamp(profile.ReplayMaxHeight, 360, 4320);
