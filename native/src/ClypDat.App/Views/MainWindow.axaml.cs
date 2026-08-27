@@ -5596,6 +5596,88 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // ---- Custom Game Settings -------------------------------------------
+
+    private void AddCustomGameComboBox_OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ComboBox combo || ViewModel is null) return;
+        if (combo.SelectedItem is not GameBackendRowViewModel row) return;
+
+        // Cleared before adding: AddCustomGame rebuilds the candidate list this
+        // ComboBox is bound to, and leaving a selection pointing at a row that
+        // is about to be removed leaves the box showing a game that is no
+        // longer addable.
+        combo.SelectedItem = null;
+        ViewModel.AddCustomGame(row.ExecutableName, row.DisplayName);
+    }
+
+    private void CustomGameTab_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control { DataContext: CustomGameTabViewModel tab } && ViewModel is not null)
+        {
+            ViewModel.SelectedCustomGameTab = tab;
+        }
+    }
+
+    private void AddCustomGameSettingButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        // The button's own MenuFlyout does the work; this exists so the flyout
+        // opens on a plain left click rather than only on right click.
+        if (sender is Button button) button.Flyout?.ShowAt(button);
+    }
+
+    private void AddCustomGameGroupMenuItem_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: string group }) SetCustomGameGroup(group, true);
+    }
+
+    private void RemoveCustomGameGroupButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string group }) SetCustomGameGroup(group, false);
+    }
+
+    private void SetCustomGameGroup(string group, bool enabled)
+    {
+        var tab = ViewModel?.SelectedCustomGameTab;
+        if (tab is null) return;
+
+        switch (group)
+        {
+            case "Quality": tab.HasQuality = enabled; break;
+            case "Replay": tab.HasReplay = enabled; break;
+            case "Audio": tab.HasAudio = enabled; break;
+            case "FullSession": tab.HasFullSession = enabled; break;
+        }
+    }
+
+    private void CustomGameHotkeyButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        var tab = ViewModel?.SelectedCustomGameTab;
+        if (tab is null) return;
+
+        // Reuses the window's existing capture flow wholesale; the target is
+        // what redirects the finished string onto this game's profile instead
+        // of the global hotkey (see MainWindowViewModel.SetHotkey).
+        ViewModel!.HotkeyCaptureTarget = tab;
+        HotkeyCaptureButton_OnClick(sender, e);
+    }
+
+    private async void DeleteCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        var tab = ViewModel?.SelectedCustomGameTab;
+        if (tab is null || ViewModel is null) return;
+
+        var confirmed = await ShowModalDialogAsync<bool>(CreateDialog(
+            "Delete custom settings?",
+            $"{tab.DisplayName} goes back to your normal recording settings. Clips you have already saved are not affected.",
+            true,
+            "Delete",
+            destructive: true));
+        if (!confirmed) return;
+
+        ViewModel.RemoveCustomGame(tab.DetectionKey);
+    }
+
     private void ToggleMicTestButton_OnClick(object? sender, RoutedEventArgs e)
     {
         ViewModel?.ToggleMicTest();

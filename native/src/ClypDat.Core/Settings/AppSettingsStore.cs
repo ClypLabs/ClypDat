@@ -106,6 +106,29 @@ public static class AppSettingsStore
             settings.MicrophoneNoiseGateThresholdDb = double.IsFinite(settings.MicrophoneNoiseGateThresholdDb)
                 ? Math.Clamp(settings.MicrophoneNoiseGateThresholdDb, -100, -25)
                 : -100;
+            settings.CustomGameSettings ??= new Dictionary<string, CustomGameProfile>(StringComparer.OrdinalIgnoreCase);
+            // A hand-edited or partially-written profile must not be able to
+            // push an out-of-range value into a recording - these are the same
+            // bounds the sliders enforce.
+            foreach (var profile in settings.CustomGameSettings.Values)
+            {
+                if (profile is null) continue;
+                profile.Groups ??= new List<string>();
+                profile.ReplayBitrateMbps = Math.Clamp(profile.ReplayBitrateMbps, 1, 200);
+                profile.ReplayFrameRate = Math.Clamp(profile.ReplayFrameRate, 10, 480);
+                profile.ReplayMaxHeight = Math.Clamp(profile.ReplayMaxHeight, 360, 4320);
+                profile.ReplayDurationSeconds = Math.Clamp(profile.ReplayDurationSeconds, 5, 7200);
+                profile.GameAudioVolumePercent = Math.Clamp(profile.GameAudioVolumePercent, 0, 150);
+                profile.MicrophoneVolumePercent = Math.Clamp(profile.MicrophoneVolumePercent, 0, 150);
+                profile.FullSessionQuotaGb = Math.Max(0, profile.FullSessionQuotaGb);
+                profile.MicrophoneNoiseGateThresholdDb = double.IsFinite(profile.MicrophoneNoiseGateThresholdDb)
+                    ? Math.Clamp(profile.MicrophoneNoiseGateThresholdDb, -100, -25)
+                    : -100;
+                if (string.IsNullOrWhiteSpace(profile.ReplayVideoCodec)) profile.ReplayVideoCodec = "H.264";
+                if (string.IsNullOrWhiteSpace(profile.ReplayEncoderMode)) profile.ReplayEncoderMode = "GPU";
+                if (string.IsNullOrWhiteSpace(profile.FullSessionVideoCodec)) profile.FullSessionVideoCodec = "H.264";
+                if (string.IsNullOrWhiteSpace(profile.SaveReplayHotkey)) profile.SaveReplayHotkey = settings.SaveReplayHotkey;
+            }
             settings.MicrophoneDeviceIds ??= new List<string>();
             settings.IgnoredGameExecutables ??= new List<string>();
             settings.GameCaptureOverrides ??= new List<GameCaptureOverride>();

@@ -310,6 +310,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new AutoClipGameViewModel(definition, Settings.AutoClipping.Games[definition.Id], SaveSettings)));
         ComingSoonAutoClipGames = new ObservableCollection<string>(AutoClipCatalog.ComingSoon);
         RebuildGameCaptureRows();
+        RebuildCustomGameTabs();
         SyncIgnoredGameExecutableRows();
         // Three synchronous MMDeviceEnumerator COM enumerations. At cold boot
         // the Windows Audio service and USB/Bluetooth drivers are often still
@@ -1030,6 +1031,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         });
         SaveSettings();
         RebuildGameCaptureRows();
+        RebuildCustomGameCandidates();
         GameCatalogChanged?.Invoke(this, EventArgs.Empty);
         AppLog.Info($"Game detection: auto-added {detection.DisplayName} ({detectionKey}) to Game Detection settings.");
     }
@@ -5620,8 +5622,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         IsEditorVisible = returnToEditor && _wasEditorVisibleBeforeSettings && !string.IsNullOrWhiteSpace(SelectedVideoPath);
     }
 
+    // Set while a capture belongs to one game's profile rather than to the
+    // global hotkey. The capture flow itself is shared - it lives on the window
+    // and is stateful - so the only thing that changes per target is where the
+    // finished string is written.
+    public CustomGameTabViewModel? HotkeyCaptureTarget { get; set; }
+
     public void SetHotkey(string hotkey)
     {
+        if (HotkeyCaptureTarget is { } target)
+        {
+            target.SaveReplayHotkey = hotkey;
+            HotkeyCaptureTarget = null;
+            IsCapturingHotkey = false;
+            OnPropertyChanged(nameof(HotkeyDisplay));
+            return;
+        }
+
         Settings.SaveReplayHotkey = hotkey;
         IsCapturingHotkey = false;
         OnPropertyChanged(nameof(HotkeyDisplay));
@@ -5781,6 +5798,118 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
         AddIgnoredGameExecutable(row.ExecutableName);
+    }
+
+
+    // ---- Custom Game Settings -------------------------------------------
+    // Per-game overrides of the recording settings. The tab strip is the added
+    // games; the panel below it belongs to whichever tab is selected.
+
+    public ObservableCollection<CustomGameTabViewModel> CustomGameTabs { get; } = new();
+
+    private CustomGameTabViewModel? _selectedCustomGameTab;
+    private string _customGameSearchText = string.Empty;
+
+    public CustomGameTabViewModel? SelectedCustomGameTab
+    {
+        get => _selectedCustomGameTab;
+        set
+        {
+            if (ReferenceEquals(_selectedCustomGameTab, value)) return;
+            if (_selectedCustomGameTab is not null) _selectedCustomGameTab.IsSelected = false;
+            _selectedCustomGameTab = value;
+            if (_selectedCustomGameTab is not null) _selectedCustomGameTab.IsSelected = true;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(HasSelectedCustomGame));
+        }
+    }
+
+    public bool HasSelectedCustomGame => SelectedCustomGameTab is not null;
+    public bool HasCustomGameTabs => CustomGameTabs.Count > 0;
+
+    /// <summary>
+    /// Detected games that do not already have a profile. Sourced from
+    /// GameCaptureOverrides - the same list Game Detection shows - so the
+    /// picker only ever offers games ClypDat has actually seen running, not a
+    /// catalogue of everything that exists.
+    /// </summary>
+    public ObservableCollection<GameBackendRowViewModel> CustomGameCandidates { get; } = new();
+
+    public string CustomGameSearchText
+    {
+        get => _customGameSearchText;
+        set
+        {
+            if (!SetProperty(ref _customGameSearchText, value)) return;
+            RebuildCustomGameCandidates();
+        }
+    }
+
+    public void RebuildCustomGameTabs()
+    {
+        var previousKey = SelectedCustomGameTab?.DetectionKey;
+        CustomGameTabs.Clear();
+
+        foreach (var entry in Settings.CustomGameSettings.OrderBy(pair => pair.Value.DisplayName, StringComparer.OrdinalIgnoreCase))
+        {
+            CustomGameTabs.Add(new CustomGameTabViewModel(entry.Key, entry.Value, Settings, SaveSettings));
+        }
+
+        SelectedCustomGameTab = CustomGameTabs.FirstOrDefault(tab => string.Equals(tab.DetectionKey, previousKey, StringComparison.OrdinalIgnoreCase))
+            ?? CustomGameTabs.FirstOrDefault();
+        OnPropertyChanged(nameof(HasCustomGameTabs));
+        RebuildCustomGameCandidates();
+    }
+
+    private void RebuildCustomGameCandidates()
+    {
+        CustomGameCandidates.Clear();
+        var query = _customGameSearchText.Trim();
+
+        var candidates = Settings.GameCaptureOverrides
+            .Where(game => !string.IsNullOrWhiteSpace(game.DisplayName))
+            .Where(game => !Settings.CustomGameSettings.ContainsKey(game.ExecutableName))
+            .Where(game => !Settings.IgnoredGameExecutables.Contains(game.ExecutableName, StringComparer.OrdinalIgnoreCase))
+            // A game can be detected through more than one key over its life
+            // (an exe rule and a catalog rule); the picker shows one row per
+            // name so the user is not asked to choose between two identical
+            // looking entries.
+            .GroupBy(game => game.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .Where(game => query.Length == 0
+                || game.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || game.ProcessName.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(game => game.DisplayName, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var game in candidates)
+        {
+            CustomGameCandidates.Add(new GameBackendRowViewModel(
+                game.ExecutableName, game.DisplayName, game.ProcessName, false));
+        }
+    }
+
+    public void AddCustomGame(string detectionKey, string displayName)
+    {
+        if (string.IsNullOrWhiteSpace(detectionKey) || Settings.CustomGameSettings.ContainsKey(detectionKey)) return;
+
+        // Created with no groups switched on: adding a game means "I want to
+        // customise this one", not "change how it records right now". Nothing
+        // about the recording changes until a group is enabled.
+        var profile = new CustomGameProfile { DisplayName = displayName };
+        Settings.CustomGameSettings[detectionKey] = profile;
+        SaveSettings();
+        RebuildCustomGameTabs();
+        SelectedCustomGameTab = CustomGameTabs.FirstOrDefault(tab => string.Equals(tab.DetectionKey, detectionKey, StringComparison.OrdinalIgnoreCase));
+        CustomGameSearchText = string.Empty;
+        AppLog.Info($"Custom game settings added: game='{displayName}', key='{detectionKey}'.");
+    }
+
+    public void RemoveCustomGame(string detectionKey)
+    {
+        if (!Settings.CustomGameSettings.Remove(detectionKey)) return;
+        SaveSettings();
+        RebuildCustomGameTabs();
+        AppLog.Info($"Custom game settings removed: key='{detectionKey}'.");
     }
 
     private void RebuildGameCaptureRows()
@@ -5964,6 +6093,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             .FirstOrDefault(g => string.Equals(g.ExecutableName, detectionKey, StringComparison.OrdinalIgnoreCase));
         const string effectiveBackend = "Native";
 
+        // Per-game overrides. Desktop capture is not a game, so it always
+        // records with the global settings - a profile for whatever happened to
+        // be in the foreground must not follow the user onto their desktop.
+        var effective = desktopCapture
+            ? CustomGameSettingsResolver.Resolve(Settings, null)
+            : CustomGameSettingsResolver.Resolve(Settings, detectionKey);
+        if (effective.AppliedGroups.Length > 0)
+        {
+            AppLog.Info($"Custom game settings applied: game='{ActiveGameDetection.DisplayName}', key='{detectionKey}', groups=[{effective.AppliedGroups}].");
+        }
+
         // SelectedChatProcess/SelectedMicrophoneDevice reflect whatever the
         // ComboBox last resolved to, and can legitimately be transiently null
         // (e.g. mid-refresh) even though a real choice is persisted in
@@ -5984,9 +6124,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             : SelectedMicrophoneDevice?.Name ?? string.Empty;
 
         return new ReplayBufferConfig(
-            SelectedReplayDurationPreset?.Seconds ?? Settings.ReplayDurationSeconds,
-            Settings.ReplayMaxHeight,
-            Settings.ReplayFrameRate,
+            SelectedReplayDurationPreset?.Seconds ?? effective.ReplayDurationSeconds,
+            effective.ReplayMaxHeight,
+            effective.ReplayFrameRate,
             desktopCapture ? desktopMonitor.X : ReplayCaptureX,
             desktopCapture ? desktopMonitor.Y : ReplayCaptureY,
             desktopCapture ? desktopMonitor.Width : ReplayCaptureWidth,
@@ -6003,30 +6143,30 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             desktopCapture ? string.Empty : ActiveGameDetection.WindowClass,
             effectiveBackend,
             GameWindowHandle: desktopCapture ? IntPtr.Zero : ActiveGameDetection.WindowHandle,
-            FullSessionRecordingEnabled: Settings.FullSessionRecordingEnabled,
+            FullSessionRecordingEnabled: effective.FullSessionRecordingEnabled,
             FullSessionRecordingFolder: LibraryLayout.VodDirectory(Settings.LibraryFolder, desktopCapture ? "Desktop Capture" : ActiveGameDetection.DisplayName),
-            FullSessionVideoCodec: Settings.FullSessionVideoCodec,
-            FullSessionQuotaGb: Settings.FullSessionQuotaGb,
+            FullSessionVideoCodec: effective.FullSessionVideoCodec,
+            FullSessionQuotaGb: effective.FullSessionQuotaGb,
             FullSessionBackgroundFinalize: Settings.FullSessionBackgroundFinalize,
             ClipFileNameScheme: Settings.ClipFileNameScheme,
             CustomClipFileNameTemplate: Settings.CustomClipFileNameTemplate,
             LibraryFolder: Settings.LibraryFolder,
             EncoderProfile: ReplayEncoderProfilePolicy.Resolve(),
-            BitrateMbps: Settings.ReplayBitrateMbps,
-            VideoCodec: Settings.ReplayVideoCodec,
-            EncoderMode: Settings.ReplayEncoderMode,
-            FrameRateMode: ReplayFrameTimingPolicy.Normalize(Settings.ReplayFrameRateMode),
+            BitrateMbps: effective.ReplayBitrateMbps,
+            VideoCodec: effective.ReplayVideoCodec,
+            EncoderMode: effective.ReplayEncoderMode,
+            FrameRateMode: ReplayFrameTimingPolicy.Normalize(effective.ReplayFrameRateMode),
             CaptureSource: desktopCapture ? "Desktop" : "Game",
             CaptureMonitorDeviceName: desktopCapture ? desktopMonitor.DeviceName : string.Empty,
             CaptureCursor: desktopCapture && Settings.ReplayDesktopCaptureCursor,
             ProcessPriority: Settings.ProcessPriority,
-            SaveReplayHotkey: Settings.SaveReplayHotkey,
+            SaveReplayHotkey: effective.SaveReplayHotkey,
             AdditionalAudioProcesses: AudioProcessIdentity.NormalizeDictionary(Settings.AdditionalAudioProcesses),
-            GameAudioVolumePercent: Settings.GameAudioVolumePercent,
-            MicrophoneVolumePercent: Settings.MicrophoneVolumePercent,
+            GameAudioVolumePercent: effective.GameAudioVolumePercent,
+            MicrophoneVolumePercent: effective.MicrophoneVolumePercent,
             MicrophoneChannelMode: Settings.MicrophoneChannelMode,
-            MicrophoneNoiseSuppressionEnabled: Settings.MicrophoneNoiseSuppressionEnabled,
-            MicrophoneNoiseGateThresholdDb: Settings.MicrophoneNoiseGateThresholdDb);
+            MicrophoneNoiseSuppressionEnabled: effective.MicrophoneNoiseSuppressionEnabled,
+            MicrophoneNoiseGateThresholdDb: effective.MicrophoneNoiseGateThresholdDb);
     }
 
     public void SetDuration(TimeSpan duration)
@@ -7842,7 +7982,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private static readonly string[] SettingsSectionNames =
     {
         "General", "Game Detection", "Import Clips",
-        "Replay Buffer", "Overlays and Notifications", "Auto-Clip", "Audio", "Game Audio Exclusions",
+        "Replay Buffer", "Custom Game Settings", "Overlays and Notifications", "Auto-Clip", "Audio", "Game Audio Exclusions",
         "About"
     };
 

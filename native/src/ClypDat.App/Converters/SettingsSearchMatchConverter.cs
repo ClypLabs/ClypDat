@@ -74,6 +74,11 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
             "Channels", "Mono", "Stereo"
         },
         ["Game Audio Exclusions"] = new[] { "Excluded apps", "Excluded", "exclusions" },
+        ["Custom Game Settings"] = new[]
+        {
+            "Per-game settings", "Per game", "Custom game", "Game overrides", "Override",
+            "Add Game", "Add Setting", "Recording Quality", "Replay Length", "Full Session"
+        },
         ["About"] = new[]
         {
             "Updates", "Check for updates", "Source and Licenses", "View on GitHub", "Diagnostics",

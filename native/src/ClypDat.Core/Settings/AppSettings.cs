@@ -210,6 +210,13 @@ public sealed class AppSettings
     // confirmations off, or vice versa.
     public bool EnableAutoClipFailedOverlay { get; set; } = true;
     public List<GameCaptureOverride> GameCaptureOverrides { get; set; } = new();
+    // Per-game overrides of the global recording settings, keyed by the same
+    // detection key GameCaptureOverrides uses (see GameCaptureOverride
+    // .ExecutableName) so a game identified through Steam/Epic/exe resolves to
+    // one profile however it was found. A game with no entry here records with
+    // the global settings, which is the overwhelmingly common case - profiles
+    // are only created when the user explicitly adds one.
+    public Dictionary<string, CustomGameProfile> CustomGameSettings { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     // Executables user explicitly told game detection to skip.
     public List<string> IgnoredGameExecutables { get; set; } = new();
     // Auto-clipping is data-driven so new game providers do not need their own
@@ -267,6 +274,46 @@ public sealed class ClipEditSettings
     // it and closing the editor silently threw the text away. Sidecars written
     // before this simply deserialize it as empty.
     public string Description { get; set; } = string.Empty;
+}
+
+// One game's overrides. Values are seeded from the user's current global
+// settings the moment a group is switched on, never from type defaults - an
+// override that silently reset a game to 15Mbps H.264 because that is what the
+// field initialiser said would be worse than not having the feature.
+//
+// Groups is what decides whether a block applies. The values below stay
+// populated even for inactive groups so toggling a group off and back on
+// returns the user to what they had, rather than to the global value again.
+public sealed class CustomGameProfile
+{
+    // Snapshot of the game's name when the profile was created, so the settings
+    // page can still label the row after a game stops being detected (a
+    // reinstall, a launcher change) instead of showing a bare "steam-1172470".
+    public string DisplayName { get; set; } = string.Empty;
+    public List<string> Groups { get; set; } = new();
+
+    // Quality
+    public string ReplayVideoCodec { get; set; } = "H.264";
+    public string ReplayEncoderMode { get; set; } = "GPU";
+    public int ReplayBitrateMbps { get; set; } = 15;
+    public int ReplayFrameRate { get; set; } = 60;
+    public int ReplayMaxHeight { get; set; } = 1080;
+    public string ReplayFrameRateMode { get; set; } = "CFR";
+
+    // Replay length and save hotkey
+    public int ReplayDurationSeconds { get; set; } = 60;
+    public string SaveReplayHotkey { get; set; } = "Ctrl+Shift+F9";
+
+    // Audio
+    public int GameAudioVolumePercent { get; set; } = 100;
+    public int MicrophoneVolumePercent { get; set; } = 100;
+    public bool MicrophoneNoiseSuppressionEnabled { get; set; }
+    public double MicrophoneNoiseGateThresholdDb { get; set; } = -100;
+
+    // Full session recording
+    public bool FullSessionRecordingEnabled { get; set; }
+    public string FullSessionVideoCodec { get; set; } = "H.264";
+    public int FullSessionQuotaGb { get; set; }
 }
 
 public sealed class GameCaptureOverride

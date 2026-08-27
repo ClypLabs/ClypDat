@@ -339,6 +339,68 @@
     to Export. Same template, same metrics, only the colours differ.
     deleteButton stays as it is for the places already using it.
   -->
+  <!-- Custom Game Settings tab strip. Underline-on-active rather than a filled
+       pill: the strip sits directly on the page background with a hairline
+       under it, and a filled tab would read as a button floating above that
+       line instead of as the selected one attached to it. -->
+  <Style Selector="Button.customGameTab">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0,0,0,2" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="CornerRadius" Value="0" />
+    <Setter Property="Padding" Value="10,8" />
+    <Setter Property="Margin" Value="0" />
+    <Setter Property="Foreground" Value="#8C98A7" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="{TemplateBinding CornerRadius}">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                            Padding="{TemplateBinding Padding}"
+                            HorizontalContentAlignment="Center"
+                            VerticalContentAlignment="Center" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <Style Selector="Button.customGameTab:not(ToggleSwitch):pointerover">
+    <Setter Property="Foreground" Value="#D8E4F2" />
+  </Style>
+  <Style Selector="Button.customGameTab.active">
+    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="BorderBrush" Value="#FFFFFF" />
+  </Style>
+
+  <!-- The "Add Setting" drop zone under the enabled groups. Dashed outline
+       says "something goes here" the way a filled card cannot. -->
+  <Style Selector="Button.addSettingCard">
+    <Setter Property="Background" Value="#0D141B" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Padding" Value="0,30" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Panel>
+          <Rectangle RadiusX="12" RadiusY="12"
+                     Stroke="#33465A" StrokeThickness="1.5" StrokeDashArray="6,4"
+                     Fill="{TemplateBinding Background}" />
+          <ContentPresenter Content="{TemplateBinding Content}"
+                            Padding="{TemplateBinding Padding}"
+                            HorizontalContentAlignment="Center"
+                            VerticalContentAlignment="Center" />
+        </Panel>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <Style Selector="Button.addSettingCard:not(ToggleSwitch):pointerover">
+    <Setter Property="Background" Value="#131C25" />
+  </Style>
+
   <Style Selector="Button.dangerButton">
     <Setter Property="Background" Value="#D85E61" />
     <Setter Property="Foreground" Value="#FFFFFF" />
