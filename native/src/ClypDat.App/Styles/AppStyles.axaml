@@ -1962,7 +1962,7 @@
        a scroller reads as loose, not as a header. -->
   <Style Selector="Border.settingsNotice.stickyNotice">
     <Setter Property="CornerRadius" Value="0" />
-    <Setter Property="Padding" Value="33,13,36,13" />
+    <Setter Property="Padding" Value="18,13,14,13" />
   </Style>
   <Style Selector="Border.settingsNotice PathIcon.cautionIcon">
     <Setter Property="Width" Value="15" />
