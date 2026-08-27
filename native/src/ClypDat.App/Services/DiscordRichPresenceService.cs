@@ -30,6 +30,13 @@ internal static class DiscordRichPresenceService
     // for anyone running more than one Discord build.
     private const int MaxPipeIndex = 9;
 
+    // Discord allows up to two buttons; one is enough. Note that Discord
+    // deliberately hides activity buttons on your OWN profile - they render
+    // for everyone else, so "it does not show up for me" is expected rather
+    // than a fault.
+    private const string ButtonLabel = "Get ClypDat";
+    private const string ButtonUrl = "https://www.clypdat.xyz";
+
     /// <summary>
     /// ClypDat's own Discord application - the identity the status is published
     /// under. Fixed rather than configurable: pointing it at another
@@ -268,7 +275,8 @@ internal static class DiscordRichPresenceService
                 timestamps = presence.StartedUtc is { } started
                     ? new { start = new DateTimeOffset(DateTime.SpecifyKind(started, DateTimeKind.Utc)).ToUnixTimeSeconds() }
                     : null,
-                assets = new { large_image = "clypdat", large_text = "ClypDat" }
+                assets = new { large_image = "clypdat", large_text = "ClypDat" },
+                buttons = new[] { new { label = ButtonLabel, url = ButtonUrl } }
             };
 
         var payload = JsonSerializer.Serialize(new
