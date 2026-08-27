@@ -462,7 +462,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // editor grid needs this explicit measured child because the real timeline
     // spans both rows underneath the clip-details column.
     public double EditorTimelineHeight => 22 + 68 + 34 +
-        (EditorHoverBarEnabled ? 0 : 44) +
         TimelineTracks.Sum(track => track.LaneHeight + track.LaneMargin.Bottom);
     public ObservableCollection<AudioDeviceOption> ChatAudioDevices { get; }
     public ObservableCollection<AudioDeviceOption> MicrophoneDevices { get; }
@@ -3209,23 +3208,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (Settings.ScaleClipsWithWindow == value) return;
             Settings.ScaleClipsWithWindow = value;
             OnPropertyChanged();
-            SaveSettings();
-        }
-    }
-
-    // Which of the editor's two playback bars is live. MainWindow watches this
-    // (its ViewModel.PropertyChanged handler) to build the docked bar on
-    // demand and to drop the floating one; the docked bar's own visibility is
-    // bound straight to it in XAML.
-    public bool EditorHoverBarEnabled
-    {
-        get => Settings.EditorHoverBarEnabled;
-        set
-        {
-            if (Settings.EditorHoverBarEnabled == value) return;
-            Settings.EditorHoverBarEnabled = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(EditorTimelineHeight));
             SaveSettings();
         }
     }

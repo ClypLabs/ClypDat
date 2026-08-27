@@ -61,7 +61,7 @@
       </StackPanel>
     </Border>
 
-    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Show status panel|Show &quot;Playback Paused&quot; indicator|Scale clips with window size|Hoverbar|Video preview|Combine sidebar filters|Layout'}">
+    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Show status panel|Show &quot;Playback Paused&quot; indicator|Scale clips with window size|Video preview|Combine sidebar filters|Layout'}">
       <StackPanel Spacing="18">
         <TextBlock Classes="settingsCardLabel" Text="LAYOUT" />
         <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show status panel|Layout}">
@@ -84,13 +84,6 @@
             <TextBlock Classes="settingsRowDesc" Text="Library cards target a fixed size and more columns fit on a wider window (e.g. ~6 across at 1440p), instead of always 3 columns that just grow or shrink with the window." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
           </StackPanel>
           <ToggleSwitch Grid.Column="1" IsChecked="{Binding ScaleClipsWithWindow}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-        </Grid>
-        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Hoverbar|Layout}">
-          <StackPanel Spacing="2">
-            <TextBlock Classes="settingsRowTitle" Text="Hoverbar" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <TextBlock Classes="settingsRowDesc" Text="Floats the Editor's playback controls over the bottom of the video, appearing while the pointer is in the Editor. Off keeps them docked under the video, always visible." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-          </StackPanel>
-          <ToggleSwitch Grid.Column="1" IsChecked="{Binding EditorHoverBarEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
         </Grid>
         <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Video preview|hovering over a clip|Layout'}">
           <StackPanel Spacing="2">

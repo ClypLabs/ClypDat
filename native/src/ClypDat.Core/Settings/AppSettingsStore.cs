@@ -78,16 +78,6 @@ public static class AppSettingsStore
             settings.ReplayFrameRateMode = string.Equals(settings.ReplayFrameRateMode, "CFR", StringComparison.OrdinalIgnoreCase)
                 ? "CFR"
                 : "VFR";
-            // One-time switch-on: the floating hover bar is the default now,
-            // but existing settings.json files already carry an explicit false
-            // for it, so the changed property default alone would only reach
-            // new installs. Same guard shape as the reset above - runs once,
-            // then leaves the setting alone for good.
-            if (!settings.HoverBarDefaultOnApplied)
-            {
-                settings.EditorHoverBarEnabled = true;
-                settings.HoverBarDefaultOnApplied = true;
-            }
             if (settings.ReplayMaxHeight <= 0) settings.ReplayMaxHeight = 1080;
             if (string.IsNullOrWhiteSpace(settings.ExportVideoCodec)) settings.ExportVideoCodec = "H.264";
             settings.ProcessPriority = settings.ProcessPriority switch

@@ -8488,14 +8488,11 @@ public sealed partial class MainWindow : Window
     }
 
     // One rule: the pointer is over the video (or over the bar itself), or the
-    // bar goes. Now that the hover bar is opt-in - the docked row under the
-    // video is the default - the point of choosing it is keeping the editor
-    // clear of controls except while you're actually on the picture, so the
-    // zone is the picture and nothing else.
+    // bar goes. The point of the bar is keeping the editor clear of controls
+    // except while you're actually on the picture, so the zone is the picture
+    // and nothing else.
     private void PollEditorHoverControls()
     {
-        // Docked mode (the default) is the control row in the timeline panel,
-        // so the floating one never comes out at all.
         // IsVisible is the main window's own. Closing ClypDat hides it to the
         // tray rather than exiting, and Avalonia refuses outright to show a
         // window whose owner isn't visible ("Cannot show window with
@@ -8504,11 +8501,11 @@ public sealed partial class MainWindow : Window
         // - drop the window, build a fresh one - just produced a new window to
         // fail on, so the bar never came back after a restore.
         if (ViewModel is null || !IsVisible || !ViewModel.IsEditorVisible || ViewModel.IsVideoFullscreen || _playback is null ||
-            !ViewModel.Settings.EditorHoverBarEnabled || IsEditorSurfaceCovered)
+            IsEditorSurfaceCovered)
         {
             if (_editorHoverControlsWindow is { IsVisible: true })
             {
-                LogHoverControlsState($"hidden (window={IsVisible}, editor={ViewModel?.IsEditorVisible}, fullscreen={ViewModel?.IsVideoFullscreen}, playback={_playback is not null}, hoverBar={ViewModel?.Settings.EditorHoverBarEnabled}, covered={IsEditorSurfaceCovered})");
+                LogHoverControlsState($"hidden (window={IsVisible}, editor={ViewModel?.IsEditorVisible}, fullscreen={ViewModel?.IsVideoFullscreen}, playback={_playback is not null}, covered={IsEditorSurfaceCovered})");
             }
             HideEditorHoverControls(immediate: true);
             return;
@@ -8875,11 +8872,9 @@ public sealed partial class MainWindow : Window
             SetWindowPos(handle, HwndTop, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
     }
 
-    // Contents of the floating hover bar. The docked alternative is plain XAML
-    // in the timeline panel (it predates this and is deliberately unchanged) -
-    // this one carries the extras that only make sense floating over the
-    // picture, the scrub strip and the elapsed/duration readout, since in
-    // docked mode the timeline right below already provides both.
+    // Contents of the floating hover bar - the editor's only playback controls.
+    // It carries the scrub strip and the elapsed/duration readout on top of the
+    // transport and volume groups.
     private Control BuildPlaybackBarLayout()
     {
         PathIcon Icon(string data, double size = 16) => new()
