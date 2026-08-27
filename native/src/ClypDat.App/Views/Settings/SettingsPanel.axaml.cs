@@ -22,6 +22,15 @@ public sealed partial class SettingsPanel : UserControl
 
     private void SettingsNavButton_OnClick(object? sender, RoutedEventArgs e)
         => Owner?.SettingsNavButton_OnClick(sender, e);
+
+    private void FixCustomGameQualityWarningButton_OnClick(object? sender, RoutedEventArgs e)
+        => Owner?.FixCustomGameQualityWarningButton_OnClick(sender, e);
+
+    private void AcknowledgeCustomGameQualityWarningButton_OnClick(object? sender, RoutedEventArgs e)
+        => Owner?.AcknowledgeCustomGameQualityWarningButton_OnClick(sender, e);
+
+    private void HideCustomGameQualityWarningButton_OnClick(object? sender, RoutedEventArgs e)
+        => Owner?.HideCustomGameQualityWarningButton_OnClick(sender, e);
     internal TextBox SearchBox => SettingsSearchBox;
 
     internal ScrollViewer ScrollViewer => SettingsScrollViewer;

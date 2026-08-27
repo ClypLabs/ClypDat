@@ -26,15 +26,6 @@ public sealed partial class CustomGameSection : UserControl
     private void RemoveCustomGameGroupButton_OnClick(object? sender, RoutedEventArgs e)
         => Owner?.RemoveCustomGameGroupButton_OnClick(sender, e);
 
-    private void FixCustomGameQualityWarningButton_OnClick(object? sender, RoutedEventArgs e)
-        => Owner?.FixCustomGameQualityWarningButton_OnClick(sender, e);
-
-    private void AcknowledgeCustomGameQualityWarningButton_OnClick(object? sender, RoutedEventArgs e)
-        => Owner?.AcknowledgeCustomGameQualityWarningButton_OnClick(sender, e);
-
-    private void HideCustomGameQualityWarningButton_OnClick(object? sender, RoutedEventArgs e)
-        => Owner?.HideCustomGameQualityWarningButton_OnClick(sender, e);
-
     private void AddCustomGameSettingButton_OnClick(object? sender, RoutedEventArgs e)
         => Owner?.AddCustomGameSettingButton_OnClick(sender, e);
 

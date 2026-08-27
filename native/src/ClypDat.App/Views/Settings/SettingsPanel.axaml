@@ -7,8 +7,8 @@
              x:Class="ClypDat.App.Views.Settings.SettingsPanel"
              x:DataType="vm:MainWindowViewModel">
   <Border Background="{StaticResource PanelBgBrush}">
-    <Grid ColumnDefinitions="240,*,Auto">
-      <Border Grid.Column="0" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="0,0,1,0">
+    <Grid ColumnDefinitions="240,*,Auto" RowDefinitions="Auto,*">
+      <Border Grid.Column="0" Grid.RowSpan="2" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="0,0,1,0">
         <StackPanel Margin="0,18,16,24" Spacing="2">
           <TextBox x:Name="SettingsSearchBox" Classes="settingsInput appSearchBox" Text="{Binding SettingsSearchText}" PlaceholderText="Search settings" Margin="14,0,0,14" VerticalContentAlignment="Center">
             <TextBox.InnerLeftContent>
@@ -46,7 +46,28 @@
         </StackPanel>
       </Border>
 
-      <ScrollViewer x:Name="SettingsScrollViewer" Grid.Column="1" Classes="settingsScroll">
+      <!-- Reserved outside SettingsScrollViewer: warning remains fixed at
+           panel top while Custom Game Settings content scrolls underneath. -->
+      <Border Grid.Column="1" Grid.Row="0"
+              IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Custom Game Settings}">
+        <Border Margin="36,12,36,0" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource DangerBrush}" BorderThickness="1" CornerRadius="8" Padding="14,11"
+                IsVisible="{Binding SelectedCustomGameTab.QualityWarningVisible}">
+          <StackPanel Spacing="8">
+            <TextBlock FontSize="12" TextWrapping="Wrap">
+              <Run Text="Performance note: " Foreground="{StaticResource DangerBrush}" FontWeight="Bold" />
+              <Run Text="{Binding SelectedCustomGameTab.QualityWarningSummary}" Foreground="{StaticResource TextBrush}" />
+            </TextBlock>
+            <TextBlock Text="Higher quality can increase encoder load, RAM use, and dropped frames during gameplay." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
+            <WrapPanel Orientation="Horizontal">
+              <Button Content="Fix Now" Margin="0,0,8,0" Click="FixCustomGameQualityWarningButton_OnClick" />
+              <Button Content="Acknowledge" Margin="0,0,8,0" Click="AcknowledgeCustomGameQualityWarningButton_OnClick" />
+              <Button Content="Don't Show Again" Click="HideCustomGameQualityWarningButton_OnClick" />
+            </WrapPanel>
+          </StackPanel>
+        </Border>
+      </Border>
+
+      <ScrollViewer x:Name="SettingsScrollViewer" Grid.Column="1" Grid.Row="1" Classes="settingsScroll">
         <StackPanel Margin="36,28,36,40" Spacing="22">
 
           <settings:ReplayBufferSection />
@@ -63,7 +84,7 @@
         </StackPanel>
       </ScrollViewer>
 
-      <Border Grid.Column="2" Width="280" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1,0,0,0" IsVisible="{Binding IsStatusAreaVisible}">
+      <Border Grid.Column="2" Grid.RowSpan="2" Width="280" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1,0,0,0" IsVisible="{Binding IsStatusAreaVisible}">
         <ScrollViewer>
           <StackPanel Margin="22,28,22,20">
             <TextBlock Classes="settingsSectionLabel" Text="STATUS" Margin="0,0,0,4" />
