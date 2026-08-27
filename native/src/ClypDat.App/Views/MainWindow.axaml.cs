@@ -80,7 +80,6 @@ public sealed partial class MainWindow : Window
     private readonly Stopwatch _cropPreviewThrottle = new();
     private CropPreviewRequest? _pendingCropPreview;
     private bool _cropPreviewRenderInFlight;
-    private bool _cropPreviewDragActive;
     private int _cropPreviewGeneration;
     private static readonly TimeSpan CropPreviewMinimumInterval = TimeSpan.FromMilliseconds(100);
     // True only while a settling (non-preview) seek is awaiting confirmation -
@@ -387,9 +386,7 @@ public sealed partial class MainWindow : Window
                     }
                     if (e.PropertyName == nameof(MainWindowViewModel.StartupLibraryIndexVersion)) QueueDateScrubberRebuild();
                     if (e.PropertyName == nameof(MainWindowViewModel.ClipSpeed)) ApplyEditorSpeedPreview();
-                    if (e.PropertyName is nameof(MainWindowViewModel.ClipCropMode)
-                        or nameof(MainWindowViewModel.ClipCropOffsetX)
-                        or nameof(MainWindowViewModel.ClipCropOffsetY)) QueueEditorCropPreview();
+                    if (e.PropertyName == nameof(MainWindowViewModel.ClipCropMode)) QueueEditorCropPreview();
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible)
                         or nameof(MainWindowViewModel.IsEditorVisible)
                         or nameof(MainWindowViewModel.SelectedVideoPath)
@@ -6577,9 +6574,6 @@ public sealed partial class MainWindow : Window
     private void ResetClipEffectsButton_OnClick(object? sender, RoutedEventArgs e) =>
         ViewModel?.ResetClipEffects();
 
-    private void ResetClipCropPositionButton_OnClick(object? sender, RoutedEventArgs e) =>
-        ViewModel?.ResetClipCropPosition();
-
     // Effects are previewed by libvlc itself, not by anything Avalonia draws:
     // the picture is a native child window that paints over every sibling
     // regardless of z-order (see ClickableVideoView), so a crop mask laid on top
@@ -6661,29 +6655,18 @@ public sealed partial class MainWindow : Window
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
             _cropPreviewRenderInFlight = false;
-            // A completed in-drag mask is useful feedback even when a newer
-            // position is already queued. Outside a drag, only the latest
-            // geometry may land; aspect clicks and Reset must not flash stale.
-            var isCurrent = request.Generation == _cropPreviewGeneration;
-            if ((_cropPreviewDragActive || isCurrent) &&
+            // Only the latest geometry may land - an aspect click that lands
+            // after a newer one must not flash the stale shape.
+            if (request.Generation == _cropPreviewGeneration &&
                 _playback is { } playback && ViewModel is { IsClipCropActive: true })
             {
                 playback.SetCropMaskImage(path);
                 _ = Task.Run(() => CropMaskImage.Prune(EditorCropMaskDirectory, path));
-                AppLog.Debug($"Editor crop preview: renderMs={renderClock.ElapsedMilliseconds}, current={isCurrent}, drag={_cropPreviewDragActive}.");
+                AppLog.Debug($"Editor crop preview: renderMs={renderClock.ElapsedMilliseconds}.");
             }
 
             if (_pendingCropPreview is not null) StartPendingCropPreview();
         });
-    }
-
-    private void CropPositionSlider_OnPointerPressed(object? sender, PointerPressedEventArgs e) =>
-        _cropPreviewDragActive = true;
-
-    private void CropPositionSlider_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
-    {
-        _cropPreviewDragActive = false;
-        QueueEditorCropPreview(flush: true);
     }
 
     private void ResetEditorCropPreview()
@@ -6691,7 +6674,6 @@ public sealed partial class MainWindow : Window
         _cropPreviewGeneration++;
         _pendingCropPreview = null;
         _cropPreviewTimer.Stop();
-        _cropPreviewDragActive = false;
         _playback?.SetCropMaskImage(null);
         _ = Task.Run(() => CropMaskImage.Prune(EditorCropMaskDirectory, keepPath: null, maximumFiles: 0));
     }
@@ -9371,6 +9353,9 @@ public sealed partial class MainWindow : Window
         if (ViewModel.IsPlaying)
         {
             ViewModel.CurrentTime = SmoothPlaybackPosition();
+            // Rides this tick rather than owning a timer: it throttles itself
+            // and does nothing above 1x. See PlaybackSession.MonitorSlowRateStall.
+            _playback.MonitorSlowRateStall();
         }
         else
         {

@@ -187,8 +187,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private TimeSpan _trimEnd = TimeSpan.Zero;
     private double _clipSpeed = 1.0;
     private string _clipCropMode = ClipRenderFilters.NoCrop;
-    private double _clipCropOffsetX = 0.5;
-    private double _clipCropOffsetY = 0.5;
     // Set while ApplyClipEditState is pushing a sidecar back into the view model,
     // so restoring a clip's saved effects does not immediately write the same
     // values back out again (and, worse, write them against whichever clip
@@ -3865,25 +3863,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public double ClipCropOffsetX
-    {
-        get => _clipCropOffsetX;
-        set
-        {
-            if (!SetProperty(ref _clipCropOffsetX, Math.Clamp(value, 0, 1))) return;
-            OnEditorEffectsChanged();
-        }
-    }
-
-    public double ClipCropOffsetY
-    {
-        get => _clipCropOffsetY;
-        set
-        {
-            if (!SetProperty(ref _clipCropOffsetY, Math.Clamp(value, 0, 1))) return;
-            OnEditorEffectsChanged();
-        }
-    }
+    // The crop window is always centred. The offsets stay in the sidecar and in
+    // ComputeCrop's signature - the aspect pills are the only crop control the
+    // editor offers, and a saved off-centre value from an older build would be
+    // a crop nothing in the UI can move back.
+    public const double ClipCropOffsetX = 0.5;
+    public const double ClipCropOffsetY = 0.5;
 
     public bool IsClipCropActive => !string.Equals(ClipCropMode, ClipRenderFilters.NoCrop, StringComparison.Ordinal);
     public bool IsClipSpeedActive => ClipRenderFilters.IsSpeedActive(ClipSpeed);
@@ -3921,24 +3906,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    // Just the framing, not the aspect: having picked 9:16 and then dragged the
-    // window off target, the wanted undo is "put it back in the middle", not
-    // "throw away the crop".
-    public bool IsClipCropPositionMoved =>
-        IsClipCropActive && (Math.Abs(ClipCropOffsetX - 0.5) > 0.001 || Math.Abs(ClipCropOffsetY - 0.5) > 0.001);
-
-    public void ResetClipCropPosition()
-    {
-        ClipCropOffsetX = 0.5;
-        ClipCropOffsetY = 0.5;
-    }
-
     public void ResetClipEffects()
     {
         ClipSpeed = 1.0;
         ClipCropMode = ClipRenderFilters.NoCrop;
-        ClipCropOffsetX = 0.5;
-        ClipCropOffsetY = 0.5;
     }
 
     // One notification point for everything downstream of an effect: the export
@@ -3951,7 +3922,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ClipSpeedLabel));
         OnPropertyChanged(nameof(ClipCropSizeLabel));
         OnPropertyChanged(nameof(ClipEffectsSummary));
-        OnPropertyChanged(nameof(IsClipCropPositionMoved));
         OnPropertyChanged(nameof(ActiveCropRect));
         OnPropertyChanged(nameof(ExportDuration));
         OnPropertyChanged(nameof(ExportLengthLabel));
@@ -7242,8 +7212,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             ClipSpeed = ClipRenderFilters.NormalizeSpeed(edit.SpeedMultiplier);
             ClipCropMode = ClipRenderFilters.NormalizeCropMode(edit.CropMode);
-            ClipCropOffsetX = edit.CropOffsetX;
-            ClipCropOffsetY = edit.CropOffsetY;
             // Unconditional, not left to the setters: opening a second clip with
             // the same effects as the first changes no property, but the source
             // dimensions behind ActiveCropRect and the duration behind

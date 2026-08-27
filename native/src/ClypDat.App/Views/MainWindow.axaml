@@ -1670,32 +1670,12 @@
 
                 <Border Classes="editorInspectorCard">
                   <StackPanel Spacing="9">
-                    <Grid ColumnDefinitions="*,Auto">
-                      <TextBlock Text="CROP &amp; ASPECT" Classes="editorCardLabel" VerticalAlignment="Center" />
-                      <!-- Disabled rather than hidden at the centre position:
-                           collapsing it would shift the heading every time the
-                           slider passed through the middle. -->
-                      <Button Grid.Column="1" Classes="linkButton" Content="Reset" FontSize="11" Padding="6,1"
-                              VerticalAlignment="Center" IsVisible="{Binding IsClipCropActive}"
-                              IsEnabled="{Binding IsClipCropPositionMoved}"
-                              ToolTip.Tip="Re-centre the crop window"
-                              Click="ResetClipCropPositionButton_OnClick" />
-                    </Grid>
+                    <!-- Aspect only. The crop window is always centred, so there
+                         is no position to move and nothing to reset. -->
+                    <TextBlock Text="CROP &amp; ASPECT" Classes="editorCardLabel" />
                     <ListBox Classes="pillGroup compactPills" SelectionMode="Single"
                              ItemsSource="{Binding ClipCropModes}" SelectedItem="{Binding ClipCropMode, Mode=TwoWay}" />
                     <TextBlock Text="{Binding ClipCropSizeLabel}" Foreground="#8EA1B6" FontSize="11" />
-                    <StackPanel Spacing="4" IsVisible="{Binding IsClipCropActive}">
-                      <TextBlock Text="Horizontal position" Foreground="#8EA1B6" FontSize="12" Margin="0,4,0,0" />
-                      <Slider Minimum="0" Maximum="1" TickFrequency="0.01" IsSnapToTickEnabled="True"
-                              Value="{Binding ClipCropOffsetX, Mode=TwoWay}"
-                              PointerPressed="CropPositionSlider_OnPointerPressed"
-                              PointerReleased="CropPositionSlider_OnPointerReleased" />
-                      <TextBlock Text="Vertical position" Foreground="#8EA1B6" FontSize="12" />
-                      <Slider Minimum="0" Maximum="1" TickFrequency="0.01" IsSnapToTickEnabled="True"
-                              Value="{Binding ClipCropOffsetY, Mode=TwoWay}"
-                              PointerPressed="CropPositionSlider_OnPointerPressed"
-                              PointerReleased="CropPositionSlider_OnPointerReleased" />
-                    </StackPanel>
                   </StackPanel>
                 </Border>
 

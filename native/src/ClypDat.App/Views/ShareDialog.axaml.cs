@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using ClypDat.App.Services;
 using ClypDat.App.ViewModels;
@@ -45,6 +46,9 @@ public partial class ShareDialog : Window
             CleanUp();
         };
         Opened += (_, _) => OverlayTransparencyDiagnostics.Log(this, "share-dialog");
+        // The empty dashed box is the drop zone, so it needs the clip's shape
+        // before the first encode has produced anything to put in it.
+        Opened += (_, _) => SizeSharePreviewBox();
 
         // Deliberately does NOT start encoding on open. Encoding is expensive
         // GPU work, and this app is usually running with the replay buffer
@@ -298,6 +302,9 @@ public partial class ShareDialog : Window
 
         ShareThumbnail.IsVisible = false;
         ShareDurationBadge.IsVisible = false;
+        // The box carries the aspect even while empty, so switching size preset
+        // does not flash the previous clip's shape back.
+        SizeSharePreviewBox();
         ShareShowInFolderButton.Content = "Cancel";
         ShareShowInFolderButton.IsEnabled = true;
         ShareResultSizeText.Text = string.Empty;
@@ -463,7 +470,11 @@ public partial class ShareDialog : Window
                 return;
             }
 
-            var spec = _viewModel.ComputeShareEncodeSpec(exportDuration.TotalSeconds, _viewModel.SelectedSourceWidth, _viewModel.SelectedSourceHeight, _viewModel.SelectedSourceFps, targetBytes, useAv1);
+            // Cropped dimensions, matching what BuildShareArguments budgeted and
+            // encoded for - handing this the source size labels a cropped clip
+            // with a resolution it was never encoded at.
+            var crop = _viewModel.ActiveCropRect;
+            var spec = _viewModel.ComputeShareEncodeSpec(exportDuration.TotalSeconds, crop?.Width ?? _viewModel.SelectedSourceWidth, crop?.Height ?? _viewModel.SelectedSourceHeight, _viewModel.SelectedSourceFps, targetBytes, useAv1);
             var actualMb = actualBytes / 1_000_000.0;
 
             ShareProgressPanel.IsVisible = false;
@@ -477,8 +488,9 @@ public partial class ShareDialog : Window
             ShareShowInFolderButton.Content = "Show in folder";
             ShareShowInFolderButton.IsEnabled = true;
 
-            ShareThumbnail.Source = _viewModel.SelectedThumbnail;
-            ShareThumbnail.IsVisible = _viewModel.SelectedThumbnail is not null;
+            ShareThumbnail.Source = BuildPreviewImage();
+            ShareThumbnail.IsVisible = ShareThumbnail.Source is not null;
+            SizeSharePreviewBox();
             ShareDurationText.Text = FormatShareDuration(exportDuration);
             ShareDurationBadge.IsVisible = true;
         }
@@ -492,6 +504,55 @@ public partial class ShareDialog : Window
             ShareShowInFolderButton.IsEnabled = false;
             ShareStatusText.Text = "Encode failed.";
         }
+    }
+
+    // The thumbnail is the whole source frame (MediaProbeService writes it
+    // "scale=960:-2"), so a crop the user picked in the editor is not in it -
+    // and the file being dragged out IS cropped. Cut the same window out of the
+    // bitmap rather than showing a frame that is not what gets sent.
+    private Avalonia.Media.IImage? BuildPreviewImage()
+    {
+        var source = _viewModel.SelectedThumbnail;
+        if (source is null) return null;
+        if (_viewModel.ActiveCropRect is not { } crop) return source;
+
+        var sourceWidth = _viewModel.SelectedSourceWidth;
+        var sourceHeight = _viewModel.SelectedSourceHeight;
+        if (sourceWidth <= 0 || sourceHeight <= 0) return source;
+
+        var size = source.PixelSize;
+        var scaleX = (double)size.Width / sourceWidth;
+        var scaleY = (double)size.Height / sourceHeight;
+        var x = Math.Clamp((int)Math.Round(crop.X * scaleX), 0, Math.Max(0, size.Width - 1));
+        var y = Math.Clamp((int)Math.Round(crop.Y * scaleY), 0, Math.Max(0, size.Height - 1));
+        var width = Math.Clamp((int)Math.Round(crop.Width * scaleX), 1, size.Width - x);
+        var height = Math.Clamp((int)Math.Round(crop.Height * scaleY), 1, size.Height - y);
+        return new CroppedBitmap(source, new PixelRect(x, y, width, height));
+    }
+
+    // Fits the preview's own aspect inside the fixed 424x238 slot (dialog is 480
+    // wide with 28px margins either side). Vertical crops get narrower, never
+    // taller, so picking an aspect never resizes the dialog under the cursor.
+    private void SizeSharePreviewBox()
+    {
+        const double MaximumWidth = 424;
+        const double MaximumHeight = 238;
+
+        var crop = _viewModel.ActiveCropRect;
+        var width = crop?.Width ?? _viewModel.SelectedSourceWidth;
+        var height = crop?.Height ?? _viewModel.SelectedSourceHeight;
+        var aspect = width > 0 && height > 0 ? (double)width / height : 16.0 / 9.0;
+
+        var boxHeight = MaximumHeight;
+        var boxWidth = boxHeight * aspect;
+        if (boxWidth > MaximumWidth)
+        {
+            boxWidth = MaximumWidth;
+            boxHeight = boxWidth / aspect;
+        }
+
+        SharePreviewBox.Width = boxWidth;
+        SharePreviewBox.Height = boxHeight;
     }
 
     private static string FormatShareDuration(TimeSpan duration) =>
