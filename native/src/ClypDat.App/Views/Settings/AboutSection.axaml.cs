@@ -20,8 +20,24 @@ public sealed partial class AboutSection : UserControl
     private void LicenseLinkText_OnPointerPressed(object? sender, PointerPressedEventArgs e)
         => Owner?.LicenseLinkText_OnPointerPressed(sender, e);
 
-    private void CheckUpdatesButton_OnClick(object? sender, RoutedEventArgs e)
-        => Owner?.CheckUpdatesButton_OnClick(sender, e);
+    private async void CheckUpdatesButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (Owner is not { } owner || !CheckNowButton.IsEnabled) return;
+
+        CheckNowButton.IsEnabled = false;
+        CheckNowButtonText.IsVisible = false;
+        CheckingContent.IsVisible = true;
+        try
+        {
+            await owner.CheckUpdatesAsync();
+        }
+        finally
+        {
+            CheckingContent.IsVisible = false;
+            CheckNowButtonText.IsVisible = true;
+            CheckNowButton.IsEnabled = true;
+        }
+    }
 
     private void OpenGitHubButton_OnClick(object? sender, RoutedEventArgs e)
         => Owner?.OpenGitHubButton_OnClick(sender, e);

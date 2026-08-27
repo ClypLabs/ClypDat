@@ -88,7 +88,15 @@
         <TextBlock Classes="settingsRowTitle" Text="Check for Updates" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
             <TextBlock Classes="settingsRowDesc" Text="ClypDat also checks automatically on launch." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
           </StackPanel>
-          <Button Name="CheckNowButton" Grid.Column="1" Content="Check Now" Classes="primaryButton" Click="CheckUpdatesButton_OnClick" VerticalAlignment="Center" />
+          <Button x:Name="CheckNowButton" Grid.Column="1" Classes="primaryButton" Click="CheckUpdatesButton_OnClick" VerticalAlignment="Center">
+            <Grid>
+              <TextBlock x:Name="CheckNowButtonText" Text="Check Now" />
+              <StackPanel x:Name="CheckingContent" Orientation="Horizontal" Spacing="7" IsVisible="False">
+                <controls:ClypDatLoader Width="18" Height="18" />
+                <TextBlock Text="Checking…" VerticalAlignment="Center" />
+              </StackPanel>
+            </Grid>
+          </Button>
         </Grid>
         <Grid ColumnDefinitions="*,Auto">
           <StackPanel Spacing="2">

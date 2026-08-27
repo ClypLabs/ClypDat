@@ -5391,7 +5391,7 @@ public sealed partial class MainWindow : Window
         if (sender is Button { DataContext: AutoClipGroupViewModel group }) group.Toggle();
     }
 
-    internal async void CheckUpdatesButton_OnClick(object? sender, RoutedEventArgs e)
+    internal async Task CheckUpdatesAsync()
     {
         if (ViewModel is null || _updateDialogOpen) return;
 
@@ -5417,16 +5417,7 @@ public sealed partial class MainWindow : Window
         }
 
         SetAvailableUpdate(update);
-        _updateDialogOpen = true;
-        try
-        {
-            var dialog = CreateUpdateDialog(update);
-            await ShowUpdateDialogAsync(dialog);
-        }
-        finally
-        {
-            _updateDialogOpen = false;
-        }
+        await ShowUpdateDialogAsync(CreateUpdateDialog(update));
     }
 
     internal void OpenGitHubButton_OnClick(object? sender, RoutedEventArgs e)
@@ -6997,15 +6988,7 @@ public sealed partial class MainWindow : Window
     private async void AvailableUpdateButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (_availableUpdate is null || _updateDialogOpen) return;
-        _updateDialogOpen = true;
-        try
-        {
-            await ShowUpdateDialogAsync(CreateUpdateDialog(_availableUpdate));
-        }
-        finally
-        {
-            _updateDialogOpen = false;
-        }
+        await ShowUpdateDialogAsync(CreateUpdateDialog(_availableUpdate));
     }
 
     private void OnboardingOverlay_OnPointerPressed(object? sender, PointerPressedEventArgs e)
@@ -7111,16 +7094,7 @@ public sealed partial class MainWindow : Window
         }
 
         SetAvailableUpdate(update);
-        _updateDialogOpen = true;
-        try
-        {
-            var dialog = CreateUpdateDialog(update);
-            await ShowUpdateDialogAsync(dialog);
-        }
-        finally
-        {
-            _updateDialogOpen = false;
-        }
+        await ShowUpdateDialogAsync(CreateUpdateDialog(update));
     }
 
     private void SetAvailableUpdate(AppUpdateInfo? update)
@@ -7134,12 +7108,23 @@ public sealed partial class MainWindow : Window
     // owner while still preventing interaction with it.
     private async Task ShowUpdateDialogAsync(Window dialog)
     {
-        var backdrop = new ShareBackdropWindow(this);
+        if (_updateDialogOpen) return;
+
+        _updateDialogOpen = true;
+        var backdrop = new ShareBackdropWindow(this, allowOwnerMove: true);
         EventHandler dismiss = (_, _) => dialog.Close();
+        EventHandler<PixelPointEventArgs> ownerPositionChanged = (_, _) => CenterUpdateDialogOverOwner(dialog);
+        EventHandler<SizeChangedEventArgs> ownerSizeChanged = (_, _) => CenterUpdateDialogOverOwner(dialog);
+        EventHandler<SizeChangedEventArgs> dialogSizeChanged = (_, _) => CenterUpdateDialogOverOwner(dialog);
+        EventHandler dialogOpened = (_, _) => CenterUpdateDialogOverOwner(dialog);
         backdrop.DismissRequested += dismiss;
-        backdrop.Show(this);
+        PositionChanged += ownerPositionChanged;
+        SizeChanged += ownerSizeChanged;
+        dialog.SizeChanged += dialogSizeChanged;
+        dialog.Opened += dialogOpened;
         try
         {
+            backdrop.Show(this);
             var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             EventHandler? closedHandler = null;
             closedHandler = (_, _) => closed.TrySetResult();
@@ -7156,8 +7141,49 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
+            dialog.Opened -= dialogOpened;
+            dialog.SizeChanged -= dialogSizeChanged;
+            SizeChanged -= ownerSizeChanged;
+            PositionChanged -= ownerPositionChanged;
             backdrop.DismissRequested -= dismiss;
             backdrop.Close();
+            _updateDialogOpen = false;
+        }
+    }
+
+    // This dialog is intentionally shown normally over an owned scrim, rather
+    // than with ShowDialog. Keep that pair centered as the real owner moves,
+    // resizes, or lays out a different amount of release-note content.
+    private void CenterUpdateDialogOverOwner(Window dialog)
+    {
+        try
+        {
+            var ownerHandle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+            if (ownerHandle == IntPtr.Zero || !GetWindowRect(ownerHandle, out var ownerBounds)) return;
+
+            var dialogHandle = dialog.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+            var scale = dialog.RenderScaling > 0 ? dialog.RenderScaling : 1;
+            var width = dialog.Bounds.Width * scale;
+            var height = dialog.Bounds.Height * scale;
+            if (dialogHandle != IntPtr.Zero && GetWindowRect(dialogHandle, out var dialogBounds))
+            {
+                width = dialogBounds.Right - dialogBounds.Left;
+                height = dialogBounds.Bottom - dialogBounds.Top;
+            }
+            if (width <= 0 || height <= 0) return;
+
+            dialog.Position = new PixelPoint(
+                ownerBounds.Left + (int)Math.Round(((ownerBounds.Right - ownerBounds.Left) - width) / 2),
+                ownerBounds.Top + (int)Math.Round(((ownerBounds.Bottom - ownerBounds.Top) - height) / 2));
+
+            // HWND_TOP keeps this owned card over ClypDat's other owned
+            // windows. It stays in the normal band, unlike global Topmost.
+            if (dialogHandle != IntPtr.Zero)
+                SetWindowPos(dialogHandle, HwndTop, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Update dialog recenter failed (recovered)", error);
         }
     }
 

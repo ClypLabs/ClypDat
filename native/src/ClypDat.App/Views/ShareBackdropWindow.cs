@@ -11,12 +11,14 @@ internal sealed class ShareBackdropWindow : Window
 {
     public event EventHandler? DismissRequested;
     private readonly Window _owner;
+    private readonly bool _allowOwnerMove;
     private PixelPoint _lockedPosition;
     private bool _restoringPosition;
 
-    public ShareBackdropWindow(Window owner)
+    public ShareBackdropWindow(Window owner, bool allowOwnerMove = false)
     {
         _owner = owner;
+        _allowOwnerMove = allowOwnerMove;
         WindowDecorations = WindowDecorations.None;
         ShowInTaskbar = false;
         CanResize = false;
@@ -36,7 +38,8 @@ internal sealed class ShareBackdropWindow : Window
         PositionOverOwner(owner);
         PositionChanged += (_, _) => RestoreLockedPosition();
         owner.PositionChanged += Owner_OnPositionChanged;
-        Closed += (_, _) => owner.PositionChanged -= Owner_OnPositionChanged;
+        owner.SizeChanged += Owner_OnSizeChanged;
+        Closed += OnClosed;
         Opened += (_, _) =>
         {
             WindowTransparencyFallback.ApplyIfNeeded(this, scrim.Background, b => scrim.Background = b);
@@ -46,8 +49,16 @@ internal sealed class ShareBackdropWindow : Window
 
     private void Scrim_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (e.GetCurrentPoint((Visual)sender!).Properties.IsLeftButtonPressed)
-            DismissRequested?.Invoke(this, EventArgs.Empty);
+        if (!e.GetCurrentPoint((Visual)sender!).Properties.IsLeftButtonPressed) return;
+
+        if (_allowOwnerMove && e.GetPosition((Visual)sender!).Y < OwnerTitleBarHeight)
+        {
+            e.Handled = true;
+            _owner.BeginMoveDrag(e);
+            return;
+        }
+
+        DismissRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void PositionOverOwner(Window owner)
@@ -71,6 +82,14 @@ internal sealed class ShareBackdropWindow : Window
 
     private void Owner_OnPositionChanged(object? sender, PixelPointEventArgs e) => PositionOverOwner(_owner);
 
+    private void Owner_OnSizeChanged(object? sender, SizeChangedEventArgs e) => PositionOverOwner(_owner);
+
+    private void OnClosed(object? sender, EventArgs e)
+    {
+        _owner.PositionChanged -= Owner_OnPositionChanged;
+        _owner.SizeChanged -= Owner_OnSizeChanged;
+    }
+
     private void RestoreLockedPosition()
     {
         if (_restoringPosition || Position == _lockedPosition) return;
@@ -90,4 +109,6 @@ internal sealed class ShareBackdropWindow : Window
         public int Right;
         public int Bottom;
     }
+
+    private const double OwnerTitleBarHeight = 48;
 }
