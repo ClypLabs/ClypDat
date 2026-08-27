@@ -432,6 +432,15 @@ public static class GameIconService
         }
     }
 
+    /// <summary>
+    /// Steam appid for a display name, using the same curated-map-then-store-
+    /// search ladder icon lookup uses. Exposed so GamePortraitService can ask
+    /// the same question without a second, subtly different implementation of
+    /// the name matching.
+    /// </summary>
+    internal static Task<int?> ResolveSteamAppIdForAsync(string displayName, CancellationToken cancellationToken = default) =>
+        ResolveSteamAppIdAsync(Http, displayName, cancellationToken);
+
     private static async Task<int?> ResolveSteamAppIdAsync(HttpClient client, string displayName, CancellationToken cancellationToken)
     {
         var first = true;

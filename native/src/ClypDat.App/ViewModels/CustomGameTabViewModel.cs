@@ -1,4 +1,5 @@
 using Avalonia.Media.Imaging;
+using Avalonia.Threading;
 using ClypDat.App.Services;
 using ClypDat.Core.Settings;
 
@@ -20,6 +21,29 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         _settings = settings;
         _save = save;
         Icon = GameIconService.TryLoad(profile.DisplayName);
+        _portrait = GamePortraitService.TryLoad(profile.DisplayName);
+        // Fetched off the UI thread and applied only if something new landed.
+        // Fire-and-forget because a card with no cover art is a complete card -
+        // the portrait is depth, not information.
+        if (_portrait is null) _ = LoadPortraitAsync();
+    }
+
+    private async Task LoadPortraitAsync()
+    {
+        try
+        {
+            if (!await GamePortraitService.EnsureCachedAsync(DetectionKey, DisplayName).ConfigureAwait(false)) return;
+            var portrait = GamePortraitService.TryLoad(DisplayName);
+            if (portrait is null) return;
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                Portrait = portrait;
+            });
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Game portrait load failed for '{DisplayName}'", error);
+        }
     }
 
     // Same identity GameCaptureOverrides uses - see CustomGameSettingsResolver.
@@ -30,6 +54,21 @@ public sealed class CustomGameTabViewModel : ViewModelBase
     // Null for a game with no cached icon; the tab falls back to its initial.
     public Bitmap? Icon { get; }
     public bool HasIcon => Icon is not null;
+
+    private Bitmap? _portrait;
+
+    /// <summary>Tall cover art, or null for a game none could be found for.</summary>
+    public Bitmap? Portrait
+    {
+        get => _portrait;
+        private set
+        {
+            if (!SetProperty(ref _portrait, value)) return;
+            OnPropertyChanged(nameof(HasPortrait));
+        }
+    }
+
+    public bool HasPortrait => _portrait is not null;
     public string Initial => string.IsNullOrWhiteSpace(DisplayName) ? "?" : DisplayName[..1].ToUpperInvariant();
 
     public bool IsSelected
@@ -68,12 +107,6 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         set => SetGroup(CustomGameSettingsResolver.AudioGroup, value);
     }
 
-    public bool HasFullSession
-    {
-        get => Has(CustomGameSettingsResolver.FullSessionGroup);
-        set => SetGroup(CustomGameSettingsResolver.FullSessionGroup, value);
-    }
-
     public bool HasAnyGroup => Profile.Groups.Count > 0;
 
     private bool Has(string group) => CustomGameSettingsResolver.HasGroup(Profile, group);
@@ -95,7 +128,6 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasQuality));
         OnPropertyChanged(nameof(HasReplay));
         OnPropertyChanged(nameof(HasAudio));
-        OnPropertyChanged(nameof(HasFullSession));
         OnPropertyChanged(nameof(HasAnyGroup));
         RaiseAllValues();
         _save();
@@ -284,26 +316,6 @@ public sealed class CustomGameTabViewModel : ViewModelBase
             Profile.MicrophoneNoiseGateThresholdDb, value);
     }
 
-    // --- full session -----------------------------------------------------
-
-    public bool FullSessionRecordingEnabled
-    {
-        get => Profile.FullSessionRecordingEnabled;
-        set => Set(v => Profile.FullSessionRecordingEnabled = v, Profile.FullSessionRecordingEnabled, value);
-    }
-
-    public string FullSessionVideoCodec
-    {
-        get => Profile.FullSessionVideoCodec;
-        set => Set(v => Profile.FullSessionVideoCodec = v, Profile.FullSessionVideoCodec, value);
-    }
-
-    public double FullSessionQuotaGb
-    {
-        get => Profile.FullSessionQuotaGb;
-        set => Set(v => Profile.FullSessionQuotaGb = (int)Math.Round(Math.Max(0, v)), Profile.FullSessionQuotaGb, value);
-    }
-
     // Assigns through a setter delegate so every property above is one line and
     // none of them can forget to persist. Compares before writing because
     // two-way slider bindings re-assign their own value constantly.
@@ -341,8 +353,5 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         OnPropertyChanged(nameof(MicrophoneVolumePercent));
         OnPropertyChanged(nameof(MicrophoneNoiseSuppressionEnabled));
         OnPropertyChanged(nameof(MicrophoneNoiseGateThresholdDb));
-        OnPropertyChanged(nameof(FullSessionRecordingEnabled));
-        OnPropertyChanged(nameof(FullSessionVideoCodec));
-        OnPropertyChanged(nameof(FullSessionQuotaGb));
     }
 }

@@ -87,6 +87,41 @@ public static class RemoteGameIconsService
         return _appIdMemoryCache;
     }
 
+    // Curated portrait art, for launcher exclusives that have no Steam page at
+    // all - VALORANT and League of Legends resolve to nothing, and Overwatch's
+    // closest store match is a DLC pack. Without an override those games get no
+    // cover art no matter how the search is tuned, and tuning it harder is how
+    // League of Legends ends up wearing Ruined King's box art.
+    //
+    // A curated URL rather than an appid because the whole point is that these
+    // titles are not on Steam.
+    public static IReadOnlyDictionary<string, string> LoadCachedPortraits()
+    {
+        if (_portraitMemoryCache is not null) return _portraitMemoryCache;
+        _portraitMemoryCache = TryReadCacheEntry()?.Portraits ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        MergePackagedPortraits(_portraitMemoryCache);
+        return _portraitMemoryCache;
+    }
+
+    private static Dictionary<string, string>? _portraitMemoryCache;
+
+    private static void MergePackagedPortraits(Dictionary<string, string> portraits)
+    {
+        try
+        {
+            if (!File.Exists(LocalManifestPath)) return;
+            var document = JsonSerializer.Deserialize<IconsDocument>(File.ReadAllText(LocalManifestPath), DocumentOptions);
+            foreach (var pair in document?.Portraits ?? new Dictionary<string, string>())
+            {
+                if (!string.IsNullOrWhiteSpace(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value)) portraits[pair.Key] = pair.Value;
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Packaged game-portraits manifest merge failed (non-fatal)", error);
+        }
+    }
+
     private static void MergePackagedManifest(Dictionary<string, string>? icons, Dictionary<string, int>? appIds)
     {
         try
@@ -172,10 +207,17 @@ public static class RemoteGameIconsService
                 if (!string.IsNullOrWhiteSpace(pair.Key) && pair.Value > 0) appIds[pair.Key] = pair.Value;
             }
 
+            var portraits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in document?.Portraits ?? new Dictionary<string, string>())
+            {
+                if (!string.IsNullOrWhiteSpace(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value)) portraits[pair.Key] = pair.Value;
+            }
+
             Directory.CreateDirectory(Path.GetDirectoryName(CachePath)!);
-            File.WriteAllText(CachePath, JsonSerializer.Serialize(new CacheEntry(DateTimeOffset.UtcNow, icons, appIds)));
+            File.WriteAllText(CachePath, JsonSerializer.Serialize(new CacheEntry(DateTimeOffset.UtcNow, icons, appIds, portraits)));
             _memoryCache = icons;
             _appIdMemoryCache = appIds;
+            _portraitMemoryCache = portraits;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -201,11 +243,16 @@ public static class RemoteGameIconsService
 
     // SteamAppIds is absent from cache files written before it existed, so it
     // stays nullable and callers fall back to an empty map.
-    private sealed record CacheEntry(DateTimeOffset FetchedAt, Dictionary<string, string> Icons, Dictionary<string, int>? SteamAppIds = null);
+    private sealed record CacheEntry(
+        DateTimeOffset FetchedAt,
+        Dictionary<string, string> Icons,
+        Dictionary<string, int>? SteamAppIds = null,
+        Dictionary<string, string>? Portraits = null);
 
     private sealed class IconsDocument
     {
         public Dictionary<string, string>? Icons { get; set; }
         public Dictionary<string, int>? SteamAppIds { get; set; }
+        public Dictionary<string, string>? Portraits { get; set; }
     }
 }

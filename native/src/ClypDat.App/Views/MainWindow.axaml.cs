@@ -5651,7 +5651,6 @@ public sealed partial class MainWindow : Window
             case "Quality": tab.HasQuality = enabled; break;
             case "Replay": tab.HasReplay = enabled; break;
             case "Audio": tab.HasAudio = enabled; break;
-            case "FullSession": tab.HasFullSession = enabled; break;
         }
     }
 

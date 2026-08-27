@@ -24,11 +24,10 @@ internal static class CustomGameSettingsResolver
     public const string QualityGroup = "Quality";
     public const string ReplayGroup = "Replay";
     public const string AudioGroup = "Audio";
-    public const string FullSessionGroup = "FullSession";
 
     public static readonly IReadOnlyList<string> AllGroups = new[]
     {
-        RecordingModeGroup, QualityGroup, ReplayGroup, AudioGroup, FullSessionGroup
+        RecordingModeGroup, QualityGroup, ReplayGroup, AudioGroup
     };
 
     // The one group a newly added game starts with. Adding a game is almost
@@ -46,7 +45,6 @@ internal static class CustomGameSettingsResolver
         QualityGroup => "Recording Quality",
         ReplayGroup => "Replay Length and Hotkey",
         AudioGroup => "Audio",
-        FullSessionGroup => "Full Session Recording",
         _ => group
     };
 
@@ -56,7 +54,6 @@ internal static class CustomGameSettingsResolver
         QualityGroup => "Codec, encoder, bitrate, frame rate and resolution cap for this game.",
         ReplayGroup => "How much of this game the buffer keeps, and the key that saves it.",
         AudioGroup => "Game and microphone levels, and microphone noise suppression.",
-        FullSessionGroup => "Whether whole sessions of this game are recorded, and at what quality.",
         _ => string.Empty
     };
 
@@ -142,12 +139,6 @@ internal static class CustomGameSettingsResolver
                 profile.MicrophoneNoiseSuppressionEnabled = settings.MicrophoneNoiseSuppressionEnabled;
                 profile.MicrophoneNoiseGateThresholdDb = settings.MicrophoneNoiseGateThresholdDb;
                 break;
-
-            case FullSessionGroup:
-                profile.FullSessionRecordingEnabled = settings.FullSessionRecordingEnabled;
-                profile.FullSessionVideoCodec = settings.FullSessionVideoCodec;
-                profile.FullSessionQuotaGb = settings.FullSessionQuotaGb;
-                break;
         }
     }
 
@@ -158,16 +149,16 @@ internal static class CustomGameSettingsResolver
         var quality = FindActive(settings, detectionKey, QualityGroup);
         var replay = FindActive(settings, detectionKey, ReplayGroup);
         var audio = FindActive(settings, detectionKey, AudioGroup);
-        var session = FindActive(settings, detectionKey, FullSessionGroup);
 
-        // Recording mode decides WHETHER full sessions run; the full-session
-        // group only decides how they are recorded. Without that split the two
-        // groups would each own the same flag and the last one edited would
-        // win, which is not something the UI could explain.
+        // Recording Mode is the sole owner of whether this game records at all
+        // and whether it records whole sessions. There was briefly a separate
+        // Full Session group as well, which meant two groups owning one flag
+        // and the last one edited winning - not something a settings page can
+        // explain. How a session is recorded (codec, quota) stays global.
         var recordingEnabled = mode is null || !string.Equals(mode.RecordingMode, OffMode, StringComparison.OrdinalIgnoreCase);
         var fullSession = mode is not null
             ? string.Equals(mode.RecordingMode, FullSessionMode, StringComparison.OrdinalIgnoreCase)
-            : session?.FullSessionRecordingEnabled ?? settings.FullSessionRecordingEnabled;
+            : settings.FullSessionRecordingEnabled;
 
         return new EffectiveRecordingSettings(
             RecordingEnabled: recordingEnabled,
@@ -184,23 +175,22 @@ internal static class CustomGameSettingsResolver
             MicrophoneNoiseSuppressionEnabled: audio?.MicrophoneNoiseSuppressionEnabled ?? settings.MicrophoneNoiseSuppressionEnabled,
             MicrophoneNoiseGateThresholdDb: audio?.MicrophoneNoiseGateThresholdDb ?? settings.MicrophoneNoiseGateThresholdDb,
             FullSessionRecordingEnabled: recordingEnabled && fullSession,
-            FullSessionVideoCodec: session?.FullSessionVideoCodec ?? settings.FullSessionVideoCodec,
-            FullSessionQuotaGb: session?.FullSessionQuotaGb ?? settings.FullSessionQuotaGb,
-            AppliedGroups: DescribeAppliedGroups(mode, quality, replay, audio, session));
+            FullSessionVideoCodec: settings.FullSessionVideoCodec,
+            FullSessionQuotaGb: settings.FullSessionQuotaGb,
+            AppliedGroups: DescribeAppliedGroups(mode, quality, replay, audio));
     }
 
     // Purely for the log line at the start of a recording - "which of these
     // settings are not the ones in the settings page?" is otherwise an
     // unanswerable question when a user reports odd output for one game.
     private static string DescribeAppliedGroups(
-        CustomGameProfile? mode, CustomGameProfile? quality, CustomGameProfile? replay, CustomGameProfile? audio, CustomGameProfile? session)
+        CustomGameProfile? mode, CustomGameProfile? quality, CustomGameProfile? replay, CustomGameProfile? audio)
     {
         var applied = new List<string>(5);
         if (mode is not null) applied.Add(RecordingModeGroup);
         if (quality is not null) applied.Add(QualityGroup);
         if (replay is not null) applied.Add(ReplayGroup);
         if (audio is not null) applied.Add(AudioGroup);
-        if (session is not null) applied.Add(FullSessionGroup);
         return applied.Count == 0 ? string.Empty : string.Join(",", applied);
     }
 }
