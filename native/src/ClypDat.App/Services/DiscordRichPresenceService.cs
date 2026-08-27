@@ -61,7 +61,7 @@ internal static class DiscordRichPresenceService
     private static readonly SemaphoreSlim Wake = new(0, 1);
 
     private static bool _enabled;
-    private static bool _showGetClypDatButton = true;
+    private static bool _showGetClypDatButton;
     private static DiscordPresence _desired = DiscordPresence.None;
     private static DiscordPresence? _sent;
     private static Task? _worker;

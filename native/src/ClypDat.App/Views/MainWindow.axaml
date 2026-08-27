@@ -2787,7 +2787,7 @@
                   <Border Height="1" Background="#263544" />
                   <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
                     <StackPanel Spacing="2" VerticalAlignment="Center">
-                      <TextBlock Text="Show “Get ClypDat” link" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14"
+                      <TextBlock Text="Show “Get ClypDat” Link" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14"
                                  opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                       <TextBlock Text="Adds a clypdat.xyz button to your Rich Presence for people viewing your profile."
                                  Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
