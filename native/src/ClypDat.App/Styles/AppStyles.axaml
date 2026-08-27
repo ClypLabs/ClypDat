@@ -380,7 +380,11 @@
     <Setter Property="Background" Value="#0D141B" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="12" />
-    <Setter Property="Padding" Value="0,30" />
+    <!-- No vertical padding: the button carries an explicit Height and centres
+         its content in it. Padding plus centring meant the content box was
+         inset from the top and bottom AND centred inside what was left, so any
+         rounding in that inset showed up as the row sitting slightly high. -->
+    <Setter Property="Padding" Value="0" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
     <Setter Property="Template">

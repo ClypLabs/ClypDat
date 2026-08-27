@@ -227,15 +227,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         MicrophoneDevices = new ObservableCollection<AudioDeviceOption>();
         OpenProcesses = new ObservableCollection<ProcessOption>();
         GameCandidateProcesses = new ObservableCollection<ProcessOption>();
-        ReplayDurationPresets = new ObservableCollection<ReplayDurationPreset>
-        {
-            new("30s", 30),
-            new("1 Minute", 60),
-            new("2 Minutes", 120),
-            new("3 Minutes", 180),
-            new("4 Minutes", 240),
-            new("5 Minutes", 300)
-        };
+        ReplayDurationPresets = new ObservableCollection<ReplayDurationPreset>(DurationPresets);
         ReplayResolutions = new ObservableCollection<ResolutionOption>
         {
             new("Low (480p)", 480),
@@ -478,6 +470,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<AudioTrackProcessViewModel> ActiveAudioProcesses { get; }
     // "Add a running game" excludes processes already configured by user.
     public ObservableCollection<ProcessOption> GameCandidateProcesses { get; }
+    // Static for the same reason QualityPresets is: the per-game Replay Length
+    // card offers exactly the lengths the global one does.
+    internal static readonly IReadOnlyList<ReplayDurationPreset> DurationPresets = new ReplayDurationPreset[]
+    {
+        new("30s", 30),
+        new("1 Minute", 60),
+        new("2 Minutes", 120),
+        new("3 Minutes", 180),
+        new("4 Minutes", 240),
+        new("5 Minutes", 300)
+    };
+
     public ObservableCollection<ReplayDurationPreset> ReplayDurationPresets { get; }
     public ObservableCollection<ResolutionOption> ReplayResolutions { get; }
     private readonly record struct ReplayBitrateRecommendation(int MinimumMbps, int MaximumMbps)
@@ -5652,23 +5656,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         IsEditorVisible = returnToEditor && _wasEditorVisibleBeforeSettings && !string.IsNullOrWhiteSpace(SelectedVideoPath);
     }
 
-    // Set while a capture belongs to one game's profile rather than to the
-    // global hotkey. The capture flow itself is shared - it lives on the window
-    // and is stateful - so the only thing that changes per target is where the
-    // finished string is written.
-    public CustomGameTabViewModel? HotkeyCaptureTarget { get; set; }
-
     public void SetHotkey(string hotkey)
     {
-        if (HotkeyCaptureTarget is { } target)
-        {
-            target.SaveReplayHotkey = hotkey;
-            HotkeyCaptureTarget = null;
-            IsCapturingHotkey = false;
-            OnPropertyChanged(nameof(HotkeyDisplay));
-            return;
-        }
-
         Settings.SaveReplayHotkey = hotkey;
         IsCapturingHotkey = false;
         OnPropertyChanged(nameof(HotkeyDisplay));

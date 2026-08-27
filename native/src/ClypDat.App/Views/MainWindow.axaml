@@ -2536,30 +2536,18 @@
                 </Border>
 
                 <Border Classes="settingsCard" IsVisible="{Binding HasReplay}">
-                  <StackPanel Spacing="14">
+                  <StackPanel Spacing="11">
                     <Grid ColumnDefinitions="*,Auto">
-                      <TextBlock Text="Replay Length and Hotkey" Foreground="#EDF4FB" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
+                      <TextBlock Text="Replay Length" Foreground="#EDF4FB" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
                       <Button Grid.Column="1" Classes="linkButton" Content="Remove" Tag="Replay" Click="RemoveCustomGameGroupButton_OnClick" />
                     </Grid>
-                    <Grid ColumnDefinitions="*,Auto,70" ColumnSpacing="12">
-                      <StackPanel Spacing="2">
-                        <TextBlock Text="Replay length" Foreground="#D8E4F2" />
-                        <TextBlock Text="How much of this game the buffer keeps." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
-                      </StackPanel>
-                      <Slider Grid.Column="1" Width="220" Classes="volumeSlider" Minimum="15" Maximum="1200" SmallChange="5" LargeChange="30" TickFrequency="5" IsSnapToTickEnabled="True" VerticalAlignment="Center" Value="{Binding ReplayDurationSeconds}" />
-                      <TextBlock Grid.Column="2" Text="{Binding ReplayDurationSeconds, StringFormat={}{0:0}s}" Foreground="#B8C7D8" FontSize="11" TextAlignment="Right" VerticalAlignment="Center" />
-                    </Grid>
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-                      <StackPanel Spacing="2">
-                        <TextBlock Text="Save hotkey" Foreground="#D8E4F2" />
-                        <TextBlock Text="Used instead of your normal save key while this game is running." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
-                      </StackPanel>
-                      <Button Grid.Column="1" Classes="replayFlyoutInput hotkeyKeycap" MinWidth="150" VerticalAlignment="Center"
-                              HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                              Click="CustomGameHotkeyButton_OnClick">
-                        <TextBlock Text="{Binding SaveReplayHotkey}" TextAlignment="Center" VerticalAlignment="Center" />
-                      </Button>
-                    </Grid>
+                    <TextBlock Text="How much of this game the replay buffer keeps." Foreground="#93A6B8" FontSize="11" TextWrapping="Wrap" />
+                    <!-- Same pill group the global Replay Buffer card uses, so
+                         the two read as the same control rather than as a
+                         slider that happens to mean the same thing. -->
+                    <ListBox Classes="pillGroup"
+                             ItemsSource="{Binding $parent[Window].DataContext.ReplayDurationPresets}"
+                             SelectedItem="{Binding SelectedDurationPreset}" />
                   </StackPanel>
                 </Border>
 
@@ -2597,8 +2585,8 @@
                 <!-- Add Setting. Sits BELOW whatever is already enabled, so the
                      card list grows downward toward it. Hidden once all four
                      groups are on, because there is then nothing to add. -->
-                <Button Classes="addSettingCard" Click="AddCustomGameSettingButton_OnClick" HorizontalAlignment="Stretch">
-                  <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
+                <Button Classes="addSettingCard" Click="AddCustomGameSettingButton_OnClick" HorizontalAlignment="Stretch" Height="88">
+                  <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <!-- Two rectangles, not a "+" glyph. A text plus carries
                          the font's own side bearings and line height, so it
                          sits off-centre inside a circle no matter what margin

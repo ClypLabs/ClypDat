@@ -5654,18 +5654,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void CustomGameHotkeyButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        var tab = ViewModel?.SelectedCustomGameTab;
-        if (tab is null) return;
-
-        // Reuses the window's existing capture flow wholesale; the target is
-        // what redirects the finished string onto this game's profile instead
-        // of the global hotkey (see MainWindowViewModel.SetHotkey).
-        ViewModel!.HotkeyCaptureTarget = tab;
-        HotkeyCaptureButton_OnClick(sender, e);
-    }
-
     private async void DeleteCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
     {
         var tab = ViewModel?.SelectedCustomGameTab;

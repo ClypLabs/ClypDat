@@ -21,24 +21,28 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         _settings = settings;
         _save = save;
         Icon = GameIconService.TryLoad(profile.DisplayName);
-        _portrait = GamePortraitService.TryLoad(profile.DisplayName);
-        // Fetched off the UI thread and applied only if something new landed.
-        // Fire-and-forget because a card with no cover art is a complete card -
-        // the portrait is depth, not information.
-        if (_portrait is null) _ = LoadPortraitAsync();
+        // Nothing about the portrait touches the UI thread. This constructor
+        // runs once per tab while the settings page is being built, and a
+        // cached portrait is a 600x900 JPEG - decoding several of those inline
+        // is what made the cards visibly late rather than the download did.
+        _ = LoadPortraitAsync();
     }
 
     private async Task LoadPortraitAsync()
     {
         try
         {
-            if (!await GamePortraitService.EnsureCachedAsync(DetectionKey, DisplayName).ConfigureAwait(false)) return;
-            var portrait = GamePortraitService.TryLoad(DisplayName);
-            if (portrait is null) return;
-            await Dispatcher.UIThread.InvokeAsync(() =>
+            // Decode first: a portrait already on disk should appear on the
+            // next frame, not after a round trip that will find nothing new.
+            var portrait = await Task.Run(() => GamePortraitService.TryLoad(DisplayName)).ConfigureAwait(false);
+            if (portrait is null)
             {
-                Portrait = portrait;
-            });
+                if (!await GamePortraitService.EnsureCachedAsync(DetectionKey, DisplayName).ConfigureAwait(false)) return;
+                portrait = await Task.Run(() => GamePortraitService.TryLoad(DisplayName)).ConfigureAwait(false);
+                if (portrait is null) return;
+            }
+
+            await Dispatcher.UIThread.InvokeAsync(() => Portrait = portrait);
         }
         catch (Exception error)
         {
@@ -277,16 +281,26 @@ public sealed class CustomGameTabViewModel : ViewModelBase
 
     // --- replay length and hotkey ----------------------------------------
 
-    public double ReplayDurationSeconds
-    {
-        get => Profile.ReplayDurationSeconds;
-        set => Set(v => Profile.ReplayDurationSeconds = (int)Math.Round(v), Profile.ReplayDurationSeconds, value);
-    }
+    public int ReplayDurationSeconds => Profile.ReplayDurationSeconds;
 
-    public string SaveReplayHotkey
+    private ReplayDurationPreset? _selectedDurationPreset;
+
+    // Null when the stored length matches no preset - only reachable from a
+    // hand-edited settings file, and the pills simply show nothing selected
+    // rather than silently rounding the user's value to the nearest one.
+    public ReplayDurationPreset? SelectedDurationPreset
     {
-        get => Profile.SaveReplayHotkey;
-        set => Set(v => Profile.SaveReplayHotkey = v, Profile.SaveReplayHotkey, value);
+        get => _selectedDurationPreset ??= MainWindowViewModel.DurationPresets
+            .FirstOrDefault(preset => preset.Seconds == Profile.ReplayDurationSeconds);
+        set
+        {
+            if (value is null || ReferenceEquals(_selectedDurationPreset, value)) return;
+            _selectedDurationPreset = value;
+            Profile.ReplayDurationSeconds = value.Seconds;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ReplayDurationSeconds));
+            _save();
+        }
     }
 
     // --- audio ------------------------------------------------------------
@@ -348,7 +362,8 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsCustomQuality));
         OnPropertyChanged(nameof(ReplayFrameRateMode));
         OnPropertyChanged(nameof(ReplayDurationSeconds));
-        OnPropertyChanged(nameof(SaveReplayHotkey));
+        _selectedDurationPreset = null;
+        OnPropertyChanged(nameof(SelectedDurationPreset));
         OnPropertyChanged(nameof(GameAudioVolumePercent));
         OnPropertyChanged(nameof(MicrophoneVolumePercent));
         OnPropertyChanged(nameof(MicrophoneNoiseSuppressionEnabled));

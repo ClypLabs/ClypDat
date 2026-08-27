@@ -43,7 +43,7 @@ internal static class CustomGameSettingsResolver
     {
         RecordingModeGroup => "Recording Mode",
         QualityGroup => "Recording Quality",
-        ReplayGroup => "Replay Length and Hotkey",
+        ReplayGroup => "Replay Length",
         AudioGroup => "Audio",
         _ => group
     };
@@ -52,7 +52,7 @@ internal static class CustomGameSettingsResolver
     {
         RecordingModeGroup => "Whether this game records by hotkey, records whole sessions, or is not recorded.",
         QualityGroup => "Codec, encoder, bitrate, frame rate and resolution cap for this game.",
-        ReplayGroup => "How much of this game the buffer keeps, and the key that saves it.",
+        ReplayGroup => "How much of this game the replay buffer keeps.",
         AudioGroup => "Game and microphone levels, and microphone noise suppression.",
         _ => string.Empty
     };
@@ -130,7 +130,6 @@ internal static class CustomGameSettingsResolver
 
             case ReplayGroup:
                 profile.ReplayDurationSeconds = settings.ReplayDurationSeconds;
-                profile.SaveReplayHotkey = settings.SaveReplayHotkey;
                 break;
 
             case AudioGroup:
@@ -169,7 +168,7 @@ internal static class CustomGameSettingsResolver
             ReplayMaxHeight: quality?.ReplayMaxHeight ?? settings.ReplayMaxHeight,
             ReplayFrameRateMode: quality?.ReplayFrameRateMode ?? settings.ReplayFrameRateMode,
             ReplayDurationSeconds: replay?.ReplayDurationSeconds ?? settings.ReplayDurationSeconds,
-            SaveReplayHotkey: replay?.SaveReplayHotkey ?? settings.SaveReplayHotkey,
+            SaveReplayHotkey: settings.SaveReplayHotkey,
             GameAudioVolumePercent: audio?.GameAudioVolumePercent ?? settings.GameAudioVolumePercent,
             MicrophoneVolumePercent: audio?.MicrophoneVolumePercent ?? settings.MicrophoneVolumePercent,
             MicrophoneNoiseSuppressionEnabled: audio?.MicrophoneNoiseSuppressionEnabled ?? settings.MicrophoneNoiseSuppressionEnabled,
