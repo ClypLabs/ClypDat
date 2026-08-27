@@ -2550,12 +2550,18 @@
                          sits off-centre inside a circle no matter what margin
                          is nudged at it; these are centred by layout and are
                          exact at any size. -->
-                    <Border Width="20" Height="20" CornerRadius="10" BorderThickness="1.4" BorderBrush="#8FA6BD">
-                      <Panel>
-                        <Rectangle Width="9" Height="1.6" RadiusX="0.8" RadiusY="0.8" Fill="#8FA6BD" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        <Rectangle Width="1.6" Height="9" RadiusX="0.8" RadiusY="0.8" Fill="#8FA6BD" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                      </Panel>
-                    </Border>
+                    <!-- Ring and bars are SIBLINGS in one 20x20 Panel, not a
+                         Border wrapping its content. A Border lays its child
+                         out inside the stroke, so the bars would centre in a
+                         17.2px box offset by 1.4px rather than in the circle
+                         itself - close enough to look like a rendering bug and
+                         impossible to fix by nudging margins. Here all three
+                         fill the same box and centre independently. -->
+                    <Panel Width="20" Height="20" VerticalAlignment="Center">
+                      <Ellipse Width="20" Height="20" Stroke="#8FA6BD" StrokeThickness="1.4" />
+                      <Rectangle Width="9" Height="1.6" RadiusX="0.8" RadiusY="0.8" Fill="#8FA6BD" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                      <Rectangle Width="1.6" Height="9" RadiusX="0.8" RadiusY="0.8" Fill="#8FA6BD" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Panel>
                     <TextBlock Text="Add Setting" Foreground="#B8C7D8" FontWeight="SemiBold" VerticalAlignment="Center" />
                   </StackPanel>
                   <Button.Flyout>
