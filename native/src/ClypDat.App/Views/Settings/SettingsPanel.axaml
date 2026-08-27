@@ -48,22 +48,25 @@
 
       <!-- Reserved outside SettingsScrollViewer: warning remains fixed at
            panel top while Custom Game Settings content scrolls underneath. -->
-      <Border Grid.Column="1" Grid.Row="0"
+      <Border Grid.Column="1" Grid.Row="0" Background="{StaticResource PanelBgBrush}"
               IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Custom Game Settings}">
-        <Border Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource DangerBrush}" BorderThickness="1" Padding="22,14"
+        <Border Classes="settingsNotice" Margin="36,16,36,4"
                 IsVisible="{Binding SelectedCustomGameTab.QualityWarningVisible}">
-          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="20">
-            <StackPanel Spacing="4" VerticalAlignment="Center">
-              <TextBlock FontSize="12" TextWrapping="Wrap">
-                <Run Text="Performance note: " Foreground="{StaticResource DangerBrush}" FontWeight="Bold" />
-                <Run Text="{Binding SelectedCustomGameTab.QualityWarningSummary}" Foreground="{StaticResource TextBrush}" />
+          <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
+            <PathIcon Classes="cautionIcon" VerticalAlignment="Center" Margin="0" />
+            <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
+              <TextBlock FontSize="12.5" TextWrapping="Wrap">
+                <Run Text="Performance note: " Foreground="{StaticResource CautionBrush}" FontWeight="SemiBold" />
+                <Run Text="{Binding SelectedCustomGameTab.QualityWarningSummary}" Foreground="{StaticResource TextStrongBrush}" />
               </TextBlock>
-              <TextBlock Text="Higher quality can increase encoder load, RAM use, and dropped frames during gameplay." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
+              <TextBlock Classes="settingsRowDescSm" Text="Higher quality can increase encoder load, RAM use, and dropped frames during gameplay." />
             </StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-              <Button Content="Fix Now" Click="FixCustomGameQualityWarningButton_OnClick" />
+            <!-- One recommended action, one dismissal, one opt-out - three
+                 identical buttons made the user read all three to find it. -->
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+              <Button Classes="primaryButton" Content="Fix Now" Click="FixCustomGameQualityWarningButton_OnClick" />
               <Button Content="Acknowledge" Click="AcknowledgeCustomGameQualityWarningButton_OnClick" />
-              <Button Content="Don't Show Again" Click="HideCustomGameQualityWarningButton_OnClick" />
+              <Button Classes="linkButton" Content="Don't Show Again" Click="HideCustomGameQualityWarningButton_OnClick" />
             </StackPanel>
           </Grid>
         </Border>

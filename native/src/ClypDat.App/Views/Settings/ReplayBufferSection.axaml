@@ -92,17 +92,20 @@
                   Click="ApplyReplayBitrateRecommendationButton_OnClick" />
         </StackPanel>
 
-        <Border Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1" CornerRadius="8" Padding="14,11" IsVisible="{Binding ReplayQualityAboveDefault}">
-          <StackPanel Spacing="4">
+        <Border Classes="settingsNotice" IsVisible="{Binding ReplayQualityAboveDefault}">
+          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+            <PathIcon Classes="cautionIcon" />
+            <StackPanel Grid.Column="1" Spacing="4">
             <TextBlock FontSize="12" TextWrapping="Wrap">
-              <Run Text="Performance note: " Foreground="{StaticResource DangerBrush}" FontWeight="Bold" />
-              <Run Text="{Binding ReplayQualityWarningSummary}" Foreground="{StaticResource TextBrush}" />
+              <Run Text="Performance note: " Foreground="{StaticResource CautionBrush}" FontWeight="SemiBold" />
+              <Run Text="{Binding ReplayQualityWarningSummary}" Foreground="{StaticResource TextStrongBrush}" />
             </TextBlock>
             <TextBlock Text="• Check capture headroom during gameplay; higher quality increases encoder workload." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
             <TextBlock Text="{Binding ReplayQualityWarning}" Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
             <TextBlock Text="• Encoder overload is monitored, but your selected FPS is never lowered automatically." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
             <TextBlock Text="• Stable output usually matters more than maximum resolution." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
-          </StackPanel>
+            </StackPanel>
+          </Grid>
         </Border>
 
         <Grid ColumnDefinitions="150,150" ColumnSpacing="12" HorizontalAlignment="Left">
@@ -122,14 +125,17 @@
         <StackPanel Spacing="2">
           <TextBlock Text="{Binding ReplayEncoderModeStatus}" Foreground="{StaticResource TextSubtleBrush}" FontSize="10" TextWrapping="Wrap" />
           <TextBlock Text="{Binding ReplayVideoCodecStatus}" Foreground="{StaticResource TextSubtleBrush}" FontSize="10" TextWrapping="Wrap" />
-          <Border Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1" CornerRadius="8" Padding="14,11" IsVisible="{Binding CpuEncoderHardwareWarningVisible}">
-            <StackPanel Spacing="4">
-              <TextBlock FontSize="12" TextWrapping="Wrap">
-                <Run Text="Performance note: " Foreground="{StaticResource DangerBrush}" FontWeight="Bold" />
-                <Run Text="{Binding CpuEncoderHardwareWarning}" Foreground="{StaticResource TextBrush}" />
-              </TextBlock>
-              <TextBlock Text="• CPU mode is best reserved for troubleshooting or when GPU encoding is unavailable." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
-            </StackPanel>
+          <Border Classes="settingsNotice" Margin="0,6,0,0" IsVisible="{Binding CpuEncoderHardwareWarningVisible}">
+            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+              <PathIcon Classes="cautionIcon" />
+              <StackPanel Grid.Column="1" Spacing="4">
+                <TextBlock FontSize="12" TextWrapping="Wrap">
+                  <Run Text="Performance note: " Foreground="{StaticResource CautionBrush}" FontWeight="SemiBold" />
+                  <Run Text="{Binding CpuEncoderHardwareWarning}" Foreground="{StaticResource TextStrongBrush}" />
+                </TextBlock>
+                <TextBlock Text="• CPU mode is best reserved for troubleshooting or when GPU encoding is unavailable." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
+              </StackPanel>
+            </Grid>
           </Border>
           <TextBlock Text="Automatic encoder profile: chooses the fastest stable configuration for the available NVIDIA, AMD, Intel, or CPU encoder." Foreground="{StaticResource TextSubtleBrush}" FontSize="10" TextWrapping="Wrap" />
           <TextBlock Text="{Binding ReplayFrameTimingMetrics}" Foreground="{StaticResource TextSubtleBrush}" FontSize="10" TextWrapping="Wrap" IsVisible="{Binding ReplayFrameTimingMetrics, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />

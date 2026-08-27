@@ -1945,6 +1945,23 @@
     <Setter Property="LineHeight" Value="16" />
   </Style>
 
+  <!-- Performance notes and other inline cautions. An amber left bar rather
+       than a full red outline: these are advisory, and a red rectangle drawn
+       around the whole width read as a validation error on a form the user
+       had filled in correctly. Raised a step above both the panel and the
+       cards so a sticky one still separates from content scrolling under it. -->
+  <Style Selector="Border.settingsNotice">
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource CautionBrush}" />
+    <Setter Property="BorderThickness" Value="3,0,0,0" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="16,13" />
+  </Style>
+  <Style Selector="Border.settingsNotice PathIcon.cautionIcon">
+    <Setter Property="Width" Value="15" />
+    <Setter Property="Height" Value="15" />
+  </Style>
+
   <!-- Hairline between two rows of the same card. -->
   <Style Selector="Border.settingsDivider">
     <Setter Property="Height" Value="1" />
