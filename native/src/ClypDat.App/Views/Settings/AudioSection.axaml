@@ -19,13 +19,13 @@
               <TextBlock Classes="settingsSectionDesc" Text="Choose the Windows mixer apps to capture. Every enabled app is saved as its own editable track." />
     </StackPanel>
 
-    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording Audio|Audio Processes}">
+    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording Audio|Audio Tracks}">
       <StackPanel Spacing="18">
-        <StackPanel Spacing="10" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording Audio|Audio Processes}">
+        <StackPanel Spacing="10" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording Audio|Audio Tracks}">
           <Grid ColumnDefinitions="*,Auto">
             <StackPanel Spacing="2">
               <TextBlock Text="Recording Audio" Foreground="{StaticResource TextStrongBrush}" FontWeight="Bold" FontSize="16" />
-              <TextBlock Text="Audio Processes" Foreground="{StaticResource TextSubtleBrush}" FontSize="11" FontWeight="Bold" />
+              <TextBlock Text="Audio Tracks" Foreground="{StaticResource TextSubtleBrush}" FontSize="11" FontWeight="Bold" />
             </StackPanel>
             <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" VerticalAlignment="Center" />
           </Grid>

@@ -504,9 +504,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // disagreed by one bitrate would be near-impossible to spot.
     internal static readonly IReadOnlyList<ReplayQualityPreset> QualityPresets = new ReplayQualityPreset[]
     {
-        new("Low Quality", "Efficient capture for lighter systems", "480p · 30 FPS · 5 Mbps", 480, 30, 5),
-        new("Standard", "Balanced detail and performance", "720p · 60 FPS · 10 Mbps", 720, 60, 10),
-        new("High Quality", "Sharper video at higher resource cost", "1080p · 60 FPS · 20 Mbps", 1080, 60, 20),
+        new("Low", "Efficient capture for lighter systems", "480p · 30 FPS · 5 Mbps", 480, 30, 5),
+        new("Balanced", "Balanced detail and performance", "720p · 60 FPS · 10 Mbps", 720, 60, 10),
+        new("High", "Sharper video at higher resource cost", "1080p · 60 FPS · 20 Mbps", 1080, 60, 20),
         new("Custom", "Set each recording option yourself", "Choose resolution, FPS, and bitrate", -1, 0, 0)
     };
 

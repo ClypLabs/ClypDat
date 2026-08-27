@@ -130,7 +130,7 @@
           </RadioButton>
           <RadioButton GroupName="CustomGameRecordingMode" IsChecked="{Binding IsFullSessionCapture}">
             <StackPanel Spacing="2" Margin="4,0,0,0">
-              <TextBlock Text="Automatically record entire game session" Foreground="{StaticResource TextStrongBrush}" FontWeight="SemiBold" />
+              <TextBlock Text="Record the whole session" Foreground="{StaticResource TextStrongBrush}" FontWeight="SemiBold" />
               <TextBlock Classes="settingsRowDescSm" Text="Starts recording as soon as this game opens. Your hotkey still saves clips." />
             </StackPanel>
           </RadioButton>
@@ -242,7 +242,7 @@
           <Grid ColumnDefinitions="*,Auto">
             <StackPanel Spacing="2">
               <TextBlock Classes="settingsRowTitle" Text="Recording Audio" />
-              <TextBlock Text="Audio Processes" Foreground="{StaticResource TextSubtleBrush}" FontSize="11" FontWeight="Bold" />
+              <TextBlock Text="Audio Tracks" Foreground="{StaticResource TextSubtleBrush}" FontSize="11" FontWeight="Bold" />
             </StackPanel>
             <Button Grid.Column="1" Classes="linkButton" Content="Remove" Tag="Audio" Click="RemoveCustomGameGroupButton_OnClick" VerticalAlignment="Center" />
           </Grid>
