@@ -5911,7 +5911,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         else if (ActiveGameDetection.IsDetected && !string.IsNullOrWhiteSpace(ActiveGameDetection.DisplayName))
         {
             var armed = Settings.ReplayBufferEnabled && IsRecordingEnabledForActiveGame;
-            kind = armed ? "recording" : "playing";
+            // Game name is part of the kind, so the elapsed timer Discord shows
+            // is "how long on THIS game" rather than "how long recording
+            // anything". Without it, alt-tabbing from one game straight into
+            // another kept the first game's start time and the timer read as a
+            // session that never happened.
+            kind = armed
+                ? $"recording:{ActiveGameDetection.DisplayName}"
+                : $"playing:{ActiveGameDetection.DisplayName}";
             details = armed
                 ? $"Recording {ActiveGameDetection.DisplayName}"
                 : $"Playing {ActiveGameDetection.DisplayName}";
