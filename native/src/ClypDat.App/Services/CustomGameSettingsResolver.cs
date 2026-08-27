@@ -55,7 +55,26 @@ internal static class CustomGameSettingsResolver
     public static CustomGameProfile? Find(AppSettings settings, string? detectionKey)
     {
         if (string.IsNullOrWhiteSpace(detectionKey)) return null;
-        return settings.CustomGameSettings.TryGetValue(detectionKey, out var profile) ? profile : null;
+        if (settings.CustomGameSettings.TryGetValue(detectionKey, out var profile)) return profile;
+
+        // One game can be known under more than one detection key - Rainbow Six
+        // is both "steam-359550" and "RainbowSix.exe" in a real settings file,
+        // and which one a session reports depends on how it was matched that
+        // launch. The profile is stored against whichever key the picker
+        // offered, so a direct miss falls back to "same game by name", or the
+        // override would silently do nothing on exactly the launches that
+        // matched the other way.
+        var name = settings.GameCaptureOverrides
+            .FirstOrDefault(game => string.Equals(game.ExecutableName, detectionKey, StringComparison.OrdinalIgnoreCase))
+            ?.DisplayName;
+        if (string.IsNullOrWhiteSpace(name)) return null;
+
+        var alias = settings.GameCaptureOverrides
+            .Where(game => string.Equals(game.DisplayName, name, StringComparison.OrdinalIgnoreCase))
+            .Select(game => game.ExecutableName)
+            .FirstOrDefault(key => settings.CustomGameSettings.ContainsKey(key));
+
+        return alias is not null ? settings.CustomGameSettings[alias] : null;
     }
 
     /// <summary>
