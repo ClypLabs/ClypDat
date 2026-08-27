@@ -346,6 +346,11 @@ public sealed partial class MainWindow : Window
                 {
                     if (e.PropertyName == nameof(MainWindowViewModel.AutoClippingEnabled)) UpdateAutoClipStates();
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayBufferEnabled)) _ = ApplyReplayBufferEnabledAsync();
+                    if (e.PropertyName == nameof(MainWindowViewModel.ReplayAdaptiveFrameRateEnabled))
+                    {
+                        _encoderTuning.SetEnabled(ViewModel.ReplayAdaptiveFrameRateEnabled);
+                        ScheduleReplayRestart();
+                    }
                     if (e.PropertyName is nameof(MainWindowViewModel.SelectedReplayCaptureSource)
                         or nameof(MainWindowViewModel.SelectedDesktopMonitor)
                         or nameof(MainWindowViewModel.ReplayDesktopCaptureCursor)
@@ -2735,7 +2740,7 @@ public sealed partial class MainWindow : Window
             _activeReplayConfigSnapshot = activeConfig;
             _activeReplayTargetIdentity = ReplayTargetIdentity(activeConfig);
             _encoderTuning.BeginSession(activeConfig.EncoderProfile, activeConfig.FrameRate, activeConfig.MaxHeight,
-                enabled: true);
+                activeConfig.AdaptiveFrameRateProtectionEnabled);
             // Fresh session, fresh list - but only for a GENUINELY new session
             // (a game was just detected). A quality restart is left open (not
             // cleared here either) so a Full Session VOD that finalizes minutes

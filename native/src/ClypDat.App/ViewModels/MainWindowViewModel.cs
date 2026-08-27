@@ -6493,7 +6493,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             MicrophoneVolumePercent: effective.MicrophoneVolumePercent,
             MicrophoneChannelMode: Settings.MicrophoneChannelMode,
             MicrophoneNoiseSuppressionEnabled: effective.MicrophoneNoiseSuppressionEnabled,
-            MicrophoneNoiseGateThresholdDb: effective.MicrophoneNoiseGateThresholdDb);
+            MicrophoneNoiseGateThresholdDb: effective.MicrophoneNoiseGateThresholdDb,
+            AdaptiveFrameRateProtectionEnabled: Settings.ReplayAdaptiveFrameRateEnabled);
     }
 
     public void SetDuration(TimeSpan duration)

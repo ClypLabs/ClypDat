@@ -182,6 +182,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private int _requestedFrameRate;
     private int _activeFrameRate;
     private int _configuredFrameRate;
+    private int _frameRateProtectionEnabled;
     private int _frameRateProtectionActive;
     private DateTime? _lastDegradedUtc;
     private ReplayCaptureHealth _health = ReplayCaptureHealth.Unknown("Native");
@@ -267,6 +268,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         Volatile.Write(ref _configuredFrameRate, configuredFrameRate);
         Volatile.Write(ref _requestedFrameRate, configuredFrameRate);
         Volatile.Write(ref _activeFrameRate, configuredFrameRate);
+        Volatile.Write(ref _frameRateProtectionEnabled, config.AdaptiveFrameRateProtectionEnabled ? 1 : 0);
         Volatile.Write(ref _frameRateProtectionActive, 0);
         Duration = TimeSpan.FromSeconds(Math.Clamp(config.DurationSeconds, 30, 1200));
 
@@ -1506,7 +1508,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var cleanForRecovery = hasCapturedRealFrame && !saveInProgress && !isStalled && !transportDegraded &&
                         !overloaded && outputFrameRate >= activeFrameRate * ReplayEncoderQualificationPolicy.TargetThreshold &&
                         encodeQueue.Count * 4 < encodeQueueCapacity;
-                    if (Volatile.Read(ref _frameRateProtectionActive) != 0 && cleanForRecovery)
+                    if (Volatile.Read(ref _frameRateProtectionEnabled) != 0 &&
+                        Volatile.Read(ref _frameRateProtectionActive) != 0 && cleanForRecovery)
                     {
                         cleanRecoverySinceUtc ??= DateTime.UtcNow;
                         if (DateTime.UtcNow - cleanRecoverySinceUtc >= TimeSpan.FromMinutes(10))
@@ -1532,7 +1535,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // working encoder mid-ring.  Only investigate another
                         // input path after the current path also fails at the
                         // safer rate.
-                        if (NextLowerReplayFrameRate(activeFrameRate) < activeFrameRate)
+                        if (Volatile.Read(ref _frameRateProtectionEnabled) != 0 &&
+                            NextLowerReplayFrameRate(activeFrameRate) < activeFrameRate)
                         {
                             RequestAutomaticLowerFrameRate($"{consecutiveOverloadWindows} overloaded diagnostic windows");
                             consecutiveOverloadWindows = 0;
@@ -1635,7 +1639,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         FrameRateMode = ReplayFrameTimingPolicy.Normalize(config.FrameRateMode),
                         ConfiguredFrameRate = Volatile.Read(ref _configuredFrameRate),
                         EncoderInputPath = hardwareFramesActive ? "D3D11 zero-copy" : "System memory",
-                        FrameRateProtectionActive = Volatile.Read(ref _frameRateProtectionActive) != 0,
+                        FrameRateProtectionActive = Volatile.Read(ref _frameRateProtectionEnabled) != 0 &&
+                            Volatile.Read(ref _frameRateProtectionActive) != 0,
                         // See ReplayCaptureHealth.SaveInProgress. A save backs
                         // the queue up for a second or two by design; it is not
                         // evidence the settings are unsustainable.
@@ -3142,7 +3147,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 // queue is deliberately small to keep latency bounded, so at
                 // 90 FPS a full queue is already too late to wait for the next
                 // one-second diagnostic window.
-                if (hasCapturedRealFrame && !isPaused && !isStalled &&
+                if (Volatile.Read(ref _frameRateProtectionEnabled) != 0 && hasCapturedRealFrame && !isPaused && !isStalled &&
                     encodeQueue!.Count * 4 >= encodeQueueCapacity * 3)
                 {
                     RequestAutomaticLowerFrameRate($"encode queue {encodeQueue.Count}/{encodeQueueCapacity}");
