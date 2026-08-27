@@ -5579,7 +5579,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         "Capture",
         "Quality",
         "Audio",
-        "Game Settings",
         "Startup"
     };
 

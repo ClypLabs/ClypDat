@@ -3425,7 +3425,7 @@
             PointerPressed="OnboardingOverlay_OnPointerPressed">
       <!-- Fixed dimensions keep Back/Next in one place. Long step content scrolls
            inside the body instead of resizing the dialog and moving its controls. -->
-      <Border Width="640" Height="680" CornerRadius="12" Background="#111920" BorderBrush="#232F3A" BorderThickness="1"
+      <Border Width="640" Height="560" CornerRadius="12" Background="#111920" BorderBrush="#232F3A" BorderThickness="1"
               ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center">
         <DockPanel Margin="1">
           <Border DockPanel.Dock="Top" Background="#0C1319" CornerRadius="11,11,0,0">
@@ -3451,7 +3451,6 @@
               <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Capture}" />
               <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Quality}" />
               <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Audio}" />
-              <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Game Settings}" />
               <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Startup}" />
               </StackPanel>
             </StackPanel>
@@ -3520,7 +3519,7 @@
                       </ComboBox.ItemTemplate>
                     </ComboBox>
                   </StackPanel>
-                  <Grid ColumnDefinitions="*,120" ColumnSpacing="12">
+                  <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
                     <StackPanel Spacing="4">
                       <TextBlock Text="Resolution" Foreground="#B8C7D8" FontWeight="Bold" FontSize="14" />
                       <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}">
@@ -3552,27 +3551,9 @@
                   <StackPanel Spacing="3">
                     <TextBlock Text="Separate tracks stay flexible" Foreground="#B8F1DC" FontSize="13" FontWeight="Bold" />
                     <TextBlock Text="Enable Game Audio, Microphone, Spotify, Discord or other apps independently in Settings → Audio." Foreground="#A1CDBE" FontSize="11" TextWrapping="Wrap" />
+                    <TextBlock Text="Custom Game Settings and Game Audio exclusions are in Settings → Capture when you need per-game control." Foreground="#A1CDBE" FontSize="11" TextWrapping="Wrap" />
                   </StackPanel>
                 </Border>
-                </StackPanel>
-                </Border>
-              </StackPanel>
-
-              <StackPanel Spacing="16" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Settings}">
-                <TextBlock Text="Make each game yours" Foreground="#EDF4FB" FontWeight="Bold" FontSize="18" />
-                <TextBlock Text="ClypDat can give detected games their own recording behavior without changing your everyday defaults." Foreground="#B9C6D4" FontSize="13" TextWrapping="Wrap" />
-
-                <Border Classes="onboardingSettingCard">
-                <StackPanel Spacing="14">
-                  <StackPanel Spacing="3">
-                    <TextBlock Text="Custom Game Settings" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
-                    <TextBlock Text="Set replay, full-session, or off per game. Give a title its own replay length, quality and audio tracks." Foreground="#93A6B8" FontSize="12" TextWrapping="Wrap" />
-                  </StackPanel>
-                  <StackPanel Spacing="3">
-                    <TextBlock Text="Game Audio exclusions" Foreground="#D2DEEC" FontWeight="Bold" FontSize="15" />
-                    <TextBlock Text="Keep music players and notifications out of Game Audio. Selected app tracks are excluded automatically." Foreground="#93A6B8" FontSize="12" TextWrapping="Wrap" />
-                  </StackPanel>
-                  <TextBlock Text="Find both in Settings → Capture after setup." Foreground="#6B7C8C" FontSize="11" />
                 </StackPanel>
                 </Border>
               </StackPanel>
