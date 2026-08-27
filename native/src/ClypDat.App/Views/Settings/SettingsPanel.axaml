@@ -50,20 +50,22 @@
            panel top while Custom Game Settings content scrolls underneath. -->
       <Border Grid.Column="1" Grid.Row="0"
               IsVisible="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Custom Game Settings}">
-        <Border Margin="36,12,36,0" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource DangerBrush}" BorderThickness="1" CornerRadius="8" Padding="14,11"
+        <Border Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource DangerBrush}" BorderThickness="1" Padding="22,14"
                 IsVisible="{Binding SelectedCustomGameTab.QualityWarningVisible}">
-          <StackPanel Spacing="8">
-            <TextBlock FontSize="12" TextWrapping="Wrap">
-              <Run Text="Performance note: " Foreground="{StaticResource DangerBrush}" FontWeight="Bold" />
-              <Run Text="{Binding SelectedCustomGameTab.QualityWarningSummary}" Foreground="{StaticResource TextBrush}" />
-            </TextBlock>
-            <TextBlock Text="Higher quality can increase encoder load, RAM use, and dropped frames during gameplay." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
-            <WrapPanel Orientation="Horizontal">
-              <Button Content="Fix Now" Margin="0,0,8,0" Click="FixCustomGameQualityWarningButton_OnClick" />
-              <Button Content="Acknowledge" Margin="0,0,8,0" Click="AcknowledgeCustomGameQualityWarningButton_OnClick" />
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="20">
+            <StackPanel Spacing="4" VerticalAlignment="Center">
+              <TextBlock FontSize="12" TextWrapping="Wrap">
+                <Run Text="Performance note: " Foreground="{StaticResource DangerBrush}" FontWeight="Bold" />
+                <Run Text="{Binding SelectedCustomGameTab.QualityWarningSummary}" Foreground="{StaticResource TextBrush}" />
+              </TextBlock>
+              <TextBlock Text="Higher quality can increase encoder load, RAM use, and dropped frames during gameplay." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+              <Button Content="Fix Now" Click="FixCustomGameQualityWarningButton_OnClick" />
+              <Button Content="Acknowledge" Click="AcknowledgeCustomGameQualityWarningButton_OnClick" />
               <Button Content="Don't Show Again" Click="HideCustomGameQualityWarningButton_OnClick" />
-            </WrapPanel>
-          </StackPanel>
+            </StackPanel>
+          </Grid>
         </Border>
       </Border>
 
