@@ -48,13 +48,11 @@ public sealed class PlaybackSession : IDisposable
     // Frozen-picture detection for slow rates - see MonitorSlowRateStall.
     private static readonly TimeSpan SlowRateSampleInterval = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan SlowRateStallThreshold = TimeSpan.FromMilliseconds(350);
-    private static readonly TimeSpan SlowRateRecoveryInterval = TimeSpan.FromSeconds(1);
-    private const int MaximumSlowRateRecoveryAttempts = 3;
+    private static readonly TimeSpan SlowRateReportInterval = TimeSpan.FromSeconds(1);
     private long _slowRateSampleTimestamp;
     private long _slowRateProgressTimestamp;
-    private long _slowRateRecoveryTimestamp;
+    private long _slowRateReportTimestamp;
     private long _slowRateDisplayedPictures = -1;
-    private int _slowRateRecoveryAttempts;
     private bool _slowRateStatsWarned;
     private TimeSpan _lastRequestedPosition = TimeSpan.Zero;
     private readonly SemaphoreSlim _seekLock = new(1, 1);
@@ -816,11 +814,31 @@ public sealed class PlaybackSession : IDisposable
     /// adds latency the A/V drift corrector then has to argue with. The export
     /// is pitch-preserving either way - ffmpeg's atempo, see
     /// ClipRenderFilters.BuildAudioSpeedFilter.
+    ///
+    /// A rate change on a ROLLING transport then re-lands it at the position it
+    /// was already at, which is the one part of this that is not free. It is
+    /// there because libvlc's live rate change is measurably broken in both
+    /// directions, and three commits' worth of downstream compensation could not
+    /// hide it. Slowing down leaves the pictures already queued dated under the
+    /// old rate: the vout burns through them and then presents nothing for
+    /// 500-800ms while the pipeline refills on the new schedule (measured -
+    /// Media.Statistics.DisplayedPictures sat flat while media time advanced
+    /// perfectly linearly). Speeding up jumps libvlc's own clock forward about a
+    /// second: at a 0.25x -> 1.5x switch the audio device clock read 36.46s, the
+    /// arithmetic said 36.39s, and libvlc said 37.44s - so the A/V corrector,
+    /// which believes libvlc, yanked the audio a second forward. Re-landing
+    /// flushes the picture queue and makes libvlc re-derive its clock from a
+    /// known position, and the seek path restarts and anchors the audio there
+    /// itself, so there is nothing left for the drift corrector to chase.
     /// </remarks>
     public bool SetPlaybackRate(double rate)
     {
         var normalized = ClipRenderFilters.NormalizeSpeed(rate);
         if (Math.Abs(_playbackRate - normalized) < 0.0001) return false;
+        // Read the position BEFORE the rate lands. VideoPlayer.Time is not
+        // trustworthy across a rate change - see the re-land below.
+        var resumeAt = Position;
+        var wasRolling = _shouldPlay && VideoPlayer.IsPlaying && !_isSeeking;
         _playbackRate = normalized;
         Interlocked.Increment(ref _rateVersion);
         try
@@ -839,32 +857,42 @@ public sealed class PlaybackSession : IDisposable
         // reads again; otherwise it blends frames from two playback speeds.
         _rateStage?.SetRate(normalized);
 
-        ReanchorAudioClock();
-
-        AppLog.Debug($"Editor playback rate: {normalized:0.###}x.");
+        AppLog.Debug($"Editor playback rate: {normalized:0.###}x, resumeAt={resumeAt.TotalSeconds:0.###}s, rolling={wasRolling}.");
         ResetSlowRateMonitor();
+
+        if (wasRolling)
+        {
+            // Re-land the transport at the position it was already at. Rapid
+            // clicking is handled for free: SeekAsync bumps _seekVersion, so an
+            // older queued seek supersedes itself exactly as it does when the
+            // user drags the timeline.
+            _ = SeekAsync(resumeAt, resumePlayback: true);
+        }
+        else
+        {
+            ReanchorAudioClock();
+        }
         return true;
     }
 
     /// <summary>
-    /// Unsticks the picture when libvlc accepts a slow rate but leaves its vout
-    /// parked on one frame. Call it from the editor's playback tick; it
-    /// throttles itself and does nothing at 1x or faster.
+    /// Reports a frozen picture at slow rates. Call it from the editor's
+    /// playback tick; it throttles itself and does nothing at 1x or faster.
     /// </summary>
     /// <remarks>
-    /// The previous watchdog decided "stalled" from Position - i.e.
-    /// VideoPlayer.Time, the INPUT clock. That clock keeps advancing while the
-    /// vout sits on the same picture, so its "has it moved 100ms" test passed
-    /// on every single call and the recovery never once ran (no
-    /// "slow-rate recovery" line was ever written to a log, across hundreds of
-    /// 0.25x/0.5x switches). The cure was right, the detector was measuring the
-    /// one thing that does not stall.
+    /// Deliberately does NOT touch the transport. It used to pause/resume to
+    /// unstick the vout, which meant its own log lines could not be told apart
+    /// from the stalls that pause/resume caused - and the stall it was firing on
+    /// was a consequence of the live rate change SetPlaybackRate no longer does.
     ///
-    /// DisplayedPictures is the vout's own counter of frames it actually put on
-    /// screen, so it stalls exactly when the user sees a frozen picture and
-    /// never when they do not. DecodedVideo rides along in the log line: if a
-    /// freeze ever survives this, whether decode stalled too is what separates
-    /// a hardware-decode surface starvation from a vout clock stall.
+    /// It stays as an instrument. DisplayedPictures is the vout's own count of
+    /// frames it put on screen, so it goes flat exactly when the user sees a
+    /// frozen picture and never when they do not, and DecodedVideo beside it
+    /// separates a decode starvation (hardware surfaces - clips take
+    /// :avcodec-hw=any) from a vout that stopped presenting what it already has.
+    /// An earlier watchdog measured Position instead, which is the INPUT clock:
+    /// it keeps advancing through a frozen picture, so that detector never fired
+    /// once across hundreds of 0.25x switches.
     /// </remarks>
     public void MonitorSlowRateStall()
     {
@@ -900,7 +928,6 @@ public sealed class PlaybackSession : IDisposable
         {
             _slowRateDisplayedPictures = stats.Displayed;
             _slowRateProgressTimestamp = now;
-            _slowRateRecoveryAttempts = 0;
             return;
         }
 
@@ -912,48 +939,25 @@ public sealed class PlaybackSession : IDisposable
 
         var frozenFor = Stopwatch.GetElapsedTime(_slowRateProgressTimestamp, now);
         if (frozenFor < SlowRateStallThreshold) return;
-        if (_slowRateRecoveryTimestamp != 0 &&
-            Stopwatch.GetElapsedTime(_slowRateRecoveryTimestamp, now) < SlowRateRecoveryInterval) return;
-        // Three rebases that all failed to restart the picture means this is not
-        // the parked-clock case, and repeating it just pauses and resumes a dead
-        // vout forever. Rearmed by the next rate change, seek or play.
-        if (_slowRateRecoveryAttempts >= MaximumSlowRateRecoveryAttempts) return;
+        // One line a second at most: a real stall lasts, and repeating it on
+        // every sample would bury the rest of the editor's trace.
+        if (_slowRateReportTimestamp != 0 &&
+            Stopwatch.GetElapsedTime(_slowRateReportTimestamp, now) < SlowRateReportInterval) return;
+        _slowRateReportTimestamp = now;
 
-        _slowRateRecoveryAttempts++;
-        _slowRateRecoveryTimestamp = now;
-        var rate = _playbackRate;
-        try
-        {
-            lock (_transportLock)
-            {
-                if (_disposed || !_shouldPlay || _isSeeking || IsEnded) return;
-                if (!VideoPlayer.IsPlaying) VideoPlayer.Play();
-                VideoPlayer.SetPause(true);
-                VideoPlayer.SetPause(false);
-            }
-
-            ReanchorAudioClock();
-            var level = _slowRateRecoveryAttempts >= MaximumSlowRateRecoveryAttempts ? "final" : "retry";
-            AppLog.Debug(
-                $"Editor slow-rate recovery ({level}): rate={rate:0.###}x, frozenMs={frozenFor.TotalMilliseconds:0}, " +
-                $"displayed={stats.Displayed}, decoded={stats.Decoded}, lost={stats.Lost}, pos={Position.TotalSeconds:0.###}s, attempt={_slowRateRecoveryAttempts}.");
-        }
-        catch (Exception error)
-        {
-            AppLog.Error($"Editor slow-rate recovery failed: {rate:0.###}x", error);
-        }
+        AppLog.Debug(
+            $"Editor slow-rate picture stall: rate={_playbackRate:0.###}x, frozenMs={frozenFor.TotalMilliseconds:0}, " +
+            $"displayed={stats.Displayed}, decoded={stats.Decoded}, lost={stats.Lost}, pos={Position.TotalSeconds:0.###}s.");
     }
 
     // Anything that legitimately restarts the picture - a rate change, a seek,
-    // play/pause - invalidates both the frozen-frame baseline and the attempt
-    // budget.
+    // play/pause - invalidates the frozen-frame baseline.
     private void ResetSlowRateMonitor()
     {
         _slowRateSampleTimestamp = 0;
         _slowRateProgressTimestamp = 0;
-        _slowRateRecoveryTimestamp = 0;
+        _slowRateReportTimestamp = 0;
         _slowRateDisplayedPictures = -1;
-        _slowRateRecoveryAttempts = 0;
     }
 
     private VideoPictureStats? ReadVideoStats()

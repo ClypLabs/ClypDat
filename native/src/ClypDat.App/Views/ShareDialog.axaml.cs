@@ -553,6 +553,13 @@ public partial class ShareDialog : Window
 
         SharePreviewBox.Width = boxWidth;
         SharePreviewBox.Height = boxHeight;
+
+        // The progress panel sits inside the box, so a 9:16 or 4:5 box has to
+        // pull the bar in with it rather than let it run over the outline.
+        var barWidth = Math.Clamp(boxWidth - 48, 72, 160);
+        ShareProgressBar.Width = barWidth;
+        ShareProgressPercentText.MaxWidth = Math.Max(barWidth, boxWidth - 24);
+        ShareProgressEtaText.MaxWidth = Math.Max(barWidth, boxWidth - 24);
     }
 
     private static string FormatShareDuration(TimeSpan duration) =>
