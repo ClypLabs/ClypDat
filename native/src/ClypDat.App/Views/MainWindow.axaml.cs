@@ -6571,7 +6571,8 @@ public sealed partial class MainWindow : Window
     private void ApplyEditorEffectPreview()
     {
         if (_playback is not { } playback || ViewModel is not { } viewModel) return;
-        playback.SetPlaybackRate(viewModel.ClipSpeed);
+        var rateChanged = playback.SetPlaybackRate(viewModel.ClipSpeed);
+        if (viewModel.IsPlaying && rateChanged) RebasePlayheadClock(viewModel.CurrentTime);
         ApplyEditorCropPreview();
     }
 
@@ -9491,10 +9492,20 @@ public sealed partial class MainWindow : Window
         _playheadClock.Reset();
     }
 
+    // Rate changes preserve the current media position but start a new elapsed
+    // interval. Unlike StartPlayheadClock, this must not change trim-boundary
+    // intent for the active play session.
+    private void RebasePlayheadClock(TimeSpan time)
+    {
+        _playheadBaseTime = time < TimeSpan.Zero ? TimeSpan.Zero : time;
+        _playheadClock.Restart();
+    }
+
     private TimeSpan SmoothPlaybackPosition()
     {
         if (ViewModel is null) return _playheadBaseTime;
-        var position = _playheadBaseTime + _playheadClock.Elapsed;
+        var position = _playheadBaseTime + TimeSpan.FromTicks(
+            (long)(_playheadClock.Elapsed.Ticks * ViewModel.ClipSpeed));
         if (ViewModel.Duration > TimeSpan.Zero && position > ViewModel.Duration) return ViewModel.Duration;
         return position;
     }

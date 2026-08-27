@@ -3795,7 +3795,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set
         {
             if (!SetProperty(ref _currentTime, ClampTime(value))) return;
-            OnTimelineChanged();
+            OnTimelinePositionChanged();
         }
     }
 
@@ -3805,7 +3805,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         private set
         {
             if (!SetProperty(ref _duration, value < TimeSpan.Zero ? TimeSpan.Zero : value)) return;
-            OnTimelineChanged();
+            OnTimelineRangeChanged();
         }
     }
 
@@ -3817,7 +3817,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var clamped = ClampTime(value);
             if (TrimEnd > TimeSpan.Zero && clamped > TrimEnd) clamped = TrimEnd;
             if (!SetProperty(ref _trimStart, clamped)) return;
-            OnTimelineChanged();
+            OnTimelineRangeChanged();
         }
     }
 
@@ -3829,7 +3829,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var clamped = ClampTime(value);
             if (clamped < TrimStart) clamped = TrimStart;
             if (!SetProperty(ref _trimEnd, clamped)) return;
-            OnTimelineChanged();
+            OnTimelineRangeChanged();
         }
     }
 
@@ -9348,21 +9348,28 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return Duration > TimeSpan.Zero && time > Duration ? Duration : time;
     }
 
-    private void OnTimelineChanged()
+    private void OnTimelinePositionChanged()
     {
         OnPropertyChanged(nameof(CurrentTimeLabel));
-        OnPropertyChanged(nameof(DurationLabel));
         OnPropertyChanged(nameof(TimelineStatusLabel));
+        OnPropertyChanged(nameof(PlayheadPercent));
+        OnPropertyChanged(nameof(PlayheadPercentValue));
+    }
+
+    private void OnTimelineRangeChanged()
+    {
+        OnTimelinePositionChanged();
+        OnPropertyChanged(nameof(DurationLabel));
         OnPropertyChanged(nameof(TrimRangeLabel));
         OnPropertyChanged(nameof(TrimStartPercent));
         OnPropertyChanged(nameof(TrimEndPercent));
-        OnPropertyChanged(nameof(PlayheadPercent));
         OnPropertyChanged(nameof(TrimStartPercentValue));
         OnPropertyChanged(nameof(TrimEndPercentValue));
-        OnPropertyChanged(nameof(PlayheadPercentValue));
         OnPropertyChanged(nameof(LeftShadeWidth));
         OnPropertyChanged(nameof(RightShadeLeft));
         OnPropertyChanged(nameof(RightShadeWidth));
+        OnPropertyChanged(nameof(ExportDuration));
+        OnPropertyChanged(nameof(ExportLengthLabel));
     }
 
     private string Percent(TimeSpan time)

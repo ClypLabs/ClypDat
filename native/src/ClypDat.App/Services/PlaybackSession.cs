@@ -116,8 +116,9 @@ public sealed class PlaybackSession : IDisposable
             VideoPlayer.SetLogoInt(VideoLogoOption.X, 0);
             VideoPlayer.SetLogoInt(VideoLogoOption.Y, 0);
             VideoPlayer.SetLogoInt(VideoLogoOption.Opacity, 255);
-            // Repeat 0 = show it once and leave it up; the default cycles it.
-            VideoPlayer.SetLogoInt(VideoLogoOption.Repeat, 0);
+            // VLC treats zero as disabled. Negative one keeps the guide on every
+            // frame, which is what a crop preview needs while playback runs.
+            VideoPlayer.SetLogoInt(VideoLogoOption.Repeat, -1);
             VideoPlayer.SetLogoInt(VideoLogoOption.Enable, 1);
         }
         catch (Exception error)
@@ -401,7 +402,8 @@ public sealed class PlaybackSession : IDisposable
         // Permanent member of the chain, transparent at 1x. Clip speed changes
         // its ratio in place - see SetPlaybackRate for why it must never be
         // spliced in and out.
-        _rateStage = new PlaybackRateSampleProvider(_masterVolume) { Rate = _playbackRate };
+        _rateStage = new PlaybackRateSampleProvider(_masterVolume);
+        _rateStage.SetRate(_playbackRate);
         var limited = new SoftLimiterSampleProvider(_rateStage);
         // The one place that genuinely needs the previous endpoint gone. By now
         // the release started at load time has almost always finished already,
@@ -791,20 +793,46 @@ public sealed class PlaybackSession : IDisposable
     /// is pitch-preserving either way - ffmpeg's atempo, see
     /// ClipRenderFilters.BuildAudioSpeedFilter.
     /// </remarks>
-    public void SetPlaybackRate(double rate)
+    public bool SetPlaybackRate(double rate)
     {
         var normalized = ClipRenderFilters.NormalizeSpeed(rate);
-        if (Math.Abs(_playbackRate - normalized) < 0.0001) return;
+        if (Math.Abs(_playbackRate - normalized) < 0.0001) return false;
         _playbackRate = normalized;
 
-        try { VideoPlayer.SetRate((float)normalized); }
-        catch (Exception error) { AppLog.Error($"Editor playback rate failed: {normalized:0.###}x", error); }
+        // VLC can leave its picture clock stalled after a direct slow-rate
+        // change. Briefly parking and resuming an already-running transport
+        // makes it rebase that clock without seeking or rebuilding audio.
+        var rebaseRunningTransport = normalized < 1 && _shouldPlay && VideoPlayer.IsPlaying;
+        try
+        {
+            lock (_transportLock)
+            {
+                if (rebaseRunningTransport) VideoPlayer.SetPause(true);
+                VideoPlayer.SetRate((float)normalized);
+                if (rebaseRunningTransport) VideoPlayer.SetPause(false);
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Editor playback rate failed: {normalized:0.###}x", error);
+            if (rebaseRunningTransport)
+            {
+                try
+                {
+                    lock (_transportLock) VideoPlayer.SetPause(false);
+                }
+                catch (Exception resumeError) { AppLog.Error("Editor playback rate resume failed", resumeError); }
+            }
+        }
 
-        if (_rateStage is { } stage) stage.Rate = normalized;
+        // Discard interpolation from the previous ratio before the audio thread
+        // reads again; otherwise it blends frames from two playback speeds.
+        _rateStage?.SetRate(normalized);
 
         ReanchorAudioClock();
 
         AppLog.Debug($"Editor playback rate: {normalized:0.###}x.");
+        return true;
     }
 
     public void SetTrackVolume(int streamIndex, double percent)
@@ -1254,6 +1282,7 @@ public sealed class PlaybackSession : IDisposable
     // so it costs nothing when nobody is using it.
     private sealed class PlaybackRateSampleProvider : ISampleProvider
     {
+        private readonly object _stateLock = new();
         private readonly ISampleProvider _source;
         private readonly int _channels;
         private float[] _input = Array.Empty<float>();
@@ -1278,72 +1307,89 @@ public sealed class PlaybackSession : IDisposable
 
         public WaveFormat WaveFormat { get; }
 
-        public double Rate { get; set; } = 1.0;
+        private double _rate = 1.0;
+
+        public void SetRate(double rate)
+        {
+            lock (_stateLock)
+            {
+                _rate = rate;
+                ResetCore();
+            }
+        }
 
         public void Reset()
         {
-            _tailFrames = 0;
-            _phase = 0;
+            lock (_stateLock) ResetCore();
         }
 
         public int Read(float[] buffer, int offset, int count)
         {
-            var rate = Rate;
-            if (!ClipRenderFilters.IsSpeedActive(rate))
+            lock (_stateLock)
             {
-                // Straight through at 1x, and the carried state is dropped so
-                // returning to a non-1x rate starts clean rather than splicing in
-                // a frame from before.
-                if (_tailFrames != 0 || _phase != 0) Reset();
-                return _source.Read(buffer, offset, count);
-            }
+                var rate = _rate;
+                if (!ClipRenderFilters.IsSpeedActive(rate))
+                {
+                    // Straight through at 1x, and the carried state is dropped so
+                    // returning to a non-1x rate starts clean rather than splicing in
+                    // a frame from before.
+                    if (_tailFrames != 0 || _phase != 0) ResetCore();
+                    return _source.Read(buffer, offset, count);
+                }
 
-            var outputFrames = count / _channels;
-            if (outputFrames <= 0) return 0;
+                var outputFrames = count / _channels;
+                if (outputFrames <= 0) return 0;
 
             // +2, not +1: the last output sample interpolates towards the frame
             // after the one it sits on, and the frame it sits on has to survive
             // into the next block as the tail.
-            var neededFrames = (int)Math.Floor(_phase + rate * (outputFrames - 1)) + 2;
-            EnsureInput(neededFrames);
+                var neededFrames = (int)Math.Floor(_phase + rate * (outputFrames - 1)) + 2;
+                EnsureInput(neededFrames);
 
-            if (_tailFrames > 0) Array.Copy(_tail, 0, _input, 0, _tailFrames * _channels);
-            var wantedFrames = neededFrames - _tailFrames;
-            var read = wantedFrames > 0
-                ? _source.Read(_input, _tailFrames * _channels, wantedFrames * _channels)
-                : 0;
-            var availableFrames = _tailFrames + read / _channels;
-            if (availableFrames < 2) return 0;
+                if (_tailFrames > 0) Array.Copy(_tail, 0, _input, 0, _tailFrames * _channels);
+                var wantedFrames = neededFrames - _tailFrames;
+                var read = wantedFrames > 0
+                    ? _source.Read(_input, _tailFrames * _channels, wantedFrames * _channels)
+                    : 0;
+                var availableFrames = _tailFrames + read / _channels;
+                if (availableFrames < 2) return 0;
 
-            var written = 0;
-            var position = _phase;
-            for (var frame = 0; frame < outputFrames; frame++)
-            {
-                var index = (int)position;
-                if (index + 1 >= availableFrames) break;
-
-                var fraction = (float)(position - index);
-                var left = index * _channels;
-                var right = left + _channels;
-                for (var channel = 0; channel < _channels; channel++)
+                var written = 0;
+                var position = _phase;
+                for (var frame = 0; frame < outputFrames; frame++)
                 {
-                    var a = _input[left + channel];
-                    var b = _input[right + channel];
-                    buffer[offset + written++] = a + (b - a) * fraction;
+                    var index = (int)position;
+                    if (index + 1 >= availableFrames) break;
+
+                    var fraction = (float)(position - index);
+                    var left = index * _channels;
+                    var right = left + _channels;
+                    for (var channel = 0; channel < _channels; channel++)
+                    {
+                        var a = _input[left + channel];
+                        var b = _input[right + channel];
+                        buffer[offset + written++] = a + (b - a) * fraction;
+                    }
+
+                    position += rate;
                 }
 
-                position += rate;
+                // Keep everything from the frame the next sample sits on onwards.
+                var keepFrom = Math.Min((int)position, availableFrames - 1);
+                if (keepFrom < 0) keepFrom = 0;
+                _tailFrames = availableFrames - keepFrom;
+                EnsureTail(_tailFrames);
+                Array.Copy(_input, keepFrom * _channels, _tail, 0, _tailFrames * _channels);
+                _phase = position - keepFrom;
+
+                return written;
             }
+        }
 
-            // Keep everything from the frame the next sample sits on onwards.
-            var keepFrom = Math.Min((int)position, availableFrames - 1);
-            if (keepFrom < 0) keepFrom = 0;
-            _tailFrames = availableFrames - keepFrom;
-            EnsureTail(_tailFrames);
-            Array.Copy(_input, keepFrom * _channels, _tail, 0, _tailFrames * _channels);
-            _phase = position - keepFrom;
-
-            return written;
+        private void ResetCore()
+        {
+            _tailFrames = 0;
+            _phase = 0;
         }
 
         private void EnsureInput(int frames)
