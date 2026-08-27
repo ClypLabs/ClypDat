@@ -292,6 +292,10 @@ public sealed class CustomGameProfile
     public string DisplayName { get; set; } = string.Empty;
     public List<string> Groups { get; set; } = new();
 
+    // "Manual" (replay buffer, saved by hotkey), "FullSession" (record the
+    // whole session from launch) or "Off" (do not record this game at all).
+    public string RecordingMode { get; set; } = "Manual";
+
     // Quality
     public string ReplayVideoCodec { get; set; } = "H.264";
     public string ReplayEncoderMode { get; set; } = "GPU";

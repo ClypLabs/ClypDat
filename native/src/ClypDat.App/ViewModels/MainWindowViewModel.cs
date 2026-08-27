@@ -244,13 +244,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("QHD 2K (1440p)", 1440),
             new("UHD 4K (2160p)", 2160)
         };
-        ReplayQualityPresets = new ObservableCollection<ReplayQualityPreset>
-        {
-            new("Low Quality", "Efficient capture for lighter systems", "480p · 30 FPS · 5 Mbps", 480, 30, 5),
-            new("Standard", "Balanced detail and performance", "720p · 60 FPS · 10 Mbps", 720, 60, 10),
-            new("High Quality", "Sharper video at higher resource cost", "1080p · 60 FPS · 20 Mbps", 1080, 60, 20),
-            new("Custom", "Set each recording option yourself", "Choose resolution, FPS, and bitrate", -1, 0, 0)
-        };
+        ReplayQualityPresets = new ObservableCollection<ReplayQualityPreset>(QualityPresets);
         ReplayEncoderModes = new ObservableCollection<ReplayEncoderModeOption>
         {
             new("GPU", "Hardware encoding. Recommended for most systems."),
@@ -499,6 +493,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         public bool IsCustom => Height < 0;
         public bool Matches(int height, int frameRate, int bitrate) => !IsCustom && Height == height && FrameRate == frameRate && Bitrate == bitrate;
     }
+
+    // Static so the per-game Quality card (CustomGameTabViewModel) matches
+    // against the SAME four presets the global card offers. Two lists would
+    // drift, and a game silently sitting on "Custom" because its preset table
+    // disagreed by one bitrate would be near-impossible to spot.
+    internal static readonly IReadOnlyList<ReplayQualityPreset> QualityPresets = new ReplayQualityPreset[]
+    {
+        new("Low Quality", "Efficient capture for lighter systems", "480p · 30 FPS · 5 Mbps", 480, 30, 5),
+        new("Standard", "Balanced detail and performance", "720p · 60 FPS · 10 Mbps", 720, 60, 10),
+        new("High Quality", "Sharper video at higher resource cost", "1080p · 60 FPS · 20 Mbps", 1080, 60, 20),
+        new("Custom", "Set each recording option yourself", "Choose resolution, FPS, and bitrate", -1, 0, 0)
+    };
 
     public ObservableCollection<ReplayQualityPreset> ReplayQualityPresets { get; }
     public sealed record ReplayEncoderModeOption(string Label, string Description)
@@ -5825,6 +5831,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public bool HasSelectedCustomGame => SelectedCustomGameTab is not null;
+
+    /// <summary>
+    /// False when the game in the foreground has its Recording Mode set to
+    /// "Off". Checked alongside the global ReplayBufferEnabled before arming,
+    /// so a game the user has switched off is not recorded even while the
+    /// buffer is otherwise armed.
+    /// </summary>
+    public bool IsRecordingEnabledForActiveGame
+    {
+        get
+        {
+            if (IsEffectiveDesktopCapture) return true;
+            var key = string.IsNullOrWhiteSpace(ActiveGameDetection.DetectionKey)
+                ? ActiveGameDetection.ExeName
+                : ActiveGameDetection.DetectionKey;
+            return CustomGameSettingsResolver.Resolve(Settings, key).RecordingEnabled;
+        }
+    }
     public bool HasCustomGameTabs => CustomGameTabs.Count > 0;
 
     /// <summary>
@@ -5896,6 +5920,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // customise this one", not "change how it records right now". Nothing
         // about the recording changes until a group is enabled.
         var profile = new CustomGameProfile { DisplayName = displayName };
+        // Recording Mode is the one group a new game starts with - see
+        // CustomGameSettingsResolver.DefaultGroup. Seeded from the global
+        // settings, so it describes what the game already did rather than
+        // changing it.
+        CustomGameSettingsResolver.SeedGroupFromGlobal(Settings, profile, CustomGameSettingsResolver.DefaultGroup);
+        profile.Groups.Add(CustomGameSettingsResolver.DefaultGroup);
         Settings.CustomGameSettings[detectionKey] = profile;
         SaveSettings();
         RebuildCustomGameTabs();

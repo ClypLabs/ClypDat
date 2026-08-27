@@ -2554,8 +2554,12 @@ public sealed partial class MainWindow : Window
     // flat lie about whether anything is being captured.
     private string ReplayIdleStatus => ViewModel?.Settings.ReplayBufferEnabled == false ? "Replay Off" : "Replay Armed";
 
+    // IsRecordingEnabledForActiveGame is the per-game half of the same
+    // question: a game whose Custom Game Settings set Recording Mode to "Off"
+    // must not be recorded even though the buffer is armed for everything else.
     private bool ShouldRecordReplay(GameDetection detection) =>
-        ViewModel is { Settings.ReplayBufferEnabled: true } && (ViewModel.IsDesktopCapture || detection.IsDetected);
+        ViewModel is { Settings.ReplayBufferEnabled: true, IsRecordingEnabledForActiveGame: true }
+        && (ViewModel.IsDesktopCapture || detection.IsDetected);
 
     private static string ReplayTargetIdentity(ReplayBufferConfig config) => string.Join('|',
         config.CaptureSource,
@@ -5643,6 +5647,7 @@ public sealed partial class MainWindow : Window
 
         switch (group)
         {
+            case "RecordingMode": tab.HasRecordingMode = enabled; break;
             case "Quality": tab.HasQuality = enabled; break;
             case "Replay": tab.HasReplay = enabled; break;
             case "Audio": tab.HasAudio = enabled; break;

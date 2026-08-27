@@ -2346,17 +2346,16 @@
                            Foreground="#93A6B8" TextWrapping="Wrap" />
               </StackPanel>
 
-              <!-- Add Game -->
-              <Border Classes="settingsCard">
+              <!-- Add Game. One row, no title band or divider: it is a single
+                   control and every pixel it takes is a pixel of the game's
+                   actual settings pushed off screen. -->
+              <Border Classes="settingsCard" Padding="16,12">
                 <StackPanel Spacing="0">
-                  <TextBlock Text="Add Game" Foreground="#EDF4FB" FontWeight="Bold" FontSize="16" Margin="0,0,0,14"
-                             opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                  <Border Height="1" Background="#1B242D" />
-                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" Margin="0,14,0,0">
-                    <StackPanel Spacing="2" VerticalAlignment="Center">
-                      <TextBlock Text="Search for a game" Foreground="#EDF4FB" FontWeight="SemiBold"
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                    <StackPanel Spacing="1" VerticalAlignment="Center">
+                      <TextBlock Text="Add Game" Foreground="#EDF4FB" FontWeight="Bold" FontSize="15"
                                  opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                      <TextBlock Text="Pick from the games ClypDat has already detected. Play a game once and it shows up here."
+                      <TextBlock Text="Pick from the games ClypDat has already detected."
                                  Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
                     </StackPanel>
                     <ComboBox Grid.Column="1" Classes="settingsInput" MinWidth="280" VerticalAlignment="Center"
@@ -2374,7 +2373,7 @@
                     </ComboBox>
                   </Grid>
                   <TextBlock Text="Every detected game already has custom settings."
-                             Foreground="#6B7C8C" FontSize="11" Margin="0,10,0,0"
+                             Foreground="#6B7C8C" FontSize="11" Margin="0,8,0,0"
                              IsVisible="{Binding !CustomGameCandidates.Count}" />
                 </StackPanel>
               </Border>
@@ -2421,34 +2420,106 @@
               <ContentControl IsVisible="{Binding HasSelectedCustomGame}" HorizontalAlignment="Stretch">
               <StackPanel Spacing="18" DataContext="{Binding SelectedCustomGameTab}">
 
+                <!-- Recording Mode. The one group a newly added game starts
+                     with, and the only three-way choice here - it is not a
+                     toggle because "record clips by hotkey", "record the whole
+                     session" and "do not record this at all" are three
+                     positions on one dial, not three switches. -->
+                <Border Classes="settingsCard" IsVisible="{Binding HasRecordingMode}">
+                  <StackPanel Spacing="12">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Text="Recording Mode" Foreground="#EDF4FB" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
+                      <Button Grid.Column="1" Classes="linkButton" Content="Remove" Tag="RecordingMode" Click="RemoveCustomGameGroupButton_OnClick" />
+                    </Grid>
+
+                    <RadioButton GroupName="CustomGameRecordingMode" IsChecked="{Binding IsManualCapture}">
+                      <StackPanel Spacing="2" Margin="4,0,0,0">
+                        <TextBlock Text="Manual capture" Foreground="#EDF4FB" FontWeight="SemiBold" />
+                        <TextBlock Text="Keep the replay buffer running and save clips with your hotkey." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </RadioButton>
+                    <RadioButton GroupName="CustomGameRecordingMode" IsChecked="{Binding IsFullSessionCapture}">
+                      <StackPanel Spacing="2" Margin="4,0,0,0">
+                        <TextBlock Text="Automatically record entire game session" Foreground="#EDF4FB" FontWeight="SemiBold" />
+                        <TextBlock Text="Starts recording as soon as this game opens. Your hotkey still saves clips." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </RadioButton>
+                    <RadioButton GroupName="CustomGameRecordingMode" IsChecked="{Binding IsRecordingOff}">
+                      <StackPanel Spacing="2" Margin="4,0,0,0">
+                        <TextBlock Text="Recording off" Foreground="#EDF4FB" FontWeight="SemiBold" />
+                        <TextBlock Text="This game is never recorded, even while the buffer is armed for everything else." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </RadioButton>
+                  </StackPanel>
+                </Border>
+
+                <!-- Same preset cards and dropdowns as the global Recording
+                     Quality card, deliberately: a per-game override that looked
+                     nothing like the setting it overrides is harder to read,
+                     and the row of sliders this replaced took four times the
+                     height to say less. -->
                 <Border Classes="settingsCard" IsVisible="{Binding HasQuality}">
-                  <StackPanel Spacing="14">
+                  <StackPanel Spacing="11">
                     <Grid ColumnDefinitions="*,Auto">
                       <TextBlock Text="Recording Quality" Foreground="#EDF4FB" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" />
                       <Button Grid.Column="1" Classes="linkButton" Content="Remove" Tag="Quality" Click="RemoveCustomGameGroupButton_OnClick" />
                     </Grid>
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-                      <TextBlock Text="Video codec" Foreground="#D8E4F2" VerticalAlignment="Center" />
-                      <ComboBox Grid.Column="1" Classes="settingsInput" MinWidth="180" ItemsSource="{Binding $parent[Window].DataContext.ReplayVideoCodecs}" DisplayMemberBinding="{Binding Label}" SelectedValueBinding="{Binding Value}" SelectedValue="{Binding ReplayVideoCodec}" />
+                    <TextBlock Text="Higher settings use more resources and storage." Foreground="#93A6B8" FontSize="11" TextWrapping="Wrap" />
+
+                    <ListBox Classes="qualityPresetCards"
+                             ItemsSource="{Binding $parent[Window].DataContext.ReplayQualityPresets}"
+                             SelectedItem="{Binding SelectedQualityPreset}">
+                      <ListBox.ItemTemplate>
+                        <DataTemplate>
+                          <StackPanel Spacing="3" HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Label}" FontSize="15" FontWeight="Bold" />
+                            <TextBlock Text="{Binding Description}" Foreground="#B8C7D8" FontSize="11" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding Summary}" Foreground="#9CB0C4" FontSize="11" TextWrapping="Wrap" />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <Grid ColumnDefinitions="170,96,96" ColumnSpacing="12" HorizontalAlignment="Left" IsVisible="{Binding IsCustomQuality}">
+                      <StackPanel Spacing="3">
+                        <TextBlock Text="Resolution" Foreground="#B8C7D8" FontSize="12" />
+                        <ComboBox Classes="settingsInput" Width="170"
+                                  ItemsSource="{Binding $parent[Window].DataContext.ReplayResolutions}"
+                                  DisplayMemberBinding="{Binding Label}"
+                                  SelectedValueBinding="{Binding Height}"
+                                  SelectedValue="{Binding ReplayMaxHeight}" />
+                      </StackPanel>
+                      <StackPanel Grid.Column="1" Spacing="3">
+                        <TextBlock Text="FPS" Foreground="#B8C7D8" FontSize="12" />
+                        <ComboBox Classes="settingsInput" Width="96"
+                                  ItemsSource="{Binding $parent[Window].DataContext.ReplayFrameRates}"
+                                  SelectedItem="{Binding ReplayFrameRate}" />
+                      </StackPanel>
+                      <StackPanel Grid.Column="2" Spacing="3">
+                        <TextBlock Text="Bitrate" Foreground="#B8C7D8" FontSize="12" />
+                        <ComboBox Classes="settingsInput" Width="96"
+                                  ItemsSource="{Binding $parent[Window].DataContext.ReplayBitrateOptions}"
+                                  SelectedItem="{Binding SelectedBitrateOption}" />
+                      </StackPanel>
                     </Grid>
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-                      <TextBlock Text="Encoder" Foreground="#D8E4F2" VerticalAlignment="Center" />
-                      <ComboBox Grid.Column="1" Classes="settingsInput" MinWidth="180" ItemsSource="{Binding $parent[Window].DataContext.ReplayEncoderModes}" DisplayMemberBinding="{Binding Label}" SelectedValueBinding="{Binding Value}" SelectedValue="{Binding ReplayEncoderMode}" />
-                    </Grid>
-                    <Grid ColumnDefinitions="*,Auto,60" ColumnSpacing="12">
-                      <TextBlock Text="Bitrate" Foreground="#D8E4F2" VerticalAlignment="Center" />
-                      <Slider Grid.Column="1" Width="220" Classes="volumeSlider" Minimum="5" Maximum="100" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding ReplayBitrateMbps}" />
-                      <TextBlock Grid.Column="2" Text="{Binding ReplayBitrateMbps, StringFormat={}{0:0} Mbps}" Foreground="#B8C7D8" FontSize="11" TextAlignment="Right" VerticalAlignment="Center" />
-                    </Grid>
-                    <Grid ColumnDefinitions="*,Auto,60" ColumnSpacing="12">
-                      <TextBlock Text="Frame rate" Foreground="#D8E4F2" VerticalAlignment="Center" />
-                      <Slider Grid.Column="1" Width="220" Classes="volumeSlider" Minimum="30" Maximum="240" SmallChange="1" LargeChange="10" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding ReplayFrameRate}" />
-                      <TextBlock Grid.Column="2" Text="{Binding ReplayFrameRate, StringFormat={}{0:0} fps}" Foreground="#B8C7D8" FontSize="11" TextAlignment="Right" VerticalAlignment="Center" />
-                    </Grid>
-                    <Grid ColumnDefinitions="*,Auto,60" ColumnSpacing="12">
-                      <TextBlock Text="Resolution cap" Foreground="#D8E4F2" VerticalAlignment="Center" />
-                      <Slider Grid.Column="1" Width="220" Classes="volumeSlider" Minimum="720" Maximum="2160" SmallChange="1" LargeChange="180" TickFrequency="180" IsSnapToTickEnabled="True" Value="{Binding ReplayMaxHeight}" />
-                      <TextBlock Grid.Column="2" Text="{Binding ReplayMaxHeight, StringFormat={}{0:0}p}" Foreground="#B8C7D8" FontSize="11" TextAlignment="Right" VerticalAlignment="Center" />
+
+                    <Grid ColumnDefinitions="170,*" ColumnSpacing="12" HorizontalAlignment="Left">
+                      <StackPanel Spacing="3">
+                        <TextBlock Text="Video codec" Foreground="#B8C7D8" FontSize="12" />
+                        <ComboBox Classes="settingsInput" Width="170"
+                                  ItemsSource="{Binding $parent[Window].DataContext.ReplayVideoCodecs}"
+                                  DisplayMemberBinding="{Binding Label}"
+                                  SelectedValueBinding="{Binding Value}"
+                                  SelectedValue="{Binding ReplayVideoCodec}" />
+                      </StackPanel>
+                      <StackPanel Grid.Column="1" Spacing="3">
+                        <TextBlock Text="Encoder" Foreground="#B8C7D8" FontSize="12" />
+                        <ComboBox Classes="settingsInput" Width="192"
+                                  ItemsSource="{Binding $parent[Window].DataContext.ReplayEncoderModes}"
+                                  DisplayMemberBinding="{Binding Label}"
+                                  SelectedValueBinding="{Binding Value}"
+                                  SelectedValue="{Binding ReplayEncoderMode}" />
+                      </StackPanel>
                     </Grid>
                   </StackPanel>
                 </Border>
@@ -2550,22 +2621,22 @@
                          sits off-centre inside a circle no matter what margin
                          is nudged at it; these are centred by layout and are
                          exact at any size. -->
-                    <!-- Ring and bars are SIBLINGS in one 20x20 Panel, not a
-                         Border wrapping its content. A Border lays its child
-                         out inside the stroke, so the bars would centre in a
-                         17.2px box offset by 1.4px rather than in the circle
-                         itself - close enough to look like a rendering bug and
-                         impossible to fix by nudging margins. Here all three
-                         fill the same box and centre independently. -->
-                    <Panel Width="20" Height="20" VerticalAlignment="Center">
-                      <Ellipse Width="20" Height="20" Stroke="#8FA6BD" StrokeThickness="1.4" />
-                      <Rectangle Width="9" Height="1.6" RadiusX="0.8" RadiusY="0.8" Fill="#8FA6BD" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                      <Rectangle Width="1.6" Height="9" RadiusX="0.8" RadiusY="0.8" Fill="#8FA6BD" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                    </Panel>
+                    <!-- One filled geometry, not a stroked ring with two
+                         rectangles laid over it. Separate shapes meant the ring
+                         and the two bars each had their own sub-pixel width
+                         (1.4 and 1.6), so on a fractionally scaled display the
+                         horizontal bar, the vertical bar and the circle all
+                         antialiased to different apparent weights. A single
+                         path is symmetric by construction and scales as one
+                         piece, which is why every other icon in the app is
+                         drawn this way. -->
+                    <PathIcon Width="18" Height="18" Foreground="#8FA6BD" VerticalAlignment="Center"
+                              Data="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M17,13H13V17H11V13H7V11H11V7H13V11H17V13Z" />
                     <TextBlock Text="Add Setting" Foreground="#B8C7D8" FontWeight="SemiBold" VerticalAlignment="Center" />
                   </StackPanel>
                   <Button.Flyout>
                     <MenuFlyout Placement="Top">
+                      <MenuItem Header="Recording Mode" Tag="RecordingMode" Click="AddCustomGameGroupMenuItem_OnClick" IsVisible="{Binding !HasRecordingMode}" />
                       <MenuItem Header="Recording Quality" Tag="Quality" Click="AddCustomGameGroupMenuItem_OnClick" IsVisible="{Binding !HasQuality}" />
                       <MenuItem Header="Replay Length and Hotkey" Tag="Replay" Click="AddCustomGameGroupMenuItem_OnClick" IsVisible="{Binding !HasReplay}" />
                       <MenuItem Header="Audio" Tag="Audio" Click="AddCustomGameGroupMenuItem_OnClick" IsVisible="{Binding !HasAudio}" />

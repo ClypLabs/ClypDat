@@ -20,6 +20,7 @@ internal static class CustomGameSettingsResolver
 {
     // Group ids. Persisted inside CustomGameProfile.Groups, so treat them as a
     // wire format: renaming one silently drops every user's overrides for it.
+    public const string RecordingModeGroup = "RecordingMode";
     public const string QualityGroup = "Quality";
     public const string ReplayGroup = "Replay";
     public const string AudioGroup = "Audio";
@@ -27,11 +28,21 @@ internal static class CustomGameSettingsResolver
 
     public static readonly IReadOnlyList<string> AllGroups = new[]
     {
-        QualityGroup, ReplayGroup, AudioGroup, FullSessionGroup
+        RecordingModeGroup, QualityGroup, ReplayGroup, AudioGroup, FullSessionGroup
     };
+
+    // The one group a newly added game starts with. Adding a game is almost
+    // always "record this one differently", and how it records at all is the
+    // first question - the rest stay off so nothing else changes silently.
+    public const string DefaultGroup = RecordingModeGroup;
+
+    public const string ManualMode = "Manual";
+    public const string FullSessionMode = "FullSession";
+    public const string OffMode = "Off";
 
     public static string GroupDisplayName(string group) => group switch
     {
+        RecordingModeGroup => "Recording Mode",
         QualityGroup => "Recording Quality",
         ReplayGroup => "Replay Length and Hotkey",
         AudioGroup => "Audio",
@@ -41,6 +52,7 @@ internal static class CustomGameSettingsResolver
 
     public static string GroupDescription(string group) => group switch
     {
+        RecordingModeGroup => "Whether this game records by hotkey, records whole sessions, or is not recorded.",
         QualityGroup => "Codec, encoder, bitrate, frame rate and resolution cap for this game.",
         ReplayGroup => "How much of this game the buffer keeps, and the key that saves it.",
         AudioGroup => "Game and microphone levels, and microphone noise suppression.",
@@ -101,6 +113,15 @@ internal static class CustomGameSettingsResolver
     {
         switch (group)
         {
+            case RecordingModeGroup:
+                // Derived, because there is no single global setting that says
+                // "recording mode" - it is the combination of the buffer being
+                // armed and full-session recording being on.
+                profile.RecordingMode = !settings.ReplayBufferEnabled
+                    ? OffMode
+                    : settings.FullSessionRecordingEnabled ? FullSessionMode : ManualMode;
+                break;
+
             case QualityGroup:
                 profile.ReplayVideoCodec = settings.ReplayVideoCodec;
                 profile.ReplayEncoderMode = settings.ReplayEncoderMode;
@@ -133,12 +154,23 @@ internal static class CustomGameSettingsResolver
     /// <summary>Every overridable value for one game, already resolved.</summary>
     public static EffectiveRecordingSettings Resolve(AppSettings settings, string? detectionKey)
     {
+        var mode = FindActive(settings, detectionKey, RecordingModeGroup);
         var quality = FindActive(settings, detectionKey, QualityGroup);
         var replay = FindActive(settings, detectionKey, ReplayGroup);
         var audio = FindActive(settings, detectionKey, AudioGroup);
         var session = FindActive(settings, detectionKey, FullSessionGroup);
 
+        // Recording mode decides WHETHER full sessions run; the full-session
+        // group only decides how they are recorded. Without that split the two
+        // groups would each own the same flag and the last one edited would
+        // win, which is not something the UI could explain.
+        var recordingEnabled = mode is null || !string.Equals(mode.RecordingMode, OffMode, StringComparison.OrdinalIgnoreCase);
+        var fullSession = mode is not null
+            ? string.Equals(mode.RecordingMode, FullSessionMode, StringComparison.OrdinalIgnoreCase)
+            : session?.FullSessionRecordingEnabled ?? settings.FullSessionRecordingEnabled;
+
         return new EffectiveRecordingSettings(
+            RecordingEnabled: recordingEnabled,
             ReplayVideoCodec: quality?.ReplayVideoCodec ?? settings.ReplayVideoCodec,
             ReplayEncoderMode: quality?.ReplayEncoderMode ?? settings.ReplayEncoderMode,
             ReplayBitrateMbps: quality?.ReplayBitrateMbps ?? settings.ReplayBitrateMbps,
@@ -151,19 +183,20 @@ internal static class CustomGameSettingsResolver
             MicrophoneVolumePercent: audio?.MicrophoneVolumePercent ?? settings.MicrophoneVolumePercent,
             MicrophoneNoiseSuppressionEnabled: audio?.MicrophoneNoiseSuppressionEnabled ?? settings.MicrophoneNoiseSuppressionEnabled,
             MicrophoneNoiseGateThresholdDb: audio?.MicrophoneNoiseGateThresholdDb ?? settings.MicrophoneNoiseGateThresholdDb,
-            FullSessionRecordingEnabled: session?.FullSessionRecordingEnabled ?? settings.FullSessionRecordingEnabled,
+            FullSessionRecordingEnabled: recordingEnabled && fullSession,
             FullSessionVideoCodec: session?.FullSessionVideoCodec ?? settings.FullSessionVideoCodec,
             FullSessionQuotaGb: session?.FullSessionQuotaGb ?? settings.FullSessionQuotaGb,
-            AppliedGroups: DescribeAppliedGroups(quality, replay, audio, session));
+            AppliedGroups: DescribeAppliedGroups(mode, quality, replay, audio, session));
     }
 
     // Purely for the log line at the start of a recording - "which of these
     // settings are not the ones in the settings page?" is otherwise an
     // unanswerable question when a user reports odd output for one game.
     private static string DescribeAppliedGroups(
-        CustomGameProfile? quality, CustomGameProfile? replay, CustomGameProfile? audio, CustomGameProfile? session)
+        CustomGameProfile? mode, CustomGameProfile? quality, CustomGameProfile? replay, CustomGameProfile? audio, CustomGameProfile? session)
     {
-        var applied = new List<string>(4);
+        var applied = new List<string>(5);
+        if (mode is not null) applied.Add(RecordingModeGroup);
         if (quality is not null) applied.Add(QualityGroup);
         if (replay is not null) applied.Add(ReplayGroup);
         if (audio is not null) applied.Add(AudioGroup);
@@ -173,6 +206,7 @@ internal static class CustomGameSettingsResolver
 }
 
 internal sealed record EffectiveRecordingSettings(
+    bool RecordingEnabled,
     string ReplayVideoCodec,
     string ReplayEncoderMode,
     int ReplayBitrateMbps,
