@@ -7960,6 +7960,11 @@ public sealed partial class MainWindow : Window
                     if (cancellationToken.IsCancellationRequested) return;
                     if (ViewModel is null) return;
                     ViewModel.IsEditorVideoLoading = false;
+                    // A restored crop can be queued while libvlc is still
+                    // constructing its vout. Re-assert at its first frame so
+                    // opening an already-cropped clip never waits for a pill
+                    // click before its guide appears.
+                    ApplyEditorEffectPreview();
                     // The playhead/timeline seeker previously started moving
                     // the instant PlayFrom was called, well before the video
                     // itself had a real frame to show - the seeker visibly
@@ -7976,6 +7981,9 @@ public sealed partial class MainWindow : Window
             playback.VideoPlayer.TimeChanged += OnTimeChanged;
 
             playback.PlayFrom(ViewModel.CurrentTime);
+            // Start generating the restored guide alongside first-frame decode,
+            // rather than after the asynchronous audio setup completes.
+            ApplyEditorEffectPreview();
             _ = LoadEditorAudioAsync(playback, ViewModel.SelectedVideoPath, audioTracks, videoReady.Task, cancellationToken, foregroundScope);
             await Task.Delay(200, cancellationToken);
             if (playback.Duration > TimeSpan.Zero && IsPlausibleDuration(playback.Duration, ViewModel.Duration))
