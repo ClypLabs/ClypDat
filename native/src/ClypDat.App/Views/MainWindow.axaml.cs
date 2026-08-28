@@ -591,6 +591,19 @@ public sealed partial class MainWindow : Window
         RevealAfterFirstDarkFrame();
     }
 
+    /// <summary>
+    /// Releases the startup-only presentation state without surfacing the main
+    /// window. Used after the loader on a Windows autostart launch.
+    /// </summary>
+    internal void FinishStartupInTray()
+    {
+        _startupLoaderActive = false;
+        ShowInTaskbar = false;
+        if (_startupWindowCloaked) StartupWindowPresentation.Reveal(this);
+        else Opacity = 1;
+        Hide();
+    }
+
     private async void UpdateDetectedGame()
     {
         // async void with no catch: an exception here is rethrown on the captured

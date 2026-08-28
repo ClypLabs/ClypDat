@@ -67,7 +67,9 @@ public sealed partial class App : Application
                 var warmupDelay = minimized ? TimeSpan.FromSeconds(12) : TimeSpan.FromSeconds(1);
                 _ = Task.Delay(warmupDelay).ContinueWith(_ => PlaybackSession.WarmUp(), TaskScheduler.Default);
             }
-            var useSplash = !minimized && !UiPreviewMode.Enabled;
+            // The loader is also the startup update check. Autostart still
+            // finishes in the tray, but it must not skip that work entirely.
+            var useSplash = !UiPreviewMode.Enabled;
             _mainWindow = new MainWindow
             {
                 DataContext = new MainWindowViewModel(),
@@ -84,7 +86,7 @@ public sealed partial class App : Application
                 desktop.Exit += (_, _) => _serverTrayMenuRenderer?.Dispose();
             }
             InitializeTrayIcon();
-            if (useSplash) StartWithSplash(_mainWindow);
+            if (useSplash) StartWithSplash(_mainWindow, minimized);
             if (minimized)
             {
                 void HideOnFirstOpen(object? _, EventArgs __)
@@ -117,7 +119,7 @@ public sealed partial class App : Application
         }
     }
 
-    private void StartWithSplash(MainWindow mainWindow)
+    private void StartWithSplash(MainWindow mainWindow, bool finishInTray)
     {
         SplashWindow splash;
         try
@@ -164,8 +166,12 @@ public sealed partial class App : Application
                 // Loader gets out of the way first, then the app it was
                 // loading is uncovered underneath it.
                 await splash.FadeOutAndCloseAsync();
-                mainWindow.RevealFromStartupLoader();
-                mainWindow.Activate();
+                if (finishInTray) mainWindow.FinishStartupInTray();
+                else
+                {
+                    mainWindow.RevealFromStartupLoader();
+                    mainWindow.Activate();
+                }
                 await mainWindow.LiftStartupCurtainAsync();
             }
         });
