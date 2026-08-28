@@ -12,7 +12,7 @@
       <Binding Path="SelectedSettingsSection" />
     </MultiBinding>
   </UserControl.IsVisible>
-  <StackPanel Spacing="22" Tag="General">
+  <StackPanel Spacing="18" Tag="General">
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="General" />

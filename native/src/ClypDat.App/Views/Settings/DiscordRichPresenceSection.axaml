@@ -10,7 +10,7 @@
       <Binding Path="SelectedSettingsSection" />
     </MultiBinding>
   </UserControl.IsVisible>
-  <StackPanel Spacing="22" Tag="Discord Rich Presence">
+  <StackPanel Spacing="18" Tag="Discord Rich Presence">
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Discord Rich Presence" />
