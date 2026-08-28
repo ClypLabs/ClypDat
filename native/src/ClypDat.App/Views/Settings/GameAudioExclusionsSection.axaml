@@ -38,6 +38,13 @@
     <Border Classes="listPane">
       <ScrollViewer Classes="listScrollCompact">
         <ItemsControl ItemsSource="{Binding ExcludedProcesses}">
+          <ItemsControl.Styles>
+            <!-- The rule belongs between two rows, so the last one does not get
+                 to draw a line under itself with nothing beneath it. -->
+            <Style Selector="ContentPresenter:nth-last-child(1) > Border">
+              <Setter Property="BorderThickness" Value="0" />
+            </Style>
+          </ItemsControl.Styles>
           <ItemsControl.ItemTemplate>
             <DataTemplate>
               <Border BorderThickness="0,0,0,1" BorderBrush="{StaticResource DividerBrush}" Background="Transparent" Padding="12,6,12,10" VerticalAlignment="Top">
