@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using System.Security.Cryptography;
@@ -30,21 +31,24 @@ public static class CropMaskImage
     // letterbox: the part being cut has to remain readable so it can be aimed.
     private const byte ShadeAlpha = 0x66;
     private const int OutlineThickness = 2;
-    // ClypDat green. The opaque guide stays legible over both the dimmed and
-    // retained parts of the frame.
-    private static readonly uint OutlineColor = Bgra(0xFF, 0x38, 0xD9, 0x96);
 
     /// <summary>
     /// Writes (or reuses) the mask PNG for this crop and returns its path.
     /// </summary>
-    public static string? TryWrite(string directory, ClipRenderFilters.CropRect crop, int sourceWidth, int sourceHeight)
+    public static string? TryWrite(
+        string directory,
+        ClipRenderFilters.CropRect crop,
+        int sourceWidth,
+        int sourceHeight,
+        Color outlineColor)
     {
         if (sourceWidth <= 0 || sourceHeight <= 0) return null;
 
         try
         {
             Directory.CreateDirectory(directory);
-            var path = Path.Combine(directory, $"crop-{Key(crop, sourceWidth, sourceHeight)}.png");
+            var outline = Bgra(outlineColor.A, outlineColor.R, outlineColor.G, outlineColor.B);
+            var path = Path.Combine(directory, $"crop-{Key(crop, sourceWidth, sourceHeight, outline)}.png");
             // Keyed by the geometry itself, so dragging a position slider back
             // and forth re-uses files already written instead of re-encoding a
             // full-resolution image for a crop that has been seen before.
@@ -63,7 +67,7 @@ public static class CropMaskImage
 
             using (var frame = bitmap.Lock())
             {
-                Fill(frame, crop, sourceWidth, sourceHeight);
+                Fill(frame, crop, sourceWidth, sourceHeight, outline);
             }
 
             bitmap.Save(path);
@@ -101,7 +105,12 @@ public static class CropMaskImage
         }
     }
 
-    private static unsafe void Fill(ILockedFramebuffer frame, ClipRenderFilters.CropRect crop, int width, int height)
+    private static unsafe void Fill(
+        ILockedFramebuffer frame,
+        ClipRenderFilters.CropRect crop,
+        int width,
+        int height,
+        uint outlineColor)
     {
         var shade = Bgra(ShadeAlpha, 0, 0, 0);
         const uint Clear = 0;
@@ -135,21 +144,21 @@ public static class CropMaskImage
             var onHorizontalEdge = y < keepTop + thickness || y >= keepBottom - thickness;
             if (onHorizontalEdge)
             {
-                for (var x = keepLeft; x < keepRight; x++) row[x] = OutlineColor;
+                for (var x = keepLeft; x < keepRight; x++) row[x] = outlineColor;
                 continue;
             }
 
-            for (var x = keepLeft; x < Math.Min(keepLeft + thickness, keepRight); x++) row[x] = OutlineColor;
-            for (var x = Math.Max(keepLeft, keepRight - thickness); x < keepRight; x++) row[x] = OutlineColor;
+            for (var x = keepLeft; x < Math.Min(keepLeft + thickness, keepRight); x++) row[x] = outlineColor;
+            for (var x = Math.Max(keepLeft, keepRight - thickness); x < keepRight; x++) row[x] = outlineColor;
         }
     }
 
     private static uint Bgra(byte a, byte r, byte g, byte b) =>
         (uint)((a << 24) | (r << 16) | (g << 8) | b);
 
-    private static string Key(ClipRenderFilters.CropRect crop, int width, int height)
+    private static string Key(ClipRenderFilters.CropRect crop, int width, int height, uint outlineColor)
     {
-        var input = $"{width}x{height}|{crop.X},{crop.Y},{crop.Width},{crop.Height}|{ShadeAlpha}|{OutlineColor:X8}";
+        var input = $"{width}x{height}|{crop.X},{crop.Y},{crop.Width},{crop.Height}|{ShadeAlpha}|{outlineColor:X8}";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(input)))[..16].ToLowerInvariant();
     }
 }

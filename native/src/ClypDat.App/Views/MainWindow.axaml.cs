@@ -390,6 +390,8 @@ public sealed partial class MainWindow : Window
                     if (e.PropertyName == nameof(MainWindowViewModel.StartupLibraryIndexVersion)) QueueDateScrubberRebuild();
                     if (e.PropertyName == nameof(MainWindowViewModel.ClipSpeed)) ApplyEditorSpeedPreview();
                     if (e.PropertyName == nameof(MainWindowViewModel.ClipCropMode)) QueueEditorCropPreview();
+                    if (e.PropertyName is nameof(MainWindowViewModel.SelectedThemePreset) or nameof(MainWindowViewModel.UseSystemAccentColor))
+                        QueueEditorCropPreview(flush: true);
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible)
                         or nameof(MainWindowViewModel.IsEditorVisible)
                         or nameof(MainWindowViewModel.SelectedVideoPath)
@@ -6653,7 +6655,8 @@ public sealed partial class MainWindow : Window
             ++_cropPreviewGeneration,
             crop,
             viewModel.SelectedSourceWidth,
-            viewModel.SelectedSourceHeight);
+            viewModel.SelectedSourceHeight,
+            ((Application.Current?.Resources["AccentBrush"] as ISolidColorBrush)?.Color) ?? Color.Parse("#38D996"));
         if (_cropPreviewRenderInFlight) return;
 
         var elapsed = _cropPreviewThrottle.Elapsed;
@@ -6681,7 +6684,7 @@ public sealed partial class MainWindow : Window
     {
         var renderClock = Stopwatch.StartNew();
         var path = await Task.Run(() => CropMaskImage.TryWrite(
-            EditorCropMaskDirectory, request.Crop, request.SourceWidth, request.SourceHeight)).ConfigureAwait(false);
+            EditorCropMaskDirectory, request.Crop, request.SourceWidth, request.SourceHeight, request.OutlineColor)).ConfigureAwait(false);
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
@@ -6716,7 +6719,8 @@ public sealed partial class MainWindow : Window
         int Generation,
         ClipRenderFilters.CropRect Crop,
         int SourceWidth,
-        int SourceHeight);
+        int SourceHeight,
+        Color OutlineColor);
 
     private async Task ShareCurrentClipAsync()
     {
