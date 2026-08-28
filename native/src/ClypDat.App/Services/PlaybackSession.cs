@@ -36,6 +36,14 @@ public sealed class PlaybackSession : IDisposable
     // Generous on purpose: a preview decode holding _seekLock is bounded work, and
     // overshooting the wait is far cheaper than the leak the timeout path takes.
     private static readonly TimeSpan PreviewWorkerDrainTimeout = TimeSpan.FromSeconds(5);
+    // Local clips are ordinary files, not streams: Windows already provides
+    // read-ahead, and the editor starts its audio independently. Libvlc maps
+    // this setting directly to its initial PTS delay, so its former 300ms
+    // value made every local library-to-editor open wait a visible third of a
+    // second before it could display a frame. Keep a small cushion for busy
+    // local disks without imposing that full delay. Network paths retain the
+    // larger cache selected in LoadVideoAsync.
+    private const int LocalFileCachingMilliseconds = 50;
     private bool _ended;
     private bool _isSeeking;
     private bool _shouldPlay;
@@ -336,14 +344,12 @@ public sealed class PlaybackSession : IDisposable
         // higher/spikier read latency blows through it and playback stutters.
         // A bigger demux cache absorbs those latency spikes at the cost of a
         // few MB of RAM; local files keep a modest bump over the default.
-        // Local files get libvlc's own default (300ms) rather than the 1000ms
-        // this used to set unconditionally: file-caching is how much the demuxer
-        // buffers BEFORE it will render anything, so on a local disk - which has
-        // none of the latency spikes this bump exists to absorb - it was simply
-        // 700ms of guaranteed delay added to every single clip open, in exchange
-        // for smoothing out a problem local storage doesn't have.
+        // File caching is libvlc's initial PTS delay. Local clips need only a
+        // small cushion because Windows already read-aheads ordinary files;
+        // network shares need a much larger buffer to absorb their latency.
         var isNetwork = IsNetworkPath(path);
-        _videoMedia.AddOption($":file-caching={(isNetwork ? 5000 : 300)}");
+        var fileCachingMilliseconds = isNetwork ? 5000 : LocalFileCachingMilliseconds;
+        _videoMedia.AddOption($":file-caching={fileCachingMilliseconds}");
         cancellationToken.ThrowIfCancellationRequested();
         VideoPlayer.Media = _videoMedia;
         VideoPlayer.Mute = true;
@@ -362,7 +368,7 @@ public sealed class PlaybackSession : IDisposable
         // living on a share.
         long sizeMb = 0;
         try { sizeMb = new FileInfo(path).Length / (1024 * 1024); } catch { }
-        AppLog.Debug($"Editor video load: codec={videoCodec}, network={isNetwork}, sizeMB={sizeMb}, replayArmed={replayArmed}, decodeThreads={decodeThreads}, stopMs={stopMs}, teardownMs={teardownMs}, totalMs={loadClock.ElapsedMilliseconds}, path={path}");
+        AppLog.Debug($"Editor video load: codec={videoCodec}, network={isNetwork}, fileCachingMs={fileCachingMilliseconds}, sizeMB={sizeMb}, replayArmed={replayArmed}, decodeThreads={decodeThreads}, stopMs={stopMs}, teardownMs={teardownMs}, totalMs={loadClock.ElapsedMilliseconds}, path={path}");
     });
 
     private static bool IsH264(string? codec) =>

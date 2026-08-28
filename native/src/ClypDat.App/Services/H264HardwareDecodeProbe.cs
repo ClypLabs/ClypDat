@@ -120,10 +120,13 @@ internal static class H264HardwareDecodeProbe
         if (!process.WaitForExit(ProbeTimeoutMilliseconds))
         {
             try { process.Kill(entireProcessTree: true); } catch { }
-            // Observe both reads before leaving. Returning without touching them left
-            // faulted tasks for the finalizer thread to rethrow as unobserved exceptions.
-            try { outputTask.GetAwaiter().GetResult(); } catch { }
-            try { errorTask.GetAwaiter().GetResult(); } catch { }
+            // A timeout is deliberately a safe software-decode fallback. Do
+            // not turn it into an unbounded wait by synchronously draining the
+            // killed process's pipes: that kept the editor's first frame
+            // stalled for 500ms+ despite the 250ms timeout. Observe faults
+            // asynchronously so no unobserved task exception is left behind.
+            ObserveFault(outputTask);
+            ObserveFault(errorTask);
             return null;
         }
         var output = outputTask.GetAwaiter().GetResult();
@@ -144,6 +147,13 @@ internal static class H264HardwareDecodeProbe
         }
         return (format, result);
     }
+
+    private static void ObserveFault(Task task) =>
+        _ = task.ContinueWith(
+            completed => _ = completed.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
 
     private static bool TryGetInt64(JsonElement packet, string name, out long value)
     {
