@@ -6,12 +6,18 @@ using Avalonia.Media;
 
 namespace ClypDat.App.Services;
 
+/// <summary>
+/// One preset, rendered as its own swatch. Every brush here is that preset's
+/// colour rather than the active theme's - a dark tile has to stay readable
+/// while a light theme is applied, and the other way round.
+/// </summary>
 public sealed record ThemeOption(
     string Id,
     string Label,
     IBrush AppBackgroundBrush,
     IBrush SurfaceBrush,
-    IBrush AccentBrush);
+    IBrush AccentBrush,
+    IBrush LabelTextBrush);
 
 /// <summary>Owns ClypDat's mutable dark-theme resource palette.</summary>
 internal static class AppThemeService
@@ -314,11 +320,13 @@ internal static class AppThemeService
     private static ThemeOption Option(string id)
     {
         var transform = Transforms.TryGetValue(id, out var t) ? t : ThemeTransform.Identity;
+        var text = NamedTokens.First(token => token.Key == "TextBrush");
         return new ThemeOption(
             id, id,
             new SolidColorBrush(Recolor(NamedTokens[0].Source, ColorRole.Surface, transform)),
             new SolidColorBrush(Recolor(NamedTokens[2].Source, ColorRole.Surface, transform)),
-            new SolidColorBrush(PresetAccent(id)));
+            new SolidColorBrush(PresetAccent(id)),
+            new SolidColorBrush(Recolor(text.Source, ColorRole.Text, transform)));
     }
 
     /// <summary>
