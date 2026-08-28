@@ -3909,6 +3909,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (!SetProperty(ref _clipCropMode, normalized)) return;
             OnPropertyChanged(nameof(IsClipCropActive));
             OnEditorEffectsChanged();
+            // Card thumbnails must show the selected aspect, not the original
+            // 16:9 frame. This is debounced/cancelled by the existing thumbnail
+            // regeneration path, so quick pill changes only keep the latest one.
+            if (!_suppressClipEditSave) RegenerateThumbnailAtTrimStart();
         }
     }
 
