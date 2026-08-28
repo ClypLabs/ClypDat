@@ -67,7 +67,7 @@
                  box rather than the picture floating in a 16:9 one. Everything
                  the box frames lives INSIDE it, progress included - the bar's
                  width is set from the box for the same reason. -->
-            <Grid x:Name="SharePreviewBox" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <Grid x:Name="SharePreviewBox" HorizontalAlignment="Center" VerticalAlignment="Center" ClipToBounds="True">
               <Rectangle RadiusX="10" RadiusY="10" Stroke="#4C6FFF" StrokeThickness="2" StrokeDashArray="6,4" Fill="Transparent" />
               <!-- Uniform, not UniformToFill - the box already carries the
                    picture's aspect, so nothing is cropped to fill it. -->
@@ -82,7 +82,7 @@
               <StackPanel x:Name="ShareProgressPanel" Spacing="8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="False">
                 <TextBlock x:Name="ShareProgressPercentText" Foreground="#D8E4F2" FontSize="14" FontWeight="Bold"
                            HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
-                <ProgressBar x:Name="ShareProgressBar" Minimum="0" Maximum="100" Width="160" Height="6"
+                <ProgressBar x:Name="ShareProgressBar" Minimum="0" Maximum="100" Width="160" MinWidth="0" Height="6"
                              CornerRadius="3" IsIndeterminate="True" />
                 <TextBlock x:Name="ShareProgressEtaText" Foreground="#8EA1B6" FontSize="12"
                            HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" IsVisible="False" />

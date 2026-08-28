@@ -265,6 +265,9 @@ public sealed class ClipEditSettings
     public double TrimStartSeconds { get; set; }
     public double TrimEndSeconds { get; set; }
     public Dictionary<int, double> TrackVolumes { get; set; } = new();
+    // Keep mute separate from level so unmute restores the user's slider value.
+    // Existing sidecars deserialize this as an empty set.
+    public HashSet<int> MutedTrackIndexes { get; set; } = new();
     // The editor has had a Description box since before this field existed,
     // bound to a view-model property nothing ever read or persisted - typing in
     // it and closing the editor silently threw the text away. Sidecars written

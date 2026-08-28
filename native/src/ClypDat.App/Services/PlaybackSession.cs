@@ -430,6 +430,11 @@ public sealed class PlaybackSession : IDisposable
         // PlaybackStopped never fires can't wedge the rebuild forever.
         try { _audioOutputRelease.Wait(TimeSpan.FromMilliseconds(500)); } catch { }
         _audioOutput = new WasapiOut(AudioClientShareMode.Shared, false, 120);
+        _audioOutput.PlaybackStopped += (_, args) =>
+        {
+            if (_disposed) return;
+            AppLog.Error($"Editor audio stopped unexpectedly: shouldPlay={_shouldPlay}, rate={_playbackRate:0.###}x, seekGeneration={Interlocked.Read(ref _seekVersion)}, error={args.Exception?.Message ?? "none"}.");
+        };
         _audioOutput.Init(limited);
         AppLog.Debug($"Editor audio output ready: streams={string.Join(",", _audioSources.Keys.OrderBy(key => key))}.");
     }
@@ -835,8 +840,7 @@ public sealed class PlaybackSession : IDisposable
     {
         var normalized = ClipRenderFilters.NormalizeSpeed(rate);
         if (Math.Abs(_playbackRate - normalized) < 0.0001) return false;
-        // Read the position BEFORE the rate lands. VideoPlayer.Time is not
-        // trustworthy across a rate change - see the re-land below.
+        // Read before changing rate: libvlc's clock can jump while it settles.
         var resumeAt = Position;
         var wasRolling = _shouldPlay && VideoPlayer.IsPlaying && !_isSeeking;
         _playbackRate = normalized;
@@ -857,21 +861,12 @@ public sealed class PlaybackSession : IDisposable
         // reads again; otherwise it blends frames from two playback speeds.
         _rateStage?.SetRate(normalized);
 
-        AppLog.Debug($"Editor playback rate: {normalized:0.###}x, resumeAt={resumeAt.TotalSeconds:0.###}s, rolling={wasRolling}.");
+        AppLog.Debug($"Editor playback rate: requested={normalized:0.###}x, resumeAt={resumeAt.TotalSeconds:0.###}s, rolling={wasRolling}, generation={Interlocked.Read(ref _rateVersion)}.");
         ResetSlowRateMonitor();
-
-        if (wasRolling)
-        {
-            // Re-land the transport at the position it was already at. Rapid
-            // clicking is handled for free: SeekAsync bumps _seekVersion, so an
-            // older queued seek supersedes itself exactly as it does when the
-            // user drags the timeline.
-            _ = SeekAsync(resumeAt, resumePlayback: true);
-        }
-        else
-        {
-            ReanchorAudioClock();
-        }
+        // Never send a live rate change through the generic seek path. Its fixed
+        // 500ms roll-confirmation window expires at .25x/.5x; its safe-failure
+        // behaviour stops video and audio, which is the reported breakage.
+        ReanchorAudioClock();
         return true;
     }
 
@@ -1494,7 +1489,14 @@ public sealed class PlaybackSession : IDisposable
                     ? _source.Read(_input, _tailFrames * _channels, wantedFrames * _channels)
                     : 0;
                 var availableFrames = _tailFrames + read / _channels;
-                if (availableFrames < 2) return 0;
+                if (availableFrames < 2)
+                {
+                    // WasapiOut reads zero as end-of-stream. A short live decode
+                    // gap must be silence, never an unexpected PlaybackStopped.
+                    Array.Clear(buffer, offset, count);
+                    ResetCore();
+                    return count;
+                }
 
                 var written = 0;
                 var position = _phase;
@@ -1524,7 +1526,8 @@ public sealed class PlaybackSession : IDisposable
                 Array.Copy(_input, keepFrom * _channels, _tail, 0, _tailFrames * _channels);
                 _phase = position - keepFrom;
 
-                return written;
+                if (written < count) Array.Clear(buffer, offset + written, count - written);
+                return count;
             }
         }
 

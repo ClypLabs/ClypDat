@@ -6194,6 +6194,7 @@ public sealed partial class MainWindow : Window
         if (sender is not Control { DataContext: TrackLaneViewModel track }) return;
         track.IsMuted = !track.IsMuted;
         _playback?.SetTrackVolume(track.StreamIndex, track.EffectiveVolumePercent);
+        ViewModel?.SaveSelectedClipEditState();
         e.Handled = true;
     }
 
@@ -7900,7 +7901,7 @@ public sealed partial class MainWindow : Window
             EditorVideoView.WatchMediaPlayer(playback.VideoPlayer);
             var audioTracks = ViewModel.TimelineTracks
                 .Where(track => track.IsAudio)
-                .Select(track => new AudioPreviewTrack(track.StreamIndex, track.VolumePercent))
+                .Select(track => new AudioPreviewTrack(track.StreamIndex, track.EffectiveVolumePercent))
                 .ToArray();
             if (cancellationToken.IsCancellationRequested) return;
 

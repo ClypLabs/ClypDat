@@ -4492,6 +4492,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             TrackVolumes = TimelineTracks
                 .Where(track => track.IsAudio)
                 .ToDictionary(track => track.StreamIndex, track => Math.Clamp(track.VolumePercent, 0, 150)),
+            MutedTrackIndexes = TimelineTracks
+                .Where(track => track.IsAudio && track.IsMuted)
+                .Select(track => track.StreamIndex)
+                .ToHashSet(),
             Description = EditorDescription ?? string.Empty,
             SpeedMultiplier = ClipSpeed,
             CropMode = ClipCropMode,
@@ -6939,17 +6943,27 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         foreach (var tier in ShareLadder)
         {
+            var fitted = FitShareTier(tier.Width, tier.Height, effectiveWidth, effectiveHeight);
             // 0.5 of slack on fps so a 59.94 source still counts as 60.
-            if (tier.Width > effectiveWidth || tier.Height > effectiveHeight || tier.Fps > effectiveFps + 0.5) continue;
-            if (videoBps < floor * tier.Width * tier.Height * tier.Fps) continue;
+            if (tier.Fps > effectiveFps + 0.5) continue;
+            if (videoBps < floor * fitted.Width * fitted.Height * tier.Fps) continue;
 
-            var downscaled = tier.Width != effectiveWidth || tier.Height != effectiveHeight || Math.Abs(tier.Fps - effectiveFps) > 0.5;
-            return new ShareEncodeSpec(tier.Width, tier.Height, tier.Fps, Math.Max(100, (int)(videoBps / 1000)), downscaled, IsOriginalQuality: false);
+            var downscaled = fitted.Width != effectiveWidth || fitted.Height != effectiveHeight || Math.Abs(tier.Fps - effectiveFps) > 0.5;
+            return new ShareEncodeSpec(fitted.Width, fitted.Height, tier.Fps, Math.Max(100, (int)(videoBps / 1000)), downscaled, IsOriginalQuality: false);
         }
 
         var last = ShareLadder[^1];
-        var clamped = Math.Max(floor * last.Width * last.Height * last.Fps * 0.6, videoBps);
-        return new ShareEncodeSpec(last.Width, last.Height, last.Fps, Math.Max(100, (int)(clamped / 1000)), Downscaled: true, IsOriginalQuality: false);
+        var fallback = FitShareTier(last.Width, last.Height, effectiveWidth, effectiveHeight);
+        var clamped = Math.Max(floor * fallback.Width * fallback.Height * last.Fps * 0.6, videoBps);
+        return new ShareEncodeSpec(fallback.Width, fallback.Height, last.Fps, Math.Max(100, (int)(clamped / 1000)), Downscaled: true, IsOriginalQuality: false);
+    }
+
+    private static (int Width, int Height) FitShareTier(int tierWidth, int tierHeight, int sourceWidth, int sourceHeight)
+    {
+        var scale = Math.Min(1d, Math.Min((double)tierWidth / sourceWidth, (double)tierHeight / sourceHeight));
+        return (
+            Math.Max(2, (int)Math.Floor(sourceWidth * scale / 2) * 2),
+            Math.Max(2, (int)Math.Floor(sourceHeight * scale / 2) * 2));
     }
 
     private static double VolumeMultiplier(double percent) => Math.Clamp(percent / 100d, 0, 1.5);
@@ -7203,6 +7217,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 track.VolumePercent = Math.Clamp(volume, 0, 150);
             }
+            track.IsMuted = edit.MutedTrackIndexes?.Contains(track.StreamIndex) == true;
         }
 
         // NormalizeSpeed turns a sidecar written before effects existed - where
