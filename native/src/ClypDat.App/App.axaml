@@ -5,13 +5,16 @@
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries>
         <ResourceInclude Source="avares://ClypDat/Styles/Tokens.axaml" />
+        <ResourceInclude Source="avares://ClypDat/Styles/SurfaceRamp.axaml" />
       </ResourceDictionary.MergedDictionaries>
-      <!-- Fallback colors; overwritten at startup in App.axaml.cs with the live
-           Windows accent color when available (Settings > Personalization > Colors). -->
+      <!-- Accent brushes live here rather than in Tokens.axaml only because they
+           have no authored "source" value: AppThemeService derives every one of
+           them from the live accent (Windows accent, or the preset's own when
+           Settings > Themes has the Windows accent switched off). The values
+           below are the startup fallback for the System preset. -->
       <SolidColorBrush x:Key="AccentBrush" Color="#5864E8" />
       <SolidColorBrush x:Key="AccentBrushHover" Color="#6D77F0" />
-      <!-- Sidebar selection tints, derived from the accent above (see
-           ApplyAccentColor) so they track the Windows colour too. -->
+      <!-- Sidebar selection tints, derived from the accent above. -->
       <SolidColorBrush x:Key="AccentSelectedBrush" Color="#2A3350" />
       <SolidColorBrush x:Key="AccentSelectedHoverBrush" Color="#222A43" />
       <SolidColorBrush x:Key="AccentSelectedIconBrush" Color="#A8B4F5" />
@@ -21,16 +24,18 @@
       <!-- Hovering a rail button uses a darker version of its selection tint,
            keeping selected state visually stronger than pointer-over state. -->
       <SolidColorBrush x:Key="AccentHoverBrush" Color="#222A43" />
-      <!-- These duplicate merged token defaults intentionally. Theme
-           selection mutates application-local brushes in place. -->
-      <SolidColorBrush x:Key="AppBgBrush" Color="#0D1116" />
-      <SolidColorBrush x:Key="PanelBgBrush" Color="#101820" />
-      <SolidColorBrush x:Key="SurfaceBrush" Color="#141D24" />
-      <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="#1A242E" />
-      <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#22303D" />
-      <SolidColorBrush x:Key="EdgeBrush" Color="#232F3A" />
-      <SolidColorBrush x:Key="EdgeStrongBrush" Color="#2C3B48" />
-      <SolidColorBrush x:Key="DividerBrush" Color="#1B242D" />
+
+      <!-- FluentTheme reads its own accent from these. Overriding them here is
+           what stops Fluent's stock blue showing through on the controls we have
+           not re-templated (ListBoxItem selection, CheckBox ticks) when a
+           non-blue theme is active. AppThemeService reassigns them on apply. -->
+      <Color x:Key="SystemAccentColor">#5864E8</Color>
+      <Color x:Key="SystemAccentColorLight1">#707BEB</Color>
+      <Color x:Key="SystemAccentColorLight2">#8B93F0</Color>
+      <Color x:Key="SystemAccentColorLight3">#A5ABF4</Color>
+      <Color x:Key="SystemAccentColorDark1">#4A54BB</Color>
+      <Color x:Key="SystemAccentColorDark2">#3B438F</Color>
+      <Color x:Key="SystemAccentColorDark3">#2C3262</Color>
     </ResourceDictionary>
   </Application.Resources>
   <Application.Styles>

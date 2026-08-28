@@ -10,7 +10,7 @@
     <Grid ColumnDefinitions="240,*,Auto" RowDefinitions="Auto,*">
       <Border Grid.Column="0" Grid.RowSpan="2" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="0,0,1,0">
         <Grid RowDefinitions="Auto,*">
-          <TextBox Grid.Row="0" x:Name="SettingsSearchBox" Classes="settingsInput appSearchBox" Text="{Binding SettingsSearchText}" PlaceholderText="Search settings" Margin="14,0,0,14" VerticalContentAlignment="Center">
+          <TextBox Grid.Row="0" x:Name="SettingsSearchBox" Classes="settingsInput appSearchBox" Text="{Binding SettingsSearchText}" PlaceholderText="Search settings" Margin="14,18,16,14" VerticalContentAlignment="Center">
             <TextBox.InnerLeftContent>
               <Canvas Width="16" Height="16" Margin="10,0,2,0" VerticalAlignment="Center">
                 <Ellipse Canvas.Left="0" Canvas.Top="0" Width="11" Height="11" Stroke="{StaticResource TextMutedBrush}" StrokeThickness="1.6" />

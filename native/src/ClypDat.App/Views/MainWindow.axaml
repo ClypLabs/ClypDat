@@ -13,7 +13,7 @@
         Height="852"
         MinWidth="1312"
         MinHeight="852"
-        Background="#0D1116"
+        Background="{StaticResource Surface_0D1116}"
         Icon="/Assets/clypdat-icon.ico"
         WindowDecorations="BorderOnly"
         ExtendClientAreaToDecorationsHint="True"
@@ -33,7 +33,7 @@
          is only ever reachable deliberately. -->
     <Border x:Name="FocusSink" Focusable="True" Width="0" Height="0" IsHitTestVisible="False"
             HorizontalAlignment="Left" VerticalAlignment="Top" />
-    <Border Grid.Row="0" Background="#171F27" BorderBrush="#1E2A33" BorderThickness="0,0,0,1" PointerPressed="HeaderBar_OnPointerPressed">
+    <Border Grid.Row="0" Background="{StaticResource Surface_171F27}" BorderBrush="{StaticResource Surface_1E2A33}" BorderThickness="0,0,0,1" PointerPressed="HeaderBar_OnPointerPressed">
       <Grid ColumnDefinitions="Auto,*,Auto,Auto" Margin="12,2,0,0" VerticalAlignment="Stretch">
         <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
           <Button Classes="brandButton" Padding="6" Click="LibraryHomeButton_OnClick" ToolTip.Tip="Library">
@@ -125,7 +125,7 @@
                               <TextBlock Text="Capture cursor" Foreground="#B8C7D8" VerticalAlignment="Center" ToolTip.Tip="Include the mouse cursor in desktop capture" />
                               <ToggleSwitch Grid.Column="1" IsChecked="{Binding ReplayDesktopCaptureCursor}" OnContent="{x:Null}" OffContent="{x:Null}" ToolTip.Tip="Include the mouse cursor in desktop capture" />
                             </Grid>
-                            <Border Grid.Column="1" Width="1" Background="#304352" Margin="0,2" VerticalAlignment="Stretch" />
+                            <Border Grid.Column="1" Width="1" Background="{StaticResource Surface_304352}" Margin="0,2" VerticalAlignment="Stretch" />
                             <Grid Grid.Column="2" ColumnDefinitions="*,Auto" ColumnSpacing="8">
                               <TextBlock Text="Switch to games" Foreground="#B8C7D8" VerticalAlignment="Center" ToolTip.Tip="Switch to Game Capture when a game is detected" />
                               <ToggleSwitch Grid.Column="1" IsChecked="{Binding ReplayAutoSwitchToGameCapture}" OnContent="{x:Null}" OffContent="{x:Null}" ToolTip.Tip="Switch to Game Capture when a game is detected" />
@@ -222,11 +222,11 @@
           </Button>
           <Button Grid.Column="1" Content="Clip" IsEnabled="{Binding IsReplayReady}" Click="ClipButton_OnClick" Margin="10,0,0,0" />
           <TextBlock Grid.Column="2" Text="{Binding HotkeyDisplay}" Foreground="#93A6B8" FontWeight="Bold" VerticalAlignment="Center" Margin="10,0,0,0" />
-          <Border Grid.Column="3" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding ShowLibraryStatus}" Margin="10,0,0,0" />
+          <Border Grid.Column="3" Width="1" Height="20" Background="{StaticResource Surface_2A3640}" IsVisible="{Binding ShowLibraryStatus}" Margin="10,0,0,0" />
           <Button Grid.Column="4" Classes="linkButton" Click="ActiveGameButton_OnClick" IsVisible="{Binding ShowLibraryStatus}" Margin="10,0,0,0" ToolTip.Tip="Click for detection options">
             <TextBlock Text="{Binding ActiveGame}" Foreground="#BDD4EE" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="220" />
           </Button>
-          <Border Grid.Column="5" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding HasSelection}" Margin="10,0,0,0" />
+          <Border Grid.Column="5" Width="1" Height="20" Background="{StaticResource Surface_2A3640}" IsVisible="{Binding HasSelection}" Margin="10,0,0,0" />
           <TextBlock Grid.Column="6"
                      Text="{Binding SelectionSummary}"
                      Foreground="#D7E2EF"
@@ -245,13 +245,13 @@
                   HorizontalContentAlignment="Center"
                   VerticalContentAlignment="Center"
                   Margin="10,0,0,0" />
-          <Border Grid.Column="8" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" Margin="10,0,0,0" />
+          <Border Grid.Column="8" Width="1" Height="20" Background="{StaticResource Surface_2A3640}" IsVisible="{Binding IsEditorVisible}" Margin="10,0,0,0" />
           <TextBlock Grid.Column="9" Text="{Binding SelectedCreated}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" Margin="10,0,0,0" />
-          <Border Grid.Column="10" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" Margin="10,0,0,0" />
+          <Border Grid.Column="10" Width="1" Height="20" Background="{StaticResource Surface_2A3640}" IsVisible="{Binding IsEditorVisible}" Margin="10,0,0,0" />
           <TextBlock Grid.Column="11" Text="{Binding SelectedQuality}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" TextTrimming="CharacterEllipsis" MaxWidth="180" Margin="10,0,0,0" />
-          <Border Grid.Column="12" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding IsEditorVisible}" Margin="10,0,0,0" />
+          <Border Grid.Column="12" Width="1" Height="20" Background="{StaticResource Surface_2A3640}" IsVisible="{Binding IsEditorVisible}" Margin="10,0,0,0" />
           <TextBlock Grid.Column="13" Text="{Binding SelectedSize}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" TextTrimming="CharacterEllipsis" MaxWidth="110" Margin="10,0,0,0" />
-          <Border Grid.Column="14" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding HasSelectedCaptureBackend}" Margin="10,0,0,0" />
+          <Border Grid.Column="14" Width="1" Height="20" Background="{StaticResource Surface_2A3640}" IsVisible="{Binding HasSelectedCaptureBackend}" Margin="10,0,0,0" />
           <TextBlock Grid.Column="15"
                      Text="{Binding SelectedCaptureBackend}"
                      Foreground="#93A6B8"
@@ -259,7 +259,7 @@
                      IsVisible="{Binding HasSelectedCaptureBackend}"
                      TextTrimming="CharacterEllipsis"
                      Margin="10,0,0,0" />
-          <Border Grid.Column="16" Width="1" Height="20" Background="#2A3640" IsVisible="{Binding HasSelectedCaptureBackend}" Margin="10,0,0,0" />
+          <Border Grid.Column="16" Width="1" Height="20" Background="{StaticResource Surface_2A3640}" IsVisible="{Binding HasSelectedCaptureBackend}" Margin="10,0,0,0" />
           <Button Grid.Column="17" Classes="linkButton" Click="EditorPathButton_OnClick" IsVisible="{Binding IsEditorVisible}" Margin="10,0,0,0">
             <TextBlock Text="{Binding SelectedVideoPath}" TextTrimming="CharacterEllipsis" />
           </Button>
@@ -295,7 +295,7 @@
          keeps the sidebar mounted and unmovable across every view, and the three
          column-1 children just gate their own visibility instead. -->
     <Grid Grid.Row="1" ColumnDefinitions="Auto,*">
-      <Border x:Name="EditorSidebarRail" Grid.Column="0" Width="{Binding EditorSidebarWidth}" Background="#0D1116" BorderBrush="#1E2A33" BorderThickness="0,0,1,0">
+      <Border x:Name="EditorSidebarRail" Grid.Column="0" Width="{Binding EditorSidebarWidth}" Background="{StaticResource Surface_0D1116}" BorderBrush="{StaticResource Surface_1E2A33}" BorderThickness="0,0,1,0">
         <Grid RowDefinitions="*,Auto">
           <!-- The rail is one column serving two modes. The library's filters
                and the editor's sections share row 0 and swap, rather than the
@@ -316,7 +316,7 @@
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
 
-              <Border Height="1" Background="#1E2A33" Margin="16,10" />
+              <Border Height="1" Background="{StaticResource Surface_1E2A33}" Margin="16,10" />
 
               <!-- With Combine off, a game and a section can never both be
                    active at once - picking either already drops the other -
@@ -447,7 +447,7 @@
                                      otherwise go), matching the "never
                                      stretch past its own cell" rule the 3-
                                      game layout now follows too. -->
-                                <Border Width="14" Height="14" HorizontalAlignment="Left" VerticalAlignment="Top" CornerRadius="4" ClipToBounds="True" Background="#26323D" IsVisible="{Binding IsSingleGame}">
+                                <Border Width="14" Height="14" HorizontalAlignment="Left" VerticalAlignment="Top" CornerRadius="4" ClipToBounds="True" Background="{StaticResource Surface_26323D}" IsVisible="{Binding IsSingleGame}">
                                   <Panel>
                                     <Image Source="{Binding Slot1Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot1Icon}" />
                                     <TextBlock Text="{Binding Slot1Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot1Icon}" />
@@ -465,13 +465,13 @@
                                      own cell and the tile rendered as one giant
                                      clipped icon instead of two small ones. -->
                                 <Grid ColumnDefinitions="*,*" RowDefinitions="*,*" IsVisible="{Binding IsTwoGames}">
-                                  <Border Grid.Row="0" Grid.Column="0" Margin="0,0,1,1" CornerRadius="4" ClipToBounds="True" Background="#26323D">
+                                  <Border Grid.Row="0" Grid.Column="0" Margin="0,0,1,1" CornerRadius="4" ClipToBounds="True" Background="{StaticResource Surface_26323D}">
                                     <Panel>
                                       <Image Source="{Binding Slot1Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot1Icon}" />
                                       <TextBlock Text="{Binding Slot1Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot1Icon}" />
                                     </Panel>
                                   </Border>
-                                  <Border Grid.Row="0" Grid.Column="1" Margin="1,0,0,1" CornerRadius="4" ClipToBounds="True" Background="#26323D">
+                                  <Border Grid.Row="0" Grid.Column="1" Margin="1,0,0,1" CornerRadius="4" ClipToBounds="True" Background="{StaticResource Surface_26323D}">
                                     <Panel>
                                       <Image Source="{Binding Slot2Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot2Icon}" />
                                       <TextBlock Text="{Binding Slot2Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot2Icon}" />
@@ -480,13 +480,13 @@
                                 </Grid>
 
                                 <Grid ColumnDefinitions="*,*" RowDefinitions="*,*" IsVisible="{Binding IsThreeGames}">
-                                  <Border Grid.Row="0" Grid.Column="0" Margin="0,0,1,1" CornerRadius="4" ClipToBounds="True" Background="#26323D">
+                                  <Border Grid.Row="0" Grid.Column="0" Margin="0,0,1,1" CornerRadius="4" ClipToBounds="True" Background="{StaticResource Surface_26323D}">
                                     <Panel>
                                       <Image Source="{Binding Slot1Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot1Icon}" />
                                       <TextBlock Text="{Binding Slot1Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot1Icon}" />
                                     </Panel>
                                   </Border>
-                                  <Border Grid.Row="0" Grid.Column="1" Margin="1,0,0,1" CornerRadius="4" ClipToBounds="True" Background="#26323D">
+                                  <Border Grid.Row="0" Grid.Column="1" Margin="1,0,0,1" CornerRadius="4" ClipToBounds="True" Background="{StaticResource Surface_26323D}">
                                     <Panel>
                                       <Image Source="{Binding Slot2Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot2Icon}" />
                                       <TextBlock Text="{Binding Slot2Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot2Icon}" />
@@ -497,7 +497,7 @@
                                        bottom-left, under Slot1, same as the
                                        single-game layout's own top-left
                                        placement, not centred under the row. -->
-                                  <Border Grid.Row="1" Grid.Column="0" Width="14" Height="14" Margin="0,1,0,0" HorizontalAlignment="Left" CornerRadius="4" ClipToBounds="True" Background="#26323D">
+                                  <Border Grid.Row="1" Grid.Column="0" Width="14" Height="14" Margin="0,1,0,0" HorizontalAlignment="Left" CornerRadius="4" ClipToBounds="True" Background="{StaticResource Surface_26323D}">
                                     <Panel>
                                       <Image Source="{Binding Slot3Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot3Icon}" />
                                       <TextBlock Text="{Binding Slot3Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot3Icon}" />
@@ -506,25 +506,25 @@
                                 </Grid>
 
                                 <Grid ColumnDefinitions="*,*" RowDefinitions="*,*" IsVisible="{Binding IsFourPlusGames}">
-                                  <Border Grid.Row="0" Grid.Column="0" Margin="0,0,1,1" CornerRadius="4" ClipToBounds="True" Background="#26323D">
+                                  <Border Grid.Row="0" Grid.Column="0" Margin="0,0,1,1" CornerRadius="4" ClipToBounds="True" Background="{StaticResource Surface_26323D}">
                                     <Panel>
                                       <Image Source="{Binding Slot1Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot1Icon}" />
                                       <TextBlock Text="{Binding Slot1Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot1Icon}" />
                                     </Panel>
                                   </Border>
-                                  <Border Grid.Row="0" Grid.Column="1" Margin="1,0,0,1" CornerRadius="4" ClipToBounds="True" Background="#26323D">
+                                  <Border Grid.Row="0" Grid.Column="1" Margin="1,0,0,1" CornerRadius="4" ClipToBounds="True" Background="{StaticResource Surface_26323D}">
                                     <Panel>
                                       <Image Source="{Binding Slot2Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot2Icon}" />
                                       <TextBlock Text="{Binding Slot2Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot2Icon}" />
                                     </Panel>
                                   </Border>
-                                  <Border Grid.Row="1" Grid.Column="0" Margin="0,1,1,0" CornerRadius="4" ClipToBounds="True" Background="#26323D">
+                                  <Border Grid.Row="1" Grid.Column="0" Margin="0,1,1,0" CornerRadius="4" ClipToBounds="True" Background="{StaticResource Surface_26323D}">
                                     <Panel>
                                       <Image Source="{Binding Slot3Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot3Icon}" />
                                       <TextBlock Text="{Binding Slot3Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot3Icon}" />
                                     </Panel>
                                   </Border>
-                                  <Border Grid.Row="1" Grid.Column="1" Margin="1,1,0,0" CornerRadius="4" ClipToBounds="True" Background="#26323D">
+                                  <Border Grid.Row="1" Grid.Column="1" Margin="1,1,0,0" CornerRadius="4" ClipToBounds="True" Background="{StaticResource Surface_26323D}">
                                     <Panel>
                                       <Image Source="{Binding Slot4Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot4Icon}" />
                                       <TextBlock Text="{Binding Slot4Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding ShowSlot4Initial}" />
@@ -577,8 +577,8 @@
           <Border Grid.Row="0" Height="22" VerticalAlignment="Bottom" IsHitTestVisible="False" IsVisible="{Binding !IsEditorVisible}">
             <Border.Background>
               <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-                <GradientStop Color="#000D1116" Offset="0" />
-                <GradientStop Color="#0D1116" Offset="1" />
+                <GradientStop Color="{DynamicResource SurfaceColor_000D1116}" Offset="0" />
+                <GradientStop Color="{DynamicResource SurfaceColor_0D1116}" Offset="1" />
               </LinearGradientBrush>
             </Border.Background>
           </Border>
@@ -635,7 +635,7 @@
                         <TextBlock Grid.Column="0" Text="{Binding LibraryDriveFreeOfTotalDisplay}" Foreground="#EDF4FB" FontWeight="Bold" FontSize="15" />
                         <TextBlock Grid.Column="1" Text="{Binding LibraryDriveUsedPercentDisplay}" Foreground="#93A6B8" FontSize="12" VerticalAlignment="Center" />
                       </Grid>
-                      <Border Width="260" Height="8" CornerRadius="4" Background="#26313C" HorizontalAlignment="Left">
+                      <Border Width="260" Height="8" CornerRadius="4" Background="{StaticResource Surface_26313C}" HorizontalAlignment="Left">
                         <StackPanel Orientation="Horizontal">
                           <Border Width="{Binding LibraryUsedFractionOfDrive, Converter={x:Static opconv:FractionToWidthConverter.Instance}, ConverterParameter=260}"
                                   Height="8" CornerRadius="4" Background="#2FD9A8" />
@@ -657,7 +657,7 @@
                     </StackPanel>
                     <TextBlock Text="Drive stats unavailable for this library folder." Foreground="#6B7C8C" FontSize="12" IsVisible="{Binding !HasDriveStats}" />
 
-                    <Border Height="1" Background="#1E2A33" />
+                    <Border Height="1" Background="{StaticResource Surface_1E2A33}" />
 
                     <StackPanel Spacing="8">
                       <Grid ColumnDefinitions="*,Auto">
@@ -697,7 +697,7 @@
                                    Margin="0,0,14,0"
                                    IsHitTestVisible="False" />
                       </Grid>
-                      <Border Height="6" CornerRadius="3" Background="#26313C" IsVisible="{Binding HasLibraryStorageLimit}">
+                      <Border Height="6" CornerRadius="3" Background="{StaticResource Surface_26313C}" IsVisible="{Binding HasLibraryStorageLimit}">
                         <Border Width="{Binding LibraryStorageLimitUsedFraction, Converter={x:Static opconv:FractionToWidthConverter.Instance}, ConverterParameter=280}"
                                 Height="6" CornerRadius="3"
                                 Background="{Binding LibraryStorageRingBrush}"
@@ -724,7 +724,7 @@
                      touching it. Only the ring carries it, so the two text
                      lines stay tight to each other. -->
                 <Panel Width="30" Height="30" HorizontalAlignment="Center" Margin="0,0,0,2">
-                  <Ellipse Width="30" Height="30" Stroke="#3E4C5A" StrokeThickness="2.5" />
+                  <Ellipse Width="30" Height="30" Stroke="{StaticResource Surface_3E4C5A}" StrokeThickness="2.5" />
                   <Path Data="{Binding LibraryStorageRingFraction, Converter={x:Static opconv:FractionToArcPathConverter.Instance}}"
                         Stroke="{Binding LibraryStorageRingBrush}" StrokeThickness="2.5" StrokeLineCap="Round" />
                 </Panel>
@@ -749,7 +749,7 @@
       </Border>
 
       <controls:RetainedPageHost Grid.Column="1" IsActive="{Binding IsLibraryVisible}">
-      <Border Background="#101820">
+      <Border Background="{StaticResource Surface_101820}">
         <DockPanel>
           <!-- Toolbar carrying the library heading and the search box. Sits
                OUTSIDE the margined content grid below so it spans the full
@@ -758,8 +758,8 @@
                the content's own padding, which is where both used to live. -->
           <Border DockPanel.Dock="Top"
                   Height="52"
-                  Background="#0D141A"
-                  BorderBrush="#1E2A33"
+                  Background="{StaticResource Surface_0D141A}"
+                  BorderBrush="{StaticResource Surface_1E2A33}"
                   BorderThickness="0,0,0,1">
             <Grid ColumnDefinitions="Auto,*,240" Margin="20,0">
               <!-- Matches date headers: hover reveals select-all checkbox and
@@ -828,8 +828,8 @@
                   Margin="0,14,0,0"
                   Padding="14,10"
                   CornerRadius="8"
-                  Background="#182029"
-                  BorderBrush="#2A3640"
+                  Background="{StaticResource Surface_182029}"
+                  BorderBrush="{StaticResource Surface_2A3640}"
                   BorderThickness="1"
                   IsVisible="{Binding IsHydratingLibrary}">
             <StackPanel Spacing="8">
@@ -847,7 +847,7 @@
                            Value="{Binding HydrationProgressFraction}"
                            Height="4"
                            CornerRadius="2"
-                           Background="#26313C"
+                           Background="{StaticResource Surface_26313C}"
                            Foreground="{StaticResource AccentBrush}"
                            HorizontalAlignment="Stretch" />
             </StackPanel>
@@ -860,8 +860,8 @@
                   Margin="0,14,0,0"
                   Padding="14,10"
                   CornerRadius="8"
-                  Background="#182029"
-                  BorderBrush="#2A3640"
+                  Background="{StaticResource Surface_182029}"
+                  BorderBrush="{StaticResource Surface_2A3640}"
                   BorderThickness="1"
                   IsVisible="{Binding HasClipNotReadyMessage}">
             <TextBlock Text="{Binding ClipNotReadyMessage}" Foreground="#B8C7D8" FontSize="12" FontWeight="Bold" />
@@ -934,7 +934,7 @@
                       </StackPanel>
                     </Border>
                     <Border x:Name="LibraryClipCardSurface"
-                            Background="#24303A"
+                            Background="{StaticResource Surface_24303A}"
                             CornerRadius="12"
                             BoxShadow="0 6 18 -6 #66000000"
                             PointerPressed="ClipCard_OnPointerPressed"
@@ -950,17 +950,17 @@
                                     IsVisible="{Binding IsCheckVisible}"
                                     IsHitTestVisible="False"
                                     ZIndex="10" />
-                            <Border Background="#16202A" Height="{Binding $parent[Window].DataContext.CardImageHeight}">
+                            <Border Background="{StaticResource Surface_16202A}" Height="{Binding $parent[Window].DataContext.CardImageHeight}">
                               <Grid>
                                 <Image Source="{Binding PreviewImage}" Stretch="UniformToFill" />
                                 <controls:ClipPreviewPresenter Classes="clipPreviewOverlay" IsHitTestVisible="False" />
-                                <Border Background="#661A2040" IsVisible="{Binding IsSelected}" IsHitTestVisible="False" />
+                                <Border Background="{StaticResource Surface_661A2040}" IsVisible="{Binding IsSelected}" IsHitTestVisible="False" />
                                 <!-- Queued for, or undergoing, a parameter-set
                                      repair. The thumbnail underneath is the
                                      broken grey decode, so dim it and say what
                                      is happening rather than let it read as the
                                      clip's real content. -->
-                                <Border Background="#CC0E151C"
+                                <Border Background="{StaticResource Surface_CC0E151C}"
                                         IsVisible="{Binding IsRepairOverlayVisible}"
                                         IsHitTestVisible="False"
                                         ZIndex="5">
@@ -1007,7 +1007,7 @@
                                   <Border Grid.Column="2"
                                           VerticalAlignment="Top"
                                           Padding="10,6"
-                                          Background="#1A2530"
+                                          Background="{StaticResource Surface_1A2530}"
                                           CornerRadius="18">
                                     <StackPanel Orientation="Horizontal" Spacing="5">
                                       <PathIcon Data="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"
@@ -1022,7 +1022,7 @@
                               </Grid>
                             </Border>
 
-                            <Border Grid.Row="1" Background="#1E2A35">
+                            <Border Grid.Row="1" Background="{StaticResource Surface_1E2A35}">
                                 <Grid ColumnDefinitions="*,Auto" Margin="16,13,16,13">
                                 <StackPanel Grid.Column="0" Spacing="6">
                                  <Border Classes="clipGameFilter"
@@ -1178,7 +1178,7 @@
               <Border x:Name="DateScrubberTrack"
                       Width="6"
                       CornerRadius="3"
-                      Background="#405262"
+                      Background="{StaticResource Surface_405262}"
                       Opacity="0"
                       HorizontalAlignment="Left"
                       VerticalAlignment="Stretch"
@@ -1249,8 +1249,8 @@
     <settings:SettingsPanel x:Name="SettingsPanelView" Grid.Column="1" IsVisible="{Binding IsSettingsVisible}" />
       <Grid Grid.Column="1" ColumnDefinitions="*,340" RowDefinitions="*,Auto" IsVisible="{Binding IsEditorVisible}">
       <Grid Grid.ColumnSpan="2" Grid.RowSpan="2" RowDefinitions="*,Auto" ColumnDefinitions="*,340">
-        <Grid Grid.Column="0" Background="#0E141A">
-          <Border Background="#05080B">
+        <Grid Grid.Column="0" Background="{StaticResource Surface_0E141A}">
+          <Border Background="{StaticResource Surface_05080B}">
             <!-- Pan slider lives in its own column, not overlapping
                  EditorVideoHost - VideoView is a native child window that
                  always paints over Avalonia-rendered siblings regardless of
@@ -1625,7 +1625,7 @@
                     <TextBlock Text="DETAILS" Classes="editorCardLabel" />
                     <TextBlock Text="Title" Foreground="#8EA1B6" FontSize="12" />
                     <TextBox Text="{Binding EditorTitle, Mode=TwoWay}" Foreground="#EDF4FB" FontSize="14" FontWeight="SemiBold"
-                             Background="#0D151C" BorderBrush="#263743" KeyDown="EditorTitle_OnKeyDown" />
+                             Background="{StaticResource Surface_0D151C}" BorderBrush="{StaticResource Surface_263743}" KeyDown="EditorTitle_OnKeyDown" />
                     <TextBlock Text="Description" Foreground="#8EA1B6" FontSize="12" Margin="0,2,0,0" />
                     <!-- KeyDown is wired in code-behind as a TUNNEL handler, not
                          here: AcceptsReturn makes TextBox's own class handler
@@ -1634,7 +1634,7 @@
                          a KeyDown="..." attribute here never fired at all. -->
                     <TextBox x:Name="EditorDescriptionBox"
                              Text="{Binding EditorDescription, Mode=TwoWay}" MinHeight="78" AcceptsReturn="True" TextWrapping="Wrap"
-                             PlaceholderText="Add a description" Background="#0D151C" BorderBrush="#263743" Foreground="#D6E2F0" />
+                             PlaceholderText="Add a description" Background="{StaticResource Surface_0D151C}" BorderBrush="{StaticResource Surface_263743}" Foreground="#D6E2F0" />
                   </StackPanel>
                 </Border>
 
@@ -1797,10 +1797,10 @@
             PointerPressed="OnboardingOverlay_OnPointerPressed">
       <!-- Fixed dimensions keep Back/Next in one place. Long step content scrolls
            inside the body instead of resizing the dialog and moving its controls. -->
-      <Border Width="640" Height="560" CornerRadius="12" Background="#111920" BorderBrush="#232F3A" BorderThickness="1"
+      <Border Width="640" Height="560" CornerRadius="12" Background="{StaticResource Surface_111920}" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="1"
               ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center">
         <DockPanel Margin="1">
-          <Border DockPanel.Dock="Top" Background="#0C1319" CornerRadius="11,11,0,0">
+          <Border DockPanel.Dock="Top" Background="{StaticResource Surface_0C1319}" CornerRadius="11,11,0,0">
           <Grid ColumnDefinitions="Auto,*,Auto" Height="52">
             <StackPanel Orientation="Horizontal" Spacing="8" Margin="14,0,0,0" VerticalAlignment="Center">
               <Image Source="/Assets/clypdat-icon-24.png" Width="16" Height="16" />
@@ -1950,7 +1950,7 @@
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding StartMinimizedToTray}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
-                  <Border Height="1" Background="#263544" />
+                  <Border Height="1" Background="{StaticResource Surface_263544}" />
                   <Grid ColumnDefinitions="*,Auto">
                     <StackPanel Spacing="3">
                       <TextBlock Text="Discord Rich Presence" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" />
@@ -1988,10 +1988,10 @@
          Window's own body. -->
     <Border x:Name="NewClipsOverlay" Grid.RowSpan="2" Background="#DD000000" IsVisible="False"
             PointerPressed="NewClipsOverlay_OnPointerPressed">
-      <Border x:Name="NewClipsDialogCard" MaxHeight="860" CornerRadius="12" Background="#111920" BorderBrush="#232F3A" BorderThickness="1"
+      <Border x:Name="NewClipsDialogCard" MaxHeight="860" CornerRadius="12" Background="{StaticResource Surface_111920}" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="1"
               ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center">
         <DockPanel LastChildFill="True">
-          <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto" Height="56" Background="#0C1319">
+          <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto" Height="56" Background="{StaticResource Surface_0C1319}">
             <TextBlock x:Name="NewClipsTitleText" Grid.Column="1" Foreground="#D8E4F2" FontSize="17" FontWeight="Bold"
                        HorizontalAlignment="Center" VerticalAlignment="Center" />
             <Button Grid.Column="2" Classes="dialogClose" FontSize="14" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
@@ -2000,7 +2000,7 @@
             </Button>
           </Grid>
 
-          <Border DockPanel.Dock="Bottom" Background="#141B23" BorderBrush="#232F3A" BorderThickness="0,1,0,0">
+          <Border DockPanel.Dock="Bottom" Background="{StaticResource Surface_141B23}" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="0,1,0,0">
             <Grid ColumnDefinitions="Auto,*,Auto" Margin="24,16,24,16">
               <Button x:Name="NewClipsDeleteButton" Classes="deleteButton" MinWidth="150" Height="40"
                       HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Click="NewClipsDeleteButton_OnClick" />
@@ -2067,7 +2067,7 @@
                          Height="3" Padding="0" BorderThickness="0" CornerRadius="0" VerticalAlignment="Center"
                          Background="#33FFFFFF" Foreground="{StaticResource AccentBrush}" IsHitTestVisible="False" />
           </Border>
-          <Border Background="#0B0F14" Padding="14,10">
+          <Border Background="{StaticResource Surface_0B0F14}" Padding="14,10">
             <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
               <Button Classes="transportButton" Click="RestartButton_OnClick" ToolTip.Tip="Restart">
                 <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
@@ -2143,7 +2143,7 @@
          the moment the loader closes. -->
     <Border x:Name="StartupCurtain"
             Grid.Row="0" Grid.RowSpan="2"
-            Background="#0D1116"
+            Background="{StaticResource Surface_0D1116}"
             IsVisible="False"
             IsHitTestVisible="True"
             ZIndex="1000" />

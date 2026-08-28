@@ -47,7 +47,7 @@ internal sealed class NewClipsDialog : Window
         _primaryButton.Classes.Add("primaryButton");
         _primaryButton.Click += viewAll;
 
-        var header = new Grid { Height = 56, Background = Brush.Parse("#0C1319"), ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
+        var header = new Grid { Height = 56, Background = AppThemeService.Brush("Surface_0C1319", "#0C1319"), ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
         header.Children.Add(_title);
         Grid.SetColumn(_title, 1);
         header.Children.Add(closeButton);
@@ -62,7 +62,7 @@ internal sealed class NewClipsDialog : Window
         dock.Children.Add(footer);
         DockPanel.SetDock(footer, Dock.Bottom);
         dock.Children.Add(new ScrollViewer { Content = Cards, MaxHeight = 620 });
-        _card = new Border { Width = 520, MaxHeight = 860, CornerRadius = new CornerRadius(12), Background = Brush.Parse("#111920"), BorderBrush = Brush.Parse("#232F3A"), BorderThickness = new Thickness(1), ClipToBounds = true, Child = dock, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        _card = new Border { Width = 520, MaxHeight = 860, CornerRadius = new CornerRadius(12), Background = AppThemeService.Brush("Surface_111920", "#111920"), BorderBrush = AppThemeService.Brush("EdgeBrush", "#232F3A"), BorderThickness = new Thickness(1), ClipToBounds = true, Child = dock, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         var scrim = new Border { Background = Brush.Parse("#DD000000"), Child = _card };
         Content = scrim;
         Opened += (_, _) =>

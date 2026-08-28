@@ -3532,7 +3532,7 @@ public sealed partial class MainWindow : Window
         // gameplay, not blend in as a subtle little pill. "AccentBrush" is
         // the same live, OS-accent-colour-tracking resource App.axaml.cs
         // keeps in sync with Windows' own accent colour (see
-        // InitializeAccentColor/ApplyAccentColor) - using it here instead of
+        // InitializeAccentColor/AppThemeService.Apply) - using it here instead of
         // a fixed hex means the overlay follows the system colour too,
         // rather than always showing ClypDat's old fixed teal regardless of
         // what the user picked in Windows.

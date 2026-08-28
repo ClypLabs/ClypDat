@@ -88,7 +88,7 @@
     <Setter Property="Margin" Value="0,4,3,4" />
   </Style>
   <Style Selector="Thumb.scrollThumb">
-    <Setter Property="Background" Value="#1E2A35" />
+    <Setter Property="Background" Value="{StaticResource Surface_1E2A35}" />
     <Setter Property="Template">
       <ControlTemplate>
         <Border Background="{TemplateBinding Background}" CornerRadius="5" />
@@ -96,10 +96,10 @@
     </Setter>
   </Style>
   <Style Selector="Thumb.scrollThumb:pointerover">
-    <Setter Property="Background" Value="#283744" />
+    <Setter Property="Background" Value="{StaticResource Surface_283744}" />
   </Style>
   <Style Selector="Thumb.scrollThumb:pressed">
-    <Setter Property="Background" Value="#324255" />
+    <Setter Property="Background" Value="{StaticResource Surface_324255}" />
   </Style>
 
   <!-- Volume mute toggle (per-track lanes AND the master volume controls) -
@@ -112,7 +112,7 @@
        right next to it in both playbars, not a circle - reads as part of the
        same button row instead of a mismatched shape. -->
   <Style Selector="Border.muteToggle">
-    <Setter Property="Background" Value="#24313C" />
+    <Setter Property="Background" Value="{StaticResource Surface_24313C}" />
     <Setter Property="CornerRadius" Value="6" />
     <Setter Property="Transitions">
       <Transitions>
@@ -121,7 +121,7 @@
     </Setter>
   </Style>
   <Style Selector="Border.muteToggle:pointerover">
-    <Setter Property="Background" Value="#2E3F4E" />
+    <Setter Property="Background" Value="{StaticResource Surface_2E3F4E}" />
   </Style>
 
   <Style Selector="Button.deleteButton">
@@ -152,7 +152,7 @@
        the exclusive-choice behaviour, retemplated to a filled pill instead
        of a dot-and-label so a row of them reads as one connected control. -->
   <Style Selector="RadioButton.sizePill">
-    <Setter Property="Background" Value="#1D2A36" />
+    <Setter Property="Background" Value="{StaticResource Surface_1D2A36}" />
     <Setter Property="Foreground" Value="#93A6B8" />
     <Setter Property="FontWeight" Value="Bold" />
     <Setter Property="FontSize" Value="13" />
@@ -177,12 +177,12 @@
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
   <Style Selector="RadioButton.sizePill:pointerover:not(:checked)">
-    <Setter Property="Background" Value="#26333F" />
+    <Setter Property="Background" Value="{StaticResource Surface_26333F}" />
   </Style>
   <Style Selector="Button:not(ToggleSwitch)">
-    <Setter Property="Background" Value="#1D2A36" />
+    <Setter Property="Background" Value="{StaticResource Surface_1D2A36}" />
     <Setter Property="Foreground" Value="#D8E4F2" />
-    <Setter Property="BorderBrush" Value="#2C3B48" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_2C3B48}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="7" />
     <Setter Property="Padding" Value="12,7" />
@@ -215,7 +215,7 @@
     </Setter>
   </Style>
   <Style Selector="Button:not(ToggleSwitch):pointerover">
-    <Setter Property="Background" Value="#263544" />
+    <Setter Property="Background" Value="{StaticResource Surface_263544}" />
   </Style>
   <Style Selector="Button:not(ToggleSwitch):disabled">
     <Setter Property="Opacity" Value="0.48" />
@@ -224,7 +224,7 @@
     <Setter Property="Width" Value="34" />
     <Setter Property="Height" Value="32" />
     <Setter Property="Padding" Value="0" />
-    <Setter Property="Background" Value="#24313C" />
+    <Setter Property="Background" Value="{StaticResource Surface_24313C}" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="7" />
     <Setter Property="FontSize" Value="15" />
@@ -233,7 +233,7 @@
     <Setter Property="Width" Value="38" />
     <Setter Property="Height" Value="38" />
     <Setter Property="CornerRadius" Value="7" />
-    <Setter Property="Background" Value="#2B3642" />
+    <Setter Property="Background" Value="{StaticResource Surface_2B3642}" />
     <Setter Property="Padding" Value="0" />
     <Setter Property="BorderThickness" Value="0" />
   </Style>
@@ -265,16 +265,16 @@
     </Setter>
   </Style>
   <Style Selector="Button.transportButton:pointerover">
-    <Setter Property="Background" Value="#334554" />
+    <Setter Property="Background" Value="{StaticResource Surface_334554}" />
   </Style>
   <Style Selector="Button.transportButton:pressed">
-    <Setter Property="Background" Value="#3E5265" />
+    <Setter Property="Background" Value="{StaticResource Surface_3E5265}" />
   </Style>
   <Style Selector="Button.playButton:pointerover">
-    <Setter Property="Background" Value="#3A4857" />
+    <Setter Property="Background" Value="{StaticResource Surface_3A4857}" />
   </Style>
   <Style Selector="Button.playButton:pressed">
-    <Setter Property="Background" Value="#45566A" />
+    <Setter Property="Background" Value="{StaticResource Surface_45566A}" />
   </Style>
   <!--
     Floating hover bar only (.flatControl is applied in code, see
@@ -377,7 +377,7 @@
   <!-- The "Add Setting" drop zone under the enabled groups. Dashed outline
        says "something goes here" the way a filled card cannot. -->
   <Style Selector="Button.addSettingCard">
-    <Setter Property="Background" Value="#0D141B" />
+    <Setter Property="Background" Value="{StaticResource Surface_0D141B}" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="12" />
     <!-- No vertical padding: the button carries an explicit Height and centres
@@ -391,7 +391,7 @@
       <ControlTemplate>
         <Panel>
           <Rectangle RadiusX="12" RadiusY="12"
-                     Stroke="#33465A" StrokeThickness="1.5" StrokeDashArray="6,4"
+                     Stroke="{StaticResource Surface_33465A}" StrokeThickness="1.5" StrokeDashArray="6,4"
                      Fill="{TemplateBinding Background}" />
           <ContentPresenter Content="{TemplateBinding Content}"
                             Padding="{TemplateBinding Padding}"
@@ -402,7 +402,7 @@
     </Setter>
   </Style>
   <Style Selector="Button.addSettingCard:not(ToggleSwitch):pointerover">
-    <Setter Property="Background" Value="#131C25" />
+    <Setter Property="Background" Value="{StaticResource Surface_131C25}" />
   </Style>
 
   <Style Selector="Button.dangerButton">
@@ -483,7 +483,7 @@
          RGB channels through white along the way, which reads as a visible
          white flash on hover-enter/exit. Same RGB as the hover color below,
          just zero alpha, so only alpha animates. -->
-    <Setter Property="Background" Value="#001D2A36" />
+    <Setter Property="Background" Value="{StaticResource Surface_001D2A36}" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Padding" Value="6,3" />
     <Setter Property="CornerRadius" Value="6" />
@@ -510,14 +510,14 @@
     </Setter>
   </Style>
   <Style Selector="Button.linkButton:pointerover">
-    <Setter Property="Background" Value="#1D2A36" />
+    <Setter Property="Background" Value="{StaticResource Surface_1D2A36}" />
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
   <Style Selector="Button.linkButton:pointerover PathIcon">
     <Setter Property="Foreground" Value="#D2DEEC" />
   </Style>
   <Style Selector="Button.brandButton">
-    <Setter Property="Background" Value="#001D2A36" />
+    <Setter Property="Background" Value="{StaticResource Surface_001D2A36}" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Padding" Value="8,5" />
     <Setter Property="CornerRadius" Value="8" />
@@ -538,10 +538,10 @@
     </Setter>
   </Style>
   <Style Selector="Button.brandButton:pointerover">
-    <Setter Property="Background" Value="#1D2A36" />
+    <Setter Property="Background" Value="{StaticResource Surface_1D2A36}" />
   </Style>
   <Style Selector="Button.gameFilterBadge">
-    <Setter Property="Background" Value="#001D2A36" />
+    <Setter Property="Background" Value="{StaticResource Surface_001D2A36}" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Padding" Value="6,3" />
     <Setter Property="CornerRadius" Value="6" />
@@ -564,7 +564,7 @@
     </Setter>
   </Style>
   <Style Selector="Button.gameFilterBadge:pointerover">
-    <Setter Property="Background" Value="#1D2A36" />
+    <Setter Property="Background" Value="{StaticResource Surface_1D2A36}" />
   </Style>
   <Style Selector="Button.gameFilterBadge:pointerover TextBlock">
     <Setter Property="Foreground" Value="#D2DEEC" />
@@ -629,16 +629,16 @@
     <Style.Resources>
       <Thickness x:Key="MenuFlyoutScrollerMargin">0</Thickness>
     </Style.Resources>
-    <Setter Property="Background" Value="#141D24" />
-    <Setter Property="BorderBrush" Value="#2C3B48" />
+    <Setter Property="Background" Value="{StaticResource Surface_141D24}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_2C3B48}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
     <Setter Property="ClipToBounds" Value="True" />
     <Setter Property="MinWidth" Value="180" />
   </Style>
   <Style Selector="ContextMenu">
-    <Setter Property="Background" Value="#141D24" />
-    <Setter Property="BorderBrush" Value="#2C3B48" />
+    <Setter Property="Background" Value="{StaticResource Surface_141D24}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_2C3B48}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
     <Setter Property="ClipToBounds" Value="True" />
@@ -654,8 +654,8 @@
        radius as the menus and flyouts below, just tighter and lighter since
        a tooltip is a passing label rather than a panel. -->
   <Style Selector="ToolTip">
-    <Setter Property="Background" Value="#141D24" />
-    <Setter Property="BorderBrush" Value="#2C3B48" />
+    <Setter Property="Background" Value="{StaticResource Surface_141D24}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_2C3B48}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="7" />
     <Setter Property="Foreground" Value="#D2DEEC" />
@@ -673,8 +673,8 @@
        back to Fluent's default light-themed chrome unless styled to match -
        used by the Game Filters / Clip Type Filters checklist dropdowns. -->
   <Style Selector="FlyoutPresenter">
-    <Setter Property="Background" Value="#141D24" />
-    <Setter Property="BorderBrush" Value="#2C3B48" />
+    <Setter Property="Background" Value="{StaticResource Surface_141D24}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_2C3B48}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
     <Setter Property="ClipToBounds" Value="True" />
@@ -694,11 +694,11 @@
     <Setter Property="Padding" Value="11,7" />
   </Style>
   <Style Selector="MenuItem:pointerover">
-    <Setter Property="Background" Value="#263544" />
+    <Setter Property="Background" Value="{StaticResource Surface_263544}" />
     <Setter Property="Foreground" Value="#D8E4F2" />
   </Style>
   <Style Selector="Button.clipShareIconButton">
-    <Setter Property="Background" Value="#2A3844" />
+    <Setter Property="Background" Value="{StaticResource Surface_2A3844}" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="10" />
     <Setter Property="Width" Value="40" />
@@ -713,26 +713,26 @@
        binding - without this the button squared off the moment it was hovered
        while its resting state stayed rounded. -->
   <Style Selector="Button.clipShareIconButton:pointerover /template/ ContentPresenter">
-    <Setter Property="Background" Value="#31485B" />
+    <Setter Property="Background" Value="{StaticResource Surface_31485B}" />
     <Setter Property="CornerRadius" Value="10" />
   </Style>
   <Style Selector="MenuItem:pointerover /template/ Border#PART_LayoutRoot">
-    <Setter Property="Background" Value="#263544" />
+    <Setter Property="Background" Value="{StaticResource Surface_263544}" />
   </Style>
   <!-- Change Game opens a separately hosted Flyout, which takes pointer
        capture from its trigger row. Keep the trigger's hover treatment while
        that child menu is open, matching a normal nested MenuItem. -->
   <Style Selector="MenuItem.changeGameMenuItem.changeGameMenuItemOpen">
-    <Setter Property="Background" Value="#263544" />
+    <Setter Property="Background" Value="{StaticResource Surface_263544}" />
     <Setter Property="Foreground" Value="#D8E4F2" />
   </Style>
   <Style Selector="MenuItem.changeGameMenuItem.changeGameMenuItemOpen /template/ Border#PART_LayoutRoot">
-    <Setter Property="Background" Value="#263544" />
+    <Setter Property="Background" Value="{StaticResource Surface_263544}" />
   </Style>
   <Style Selector="Button.replayButton">
-    <Setter Property="Background" Value="#1D2A36" />
+    <Setter Property="Background" Value="{StaticResource Surface_1D2A36}" />
     <Setter Property="Foreground" Value="#9FB0C3" />
-    <Setter Property="BorderBrush" Value="#2C3B48" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_2C3B48}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="7" />
     <Setter Property="FontWeight" Value="Bold" />
@@ -753,7 +753,7 @@
     <Setter Property="Foreground" Value="#8EA1B6" />
   </Style>
   <Style Selector="Button.dialogClose:pointerover">
-    <Setter Property="Background" Value="#263544" />
+    <Setter Property="Background" Value="{StaticResource Surface_263544}" />
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
   <!-- Replay Buffer flyout: quiet cards, sentence-case labels, and compact
@@ -768,7 +768,7 @@
   <Style Selector="StackPanel.replayFlyout Border.replayFlyoutHeader">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0,0,0,1" />
-    <Setter Property="BorderBrush" Value="#263846" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_263846}" />
     <Setter Property="CornerRadius" Value="0" />
     <Setter Property="Padding" Value="0,4,0,10" />
     <Setter Property="Margin" Value="2,2,2,8" />
@@ -814,8 +814,8 @@
     <Setter Property="FontWeight" Value="Bold" />
   </Style>
   <Style Selector="StackPanel.replayFlyout Border.replayFlyoutCard">
-    <Setter Property="Background" Value="#15212B" />
-    <Setter Property="BorderBrush" Value="#263846" />
+    <Setter Property="Background" Value="{StaticResource Surface_15212B}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_263846}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="12" />
     <Setter Property="Padding" Value="12" />
@@ -829,9 +829,9 @@
     <Setter Property="Padding" Value="8,6" />
   </Style>
   <Style Selector="StackPanel.replayFlyout ComboBox.settingsInput">
-    <Setter Property="Background" Value="#1B2934" />
+    <Setter Property="Background" Value="{StaticResource Surface_1B2934}" />
     <Setter Property="Foreground" Value="#D8E4F2" />
-    <Setter Property="BorderBrush" Value="#304352" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_304352}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
     <Setter Property="MinHeight" Value="34" />
@@ -843,13 +843,13 @@
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
   </Style>
   <Style Selector="StackPanel.replayFlyout ComboBox.settingsInput:pointerover">
-    <Setter Property="Background" Value="#223341" />
-    <Setter Property="BorderBrush" Value="#405668" />
+    <Setter Property="Background" Value="{StaticResource Surface_223341}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_405668}" />
   </Style>
   <Style Selector="StackPanel.replayFlyout Button.replayFlyoutInput">
-    <Setter Property="Background" Value="#1B2934" />
+    <Setter Property="Background" Value="{StaticResource Surface_1B2934}" />
     <Setter Property="Foreground" Value="#D8E4F2" />
-    <Setter Property="BorderBrush" Value="#304352" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_304352}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
     <Setter Property="MinHeight" Value="34" />
@@ -857,15 +857,15 @@
     <Setter Property="Padding" Value="8,4" />
   </Style>
   <Style Selector="StackPanel.replayFlyout Button.replayFlyoutInput:pointerover">
-    <Setter Property="Background" Value="#223341" />
-    <Setter Property="BorderBrush" Value="#405668" />
+    <Setter Property="Background" Value="{StaticResource Surface_223341}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_405668}" />
   </Style>
   <Style Selector="StackPanel.replayFlyout Button.replayFlyoutInput:focus">
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
   </Style>
   <Style Selector="StackPanel.replayFlyout Button.hotkeyKeycap">
-    <Setter Property="Background" Value="#111C25" />
-    <Setter Property="BorderBrush" Value="#42586B" />
+    <Setter Property="Background" Value="{StaticResource Surface_111C25}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_42586B}" />
     <Setter Property="CornerRadius" Value="8" />
     <Setter Property="FontWeight" Value="Bold" />
     <Setter Property="Height" Value="42" />
@@ -880,8 +880,8 @@
   <!-- Small setting groups used by first-run setup. The low-contrast card
        separates choices without turning the walkthrough into a settings page. -->
   <Style Selector="Border.onboardingSettingCard">
-    <Setter Property="Background" Value="#15212B" />
-    <Setter Property="BorderBrush" Value="#2B4050" />
+    <Setter Property="Background" Value="{StaticResource Surface_15212B}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_2B4050}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="9" />
     <Setter Property="Padding" Value="15" />
@@ -898,8 +898,8 @@
     <Setter Property="Height" Value="46" />
     <Setter Property="Padding" Value="0" />
     <Setter Property="CornerRadius" Value="12" />
-    <Setter Property="Background" Value="#EE141D24" />
-    <Setter Property="BorderBrush" Value="#232F3A" />
+    <Setter Property="Background" Value="{StaticResource Surface_EE141D24}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_232F3A}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -930,7 +930,7 @@
     </Setter>
   </Style>
   <Style Selector="Button.scrollToTopButton:not(ToggleSwitch):pointerover">
-    <Setter Property="Background" Value="#EE1B2733" />
+    <Setter Property="Background" Value="{StaticResource Surface_EE1B2733}" />
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
   </Style>
 
@@ -939,7 +939,7 @@
          doesn't interpolate through white on unhover (see settingsNavButton).
          The close button overrides this with its own red-tinted idle below,
          since it transitions to red instead. -->
-    <Setter Property="Background" Value="#001D2A36" />
+    <Setter Property="Background" Value="{StaticResource Surface_001D2A36}" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="0" />
     <Setter Property="Width" Value="46" />
@@ -990,7 +990,7 @@
     <Setter Property="Foreground" Value="#8EA1B6" />
   </Style>
   <Style Selector="Button.windowChromeButton:pointerover">
-    <Setter Property="Background" Value="#1D2A36" />
+    <Setter Property="Background" Value="{StaticResource Surface_1D2A36}" />
   </Style>
   <Style Selector="Button.windowChromeButton:pointerover PathIcon">
     <Setter Property="Foreground" Value="#F5F9FF" />
@@ -1036,7 +1036,7 @@
     <Setter Property="CornerRadius" Value="12" />
   </Style>
   <Style Selector="Button.searchClear:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="#2A3B49" />
+    <Setter Property="Background" Value="{StaticResource Surface_2A3B49}" />
   </Style>
 
   <Style Selector="ComboBox.settingsInput, TextBox.settingsInput">
@@ -1074,14 +1074,14 @@
     <Setter Property="CornerRadius" Value="17" />
     <Setter Property="Padding" Value="6,0" />
     <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
-    <Setter Property="BorderBrush" Value="#243240" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_243240}" />
   </Style>
   <Style Selector="TextBox.appSearchBox:pointerover /template/ Border#PART_BorderElement">
-    <Setter Property="Background" Value="#18232D" />
-    <Setter Property="BorderBrush" Value="#2E4052" />
+    <Setter Property="Background" Value="{StaticResource Surface_18232D}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_2E4052}" />
   </Style>
   <Style Selector="TextBox.appSearchBox:focus /template/ Border#PART_BorderElement">
-    <Setter Property="Background" Value="#18232D" />
+    <Setter Property="Background" Value="{StaticResource Surface_18232D}" />
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
   </Style>
   <!--
@@ -1096,17 +1096,17 @@
     look instead of flashing to Fluent's default look on hover/focus.
   -->
   <Style Selector="TextBox.inlineTitleEdit /template/ Border#PART_BorderElement">
-    <Setter Property="Background" Value="#0D151C" />
-    <Setter Property="BorderBrush" Value="#22303A" />
+    <Setter Property="Background" Value="{StaticResource Surface_0D151C}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_22303A}" />
     <Setter Property="BorderThickness" Value="1" />
   </Style>
   <Style Selector="TextBox.inlineTitleEdit:pointerover /template/ Border#PART_BorderElement">
-    <Setter Property="Background" Value="#0D151C" />
-    <Setter Property="BorderBrush" Value="#324454" />
+    <Setter Property="Background" Value="{StaticResource Surface_0D151C}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_324454}" />
   </Style>
   <Style Selector="TextBox.inlineTitleEdit:focus /template/ Border#PART_BorderElement">
-    <Setter Property="Background" Value="#0D151C" />
-    <Setter Property="BorderBrush" Value="#4C6478" />
+    <Setter Property="Background" Value="{StaticResource Surface_0D151C}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_4C6478}" />
     <Setter Property="BorderThickness" Value="1" />
   </Style>
   <!--
@@ -1126,7 +1126,7 @@
   </Style>
   <Style Selector="TextBox.settingsInput:pointerover /template/ Border#PART_BorderElement">
     <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
-    <Setter Property="BorderBrush" Value="#3A4C5C" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_3A4C5C}" />
   </Style>
   <Style Selector="TextBox.settingsInput:focus /template/ Border#PART_BorderElement">
     <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
@@ -1164,7 +1164,7 @@
     <Setter Property="BorderBrush" Value="Transparent" />
   </Style>
   <Style Selector="Border.clipGameFilter:pointerover">
-    <Setter Property="Background" Value="#2A3640" />
+    <Setter Property="Background" Value="{StaticResource Surface_2A3640}" />
   </Style>
   <Style Selector="Border.settingsCard">
     <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
@@ -1182,8 +1182,8 @@
   <!-- The page is a long column of near-identical cards; lifting the one under
        the pointer is what tells you which row your click will land in. -->
   <Style Selector="Border.settingsCard:pointerover">
-    <Setter Property="Background" Value="#16212B" />
-    <Setter Property="BorderBrush" Value="#2A3947" />
+    <Setter Property="Background" Value="{StaticResource Surface_16212B}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_2A3947}" />
   </Style>
   <Style Selector="ComboBox.settingsInput /template/ Border#PopupBorder">
     <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
@@ -1264,8 +1264,8 @@
     <Setter Property="IsHitTestVisible" Value="False" />
   </Style>
   <Style Selector="Border.comingSoonTag">
-    <Setter Property="Background" Value="#1D2B38" />
-    <Setter Property="BorderBrush" Value="#31546A" />
+    <Setter Property="Background" Value="{StaticResource Surface_1D2B38}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_31546A}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="5" />
     <Setter Property="Padding" Value="6,2" />
@@ -1294,8 +1294,8 @@
   </Style>
 
   <Style Selector="Border.audioProcessList">
-    <Setter Property="Background" Value="#111923" />
-    <Setter Property="BorderBrush" Value="#263644" />
+    <Setter Property="Background" Value="{StaticResource Surface_111923}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_263644}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="10" />
     <Setter Property="ClipToBounds" Value="True" />
@@ -1303,11 +1303,11 @@
 
   <Style Selector="Border.audioProcessRow">
     <Setter Property="Padding" Value="14,11" />
-    <Setter Property="BorderBrush" Value="#22303C" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_22303C}" />
     <Setter Property="BorderThickness" Value="0,0,0,1" />
   </Style>
   <Style Selector="Border.audioProcessRow.enabledRow">
-    <Setter Property="Background" Value="#202C3A" />
+    <Setter Property="Background" Value="{StaticResource Surface_202C3A}" />
     <Setter Property="BorderBrush" Value="#5864E8" />
     <Setter Property="BorderThickness" Value="3,1,3,1" />
   </Style>
@@ -1317,8 +1317,8 @@
     <Setter Property="Foreground" Value="#59B6FF" />
     <Setter Property="Background">
       <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,0%">
-        <GradientStop Color="#334757" Offset="0" />
-        <GradientStop Color="#334757" Offset="0.666" />
+        <GradientStop Color="{DynamicResource SurfaceColor_334757}" Offset="0" />
+        <GradientStop Color="{DynamicResource SurfaceColor_334757}" Offset="0.666" />
         <GradientStop Color="#F4B73E" Offset="0.667" />
         <GradientStop Color="#F4B73E" Offset="0.85" />
         <GradientStop Color="#F05A63" Offset="0.851" />
@@ -1350,22 +1350,62 @@
     <Setter Property="HorizontalAlignment" Value="Stretch" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:pointerover">
-    <Setter Property="Background" Value="#22303D" />
+    <Setter Property="Background" Value="{StaticResource Surface_22303D}" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected">
-    <Setter Property="Background" Value="#303840" />
+    <Setter Property="Background" Value="{StaticResource Surface_303840}" />
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected:pointerover">
-    <Setter Property="Background" Value="#39434C" />
+    <Setter Property="Background" Value="{StaticResource Surface_39434C}" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="#303840" />
+    <Setter Property="Background" Value="{StaticResource Surface_303840}" />
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="#39434C" />
+    <Setter Property="Background" Value="{StaticResource Surface_39434C}" />
+  </Style>
+
+  <!-- Theme swatch grid. Each item is already a fully-drawn preview tile, so the
+       ListBoxItem contributes nothing but the selection ring - hence the
+       transparent background everywhere and the 2px border that only gains a
+       colour on hover and selection. The /template/ ContentPresenter overrides
+       are the part that actually matters: Fluent's ListBoxItem theme paints its
+       selected state on the presenter, not the item, so setting it on the item
+       alone leaves the stock blue selection block visible underneath. -->
+  <Style Selector="ListBox.themePresetGrid">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="0" />
+  </Style>
+  <Style Selector="ListBox.themePresetGrid ListBoxItem">
+    <Setter Property="Margin" Value="0,0,10,10" />
+    <Setter Property="Padding" Value="3" />
+    <Setter Property="CornerRadius" Value="11" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+  <Style Selector="ListBox.themePresetGrid ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="2" />
+    <Setter Property="CornerRadius" Value="11" />
+    <Setter Property="Padding" Value="3" />
+  </Style>
+  <Style Selector="ListBox.themePresetGrid ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
+  </Style>
+  <Style Selector="ListBox.themePresetGrid ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+  </Style>
+  <Style Selector="ListBox.themePresetGrid ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrushHover}" />
   </Style>
   <Style Selector="Button.autoClipCardHeader">
     <Setter Property="Background" Value="Transparent" />
@@ -1376,7 +1416,7 @@
     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
   </Style>
   <Style Selector="Button.autoClipCardHeader:pointerover">
-    <Setter Property="Background" Value="#182029" />
+    <Setter Property="Background" Value="{StaticResource Surface_182029}" />
   </Style>
   <!-- "All Kills" sub-header - previously fully transparent at rest (only
        colored on hover, same as the outer CS2 card header), which read as
@@ -1386,18 +1426,18 @@
        reliably wins over the plain autoClipCardHeader rule above for the
        same Background property. -->
   <Style Selector="Button.autoClipCardHeader.allKillsHeader">
-    <Setter Property="Background" Value="#161F28" />
+    <Setter Property="Background" Value="{StaticResource Surface_161F28}" />
     <Setter Property="Padding" Value="12,10" />
   </Style>
   <Style Selector="Button.autoClipCardHeader.allKillsHeader:pointerover">
-    <Setter Property="Background" Value="#1C2733" />
+    <Setter Property="Background" Value="{StaticResource Surface_1C2733}" />
   </Style>
   <Style Selector="Button.settingsNavButton">
     <!-- Not Transparent (#00FFFFFF - white at zero alpha): the BrushTransition
          below interpolates RGB as well as alpha, so unhovering flashed white
          on the way back out. Zero-alpha version of the hover color, so only
          alpha animates. Same fix as linkButton above. -->
-    <Setter Property="Background" Value="#00182029" />
+    <Setter Property="Background" Value="{StaticResource Surface_00182029}" />
     <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
     <Setter Property="BorderThickness" Value="2,0,0,0" />
     <Setter Property="BorderBrush" Value="Transparent" />
@@ -1418,7 +1458,7 @@
     <Setter Property="TextWrapping" Value="Wrap" />
   </Style>
   <Style Selector="Button.settingsNavButton:pointerover">
-    <Setter Property="Background" Value="#182029" />
+    <Setter Property="Background" Value="{StaticResource Surface_182029}" />
     <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
   </Style>
   <!-- Selected reads the way a selected game in the rail does: the accent
@@ -1446,7 +1486,7 @@
   <Style Selector="Button.railIconButton">
     <!-- Zero-alpha hover color rather than Transparent, so the transition
          doesn't interpolate through white on unhover (see settingsNavButton). -->
-    <Setter Property="Background" Value="#0026323D" />
+    <Setter Property="Background" Value="{StaticResource Surface_0026323D}" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="22" />
     <Setter Property="Width" Value="44" />
@@ -1508,8 +1548,8 @@
          (see windowChromeButton for the same fix). Not a perfect colour
          match for AccentBrush (unknown until the user's Windows accent is
          read), but a dark zero-alpha neutral is far closer than white. -->
-    <Setter Property="BorderBrush" Value="#00141D24" />
-    <Setter Property="Background" Value="#00141D24" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_00141D24}" />
+    <Setter Property="Background" Value="{StaticResource Surface_00141D24}" />
     <Setter Property="Transitions">
       <Transitions>
         <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
@@ -1519,7 +1559,7 @@
   </Style>
   <Style Selector="Border.railFolderGroup.expanded">
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
-    <Setter Property="Background" Value="#141D24" />
+    <Setter Property="Background" Value="{StaticResource Surface_141D24}" />
   </Style>
   <!-- The storage button is the one rail button that isn't a bare 30px glyph:
        it holds the ring AND the used/limit caption, so it drops the fixed
@@ -1580,7 +1620,7 @@
          the base railIconButton idle colour's own zero-alpha hex instead,
          same reasoning as windowChromeButton, so opening the folder doesn't
          flash white as this fades in over the permanent tint. -->
-    <Setter Property="Background" Value="#0026323D" />
+    <Setter Property="Background" Value="{StaticResource Surface_0026323D}" />
   </Style>
   <!-- Presses shrink slightly so a click registers physically even though
        nothing else about the button moves. -->
@@ -1589,7 +1629,7 @@
   </Style>
   <!-- Selection is accent-tinted rather than another shade of grey, so the
        current section stands out against a merely-hovered one. These follow
-       the Windows accent colour (see App.axaml.cs ApplyAccentColor). -->
+       the active theme accent (see AppThemeService.Apply). -->
   <Style Selector="Button.railIconButton.active">
     <Setter Property="Background" Value="{StaticResource AccentSelectedBrush}" />
   </Style>
@@ -1606,7 +1646,7 @@
     <Setter Property="Background" Value="{StaticResource AccentGameHoverBrush}" />
   </Style>
   <Style Selector="Button.railIconButton Border.gameInitialBadge">
-    <Setter Property="Background" Value="#26323D" />
+    <Setter Property="Background" Value="{StaticResource Surface_26323D}" />
   </Style>
   <Style Selector="Button.railIconButton:pointerover Border.gameInitialBadge">
     <Setter Property="Background" Value="{StaticResource AccentSelectedBrush}" />
@@ -1620,10 +1660,10 @@
   <!-- Folder glyph badges never own hover feedback; the larger folder header
        handles it. Empty, collapsed folders retain their normal neutral glyph. -->
   <Style Selector="Button.railFolderHeader Border.gameInitialBadge">
-    <Setter Property="Background" Value="#26323D" />
+    <Setter Property="Background" Value="{StaticResource Surface_26323D}" />
   </Style>
   <Style Selector="Button.railFolderHeader:pointerover Border.gameInitialBadge">
-    <Setter Property="Background" Value="#26323D" />
+    <Setter Property="Background" Value="{StaticResource Surface_26323D}" />
   </Style>
   <!-- When open, the folder glyph replaces its closed mosaic. Its squircle
        stays bright while the larger folder header owns hover feedback. -->
@@ -1650,7 +1690,7 @@
          generic Button style's own BrushTransition on Background then
          interpolates through visible white on hover instead of just fading
          the hover fill in (see windowChromeButton for the same fix). -->
-    <Setter Property="Background" Value="#0026323D" />
+    <Setter Property="Background" Value="{StaticResource Surface_0026323D}" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="4" />
     <Setter Property="Padding" Value="9,6" />
@@ -1660,7 +1700,7 @@
     <Setter Property="FontSize" Value="12.5" />
   </Style>
   <Style Selector="Button.flyoutMenuItem:pointerover">
-    <Setter Property="Background" Value="#26323D" />
+    <Setter Property="Background" Value="{StaticResource Surface_26323D}" />
   </Style>
   <Style Selector="Button.railIconButton.active Border.gameInitialBadge TextBlock">
     <Setter Property="Foreground" Value="#FFFFFF" />
@@ -1682,7 +1722,7 @@
        off the other edge - the highlight sat visibly closer to the left of the
        rail than the right, and the right corner radius was clipped away. -->
   <Style Selector="Button.editorRailButton">
-    <Setter Property="Background" Value="#0026323D" />
+    <Setter Property="Background" Value="{StaticResource Surface_0026323D}" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="10" />
     <Setter Property="Width" Value="48" />
@@ -1739,24 +1779,24 @@
     <Setter Property="Height" Value="28" />
     <Setter Property="Padding" Value="0" />
     <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="Background" Value="#00101820" />
+    <Setter Property="Background" Value="{StaticResource Surface_00101820}" />
     <Setter Property="Foreground" Value="#B8C7D8" />
   </Style>
   <Style Selector="Button.editorToolsClose:pointerover">
-    <Setter Property="Background" Value="#263C4C" />
+    <Setter Property="Background" Value="{StaticResource Surface_263C4C}" />
     <Setter Property="Foreground" Value="#EDF4FB" />
   </Style>
   <!-- Editor timeline and inspector share one quiet, layered surface. The
        clip name and trim range stay visible while scrubbing, so controls do
        not need to carry that context themselves. -->
   <Style Selector="Border.editorTimelinePanel">
-    <Setter Property="Background" Value="#111A22" />
-    <Setter Property="BorderBrush" Value="#2A3A48" />
+    <Setter Property="Background" Value="{StaticResource Surface_111A22}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_2A3A48}" />
     <Setter Property="BorderThickness" Value="0,1,0,0" />
   </Style>
   <Style Selector="Border.editorTimelineHeader">
-    <Setter Property="Background" Value="#14202A" />
-    <Setter Property="BorderBrush" Value="#345066" />
+    <Setter Property="Background" Value="{StaticResource Surface_14202A}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_345066}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="10" />
     <Setter Property="Padding" Value="16,8" />
@@ -1773,25 +1813,25 @@
     <Setter Property="FontWeight" Value="Bold" />
   </Style>
   <Style Selector="Border.editorTimelineTime">
-    <Setter Property="Background" Value="#0D151C" />
-    <Setter Property="BorderBrush" Value="#283A48" />
+    <Setter Property="Background" Value="{StaticResource Surface_0D151C}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_283A48}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="7" />
     <Setter Property="Padding" Value="12,7" />
   </Style>
   <Style Selector="Border.editorTrackCard">
-    <Setter Property="Background" Value="#16222C" />
-    <Setter Property="BorderBrush" Value="#2B4050" />
+    <Setter Property="Background" Value="{StaticResource Surface_16222C}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_2B4050}" />
     <Setter Property="CornerRadius" Value="9" />
   </Style>
   <Style Selector="Border.editorInspector">
-    <Setter Property="Background" Value="#111920" />
-    <Setter Property="BorderBrush" Value="#30404D" />
+    <Setter Property="Background" Value="{StaticResource Surface_111920}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_30404D}" />
     <Setter Property="BorderThickness" Value="1,0,0,0" />
   </Style>
   <Style Selector="Border.editorInspectorHeader">
-    <Setter Property="Background" Value="#14202A" />
-    <Setter Property="BorderBrush" Value="#345066" />
+    <Setter Property="Background" Value="{StaticResource Surface_14202A}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_345066}" />
     <Setter Property="BorderThickness" Value="0,0,0,1" />
   </Style>
   <Style Selector="TextBlock.editorInspectorTitle">
@@ -1805,8 +1845,8 @@
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
   <Style Selector="Border.editorInspectorCard">
-    <Setter Property="Background" Value="#17232D" />
-    <Setter Property="BorderBrush" Value="#2D4252" />
+    <Setter Property="Background" Value="{StaticResource Surface_17232D}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_2D4252}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="10" />
     <Setter Property="Padding" Value="16" />
@@ -1817,7 +1857,7 @@
        Green rather than the sidebar's blue, matching effectsBadge, so the two
        renderings of the same state read as the same state. -->
   <Style Selector="Border.editorInspectorCard.effectsActive">
-    <Setter Property="Background" Value="#16242E" />
+    <Setter Property="Background" Value="{StaticResource Surface_16242E}" />
     <Setter Property="BorderBrush" Value="#3B6152" />
   </Style>
   <Style Selector="Border.effectDot">
@@ -1831,7 +1871,7 @@
        caption underneath is what it produces, which is the part they would
        otherwise have to work out from the aspect and the source. -->
   <Style Selector="Border.effectChip">
-    <Setter Property="Background" Value="#101C25" />
+    <Setter Property="Background" Value="{StaticResource Surface_101C25}" />
     <Setter Property="BorderBrush" Value="#2F5B45" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
@@ -1849,8 +1889,8 @@
     <Setter Property="Margin" Value="0,2,0,0" />
   </Style>
   <Style Selector="Border.editorInspectorActions">
-    <Setter Property="Background" Value="#101820" />
-    <Setter Property="BorderBrush" Value="#263743" />
+    <Setter Property="Background" Value="{StaticResource Surface_101820}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_263743}" />
     <Setter Property="BorderThickness" Value="0,1,0,0" />
     <Setter Property="Padding" Value="16" />
   </Style>
@@ -1916,7 +1956,7 @@
       <CornerRadius x:Key="ControlCornerRadius">3.5</CornerRadius>
     </Style.Resources>
     <Setter Property="MinHeight" Value="52" />
-    <Setter Property="Background" Value="#273440" />
+    <Setter Property="Background" Value="{StaticResource Surface_273440}" />
   </Style>
   <Style Selector="Slider.volumeSlider.appVolumeSlider /template/ Thumb">
     <Setter Property="Width" Value="22" />
@@ -2080,28 +2120,28 @@
        lands short of the right edge. 44 = 2 x 22. -->
   <Style Selector="ToggleSwitch">
     <Style.Resources>
-      <SolidColorBrush x:Key="ToggleSwitchFillOff" Color="#22303D" />
-      <SolidColorBrush x:Key="ToggleSwitchFillOffPointerOver" Color="#2A3947" />
-      <SolidColorBrush x:Key="ToggleSwitchFillOffPressed" Color="#31414F" />
-      <SolidColorBrush x:Key="ToggleSwitchFillOffDisabled" Color="#18222B" />
-      <SolidColorBrush x:Key="ToggleSwitchStrokeOff" Color="#33434F" />
-      <SolidColorBrush x:Key="ToggleSwitchStrokeOffPointerOver" Color="#3E5162" />
-      <SolidColorBrush x:Key="ToggleSwitchStrokeOffPressed" Color="#3E5162" />
-      <SolidColorBrush x:Key="ToggleSwitchStrokeOffDisabled" Color="#232F3A" />
+      <StaticResource x:Key="ToggleSwitchFillOff" ResourceKey="Surface_22303D" />
+      <StaticResource x:Key="ToggleSwitchFillOffPointerOver" ResourceKey="Surface_2A3947" />
+      <StaticResource x:Key="ToggleSwitchFillOffPressed" ResourceKey="Surface_31414F" />
+      <StaticResource x:Key="ToggleSwitchFillOffDisabled" ResourceKey="Surface_18222B" />
+      <StaticResource x:Key="ToggleSwitchStrokeOff" ResourceKey="Surface_33434F" />
+      <StaticResource x:Key="ToggleSwitchStrokeOffPointerOver" ResourceKey="Surface_3E5162" />
+      <StaticResource x:Key="ToggleSwitchStrokeOffPressed" ResourceKey="Surface_3E5162" />
+      <StaticResource x:Key="ToggleSwitchStrokeOffDisabled" ResourceKey="Surface_232F3A" />
 
       <StaticResource x:Key="ToggleSwitchFillOn" ResourceKey="AccentBrush" />
       <StaticResource x:Key="ToggleSwitchFillOnPointerOver" ResourceKey="AccentBrushHover" />
       <StaticResource x:Key="ToggleSwitchFillOnPressed" ResourceKey="AccentBrushHover" />
-      <SolidColorBrush x:Key="ToggleSwitchFillOnDisabled" Color="#2A3350" />
+      <StaticResource x:Key="ToggleSwitchFillOnDisabled" ResourceKey="Surface_2A3350" />
       <StaticResource x:Key="ToggleSwitchStrokeOn" ResourceKey="AccentBrush" />
       <StaticResource x:Key="ToggleSwitchStrokeOnPointerOver" ResourceKey="AccentBrushHover" />
       <StaticResource x:Key="ToggleSwitchStrokeOnPressed" ResourceKey="AccentBrushHover" />
-      <SolidColorBrush x:Key="ToggleSwitchStrokeOnDisabled" Color="#2A3350" />
+      <StaticResource x:Key="ToggleSwitchStrokeOnDisabled" ResourceKey="Surface_2A3350" />
 
       <SolidColorBrush x:Key="ToggleSwitchKnobFillOff" Color="#9FB2C6" />
       <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPointerOver" Color="#C4D3E2" />
       <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPressed" Color="#C4D3E2" />
-      <SolidColorBrush x:Key="ToggleSwitchKnobFillOffDisabled" Color="#4A5A69" />
+      <StaticResource x:Key="ToggleSwitchKnobFillOffDisabled" ResourceKey="Surface_4A5A69" />
       <SolidColorBrush x:Key="ToggleSwitchKnobFillOn" Color="#FFFFFF" />
       <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPointerOver" Color="#FFFFFF" />
       <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPressed" Color="#FFFFFF" />

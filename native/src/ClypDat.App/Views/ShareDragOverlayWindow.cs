@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using ClypDat.App.Services;
 
 namespace ClypDat.App.Views;
 
@@ -16,7 +17,9 @@ internal sealed class ShareDragOverlayWindow : Window
         CanResize = false;
         ShowActivated = false;
         Topmost = false;
-        Background = new SolidColorBrush(Color.Parse("#0B1016"));
+        // The drag surface sits behind the whole share card, so it tracks the app
+        // background rather than carrying a near-identical literal of its own.
+        Background = AppThemeService.Brush("AppBgBrush", "#0D1116");
         Content = new StackPanel
         {
             Spacing = 10,
@@ -30,7 +33,7 @@ internal sealed class ShareDragOverlayWindow : Window
                     Width = 72,
                     Height = 56,
                     CornerRadius = new CornerRadius(10),
-                    BorderBrush = new SolidColorBrush(Color.Parse("#4C6FFF")),
+                    BorderBrush = AppThemeService.Brush("AccentBrush", "#5864E8"),
                     BorderThickness = new Thickness(2),
                     HorizontalAlignment = HorizontalAlignment.Center,
                     Margin = new Thickness(0, 0, 0, 8),

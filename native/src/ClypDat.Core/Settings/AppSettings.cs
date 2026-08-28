@@ -14,6 +14,10 @@ public sealed class AppSettings
     // "System" preserves ClypDat's existing neutral dark palette and follows
     // the Windows accent. Named entries are bundled dark themes.
     public string ThemePreset { get; set; } = "System";
+    // Windows exposes one accent colour app-wide; following it keeps ClypDat
+    // consistent with the rest of the desktop. Turned off, each preset uses its
+    // own accent instead ("System" falls back to ClypDat's indigo).
+    public bool UseSystemAccent { get; set; } = true;
     // 0 = no limit, same convention as FullSessionQuotaGb. A soft target the
     // sidebar's storage ring fills against and warns past - nothing deletes
     // clips to enforce it.

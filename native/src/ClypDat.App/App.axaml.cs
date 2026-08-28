@@ -21,6 +21,7 @@ public sealed partial class App : Application
     private int _installerShutdownRequested;
     private Color _systemAccent = Color.FromRgb(0x58, 0x64, 0xE8);
     private string _themePreset = "System";
+    private bool _useSystemAccent = true;
 
     public override void Initialize()
     {
@@ -74,7 +75,7 @@ public sealed partial class App : Application
             var useSplash = !UiPreviewMode.Enabled;
             InitializeAccentColor();
             var viewModel = new MainWindowViewModel();
-            ApplyTheme(viewModel.Settings.ThemePreset);
+            ApplyTheme(viewModel.Settings.ThemePreset, viewModel.Settings.UseSystemAccent);
             _mainWindow = new MainWindow
             {
                 DataContext = viewModel,
@@ -218,11 +219,14 @@ public sealed partial class App : Application
             if (settings is null) return;
 
             _systemAccent = settings.GetColorValues().AccentColor1;
-            ApplyTheme(_themePreset);
+            ApplyTheme(_themePreset, _useSystemAccent);
+            // Only worth repainting while the accent is actually sourced from
+            // Windows; with the toggle off the preset's own accent is in use and
+            // a system colour change means nothing to us.
             settings.ColorValuesChanged += (_, values) =>
             {
                 _systemAccent = values.AccentColor1;
-                if (AppThemeService.UsesSystemAccent(_themePreset)) ApplyTheme(_themePreset);
+                if (_useSystemAccent) ApplyTheme(_themePreset, _useSystemAccent);
             };
         }
         catch (Exception error)
@@ -231,47 +235,11 @@ public sealed partial class App : Application
         }
     }
 
-    internal void ApplyTheme(string preset)
+    internal void ApplyTheme(string preset, bool useSystemAccent)
     {
         _themePreset = AppThemeService.Normalize(preset);
-        AppThemeService.Apply(this, _themePreset, _systemAccent);
-    }
-
-    private void ApplyAccentColor(Color accent)
-    {
-        if (Resources["AccentBrush"] is SolidColorBrush accentBrush) accentBrush.Color = accent;
-        if (Resources["AccentBrushHover"] is SolidColorBrush hoverBrush) hoverBrush.Color = BlendWithWhite(accent, 0.18);
-
-        // Selection tints for the sidebar rail. The accent at full strength is
-        // far too loud as a backdrop behind an icon, so these are the accent
-        // mixed down into the rail's own background - which keeps them
-        // following the system colour instead of being fixed indigo shades
-        // that only happened to match the default accent.
-        if (Resources["AccentSelectedBrush"] is SolidColorBrush selectedBrush) selectedBrush.Color = BlendWith(accent, RailBackground, 0.78);
-        if (Resources["AccentSelectedHoverBrush"] is SolidColorBrush selectedHoverBrush) selectedHoverBrush.Color = BlendWith(accent, RailBackground, 0.84);
-        if (Resources["AccentSelectedIconBrush"] is SolidColorBrush selectedIconBrush) selectedIconBrush.Color = BlendWithWhite(accent, 0.55);
-        // Game and folder hover is intentionally darker than the selected
-        // tint, preserving hue while making selection the stronger state.
-        if (Resources["AccentGameHoverBrush"] is SolidColorBrush gameHoverBrush) gameHoverBrush.Color = BlendWith(accent, RailBackground, 0.84);
-        if (Resources["AccentFolderBrush"] is SolidColorBrush folderBrush) folderBrush.Color = BlendWith(accent, RailBackground, 0.55);
-        if (Resources["AccentHoverBrush"] is SolidColorBrush accentHoverBrush) accentHoverBrush.Color = BlendWith(accent, RailBackground, 0.84);
-    }
-
-    // #0D1116 - the sidebar rail's background, which selection tints are mixed
-    // into so they read as a subtle wash rather than a solid accent block.
-    private static readonly Color RailBackground = Color.FromRgb(0x0D, 0x11, 0x16);
-
-    private static Color BlendWithWhite(Color color, double amount)
-    {
-        byte Blend(byte channel) => (byte)(channel + (255 - channel) * amount);
-        return Color.FromArgb(color.A, Blend(color.R), Blend(color.G), Blend(color.B));
-    }
-
-    // amount is how far from color toward target: 0 keeps color, 1 gives target.
-    private static Color BlendWith(Color color, Color target, double amount)
-    {
-        byte Blend(byte from, byte to) => (byte)(from + (to - from) * amount);
-        return Color.FromArgb(color.A, Blend(color.R, target.R), Blend(color.G, target.G), Blend(color.B, target.B));
+        _useSystemAccent = useSystemAccent;
+        AppThemeService.Apply(this, _themePreset, _systemAccent, _useSystemAccent);
     }
 
     private void InitializeTrayIcon()

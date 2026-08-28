@@ -417,10 +417,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (string.Equals(Settings.ThemePreset, preset, StringComparison.OrdinalIgnoreCase)) return;
             Settings.ThemePreset = preset;
             SaveSettings();
-            (Application.Current as ClypDat.App.App)?.ApplyTheme(preset);
+            ApplyTheme();
             OnPropertyChanged();
         }
     }
+
+    public bool UseSystemAccentColor
+    {
+        get => Settings.UseSystemAccent;
+        set
+        {
+            if (Settings.UseSystemAccent == value) return;
+            Settings.UseSystemAccent = value;
+            SaveSettings();
+            ApplyTheme();
+            OnPropertyChanged();
+        }
+    }
+
+    private void ApplyTheme() =>
+        (Application.Current as ClypDat.App.App)?.ApplyTheme(Settings.ThemePreset, Settings.UseSystemAccent);
     public string StartupRegistrationError
     {
         get => _startupRegistrationError;

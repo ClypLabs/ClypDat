@@ -28,7 +28,7 @@
           </ListBox.ItemsPanel>
           <ListBox.ItemTemplate>
             <DataTemplate>
-              <Border Width="164" Height="88" CornerRadius="8" Background="{Binding AppBackgroundBrush}" BorderBrush="{Binding SurfaceBrush}" BorderThickness="1" Padding="11" Margin="0,0,10,10">
+              <Border Width="164" Height="88" CornerRadius="8" Background="{Binding AppBackgroundBrush}" BorderBrush="{Binding SurfaceBrush}" BorderThickness="1" Padding="11">
                 <Grid RowDefinitions="*,Auto">
                   <Border Background="{Binding SurfaceBrush}" CornerRadius="5" />
                   <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="0,9,0,0">
@@ -40,6 +40,20 @@
             </DataTemplate>
           </ListBox.ItemTemplate>
         </ListBox>
+      </StackPanel>
+    </Border>
+
+    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Accent|Accent colour|Windows accent|System accent'}">
+      <StackPanel Spacing="14">
+        <TextBlock Classes="settingsCardLabel" Text="ACCENT COLOUR" />
+        <Grid ColumnDefinitions="*,Auto,Auto">
+          <StackPanel Spacing="3">
+            <TextBlock Classes="settingsRowTitle" Text="Use Windows accent colour" />
+            <TextBlock Classes="settingsRowDesc" Text="Follows Settings &gt; Personalization &gt; Colors. Turn this off to use the selected theme's own accent instead." />
+          </StackPanel>
+          <Border Grid.Column="1" Width="18" Height="18" CornerRadius="9" Margin="16,0,14,0" VerticalAlignment="Center" Background="{StaticResource AccentBrush}" />
+          <ToggleSwitch Grid.Column="2" IsChecked="{Binding UseSystemAccentColor}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+        </Grid>
       </StackPanel>
     </Border>
 

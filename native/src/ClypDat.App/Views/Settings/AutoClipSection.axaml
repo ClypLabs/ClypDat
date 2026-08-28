@@ -42,7 +42,7 @@
       <ItemsControl.ItemTemplate>
         <DataTemplate>
           <Grid ColumnDefinitions="84,*,Auto" ColumnSpacing="16" Margin="0,0,0,18" IsVisible="{Binding IsSearchMatch}">
-            <Border Width="84" Height="120" CornerRadius="8" ClipToBounds="True" Background="#1F3341" VerticalAlignment="Top">
+            <Border Width="84" Height="120" CornerRadius="8" ClipToBounds="True" Background="{StaticResource Surface_1F3341}" VerticalAlignment="Top">
               <Image Source="{Binding CoverImage}" Stretch="UniformToFill" />
             </Border>
             <StackPanel Grid.Column="1" Spacing="8">
