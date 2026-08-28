@@ -124,10 +124,37 @@ public sealed class PlaybackSession : IDisposable
     /// as a media option means it can be turned on and off without reloading the
     /// clip.
     /// </remarks>
-    public void SetCropMaskImage(string? pngPath, bool force = false)
+    public void SetCropMaskImage(string? pngPath)
     {
-        if (!force && string.Equals(_cropMaskPath, pngPath, StringComparison.OrdinalIgnoreCase)) return;
+        if (string.Equals(_cropMaskPath, pngPath, StringComparison.OrdinalIgnoreCase)) return;
         _cropMaskPath = pngPath;
+        ApplyCropMaskImage(pngPath);
+    }
+
+    /// <summary>
+    /// Restarts libvlc's logo filter after its video output is ready.
+    /// </summary>
+    /// <remarks>
+    /// Setting the same file again only bypasses this class's cache; it does
+    /// not make an already-running vout reconstruct its logo sub-filter.
+    /// Toggling Enable does, which lets a restored guide apply to its first
+    /// visible frame instead of waiting for a later vout transition.
+    /// </remarks>
+    public void ReapplyCropMaskImage()
+    {
+        try
+        {
+            VideoPlayer.SetLogoInt(VideoLogoOption.Enable, 0);
+            if (!string.IsNullOrEmpty(_cropMaskPath)) ApplyCropMaskImage(_cropMaskPath);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Editor crop mask reapply failed: '{_cropMaskPath}'", error);
+        }
+    }
+
+    private void ApplyCropMaskImage(string? pngPath)
+    {
         try
         {
             if (string.IsNullOrEmpty(pngPath))

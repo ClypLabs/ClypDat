@@ -6694,10 +6694,7 @@ public sealed partial class MainWindow : Window
             if (request.Generation == _cropPreviewGeneration &&
                 _playback is { } playback && ViewModel is { IsClipCropActive: true })
             {
-                // The early load request can reach libvlc before its vout is
-                // ready. Reapply the same file after first-frame readiness;
-                // it must not short-circuit merely because its path matches.
-                playback.SetCropMaskImage(path, force: true);
+                playback.SetCropMaskImage(path);
                 _ = Task.Run(() => CropMaskImage.Prune(EditorCropMaskDirectory, path));
                 AppLog.Debug($"Editor crop preview: renderMs={renderClock.ElapsedMilliseconds}.");
             }
@@ -7962,12 +7959,11 @@ public sealed partial class MainWindow : Window
                 {
                     if (cancellationToken.IsCancellationRequested) return;
                     if (ViewModel is null) return;
+                    // A restored crop can reach libvlc before its vout exists.
+                    // Restart its logo filter now that first-frame readiness
+                    // confirms a live vout, before revealing the video.
+                    playback.ReapplyCropMaskImage();
                     ViewModel.IsEditorVideoLoading = false;
-                    // A restored crop can be queued while libvlc is still
-                    // constructing its vout. Re-assert at its first frame so
-                    // opening an already-cropped clip never waits for a pill
-                    // click before its guide appears.
-                    ApplyEditorEffectPreview();
                     // The playhead/timeline seeker previously started moving
                     // the instant PlayFrom was called, well before the video
                     // itself had a real frame to show - the seeker visibly
