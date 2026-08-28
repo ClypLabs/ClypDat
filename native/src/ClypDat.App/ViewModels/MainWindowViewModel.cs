@@ -197,6 +197,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private double _cardWidth = 368;
     private double _cardImageHeight = 207;
     private int _cardColumns = 3;
+    private LibraryCardLayout? _pendingLibraryLayout;
     private bool _isOnboardingVisible;
     private string _onboardingStep = "Replay Buffer";
 
@@ -1164,6 +1165,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(ShowHeaderUpdateButton));
             OnPropertyChanged(nameof(HasSelectedCaptureBackend));
             OnPropertyChanged(nameof(EditorSidebarWidth));
+            ApplyPendingLibraryLayout();
         }
     }
 
@@ -1178,6 +1180,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(ShowLibraryActions));
             OnPropertyChanged(nameof(ShowLibraryStatus));
             OnPropertyChanged(nameof(ShowHeaderUpdateButton));
+            ApplyPendingLibraryLayout();
         }
     }
 
@@ -5315,12 +5318,39 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // Called by LibraryCardPanel before it measures card children.
     internal void UpdateCardLayout(LibraryCardLayout layout)
     {
+        // RetainedPageHost leaves the library laid out while another page is
+        // visible. Remember its latest geometry, but do not rebuild rows or
+        // decode thumbnails until it returns to the screen.
+        if (!IsLibraryVisible)
+        {
+            _pendingLibraryLayout = layout;
+            return;
+        }
+
+        _pendingLibraryLayout = null;
+        ApplyCardLayout(layout);
+    }
+
+    private void ApplyPendingLibraryLayout()
+    {
+        if (!IsLibraryVisible || _pendingLibraryLayout is not { } layout) return;
+        _pendingLibraryLayout = null;
+        ApplyCardLayout(layout);
+    }
+
+    private void ApplyCardLayout(LibraryCardLayout layout)
+    {
         if (CardColumns == layout.Columns && CardWidth == layout.Width && CardImageHeight == layout.ImageHeight) return;
+
+        var columnsChanged = CardColumns != layout.Columns;
 
         CardColumns = layout.Columns;
         CardWidth = layout.Width;
         CardImageHeight = layout.ImageHeight;
-        RebuildLibraryProjection();
+        // Rows encode only card membership. Their layout does not change
+        // until a column threshold is crossed; rebuilding them for every DIP
+        // width change resets the virtualized item containers during resize.
+        if (columnsChanged) RebuildLibraryProjection();
         OnPropertyChanged(nameof(LibraryLoadingRowPitch));
         OnPropertyChanged(nameof(LibraryLoadingTileHeight));
         if (HasStartupLibraryIndex) UpdateReservedLibraryExtent();

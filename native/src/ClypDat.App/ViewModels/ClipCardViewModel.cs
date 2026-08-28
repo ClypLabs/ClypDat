@@ -609,6 +609,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     // during decode, so both the pixels and the work scale with what is
     // actually shown.
     private const int MinimumPreviewDecodeWidth = 160;
+    private const int PreviewDecodeWidthBucket = 64;
     private static int _previewDecodeWidth = 480;
 
     public static void SetPreviewDecodeWidth(double cardWidth, double renderScaling)
@@ -618,7 +619,8 @@ public sealed class ClipCardViewModel : ViewModelBase
         if (!double.IsFinite(width) || width < MinimumPreviewDecodeWidth) width = MinimumPreviewDecodeWidth;
         // Never decode LARGER than the source - DecodeToWidth would upscale,
         // spending memory to add no detail.
-        Volatile.Write(ref _previewDecodeWidth, Math.Min(ThumbnailSourceWidth, (int)Math.Round(width)));
+        var bucketedWidth = (int)Math.Ceiling(width / PreviewDecodeWidthBucket) * PreviewDecodeWidthBucket;
+        Volatile.Write(ref _previewDecodeWidth, Math.Min(ThumbnailSourceWidth, bucketedWidth));
     }
 
     // Matches MediaProbeService's thumbnail scale.

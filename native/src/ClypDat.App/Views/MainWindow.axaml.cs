@@ -2060,6 +2060,7 @@ public sealed partial class MainWindow : Window
     // another LayoutUpdated - without a "nothing actually changed" guard that
     // would spin forever. Keyed on everything the marker layout depends on.
     private (double Extent, double Viewport, double Track, int VisibleClips) _scrubberSignature = (-1, -1, -1, -1);
+    private const double ScrubberTrackHeightBucket = 8;
     // Each distinct date, the content offset it starts at, and how many
     // visible clips fall on it - backs both the thumb's own bubble (whichever
     // date the viewport currently sits in) and the hover bubble/line
@@ -2116,7 +2117,7 @@ public sealed partial class MainWindow : Window
         var viewportHeight = LibraryScrollViewer.Viewport.Height;
 
         var usingProjection = ViewModel.LibraryProjection.Rows.Count > 0;
-        var signature = (extentHeight, viewportHeight, trackHeight,
+        var signature = (extentHeight, viewportHeight, Math.Floor(trackHeight / ScrubberTrackHeightBucket) * ScrubberTrackHeightBucket,
             usingProjection ? ViewModel.LibraryProjection.Rows.Count : VisibleLibraryClipCount());
         if (signature == _scrubberSignature) return;
         _scrubberSignature = signature;

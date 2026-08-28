@@ -73,7 +73,7 @@ public sealed class ClipPreviewPresenter : Control, IClipPreviewPresenter
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
-        if (change.Property == BoundsProperty)
+        if (GpuPreviewEnabled && change.Property == BoundsProperty)
             _ = ResizeGpuAsync(Bounds.Size);
         base.OnPropertyChanged(change);
     }
