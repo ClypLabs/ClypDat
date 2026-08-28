@@ -1,27 +1,53 @@
+using System.Collections.ObjectModel;
+
 namespace ClypDat.App.ViewModels;
 
 public sealed class LibraryGridRow : ViewModelBase
 {
     public LibraryGridRow(IReadOnlyList<ClipCardViewModel> clips, int index)
     {
-        Clips = clips;
+        Clips = new ObservableCollection<ClipCardViewModel>(clips);
         Index = index;
     }
 
-    public IReadOnlyList<ClipCardViewModel> Clips { get; private set; }
+    // Keep this source stable. Replacing it makes Avalonia remove every card
+    // container in the nested ItemsControl, which is visible as a blank grid
+    // whenever a resize changes the number of columns.
+    public ObservableCollection<ClipCardViewModel> Clips { get; }
     public int Index { get; private set; }
 
     internal void Update(IReadOnlyList<ClipCardViewModel> clips, int index)
     {
-        if (!Clips.SequenceEqual(clips))
-        {
-            Clips = clips;
-            OnPropertyChanged(nameof(Clips));
-        }
+        ReconcileClips(clips);
 
         if (Index == index) return;
         Index = index;
         OnPropertyChanged(nameof(Index));
+    }
+
+    private void ReconcileClips(IReadOnlyList<ClipCardViewModel> clips)
+    {
+        // Insert or move desired cards before removing stale ones. In
+        // particular, a row changing from 3 to 4 cards can never become empty
+        // between collection notifications, so Avalonia always has a live
+        // card tree to arrange while the resize is in progress.
+        for (var index = 0; index < clips.Count; index++)
+        {
+            if (index < Clips.Count && ReferenceEquals(Clips[index], clips[index])) continue;
+
+            var existingIndex = -1;
+            for (var candidate = index + 1; candidate < Clips.Count; candidate++)
+            {
+                if (!ReferenceEquals(Clips[candidate], clips[index])) continue;
+                existingIndex = candidate;
+                break;
+            }
+
+            if (existingIndex >= 0) Clips.Move(existingIndex, index);
+            else Clips.Insert(index, clips[index]);
+        }
+
+        while (Clips.Count > clips.Count) Clips.RemoveAt(Clips.Count - 1);
     }
 }
 

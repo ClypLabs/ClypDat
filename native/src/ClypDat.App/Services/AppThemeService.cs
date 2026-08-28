@@ -79,7 +79,7 @@ internal static class AppThemeService
         new Dictionary<string, ThemeTransform>(StringComparer.OrdinalIgnoreCase)
         {
             ["ClypDat Blue"] = new(228.8, 0.4579, 0.1938, 1.5581, -0.0337),
-            ["Violet"] = new(265.9, 0.4274, 0.1614, 1.3914, -0.0269),
+            ["Berry"] = new(265.9, 0.4274, 0.1614, 1.3914, -0.0269),
             ["Emerald"] = new(161.4, 0.4711, 0.1715, 1.1712, -0.0251),
             ["Rose"] = new(333.2, 0.4942, 0.1639, 1.3705, -0.0263),
             ["Amber"] = new(35.4, 0.7844, 0.1753, 1.3132, -0.0279),
@@ -88,7 +88,7 @@ internal static class AppThemeService
             // unused for them - Recolor inverts lightness outright instead.
             ["Light"] = new(209.0, 1, 0, 1, 0, IsLight: true),
             ["Light Blue"] = new(228.8, 1, 0, 1, 0, IsLight: true),
-            ["Light Violet"] = new(265.9, 1, 0, 1, 0, IsLight: true),
+            ["Light Berry"] = new(265.9, 1, 0, 1, 0, IsLight: true),
             ["Light Emerald"] = new(161.4, 1, 0, 1, 0, IsLight: true),
             ["Light Rose"] = new(333.2, 1, 0, 1, 0, IsLight: true),
             ["Light Amber"] = new(35.4, 1, 0, 1, 0, IsLight: true)
@@ -99,7 +99,7 @@ internal static class AppThemeService
         {
             ["System"] = Color.Parse("#5864E8"),
             ["ClypDat Blue"] = Color.Parse("#5864E8"),
-            ["Violet"] = Color.Parse("#8B5CF6"),
+            ["Berry"] = Color.Parse("#8B5CF6"),
             ["Emerald"] = Color.Parse("#10B981"),
             ["Rose"] = Color.Parse("#F43F5E"),
             ["Amber"] = Color.Parse("#F59E0B"),
@@ -109,14 +109,14 @@ internal static class AppThemeService
             // near-white surface.
             ["Light"] = Color.Parse("#4650C9"),
             ["Light Blue"] = Color.Parse("#4650C9"),
-            ["Light Violet"] = Color.Parse("#7343E0"),
+            ["Light Berry"] = Color.Parse("#7343E0"),
             ["Light Emerald"] = Color.Parse("#0E9268"),
             ["Light Rose"] = Color.Parse("#D42145"),
             ["Light Amber"] = Color.Parse("#B87608")
         };
 
     private static readonly string[] LightPresetOrder =
-        { "Light", "Light Blue", "Light Violet", "Light Emerald", "Light Rose", "Light Amber" };
+        { "Light", "Light Blue", "Light Berry", "Light Emerald", "Light Rose", "Light Amber" };
 
     // The System source values for the named tokens, with the role each is
     // recoloured under. System itself is the identity transform, so its rendering
@@ -159,7 +159,7 @@ internal static class AppThemeService
 
     public static IReadOnlyList<ThemeOption> Options { get; } = new[]
     {
-        Option("System"), Option("ClypDat Blue"), Option("Violet"),
+        Option("System"), Option("ClypDat Blue"), Option("Berry"),
         Option("Emerald"), Option("Rose"), Option("Amber")
     };
 
@@ -169,8 +169,12 @@ internal static class AppThemeService
     public static bool IsLight(string preset) =>
         Transforms.TryGetValue(Normalize(preset), out var transform) && transform.IsLight;
 
-    public static string Normalize(string? preset) =>
-        preset is not null && (IsSystem(preset) || Transforms.ContainsKey(preset)) ? preset : "System";
+    public static string Normalize(string? preset)
+    {
+        if (string.Equals(preset, "Violet", StringComparison.OrdinalIgnoreCase)) return "Berry";
+        if (string.Equals(preset, "Light Violet", StringComparison.OrdinalIgnoreCase)) return "Light Berry";
+        return preset is not null && (IsSystem(preset) || Transforms.ContainsKey(preset)) ? preset : "System";
+    }
 
     /// <summary>
     /// The System preset is the only one with no accent of its own - it is ClypDat's

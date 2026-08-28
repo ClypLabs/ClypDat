@@ -19,7 +19,7 @@
       <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
 
-    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Themes|System|ClypDat Blue|Violet|Emerald|Rose|Amber'}">
+    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Themes|System|ClypDat Blue|Berry|Violet|Emerald|Rose|Amber'}">
       <StackPanel Spacing="14">
         <TextBlock Classes="settingsCardLabel" Text="PRESET THEMES" />
         <ListBox Classes="themePresetGrid" SelectionMode="Single" ItemsSource="{Binding ThemeOptions}"
@@ -44,7 +44,7 @@
       </StackPanel>
     </Border>
 
-    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Light|Light mode|Light themes|Light Blue|Light Violet|Light Emerald|Light Rose|Light Amber'}">
+    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Light|Light mode|Light themes|Light Blue|Light Berry|Light Violet|Light Emerald|Light Rose|Light Amber'}">
       <StackPanel Spacing="14">
         <TextBlock Classes="settingsCardLabel" Text="LIGHT THEMES" />
         <ListBox Classes="themePresetGrid" SelectionMode="Single" ItemsSource="{Binding LightThemeOptions}"

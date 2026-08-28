@@ -81,9 +81,9 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         },
         ["Themes"] = new[]
         {
-            "Theme", "Preset themes", "System", "ClypDat Blue", "Violet", "Emerald", "Rose", "Amber",
+            "Theme", "Preset themes", "System", "ClypDat Blue", "Berry", "Violet", "Emerald", "Rose", "Amber",
             "Accent", "Accent colour", "Windows accent", "System accent",
-            "Light", "Light mode", "Light themes", "Light Blue", "Light Violet",
+            "Light", "Light mode", "Light themes", "Light Blue", "Light Berry", "Light Violet",
             "Light Emerald", "Light Rose", "Light Amber",
             "Custom themes", "Custom colours"
         },

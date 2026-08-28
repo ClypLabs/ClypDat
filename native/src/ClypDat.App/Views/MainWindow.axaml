@@ -301,8 +301,9 @@
                and the editor's sections share row 0 and swap, rather than the
                rail growing a second column - a 64px strip is the width the
                editor's video rect is measured against. -->
-          <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Hidden" IsVisible="{Binding !IsEditorVisible}">
-            <StackPanel Margin="0,16,0,16" Spacing="2">
+          <Grid Grid.Row="0" RowDefinitions="Auto,*" IsVisible="{Binding !IsEditorVisible}">
+            <!-- Library filters stay reachable while game icons scroll. -->
+            <StackPanel Grid.Row="0" Margin="0,16,0,8" Spacing="2">
               <Button x:Name="AllClipsFilterButton" Classes="railIconButton" Classes.active="{Binding IsAllClipsActive}" Click="AllClipsFilterButton_OnClick" ToolTip.Tip="All Clips">
                 <PathIcon Data="M4,4h4v4H4V4z M10,4h4v4h-4V4z M16,4h4v4h-4V4z M4,10h4v4H4v-4z M10,10h4v4h-4v-4z M16,10h4v4h-4v-4z M4,16h4v4H4v-4z M10,16h4v4h-4v-4z M16,16h4v4h-4v-4z" Width="18" Height="18" />
               </Button>
@@ -317,6 +318,12 @@
               </ItemsControl>
 
               <Border Height="1" Background="{StaticResource Surface_1E2A33}" Margin="16,10" />
+
+            </StackPanel>
+
+            <Grid Grid.Row="1">
+              <ScrollViewer VerticalScrollBarVisibility="Hidden">
+                <StackPanel Margin="0,0,0,16" Spacing="2">
 
               <!-- With Combine off, a game and a section can never both be
                    active at once - picking either already drops the other -
@@ -567,14 +574,26 @@
                     </DataTemplate>
                   </ItemsControl.DataTemplates>
                 </ItemsControl>
-              </StackPanel>
-            </StackPanel>
-          </ScrollViewer>
+                </StackPanel>
+                </StackPanel>
+              </ScrollViewer>
+
+              <!-- Soft edge shows game rail continues beneath fixed filters. -->
+              <Border Height="14" VerticalAlignment="Top" IsHitTestVisible="False" ZIndex="1">
+                <Border.Background>
+                  <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                    <GradientStop Color="{DynamicResource SurfaceColor_0D1116}" Offset="0" />
+                    <GradientStop Color="{DynamicResource SurfaceColor_000D1116}" Offset="1" />
+                  </LinearGradientBrush>
+                </Border.Background>
+              </Border>
+            </Grid>
+          </Grid>
 
           <!-- Implies more content below without a visible scrollbar track -
                a thin fade from transparent to the rail's own background,
                always present (harmless when nothing's actually clipped). -->
-          <Border Grid.Row="0" Height="22" VerticalAlignment="Bottom" IsHitTestVisible="False" IsVisible="{Binding !IsEditorVisible}">
+          <Border Grid.Row="0" Height="22" VerticalAlignment="Bottom" IsHitTestVisible="False" IsVisible="{Binding !IsEditorVisible}" ZIndex="2">
             <Border.Background>
               <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
                 <GradientStop Color="{DynamicResource SurfaceColor_000D1116}" Offset="0" />
