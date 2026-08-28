@@ -730,7 +730,7 @@ function Ensure-StableAvaloniaPackages {
             try {
                 $packageBuildExitCode = Invoke-AvaloniaBuild -FilePath $msbuildExecutable -Arguments @(
                     $packageProject, '/t:Pack', "/p:ClypDatPackageVersion=$stableVersion",
-                    "/p:ClypDatPackageOutput=$stagingFullPath", '/nologo'
+                    "/p:ClypDatPackageOutput=$stagingFullPath", '/nologo', '/nodeReuse:false'
                 )
             }
             finally {
@@ -747,7 +747,7 @@ function Ensure-StableAvaloniaPackages {
         $buildTasksProject = Join-Path $worktreeRoot 'src\Avalonia.Build.Tasks\Avalonia.Build.Tasks.csproj'
         $buildTasksOutput = Join-Path $worktreeRoot 'src\Avalonia.Build.Tasks\bin\Release\netstandard2.0'
         $buildTasksExitCode = Invoke-AvaloniaBuild -FilePath $dotnetExecutable -Arguments @(
-            'build', $buildTasksProject, '-c', 'Release', '-f', 'netstandard2.0', '--no-restore', '/nologo'
+            'build', $buildTasksProject, '-c', 'Release', '-f', 'netstandard2.0', '--no-restore', '/nologo', '/nodeReuse:false'
         )
         if ($buildTasksExitCode -ne 0) {
             throw "Avalonia build task compilation failed with exit code $buildTasksExitCode."
@@ -758,7 +758,7 @@ function Ensure-StableAvaloniaPackages {
         $generatorProject = Join-Path $worktreeRoot 'src\tools\Avalonia.Generators\Avalonia.Generators.csproj'
         $generatorOutput = Join-Path $worktreeRoot 'src\tools\Avalonia.Generators\bin\Release\netstandard2.0\Avalonia.Generators.dll'
         $generatorBuildExitCode = Invoke-AvaloniaBuild -FilePath $dotnetExecutable -Arguments @(
-            'build', $generatorProject, '-c', 'Release', '-f', 'netstandard2.0', '--no-restore', '/nologo'
+            'build', $generatorProject, '-c', 'Release', '-f', 'netstandard2.0', '--no-restore', '/nologo', '/nodeReuse:false'
         )
         if ($generatorBuildExitCode -ne 0) {
             throw "Avalonia generator compilation failed with exit code $generatorBuildExitCode."
@@ -856,7 +856,7 @@ try {
     New-Item -ItemType Directory -Path $publishStagingDirectory -Force | Out-Null
 
     Write-Host "Publishing to staging directory: $publishStagingDirectory"
-    & $dotnetExecutable publish $appProject -c Release -r win-x64 --self-contained true -p:Platform=x64 -o $publishStagingDirectory
+    & $dotnetExecutable publish $appProject -c Release -r win-x64 --self-contained true -p:Platform=x64 -o $publishStagingDirectory /nodeReuse:false
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish failed with exit code $LASTEXITCODE."
     }
