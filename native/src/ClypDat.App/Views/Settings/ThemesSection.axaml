@@ -48,7 +48,7 @@
       <StackPanel Spacing="14">
         <Grid ColumnDefinitions="*,Auto">
           <TextBlock Classes="settingsCardLabel" Text="LIGHT THEMES" VerticalAlignment="Center" />
-          <TextBlock Grid.Column="1" Classes="settingsRowDesc" Text="You sicko" VerticalAlignment="Center" />
+          <TextBlock Grid.Column="1" Classes="settingsRowDesc" Text="You Freak" VerticalAlignment="Center" />
         </Grid>
         <ListBox Classes="themePresetGrid" SelectionMode="Single" ItemsSource="{Binding LightThemeOptions}"
                  SelectedValue="{Binding SelectedThemePreset}" SelectedValueBinding="{Binding Id}">

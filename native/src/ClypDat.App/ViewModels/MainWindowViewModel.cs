@@ -409,11 +409,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public IReadOnlyList<ThemeOption> ThemeOptions => AppThemeService.Options;
     public IReadOnlyList<ThemeOption> LightThemeOptions => AppThemeService.LightOptions;
 
-    public string SelectedThemePreset
+    public string? SelectedThemePreset
     {
         get => Settings.ThemePreset;
         set
         {
+            // The dark and light swatch grids are two ListBoxes bound to this one
+            // property, so whichever grid does not hold the selected preset finds
+            // no matching item and pushes null back. Normalizing that to "System"
+            // would silently overwrite the user's choice - and persist it, which
+            // is what made themes look like they were not saving across restarts.
+            if (string.IsNullOrEmpty(value)) return;
             var preset = AppThemeService.Normalize(value);
             if (string.Equals(Settings.ThemePreset, preset, StringComparison.OrdinalIgnoreCase)) return;
             Settings.ThemePreset = preset;
