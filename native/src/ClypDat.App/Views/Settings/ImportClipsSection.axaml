@@ -22,14 +22,14 @@
           <StackPanel Spacing="10">
             <TextBlock Text="Medal" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="16" />
             <TextBlock Classes="settingsRowDescSm" Text="Import clips recorded by Medal, including its titles and game metadata." />
-            <Button Content="Open Medal Importer" Classes="primaryButton" Tag="Medal" Click="ChooseImportSourceButton_OnClick" HorizontalAlignment="Left" />
+            <Button Content="Open Medal Importer" FontSize="12" Classes="primaryButton" Tag="Medal" Click="ChooseImportSourceButton_OnClick" HorizontalAlignment="Left" />
           </StackPanel>
         </Border>
         <Border Grid.Column="1" Classes="settingsCard" Padding="16">
           <StackPanel Spacing="10">
             <TextBlock Text="SteelSeries Moments" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="16" />
             <TextBlock Classes="settingsRowDescSm" Text="Import Moments clips with metadata dates, titles, games, and auto-clip reasons." />
-            <Button Content="Open SteelSeries Importer" Classes="primaryButton" Tag="SteelSeries" Click="ChooseImportSourceButton_OnClick" HorizontalAlignment="Left" />
+            <Button Content="Open SteelSeries Importer" FontSize="12" Classes="primaryButton" Tag="SteelSeries" Click="ChooseImportSourceButton_OnClick" HorizontalAlignment="Left" />
           </StackPanel>
         </Border>
       </Grid>
