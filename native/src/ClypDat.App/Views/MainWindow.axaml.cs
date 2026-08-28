@@ -7266,7 +7266,7 @@ public sealed partial class MainWindow : Window
             ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
             Height = 48
         };
-        var titleIcon = new Image { Source = new Avalonia.Media.Imaging.Bitmap(Avalonia.Platform.AssetLoader.Open(new Uri("avares://ClypDat/Assets/clypdat-icon-24.png"))), Width = 16, Height = 16, Margin = new Avalonia.Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        var titleIcon = new Image { Source = AppThemeService.CurrentLogo(large: false), Width = 16, Height = 16, Margin = new Avalonia.Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         // 2px down: TextBlock's cap height sits visually higher than the icon's
         // optical center at this size, reading as misaligned despite both being
         // VerticalAlignment=Center.
@@ -7658,7 +7658,7 @@ public sealed partial class MainWindow : Window
             ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
             Height = 48
         };
-        var titleIcon = new Image { Source = new Avalonia.Media.Imaging.Bitmap(Avalonia.Platform.AssetLoader.Open(new Uri("avares://ClypDat/Assets/clypdat-icon-24.png"))), Width = 16, Height = 16, Margin = new Avalonia.Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        var titleIcon = new Image { Source = AppThemeService.CurrentLogo(large: false), Width = 16, Height = 16, Margin = new Avalonia.Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         var titleText = new TextBlock { Text = "You're up to date", Foreground = AppThemeService.Brush("Text_B9C6D4", "#B9C6D4"), FontSize = 12, FontWeight = Avalonia.Media.FontWeight.SemiBold, Margin = new Avalonia.Thickness(8, 2, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         var titleLeft = new StackPanel { Orientation = Orientation.Horizontal, Children = { titleIcon, titleText } };
         Grid.SetColumn(titleLeft, 0);

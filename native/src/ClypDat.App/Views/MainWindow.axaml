@@ -43,7 +43,7 @@
                  defaults to a lower-quality mode for the downscale itself,
                  independent of how much source detail is available.
                  HighQuality actually uses that detail. -->
-            <Image Source="/Assets/clypdat-icon-256.png" Width="26" Height="26" RenderOptions.BitmapInterpolationMode="HighQuality" />
+            <Image Source="{DynamicResource AppLogoLarge}" Width="26" Height="26" RenderOptions.BitmapInterpolationMode="HighQuality" />
           </Button>
           <Button x:Name="BackNavButton" Classes="linkButton" Click="BackNavButton_OnClick" ToolTip.Tip="Back" Padding="6" Margin="6,0,0,0">
             <PathIcon Data="M15.41,7.41L14,6l-6,6l6,6l1.41-1.41L10.83,12L15.41,7.41z" Width="16" Height="16" />
@@ -1816,7 +1816,7 @@
           <Border DockPanel.Dock="Top" Background="{StaticResource Surface_0C1319}" CornerRadius="11,11,0,0">
           <Grid ColumnDefinitions="Auto,*,Auto" Height="52">
             <StackPanel Orientation="Horizontal" Spacing="8" Margin="14,0,0,0" VerticalAlignment="Center">
-              <Image Source="/Assets/clypdat-icon-24.png" Width="16" Height="16" />
+              <Image Source="{DynamicResource AppLogoSmall}" Width="16" Height="16" />
               <StackPanel Spacing="1">
                 <TextBlock Text="Welcome to ClypDat" Foreground="{StaticResource Text_EDF4FB}" FontSize="14" FontWeight="Bold" />
                 <TextBlock Text="Quick setup — you can change everything later" Foreground="{StaticResource Surface_718396}" FontSize="10.5" />

@@ -3,6 +3,8 @@ using Avalonia.Controls;
 using Avalonia.Styling;
 using Avalonia.Markup.Xaml.Styling;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 
 namespace ClypDat.App.Services;
 
@@ -213,6 +215,7 @@ internal static class AppThemeService
         SetBrush(application, "AccentHoverBrush", Blend(accent, appBackground, 0.84));
 
         ApplyFluentAccent(application, accent, appBackground);
+        ApplyLogo(application, transform.IsLight);
     }
 
     // FluentTheme paints ListBoxItem selection, CheckBox ticks and anything else we
@@ -230,6 +233,33 @@ internal static class AppThemeService
         application.Resources["SystemAccentColorDark1"] = Blend(accent, appBackground, 0.20);
         application.Resources["SystemAccentColorDark2"] = Blend(accent, appBackground, 0.40);
         application.Resources["SystemAccentColorDark3"] = Blend(accent, appBackground, 0.60);
+    }
+
+    // The app mark is a near-white shape with a black outline, which disappears
+    // against a light page. The light-mode assets are its exact luminance
+    // inverse - black shape, white outline - so the two read identically on
+    // their own backgrounds. Loaded once each and cached; a theme switch swaps
+    // which pair the resources point at, it does not re-decode.
+    private static readonly Dictionary<string, Bitmap> LogoCache = new(StringComparer.Ordinal);
+    private static bool _isLightTheme;
+
+    /// <summary>The app mark for the active theme. Use for surfaces the app paints itself.</summary>
+    public static Bitmap CurrentLogo(bool large) => Logo(large, _isLightTheme);
+
+    private static Bitmap Logo(bool large, bool light)
+    {
+        var name = $"clypdat-icon-{(large ? 256 : 24)}{(light ? "-light" : string.Empty)}.png";
+        if (LogoCache.TryGetValue(name, out var cached)) return cached;
+        var bitmap = new Bitmap(AssetLoader.Open(new Uri($"avares://ClypDat/Assets/{name}")));
+        LogoCache[name] = bitmap;
+        return bitmap;
+    }
+
+    private static void ApplyLogo(Application application, bool isLight)
+    {
+        _isLightTheme = isLight;
+        application.Resources["AppLogoSmall"] = Logo(false, isLight);
+        application.Resources["AppLogoLarge"] = Logo(true, isLight);
     }
 
     private static void ApplyRamp(Application application, ThemeTransform transform)

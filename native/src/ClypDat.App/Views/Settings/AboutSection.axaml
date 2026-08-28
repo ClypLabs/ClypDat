@@ -23,7 +23,7 @@
     <Border Classes="settingsCard">
       <StackPanel Orientation="Horizontal" Spacing="16">
         <Border Width="52" Height="52" CornerRadius="12" Background="{StaticResource SurfaceRaisedBrush}">
-          <Image Source="/Assets/clypdat-icon-24.png" Width="30" Height="30" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          <Image Source="{DynamicResource AppLogoSmall}" Width="30" Height="30" HorizontalAlignment="Center" VerticalAlignment="Center" />
         </Border>
         <StackPanel Spacing="3" VerticalAlignment="Center">
           <TextBlock Text="ClypDat" Foreground="{StaticResource TextStrongBrush}" FontWeight="Bold" FontSize="20" />

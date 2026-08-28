@@ -46,10 +46,7 @@
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Light|Light mode|Light themes|Light Blue|Light Violet|Light Emerald|Light Rose|Light Amber'}">
       <StackPanel Spacing="14">
-        <Grid ColumnDefinitions="*,Auto">
-          <TextBlock Classes="settingsCardLabel" Text="LIGHT THEMES" VerticalAlignment="Center" />
-          <TextBlock Grid.Column="1" Classes="settingsRowDesc" Text="You Freak" VerticalAlignment="Center" />
-        </Grid>
+        <TextBlock Classes="settingsCardLabel" Text="LIGHT THEMES" />
         <ListBox Classes="themePresetGrid" SelectionMode="Single" ItemsSource="{Binding LightThemeOptions}"
                  SelectedValue="{Binding SelectedThemePreset}" SelectedValueBinding="{Binding Id}">
           <ListBox.ItemsPanel>
