@@ -234,27 +234,58 @@ internal static class AppThemeService
 
     private static void ApplyRamp(Application application, ThemeTransform transform)
     {
+        // Keys only, then resolve each one back through TryGetResource. A
+        // dictionary loaded from XAML can hold its entries as deferred content
+        // rather than the finished object, so reading entry.Value directly finds
+        // something that is not a brush and skips it - while StaticResource later
+        // materializes an instance of its own. That is why the named tokens, which
+        // have always gone through TryGetResource, themed correctly at startup
+        // while the ramp did not, and why the ramp appeared to fix itself as soon
+        // as a theme was picked by hand.
+        foreach (var key in RampKeys(application))
+        {
+            if (!TryMatchRamp(key, out var role, out var isColor, out var source)) continue;
+
+            var themed = Recolor(source, role, transform);
+            if (isColor)
+            {
+                // Color is a struct, so this shadows the ramp entry with a new
+                // value at application level rather than mutating one in place.
+                application.Resources[key] = themed;
+            }
+            else if (TryFindBrush(application.Resources, key, out var brush))
+            {
+                brush.Color = themed;
+            }
+        }
+    }
+
+    private static IReadOnlyList<string> RampKeys(Application application)
+    {
+        if (_rampKeys is not null) return _rampKeys;
+
+        var keys = new List<string>();
         foreach (var resources in MergedDictionaries(application.Resources))
         {
             foreach (var entry in resources)
             {
-                if (entry.Key is not string key) continue;
-                if (!TryMatchRamp(key, out var role, out var isColor, out var source)) continue;
-
-                var themed = Recolor(source, role, transform);
-                if (isColor)
+                if (entry.Key is string key && RampPrefixes.Any(p => key.StartsWith(p.Prefix, StringComparison.Ordinal)))
                 {
-                    // Color is a struct, so this shadows the ramp entry with a new
-                    // value at application level rather than mutating one in place.
-                    application.Resources[key] = themed;
-                }
-                else if (entry.Value is SolidColorBrush brush)
-                {
-                    brush.Color = themed;
+                    keys.Add(key);
                 }
             }
         }
+
+        _rampKeys = keys;
+        // The ramp is what every non-token surface in the app resolves through,
+        // and a silent zero here reads in the UI as "the theme only half applied".
+        // Cheap enough to state once per launch.
+        AppLog.Info($"Theme ramp: {keys.Count} keys registered.");
+        return keys;
     }
+
+    // The ramp is a generated file; its key set cannot change while the app runs.
+    private static IReadOnlyList<string>? _rampKeys;
 
     private static bool TryMatchRamp(string key, out ColorRole role, out bool isColor, out Color source)
     {
