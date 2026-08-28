@@ -6694,7 +6694,10 @@ public sealed partial class MainWindow : Window
             if (request.Generation == _cropPreviewGeneration &&
                 _playback is { } playback && ViewModel is { IsClipCropActive: true })
             {
-                playback.SetCropMaskImage(path);
+                // The early load request can reach libvlc before its vout is
+                // ready. Reapply the same file after first-frame readiness;
+                // it must not short-circuit merely because its path matches.
+                playback.SetCropMaskImage(path, force: true);
                 _ = Task.Run(() => CropMaskImage.Prune(EditorCropMaskDirectory, path));
                 AppLog.Debug($"Editor crop preview: renderMs={renderClock.ElapsedMilliseconds}.");
             }

@@ -124,9 +124,9 @@ public sealed class PlaybackSession : IDisposable
     /// as a media option means it can be turned on and off without reloading the
     /// clip.
     /// </remarks>
-    public void SetCropMaskImage(string? pngPath)
+    public void SetCropMaskImage(string? pngPath, bool force = false)
     {
-        if (string.Equals(_cropMaskPath, pngPath, StringComparison.OrdinalIgnoreCase)) return;
+        if (!force && string.Equals(_cropMaskPath, pngPath, StringComparison.OrdinalIgnoreCase)) return;
         _cropMaskPath = pngPath;
         try
         {
