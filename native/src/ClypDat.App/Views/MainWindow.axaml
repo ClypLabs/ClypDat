@@ -971,7 +971,7 @@
                                     ZIndex="10" />
                             <Border Background="{StaticResource Surface_16202A}" Height="{Binding $parent[Window].DataContext.CardImageHeight}">
                               <Grid>
-                                <Image Source="{Binding PreviewImage}" Stretch="UniformToFill" />
+                                <Image Source="{Binding PreviewImage}" Stretch="{Binding PreviewImageStretch}" />
                                 <controls:ClipPreviewPresenter Classes="clipPreviewOverlay" IsHitTestVisible="False" />
                                 <Border Background="{StaticResource Surface_661A2040}" IsVisible="{Binding IsSelected}" IsHitTestVisible="False" />
                                 <!-- Queued for, or undergoing, a parameter-set

@@ -239,14 +239,22 @@ public sealed class ClipCardViewModel : ViewModelBase
     public bool HasTrimEdit => _clipEdit is not null && Duration - TrimmedDuration > TimeSpan.FromMilliseconds(50);
 
     // Trimming shortens the number the tile already shows, so a pencil next to it
-    // explains the discrepancy. Speed and crop change nothing the tile displays,
-    // which is why they get an indicator of their own rather than sharing that
-    // one. Volume and mute are deliberately not counted - they are per-track
+    // explains the discrepancy. Speed gets its own indicator; crop changes the
+    // tile frame but still needs an explicit edit marker. Volume and mute are deliberately not counted - they are per-track
     // mixing, not an effect applied to the clip.
     public bool HasEffectEdit => _clipEdit is not null &&
         (Math.Abs(_clipEdit.SpeedMultiplier - 1.0) > 0.001 ||
          !string.IsNullOrEmpty(_clipEdit.CropMode) &&
          !string.Equals(_clipEdit.CropMode, "None", StringComparison.OrdinalIgnoreCase));
+
+    // A cropped portrait/square frame must fit within the card instead of
+    // being cropped a second time by the 16:9 tile surface.
+    public Stretch PreviewImageStretch => _clipEdit is not null &&
+        !string.IsNullOrEmpty(_clipEdit.CropMode) &&
+        !string.Equals(_clipEdit.CropMode, "None", StringComparison.OrdinalIgnoreCase)
+        ? Stretch.Uniform
+        : Stretch.UniformToFill;
+
     public string DurationLabel => TrimmedDuration > TimeSpan.Zero ? TrimmedDuration.ToString("m\\:ss") : "0:00";
     public string GameLabel => "VIDEO";
     public string CaptureBackendLabel => IsMedalImport
@@ -458,6 +466,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(TrimmedDuration));
         OnPropertyChanged(nameof(HasTrimEdit));
         OnPropertyChanged(nameof(HasEffectEdit));
+        OnPropertyChanged(nameof(PreviewImageStretch));
         OnPropertyChanged(nameof(DurationLabel));
     }
 
