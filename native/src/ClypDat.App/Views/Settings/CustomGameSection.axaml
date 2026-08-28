@@ -40,7 +40,10 @@
             <TextBlock Classes="settingsRowDescSm" Text="Pick from the games ClypDat has already detected."
                        />
           </StackPanel>
-          <ComboBox Grid.Column="1" Classes="settingsInput" MinWidth="280" VerticalAlignment="Center"
+          <!-- Auto column, so the box claims its MinWidth before the label gets
+               any: at 280 it crushed "Add Game" to a clipped word and its
+               description to one word per line on a narrow window. -->
+          <ComboBox Grid.Column="1" Classes="settingsInput" MinWidth="200" MaxWidth="280" VerticalAlignment="Center"
                     PlaceholderText="Search for a game to add..."
                     ItemsSource="{Binding CustomGameCandidates}"
                     SelectionChanged="AddCustomGameComboBox_OnSelectionChanged">
