@@ -412,6 +412,23 @@ public sealed class ClipCardViewModel : ViewModelBase
         }
     }
 
+    // Hover playback bypasses the card bitmap and decodes the source directly.
+    // Carry the saved crop into FFmpeg so it matches the tile and final export.
+    internal string? HoverPreviewCropFilter
+    {
+        get
+        {
+            if (_clipEdit is null) return null;
+            var crop = ClipRenderFilters.ComputeCrop(
+                _clipEdit.CropMode,
+                _clipEdit.CropOffsetX,
+                _clipEdit.CropOffsetY,
+                Media.Width,
+                Media.Height);
+            return crop is { } rect ? $"crop={rect.Width}:{rect.Height}:{rect.X}:{rect.Y}" : null;
+        }
+    }
+
     // Called by MainWindow's per-card EffectiveViewportChanged handler as
     // cards cross the ScrollViewer's viewport - decodes the thumbnail on
     // entry and disposes/releases it on exit, so a large library never has

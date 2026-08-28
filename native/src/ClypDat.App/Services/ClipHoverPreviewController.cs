@@ -291,7 +291,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
 
             while (!token.IsCancellationRequested && IsCurrent(clip, generation))
             {
-                using var process = StartDecoder(clip.Path, range, pacer.CurrentFrameRate, previewSize);
+                using var process = StartDecoder(clip.Path, range, pacer.CurrentFrameRate, previewSize, clip.HoverPreviewCropFilter);
                 SetProcess(clip, generation, process);
                 var stderr = process.StandardError.ReadToEndAsync();
                 var sourceReadsBefore = GetReadBytes(process);
@@ -420,16 +420,21 @@ internal sealed class ClipHoverPreviewController : IDisposable
 
     internal static double ResolveFrameRate(double recordedFrameRate) => MaximumFramesPerSecond;
 
-    private static Process StartDecoder(string path, (TimeSpan Start, TimeSpan Duration) range, double frameRate, PixelSize previewSize)
+    private static Process StartDecoder(string path, (TimeSpan Start, TimeSpan Duration) range, double frameRate, PixelSize previewSize, string? cropFilter)
     {
         var info = new ProcessStartInfo(FfmpegPathResolver.FfmpegPath) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = FfmpegPathResolver.WorkingDirectory };
-        foreach (var argument in BuildDecoderArguments(path, range, frameRate, previewSize)) info.ArgumentList.Add(argument);
+        foreach (var argument in BuildDecoderArguments(path, range, frameRate, previewSize, cropFilter)) info.ArgumentList.Add(argument);
         var process = Process.Start(info) ?? throw new InvalidOperationException("FFmpeg did not start.");
         try { process.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
         return process;
     }
 
-    internal static IReadOnlyList<string> BuildDecoderArguments(string path, (TimeSpan Start, TimeSpan Duration) range, double frameRate, PixelSize previewSize)
+    internal static IReadOnlyList<string> BuildDecoderArguments(
+        string path,
+        (TimeSpan Start, TimeSpan Duration) range,
+        double frameRate,
+        PixelSize previewSize,
+        string? cropFilter = null)
     {
         var start = range.Start.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
         var duration = range.Duration.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
@@ -440,8 +445,9 @@ internal sealed class ClipHoverPreviewController : IDisposable
         // and its sharpening is invisible once the output is this small - and
         // at the old fixed 1920x1080 it was paying that cost for a 1080p source
         // that wasn't even being resized.
+        var crop = string.IsNullOrWhiteSpace(cropFilter) ? string.Empty : $"{cropFilter},";
         return ["-hide_banner", "-loglevel", "error", "-ss", start, "-i", path, "-t", duration,
-            "-an", "-vf", $"fps={fps},scale=w={width}:h={height}:flags=bilinear:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
+            "-an", "-vf", $"{crop}fps={fps},scale=w={width}:h={height}:flags=bilinear:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
             "-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1"];
     }
 
