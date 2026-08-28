@@ -17,8 +17,8 @@
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Game Detection" />
       <TextBlock Classes="settingsSectionDesc" Text="Add a game ClypDat doesn't recognize yet, and pick which capture backend any game should always use." />
+      <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
-    <Border Classes="settingsDivider" />
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Add a running game|Or browse for an executable|Add Games}">
       <StackPanel Spacing="16">

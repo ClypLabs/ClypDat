@@ -22,8 +22,8 @@
         <TextBlock Grid.Column="1" Text="Experimental - still being worked on and can miss events, mislabel clips, or misbehave."
                    Foreground="{StaticResource CautionBrush}" FontSize="11" FontWeight="Bold" TextWrapping="Wrap" />
       </Grid>
+      <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
-    <Border Classes="settingsDivider" />
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Auto Capture Events}">
       <StackPanel Spacing="14">

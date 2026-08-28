@@ -17,8 +17,8 @@
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Replay Buffer" />
       <TextBlock Classes="settingsSectionDesc" Text="Control how ClypDat records in the background and which capture backend it uses." />
+      <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
-    <Border Classes="settingsDivider" />
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Save hotkey|Hotkey}">
       <StackPanel Spacing="6">

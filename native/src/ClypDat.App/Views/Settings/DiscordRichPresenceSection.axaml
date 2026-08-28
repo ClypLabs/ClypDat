@@ -15,8 +15,8 @@
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Discord Rich Presence" />
       <TextBlock Classes="settingsSectionDesc" Text="Control what ClypDat shares on your Discord profile." />
+      <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
-    <Border Classes="settingsDivider" />
     <Border Classes="settingsCard">
       <StackPanel Spacing="14">
         <TextBlock Classes="settingsCardLabel" Text="DISCORD" />

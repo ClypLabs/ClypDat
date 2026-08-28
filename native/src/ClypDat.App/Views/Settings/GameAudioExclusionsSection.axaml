@@ -17,8 +17,8 @@
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Game Audio Exclusions" />
       <TextBlock Classes="settingsSectionDesc" Text="Apps here are removed from Game Audio. Chat Audio captures the selected app above." />
+      <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
-    <Border Classes="settingsDivider" />
 
     <Border Classes="settingsCard">
       <StackPanel Spacing="14">

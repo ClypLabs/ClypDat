@@ -17,8 +17,8 @@
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Overlays and Notifications" />
       <TextBlock Classes="settingsSectionDesc" Text="Turn the on-screen confirmation and sound on or off, and choose where and how loud it is when a clip saves." />
+      <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
-    <Border Classes="settingsDivider" />
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clip saved overlay|Hide overlays from screen capture|Show new clips when a game closes|Show clipping started overlay|Show auto-clip detected overlay|Show auto-clip failed overlay|Overlay position|Overlays}">
       <StackPanel Spacing="18">
