@@ -30,7 +30,7 @@
         </Border>
         <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
           <TextBlock Text="ClypDat" Foreground="{StaticResource TextStrongBrush}" FontWeight="Bold" FontSize="20" />
-          <TextBlock Text="A clip recorder and editor, made to be fast and to stay out of your way." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="NoWrap" />
+          <TextBlock Text="A clip recorder and editor, made to be fast and to stay out of your way." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
           <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,4,0,0">
             <TextBlock Classes="settingsCardLabel" Text="{Binding AppVersionDisplay}" />
             <TextBlock Text="·" Foreground="{StaticResource LabelBrush}" FontSize="11" FontWeight="Bold" />
