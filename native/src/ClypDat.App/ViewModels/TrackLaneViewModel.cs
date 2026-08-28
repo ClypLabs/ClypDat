@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using ClypDat.App.Services;
 
 namespace ClypDat.App.ViewModels;
 
@@ -117,8 +118,8 @@ public sealed class TrackLaneViewModel : ViewModelBase
 
     private Color GetVolumeAccentColor(double volumePercent) => volumePercent switch
     {
-        > 125 => Avalonia.Media.Color.Parse("#F05A63"),
-        > 100 => Avalonia.Media.Color.Parse("#F4B73E"),
+        > 125 => AppThemeService.ThemeColor("Semantic_F05A63", "#F05A63"),
+        > 100 => AppThemeService.ThemeColor("Semantic_F4B73E", "#F4B73E"),
         _ => _laneColor
     };
 

@@ -25,7 +25,7 @@
                  rather than sitting in column 1 alone - with nothing in
                  column 0 to balance the close button's column 2, centering
                  within just column 1 read as shifted left of true center. -->
-            <TextBlock Grid.Column="0" Grid.ColumnSpan="3" Text="SHARE CLIP" Foreground="#D8E4F2" FontSize="17" FontWeight="Bold"
+            <TextBlock Grid.Column="0" Grid.ColumnSpan="3" Text="SHARE CLIP" Foreground="{StaticResource Text_D8E4F2}" FontSize="17" FontWeight="Bold"
                        HorizontalAlignment="Center" VerticalAlignment="Center" Margin="-2,0,0,0" IsHitTestVisible="False" />
             <Button Grid.Column="2" Classes="dialogClose" FontSize="14" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                     Width="52" Height="56" CornerRadius="0,11,0,0" Click="CloseButton_OnClick">
@@ -36,7 +36,7 @@
 
         <StackPanel Margin="28,24,28,28" Spacing="18">
           <StackPanel Spacing="10">
-            <TextBlock Text="Choose a file size" Foreground="#93A6B8" FontSize="13" FontWeight="Bold" />
+            <TextBlock Text="Choose a file size" Foreground="{StaticResource Text_93A6B8}" FontSize="13" FontWeight="Bold" />
             <!-- 10 MB is Discord's free-tier cap, 20 MB suits smaller chat
                  uploads, 50 MB Nitro Basic, and 100 MB covers most others. -->
             <StackPanel Orientation="Horizontal" Spacing="1">
@@ -49,15 +49,15 @@
             </StackPanel>
             <TextBox x:Name="ShareCustomSizeBox" PlaceholderText="Size in MB" IsVisible="False" Width="140"
                      HorizontalAlignment="Left" KeyDown="CustomSizeBox_OnKeyDown" />
-            <CheckBox x:Name="ShareAv1Toggle" Content="Smaller file (AV1)" Foreground="#93A6B8" FontSize="12" IsChecked="True"
+            <CheckBox x:Name="ShareAv1Toggle" Content="Smaller file (AV1)" Foreground="{StaticResource Text_93A6B8}" FontSize="12" IsChecked="True"
                       IsCheckedChanged="Av1Toggle_OnChanged"
                       ToolTip.Tip="Fits roughly 45% more detail in the same size. Falls back to H.264 automatically if your GPU can't encode AV1. Some chat apps may show it as a download instead of playing it inline, so turn this off if that matters here." />
           </StackPanel>
 
           <StackPanel Spacing="4" HorizontalAlignment="Center">
-            <TextBlock Text="Drag &amp; Drop" Foreground="#EDF4FB" FontWeight="Bold" FontSize="16" HorizontalAlignment="Center" />
+            <TextBlock Text="Drag &amp; Drop" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="16" HorizontalAlignment="Center" />
             <TextBlock x:Name="ShareStatusText" Text="Pick a size to prepare the clip"
-                       Foreground="#8EA1B6" FontSize="12" HorizontalAlignment="Center"
+                       Foreground="{StaticResource Text_8EA1B6}" FontSize="12" HorizontalAlignment="Center"
                        TextWrapping="Wrap" TextAlignment="Center" />
           </StackPanel>
 
@@ -68,7 +68,7 @@
                  the box frames lives INSIDE it, progress included - the bar's
                  width is set from the box for the same reason. -->
             <Grid x:Name="SharePreviewBox" HorizontalAlignment="Center" VerticalAlignment="Center" ClipToBounds="True">
-              <Rectangle RadiusX="10" RadiusY="10" Stroke="#4C6FFF" StrokeThickness="2" StrokeDashArray="6,4" Fill="Transparent" />
+              <Rectangle RadiusX="10" RadiusY="10" Stroke="{StaticResource Semantic_4C6FFF}" StrokeThickness="2" StrokeDashArray="6,4" Fill="Transparent" />
               <!-- Uniform, not UniformToFill - the box already carries the
                    picture's aspect, so nothing is cropped to fill it. -->
               <Image x:Name="ShareThumbnail" Stretch="Uniform" Margin="3" IsVisible="False" Cursor="Hand"
@@ -80,18 +80,18 @@
                 <TextBlock x:Name="ShareDurationText" Foreground="White" FontSize="11" FontWeight="Bold" />
               </Border>
               <StackPanel x:Name="ShareProgressPanel" Spacing="8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="False">
-                <TextBlock x:Name="ShareProgressPercentText" Foreground="#D8E4F2" FontSize="14" FontWeight="Bold"
+                <TextBlock x:Name="ShareProgressPercentText" Foreground="{StaticResource Text_D8E4F2}" FontSize="14" FontWeight="Bold"
                            HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
                 <ProgressBar x:Name="ShareProgressBar" Minimum="0" Maximum="100" Width="160" MinWidth="0" Height="6"
                              CornerRadius="3" IsIndeterminate="True" />
-                <TextBlock x:Name="ShareProgressEtaText" Foreground="#8EA1B6" FontSize="12"
+                <TextBlock x:Name="ShareProgressEtaText" Foreground="{StaticResource Text_8EA1B6}" FontSize="12"
                            HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" IsVisible="False" />
               </StackPanel>
             </Grid>
           </Grid>
 
           <Grid ColumnDefinitions="*,Auto">
-            <TextBlock x:Name="ShareResultSizeText" Foreground="#8EA1B6" FontSize="12" VerticalAlignment="Center" />
+            <TextBlock x:Name="ShareResultSizeText" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" VerticalAlignment="Center" />
             <Button Grid.Column="1" Content="Show in folder" IsEnabled="False" x:Name="ShareShowInFolderButton" Click="ShowInFolderButton_OnClick" />
           </Grid>
         </StackPanel>

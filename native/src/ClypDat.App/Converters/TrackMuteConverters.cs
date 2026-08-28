@@ -1,6 +1,7 @@
 using System.Globalization;
 using Avalonia.Data.Converters;
 using Avalonia.Media;
+using ClypDat.App.Services;
 
 namespace ClypDat.App.Converters;
 
@@ -40,7 +41,7 @@ public sealed class BoolToMuteBrushConverter : IValueConverter
     public static readonly BoolToMuteBrushConverter Instance = new();
 
     public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
-        value is true ? Brush.Parse("#E5707A") : Brush.Parse("#B9C9DA");
+        value is true ? AppThemeService.Brush("Semantic_E5707A", "#E5707A") : AppThemeService.Brush("Text_B9C9DA", "#B9C9DA");
 
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotSupportedException();
 }

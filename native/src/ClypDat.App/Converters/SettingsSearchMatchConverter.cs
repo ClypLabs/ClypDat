@@ -83,6 +83,8 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         {
             "Theme", "Preset themes", "System", "ClypDat Blue", "Violet", "Emerald", "Rose", "Amber",
             "Accent", "Accent colour", "Windows accent", "System accent",
+            "Light", "Light mode", "Light themes", "Light Blue", "Light Violet",
+            "Light Emerald", "Light Rose", "Light Amber",
             "Custom themes", "Custom colours"
         },
         ["Discord Rich Presence"] = new[]

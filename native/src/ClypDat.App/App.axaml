@@ -5,7 +5,7 @@
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries>
         <ResourceInclude Source="avares://ClypDat/Styles/Tokens.axaml" />
-        <ResourceInclude Source="avares://ClypDat/Styles/SurfaceRamp.axaml" />
+        <ResourceInclude Source="avares://ClypDat/Styles/ThemeRamp.axaml" />
       </ResourceDictionary.MergedDictionaries>
       <!-- Accent brushes live here rather than in Tokens.axaml only because they
            have no authored "source" value: AppThemeService derives every one of

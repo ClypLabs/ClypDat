@@ -22,9 +22,9 @@
       <StackPanel Grid.Row="0" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="14" Margin="0,14,0,0">
         <controls:ClypDatLoader Width="96" Height="96" HorizontalAlignment="Center" />
 
-        <TextBlock Text="ClypDat" Foreground="#EAF1F9" FontSize="21" FontWeight="Bold"
+        <TextBlock Text="ClypDat" Foreground="{StaticResource Text_EAF1F9}" FontSize="21" FontWeight="Bold"
                    HorizontalAlignment="Center" />
-        <TextBlock x:Name="StageText" Text="Starting" Foreground="#8FA3B8" FontSize="12"
+        <TextBlock x:Name="StageText" Text="Starting" Foreground="{StaticResource Text_8FA3B8}" FontSize="12"
                    HorizontalAlignment="Center" TextAlignment="Center" />
       </StackPanel>
 
@@ -32,14 +32,14 @@
         <ProgressBar x:Name="Bar" Height="4" Minimum="0" Maximum="1" IsVisible="False"
                      Background="{StaticResource SurfaceRaisedBrush}" Foreground="{StaticResource AccentBrush}" CornerRadius="2" />
         <Grid ColumnDefinitions="*,Auto">
-          <TextBlock x:Name="VersionText" Text="" Foreground="#5C6B7C" FontSize="10"
+          <TextBlock x:Name="VersionText" Text="" Foreground="{StaticResource Surface_5C6B7C}" FontSize="10"
                      VerticalAlignment="Center" />
           <!-- An update on a bad connection must never be the reason someone
                cannot get into their clips. Skipping leaves the update for the
                usual dialog after launch. -->
           <Button x:Name="SkipButton" Grid.Column="1" Content="Not now"
                   IsVisible="False" Padding="10,3" FontSize="11"
-                  Background="{StaticResource SurfaceRaisedBrush}" Foreground="#9FB2C6" BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1"
+                  Background="{StaticResource SurfaceRaisedBrush}" Foreground="{StaticResource Text_9FB2C6}" BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1"
                   CornerRadius="4" Click="SkipButton_OnClick" />
         </Grid>
       </StackPanel>

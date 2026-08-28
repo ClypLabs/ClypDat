@@ -407,6 +407,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public AppSettings Settings { get; }
     public IReadOnlyList<ThemeOption> ThemeOptions => AppThemeService.Options;
+    public IReadOnlyList<ThemeOption> LightThemeOptions => AppThemeService.LightOptions;
 
     public string SelectedThemePreset
     {
@@ -777,8 +778,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // reading as one if it followed the user's accent. Under the limit uses
     // the app's accent brush, which itself tracks the Windows accent colour.
     public IBrush LibraryStorageRingBrush => IsOverLibraryStorageLimit
-        ? new SolidColorBrush(Color.Parse("#E5484D"))
-        : Application.Current?.Resources["AccentBrush"] as IBrush ?? new SolidColorBrush(Color.Parse("#5864E8"));
+        ? AppThemeService.Brush("Semantic_E5484D", "#E5484D")
+        : Application.Current?.Resources["AccentBrush"] as IBrush ?? AppThemeService.Brush("AccentBrush", "#5864E8");
 
     public string LibraryStorageLimitSummary
     {

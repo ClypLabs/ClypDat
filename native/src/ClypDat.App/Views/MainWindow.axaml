@@ -122,12 +122,12 @@
                           </StackPanel>
                           <Grid ColumnDefinitions="*,Auto,*" ColumnSpacing="12">
                             <Grid Grid.Column="0" ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                              <TextBlock Text="Capture cursor" Foreground="#B8C7D8" VerticalAlignment="Center" ToolTip.Tip="Include the mouse cursor in desktop capture" />
+                              <TextBlock Text="Capture cursor" Foreground="{StaticResource Text_B8C7D8}" VerticalAlignment="Center" ToolTip.Tip="Include the mouse cursor in desktop capture" />
                               <ToggleSwitch Grid.Column="1" IsChecked="{Binding ReplayDesktopCaptureCursor}" OnContent="{x:Null}" OffContent="{x:Null}" ToolTip.Tip="Include the mouse cursor in desktop capture" />
                             </Grid>
                             <Border Grid.Column="1" Width="1" Background="{StaticResource Surface_304352}" Margin="0,2" VerticalAlignment="Stretch" />
                             <Grid Grid.Column="2" ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                              <TextBlock Text="Switch to games" Foreground="#B8C7D8" VerticalAlignment="Center" ToolTip.Tip="Switch to Game Capture when a game is detected" />
+                              <TextBlock Text="Switch to games" Foreground="{StaticResource Text_B8C7D8}" VerticalAlignment="Center" ToolTip.Tip="Switch to Game Capture when a game is detected" />
                               <ToggleSwitch Grid.Column="1" IsChecked="{Binding ReplayAutoSwitchToGameCapture}" OnContent="{x:Null}" OffContent="{x:Null}" ToolTip.Tip="Switch to Game Capture when a game is detected" />
                             </Grid>
                           </Grid>
@@ -221,15 +221,15 @@
             </Button.Flyout>
           </Button>
           <Button Grid.Column="1" Content="Clip" IsEnabled="{Binding IsReplayReady}" Click="ClipButton_OnClick" Margin="10,0,0,0" />
-          <TextBlock Grid.Column="2" Text="{Binding HotkeyDisplay}" Foreground="#93A6B8" FontWeight="Bold" VerticalAlignment="Center" Margin="10,0,0,0" />
+          <TextBlock Grid.Column="2" Text="{Binding HotkeyDisplay}" Foreground="{StaticResource Text_93A6B8}" FontWeight="Bold" VerticalAlignment="Center" Margin="10,0,0,0" />
           <Border Grid.Column="3" Width="1" Height="20" Background="{StaticResource Surface_2A3640}" IsVisible="{Binding ShowLibraryStatus}" Margin="10,0,0,0" />
           <Button Grid.Column="4" Classes="linkButton" Click="ActiveGameButton_OnClick" IsVisible="{Binding ShowLibraryStatus}" Margin="10,0,0,0" ToolTip.Tip="Click for detection options">
-            <TextBlock Text="{Binding ActiveGame}" Foreground="#BDD4EE" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="220" />
+            <TextBlock Text="{Binding ActiveGame}" Foreground="{StaticResource Text_BDD4EE}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="220" />
           </Button>
           <Border Grid.Column="5" Width="1" Height="20" Background="{StaticResource Surface_2A3640}" IsVisible="{Binding HasSelection}" Margin="10,0,0,0" />
           <TextBlock Grid.Column="6"
                      Text="{Binding SelectionSummary}"
-                     Foreground="#D7E2EF"
+                     Foreground="{StaticResource Text_D7E2EF}"
                      FontSize="14"
                      FontWeight="Bold"
                      VerticalAlignment="Center"
@@ -246,15 +246,15 @@
                   VerticalContentAlignment="Center"
                   Margin="10,0,0,0" />
           <Border Grid.Column="8" Width="1" Height="20" Background="{StaticResource Surface_2A3640}" IsVisible="{Binding IsEditorVisible}" Margin="10,0,0,0" />
-          <TextBlock Grid.Column="9" Text="{Binding SelectedCreated}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" Margin="10,0,0,0" />
+          <TextBlock Grid.Column="9" Text="{Binding SelectedCreated}" Foreground="{StaticResource Text_93A6B8}" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" Margin="10,0,0,0" />
           <Border Grid.Column="10" Width="1" Height="20" Background="{StaticResource Surface_2A3640}" IsVisible="{Binding IsEditorVisible}" Margin="10,0,0,0" />
-          <TextBlock Grid.Column="11" Text="{Binding SelectedQuality}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" TextTrimming="CharacterEllipsis" MaxWidth="180" Margin="10,0,0,0" />
+          <TextBlock Grid.Column="11" Text="{Binding SelectedQuality}" Foreground="{StaticResource Text_93A6B8}" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" TextTrimming="CharacterEllipsis" MaxWidth="180" Margin="10,0,0,0" />
           <Border Grid.Column="12" Width="1" Height="20" Background="{StaticResource Surface_2A3640}" IsVisible="{Binding IsEditorVisible}" Margin="10,0,0,0" />
-          <TextBlock Grid.Column="13" Text="{Binding SelectedSize}" Foreground="#93A6B8" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" TextTrimming="CharacterEllipsis" MaxWidth="110" Margin="10,0,0,0" />
+          <TextBlock Grid.Column="13" Text="{Binding SelectedSize}" Foreground="{StaticResource Text_93A6B8}" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" TextTrimming="CharacterEllipsis" MaxWidth="110" Margin="10,0,0,0" />
           <Border Grid.Column="14" Width="1" Height="20" Background="{StaticResource Surface_2A3640}" IsVisible="{Binding HasSelectedCaptureBackend}" Margin="10,0,0,0" />
           <TextBlock Grid.Column="15"
                      Text="{Binding SelectedCaptureBackend}"
-                     Foreground="#93A6B8"
+                     Foreground="{StaticResource Text_93A6B8}"
                      VerticalAlignment="Center"
                      IsVisible="{Binding HasSelectedCaptureBackend}"
                      TextTrimming="CharacterEllipsis"
@@ -266,7 +266,7 @@
         </Grid>
 
         <Button Grid.Column="2" Classes="windowChromeButton" Click="AvailableUpdateButton_OnClick" ToolTip.Tip="Update available" IsVisible="{Binding ShowHeaderUpdateButton}">
-          <PathIcon Data="M5,20H19V22H5V20M12,17L5,10H9V3H15V10H19L12,17Z" Width="18" Height="18" Foreground="#38D996" />
+          <PathIcon Data="M5,20H19V22H5V20M12,17L5,10H9V3H15V10H19L12,17Z" Width="18" Height="18" Foreground="{StaticResource Semantic_38D996}" />
         </Button>
 
         <!-- The active-game chip that used to sit here is gone: the Library
@@ -450,7 +450,7 @@
                                 <Border Width="14" Height="14" HorizontalAlignment="Left" VerticalAlignment="Top" CornerRadius="4" ClipToBounds="True" Background="{StaticResource Surface_26323D}" IsVisible="{Binding IsSingleGame}">
                                   <Panel>
                                     <Image Source="{Binding Slot1Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot1Icon}" />
-                                    <TextBlock Text="{Binding Slot1Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot1Icon}" />
+                                    <TextBlock Text="{Binding Slot1Initial}" FontWeight="Bold" FontSize="9" Foreground="{StaticResource Text_B8C7D8}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot1Icon}" />
                                   </Panel>
                                 </Border>
 
@@ -468,13 +468,13 @@
                                   <Border Grid.Row="0" Grid.Column="0" Margin="0,0,1,1" CornerRadius="4" ClipToBounds="True" Background="{StaticResource Surface_26323D}">
                                     <Panel>
                                       <Image Source="{Binding Slot1Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot1Icon}" />
-                                      <TextBlock Text="{Binding Slot1Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot1Icon}" />
+                                      <TextBlock Text="{Binding Slot1Initial}" FontWeight="Bold" FontSize="9" Foreground="{StaticResource Text_B8C7D8}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot1Icon}" />
                                     </Panel>
                                   </Border>
                                   <Border Grid.Row="0" Grid.Column="1" Margin="1,0,0,1" CornerRadius="4" ClipToBounds="True" Background="{StaticResource Surface_26323D}">
                                     <Panel>
                                       <Image Source="{Binding Slot2Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot2Icon}" />
-                                      <TextBlock Text="{Binding Slot2Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot2Icon}" />
+                                      <TextBlock Text="{Binding Slot2Initial}" FontWeight="Bold" FontSize="9" Foreground="{StaticResource Text_B8C7D8}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot2Icon}" />
                                     </Panel>
                                   </Border>
                                 </Grid>
@@ -483,13 +483,13 @@
                                   <Border Grid.Row="0" Grid.Column="0" Margin="0,0,1,1" CornerRadius="4" ClipToBounds="True" Background="{StaticResource Surface_26323D}">
                                     <Panel>
                                       <Image Source="{Binding Slot1Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot1Icon}" />
-                                      <TextBlock Text="{Binding Slot1Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot1Icon}" />
+                                      <TextBlock Text="{Binding Slot1Initial}" FontWeight="Bold" FontSize="9" Foreground="{StaticResource Text_B8C7D8}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot1Icon}" />
                                     </Panel>
                                   </Border>
                                   <Border Grid.Row="0" Grid.Column="1" Margin="1,0,0,1" CornerRadius="4" ClipToBounds="True" Background="{StaticResource Surface_26323D}">
                                     <Panel>
                                       <Image Source="{Binding Slot2Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot2Icon}" />
-                                      <TextBlock Text="{Binding Slot2Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot2Icon}" />
+                                      <TextBlock Text="{Binding Slot2Initial}" FontWeight="Bold" FontSize="9" Foreground="{StaticResource Text_B8C7D8}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot2Icon}" />
                                     </Panel>
                                   </Border>
                                   <!-- Same size as the two cells above it, not
@@ -500,7 +500,7 @@
                                   <Border Grid.Row="1" Grid.Column="0" Width="14" Height="14" Margin="0,1,0,0" HorizontalAlignment="Left" CornerRadius="4" ClipToBounds="True" Background="{StaticResource Surface_26323D}">
                                     <Panel>
                                       <Image Source="{Binding Slot3Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot3Icon}" />
-                                      <TextBlock Text="{Binding Slot3Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot3Icon}" />
+                                      <TextBlock Text="{Binding Slot3Initial}" FontWeight="Bold" FontSize="9" Foreground="{StaticResource Text_B8C7D8}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot3Icon}" />
                                     </Panel>
                                   </Border>
                                 </Grid>
@@ -509,26 +509,26 @@
                                   <Border Grid.Row="0" Grid.Column="0" Margin="0,0,1,1" CornerRadius="4" ClipToBounds="True" Background="{StaticResource Surface_26323D}">
                                     <Panel>
                                       <Image Source="{Binding Slot1Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot1Icon}" />
-                                      <TextBlock Text="{Binding Slot1Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot1Icon}" />
+                                      <TextBlock Text="{Binding Slot1Initial}" FontWeight="Bold" FontSize="9" Foreground="{StaticResource Text_B8C7D8}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot1Icon}" />
                                     </Panel>
                                   </Border>
                                   <Border Grid.Row="0" Grid.Column="1" Margin="1,0,0,1" CornerRadius="4" ClipToBounds="True" Background="{StaticResource Surface_26323D}">
                                     <Panel>
                                       <Image Source="{Binding Slot2Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot2Icon}" />
-                                      <TextBlock Text="{Binding Slot2Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot2Icon}" />
+                                      <TextBlock Text="{Binding Slot2Initial}" FontWeight="Bold" FontSize="9" Foreground="{StaticResource Text_B8C7D8}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot2Icon}" />
                                     </Panel>
                                   </Border>
                                   <Border Grid.Row="1" Grid.Column="0" Margin="0,1,1,0" CornerRadius="4" ClipToBounds="True" Background="{StaticResource Surface_26323D}">
                                     <Panel>
                                       <Image Source="{Binding Slot3Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot3Icon}" />
-                                      <TextBlock Text="{Binding Slot3Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot3Icon}" />
+                                      <TextBlock Text="{Binding Slot3Initial}" FontWeight="Bold" FontSize="9" Foreground="{StaticResource Text_B8C7D8}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !HasSlot3Icon}" />
                                     </Panel>
                                   </Border>
                                   <Border Grid.Row="1" Grid.Column="1" Margin="1,1,0,0" CornerRadius="4" ClipToBounds="True" Background="{StaticResource Surface_26323D}">
                                     <Panel>
                                       <Image Source="{Binding Slot4Icon}" Stretch="UniformToFill" IsVisible="{Binding HasSlot4Icon}" />
-                                      <TextBlock Text="{Binding Slot4Initial}" FontWeight="Bold" FontSize="9" Foreground="#B8C7D8" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding ShowSlot4Initial}" />
-                                      <TextBlock Text="{Binding OverflowBadgeLabel}" FontWeight="Bold" FontSize="8" Foreground="#D8E4F2" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding HasOverflowBadge}" />
+                                      <TextBlock Text="{Binding Slot4Initial}" FontWeight="Bold" FontSize="9" Foreground="{StaticResource Text_B8C7D8}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding ShowSlot4Initial}" />
+                                      <TextBlock Text="{Binding OverflowBadgeLabel}" FontWeight="Bold" FontSize="8" Foreground="{StaticResource Text_D8E4F2}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding HasOverflowBadge}" />
                                     </Panel>
                                   </Border>
                                 </Grid>
@@ -629,43 +629,43 @@
                      without it left the flyout floating out in the content. -->
                 <Flyout Placement="RightEdgeAlignedBottom" HorizontalOffset="4">
                   <StackPanel Width="320" Spacing="12" Margin="4,2">
-                    <TextBlock Text="HARD DRIVE SPACE" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" />
+                    <TextBlock Text="HARD DRIVE SPACE" Foreground="{StaticResource Text_5C6D7E}" FontSize="12" FontWeight="Bold" />
                     <StackPanel IsVisible="{Binding HasDriveStats}" Spacing="12">
                       <Grid ColumnDefinitions="*,Auto">
-                        <TextBlock Grid.Column="0" Text="{Binding LibraryDriveFreeOfTotalDisplay}" Foreground="#EDF4FB" FontWeight="Bold" FontSize="15" />
-                        <TextBlock Grid.Column="1" Text="{Binding LibraryDriveUsedPercentDisplay}" Foreground="#93A6B8" FontSize="12" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="0" Text="{Binding LibraryDriveFreeOfTotalDisplay}" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="15" />
+                        <TextBlock Grid.Column="1" Text="{Binding LibraryDriveUsedPercentDisplay}" Foreground="{StaticResource Text_93A6B8}" FontSize="12" VerticalAlignment="Center" />
                       </Grid>
                       <Border Width="260" Height="8" CornerRadius="4" Background="{StaticResource Surface_26313C}" HorizontalAlignment="Left">
                         <StackPanel Orientation="Horizontal">
                           <Border Width="{Binding LibraryUsedFractionOfDrive, Converter={x:Static opconv:FractionToWidthConverter.Instance}, ConverterParameter=260}"
-                                  Height="8" CornerRadius="4" Background="#2FD9A8" />
+                                  Height="8" CornerRadius="4" Background="{StaticResource Semantic_2FD9A8}" />
                           <Border Width="{Binding LibraryOtherUsedFractionOfDrive, Converter={x:Static opconv:FractionToWidthConverter.Instance}, ConverterParameter=260}"
                                   Height="8" Background="{StaticResource AccentBrush}" />
                         </StackPanel>
                       </Border>
                       <StackPanel Spacing="6">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                          <Border Width="10" Height="10" CornerRadius="2" Background="#2FD9A8" />
-                          <TextBlock Text="{Binding LibraryClipsUsageDisplay}" Foreground="#B8C7D8" FontSize="12" />
+                          <Border Width="10" Height="10" CornerRadius="2" Background="{StaticResource Semantic_2FD9A8}" />
+                          <TextBlock Text="{Binding LibraryClipsUsageDisplay}" Foreground="{StaticResource Text_B8C7D8}" FontSize="12" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="6">
                           <Border Width="10" Height="10" CornerRadius="2" Background="{StaticResource AccentBrush}" />
-                          <TextBlock Text="{Binding LibraryOtherUsageDisplay}" Foreground="#B8C7D8" FontSize="12" />
+                          <TextBlock Text="{Binding LibraryOtherUsageDisplay}" Foreground="{StaticResource Text_B8C7D8}" FontSize="12" />
                         </StackPanel>
                       </StackPanel>
-                      <TextBlock Text="{Binding LibraryPossibleClipsDisplay}" Foreground="#6B7C8C" FontSize="11.5" IsVisible="{Binding LibraryPossibleClipsDisplay, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+                      <TextBlock Text="{Binding LibraryPossibleClipsDisplay}" Foreground="{StaticResource Text_6B7C8C}" FontSize="11.5" IsVisible="{Binding LibraryPossibleClipsDisplay, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
                     </StackPanel>
-                    <TextBlock Text="Drive stats unavailable for this library folder." Foreground="#6B7C8C" FontSize="12" IsVisible="{Binding !HasDriveStats}" />
+                    <TextBlock Text="Drive stats unavailable for this library folder." Foreground="{StaticResource Text_6B7C8C}" FontSize="12" IsVisible="{Binding !HasDriveStats}" />
 
                     <Border Height="1" Background="{StaticResource Surface_1E2A33}" />
 
                     <StackPanel Spacing="8">
                       <Grid ColumnDefinitions="*,Auto">
-                        <TextBlock Grid.Column="0" Text="STORAGE LIMIT" Foreground="#5C6D7E" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="1" Text="{Binding LibraryStorageLimitSummary}" Foreground="#93A6B8" FontSize="11.5" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="0" Text="STORAGE LIMIT" Foreground="{StaticResource Text_5C6D7E}" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Text="{Binding LibraryStorageLimitSummary}" Foreground="{StaticResource Text_93A6B8}" FontSize="11.5" VerticalAlignment="Center" />
                       </Grid>
                       <TextBlock Text="A target for the library's own size. Nothing is deleted automatically to stay under it."
-                                 Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                                 Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" />
                       <ComboBox Classes="settingsInput"
                                 ItemsSource="{Binding LibraryStorageLimitOptions}"
                                 SelectedItem="{Binding SelectedLibraryStorageLimit}"
@@ -689,7 +689,7 @@
                                  Padding="14,10,42,10"
                                  PlaceholderText="Size" />
                         <TextBlock Text="GB"
-                                   Foreground="#7C8EA3"
+                                   Foreground="{StaticResource Text_7C8EA3}"
                                    FontSize="13"
                                    FontWeight="Bold"
                                    HorizontalAlignment="Right"
@@ -704,7 +704,7 @@
                                 HorizontalAlignment="Left" />
                       </Border>
                       <TextBlock Text="Library is over its storage limit."
-                                 Foreground="#E5484D" FontSize="11" FontWeight="Bold"
+                                 Foreground="{StaticResource Semantic_E5484D}" FontSize="11" FontWeight="Bold"
                                  IsVisible="{Binding IsOverLibraryStorageLimit}" />
                     </StackPanel>
 
@@ -729,10 +729,10 @@
                         Stroke="{Binding LibraryStorageRingBrush}" StrokeThickness="2.5" StrokeLineCap="Round" />
                 </Panel>
                 <TextBlock Text="{Binding LibrarySizeDisplay}"
-                           Foreground="#B8C7D8" FontSize="10" FontWeight="Bold"
+                           Foreground="{StaticResource Text_B8C7D8}" FontSize="10" FontWeight="Bold"
                            HorizontalAlignment="Center" />
                 <TextBlock Text="{Binding LibraryStorageLimitShortDisplay}"
-                           Foreground="#6B7C8C" FontSize="9"
+                           Foreground="{StaticResource Text_6B7C8C}" FontSize="9"
                            HorizontalAlignment="Center" />
               </StackPanel>
             </Button>
@@ -777,7 +777,7 @@
                             ToolTip.Tip="Select visible clips"
                             VerticalAlignment="Center" />
                   <TextBlock Text="{Binding LibraryTitle}"
-                             Foreground="#C4D0DF"
+                             Foreground="{StaticResource Text_C4D0DF}"
                              FontSize="15"
                              FontWeight="Bold"
                              VerticalAlignment="Center" />
@@ -792,8 +792,8 @@
                        VerticalContentAlignment="Center">
                 <TextBox.InnerLeftContent>
                   <Canvas Width="16" Height="16" Margin="10,0,2,0" VerticalAlignment="Center">
-                    <Ellipse Canvas.Left="0" Canvas.Top="0" Width="11" Height="11" Stroke="#6B7C8C" StrokeThickness="1.6" />
-                    <Line StartPoint="9,9" EndPoint="15,15" Stroke="#6B7C8C" StrokeThickness="1.6" StrokeLineCap="Round" />
+                    <Ellipse Canvas.Left="0" Canvas.Top="0" Width="11" Height="11" Stroke="{StaticResource Text_6B7C8C}" StrokeThickness="1.6" />
+                    <Line StartPoint="9,9" EndPoint="15,15" Stroke="{StaticResource Text_6B7C8C}" StrokeThickness="1.6" StrokeLineCap="Round" />
                   </Canvas>
                 </TextBox.InnerLeftContent>
                 <TextBox.InnerRightContent>
@@ -801,8 +801,8 @@
                           IsVisible="{Binding LibrarySearchText, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
                           ToolTip.Tip="Clear search">
                     <Canvas Width="12" Height="12">
-                      <Line StartPoint="1,1" EndPoint="11,11" Stroke="#8DA0B4" StrokeThickness="1.6" StrokeLineCap="Round" />
-                      <Line StartPoint="11,1" EndPoint="1,11" Stroke="#8DA0B4" StrokeThickness="1.6" StrokeLineCap="Round" />
+                      <Line StartPoint="1,1" EndPoint="11,11" Stroke="{StaticResource Text_8DA0B4}" StrokeThickness="1.6" StrokeLineCap="Round" />
+                      <Line StartPoint="11,1" EndPoint="1,11" Stroke="{StaticResource Text_8DA0B4}" StrokeThickness="1.6" StrokeLineCap="Round" />
                     </Canvas>
                   </Button>
                 </TextBox.InnerRightContent>
@@ -834,10 +834,10 @@
                   IsVisible="{Binding IsHydratingLibrary}">
             <StackPanel Spacing="8">
               <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Grid.Column="0" Text="{Binding HydrationProgressText}" Foreground="#B8C7D8" FontSize="12" FontWeight="Bold" />
+                <TextBlock Grid.Column="0" Text="{Binding HydrationProgressText}" Foreground="{StaticResource Text_B8C7D8}" FontSize="12" FontWeight="Bold" />
                 <TextBlock Grid.Column="1"
                            Text="{Binding HydrationEtaText}"
-                           Foreground="#7C8EA3"
+                           Foreground="{StaticResource Text_7C8EA3}"
                            FontSize="11"
                            VerticalAlignment="Center"
                            IsVisible="{Binding HasHydrationEta}" />
@@ -864,7 +864,7 @@
                   BorderBrush="{StaticResource Surface_2A3640}"
                   BorderThickness="1"
                   IsVisible="{Binding HasClipNotReadyMessage}">
-            <TextBlock Text="{Binding ClipNotReadyMessage}" Foreground="#B8C7D8" FontSize="12" FontWeight="Bold" />
+            <TextBlock Text="{Binding ClipNotReadyMessage}" Foreground="{StaticResource Text_B8C7D8}" FontSize="12" FontWeight="Bold" />
           </Border>
 
 
@@ -927,7 +927,7 @@
                                   Click="ClipDayCheckBox_OnClick"
                                   VerticalAlignment="Center" />
                         <TextBlock Text="{Binding DateHeaderLabel}"
-                                   Foreground="#B8C7D8"
+                                   Foreground="{StaticResource Text_B8C7D8}"
                                    FontSize="13"
                                    FontWeight="Bold"
                                    VerticalAlignment="Center" />
@@ -975,7 +975,7 @@
                                           <!-- Same mark the startup loader uses. -->
                                           <controls:ClypDatLoader Width="34" Height="34" HorizontalAlignment="Center" />
                                           <TextBlock Text="{Binding}"
-                                                     Foreground="#DCE7F3" FontSize="13" FontWeight="Bold"
+                                                     Foreground="{StaticResource Text_DCE7F3}" FontSize="13" FontWeight="Bold"
                                                      HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
                                         </StackPanel>
                                       </DataTemplate>
@@ -1012,10 +1012,17 @@
                                     <StackPanel Orientation="Horizontal" Spacing="5">
                                       <PathIcon Data="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"
                                                 Width="12" Height="12"
-                                                Foreground="#93A6B8"
+                                                Foreground="{StaticResource Text_93A6B8}"
                                                 VerticalAlignment="Center"
                                                 IsVisible="{Binding HasTrimEdit}" />
-                                      <TextBlock Text="{Binding DurationLabel}" Foreground="#D8E2EE" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" />
+                                      <!-- Speed or crop. Separate from the trim pencil because neither one
+                                           changes the duration standing next to it. -->
+                                      <PathIcon Data="M7.5,5.6L5,7L6.4,4.5L5,2L7.5,3.4L10,2L8.6,4.5L10,7L7.5,5.6M19.5,15.4L22,14L20.6,16.5L22,19L19.5,17.6L17,19L18.4,16.5L17,14L19.5,15.4M22,2L20.6,4.5L22,7L19.5,5.6L17,7L18.4,4.5L17,2L19.5,3.4L22,2M13.34,12.78L15.78,10.34L13.66,8.22L11.22,10.66L13.34,12.78M14.37,7.29L16.71,9.63C17.1,10 17.1,10.65 16.71,11.04L5.04,22.71C4.65,23.1 4,23.1 3.63,22.71L1.29,20.37C0.9,20 0.9,19.35 1.29,18.96L12.96,7.29C13.35,6.9 14,6.9 14.37,7.29Z"
+                                                Width="12" Height="12"
+                                                Foreground="{StaticResource Text_93A6B8}"
+                                                VerticalAlignment="Center"
+                                                IsVisible="{Binding HasEffectEdit}" />
+                                      <TextBlock Text="{Binding DurationLabel}" Foreground="{StaticResource Text_D8E2EE}" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" />
                                     </StackPanel>
                                   </Border>
                                 </Grid>
@@ -1035,7 +1042,7 @@
                                          ToolTip.Tip="Filter by this game"
                                          PointerPressed="ClipGame_OnPointerPressed">
                                    <TextBlock Text="{Binding TileTopLabel}"
-                                              Foreground="#8C98A7"
+                                              Foreground="{StaticResource Text_8C98A7}"
                                               FontSize="12"
                                               FontWeight="Bold"
                                               TextTrimming="CharacterEllipsis" />
@@ -1055,7 +1062,7 @@
                                 <Panel>
                                   <TextBlock Classes="editableTitle"
                                              Text="{Binding TileMainLabel}"
-                                             Foreground="#EDF4FB"
+                                             Foreground="{StaticResource Text_EDF4FB}"
                                              FontSize="15"
                                              FontWeight="Bold"
                                              MaxWidth="{Binding $parent[Window].DataContext.CardWidth, Converter={x:Static opconv:SubtractDoubleConverter.Instance}, ConverterParameter=104}"
@@ -1067,14 +1074,14 @@
                                 </Panel>
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                   <Path Data="M11.99,2C6.47,2,2,6.48,2,12s4.47,10,9.99,10C17.52,22,22,17.52,22,12S17.52,2,11.99,2z M12.5,7H11v6l5.25,3.15l0.75-1.23l-4.5-2.67V7z"
-                                        Fill="#8C98A7" Width="12" Height="12" Stretch="Uniform" VerticalAlignment="Center" />
+                                        Fill="{StaticResource Text_8C98A7}" Width="12" Height="12" Stretch="Uniform" VerticalAlignment="Center" />
                                   <TextBlock Text="{Binding RelativeDateLabel}"
-                                             Foreground="#8C98A7"
+                                             Foreground="{StaticResource Text_8C98A7}"
                                              FontSize="12"
                                              FontWeight="SemiBold"
                                              VerticalAlignment="Center" />
                                   <TextBlock Text="{Binding CaptureBackendLabel}"
-                                             Foreground="#5C6D7E"
+                                             Foreground="{StaticResource Text_5C6D7E}"
                                              FontSize="11"
                                              IsVisible="{Binding HasCaptureBackendLabel}"
                                              TextTrimming="CharacterEllipsis"
@@ -1087,7 +1094,7 @@
                                           ToolTip.Tip="Share this clip"
                                           Click="ClipCardShare_OnClick">
                                     <PathIcon Data="M18,16.08C17.24,16.08 16.56,16.38 16.04,16.85L8.91,12.7C8.96,12.47 9,12.24 9,12C9,11.76 8.96,11.53 8.91,11.3L15.96,7.19C16.5,7.69 17.21,8 18,8A3,3 0 0,0 21,5A3,3 0 0,0 18,2A3,3 0 0,0 15,5C15,5.24 15.04,5.47 15.09,5.7L8.04,9.81C7.5,9.31 6.79,9 6,9A3,3 0 0,0 3,12A3,3 0 0,0 6,15C6.79,15 7.5,14.69 8.04,14.19L15.16,18.34C15.11,18.55 15.08,18.77 15.08,19C15.08,20.61 16.39,21.91 18,21.91C19.61,21.91 20.92,20.61 20.92,19A2.92,2.92 0 0,0 18,16.08Z"
-                                              Width="17" Height="17" Foreground="#C8D9E9" />
+                                              Width="17" Height="17" Foreground="{StaticResource Text_C8D9E9}" />
                                   </Button>
                                 </StackPanel>
                                 </Grid>
@@ -1138,7 +1145,7 @@
                 <Binding Path="IsLibraryVisible" />
               </MultiBinding>
             </Button.IsVisible>
-            <Path Data="M6,15 L12,9 L18,15" Stroke="#D2DEEC" StrokeThickness="2.4" StrokeLineCap="Round" StrokeJoin="Round" Width="16" Height="16" Stretch="Uniform" Margin="0,6,0,0" />
+            <Path Data="M6,15 L12,9 L18,15" Stroke="{StaticResource Text_D2DEEC}" StrokeThickness="2.4" StrokeLineCap="Round" StrokeJoin="Round" Width="16" Height="16" Stretch="Uniform" Margin="0,6,0,0" />
           </Button>
 
           <!-- Date scrubber: labels are positioned in code-behind
@@ -1200,7 +1207,7 @@
                         Width="6"
                         MinHeight="34"
                         CornerRadius="3"
-                        Background="#91A9BB"
+                        Background="{StaticResource Text_91A9BB}"
                         Opacity="0"
                         RenderTransformOrigin="50%,50%"
                         RenderTransform="scaleX(1)"
@@ -1297,7 +1304,7 @@
                   </Image.IsVisible>
                 </Image>
                 <TextBlock Text="Loading"
-                           Foreground="#93A6B8"
+                           Foreground="{StaticResource Text_93A6B8}"
                            FontSize="16"
                            FontWeight="Bold"
                            HorizontalAlignment="Center"
@@ -1336,7 +1343,7 @@
                 <Border Grid.Column="1" Classes="editorTimelineTime" VerticalAlignment="Center">
                   <StackPanel Orientation="Horizontal" Spacing="7">
                     <TextBlock Text="PLAYHEAD" Classes="editorTimelineEyebrow" VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding TimelineStatusLabel}" Foreground="#EDF4FB" FontFamily="Consolas" FontSize="13" FontWeight="Bold" VerticalAlignment="Center" Margin="0,2,0,0" />
+                    <TextBlock Text="{Binding TimelineStatusLabel}" Foreground="{StaticResource Text_EDF4FB}" FontFamily="Consolas" FontSize="13" FontWeight="Bold" VerticalAlignment="Center" Margin="0,2,0,0" />
                   </StackPanel>
                 </Border>
               </Grid>
@@ -1352,7 +1359,7 @@
                 <StackPanel HorizontalAlignment="Left" VerticalAlignment="Bottom"
                             Margin="10,0,0,7" Spacing="3" Classes="editorTrimReadout">
                   <TextBlock Text="TRIM RANGE" Classes="editorTimelineEyebrow" />
-                  <TextBlock Text="{Binding TrimRangeLabel}" Foreground="#D8E7F5" FontSize="13" FontWeight="SemiBold" FontFamily="Consolas" />
+                  <TextBlock Text="{Binding TrimRangeLabel}" Foreground="{StaticResource Text_D8E7F5}" FontSize="13" FontWeight="SemiBold" FontFamily="Consolas" />
                 </StackPanel>
                 <ItemsControl Grid.Row="1" ItemsSource="{Binding TimelineTracks}">
                   <ItemsControl.ItemsPanel>
@@ -1377,7 +1384,7 @@
                                 ColumnDefinitions="*,Auto"
                                 ZIndex="2">
                             <TextBlock Text="{Binding Label}"
-                                       Foreground="#E6EEF7"
+                                       Foreground="{StaticResource Text_E6EEF7}"
                                        FontSize="12"
                                        FontWeight="SemiBold"
                                        Margin="{Binding LabelMargin}"
@@ -1450,7 +1457,7 @@
                                   PropertyChanged="TrackVolume_OnPropertyChanged" />
                           <Border Grid.Row="1"
                                   Grid.Column="2"
-                                  Background="#E8EEF8"
+                                  Background="{StaticResource Text_E8EEF8}"
                                   CornerRadius="4"
                                   Padding="5,2"
                                   HorizontalAlignment="Left"
@@ -1459,7 +1466,7 @@
                                   ZIndex="10"
                                   IsHitTestVisible="False"
                                   IsVisible="{Binding ShowVolumePercent}">
-                            <TextBlock Text="{Binding VolumeLabel}" Foreground="#18202A" FontSize="10" FontWeight="Bold" />
+                            <TextBlock Text="{Binding VolumeLabel}" Foreground="{StaticResource Surface_18202A}" FontSize="10" FontWeight="Bold" />
                           </Border>
                         </Grid>
                       </Border>
@@ -1520,11 +1527,11 @@
                          without washing out the frames it sits over. -->
                     <Border x:Name="TimelinePlayhead"
                             Width="3"
-                            Background="#F2F6FB"
+                            Background="{StaticResource Text_F2F6FB}"
                             BoxShadow="0 0 7 0 #7DF2F6FB" />
                     <Polygon x:Name="PlayheadCap"
                              Points="0,0 16,0 8,10"
-                             Fill="#F2F6FB" />
+                             Fill="{StaticResource Text_F2F6FB}" />
                   </Canvas>
 
                   <!-- Trim start/end handles - thin full-height lines with a
@@ -1623,10 +1630,10 @@
                 <Border x:Name="EditorDetailsCard" Focusable="True" Classes="editorInspectorCard">
                   <StackPanel Spacing="8">
                     <TextBlock Text="DETAILS" Classes="editorCardLabel" />
-                    <TextBlock Text="Title" Foreground="#8EA1B6" FontSize="12" />
-                    <TextBox Text="{Binding EditorTitle, Mode=TwoWay}" Foreground="#EDF4FB" FontSize="14" FontWeight="SemiBold"
+                    <TextBlock Text="Title" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" />
+                    <TextBox Text="{Binding EditorTitle, Mode=TwoWay}" Foreground="{StaticResource Text_EDF4FB}" FontSize="14" FontWeight="SemiBold"
                              Background="{StaticResource Surface_0D151C}" BorderBrush="{StaticResource Surface_263743}" KeyDown="EditorTitle_OnKeyDown" />
-                    <TextBlock Text="Description" Foreground="#8EA1B6" FontSize="12" Margin="0,2,0,0" />
+                    <TextBlock Text="Description" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" Margin="0,2,0,0" />
                     <!-- KeyDown is wired in code-behind as a TUNNEL handler, not
                          here: AcceptsReturn makes TextBox's own class handler
                          consume Enter to insert a newline, and a class handler
@@ -1634,7 +1641,7 @@
                          a KeyDown="..." attribute here never fired at all. -->
                     <TextBox x:Name="EditorDescriptionBox"
                              Text="{Binding EditorDescription, Mode=TwoWay}" MinHeight="78" AcceptsReturn="True" TextWrapping="Wrap"
-                             PlaceholderText="Add a description" Background="{StaticResource Surface_0D151C}" BorderBrush="{StaticResource Surface_263743}" Foreground="#D6E2F0" />
+                             PlaceholderText="Add a description" Background="{StaticResource Surface_0D151C}" BorderBrush="{StaticResource Surface_263743}" Foreground="{StaticResource Text_D6E2F0}" />
                   </StackPanel>
                 </Border>
 
@@ -1649,7 +1656,7 @@
                       <TextBlock Text="EFFECTS" Classes="editorCardLabel" VerticalAlignment="Center" />
                       <Border Grid.Column="1" Classes="effectDot" IsVisible="{Binding HasClipEffects}" />
                     </Grid>
-                    <TextBlock Text="No effects applied" Foreground="#6B7C8C" FontSize="13"
+                    <TextBlock Text="No effects applied" Foreground="{StaticResource Text_6B7C8C}" FontSize="13"
                                IsVisible="{Binding !HasClipEffects}" />
                     <!-- The negative bottom margin absorbs the chips' own gutter,
                          so one row of them sits as tight to the footnote as two. -->
@@ -1668,7 +1675,7 @@
                       </Border>
                     </WrapPanel>
                     <TextBlock Text="Nothing is written to the clip until you export, share or save the trim."
-                               Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                               Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" />
                   </StackPanel>
                 </Border>
               </StackPanel>
@@ -1686,9 +1693,9 @@
                       </ListBox.ItemTemplate>
                     </ListBox>
                     <TextBlock Text="{Binding ExportLengthLabel, StringFormat=Renders as \{0\}}"
-                               Foreground="#8EA1B6" FontSize="11" />
+                               Foreground="{StaticResource Text_8EA1B6}" FontSize="11" />
                     <TextBlock Text="Preview pitch rises and falls with speed. The export keeps the original pitch."
-                               Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap"
+                               Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap"
                                IsVisible="{Binding IsClipSpeedActive}" />
                   </StackPanel>
                 </Border>
@@ -1700,7 +1707,7 @@
                     <TextBlock Text="CROP &amp; ASPECT" Classes="editorCardLabel" />
                     <ListBox Classes="pillGroup compactPills" SelectionMode="Single"
                              ItemsSource="{Binding ClipCropModes}" SelectedItem="{Binding ClipCropMode, Mode=TwoWay}" />
-                    <TextBlock Text="{Binding ClipCropSizeLabel}" Foreground="#8EA1B6" FontSize="11" />
+                    <TextBlock Text="{Binding ClipCropSizeLabel}" Foreground="{StaticResource Text_8EA1B6}" FontSize="11" />
                   </StackPanel>
                 </Border>
 
@@ -1714,7 +1721,7 @@
                       <TextBlock Text="TEXT" Classes="editorCardLabel" VerticalAlignment="Center" />
                       <Border Grid.Column="1" Classes="comingSoonTag"><TextBlock Text="SOON" /></Border>
                     </Grid>
-                    <TextBlock Text="Burned-in captions and callouts." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    <TextBlock Text="Burned-in captions and callouts." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" />
                   </StackPanel>
                 </Border>
 
@@ -1724,7 +1731,7 @@
                       <TextBlock Text="BLUR" Classes="editorCardLabel" VerticalAlignment="Center" />
                       <Border Grid.Column="1" Classes="comingSoonTag"><TextBlock Text="SOON" /></Border>
                     </Grid>
-                    <TextBlock Text="Hide a name, a stream key, or a corner of the HUD." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    <TextBlock Text="Hide a name, a stream key, or a corner of the HUD." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" />
                   </StackPanel>
                 </Border>
 
@@ -1736,7 +1743,7 @@
                 <Border Classes="editorInspectorCard">
                   <StackPanel Spacing="9">
                     <TextBlock Text="FORMAT" Classes="editorCardLabel" />
-                    <TextBlock Text="Video codec" Foreground="#8EA1B6" FontSize="12" />
+                    <TextBlock Text="Video codec" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" />
                     <ComboBox Classes="settingsInput" ItemsSource="{Binding ExportCodecs}" SelectedItem="{Binding SelectedExportCodec}"
                               HorizontalAlignment="Stretch" />
                   </StackPanel>
@@ -1746,14 +1753,14 @@
                   <StackPanel Spacing="6">
                     <TextBlock Text="OUTPUT" Classes="editorCardLabel" />
                     <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="4" ColumnSpacing="10">
-                      <TextBlock Text="Range" Foreground="#8EA1B6" FontSize="12" />
-                      <TextBlock Grid.Column="1" Text="{Binding TrimRangeLabel}" Foreground="#D6E2F0" FontSize="12" FontFamily="Consolas" />
-                      <TextBlock Grid.Row="1" Text="Length" Foreground="#8EA1B6" FontSize="12" />
-                      <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding ExportLengthLabel}" Foreground="#D6E2F0" FontSize="12" FontFamily="Consolas" />
-                      <TextBlock Grid.Row="2" Text="Size" Foreground="#8EA1B6" FontSize="12" />
-                      <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding ClipCropSizeLabel}" Foreground="#D6E2F0" FontSize="12" FontFamily="Consolas" />
+                      <TextBlock Text="Range" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" />
+                      <TextBlock Grid.Column="1" Text="{Binding TrimRangeLabel}" Foreground="{StaticResource Text_D6E2F0}" FontSize="12" FontFamily="Consolas" />
+                      <TextBlock Grid.Row="1" Text="Length" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" />
+                      <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding ExportLengthLabel}" Foreground="{StaticResource Text_D6E2F0}" FontSize="12" FontFamily="Consolas" />
+                      <TextBlock Grid.Row="2" Text="Size" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" />
+                      <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding ClipCropSizeLabel}" Foreground="{StaticResource Text_D6E2F0}" FontSize="12" FontFamily="Consolas" />
                     </Grid>
-                    <TextBlock Text="Save Trim replaces this clip. Export writes a new file." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                    <TextBlock Text="Save Trim replaces this clip. Export writes a new file." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" />
                   </StackPanel>
                 </Border>
               </StackPanel>
@@ -1805,8 +1812,8 @@
             <StackPanel Orientation="Horizontal" Spacing="8" Margin="14,0,0,0" VerticalAlignment="Center">
               <Image Source="/Assets/clypdat-icon-24.png" Width="16" Height="16" />
               <StackPanel Spacing="1">
-                <TextBlock Text="Welcome to ClypDat" Foreground="#EDF4FB" FontSize="14" FontWeight="Bold" />
-                <TextBlock Text="Quick setup — you can change everything later" Foreground="#718396" FontSize="10.5" />
+                <TextBlock Text="Welcome to ClypDat" Foreground="{StaticResource Text_EDF4FB}" FontSize="14" FontWeight="Bold" />
+                <TextBlock Text="Quick setup — you can change everything later" Foreground="{StaticResource Surface_718396}" FontSize="10.5" />
               </StackPanel>
             </StackPanel>
             <Button Grid.Column="2" Classes="dialogClose" FontSize="22" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
@@ -1818,7 +1825,7 @@
 
           <StackPanel DockPanel.Dock="Bottom" Margin="24,0,24,20" Spacing="14">
             <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-              <TextBlock Text="{Binding OnboardingProgressLabel}" Foreground="#A9C9E5" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
+              <TextBlock Text="{Binding OnboardingProgressLabel}" Foreground="{StaticResource Text_A9C9E5}" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
               <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
               <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Capture}" />
               <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Quality}" />
@@ -1839,27 +1846,27 @@
             <StackPanel Margin="24,22,24,20" Spacing="18">
 
               <StackPanel Spacing="16" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Capture}">
-                <TextBlock Text="Capture in seconds" Foreground="#EDF4FB" FontWeight="Bold" FontSize="18" />
-                <TextBlock Text="Choose where clips save, your save hotkey, and how far back your replay buffer reaches." Foreground="#B9C6D4" FontSize="13" TextWrapping="Wrap" />
+                <TextBlock Text="Capture in seconds" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" />
+                <TextBlock Text="Choose where clips save, your save hotkey, and how far back your replay buffer reaches." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
 
                 <Border Classes="onboardingSettingCard">
                 <StackPanel Spacing="16">
                 <StackPanel Spacing="6">
-                  <TextBlock Text="Library folder" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
+                  <TextBlock Text="Library folder" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" FontSize="15" />
                   <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
-                    <TextBlock Text="{Binding LibraryFolderDisplay}" Foreground="#6B7C8C" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding LibraryFolderDisplay}" Foreground="{StaticResource Text_6B7C8C}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                     <Button Grid.Column="1" Content="Use Default" Click="ResetLibraryFolderButton_OnClick" />
                     <Button Grid.Column="2" Content="Change Folder" Click="FolderButton_OnClick" />
                   </Grid>
                 </StackPanel>
 
                 <StackPanel Spacing="6">
-                  <TextBlock Text="Save hotkey" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
+                  <TextBlock Text="Save hotkey" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" FontSize="15" />
                   <Button Content="{Binding HotkeyDisplay}" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Left" MinWidth="200" />
                 </StackPanel>
 
                 <StackPanel Spacing="6">
-                  <TextBlock Text="Replay length" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
+                  <TextBlock Text="Replay length" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" FontSize="15" />
                   <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}">
                     <ListBox.ItemTemplate>
                       <DataTemplate>
@@ -1873,19 +1880,19 @@
               </StackPanel>
 
               <StackPanel Spacing="16" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Quality}">
-                <TextBlock Text="Choose recording quality" Foreground="#EDF4FB" FontWeight="Bold" FontSize="18" />
-                <TextBlock Text="Balanced is a strong default. Higher quality uses more GPU, disk space and capture headroom." Foreground="#B9C6D4" FontSize="13" TextWrapping="Wrap" />
+                <TextBlock Text="Choose recording quality" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" />
+                <TextBlock Text="Balanced is a strong default. Higher quality uses more GPU, disk space and capture headroom." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
 
                 <Border Classes="onboardingSettingCard">
                 <StackPanel Spacing="16">
                   <StackPanel Spacing="6">
-                    <TextBlock Text="Quality preset" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
+                    <TextBlock Text="Quality preset" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" FontSize="15" />
                     <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayQualityPresets}" SelectedItem="{Binding SelectedReplayQualityPreset}" HorizontalAlignment="Stretch">
                       <ComboBox.ItemTemplate>
                         <DataTemplate>
                           <StackPanel Spacing="2">
                             <TextBlock Text="{Binding Label}" />
-                            <TextBlock Text="{Binding Summary}" Foreground="#93A6B8" FontSize="11" />
+                            <TextBlock Text="{Binding Summary}" Foreground="{StaticResource Text_93A6B8}" FontSize="11" />
                           </StackPanel>
                         </DataTemplate>
                       </ComboBox.ItemTemplate>
@@ -1893,37 +1900,37 @@
                   </StackPanel>
                   <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
                     <StackPanel Spacing="4">
-                      <TextBlock Text="Resolution" Foreground="#B8C7D8" FontWeight="Bold" FontSize="14" />
+                      <TextBlock Text="Resolution" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" FontSize="14" />
                       <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}">
                         <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
                       </ComboBox>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Spacing="4">
-                      <TextBlock Text="Frame rate" Foreground="#B8C7D8" FontWeight="Bold" FontSize="14" />
+                      <TextBlock Text="Frame rate" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" FontSize="14" />
                       <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}" />
                     </StackPanel>
                   </Grid>
-                  <TextBlock Text="Bitrate, encoder and codec stay available in Settings → Capture when you want finer control." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                  <TextBlock Text="Bitrate, encoder and codec stay available in Settings → Capture when you want finer control." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" />
                 </StackPanel>
                 </Border>
               </StackPanel>
 
               <StackPanel Spacing="16" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Audio}">
-                <TextBlock Text="Microphone" Foreground="#EDF4FB" FontWeight="Bold" FontSize="18" />
-                <TextBlock Text="Choose microphone recorded with clips. Noise suppression, gate and Mic Test are ready in Settings → Audio." Foreground="#B9C6D4" FontSize="13" TextWrapping="Wrap" />
+                <TextBlock Text="Microphone" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" />
+                <TextBlock Text="Choose microphone recorded with clips. Noise suppression, gate and Mic Test are ready in Settings → Audio." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
 
                 <Border Classes="onboardingSettingCard">
                 <StackPanel Spacing="16">
                 <StackPanel Spacing="6">
-                  <TextBlock Text="Microphone" Foreground="#B8C7D8" FontWeight="Bold" FontSize="15" />
+                  <TextBlock Text="Microphone" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" FontSize="15" />
                   <ComboBox Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" HorizontalAlignment="Stretch" />
-                  <TextBlock Text="Multiple microphones? Turn that on later in Settings &gt; Audio." Foreground="#6B7C8C" FontSize="11" />
+                  <TextBlock Text="Multiple microphones? Turn that on later in Settings &gt; Audio." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" />
                 </StackPanel>
-                <Border Background="#102723" BorderBrush="#285A50" BorderThickness="1" CornerRadius="9" Padding="13,11">
+                <Border Background="{StaticResource Semantic_102723}" BorderBrush="{StaticResource Semantic_285A50}" BorderThickness="1" CornerRadius="9" Padding="13,11">
                   <StackPanel Spacing="3">
-                    <TextBlock Text="Separate tracks stay flexible" Foreground="#B8F1DC" FontSize="13" FontWeight="Bold" />
-                    <TextBlock Text="Enable Game Audio, Microphone, Spotify, Discord or other apps independently in Settings → Audio." Foreground="#A1CDBE" FontSize="11" TextWrapping="Wrap" />
-                    <TextBlock Text="Custom Game Settings and Game Audio exclusions are in Settings → Capture when you need per-game control." Foreground="#A1CDBE" FontSize="11" TextWrapping="Wrap" />
+                    <TextBlock Text="Separate tracks stay flexible" Foreground="{StaticResource Semantic_B8F1DC}" FontSize="13" FontWeight="Bold" />
+                    <TextBlock Text="Enable Game Audio, Microphone, Spotify, Discord or other apps independently in Settings → Audio." Foreground="{StaticResource Semantic_A1CDBE}" FontSize="11" TextWrapping="Wrap" />
+                    <TextBlock Text="Custom Game Settings and Game Audio exclusions are in Settings → Capture when you need per-game control." Foreground="{StaticResource Semantic_A1CDBE}" FontSize="11" TextWrapping="Wrap" />
                   </StackPanel>
                 </Border>
                 </StackPanel>
@@ -1931,39 +1938,39 @@
               </StackPanel>
 
               <StackPanel Spacing="16" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Startup}">
-                <TextBlock Text="Ready when you are" Foreground="#EDF4FB" FontWeight="Bold" FontSize="18" />
-                <TextBlock Text="Choose how ClypDat starts. You can revisit this walkthrough anytime from Settings → About." Foreground="#B9C6D4" FontSize="13" TextWrapping="Wrap" />
+                <TextBlock Text="Ready when you are" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" />
+                <TextBlock Text="Choose how ClypDat starts. You can revisit this walkthrough anytime from Settings → About." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
 
                 <Border Classes="onboardingSettingCard">
                 <StackPanel Spacing="14">
                   <Grid ColumnDefinitions="*,Auto">
                     <StackPanel Spacing="3">
-                      <TextBlock Text="Launch ClypDat on Windows boot" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" />
-                      <TextBlock Text="Keep replay ready after sign-in." Foreground="#6B7C8C" FontSize="11" />
+                      <TextBlock Text="Launch ClypDat on Windows boot" Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" FontSize="14" />
+                      <TextBlock Text="Keep replay ready after sign-in." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding LaunchOnWindowsStartup}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
                   <Grid ColumnDefinitions="*,Auto">
                     <StackPanel Spacing="3">
-                      <TextBlock Text="Start minimized to tray" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" />
-                      <TextBlock Text="Keep ClypDat out of the way while it records." Foreground="#6B7C8C" FontSize="11" />
+                      <TextBlock Text="Start minimized to tray" Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" FontSize="14" />
+                      <TextBlock Text="Keep ClypDat out of the way while it records." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding StartMinimizedToTray}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
                   <Border Height="1" Background="{StaticResource Surface_263544}" />
                   <Grid ColumnDefinitions="*,Auto">
                     <StackPanel Spacing="3">
-                      <TextBlock Text="Discord Rich Presence" Foreground="#D2DEEC" FontWeight="Bold" FontSize="14" />
-                      <TextBlock Text="Show your ClypDat activity on Discord. Anyone who can see your profile can see the game name." Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
+                      <TextBlock Text="Discord Rich Presence" Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" FontSize="14" />
+                      <TextBlock Text="Show your ClypDat activity on Discord. Anyone who can see your profile can see the game name." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" />
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordRichPresenceEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
                 </StackPanel>
                 </Border>
-                <Border Background="#102723" BorderBrush="#285A50" BorderThickness="1" CornerRadius="9" Padding="15,13">
+                <Border Background="{StaticResource Semantic_102723}" BorderBrush="{StaticResource Semantic_285A50}" BorderThickness="1" CornerRadius="9" Padding="15,13">
                   <StackPanel Spacing="4">
-                    <TextBlock Text="You’re all set" Foreground="#B8F1DC" FontSize="14" FontWeight="Bold" />
-                    <TextBlock Text="Press Finish, start replay, then capture something great." Foreground="#A1CDBE" FontSize="12" TextWrapping="Wrap" />
+                    <TextBlock Text="You’re all set" Foreground="{StaticResource Semantic_B8F1DC}" FontSize="14" FontWeight="Bold" />
+                    <TextBlock Text="Press Finish, start replay, then capture something great." Foreground="{StaticResource Semantic_A1CDBE}" FontSize="12" TextWrapping="Wrap" />
                   </StackPanel>
                 </Border>
               </StackPanel>
@@ -1992,7 +1999,7 @@
               ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center">
         <DockPanel LastChildFill="True">
           <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto" Height="56" Background="{StaticResource Surface_0C1319}">
-            <TextBlock x:Name="NewClipsTitleText" Grid.Column="1" Foreground="#D8E4F2" FontSize="17" FontWeight="Bold"
+            <TextBlock x:Name="NewClipsTitleText" Grid.Column="1" Foreground="{StaticResource Text_D8E4F2}" FontSize="17" FontWeight="Bold"
                        HorizontalAlignment="Center" VerticalAlignment="Center" />
             <Button Grid.Column="2" Classes="dialogClose" FontSize="14" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                     Width="52" Height="56" Click="NewClipsCloseButton_OnClick">
@@ -2070,22 +2077,22 @@
           <Border Background="{StaticResource Surface_0B0F14}" Padding="14,10">
             <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
               <Button Classes="transportButton" Click="RestartButton_OnClick" ToolTip.Tip="Restart">
-                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+                <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_C8D6E6}" Data="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
               </Button>
               <Button Classes="transportButton" Click="StepBackButton_OnClick" ToolTip.Tip="Step back">
-                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M16 5v14L5 12Z" />
+                <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_C8D6E6}" Data="M16 5v14L5 12Z" />
               </Button>
               <Button Classes="playButton" Click="PlayPauseButton_OnClick" ToolTip.Tip="Play/Pause">
                 <Grid>
-                  <PathIcon Width="16" Height="16" Foreground="#DDE8F6" Data="M8 5v14l11-7z" IsVisible="{Binding !IsPlaying}" />
-                  <PathIcon Width="16" Height="16" Foreground="#DDE8F6" Data="M6 19h4V5H6v14zm8-14v14h4V5h-4z" IsVisible="{Binding IsPlaying}" />
+                  <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_DDE8F6}" Data="M8 5v14l11-7z" IsVisible="{Binding !IsPlaying}" />
+                  <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_DDE8F6}" Data="M6 19h4V5H6v14zm8-14v14h4V5h-4z" IsVisible="{Binding IsPlaying}" />
                 </Grid>
               </Button>
               <Button Classes="transportButton" Click="StepForwardButton_OnClick" ToolTip.Tip="Step forward">
-                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M8 5v14l11-7z" />
+                <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_C8D6E6}" Data="M8 5v14l11-7z" />
               </Button>
               <Button Classes="transportButton" Click="EndButton_OnClick" ToolTip.Tip="End">
-                <PathIcon Width="16" Height="16" Foreground="#C8D6E6" Data="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+                <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_C8D6E6}" Data="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
               </Button>
               <Border Width="1" Height="20" Background="#26FFFFFF" Margin="4,0" />
               <Border Classes="muteToggle"
@@ -2107,7 +2114,7 @@
                       Value="{Binding MasterVolumePercent, Mode=TwoWay}"
                       Opacity="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToOpacityConverter.Instance}}" />
               <TextBlock Text="{Binding MasterVolumePercent, StringFormat={}{0:0}%}"
-                         Foreground="#C8D6E6"
+                         Foreground="{StaticResource Text_C8D6E6}"
                          FontSize="11"
                          Width="30"
                          Margin="0,2,0,0"
@@ -2129,7 +2136,7 @@
                       ToolTip.Tip="Reset to 100%" />
               <Border Width="1" Height="20" Background="#26FFFFFF" Margin="4,0" />
               <Button Classes="transportButton" Click="ExitVideoFullscreenButton_OnClick" ToolTip.Tip="Exit fullscreen">
-                <PathIcon Width="14" Height="14" Foreground="#C8D6E6" Data="M19,6.41 L17.59,5 L12,10.59 L6.41,5 L5,6.41 L10.59,12 L5,17.59 L6.41,19 L12,13.41 L17.59,19 L19,17.59 L13.41,12 Z" />
+                <PathIcon Width="14" Height="14" Foreground="{StaticResource Text_C8D6E6}" Data="M19,6.41 L17.59,5 L12,10.59 L6.41,5 L5,6.41 L10.59,12 L5,17.59 L6.41,19 L12,13.41 L17.59,19 L19,17.59 L13.41,12 Z" />
               </Button>
             </StackPanel>
           </Border>

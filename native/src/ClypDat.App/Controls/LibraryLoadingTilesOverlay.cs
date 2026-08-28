@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Threading;
 using ClypDat.App.ViewModels;
+using ClypDat.App.Services;
 
 namespace ClypDat.App.Controls;
 
@@ -240,8 +241,8 @@ internal sealed class LibraryLoadingTilesOverlay : Control
         EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
         GradientStops =
         {
-            new GradientStop(Color.Parse("#26323D"), 0),
-            new GradientStop(Color.Parse("#202B35"), 1)
+            new GradientStop(AppThemeService.ThemeColor("Surface_26323D", "#26323D"), 0),
+            new GradientStop(AppThemeService.ThemeColor("Surface_202B35", "#202B35"), 1)
         }
     };
 

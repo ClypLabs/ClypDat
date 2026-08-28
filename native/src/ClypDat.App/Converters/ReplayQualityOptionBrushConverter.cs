@@ -9,8 +9,8 @@ public sealed class ReplayQualityOptionBrushConverter : IValueConverter
 {
     public static readonly ReplayQualityOptionBrushConverter Instance = new();
 
-    private static readonly IBrush NormalBrush = new SolidColorBrush(Color.Parse("#B8C7D8"));
-    private static readonly IBrush WarningBrush = new SolidColorBrush(Color.Parse("#FF9AA2"));
+    private static readonly IBrush NormalBrush = AppThemeService.Brush("Text_B8C7D8", "#B8C7D8");
+    private static readonly IBrush WarningBrush = AppThemeService.Brush("Semantic_FF9AA2", "#FF9AA2");
 
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {

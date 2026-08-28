@@ -85,7 +85,7 @@
               <DataTemplate>
                 <StackPanel Orientation="Horizontal" Spacing="10">
                   <Border Width="52" Height="34" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1" CornerRadius="4">
-                    <Border Width="16" Height="8" Margin="4" CornerRadius="2" Background="#5864E8"
+                    <Border Width="16" Height="8" Margin="4" CornerRadius="2" Background="{StaticResource AccentBrush}"
                             HorizontalAlignment="{Binding Converter={x:Static opconv:OverlayPositionToHorizontalAlignmentConverter.Instance}}"
                             VerticalAlignment="{Binding Converter={x:Static opconv:OverlayPositionToVerticalAlignmentConverter.Instance}}" />
                   </Border>

@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
+using ClypDat.App.Services;
 
 namespace ClypDat.App.Controls;
 
@@ -29,11 +30,11 @@ public sealed class MicLevelMeter : Control
     private const int BarCount = 64;
     private const double BarGapRatio = 0.32;
 
-    private static readonly IBrush IdleBrush = new SolidColorBrush(Color.Parse("#26313C"));
-    private static readonly IBrush LitBrush = new SolidColorBrush(Color.Parse("#2FD9A8"));
-    private static readonly IBrush LoudBrush = new SolidColorBrush(Color.Parse("#E5A23D"));
-    private static readonly IBrush PeakBrush = new SolidColorBrush(Color.Parse("#E5484D"));
-    private static readonly IPen ThresholdPen = new Pen(new SolidColorBrush(Color.Parse("#8FA6BD")), 1.5);
+    private static readonly IBrush IdleBrush = AppThemeService.Brush("Surface_26313C", "#26313C");
+    private static readonly IBrush LitBrush = AppThemeService.Brush("Semantic_2FD9A8", "#2FD9A8");
+    private static readonly IBrush LoudBrush = AppThemeService.Brush("Semantic_E5A23D", "#E5A23D");
+    private static readonly IBrush PeakBrush = AppThemeService.Brush("Semantic_E5484D", "#E5484D");
+    private static readonly IPen ThresholdPen = new Pen(AppThemeService.Brush("Text_8FA6BD", "#8FA6BD"), 1.5);
 
     static MicLevelMeter()
     {

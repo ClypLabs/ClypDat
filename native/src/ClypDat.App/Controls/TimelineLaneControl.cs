@@ -79,7 +79,7 @@ public sealed class TimelineLaneControl : Control
     // is not a once-per-open cost: AffectsRender includes the trim percentages
     // and every lane binds them, so dragging a trim handle re-renders every
     // lane on every single pointer-move.
-    private static readonly Pen VideoOutlinePen = new(new SolidColorBrush(Color.Parse("#13C8B5")), 1);
+    private static readonly Pen VideoOutlinePen = new(AppThemeService.Brush("Semantic_13C8B5", "#13C8B5"), 1);
     private static readonly IBrush ShadeBrush = new SolidColorBrush(Color.FromArgb(120, 10, 15, 19));
     private static readonly IBrush HatchBrush = CreateHatchBrush();
 

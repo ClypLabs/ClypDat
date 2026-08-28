@@ -37,7 +37,7 @@ internal sealed class NewClipsDialog : Window
             owner.SizeChanged -= Owner_OnSizeChanged;
         };
 
-        _title = new TextBlock { Foreground = Brush.Parse("#D8E4F2"), FontSize = 17, FontWeight = FontWeight.Bold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        _title = new TextBlock { Foreground = AppThemeService.Brush("Text_D8E4F2", "#D8E4F2"), FontSize = 17, FontWeight = FontWeight.Bold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         var closeButton = new Button { Content = "✕", Width = 52, Height = 56 };
         closeButton.Classes.Add("dialogClose");
         closeButton.Click += close;

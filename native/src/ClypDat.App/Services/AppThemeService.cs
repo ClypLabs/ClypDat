@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Styling;
 using Avalonia.Markup.Xaml.Styling;
 using Avalonia.Media;
 
@@ -15,23 +16,35 @@ public sealed record ThemeOption(
 /// <summary>Owns ClypDat's mutable dark-theme resource palette.</summary>
 internal static class AppThemeService
 {
-    // ClypDat's own surface family, as authored: a neutral blue-grey ramp. Every
-    // themed colour in the app - the eight named tokens in Tokens.axaml and the
-    // ~100 shades in SurfaceRamp.axaml alike - is this family run through one
-    // hue/saturation/lightness transform. Nothing is hand-picked per theme except
-    // the accent, so a shade that has no named token still lands in the right
-    // place instead of being flattened onto the nearest one.
+    // Every themed colour in the app - the named tokens in Tokens.axaml and the
+    // ~210 shades in ThemeRamp.axaml alike - is ClypDat's authored System palette
+    // run through one transform. Nothing is hand-picked per theme except the
+    // accent, so a shade that has no named token still lands in the right place
+    // instead of being flattened onto the nearest one.
     //
-    // The transforms below were fitted against the hand-picked palettes the preset
+    // The dark transforms were fitted against the hand-picked palettes the preset
     // themes originally shipped with; every channel reproduces to within 4/255, so
-    // switching to a derived palette is not a visible change.
+    // deriving them is not a visible change.
+    private enum ColorRole
+    {
+        // Backgrounds, borders and fills. Re-hued by the dark presets.
+        Surface,
+        // Text, icons and glyphs. Untouched by the dark presets - text colours
+        // stay put for readability - and inverted by the light ones.
+        Text,
+        // Greens, reds and ambers that carry meaning. Never re-hued; only
+        // inverted for light mode, so they stay legible on a pale surface.
+        Semantic
+    }
+
     private sealed record ThemeTransform(
         double Hue,
         double SaturationScale, double SaturationBias,
-        double LightnessScale, double LightnessBias)
+        double LightnessScale, double LightnessBias,
+        bool IsLight = false)
     {
         public static readonly ThemeTransform Identity = new(-1, 1, 0, 1, 0);
-        public bool IsIdentity => Hue < 0;
+        public bool IsIdentity => Hue < 0 && !IsLight;
     }
 
     // Lightness is scaled fully across the range the named tokens occupy (up to
@@ -41,6 +54,19 @@ internal static class AppThemeService
     private const double LightnessFullBelow = 0.23;
     private const double LightnessIdentityAbove = 0.40;
 
+    // Light mode inverts lightness, so the ramp's ordering survives: the darkest
+    // surface becomes the lightest, the brightest text becomes the darkest.
+    //
+    // Text and semantic colours are compressed toward the dark end on the way
+    // back, because a straight inversion is not enough for them. A muted label at
+    // 43% lightness inverts to 57% - still mid-grey, now sitting on a 93% page
+    // instead of a 7% one, so it loses most of its contrast. Semantic colours have
+    // the same problem: inverted, the caution amber comes back *lighter* than it
+    // started. Surfaces need no such help; they are meant to be near the page.
+    private const double LightSurfaceSaturationScale = 1.0;
+    private const double LightTextLightnessScale = 0.75;
+    private const double LightSemanticLightnessScale = 0.85;
+
     private static readonly IReadOnlyDictionary<string, ThemeTransform> Transforms =
         new Dictionary<string, ThemeTransform>(StringComparer.OrdinalIgnoreCase)
         {
@@ -48,7 +74,16 @@ internal static class AppThemeService
             ["Violet"] = new(265.9, 0.4274, 0.1614, 1.3914, -0.0269),
             ["Emerald"] = new(161.4, 0.4711, 0.1715, 1.1712, -0.0251),
             ["Rose"] = new(333.2, 0.4942, 0.1639, 1.3705, -0.0263),
-            ["Amber"] = new(35.4, 0.7844, 0.1753, 1.3132, -0.0279)
+            ["Amber"] = new(35.4, 0.7844, 0.1753, 1.3132, -0.0279),
+
+            // Light presets reuse their dark sibling's hue. Scale and bias are
+            // unused for them - Recolor inverts lightness outright instead.
+            ["Light"] = new(209.0, 1, 0, 1, 0, IsLight: true),
+            ["Light Blue"] = new(228.8, 1, 0, 1, 0, IsLight: true),
+            ["Light Violet"] = new(265.9, 1, 0, 1, 0, IsLight: true),
+            ["Light Emerald"] = new(161.4, 1, 0, 1, 0, IsLight: true),
+            ["Light Rose"] = new(333.2, 1, 0, 1, 0, IsLight: true),
+            ["Light Amber"] = new(35.4, 1, 0, 1, 0, IsLight: true)
         };
 
     private static readonly IReadOnlyDictionary<string, Color> PresetAccents =
@@ -59,36 +94,72 @@ internal static class AppThemeService
             ["Violet"] = Color.Parse("#8B5CF6"),
             ["Emerald"] = Color.Parse("#10B981"),
             ["Rose"] = Color.Parse("#F43F5E"),
-            ["Amber"] = Color.Parse("#F59E0B")
+            ["Amber"] = Color.Parse("#F59E0B"),
+
+            // Light-mode accents run darker than their dark-mode counterparts: the
+            // same indigo that reads as bright on #0D1116 is washed out on a
+            // near-white surface.
+            ["Light"] = Color.Parse("#4650C9"),
+            ["Light Blue"] = Color.Parse("#4650C9"),
+            ["Light Violet"] = Color.Parse("#7343E0"),
+            ["Light Emerald"] = Color.Parse("#0E9268"),
+            ["Light Rose"] = Color.Parse("#D42145"),
+            ["Light Amber"] = Color.Parse("#B87608")
         };
 
-    // The System source values for the eight named tokens. Themed output is these
-    // run through the preset's transform; System itself is the identity, so its
-    // rendering is byte-for-byte what the app shipped before themes existed.
-    private static readonly (string Key, Color Source)[] NamedTokens =
+    private static readonly string[] LightPresetOrder =
+        { "Light", "Light Blue", "Light Violet", "Light Emerald", "Light Rose", "Light Amber" };
+
+    // The System source values for the named tokens, with the role each is
+    // recoloured under. System itself is the identity transform, so its rendering
+    // is byte-for-byte what the app shipped before themes existed.
+    private static readonly (string Key, Color Source, ColorRole Role)[] NamedTokens =
     {
-        ("AppBgBrush", Color.Parse("#0D1116")),
-        ("PanelBgBrush", Color.Parse("#101820")),
-        ("SurfaceBrush", Color.Parse("#141D24")),
-        ("SurfaceRaisedBrush", Color.Parse("#1A242E")),
-        ("SurfaceHoverBrush", Color.Parse("#22303D")),
-        ("EdgeBrush", Color.Parse("#232F3A")),
-        ("EdgeStrongBrush", Color.Parse("#2C3B48")),
-        ("DividerBrush", Color.Parse("#1B242D"))
+        ("AppBgBrush", Color.Parse("#0D1116"), ColorRole.Surface),
+        ("PanelBgBrush", Color.Parse("#101820"), ColorRole.Surface),
+        ("SurfaceBrush", Color.Parse("#141D24"), ColorRole.Surface),
+        ("SurfaceRaisedBrush", Color.Parse("#1A242E"), ColorRole.Surface),
+        ("SurfaceHoverBrush", Color.Parse("#22303D"), ColorRole.Surface),
+        ("EdgeBrush", Color.Parse("#232F3A"), ColorRole.Surface),
+        ("EdgeStrongBrush", Color.Parse("#2C3B48"), ColorRole.Surface),
+        ("DividerBrush", Color.Parse("#1B242D"), ColorRole.Surface),
+
+        ("TextStrongBrush", Color.Parse("#EDF4FB"), ColorRole.Text),
+        ("TextBrush", Color.Parse("#D2DEEC"), ColorRole.Text),
+        ("TextSubtleBrush", Color.Parse("#9FB2C6"), ColorRole.Text),
+        ("TextMutedBrush", Color.Parse("#6B7C8C"), ColorRole.Text),
+        ("LabelBrush", Color.Parse("#5C6D7E"), ColorRole.Text),
+
+        ("LinkBrush", Color.Parse("#78B8FF"), ColorRole.Semantic),
+        ("CautionBrush", Color.Parse("#E5A00D"), ColorRole.Semantic),
+        ("DangerBrush", Color.Parse("#D85E61"), ColorRole.Semantic)
     };
 
-    // SurfaceRamp.axaml keys carry their own System hex ("Surface_1D2A36"), so the
-    // source colour is recovered from the key on every apply. Recolouring never
-    // reads back a previously themed brush, which is what keeps repeated theme
-    // switches from compounding.
-    private const string BrushKeyPrefix = "Surface_";
-    private const string ColorKeyPrefix = "SurfaceColor_";
+    // ThemeRamp.axaml keys carry their role and their own System hex
+    // ("Surface_1D2A36"), so both are recovered from the key on every apply.
+    // Recolouring never reads back a previously themed brush, which is what keeps
+    // repeated theme switches from compounding.
+    private static readonly (string Prefix, ColorRole Role, bool IsColor)[] RampPrefixes =
+    {
+        ("SurfaceColor_", ColorRole.Surface, true),
+        ("TextColor_", ColorRole.Text, true),
+        ("SemanticColor_", ColorRole.Semantic, true),
+        ("Surface_", ColorRole.Surface, false),
+        ("Text_", ColorRole.Text, false),
+        ("Semantic_", ColorRole.Semantic, false)
+    };
 
     public static IReadOnlyList<ThemeOption> Options { get; } = new[]
     {
         Option("System"), Option("ClypDat Blue"), Option("Violet"),
         Option("Emerald"), Option("Rose"), Option("Amber")
     };
+
+    public static IReadOnlyList<ThemeOption> LightOptions { get; } =
+        LightPresetOrder.Select(Option).ToArray();
+
+    public static bool IsLight(string preset) =>
+        Transforms.TryGetValue(Normalize(preset), out var transform) && transform.IsLight;
 
     public static string Normalize(string? preset) =>
         preset is not null && (IsSystem(preset) || Transforms.ContainsKey(preset)) ? preset : "System";
@@ -109,16 +180,28 @@ internal static class AppThemeService
         preset = Normalize(preset);
         var transform = Transforms.TryGetValue(preset, out var t) ? t : ThemeTransform.Identity;
         var accent = useSystemAccent ? systemAccent : PresetAccent(preset);
-        var appBackground = Recolor(NamedTokens[0].Source, transform);
+        var appBackground = Recolor(NamedTokens[0].Source, ColorRole.Surface, transform);
 
-        foreach (var (key, source) in NamedTokens) SetBrush(application, key, Recolor(source, transform));
+        // FluentTheme swaps its whole control-theme resource set on this. Without
+        // it every control we have not re-templated - TextBox, ComboBox popups,
+        // CheckBox - keeps its dark chrome on a near-white page.
+        application.RequestedThemeVariant = transform.IsLight ? ThemeVariant.Light : ThemeVariant.Dark;
+
+        foreach (var (key, source, role) in NamedTokens)
+        {
+            SetBrush(application, key, Recolor(source, role, transform));
+        }
         ApplyRamp(application, transform);
 
         SetBrush(application, "AccentBrush", accent);
-        SetBrush(application, "AccentBrushHover", BlendWithWhite(accent, 0.18));
+        SetBrush(application, "AccentBrushHover", transform.IsLight
+            ? Blend(accent, appBackground, 0.22)
+            : BlendWithWhite(accent, 0.18));
         SetBrush(application, "AccentSelectedBrush", Blend(accent, appBackground, 0.78));
         SetBrush(application, "AccentSelectedHoverBrush", Blend(accent, appBackground, 0.84));
-        SetBrush(application, "AccentSelectedIconBrush", BlendWithWhite(accent, 0.55));
+        SetBrush(application, "AccentSelectedIconBrush", transform.IsLight
+            ? Blend(accent, Colors.Black, 0.25)
+            : BlendWithWhite(accent, 0.55));
         SetBrush(application, "AccentGameHoverBrush", Blend(accent, appBackground, 0.84));
         SetBrush(application, "AccentFolderBrush", Blend(accent, appBackground, 0.55));
         SetBrush(application, "AccentHoverBrush", Blend(accent, appBackground, 0.84));
@@ -150,21 +233,38 @@ internal static class AppThemeService
             foreach (var entry in resources)
             {
                 if (entry.Key is not string key) continue;
-                if (key.StartsWith(BrushKeyPrefix, StringComparison.Ordinal) &&
-                    entry.Value is SolidColorBrush brush &&
-                    TryParseKeyColor(key, BrushKeyPrefix, out var brushSource))
-                {
-                    brush.Color = Recolor(brushSource, transform);
-                }
-                else if (key.StartsWith(ColorKeyPrefix, StringComparison.Ordinal) &&
-                         TryParseKeyColor(key, ColorKeyPrefix, out var colorSource))
+                if (!TryMatchRamp(key, out var role, out var isColor, out var source)) continue;
+
+                var themed = Recolor(source, role, transform);
+                if (isColor)
                 {
                     // Color is a struct, so this shadows the ramp entry with a new
                     // value at application level rather than mutating one in place.
-                    application.Resources[key] = Recolor(colorSource, transform);
+                    application.Resources[key] = themed;
+                }
+                else if (entry.Value is SolidColorBrush brush)
+                {
+                    brush.Color = themed;
                 }
             }
         }
+    }
+
+    private static bool TryMatchRamp(string key, out ColorRole role, out bool isColor, out Color source)
+    {
+        foreach (var (prefix, prefixRole, prefixIsColor) in RampPrefixes)
+        {
+            if (!key.StartsWith(prefix, StringComparison.Ordinal)) continue;
+            if (!TryParseKeyColor(key, prefix, out source)) continue;
+            role = prefixRole;
+            isColor = prefixIsColor;
+            return true;
+        }
+
+        role = ColorRole.Surface;
+        isColor = false;
+        source = default;
+        return false;
     }
 
     // A merged entry declared as <ResourceInclude> is not itself a
@@ -216,10 +316,21 @@ internal static class AppThemeService
         var transform = Transforms.TryGetValue(id, out var t) ? t : ThemeTransform.Identity;
         return new ThemeOption(
             id, id,
-            new SolidColorBrush(Recolor(NamedTokens[0].Source, transform)),
-            new SolidColorBrush(Recolor(NamedTokens[2].Source, transform)),
+            new SolidColorBrush(Recolor(NamedTokens[0].Source, ColorRole.Surface, transform)),
+            new SolidColorBrush(Recolor(NamedTokens[2].Source, ColorRole.Surface, transform)),
             new SolidColorBrush(PresetAccent(id)));
     }
+
+    /// <summary>
+    /// Themed colour lookup for the code-built surfaces that need a Color rather
+    /// than a brush - gradient stops, pens built per render. Live wherever the
+    /// call is re-evaluated; a value cached in a static field is a snapshot, so
+    /// prefer <see cref="Brush"/> where a brush will do.
+    /// </summary>
+    public static Color ThemeColor(string key, string fallbackHex) =>
+        Brush(key, fallbackHex) is SolidColorBrush brush
+            ? brush.Color
+            : Color.Parse(fallbackHex);
 
     /// <summary>
     /// Themed brush lookup for the windows built in code rather than XAML, which
@@ -254,11 +365,39 @@ internal static class AppThemeService
         return false;
     }
 
-    private static Color Recolor(Color source, ThemeTransform transform)
+    private static Color Recolor(Color source, ColorRole role, ThemeTransform transform)
     {
         if (transform.IsIdentity) return source;
 
-        var (_, saturation, lightness) = ToHsl(source);
+        var (hue, saturation, lightness) = ToHsl(source);
+
+        if (transform.IsLight)
+        {
+            // Inverting lightness is what makes a light theme out of a palette
+            // authored dark: the ordering survives, so a raised surface stays
+            // distinguishable from the page and strong text stays strongest.
+            var invertedLightness = 1 - lightness;
+            return role switch
+            {
+                ColorRole.Surface => FromHsl(
+                    transform.Hue,
+                    Clamp(saturation * LightSurfaceSaturationScale),
+                    invertedLightness,
+                    source.A),
+                // Text and semantic colours keep their own hue. Re-hueing text
+                // would tint the whole page; re-hueing a red would stop it
+                // meaning "danger".
+                ColorRole.Text => FromHsl(
+                    hue, saturation, invertedLightness * LightTextLightnessScale, source.A),
+                _ => FromHsl(
+                    hue, saturation, invertedLightness * LightSemanticLightnessScale, source.A)
+            };
+        }
+
+        // The dark presets tint surfaces only. Text stays as authored, and a
+        // semantic green has to stay green to still say what it says.
+        if (role != ColorRole.Surface) return source;
+
         var themedSaturation = Clamp(saturation * transform.SaturationScale + transform.SaturationBias);
         var scaled = Clamp(lightness * transform.LightnessScale + transform.LightnessBias);
         var weight = LightnessWeight(lightness);

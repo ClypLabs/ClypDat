@@ -43,14 +43,14 @@ internal sealed class ShareDragOverlayWindow : Window
                     Text = "Drag & drop magic, activated!",
                     FontWeight = FontWeight.Bold,
                     FontSize = 18,
-                    Foreground = new SolidColorBrush(Color.Parse("#EDF4FB")),
+                    Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB"),
                     HorizontalAlignment = HorizontalAlignment.Center,
                 },
                 new TextBlock
                 {
                     Text = "Drop the clip onto a chat channel, DM, or upload box",
                     FontSize = 13,
-                    Foreground = new SolidColorBrush(Color.Parse("#8EA1B6")),
+                    Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6"),
                     HorizontalAlignment = HorizontalAlignment.Center,
                     TextWrapping = TextWrapping.Wrap,
                     TextAlignment = TextAlignment.Center,

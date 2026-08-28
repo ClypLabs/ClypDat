@@ -164,9 +164,9 @@ public sealed class ClipCardViewModel : ViewModelBase
 
     private static readonly (string Prefix, IBrush Fill)[] AutoClipIconStyles =
     {
-        ("Headshot", Brush.Parse("#E5A00D")),
-        ("Death", Brush.Parse("#D85E61")),
-        ("Assist", Brush.Parse("#5864E8"))
+        ("Headshot", AppThemeService.Brush("Semantic_E5A00D", "#E5A00D")),
+        ("Death", AppThemeService.Brush("Semantic_D85E61", "#D85E61")),
+        ("Assist", AppThemeService.Brush("AccentBrush", "#5864E8"))
     };
 
     // Death/Assist/Headshot get their own icon+color; anything else (Kill, 2K,
@@ -190,13 +190,13 @@ public sealed class ClipCardViewModel : ViewModelBase
         get
         {
             var type = _clipInfo?.AutoClipEventType;
-            if (type is null) return Brush.Parse("#8C98A7");
+            if (type is null) return AppThemeService.Brush("Text_8C98A7", "#8C98A7");
             foreach (var (prefix, fill) in AutoClipIconStyles)
             {
                 if (type.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return fill;
             }
 
-            return Brush.Parse("#8C98A7");
+            return AppThemeService.Brush("Text_8C98A7", "#8C98A7");
         }
     }
 
@@ -237,6 +237,16 @@ public sealed class ClipCardViewModel : ViewModelBase
     }
 
     public bool HasTrimEdit => _clipEdit is not null && Duration - TrimmedDuration > TimeSpan.FromMilliseconds(50);
+
+    // Trimming shortens the number the tile already shows, so a pencil next to it
+    // explains the discrepancy. Speed and crop change nothing the tile displays,
+    // which is why they get an indicator of their own rather than sharing that
+    // one. Volume and mute are deliberately not counted - they are per-track
+    // mixing, not an effect applied to the clip.
+    public bool HasEffectEdit => _clipEdit is not null &&
+        (Math.Abs(_clipEdit.SpeedMultiplier - 1.0) > 0.001 ||
+         !string.IsNullOrEmpty(_clipEdit.CropMode) &&
+         !string.Equals(_clipEdit.CropMode, "None", StringComparison.OrdinalIgnoreCase));
     public string DurationLabel => TrimmedDuration > TimeSpan.Zero ? TrimmedDuration.ToString("m\\:ss") : "0:00";
     public string GameLabel => "VIDEO";
     public string CaptureBackendLabel => IsMedalImport
@@ -447,6 +457,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         _clipEdit = edit;
         OnPropertyChanged(nameof(TrimmedDuration));
         OnPropertyChanged(nameof(HasTrimEdit));
+        OnPropertyChanged(nameof(HasEffectEdit));
         OnPropertyChanged(nameof(DurationLabel));
     }
 
@@ -531,7 +542,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     public bool HasSelectionOrder => SelectionOrder > 0;
 
     public bool IsCheckVisible => IsSelected || IsHovered;
-    public IBrush SelectionBorderBrush => IsSelected ? Brush.Parse("#5864E8") : IsHovered ? Brush.Parse("#5C6D7E") : Brush.Parse("#24303A");
+    public IBrush SelectionBorderBrush => IsSelected ? AppThemeService.Brush("AccentBrush", "#5864E8") : IsHovered ? AppThemeService.Brush("Text_5C6D7E", "#5C6D7E") : AppThemeService.Brush("Surface_24303A", "#24303A");
     public Avalonia.Thickness SelectionBorderThickness => IsSelected || IsHovered ? new Avalonia.Thickness(2) : new Avalonia.Thickness(0);
 
     internal CachedClipState ToCachedState() => new(_media, _clipInfo, _clipEdit);
@@ -571,6 +582,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(GameNameLabel));
         OnPropertyChanged(nameof(TrimmedDuration));
         OnPropertyChanged(nameof(HasTrimEdit));
+        OnPropertyChanged(nameof(HasEffectEdit));
         OnPropertyChanged(nameof(DurationLabel));
         OnPropertyChanged(nameof(CaptureBackendLabel));
         OnPropertyChanged(nameof(HasCaptureBackendLabel));
