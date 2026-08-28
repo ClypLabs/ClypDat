@@ -93,7 +93,12 @@ internal static class AppThemeService
     public static string Normalize(string? preset) =>
         preset is not null && (IsSystem(preset) || Transforms.ContainsKey(preset)) ? preset : "System";
 
-    private static bool IsSystem(string preset) => string.Equals(preset, "System", StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// The System preset is the only one with no accent of its own - it is ClypDat's
+    /// neutral palette following Windows - so it is also the only one the Windows
+    /// accent is the natural default for.
+    /// </summary>
+    public static bool IsSystem(string preset) => string.Equals(preset, "System", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The accent a preset uses when the Windows accent colour is switched off.</summary>
     public static Color PresetAccent(string preset) =>

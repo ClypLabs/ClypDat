@@ -416,9 +416,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var preset = AppThemeService.Normalize(value);
             if (string.Equals(Settings.ThemePreset, preset, StringComparison.OrdinalIgnoreCase)) return;
             Settings.ThemePreset = preset;
+            // Picking a preset re-answers the accent question with it: System is
+            // ClypDat following Windows, so it takes the Windows accent, while a
+            // named preset ships an accent of its own that the Windows one would
+            // otherwise override. Still a plain setting - the toggle below can be
+            // flipped back either way afterwards.
+            Settings.UseSystemAccent = AppThemeService.IsSystem(preset);
             SaveSettings();
             ApplyTheme();
             OnPropertyChanged();
+            OnPropertyChanged(nameof(UseSystemAccentColor));
         }
     }
 
