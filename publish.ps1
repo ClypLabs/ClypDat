@@ -601,14 +601,9 @@ function Ensure-StableAvaloniaPackages {
         throw 'The stable Avalonia package version is missing from eng/AvaloniaPin.props.'
     }
 
-    # Pinned target omits Controls.Media; local fork may include it during
-    # package work. Validate each mode against its own exact package surface.
-    $requiredPackageIds = if ($UseLocalAvalonia) {
-        $requiredAvaloniaPackageIds
-    }
-    else {
-        @($requiredAvaloniaPackageIds | Where-Object { $_ -ne 'Avalonia.Controls.Media' })
-    }
+    # Both pinned and local builds use ClypDat.Win32Packages.proj, whose
+    # explicit package graph includes Controls.Media.
+    $requiredPackageIds = $requiredAvaloniaPackageIds
 
     if (-not (Test-Path -LiteralPath (Join-Path $avaloniaRoot '.git'))) {
         throw "The sibling Avalonia fork was not found at: $avaloniaRoot"
