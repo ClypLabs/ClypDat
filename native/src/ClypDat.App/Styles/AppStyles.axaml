@@ -1,5 +1,6 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="using:ClypDat.App.Controls"
         xmlns:sys="using:System">
   <Styles.Resources>
     <!--
@@ -1334,7 +1335,7 @@
     <Setter Property="Padding" Value="0" />
     <Setter Property="ItemsPanel">
       <ItemsPanelTemplate>
-        <UniformGrid Columns="4" />
+        <controls:ResponsiveUniformGrid MinimumItemWidth="180" MaximumColumns="4" />
       </ItemsPanelTemplate>
     </Setter>
   </Style>
