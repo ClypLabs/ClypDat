@@ -1638,10 +1638,35 @@
                   </StackPanel>
                 </Border>
 
-                <Border Classes="editorInspectorCard">
-                  <StackPanel Spacing="6">
-                    <TextBlock Text="EFFECTS" Classes="editorCardLabel" />
-                    <TextBlock Text="{Binding ClipEffectsSummary}" Foreground="#C8D6E6" FontSize="13" TextWrapping="Wrap" />
+                <!-- Effects are non-destructive and easy to forget, so an active
+                     one is shown as a set object rather than described in a
+                     sentence: one chip per effect, each carrying what it will
+                     actually produce. With nothing on, the card goes quiet
+                     again - an inactive card should not draw the eye. -->
+                <Border Classes="editorInspectorCard" Classes.effectsActive="{Binding HasClipEffects}">
+                  <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Text="EFFECTS" Classes="editorCardLabel" VerticalAlignment="Center" />
+                      <Border Grid.Column="1" Classes="effectDot" IsVisible="{Binding HasClipEffects}" />
+                    </Grid>
+                    <TextBlock Text="No effects applied" Foreground="#6B7C8C" FontSize="13"
+                               IsVisible="{Binding !HasClipEffects}" />
+                    <!-- The negative bottom margin absorbs the chips' own gutter,
+                         so one row of them sits as tight to the footnote as two. -->
+                    <WrapPanel Margin="0,0,0,-7" IsVisible="{Binding HasClipEffects}">
+                      <Border Classes="effectChip" IsVisible="{Binding IsClipCropActive}">
+                        <StackPanel>
+                          <TextBlock Text="{Binding ClipCropMode}" Classes="effectChipValue" />
+                          <TextBlock Text="{Binding ClipCropSizeLabel}" Classes="effectChipCaption" />
+                        </StackPanel>
+                      </Border>
+                      <Border Classes="effectChip" IsVisible="{Binding IsClipSpeedActive}">
+                        <StackPanel>
+                          <TextBlock Text="{Binding ClipSpeedLabel}" Classes="effectChipValue" />
+                          <TextBlock Text="{Binding ExportLengthLabel, StringFormat=Renders as \{0\}}" Classes="effectChipCaption" />
+                        </StackPanel>
+                      </Border>
+                    </WrapPanel>
                     <TextBlock Text="Nothing is written to the clip until you export, share or save the trim."
                                Foreground="#6B7C8C" FontSize="11" TextWrapping="Wrap" />
                   </StackPanel>

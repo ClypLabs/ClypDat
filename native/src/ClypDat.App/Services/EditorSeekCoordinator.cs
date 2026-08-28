@@ -11,11 +11,33 @@ internal sealed class EditorSeekCoordinator
     internal static readonly TimeSpan PositionTolerance = TimeSpan.FromMilliseconds(150);
     private readonly TimeSpan _pollInterval;
     private readonly TimeSpan _attemptTimeout;
+    private readonly Func<double>? _rate;
 
-    public EditorSeekCoordinator(TimeSpan? pollInterval = null, TimeSpan? attemptTimeout = null)
+    public EditorSeekCoordinator(TimeSpan? pollInterval = null, TimeSpan? attemptTimeout = null, Func<double>? rate = null)
     {
         _pollInterval = pollInterval ?? TimeSpan.FromMilliseconds(10);
         _attemptTimeout = attemptTimeout ?? TimeSpan.FromMilliseconds(500);
+        _rate = rate;
+    }
+
+    /// <summary>
+    /// The confirmation budget for one wait, scaled by the playback rate.
+    /// </summary>
+    /// <remarks>
+    /// Every predicate here watches the transport's Position, and libvlc
+    /// republishes that from its input loop, whose wake-ups are media-clocked.
+    /// The same ~250ms of media therefore costs 500ms of wall at 0.5x and a full
+    /// second at 0.25x, so a fixed budget is really a budget of FRAMES: at slow
+    /// rates it expires before the first update can arrive, and MakeSafe then
+    /// stops the audio and pauses the video on a seek that was about to land.
+    /// Scaling leaves 1x and every faster rate exactly as they were, and the
+    /// lower clamp bounds how long a genuinely failing seek can take.
+    /// </remarks>
+    private TimeSpan AttemptTimeout()
+    {
+        var rate = _rate?.Invoke() ?? 1.0;
+        if (double.IsNaN(rate) || double.IsInfinity(rate)) rate = 1.0;
+        return _attemptTimeout / Math.Clamp(rate, 0.25, 1.0);
     }
 
     public async Task<EditorSeekResult> SeekAsync(
@@ -128,8 +150,9 @@ internal sealed class EditorSeekCoordinator
 
     private async Task<bool> WaitUntilAsync(Func<bool> predicate, Func<bool> isCurrent, CancellationToken cancellationToken)
     {
+        var timeout = AttemptTimeout();
         var clock = Stopwatch.StartNew();
-        while (clock.Elapsed < _attemptTimeout)
+        while (clock.Elapsed < timeout)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!isCurrent()) return false;

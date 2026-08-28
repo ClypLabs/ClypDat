@@ -1811,6 +1811,43 @@
     <Setter Property="CornerRadius" Value="10" />
     <Setter Property="Padding" Value="16" />
   </Style>
+  <!-- The Info section's EFFECTS card when something is actually on. It has to
+       sit AFTER the base card style, not up with effectPending: both set
+       Background and BorderBrush, and the later rule is the one that wins.
+       Green rather than the sidebar's blue, matching effectsBadge, so the two
+       renderings of the same state read as the same state. -->
+  <Style Selector="Border.editorInspectorCard.effectsActive">
+    <Setter Property="Background" Value="#16242E" />
+    <Setter Property="BorderBrush" Value="#3B6152" />
+  </Style>
+  <Style Selector="Border.effectDot">
+    <Setter Property="Width" Value="7" />
+    <Setter Property="Height" Value="7" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Background" Value="#8BD9AE" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <!-- One chip per active effect. The value is the thing the user picked; the
+       caption underneath is what it produces, which is the part they would
+       otherwise have to work out from the aspect and the source. -->
+  <Style Selector="Border.effectChip">
+    <Setter Property="Background" Value="#101C25" />
+    <Setter Property="BorderBrush" Value="#2F5B45" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Padding" Value="11,7" />
+    <Setter Property="Margin" Value="0,0,7,7" />
+  </Style>
+  <Style Selector="TextBlock.effectChipValue">
+    <Setter Property="Foreground" Value="#EDF4FB" />
+    <Setter Property="FontSize" Value="15" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="TextBlock.effectChipCaption">
+    <Setter Property="Foreground" Value="#7E93A6" />
+    <Setter Property="FontSize" Value="10.5" />
+    <Setter Property="Margin" Value="0,2,0,0" />
+  </Style>
   <Style Selector="Border.editorInspectorActions">
     <Setter Property="Background" Value="#101820" />
     <Setter Property="BorderBrush" Value="#263743" />

@@ -53,6 +53,9 @@ public sealed class PlaybackSession : IDisposable
     private long _slowRateProgressTimestamp;
     private long _slowRateReportTimestamp;
     private long _slowRateDisplayedPictures = -1;
+    // Read beside Displayed to tell a stale stats snapshot from a real freeze -
+    // see MonitorSlowRateStall.
+    private long _slowRateDecodedPictures = -1;
     private bool _slowRateStatsWarned;
     private TimeSpan _lastRequestedPosition = TimeSpan.Zero;
     private readonly SemaphoreSlim _seekLock = new(1, 1);
@@ -60,7 +63,7 @@ public sealed class PlaybackSession : IDisposable
     private readonly PlaybackLoadGate _loadGate = new();
     private readonly object _previewLock = new();
     private readonly EditorSeekRequestQueue _previewRequests = new();
-    private readonly EditorSeekCoordinator _seekCoordinator = new();
+    private readonly EditorSeekCoordinator _seekCoordinator;
     private readonly EditorAvClockPolicy _audioClockPolicy = new();
     private Task? _previewWorker;
     private EventHandler<MediaPlayerTimeChangedEventArgs>? _audioDriftHandler;
@@ -74,6 +77,10 @@ public sealed class PlaybackSession : IDisposable
     public PlaybackSession()
     {
         global::LibVLCSharp.Shared.Core.Initialize();
+        // Not a field initializer: the coordinator has to read the LIVE clip
+        // speed on every wait, because the transport times it confirms are
+        // published on libvlc's media-clocked loop. See AttemptTimeout.
+        _seekCoordinator = new EditorSeekCoordinator(rate: () => _playbackRate);
         // Playback runs on software decode (see LoadVideo), which is enough for
         // a short clip on its own but has to share the machine with an active
         // replay buffer. When the decoder falls behind, libvlc's defaults
@@ -820,31 +827,46 @@ public sealed class PlaybackSession : IDisposable
     /// is pitch-preserving either way - ffmpeg's atempo, see
     /// ClipRenderFilters.BuildAudioSpeedFilter.
     ///
-    /// A rate change on a ROLLING transport then re-lands it at the position it
-    /// was already at, which is the one part of this that is not free. It is
-    /// there because libvlc's live rate change is measurably broken in both
-    /// directions, and three commits' worth of downstream compensation could not
-    /// hide it. Slowing down leaves the pictures already queued dated under the
-    /// old rate: the vout burns through them and then presents nothing for
-    /// 500-800ms while the pipeline refills on the new schedule (measured -
-    /// Media.Statistics.DisplayedPictures sat flat while media time advanced
-    /// perfectly linearly). Speeding up jumps libvlc's own clock forward about a
-    /// second: at a 0.25x -> 1.5x switch the audio device clock read 36.46s, the
-    /// arithmetic said 36.39s, and libvlc said 37.44s - so the A/V corrector,
-    /// which believes libvlc, yanked the audio a second forward. Re-landing
-    /// flushes the picture queue and makes libvlc re-derive its clock from a
-    /// known position, and the seek path restarts and anchors the audio there
-    /// itself, so there is nothing left for the drift corrector to chase.
+    /// SLOWING DOWN also has to flush the picture, and that is the whole reported
+    /// bug. libvlc's rate change re-anchors the input clock but does not re-date
+    /// the pictures the decoder already converted, and libvlc exposes no call
+    /// that does. About :file-caching worth of media (300ms, see LoadVideo) is
+    /// therefore sitting in the vout dated under the OLD rate: it plays out at the
+    /// old speed, and the first picture dated under the new one is not due until
+    /// caching*(1/new - 1/old) later - ~900ms at 1x->0.25x, ~300ms at 1x->0.5x.
+    /// Speeding up is the mirror image, but there the stale pictures come out
+    /// LATE rather than early and --no-drop-late-frames presents them as fast as
+    /// it can, so 1.5x/2x/4x already land instantly and are deliberately left
+    /// alone.
+    ///
+    /// A bare Time write clears it: libvlc turns that into ES_OUT_RESET_PCR ->
+    /// input_DecoderFlush -> vout_Flush, which drops the stale queue and makes the
+    /// clock re-derive from a known position. Deliberately NOT SeekAsync - that
+    /// was tried and reverted. EditorSeekCoordinator confirms a roll by waiting
+    /// for VideoPlayer.Time to advance on a fixed 500ms budget, but Time is
+    /// published on libvlc's demux loop, whose wake-ups are media-clocked, so it
+    /// arrives in ~250ms MEDIA steps - one per second of wall at 0.25x. The budget
+    /// cannot be met, and the coordinator's safe-failure stops audio and pauses
+    /// video, which is what made 0.5x unusable. With no confirmation to time out
+    /// here, the worst case degrades to the lag we already had.
+    ///
+    /// For anyone re-reading the old logs: the "Editor slow-rate picture stall"
+    /// lines that steered three rounds of this were false positives.
+    /// Media.Statistics is refreshed on that same media-clocked loop, so at 0.25x
+    /// the identical snapshot is read three or four times running. Measured on a
+    /// 60fps clip at 0.25x, DisplayedPictures advances exactly 15/s with lost=0 -
+    /// every frame, on schedule. See MonitorSlowRateStall.
     /// </remarks>
     public bool SetPlaybackRate(double rate)
     {
         var normalized = ClipRenderFilters.NormalizeSpeed(rate);
-        if (Math.Abs(_playbackRate - normalized) < 0.0001) return false;
+        var previous = _playbackRate;
+        if (Math.Abs(previous - normalized) < 0.0001) return false;
         // Read before changing rate: libvlc's clock can jump while it settles.
         var resumeAt = Position;
         var wasRolling = _shouldPlay && VideoPlayer.IsPlaying && !_isSeeking;
         _playbackRate = normalized;
-        Interlocked.Increment(ref _rateVersion);
+        var generation = Interlocked.Increment(ref _rateVersion);
         try
         {
             lock (_transportLock)
@@ -861,13 +883,56 @@ public sealed class PlaybackSession : IDisposable
         // reads again; otherwise it blends frames from two playback speeds.
         _rateStage?.SetRate(normalized);
 
-        AppLog.Debug($"Editor playback rate: requested={normalized:0.###}x, resumeAt={resumeAt.TotalSeconds:0.###}s, rolling={wasRolling}, generation={Interlocked.Read(ref _rateVersion)}.");
+        // Only a slow-down leaves a gap the user can see - see the remarks. A
+        // transport that is not rolling has nothing queued to go stale, and
+        // speeding up resolves itself.
+        var flushed = wasRolling && normalized < previous && FlushStalePictures(resumeAt, generation);
+        AppLog.Debug($"Editor playback rate: requested={normalized:0.###}x, previous={previous:0.###}x, resumeAt={resumeAt.TotalSeconds:0.###}s, rolling={wasRolling}, flushed={flushed}, generation={generation}.");
         ResetSlowRateMonitor();
-        // Never send a live rate change through the generic seek path. Its fixed
-        // 500ms roll-confirmation window expires at .25x/.5x; its safe-failure
-        // behaviour stops video and audio, which is the reported breakage.
-        ReanchorAudioClock();
+        // The flush restarts the audio at the landed position itself, so
+        // re-anchoring after it would only move the reference point again.
+        if (!flushed) ReanchorAudioClock();
         return true;
+    }
+
+    /// <summary>
+    /// Drops the pictures libvlc dated under the previous rate and restarts the
+    /// audio at the same position. False if a newer rate change superseded this
+    /// one, or if libvlc rejected the write.
+    /// </summary>
+    /// <remarks>
+    /// Nothing here waits for a confirmation, which is the point: a rate change
+    /// must not be able to leave the transport stopped. If the write does not
+    /// take, playback carries on exactly as it does without this call.
+    /// </remarks>
+    private bool FlushStalePictures(TimeSpan resumeAt, long generation)
+    {
+        if (generation != Interlocked.Read(ref _rateVersion)) return false;
+        try
+        {
+            lock (_transportLock)
+            {
+                // Re-checked inside the lock: rapid pill clicking queues these
+                // behind each other, and only the newest position is still true.
+                if (generation != Interlocked.Read(ref _rateVersion)) return false;
+                StopAudioClockMonitoring();
+                _audioOutput?.Stop();
+                ForceVideoSilent();
+                VideoPlayer.Time = (long)Math.Max(0, resumeAt.TotalMilliseconds);
+                // SeekAudio also resets the rate stage's carried frame, which is
+                // from the previous ratio and would otherwise be interpolated
+                // into the first block read at the new one.
+                SeekAudio(resumeAt);
+                StartAudioAt(resumeAt, Interlocked.Read(ref _seekVersion));
+            }
+
+            return true;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Editor rate flush failed at {resumeAt.TotalSeconds:0.###}s", error);
+            return false;
+        }
     }
 
     /// <summary>
@@ -877,14 +942,24 @@ public sealed class PlaybackSession : IDisposable
     /// <remarks>
     /// Deliberately does NOT touch the transport. It used to pause/resume to
     /// unstick the vout, which meant its own log lines could not be told apart
-    /// from the stalls that pause/resume caused - and the stall it was firing on
-    /// was a consequence of the live rate change SetPlaybackRate no longer does.
+    /// from the stalls that pause/resume caused.
     ///
-    /// It stays as an instrument. DisplayedPictures is the vout's own count of
-    /// frames it put on screen, so it goes flat exactly when the user sees a
-    /// frozen picture and never when they do not, and DecodedVideo beside it
-    /// separates a decode starvation (hardware surfaces - clips take
-    /// :avcodec-hw=any) from a vout that stopped presenting what it already has.
+    /// It stays as an instrument, but it needs both counters to be one. The
+    /// snapshot behind Media.Statistics is refreshed by libvlc's input loop,
+    /// whose wake-ups are media-clocked, so at 0.25x it is rewritten about once a
+    /// second and this 250ms sampler reads the SAME numbers three or four times
+    /// running. Reported on DisplayedPictures alone that is an unbroken run of
+    /// 500-800ms "stalls" at every slow rate - which is exactly what the logs
+    /// were full of, and what three rounds of transport surgery were aimed at.
+    /// Measured on a 60fps clip at 0.25x, DisplayedPictures advances by exactly
+    /// 15 per second with lost=0: every frame, on schedule, nothing wrong.
+    ///
+    /// So a flat Displayed only counts when DecodedVideo moved, which proves the
+    /// snapshot was rewritten at all. A real freeze still shows, because the
+    /// decoder runs ahead of the vout: Decoded keeps climbing while Displayed
+    /// sits still. That also still separates a decode starvation from a vout that
+    /// stopped presenting what it already has.
+    ///
     /// An earlier watchdog measured Position instead, which is the INPUT clock:
     /// it keeps advancing through a frozen picture, so that detector never fired
     /// once across hundreds of 0.25x switches.
@@ -922,9 +997,16 @@ public sealed class PlaybackSession : IDisposable
         if (stats.Displayed != _slowRateDisplayedPictures)
         {
             _slowRateDisplayedPictures = stats.Displayed;
+            _slowRateDecodedPictures = stats.Decoded;
             _slowRateProgressTimestamp = now;
             return;
         }
+
+        // Both counters unchanged means the snapshot was never rewritten, not
+        // that the picture stopped. Say nothing rather than time libvlc's own
+        // statistics interval and call it a stall.
+        if (stats.Decoded == _slowRateDecodedPictures) return;
+        _slowRateDecodedPictures = stats.Decoded;
 
         if (_slowRateProgressTimestamp == 0)
         {
@@ -953,6 +1035,7 @@ public sealed class PlaybackSession : IDisposable
         _slowRateProgressTimestamp = 0;
         _slowRateReportTimestamp = 0;
         _slowRateDisplayedPictures = -1;
+        _slowRateDecodedPictures = -1;
     }
 
     private VideoPictureStats? ReadVideoStats()
