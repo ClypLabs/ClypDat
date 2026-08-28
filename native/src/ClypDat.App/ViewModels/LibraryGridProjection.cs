@@ -1,6 +1,29 @@
 namespace ClypDat.App.ViewModels;
 
-public sealed record LibraryGridRow(IReadOnlyList<ClipCardViewModel> Clips, int Index);
+public sealed class LibraryGridRow : ViewModelBase
+{
+    public LibraryGridRow(IReadOnlyList<ClipCardViewModel> clips, int index)
+    {
+        Clips = clips;
+        Index = index;
+    }
+
+    public IReadOnlyList<ClipCardViewModel> Clips { get; private set; }
+    public int Index { get; private set; }
+
+    internal void Update(IReadOnlyList<ClipCardViewModel> clips, int index)
+    {
+        if (!Clips.SequenceEqual(clips))
+        {
+            Clips = clips;
+            OnPropertyChanged(nameof(Clips));
+        }
+
+        if (Index == index) return;
+        Index = index;
+        OnPropertyChanged(nameof(Index));
+    }
+}
 
 internal readonly record struct LibraryGridDateMarker(string Text, int RowIndex, int Count);
 
@@ -12,6 +35,24 @@ internal sealed record LibraryGridProjectionResult(
 
 internal static class LibraryGridProjection
 {
+    internal static void ReconcileRows(
+        IList<LibraryGridRow> currentRows,
+        IReadOnlyList<LibraryGridRow> projectedRows)
+    {
+        var sharedCount = Math.Min(currentRows.Count, projectedRows.Count);
+        for (var index = 0; index < sharedCount; index++)
+        {
+            var projected = projectedRows[index];
+            currentRows[index].Update(projected.Clips, projected.Index);
+        }
+
+        for (var index = currentRows.Count - 1; index >= projectedRows.Count; index--)
+            currentRows.RemoveAt(index);
+
+        for (var index = currentRows.Count; index < projectedRows.Count; index++)
+            currentRows.Add(projectedRows[index]);
+    }
+
     public static LibraryGridProjectionResult Build(IReadOnlyList<ClipCardViewModel> clips, int columns)
     {
         columns = Math.Max(1, columns);

@@ -4361,9 +4361,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private void RebuildLibraryProjection()
     {
         var projection = LibraryGridProjection.Build(AllClips, CardColumns);
-        LibraryProjection = projection;
-        LibraryRows.Clear();
-        foreach (var row in projection.Rows) LibraryRows.Add(row);
+        LibraryGridProjection.ReconcileRows(LibraryRows, projection.Rows);
+        LibraryProjection = projection with { Rows = LibraryRows.ToArray() };
         OnPropertyChanged(nameof(LibraryProjection));
         // The presence quotes a clip count, and it is first composed at startup
         // - before the library has loaded, when that count is still zero. This
