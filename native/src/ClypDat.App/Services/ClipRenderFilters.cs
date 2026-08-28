@@ -24,7 +24,9 @@ public static class ClipRenderFilters
     // clip's sidecar, so they are stable strings, not an enum ordinal.
     public static readonly IReadOnlyList<string> CropModes = new[] { NoCrop, "16:9", "9:16", "1:1", "4:5" };
 
-    public static readonly IReadOnlyList<double> SpeedPresets = new[] { 0.25, 0.5, 1.0, 1.5, 2.0, 4.0 };
+    // Slow exports remain valid for existing clips, but are intentionally not
+    // offered as editor controls: their preview is impractically sluggish.
+    public static readonly IReadOnlyList<double> SpeedPresets = new[] { 1.0, 1.5, 2.0, 4.0 };
 
     public static double NormalizeSpeed(double speed)
     {
@@ -112,8 +114,8 @@ public static class ClipRenderFilters
     /// Audio tempo chain, or an empty string when the clip plays at 1x.
     /// </summary>
     /// <remarks>
-    /// atempo only accepts 0.5-2.0 per instance, and the editor offers 0.25x to
-    /// 4x, so anything outside that window has to be reached by chaining
+    /// atempo only accepts 0.5-2.0 per instance. Older clips can still contain
+    /// slow speeds, so anything outside that window has to be reached by chaining
     /// instances (4x is atempo=2,atempo=2). Feeding it 4.0 directly does not
     /// clamp - ffmpeg rejects the filter and the whole export fails.
     /// </remarks>
