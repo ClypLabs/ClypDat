@@ -64,26 +64,26 @@
           </ListBox.ItemTemplate>
         </ListBox>
 
-        <Grid ColumnDefinitions="170,96,96" ColumnSpacing="12" HorizontalAlignment="Left" IsVisible="{Binding IsCustomReplayQuality}">
-          <StackPanel Spacing="3">
+        <WrapPanel HorizontalAlignment="Left" IsVisible="{Binding IsCustomReplayQuality}">
+          <StackPanel Margin="0,0,12,10" Spacing="3">
             <TextBlock Text="Resolution" Foreground="{StaticResource TextBrush}" FontSize="12" />
             <ComboBox Classes="settingsInput" Width="170" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}">
               <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Resolution}" /></DataTemplate></ComboBox.ItemTemplate>
             </ComboBox>
           </StackPanel>
-          <StackPanel Grid.Column="1" Spacing="3">
+          <StackPanel Margin="0,0,12,10" Spacing="3">
             <TextBlock Text="FPS" Foreground="{StaticResource TextBrush}" FontSize="12" />
             <ComboBox Classes="settingsInput" Width="96" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}">
               <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding StringFormat={}{0}}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=FrameRate}" /></DataTemplate></ComboBox.ItemTemplate>
             </ComboBox>
           </StackPanel>
-          <StackPanel Grid.Column="2" Spacing="3">
+          <StackPanel Margin="0,0,12,10" Spacing="3">
             <TextBlock Text="Bitrate" Foreground="{StaticResource TextBrush}" FontSize="12" />
             <ComboBox Classes="settingsInput" Width="96" ItemsSource="{Binding ReplayBitrateOptions}" SelectedItem="{Binding SelectedReplayBitrateOption}">
               <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Bitrate}" /></DataTemplate></ComboBox.ItemTemplate>
             </ComboBox>
           </StackPanel>
-        </Grid>
+        </WrapPanel>
 
         <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsCustomReplayQuality}">
           <TextBlock Classes="replayBitrateRecommendation" Text="{Binding ReplayBitrateRecommendationText}" />
@@ -109,20 +109,20 @@
           </Grid>
         </Border>
 
-        <Grid ColumnDefinitions="150,150" ColumnSpacing="12" HorizontalAlignment="Left">
-          <StackPanel Spacing="3">
+        <WrapPanel HorizontalAlignment="Left">
+          <StackPanel Margin="0,0,12,10" Spacing="3">
             <TextBlock Text="Video Encoder" Foreground="{StaticResource TextBrush}" FontSize="12" />
             <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayEncoderModes}" SelectedItem="{Binding SelectedReplayEncoderMode}">
               <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
             </ComboBox>
           </StackPanel>
-          <StackPanel Grid.Column="1" Spacing="3">
+          <StackPanel Margin="0,0,12,10" Spacing="3">
             <TextBlock Text="Codec" Foreground="{StaticResource TextBrush}" FontSize="12" />
             <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayVideoCodecs}" SelectedItem="{Binding SelectedReplayVideoCodec}" IsEnabled="{Binding !IsReplayEncoderCpu}">
               <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
             </ComboBox>
           </StackPanel>
-        </Grid>
+        </WrapPanel>
         <StackPanel Spacing="2">
           <TextBlock Text="{Binding ReplayEncoderModeStatus}" Foreground="{StaticResource TextSubtleBrush}" FontSize="10" TextWrapping="Wrap" />
           <TextBlock Text="{Binding ReplayVideoCodecStatus}" Foreground="{StaticResource TextSubtleBrush}" FontSize="10" TextWrapping="Wrap" />

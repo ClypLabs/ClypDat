@@ -173,8 +173,8 @@
             </ListBox.ItemTemplate>
           </ListBox>
 
-          <Grid ColumnDefinitions="170,96,96" ColumnSpacing="12" HorizontalAlignment="Left" IsVisible="{Binding IsCustomQuality}">
-            <StackPanel Spacing="3">
+          <WrapPanel HorizontalAlignment="Left" IsVisible="{Binding IsCustomQuality}">
+            <StackPanel Margin="0,0,12,10" Spacing="3">
               <TextBlock Text="Resolution" Foreground="{StaticResource TextBrush}" FontSize="12" />
               <ComboBox Classes="settingsInput" Width="170"
                         ItemsSource="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).ReplayResolutions}"
@@ -183,7 +183,7 @@
                 <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Resolution}" /></DataTemplate></ComboBox.ItemTemplate>
               </ComboBox>
             </StackPanel>
-            <StackPanel Grid.Column="1" Spacing="3">
+            <StackPanel Margin="0,0,12,10" Spacing="3">
               <TextBlock Text="FPS" Foreground="{StaticResource TextBrush}" FontSize="12" />
               <ComboBox Classes="settingsInput" Width="96"
                         ItemsSource="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).ReplayFrameRates}"
@@ -191,7 +191,7 @@
                 <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding StringFormat={}{0}}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=FrameRate}" /></DataTemplate></ComboBox.ItemTemplate>
               </ComboBox>
             </StackPanel>
-            <StackPanel Grid.Column="2" Spacing="3">
+            <StackPanel Margin="0,0,12,10" Spacing="3">
               <TextBlock Text="Bitrate" Foreground="{StaticResource TextBrush}" FontSize="12" />
               <ComboBox Classes="settingsInput" Width="96"
                         ItemsSource="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).ReplayBitrateOptions}"
@@ -199,10 +199,10 @@
                 <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Bitrate}" /></DataTemplate></ComboBox.ItemTemplate>
               </ComboBox>
             </StackPanel>
-          </Grid>
+          </WrapPanel>
 
-          <Grid ColumnDefinitions="170,*" ColumnSpacing="12" HorizontalAlignment="Left">
-            <StackPanel Spacing="3">
+          <WrapPanel HorizontalAlignment="Left">
+            <StackPanel Margin="0,0,12,10" Spacing="3">
               <TextBlock Text="Video codec" Foreground="{StaticResource TextBrush}" FontSize="12" />
               <ComboBox Classes="settingsInput" Width="170"
                         ItemsSource="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).ReplayVideoCodecs}"
@@ -210,7 +210,7 @@
                         SelectedValueBinding="{Binding Value}"
                         SelectedValue="{Binding ReplayVideoCodec}" />
             </StackPanel>
-            <StackPanel Grid.Column="1" Spacing="3">
+            <StackPanel Margin="0,0,12,10" Spacing="3">
               <TextBlock Text="Encoder" Foreground="{StaticResource TextBrush}" FontSize="12" />
               <ComboBox Classes="settingsInput" Width="192"
                         ItemsSource="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).ReplayEncoderModes}"
@@ -218,7 +218,7 @@
                         SelectedValueBinding="{Binding Value}"
                         SelectedValue="{Binding ReplayEncoderMode}" />
             </StackPanel>
-          </Grid>
+          </WrapPanel>
         </StackPanel>
       </Border>
 
