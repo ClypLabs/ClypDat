@@ -18,6 +18,7 @@
       <TextBlock Classes="settingsSectionTitle" Text="General" />
       <TextBlock Classes="settingsSectionDesc" Text="Startup behavior, layout, and clip filenames." />
     </StackPanel>
+    <Border Classes="settingsDivider" />
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Launch ClypDat on Windows boot|Start minimized on boot|Process priority|Automatically Focus ClypDat|Game exit|Startup'}">
       <StackPanel Spacing="18">

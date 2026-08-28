@@ -23,6 +23,7 @@
                    Foreground="{StaticResource CautionBrush}" FontSize="11" FontWeight="Bold" TextWrapping="Wrap" />
       </Grid>
     </StackPanel>
+    <Border Classes="settingsDivider" />
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Auto Capture Events}">
       <StackPanel Spacing="14">

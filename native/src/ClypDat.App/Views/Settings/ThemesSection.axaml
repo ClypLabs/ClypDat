@@ -17,6 +17,7 @@
       <TextBlock Classes="settingsSectionTitle" Text="Themes" />
       <TextBlock Classes="settingsSectionDesc" Text="Choose ClypDat's colours across the app. Text colours stay unchanged for readability." />
     </StackPanel>
+    <Border Classes="settingsDivider" />
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Themes|System|ClypDat Blue|Violet|Emerald|Rose|Amber'}">
       <StackPanel Spacing="14">

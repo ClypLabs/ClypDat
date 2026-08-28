@@ -16,6 +16,7 @@
         <TextBlock Classes="settingsSectionTitle" Text="Import Clips" />
         <TextBlock Classes="settingsSectionDesc" Text="Choose where your clips come from." />
       </StackPanel>
+      <Border Classes="settingsDivider" />
       <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
         <Border Classes="settingsCard" Padding="16">
           <StackPanel Spacing="10">

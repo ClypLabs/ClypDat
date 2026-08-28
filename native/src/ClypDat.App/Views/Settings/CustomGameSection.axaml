@@ -26,6 +26,7 @@
       <TextBlock Classes="settingsSectionDesc" Text="Record specific games differently - quality, replay length, audio or full-session recording. Anything you do not override here keeps using your normal settings."
                  />
     </StackPanel>
+    <Border Classes="settingsDivider" />
 
     <!-- Add Game. One row, no title band or divider: it is a single
          control and every pixel it takes is a pixel of the game's

@@ -18,6 +18,7 @@
       <TextBlock Classes="settingsSectionTitle" Text="Recording Audio" />
               <TextBlock Classes="settingsSectionDesc" Text="Choose the Windows mixer apps to capture. Every enabled app is saved as its own editable track." />
     </StackPanel>
+    <Border Classes="settingsDivider" />
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording Audio|Audio Tracks}">
       <StackPanel Spacing="18">
