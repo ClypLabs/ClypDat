@@ -48,38 +48,6 @@
       </StackPanel>
     </Border>
 
-    <!-- Below the identity card, not above it: this section is about
-         the build first, and a feature toggle should not be the
-         first thing between the heading and the app's own name. -->
-    <Border Classes="settingsCard">
-      <StackPanel Spacing="14">
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-          <StackPanel Spacing="2" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowTitle" Text="Discord Rich Presence"
-                       opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <TextBlock Classes="settingsRowDescSm" Text="Shows what you are recording, editing or browsing on your Discord profile. Anyone who can see your profile can see the game name."
-                       />
-          </StackPanel>
-          <ToggleSwitch Grid.Column="1" VerticalAlignment="Center"
-                        IsChecked="{Binding DiscordRichPresenceEnabled}"
-                        OnContent="{x:Null}" OffContent="{x:Null}" />
-        </Grid>
-        <Border Height="1" Background="{StaticResource SurfaceHoverBrush}" />
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-          <StackPanel Spacing="2" VerticalAlignment="Center">
-            <TextBlock Text="Show “Get ClypDat” Link" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="14"
-                       opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <TextBlock Classes="settingsRowDescSm" Text="Adds a clypdat.xyz button to your Rich Presence for people viewing your profile."
-                       />
-          </StackPanel>
-          <ToggleSwitch Grid.Column="1" VerticalAlignment="Center"
-                        IsChecked="{Binding DiscordRichPresenceShowGetClypDatButton}"
-                        IsEnabled="{Binding DiscordRichPresenceEnabled}"
-                        OnContent="{x:Null}" OffContent="{x:Null}" />
-        </Grid>
-      </StackPanel>
-    </Border>
-
     <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Check for updates|Install updates while loading|Updates}">
       <StackPanel Spacing="16">
         <TextBlock Classes="settingsCardLabel" Text="UPDATES" />

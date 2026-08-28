@@ -79,11 +79,19 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
             "Per-game settings", "Per game", "Custom game", "Game overrides", "Override",
             "Add Game", "Add Setting", "Recording Quality", "Replay Length", "Full Session"
         },
+        ["Themes"] = new[]
+        {
+            "Theme", "Preset themes", "System", "ClypDat Blue", "Violet", "Emerald", "Rose", "Amber",
+            "Custom themes", "Custom colours"
+        },
+        ["Discord Rich Presence"] = new[]
+        {
+            "Discord", "Rich Presence", "Discord Rich Presence", "Get ClypDat", "Profile link"
+        },
         ["About"] = new[]
         {
             "Updates", "Check for updates", "Source and Licenses", "View on GitHub", "Diagnostics",
             "Log folder", "Get Started", "Setup walkthrough", "License",
-            "Discord", "Rich Presence", "Discord Rich Presence", "Get ClypDat", "Profile link"
         },
     };
 

@@ -8,7 +8,7 @@
         SystemDecorations="None"
         WindowStartupLocation="CenterScreen"
         Topmost="True"
-        Background="#0B1016"
+        Background="{StaticResource AppBgBrush}"
         Title="ClypDat">
 
   <!-- Opaque on purpose: per-pixel transparency means the layered/ANGLE path,
@@ -16,7 +16,7 @@
        soft corners come from DWM rounding the composited frame instead (see
        StartupWindowPresentation.TryRoundCorners), which costs nothing and is
        what every other Windows 11 window uses. -->
-  <Border BorderBrush="#1C2836" BorderThickness="1" CornerRadius="8">
+  <Border BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="8">
     <Grid RowDefinitions="*,Auto">
 
       <StackPanel Grid.Row="0" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="14" Margin="0,14,0,0">
@@ -30,7 +30,7 @@
 
       <StackPanel Grid.Row="1" Margin="24,0,24,22" Spacing="8">
         <ProgressBar x:Name="Bar" Height="4" Minimum="0" Maximum="1" IsVisible="False"
-                     Background="#16202C" Foreground="#4C8DE0" CornerRadius="2" />
+                     Background="{StaticResource SurfaceRaisedBrush}" Foreground="{StaticResource AccentBrush}" CornerRadius="2" />
         <Grid ColumnDefinitions="*,Auto">
           <TextBlock x:Name="VersionText" Text="" Foreground="#5C6B7C" FontSize="10"
                      VerticalAlignment="Center" />
@@ -39,7 +39,7 @@
                usual dialog after launch. -->
           <Button x:Name="SkipButton" Grid.Column="1" Content="Not now"
                   IsVisible="False" Padding="10,3" FontSize="11"
-                  Background="#16202C" Foreground="#9FB2C6" BorderBrush="#26333F" BorderThickness="1"
+                  Background="{StaticResource SurfaceRaisedBrush}" Foreground="#9FB2C6" BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1"
                   CornerRadius="4" Click="SkipButton_OnClick" />
         </Grid>
       </StackPanel>

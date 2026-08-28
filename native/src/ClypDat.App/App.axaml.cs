@@ -19,6 +19,8 @@ public sealed partial class App : Application
     private Stream? _trayIconStream;
     private ServerTrayMenuRenderer? _serverTrayMenuRenderer;
     private int _installerShutdownRequested;
+    private Color _systemAccent = Color.FromRgb(0x58, 0x64, 0xE8);
+    private string _themePreset = "System";
 
     public override void Initialize()
     {
@@ -70,9 +72,12 @@ public sealed partial class App : Application
             // The loader is also the startup update check. Autostart still
             // finishes in the tray, but it must not skip that work entirely.
             var useSplash = !UiPreviewMode.Enabled;
+            InitializeAccentColor();
+            var viewModel = new MainWindowViewModel();
+            ApplyTheme(viewModel.Settings.ThemePreset);
             _mainWindow = new MainWindow
             {
-                DataContext = new MainWindowViewModel(),
+                DataContext = viewModel,
                 WindowState = WindowState.Normal,
                 ShowInTaskbar = !minimized
             };
@@ -96,7 +101,6 @@ public sealed partial class App : Application
                 }
                 _mainWindow.Opened += HideOnFirstOpen;
             }
-            InitializeAccentColor();
         }
 
         base.OnFrameworkInitializationCompleted();
@@ -213,13 +217,24 @@ public sealed partial class App : Application
             var settings = PlatformSettings;
             if (settings is null) return;
 
-            ApplyAccentColor(settings.GetColorValues().AccentColor1);
-            settings.ColorValuesChanged += (_, values) => ApplyAccentColor(values.AccentColor1);
+            _systemAccent = settings.GetColorValues().AccentColor1;
+            ApplyTheme(_themePreset);
+            settings.ColorValuesChanged += (_, values) =>
+            {
+                _systemAccent = values.AccentColor1;
+                if (AppThemeService.UsesSystemAccent(_themePreset)) ApplyTheme(_themePreset);
+            };
         }
         catch (Exception error)
         {
             AppLog.Error("Accent color unavailable, using default", error);
         }
+    }
+
+    internal void ApplyTheme(string preset)
+    {
+        _themePreset = AppThemeService.Normalize(preset);
+        AppThemeService.Apply(this, _themePreset, _systemAccent);
     }
 
     private void ApplyAccentColor(Color accent)

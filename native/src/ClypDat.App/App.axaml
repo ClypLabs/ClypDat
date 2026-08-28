@@ -21,6 +21,16 @@
       <!-- Hovering a rail button uses a darker version of its selection tint,
            keeping selected state visually stronger than pointer-over state. -->
       <SolidColorBrush x:Key="AccentHoverBrush" Color="#222A43" />
+      <!-- These duplicate merged token defaults intentionally. Theme
+           selection mutates application-local brushes in place. -->
+      <SolidColorBrush x:Key="AppBgBrush" Color="#0D1116" />
+      <SolidColorBrush x:Key="PanelBgBrush" Color="#101820" />
+      <SolidColorBrush x:Key="SurfaceBrush" Color="#141D24" />
+      <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="#1A242E" />
+      <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#22303D" />
+      <SolidColorBrush x:Key="EdgeBrush" Color="#232F3A" />
+      <SolidColorBrush x:Key="EdgeStrongBrush" Color="#2C3B48" />
+      <SolidColorBrush x:Key="DividerBrush" Color="#1B242D" />
     </ResourceDictionary>
   </Application.Resources>
   <Application.Styles>

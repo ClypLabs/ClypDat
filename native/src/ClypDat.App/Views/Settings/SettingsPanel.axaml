@@ -9,8 +9,8 @@
   <Border Background="{StaticResource PanelBgBrush}">
     <Grid ColumnDefinitions="240,*,Auto" RowDefinitions="Auto,*">
       <Border Grid.Column="0" Grid.RowSpan="2" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="0,0,1,0">
-        <StackPanel Margin="0,18,16,24" Spacing="2">
-          <TextBox x:Name="SettingsSearchBox" Classes="settingsInput appSearchBox" Text="{Binding SettingsSearchText}" PlaceholderText="Search settings" Margin="14,0,0,14" VerticalContentAlignment="Center">
+        <Grid RowDefinitions="Auto,*">
+          <TextBox Grid.Row="0" x:Name="SettingsSearchBox" Classes="settingsInput appSearchBox" Text="{Binding SettingsSearchText}" PlaceholderText="Search settings" Margin="14,0,0,14" VerticalContentAlignment="Center">
             <TextBox.InnerLeftContent>
               <Canvas Width="16" Height="16" Margin="10,0,2,0" VerticalAlignment="Center">
                 <Ellipse Canvas.Left="0" Canvas.Top="0" Width="11" Height="11" Stroke="{StaticResource TextMutedBrush}" StrokeThickness="1.6" />
@@ -28,22 +28,30 @@
               </Button>
             </TextBox.InnerRightContent>
           </TextBox>
+          <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+          <StackPanel Margin="0,0,16,24" Spacing="2">
           <TextBlock Classes="settingsSectionLabel" Text="GENERAL" Margin="22,0,0,14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter='General|Game Detection|Import Clips'}" />
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=General}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=General}" Tag="General" Content="General" Click="SettingsNavButton_OnClick" />
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Detection}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Game Detection}" Tag="Game Detection" Content="Game Detection" Click="SettingsNavButton_OnClick" />
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Import Clips}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Import Clips}" Tag="Import Clips" Content="Import Clips" Click="SettingsNavButton_OnClick" />
 
-          <TextBlock Classes="settingsSectionLabel" Text="CAPTURE" Margin="22,20,0,14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter='Replay Buffer|Custom Game Settings|Overlays and Notifications|Auto-Clip|Audio|Game Audio Exclusions'}" />
+          <TextBlock Classes="settingsSectionLabel" Text="CAPTURE" Margin="22,20,0,14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter='Replay Buffer|Custom Game Settings|Auto-Clip|Audio|Game Audio Exclusions'}" />
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Replay Buffer}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Replay Buffer}" Tag="Replay Buffer" Content="Replay Buffer" Click="SettingsNavButton_OnClick" />
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Custom Game Settings}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Custom Game Settings}" Tag="Custom Game Settings" Content="Custom Game Settings" Click="SettingsNavButton_OnClick" />
-          <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Overlays and Notifications}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Overlays and Notifications}" Tag="Overlays and Notifications" Content="Overlays and Notifications" Click="SettingsNavButton_OnClick" />
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Auto-Clip}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Auto-Clip}" Tag="Auto-Clip" Content="Auto-Clipping" Click="SettingsNavButton_OnClick" />
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Audio}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Audio}" Tag="Audio" Content="Audio" Click="SettingsNavButton_OnClick" />
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Audio Exclusions}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Game Audio Exclusions}" Tag="Game Audio Exclusions" Content="Game Audio Exclusions" Click="SettingsNavButton_OnClick" />
 
+          <TextBlock Classes="settingsSectionLabel" Text="PERSONALIZATION" Margin="22,20,0,14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter='Themes|Overlays and Notifications|Discord Rich Presence'}" />
+          <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Themes}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Themes}" Tag="Themes" Content="Themes" Click="SettingsNavButton_OnClick" />
+          <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Overlays and Notifications}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Overlays and Notifications}" Tag="Overlays and Notifications" Content="Overlays and Notifications" Click="SettingsNavButton_OnClick" />
+          <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Discord Rich Presence}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Discord Rich Presence}" Tag="Discord Rich Presence" Content="Discord Rich Presence" Click="SettingsNavButton_OnClick" />
+
           <TextBlock Classes="settingsSectionLabel" Text="ABOUT" Margin="22,20,0,14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=About}" />
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=About}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=About}" Tag="About" Content="About" Click="SettingsNavButton_OnClick" />
-        </StackPanel>
+          </StackPanel>
+          </ScrollViewer>
+        </Grid>
       </Border>
 
       <!-- Reserved outside SettingsScrollViewer: warning remains fixed at
@@ -95,6 +103,8 @@
 
           <settings:ReplayBufferSection />
           <settings:OverlaysSection />
+          <settings:ThemesSection />
+          <settings:DiscordRichPresenceSection />
           <settings:GeneralSection />
           <settings:GameDetectionSection />
           <settings:ImportClipsSection />

@@ -1,0 +1,40 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ClypDat.App.ViewModels"
+             xmlns:opconv="using:ClypDat.App.Converters"
+             x:Class="ClypDat.App.Views.Settings.DiscordRichPresenceSection"
+             x:DataType="vm:MainWindowViewModel">
+  <UserControl.IsVisible>
+    <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Discord Rich Presence">
+      <Binding Path="SettingsSearchText" />
+      <Binding Path="SelectedSettingsSection" />
+    </MultiBinding>
+  </UserControl.IsVisible>
+  <StackPanel Spacing="22" Tag="Discord Rich Presence">
+    <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
+    <StackPanel Spacing="4">
+      <TextBlock Classes="settingsSectionTitle" Text="Discord Rich Presence" />
+      <TextBlock Classes="settingsSectionDesc" Text="Control what ClypDat shares on your Discord profile." />
+    </StackPanel>
+    <Border Classes="settingsCard">
+      <StackPanel Spacing="14">
+        <TextBlock Classes="settingsCardLabel" Text="DISCORD" />
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+          <StackPanel Spacing="2" VerticalAlignment="Center">
+            <TextBlock Classes="settingsRowTitle" Text="Discord Rich Presence" />
+            <TextBlock Classes="settingsRowDescSm" Text="Shows what you are recording, editing or browsing. Anyone who can see your profile can see the game name." />
+          </StackPanel>
+          <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding DiscordRichPresenceEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" />
+        </Grid>
+        <Border Classes="settingsDivider" />
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+          <StackPanel Spacing="2" VerticalAlignment="Center">
+            <TextBlock Classes="settingsRowTitle" Text="Show “Get ClypDat” Link" />
+            <TextBlock Classes="settingsRowDescSm" Text="Adds a clypdat.xyz button for people viewing your Rich Presence." />
+          </StackPanel>
+          <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding DiscordRichPresenceShowGetClypDatButton}" IsEnabled="{Binding DiscordRichPresenceEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" />
+        </Grid>
+      </StackPanel>
+    </Border>
+  </StackPanel>
+</UserControl>

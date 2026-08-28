@@ -1,0 +1,56 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ClypDat.App.ViewModels"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             xmlns:opconv="using:ClypDat.App.Converters"
+             x:Class="ClypDat.App.Views.Settings.ThemesSection"
+             x:DataType="vm:MainWindowViewModel">
+  <UserControl.IsVisible>
+    <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Themes">
+      <Binding Path="SettingsSearchText" />
+      <Binding Path="SelectedSettingsSection" />
+    </MultiBinding>
+  </UserControl.IsVisible>
+  <StackPanel Spacing="22" Tag="Themes">
+    <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
+    <StackPanel Spacing="4">
+      <TextBlock Classes="settingsSectionTitle" Text="Themes" />
+      <TextBlock Classes="settingsSectionDesc" Text="Choose ClypDat's colours across the app. Text colours stay unchanged for readability." />
+    </StackPanel>
+
+    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Themes|System|ClypDat Blue|Violet|Emerald|Rose|Amber'}">
+      <StackPanel Spacing="14">
+        <TextBlock Classes="settingsCardLabel" Text="PRESET THEMES" />
+        <ListBox Classes="themePresetGrid" SelectionMode="Single" ItemsSource="{Binding ThemeOptions}"
+                 SelectedValue="{Binding SelectedThemePreset}" SelectedValueBinding="{Binding Id}">
+          <ListBox.ItemsPanel>
+            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+          </ListBox.ItemsPanel>
+          <ListBox.ItemTemplate>
+            <DataTemplate>
+              <Border Width="164" Height="88" CornerRadius="8" Background="{Binding AppBackgroundBrush}" BorderBrush="{Binding SurfaceBrush}" BorderThickness="1" Padding="11" Margin="0,0,10,10">
+                <Grid RowDefinitions="*,Auto">
+                  <Border Background="{Binding SurfaceBrush}" CornerRadius="5" />
+                  <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="0,9,0,0">
+                    <TextBlock Text="{Binding Label}" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center" />
+                    <Border Grid.Column="1" Width="18" Height="18" CornerRadius="9" Background="{Binding AccentBrush}" />
+                  </Grid>
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </StackPanel>
+    </Border>
+
+    <Border Classes="settingsCard" Opacity="0.55" IsHitTestVisible="False" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Custom Themes|Custom colours'}">
+      <StackPanel Spacing="5">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Classes="settingsCardLabel" Text="CUSTOM THEMES" VerticalAlignment="Center" />
+          <Border Grid.Column="1" Classes="comingSoonTag"><TextBlock Text="SOON" /></Border>
+        </Grid>
+        <TextBlock Classes="settingsRowDesc" Text="Choose your own colours for every part of ClypDat." />
+      </StackPanel>
+    </Border>
+  </StackPanel>
+</UserControl>

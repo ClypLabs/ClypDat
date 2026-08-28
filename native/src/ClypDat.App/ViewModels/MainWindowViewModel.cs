@@ -203,6 +203,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public MainWindowViewModel()
     {
         Settings = AppSettingsStore.Load();
+        Settings.ThemePreset = AppThemeService.Normalize(Settings.ThemePreset);
         Settings.ProcessPriority = ProcessPriorityService.Normalize(Settings.ProcessPriority);
         if (Settings.LastSettingsSection is "Import from Medal" or "Import from SteelSeries")
         {
@@ -405,6 +406,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public AppSettings Settings { get; }
+    public IReadOnlyList<ThemeOption> ThemeOptions => AppThemeService.Options;
+
+    public string SelectedThemePreset
+    {
+        get => Settings.ThemePreset;
+        set
+        {
+            var preset = AppThemeService.Normalize(value);
+            if (string.Equals(Settings.ThemePreset, preset, StringComparison.OrdinalIgnoreCase)) return;
+            Settings.ThemePreset = preset;
+            SaveSettings();
+            (Application.Current as ClypDat.App.App)?.ApplyTheme(preset);
+            OnPropertyChanged();
+        }
+    }
     public string StartupRegistrationError
     {
         get => _startupRegistrationError;
@@ -8382,7 +8398,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private static readonly string[] SettingsSectionNames =
     {
         "General", "Game Detection", "Import Clips",
-        "Replay Buffer", "Custom Game Settings", "Overlays and Notifications", "Auto-Clip", "Audio", "Game Audio Exclusions",
+        "Replay Buffer", "Custom Game Settings", "Auto-Clip", "Audio", "Game Audio Exclusions",
+        "Themes", "Overlays and Notifications", "Discord Rich Presence",
         "About"
     };
 
