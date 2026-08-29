@@ -36,9 +36,7 @@ Video playback uses LibVLC. Audio playback uses a separate NAudio/WASAPI pipelin
 
 ## Import existing clips
 
-Import Medal clips from **Settings > Import from Medal**. ClypDat reads Medal's local catalog, then scans Medal's default clips folder if that catalog is missing or unreadable. You can copy or move the clips into the ClypDat library.
-
-SteelSeries Moments clips can also be imported. ClypDat reads the Moments catalog when present, then scans its capture folder as a fallback.
+Import clips from other popular clipping applications through **Settings > Import Clips**. ClypDat reads supported local catalogs, then scans default capture folders when a catalog is missing or unreadable. You can copy or move the clips into the ClypDat library.
 
 ## Requirements
 
