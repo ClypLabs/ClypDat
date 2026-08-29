@@ -274,27 +274,7 @@ internal static class DiscordRichPresenceService
 
     private static async Task SendActivityAsync(NamedPipeClientStream pipe, DiscordPresence presence, CancellationToken cancellationToken)
     {
-        object? activity = presence.IsEmpty
-            // Clearing the status is a SET_ACTIVITY with no activity at all,
-            // not an activity with empty strings - Discord renders the latter
-            // as a blank card rather than removing it.
-            ? null
-            : new
-            {
-                type = 0,
-                // Discord otherwise uses the registered application name
-                // ("ClypDat") in compact member/friend-list status text.
-                status_display_type = 2,
-                details = Trim(presence.Details),
-                state = Trim(presence.State),
-                timestamps = presence.StartedUtc is { } started
-                    ? new { start = new DateTimeOffset(DateTime.SpecifyKind(started, DateTimeKind.Utc)).ToUnixTimeSeconds() }
-                    : null,
-                assets = new { large_image = "clypdat", large_text = "ClypDat" },
-                buttons = _showGetClypDatButton
-                    ? new[] { new { label = ButtonLabel, url = ButtonUrl } }
-                    : null
-            };
+        var activity = CreateActivity(presence, _showGetClypDatButton);
 
         var payload = JsonSerializer.Serialize(new
         {
@@ -304,6 +284,34 @@ internal static class DiscordRichPresenceService
         });
 
         await WriteFrameAsync(pipe, Opcode.Frame, payload, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static object? CreateActivity(DiscordPresence presence, bool showGetClypDatButton)
+    {
+        // Clearing the status requires an explicit null activity.
+        if (!presence.IsEmpty)
+        {
+            var fields = new Dictionary<string, object?>
+            {
+                ["type"] = 0,
+                // Discord otherwise uses the registered application name
+                // ("ClypDat") in compact member/friend-list status text.
+                ["status_display_type"] = 2,
+                ["timestamps"] = presence.StartedUtc is { } started
+                    ? new { start = new DateTimeOffset(DateTime.SpecifyKind(started, DateTimeKind.Utc)).ToUnixTimeSeconds() }
+                    : null,
+                ["assets"] = new { large_image = "clypdat", large_text = "ClypDat" },
+                ["buttons"] = showGetClypDatButton
+                    ? new[] { new { label = ButtonLabel, url = ButtonUrl } }
+                    : null
+            };
+
+            if (Trim(presence.Details) is { } details) fields["details"] = details;
+            if (Trim(presence.State) is { } state) fields["state"] = state;
+            return fields;
+        }
+
+        return null;
     }
 
     // Discord rejects a details or state string longer than 128 bytes, and
