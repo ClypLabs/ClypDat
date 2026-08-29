@@ -281,6 +281,11 @@ internal static class DiscordRichPresenceService
             ? null
             : new
             {
+                type = 0,
+                // Discord otherwise uses the registered application name
+                // ("ClypDat") in compact member/friend-list status text.
+                // Details keeps the live game/recording description visible.
+                status_display_type = 2,
                 details = Trim(presence.Details),
                 state = Trim(presence.State),
                 timestamps = presence.StartedUtc is { } started

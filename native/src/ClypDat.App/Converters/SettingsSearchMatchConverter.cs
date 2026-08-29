@@ -87,6 +87,10 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
             "Light Emerald", "Light Rose", "Light Amber",
             "Custom themes", "Custom colours"
         },
+        ["Fonts"] = new[]
+        {
+            "Font", "Font family", "Typeface", "Typography", "Text style", "Default font", "Installed font"
+        },
         ["Discord Rich Presence"] = new[]
         {
             "Discord", "Rich Presence", "Discord Rich Presence", "Get ClypDat", "Profile link"

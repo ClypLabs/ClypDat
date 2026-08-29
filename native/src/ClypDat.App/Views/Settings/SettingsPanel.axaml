@@ -42,8 +42,9 @@
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Audio}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Audio}" Tag="Audio" Content="Audio" Click="SettingsNavButton_OnClick" />
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Audio Exclusions}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Game Audio Exclusions}" Tag="Game Audio Exclusions" Content="Game Audio Exclusions" Click="SettingsNavButton_OnClick" />
 
-          <TextBlock Classes="settingsSectionLabel" Text="PERSONALIZATION" Margin="22,20,0,14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter='Themes|Overlays and Notifications|Discord Rich Presence'}" />
+          <TextBlock Classes="settingsSectionLabel" Text="PERSONALIZATION" Margin="22,20,0,14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter='Themes|Fonts|Overlays and Notifications|Discord Rich Presence'}" />
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Themes}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Themes}" Tag="Themes" Content="Themes" Click="SettingsNavButton_OnClick" />
+          <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Fonts}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Fonts}" Tag="Fonts" Content="Fonts" Click="SettingsNavButton_OnClick" />
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Overlays and Notifications}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Overlays and Notifications}" Tag="Overlays and Notifications" Content="Overlays and Notifications" Click="SettingsNavButton_OnClick" />
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Discord Rich Presence}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Discord Rich Presence}" Tag="Discord Rich Presence" Content="Discord Rich Presence" Click="SettingsNavButton_OnClick" />
 
@@ -104,6 +105,7 @@
           <settings:ReplayBufferSection />
           <settings:OverlaysSection />
           <settings:ThemesSection />
+          <settings:FontsSection />
           <settings:DiscordRichPresenceSection />
           <settings:GeneralSection />
           <settings:GameDetectionSection />

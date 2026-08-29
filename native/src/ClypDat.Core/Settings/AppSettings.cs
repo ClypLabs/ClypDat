@@ -25,6 +25,9 @@ public sealed class AppSettings
     // consistent with the rest of the desktop. Turned off, each preset uses its
     // own accent instead ("System" falls back to ClypDat's indigo).
     public bool UseSystemAccent { get; set; } = true;
+    // Inter is bundled with ClypDat, so the default remains available even
+    // when the user has no matching system font installed.
+    public string FontFamilyName { get; set; } = "Inter";
     // 0 = no limit, same convention as FullSessionQuotaGb. A soft target the
     // sidebar's storage ring fills against and warns past - nothing deletes
     // clips to enforce it.

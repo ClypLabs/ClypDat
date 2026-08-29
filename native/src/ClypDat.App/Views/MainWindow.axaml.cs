@@ -64,6 +64,10 @@ public sealed partial class MainWindow : Window
     // after the trim point" lands well clear of this.
     private static readonly TimeSpan TrimBoundaryTolerance = TimeSpan.FromMilliseconds(80);
     private bool _timelineWasPlayingBeforeDrag;
+    private const double TimelineMinimumZoom = 1;
+    private const double TimelineMaximumZoom = 8;
+    private const double TimelineZoomStep = 1.25;
+    private double _timelineZoom = TimelineMinimumZoom;
     private readonly Stopwatch _playheadClock = new();
     private TimeSpan _playheadBaseTime = TimeSpan.Zero;
     // Live-previews the actual video frame while dragging the playhead instead
@@ -257,6 +261,7 @@ public sealed partial class MainWindow : Window
         UpdateViewNavButtons();
         LibraryScrollViewer.ScrollChanged += LibraryScrollViewer_OnScrollChanged;
         LibraryScrollViewer.AddHandler(PointerWheelChangedEvent, LibraryScrollViewer_OnPointerWheelChanged, RoutingStrategies.Tunnel, true);
+        TimelineScrollViewer.AddHandler(PointerWheelChangedEvent, TimelineScrollViewer_OnPointerWheelChanged, RoutingStrategies.Tunnel, true);
         // Card visibility flips (filtering) and hydration both change the
         // scroll extent without a size change on this window, so the marker
         // positions have to be recomputed off layout rather than only off
@@ -371,6 +376,7 @@ public sealed partial class MainWindow : Window
                         ) ScheduleReplayRestart();
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
+                    if (e.PropertyName == nameof(MainWindowViewModel.SelectedVideoPath)) ResetTimelineZoom();
                     if (e.PropertyName == nameof(MainWindowViewModel.IsSettingsVisible) && ViewModel.IsSettingsVisible) PauseEditorPlayback();
                     if (e.PropertyName == nameof(MainWindowViewModel.EnableClipHoverPreview) && !ViewModel.EnableClipHoverPreview) _clipHoverPreview.Stop("setting disabled");
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible) or nameof(MainWindowViewModel.IsEditorVisible))
@@ -4061,6 +4067,63 @@ public sealed partial class MainWindow : Window
     private void TimelineSurface_OnSizeChanged(object? sender, SizeChangedEventArgs e)
     {
         UpdateTimelineChrome();
+    }
+
+    private void TimelineViewport_OnSizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        UpdateTimelineContentWidth();
+        UpdateTimelineChrome();
+    }
+
+    private void TimelineScrollViewer_OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
+    {
+        if (!e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.Delta.Y == 0) return;
+
+        var viewportWidth = TimelineViewportWidth();
+        if (viewportWidth <= 0) return;
+
+        var oldWidth = Math.Max(viewportWidth, TimelineContent.Bounds.Width);
+        var pointerX = Math.Clamp(e.GetPosition(TimelineScrollViewer).X, 0, viewportWidth);
+        var contentFraction = Math.Clamp((TimelineScrollViewer.Offset.X + pointerX) / oldWidth, 0, 1);
+        var factor = e.Delta.Y > 0 ? TimelineZoomStep : 1 / TimelineZoomStep;
+        var zoom = Math.Clamp(_timelineZoom * factor, TimelineMinimumZoom, TimelineMaximumZoom);
+        if (Math.Abs(zoom - _timelineZoom) < 0.001)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        _timelineZoom = zoom;
+        var newWidth = UpdateTimelineContentWidth();
+        UpdateTimelineChrome();
+        var targetOffset = Math.Clamp(contentFraction * newWidth - pointerX, 0, Math.Max(0, newWidth - viewportWidth));
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (Math.Abs(_timelineZoom - zoom) < 0.001)
+                TimelineScrollViewer.Offset = new Vector(targetOffset, 0);
+        }, DispatcherPriority.Loaded);
+        e.Handled = true;
+    }
+
+    private double TimelineViewportWidth()
+    {
+        var width = TimelineScrollViewer.Viewport.Width;
+        if (!double.IsFinite(width) || width <= 0) width = TimelineScrollViewer.Bounds.Width;
+        return double.IsFinite(width) ? Math.Max(0, width) : 0;
+    }
+
+    private double UpdateTimelineContentWidth()
+    {
+        var width = TimelineViewportWidth() * _timelineZoom;
+        if (width > 0) TimelineContent.Width = width;
+        return Math.Max(1, width);
+    }
+
+    private void ResetTimelineZoom()
+    {
+        _timelineZoom = TimelineMinimumZoom;
+        UpdateTimelineContentWidth();
+        TimelineScrollViewer.Offset = default;
     }
 
     private async void ClipCard_OnPointerPressed(object? sender, PointerPressedEventArgs e)
@@ -9903,6 +9966,23 @@ public sealed partial class MainWindow : Window
         Canvas.SetTop(TimelinePlayhead, -8);
         Canvas.SetLeft(PlayheadCap, playheadCenter - 8);
         Canvas.SetTop(PlayheadCap, -12);
+        KeepTimelinePlayheadVisible(playheadCenter);
+    }
+
+    private void KeepTimelinePlayheadVisible(double playheadCenter)
+    {
+        if (_timelineZoom <= TimelineMinimumZoom) return;
+        var viewportWidth = TimelineViewportWidth();
+        if (viewportWidth <= 0) return;
+
+        var offset = TimelineScrollViewer.Offset.X;
+        var padding = Math.Min(80, viewportWidth * 0.15);
+        var target = offset;
+        if (playheadCenter < offset + padding) target = playheadCenter - padding;
+        else if (playheadCenter > offset + viewportWidth - padding) target = playheadCenter - viewportWidth + padding;
+        target = Math.Clamp(target, 0, Math.Max(0, TimelineContent.Bounds.Width - viewportWidth));
+        if (Math.Abs(target - offset) > 0.5)
+            TimelineScrollViewer.Offset = new Vector(target, TimelineScrollViewer.Offset.Y);
     }
 
     private void StartPlayheadClock(TimeSpan time)

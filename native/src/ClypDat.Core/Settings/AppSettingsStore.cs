@@ -47,6 +47,7 @@ public static class AppSettingsStore
             settings.GameRailFolders ??= new List<GameRailFolder>();
             settings.GameRailOrder ??= new List<string>();
             settings.GameAudioExcludedProcesses ??= new List<string>();
+            if (string.IsNullOrWhiteSpace(settings.FontFamilyName)) settings.FontFamilyName = "Inter";
             if (string.IsNullOrWhiteSpace(settings.ClipFileNameScheme)) settings.ClipFileNameScheme = "Standard";
             if (string.IsNullOrWhiteSpace(settings.CustomClipFileNameTemplate)) settings.CustomClipFileNameTemplate = "{datetime:yyyy-MM-dd HH-mm-ss} - {title}";
             if (!settings.ReplayH264DefaultApplied)

@@ -1,0 +1,39 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ClypDat.App.ViewModels"
+             xmlns:opconv="using:ClypDat.App.Converters"
+             x:Class="ClypDat.App.Views.Settings.FontsSection"
+             x:DataType="vm:MainWindowViewModel">
+  <UserControl.IsVisible>
+    <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Fonts">
+      <Binding Path="SettingsSearchText" />
+      <Binding Path="SelectedSettingsSection" />
+    </MultiBinding>
+  </UserControl.IsVisible>
+  <StackPanel Spacing="18" Tag="Fonts">
+    <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
+    <StackPanel Spacing="4">
+      <TextBlock Classes="settingsSectionTitle" Text="Fonts" />
+      <TextBlock Classes="settingsSectionDesc" Text="Change the default font used throughout ClypDat." />
+      <Border Classes="settingsDivider" Margin="0,14,0,0" />
+    </StackPanel>
+
+    <Border Classes="settingsCard">
+      <StackPanel Spacing="14">
+        <TextBlock Classes="settingsCardLabel" Text="APP FONT" />
+        <Grid ColumnDefinitions="*,300" ColumnSpacing="24">
+          <StackPanel Spacing="3" VerticalAlignment="Center">
+            <TextBlock Classes="settingsRowTitle" Text="Font family name" />
+            <TextBlock Classes="settingsRowDesc" Text="Type the exact name of an installed font. Inter restores ClypDat's default." />
+          </StackPanel>
+          <TextBox Grid.Column="1"
+                   Classes="settingsInput"
+                   Text="{Binding AppFontFamilyName, Mode=TwoWay}"
+                   PlaceholderText="Inter"
+                   VerticalContentAlignment="Center"
+                   AutomationProperties.Name="Font family name" />
+        </Grid>
+      </StackPanel>
+    </Border>
+  </StackPanel>
+</UserControl>

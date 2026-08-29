@@ -76,6 +76,7 @@ public sealed partial class App : Application
             InitializeAccentColor();
             var viewModel = new MainWindowViewModel();
             ApplyTheme(viewModel.Settings.ThemePreset, viewModel.Settings.UseSystemAccent);
+            ApplyFontFamily(viewModel.Settings.FontFamilyName);
             _mainWindow = new MainWindow
             {
                 DataContext = viewModel,
@@ -240,6 +241,24 @@ public sealed partial class App : Application
         _themePreset = AppThemeService.Normalize(preset);
         _useSystemAccent = useSystemAccent;
         AppThemeService.Apply(this, _themePreset, _systemAccent, _useSystemAccent);
+    }
+
+    internal void ApplyFontFamily(string? fontFamilyName)
+    {
+        var name = string.IsNullOrWhiteSpace(fontFamilyName) ? "Inter" : fontFamilyName.Trim();
+        var source = string.Equals(name, "Inter", StringComparison.OrdinalIgnoreCase)
+            ? "fonts:Inter#Inter, $Default"
+            : $"{name}, $Default";
+
+        try
+        {
+            Resources["ContentControlThemeFontFamily"] = new FontFamily(source);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Font family '{name}' could not be applied; using Inter.", error);
+            Resources["ContentControlThemeFontFamily"] = new FontFamily("fonts:Inter#Inter, $Default");
+        }
     }
 
     private void InitializeTrayIcon()

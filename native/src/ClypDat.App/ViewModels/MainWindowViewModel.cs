@@ -454,6 +454,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void ApplyTheme() =>
         (Application.Current as ClypDat.App.App)?.ApplyTheme(Settings.ThemePreset, Settings.UseSystemAccent);
+
+    public string AppFontFamilyName
+    {
+        get => Settings.FontFamilyName;
+        set
+        {
+            var name = string.IsNullOrWhiteSpace(value) ? "Inter" : value.Trim();
+            if (string.Equals(Settings.FontFamilyName, name, StringComparison.Ordinal)) return;
+            Settings.FontFamilyName = name;
+            SaveSettings();
+            (Application.Current as ClypDat.App.App)?.ApplyFontFamily(name);
+            OnPropertyChanged();
+        }
+    }
+
     public string StartupRegistrationError
     {
         get => _startupRegistrationError;
@@ -6122,7 +6137,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 ? $"recording:{ActiveGameDetection.DisplayName}"
                 : $"playing:{ActiveGameDetection.DisplayName}";
             details = armed
-                ? $"Recording {ActiveGameDetection.DisplayName}"
+                ? $"Playing {ActiveGameDetection.DisplayName} and Recording {ActiveGameDetection.DisplayName}"
                 : $"Playing {ActiveGameDetection.DisplayName}";
             // The library total says nothing about what is happening right
             // now, which is the whole point of the line while a game is up.
@@ -8464,7 +8479,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         "General", "Game Detection", "Import Clips",
         "Replay Buffer", "Custom Game Settings", "Auto-Clip", "Audio", "Game Audio Exclusions",
-        "Themes", "Overlays and Notifications", "Discord Rich Presence",
+        "Themes", "Fonts", "Overlays and Notifications", "Discord Rich Presence",
         "About"
     };
 
