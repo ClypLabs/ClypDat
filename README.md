@@ -4,16 +4,15 @@
 
 ClypDat is a Windows replay recorder for gameplay. It keeps recent footage in a rolling buffer, then saves that buffer when you press a hotkey. Clips stay in a local library where you can trim, rename, export, or delete them.
 
+The codebase is `native/` (C#/.NET 10, Avalonia UI). ClypDat uses a maintained [Avalonia fork](https://github.com/ClypLabs/clypdat-avalonia).
+
 ## Install
 
 Download the current installer or portable build from [GitHub Releases](https://github.com/ClypLabs/ClypDat/releases). ClypDat checks for stable releases at launch and can download the next installer after you accept an update.
 
 ## Capture
 
-ClypDat has two replay-buffer backends. Choose one in Settings, or leave the default **Auto** setting.
-
-- **ClypDat (Native)** uses DXGI Desktop Duplication and GPU-side downscaling. It does not inject into games. NVENC is used when available, followed by AMD AMF and software `libx264`.
-- **Windows Capture (Legacy)** uses ScreenRecorderLib with Windows Graphics Capture or DXGI Desktop Duplication. It remains available as a fallback.
+ClypDat uses its native replay-buffer backend with DXGI Desktop Duplication and GPU-side downscaling. It does not inject into games. NVENC is used when available, followed by AMD AMF and software `libx264`.
 
 When ClypDat loses the game window because it is covered, backgrounded, or minimized, it freezes the last game frame instead of recording another app. Saved clips use the game name and recording time, for example `Counter-Strike 2 2026-07-10 17-30-00.mp4`.
 
