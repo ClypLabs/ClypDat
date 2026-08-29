@@ -10,6 +10,12 @@ The codebase is `native/` (C#/.NET 10, Avalonia UI). ClypDat uses a maintained [
 
 Download the current installer or portable build from [GitHub Releases](https://github.com/ClypLabs/ClypDat/releases). ClypDat checks for stable releases at launch and can download the next installer after you accept an update.
 
+Once the package is available in the WinGet catalog, install it from PowerShell with:
+
+```powershell
+winget install --id ClypLabs.ClypDat
+```
+
 ## Capture
 
 ClypDat uses its native replay-buffer backend with DXGI Desktop Duplication and GPU-side downscaling. It does not inject into games. NVENC is used when available, followed by AMD AMF and software `libx264`.
