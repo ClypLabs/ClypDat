@@ -19,6 +19,8 @@ jobs:
     # performs this same check below, so retries cannot submit a prerelease.
     if: github.event_name == 'workflow_dispatch' || (github.event.release.draft == false && github.event.release.prerelease == false)
     runs-on: windows-latest
+    env:
+      WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
     steps:
       - name: Check out manifest generator
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -52,7 +54,7 @@ jobs:
           if ($actualSha256 -ne $expectedSha256) { throw "WingetCreate checksum mismatch: expected $expectedSha256, got $actualSha256." }
 
       - name: Generate, validate, and submit manifest
-        if: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN != '' }}
+        if: ${{ env.WINGET_CREATE_GITHUB_TOKEN != '' }}
         shell: pwsh
         env:
           WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
@@ -66,5 +68,5 @@ jobs:
           .\eng\New-WinGetManifest.ps1 -Tag $env:TAG -InstallerUrl $env:INSTALLER_URL -OutputDirectory .\winget-manifests -Submit -WingetCreatePath .\wingetcreate.exe
 
       - name: Skip WinGet submission when token is unavailable
-        if: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN == '' }}
+        if: ${{ env.WINGET_CREATE_GITHUB_TOKEN == '' }}
         run: Write-Host 'WINGET_CREATE_GITHUB_TOKEN is not configured; skipping WinGet submission.'
