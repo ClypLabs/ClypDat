@@ -79,7 +79,7 @@ internal static class AppThemeService
         new Dictionary<string, ThemeTransform>(StringComparer.OrdinalIgnoreCase)
         {
             ["ClypDat Blue"] = new(228.8, 0.4579, 0.1938, 1.5581, -0.0337),
-            ["Berry"] = new(266.0, 0.4274, 0.1614, 1.3914, -0.0269),
+            ["Berry"] = new(266.0, 1.0, 0.6, 1.3914, -0.0269),
             ["Emerald"] = new(161.4, 0.4711, 0.1715, 1.1712, -0.0251),
             ["Rose"] = new(333.2, 0.4942, 0.1639, 1.3705, -0.0263),
             ["Amber"] = new(35.4, 0.7844, 0.1753, 1.3132, -0.0279),
