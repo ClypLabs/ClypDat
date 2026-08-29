@@ -5,18 +5,7 @@ using System.Text.Json;
 namespace ClypDat.App.Services;
 
 /// <summary>What ClypDat is currently doing, as Discord should describe it.</summary>
-internal enum DiscordStatusDisplayType
-{
-    Name = 0,
-    State = 1,
-    Details = 2
-}
-
-internal sealed record DiscordPresence(
-    string Details,
-    string State,
-    DateTime? StartedUtc,
-    DiscordStatusDisplayType StatusDisplayType = DiscordStatusDisplayType.Details)
+internal sealed record DiscordPresence(string Details, string State, DateTime? StartedUtc)
 {
     public static readonly DiscordPresence None = new(string.Empty, string.Empty, null);
 
@@ -295,7 +284,7 @@ internal static class DiscordRichPresenceService
                 type = 0,
                 // Discord otherwise uses the registered application name
                 // ("ClypDat") in compact member/friend-list status text.
-                status_display_type = (int)presence.StatusDisplayType,
+                status_display_type = 2,
                 details = Trim(presence.Details),
                 state = Trim(presence.State),
                 timestamps = presence.StartedUtc is { } started

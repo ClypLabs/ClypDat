@@ -5116,9 +5116,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // the event to fire, not after this method's own (slower) probe work
         // finishes.
         _recentlySelfAddedPaths[filePath] = DateTime.UtcNow;
-        // Counted here rather than at save time so imports and exports land in
-        // it too - it is "clips this session", not "clips recorded".
-        _clipsAddedThisSession++;
         var clock = System.Diagnostics.Stopwatch.StartNew();
         ClipCardViewModel clip;
         await _libraryRefreshLock.WaitAsync();
@@ -6111,7 +6108,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         string kind;
         string details;
         var state = clipLine;
-        var statusDisplayType = DiscordStatusDisplayType.Details;
 
         // A running game is the user's primary activity regardless of which
         // ClypDat page is open. Settings/editor navigation must not replace it.
@@ -6126,19 +6122,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             kind = recording
                 ? $"recording:{ActiveGameDetection.DisplayName}"
                 : $"playing:{ActiveGameDetection.DisplayName}";
-            details = $"Playing {ActiveGameDetection.DisplayName}";
-            // The library total says nothing about what is happening right
-            // now, which is the whole point of the line while a game is up.
-            // What the buffer is holding does, and a session tally does once
-            // there is one to report.
-            state = recording
+            details = recording
                 ? $"Recording {ActiveGameDetection.DisplayName}"
-                : RecordingStateLine(false);
-            // Keep Playing and Recording as separate lines. While recording,
-            // select the state line for Discord's one-line compact status.
-            statusDisplayType = recording
-                ? DiscordStatusDisplayType.State
-                : DiscordStatusDisplayType.Details;
+                : $"Playing {ActiveGameDetection.DisplayName}";
+            state = string.Empty;
         }
         else if (IsSettingsVisible)
         {
@@ -6178,31 +6165,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _discordActivityStartedUtc = DateTime.UtcNow;
         }
 
-        DiscordRichPresenceService.SetPresence(new DiscordPresence(details, state, _discordActivityStartedUtc, statusDisplayType));
-    }
-
-    // Clips added to the library since launch. Not persisted: it describes
-    // this sitting, which is what makes it worth showing next to an elapsed
-    // timer.
-    private int _clipsAddedThisSession;
-
-    private string RecordingStateLine(bool armed)
-    {
-        if (_clipsAddedThisSession > 0)
-        {
-            return _clipsAddedThisSession == 1 ? "1 clip this session" : $"{_clipsAddedThisSession:N0} clips this session";
-        }
-
-        if (!armed) return "Not recording";
-
-        // Resolved per game, not global: Custom Game Settings can give a game
-        // its own quality, so the status describes what is actually being
-        // captured rather than what the settings page happens to show.
-        var detectionKey = string.IsNullOrWhiteSpace(ActiveGameDetection.DetectionKey)
-            ? ActiveGameDetection.ExeName
-            : ActiveGameDetection.DetectionKey;
-        var effective = CustomGameSettingsResolver.Resolve(Settings, detectionKey);
-        return $"{effective.ReplayMaxHeight}p · {effective.ReplayFrameRate} fps";
+        DiscordRichPresenceService.SetPresence(new DiscordPresence(details, state, _discordActivityStartedUtc));
     }
 
     public bool DiscordRichPresenceEnabled
