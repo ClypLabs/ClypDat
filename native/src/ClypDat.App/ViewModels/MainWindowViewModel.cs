@@ -24,6 +24,7 @@ internal readonly record struct LibraryStartupDateMarker(string Text, int FirstV
 
 public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
+    private const int CurrentThumbnailStartFrameVersion = 1;
     private readonly MediaProbeService _mediaProbe = new();
     private readonly LibraryCacheStore _libraryCache = new();
     private readonly HashSet<string> _selectedPaths = new(StringComparer.OrdinalIgnoreCase);
@@ -9218,8 +9219,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // re-reading caches to arrive back at what the cards were already
             // showing. That walk is what made a cold start crawl and put the
             // "Building your library" banner up on every single launch.
+            var regenerateThumbnailStarts = Settings.ThumbnailStartFrameVersion < CurrentThumbnailStartFrameVersion;
             var needProbe = clips.Where(clip => clip.Duration <= TimeSpan.Zero).ToArray();
-            var needThumbnail = clips.Where(clip => clip.Media.HasVideo && string.IsNullOrEmpty(clip.Media.ThumbnailPath)).ToArray();
+            var needThumbnail = clips.Where(clip => clip.Media.HasVideo
+                && (regenerateThumbnailStarts || string.IsNullOrEmpty(clip.Media.ThumbnailPath))).ToArray();
             var needFilmstrip = clips.Where(clip => clip.Media.HasVideo && string.IsNullOrEmpty(clip.Media.FilmstripPath)).ToArray();
 
             _hydrationOverallCompleted = 0;
@@ -9260,14 +9263,39 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // Recomputed rather than reusing the list from above: a clip that
             // had no cached probe a moment ago has a real duration now, and
             // the thumbnail/filmstrip grabs seek by duration.
-            needThumbnail = clips.Where(clip => clip.Media.HasVideo && string.IsNullOrEmpty(clip.Media.ThumbnailPath)).ToArray();
+            needThumbnail = clips.Where(clip => clip.Media.HasVideo
+                && (regenerateThumbnailStarts || string.IsNullOrEmpty(clip.Media.ThumbnailPath))).ToArray();
+            var thumbnailStartRegenerationSucceeded = true;
             await RunHydrationPassAsync(needThumbnail, "Loading thumbnails", cancellationToken,
                 async clip =>
                 {
-                    var path = await _mediaProbe.EnsureThumbnailAsync(clip.Path, clip.Duration);
-                    if (string.IsNullOrEmpty(path)) return;
+                    string path;
+                    try
+                    {
+                        path = regenerateThumbnailStarts
+                            ? await _mediaProbe.RegenerateThumbnailAsync(clip.Path, clip.HoverPreviewRange.Start, clip.HoverPreviewCropFilter)
+                            : await _mediaProbe.EnsureThumbnailAsync(clip.Path, clip.Duration);
+                    }
+                    catch
+                    {
+                        if (regenerateThumbnailStarts) thumbnailStartRegenerationSucceeded = false;
+                        throw;
+                    }
+
+                    if (string.IsNullOrEmpty(path))
+                    {
+                        if (regenerateThumbnailStarts) thumbnailStartRegenerationSucceeded = false;
+                        return;
+                    }
                     await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(clip.Media with { ThumbnailPath = path }, reloadSidecars: false));
                 });
+
+            if (regenerateThumbnailStarts && thumbnailStartRegenerationSucceeded)
+            {
+                Settings.ThumbnailStartFrameVersion = CurrentThumbnailStartFrameVersion;
+                SaveSettings();
+                AppLog.Info($"Thumbnail start-frame migration: regenerated {needThumbnail.Length} tile(s).");
+            }
 
             if (!_gameIsActive) StartBackgroundWaveformHydration();
         }
