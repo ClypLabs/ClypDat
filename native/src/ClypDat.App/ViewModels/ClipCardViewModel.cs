@@ -568,7 +568,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     public bool HasSelectionOrder => SelectionOrder > 0;
 
     public bool IsCheckVisible => IsSelected || IsHovered;
-    public IBrush SelectionBorderBrush => IsSelected ? AppThemeService.Brush("AccentBrush", "#5864E8") : IsHovered ? AppThemeService.Brush("Text_5C6D7E", "#5C6D7E") : AppThemeService.Brush("Surface_24303A", "#24303A");
+    public IBrush SelectionBorderBrush => IsSelected ? AppThemeService.Brush("AccentBrush", "#5864E8") : IsHovered ? AppThemeService.Brush("AccentHoverBrush", "#4F5CB6") : AppThemeService.Brush("Surface_24303A", "#24303A");
     public Avalonia.Thickness SelectionBorderThickness => IsSelected || IsHovered ? new Avalonia.Thickness(2) : new Avalonia.Thickness(0);
 
     internal CachedClipState ToCachedState() => new(_media, _clipInfo, _clipEdit);
