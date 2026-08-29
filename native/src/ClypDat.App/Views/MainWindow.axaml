@@ -1524,8 +1524,7 @@
                             HorizontalScrollBarVisibility="Hidden"
                             VerticalScrollBarVisibility="Disabled"
                             HorizontalContentAlignment="Stretch"
-                            SizeChanged="TimelineViewport_OnSizeChanged"
-                            ToolTip.Tip="Ctrl + scroll to zoom timeline">
+                            SizeChanged="TimelineViewport_OnSizeChanged">
                 <Grid x:Name="TimelineContent" RowDefinitions="34,*">
                 <!-- Cursor="Hand" on both - the ruler already forwards to the
                      exact same click/drag handlers as the surface below it
