@@ -686,6 +686,35 @@ public sealed class MediaProbeService
         return output;
     }
 
+    public bool DeleteLegacyThumbnailCache()
+    {
+        try
+        {
+            var deleted = 0;
+            foreach (var path in Directory.EnumerateFiles(_cacheFolder, "*-v3.jpg"))
+            {
+                try
+                {
+                    File.Delete(path);
+                    deleted++;
+                }
+                catch (Exception error)
+                {
+                    AppLog.Error($"Legacy thumbnail cache cleanup failed for {path}", error);
+                    return false;
+                }
+            }
+
+            AppLog.Info($"Legacy thumbnail cache cleanup: removed {deleted} v3 file(s).");
+            return true;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Legacy thumbnail cache cleanup failed", error);
+            return false;
+        }
+    }
+
     // Re-grabs the cached library-card thumbnail at an explicit timestamp,
     // overwriting the same cache path EnsureThumbnailAsync uses - called when
     // the user moves a clip's TrimStart handle, so the card representing it

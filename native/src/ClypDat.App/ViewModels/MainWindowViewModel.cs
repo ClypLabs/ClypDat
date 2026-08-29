@@ -25,6 +25,7 @@ internal readonly record struct LibraryStartupDateMarker(string Text, int FirstV
 public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
     private const int CurrentThumbnailStartFrameVersion = 1;
+    private const int CurrentThumbnailCacheCleanupVersion = 1;
     private readonly MediaProbeService _mediaProbe = new();
     private readonly LibraryCacheStore _libraryCache = new();
     private readonly HashSet<string> _selectedPaths = new(StringComparer.OrdinalIgnoreCase);
@@ -9236,6 +9237,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             if (pending == 0)
             {
+                await CleanupLegacyThumbnailCacheAsync();
                 AppLog.Info($"Library hydration: nothing to do, all {clips.Count} clips served from cache.");
                 // Still start the idle sweeps. Probe and thumbnail results are
                 // cached per clip, so a returning user takes this branch on
@@ -9297,6 +9299,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 AppLog.Info($"Thumbnail start-frame migration: regenerated {needThumbnail.Length} tile(s).");
             }
 
+            await CleanupLegacyThumbnailCacheAsync();
+
             if (!_gameIsActive) StartBackgroundWaveformHydration();
         }
         catch (OperationCanceledException)
@@ -9321,6 +9325,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 });
             }
         }
+    }
+
+    private async Task CleanupLegacyThumbnailCacheAsync()
+    {
+        if (Settings.ThumbnailStartFrameVersion < CurrentThumbnailStartFrameVersion
+            || Settings.ThumbnailCacheCleanupVersion >= CurrentThumbnailCacheCleanupVersion)
+        {
+            return;
+        }
+
+        if (!await Task.Run(_mediaProbe.DeleteLegacyThumbnailCache)) return;
+        Settings.ThumbnailCacheCleanupVersion = CurrentThumbnailCacheCleanupVersion;
+        SaveSettings();
     }
 
     // One pass of HydrateLibraryClipsAsync - runs `action` for every clip

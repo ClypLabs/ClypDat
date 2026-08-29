@@ -11,6 +11,9 @@ public sealed class AppSettings
     // from its hover-preview start frame; it is written only after that pass
     // completes, so a failed or deferred pass retries on the next launch.
     public int ThumbnailStartFrameVersion { get; set; }
+    // Separate cleanup marker: deleting obsolete cache files never requires
+    // regenerating their v4 replacements.
+    public int ThumbnailCacheCleanupVersion { get; set; }
     public string LibraryFolder { get; set; } = string.Empty;
     // Which Settings nav section was open last, so reopening Settings picks
     // up where the user left off instead of always landing on the same page.
