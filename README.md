@@ -36,14 +36,14 @@ Video playback uses LibVLC. Audio playback uses a separate NAudio/WASAPI pipelin
 
 ## Import existing clips
 
-Import clips from other popular clipping applications through **Settings > Import Clips**. ClypDat reads supported local catalogs, then scans default capture folders when a catalog is missing or unreadable. You can copy or move the clips into the ClypDat library.
+Import clips from other popular clipping applications through **Settings > Import Clips**. ClypDat reads supported local catalogs, then scans default capture folders when a catalog is missing or unreadable. You can choose to either copy or move the clips into the ClypDat library.
 
 ## Requirements
 
 - Windows 10 or Windows 11, x64
 - Internet access for the first source build. `dotnet.ps1` downloads the pinned .NET SDK into `.dotnet` inside the clone, so a system-wide .NET installation is not required.
 
-The Native backend runs on NVIDIA and AMD GPUs. It can use software `libx264` when no supported hardware encoder is available.
+The Native backend runs on NVIDIA, AMD and Intel GPUs. It can use software `libx264` when no supported hardware encoder is available.
 
 ## Build from source
 
