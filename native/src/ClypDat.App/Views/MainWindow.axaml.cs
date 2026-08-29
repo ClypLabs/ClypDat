@@ -247,6 +247,7 @@ public sealed partial class MainWindow : Window
     {
         Background = Brushes.Black;
         InitializeComponent();
+        UpdateEditorSurfaceVisibility();
         _startupWindowCloaked = StartupWindowPresentation.TryCloak(this);
         if (!_startupWindowCloaked) Opacity = 0;
         EditorVideoView.VideoClicked += EditorVideoView_OnVideoClicked;
@@ -323,6 +324,7 @@ public sealed partial class MainWindow : Window
             ShowPendingNewClipsDialog();
             if (_startupInitialized) return;
             _startupInitialized = true;
+            UpdateEditorSurfaceVisibility();
             // Only known once there is a visual root - thumbnails decode to
             // card pixels, not card DIPs.
             ViewModel?.SetCardRenderScaling(RenderScaling);
@@ -353,6 +355,8 @@ public sealed partial class MainWindow : Window
                 ViewModel.ClipAdded += ViewModel_OnClipAdded;
                 ViewModel.PropertyChanged += (_, e) =>
                 {
+                    if (e.PropertyName is nameof(MainWindowViewModel.IsEditorVisible) or nameof(MainWindowViewModel.IsEditorVideoLoading))
+                        UpdateEditorSurfaceVisibility();
                     if (e.PropertyName == nameof(MainWindowViewModel.AutoClippingEnabled)) UpdateAutoClipStates();
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayBufferEnabled)) _ = ApplyReplayBufferEnabledAsync();
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayAdaptiveFrameRateEnabled))
@@ -4197,6 +4201,18 @@ public sealed partial class MainWindow : Window
         return true;
     }
 
+    // Opacity keeps the editor subtree measured and its NativeControlHost
+    // created. Native child HWNDs ignore Avalonia opacity, so hide/show that
+    // one surface through Win32 without destroying the HWND LibVLC warmed.
+    private void UpdateEditorSurfaceVisibility()
+    {
+        if (ViewModel is null) return;
+        var showEditor = ViewModel.IsEditorVisible;
+        EditorPanelRoot.Opacity = showEditor ? 1 : 0;
+        EditorPanelRoot.IsHitTestVisible = showEditor;
+        EditorVideoView.SetNativeSurfaceVisible(showEditor && !ViewModel.IsEditorVideoLoading);
+    }
+
     private async void ClipContextExport_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
@@ -4873,6 +4889,7 @@ public sealed partial class MainWindow : Window
         // This is the exact native EditorVideoView which will remain attached
         // after the click. LibVLC only promises a stable HWND at play start;
         // decoding through a dummy vout cannot be transferred later.
+        EditorVideoView.SetNativeSurfaceVisible(false);
         _playback = session;
         EditorVideoView.MediaPlayer = session.VideoPlayer;
         EditorVideoView.WatchMediaPlayer(session.VideoPlayer);

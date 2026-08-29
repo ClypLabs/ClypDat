@@ -48,6 +48,9 @@ internal sealed class ClickableVideoView : VideoView
     private int _nativeSizeSyncQueued;
     private int _nativeWidth;
     private int _nativeHeight;
+    // Keep LibVLC's target HWND alive while Library is visible. Avalonia
+    // opacity cannot hide a native child, so visibility belongs to Win32.
+    private bool _nativeSurfaceVisible;
     private bool _mouseDownInVideo;
     private volatile bool _disposed;
 
@@ -71,6 +74,12 @@ internal sealed class ClickableVideoView : VideoView
 
     public void RefreshClickHook() => EnsureHook();
 
+    public void SetNativeSurfaceVisible(bool visible)
+    {
+        _nativeSurfaceVisible = visible;
+        ApplyNativeSurfaceVisibility();
+    }
+
     protected override IPlatformHandle CreateNativeControlCore(IPlatformHandle parent)
     {
         var control = base.CreateNativeControlCore(parent);
@@ -78,6 +87,7 @@ internal sealed class ClickableVideoView : VideoView
         _nativeWidth = 0;
         _nativeHeight = 0;
         RequestNativeSizeSync();
+        ApplyNativeSurfaceVisibility();
         EnsureHook();
         return control;
     }
@@ -133,6 +143,12 @@ internal sealed class ClickableVideoView : VideoView
             _nativeWidth = width;
             _nativeHeight = height;
         }
+    }
+
+    private void ApplyNativeSurfaceVisibility()
+    {
+        var host = Volatile.Read(ref _hostHandle);
+        if (host != IntPtr.Zero) ShowWindow(host, _nativeSurfaceVisible ? SwShow : SwHide);
     }
 
     private void EnsureHook()
@@ -298,10 +314,15 @@ internal sealed class ClickableVideoView : VideoView
     private const uint SwpNoMove = 0x0002;
     private const uint SwpNoZOrder = 0x0004;
     private const uint SwpNoActivate = 0x0010;
+    private const int SwHide = 0;
+    private const int SwShow = 5;
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr window, int command);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern int GetMessageW(out NativeMessage message, IntPtr window, uint filterMin, uint filterMax);

@@ -1279,7 +1279,10 @@
       </controls:RetainedPageHost>
 
     <settings:SettingsPanel x:Name="SettingsPanelView" Grid.Column="1" IsVisible="{Binding IsSettingsVisible}" />
-      <Grid Grid.Column="1" ColumnDefinitions="*,340" RowDefinitions="*,Auto" IsVisible="{Binding IsEditorVisible}">
+      <!-- Stays realized while Library is visible so EditorVideoView retains
+           its native HWND for LibVLC hover warm-up. Code sets opacity and
+           Win32 child visibility; IsVisible would destroy that HWND. -->
+      <Grid x:Name="EditorPanelRoot" Grid.Column="1" ColumnDefinitions="*,340" RowDefinitions="*,Auto" Opacity="0" IsHitTestVisible="False">
       <Grid Grid.ColumnSpan="2" Grid.RowSpan="2" RowDefinitions="*,Auto" ColumnDefinitions="*,340">
         <Grid Grid.Column="0" Background="{StaticResource Surface_0E141A}">
           <Border Background="{StaticResource Surface_05080B}">
@@ -1296,7 +1299,6 @@
                    instead of just filling this pane. -->
               <Grid x:Name="EditorVideoHost" Grid.Column="0" ClipToBounds="True" PointerWheelChanged="VideoHost_OnPointerWheelChanged">
                 <controls:ClickableVideoView x:Name="EditorVideoView"
-                                IsVisible="{Binding IsEditorVideoAreaVisible}"
                                 RenderTransformOrigin="0.5,0.5">
                   <!-- Same EditorVideoView instance gets reparented into
                        FullscreenVideoHost on entering fullscreen (see
