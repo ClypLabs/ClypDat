@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
+using Avalonia.Media.Fonts;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using System.Diagnostics;
@@ -14,6 +15,10 @@ namespace ClypDat.App;
 
 public sealed partial class App : Application
 {
+    private static readonly Uri WindowsFontCollectionKey = new("fonts:ClypDatWindows");
+    private static readonly Uri SelectedWindowsFontCollectionKey = new("fonts:ClypDatSelectedWindowsFont");
+    private static IFontCollection? _windowsFontCollection;
+    private static string? _windowsFontsPath;
     private TrayIcon? _trayIcon;
     private MainWindow? _mainWindow;
     private Stream? _trayIconStream;
@@ -246,14 +251,11 @@ public sealed partial class App : Application
     internal void ApplyFontFamily(string? fontFamilyName)
     {
         var name = string.IsNullOrWhiteSpace(fontFamilyName) ? "Inter" : fontFamilyName.Trim();
-        var source = string.Equals(name, "Inter", StringComparison.OrdinalIgnoreCase)
-            ? "fonts:Inter#Inter, $Default"
-            : $"{name}, $Default";
         FontFamily fontFamily;
 
         try
         {
-            fontFamily = new FontFamily(source);
+            fontFamily = ResolveFontFamily(name);
         }
         catch (Exception error)
         {
@@ -263,6 +265,63 @@ public sealed partial class App : Application
 
         Resources["ClypDatFontFamily"] = fontFamily;
         if (_mainWindow is not null) _mainWindow.FontFamily = fontFamily;
+    }
+
+    private static FontFamily ResolveFontFamily(string name)
+    {
+        if (string.Equals(name, "Inter", StringComparison.OrdinalIgnoreCase))
+            return new FontFamily("fonts:Inter#Inter, $Default");
+
+        var collection = GetWindowsFontCollection();
+        var family = collection?.FirstOrDefault(candidate =>
+            string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (family is not null)
+            return new FontFamily($"{WindowsFontCollectionKey}#{family.Name}, $Default");
+
+        var file = FindWindowsFontFile(name);
+        if (file is null) return new FontFamily("fonts:Inter#Inter, $Default");
+
+        var selected = new EmbeddedFontCollection(SelectedWindowsFontCollectionKey, new Uri(file));
+        if (selected.Count == 0)
+        {
+            ((IFontCollection)selected).Dispose();
+            return new FontFamily("fonts:Inter#Inter, $Default");
+        }
+
+        FontManager.Current.AddFontCollection(selected);
+        return new FontFamily($"{SelectedWindowsFontCollectionKey}#{selected[0].Name}, $Default");
+    }
+
+    private static IFontCollection? GetWindowsFontCollection()
+    {
+        if (_windowsFontCollection is not null) return _windowsFontCollection;
+
+        var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        var folder = Path.Combine(string.IsNullOrWhiteSpace(windows) ? @"C:\Windows" : windows, "Fonts");
+        if (!Directory.Exists(folder)) return null;
+
+        var collection = new EmbeddedFontCollection(
+            WindowsFontCollectionKey,
+            new Uri(Path.TrimEndingDirectorySeparator(folder) + Path.DirectorySeparatorChar));
+        FontManager.Current.AddFontCollection(collection);
+        _windowsFontsPath = folder;
+        _windowsFontCollection = collection;
+        return collection;
+    }
+
+    private static string? FindWindowsFontFile(string name)
+    {
+        _ = GetWindowsFontCollection();
+        if (_windowsFontsPath is null) return null;
+
+        return Directory.EnumerateFiles(_windowsFontsPath)
+            .Where(path => Path.GetExtension(path) is { } extension &&
+                           (extension.Equals(".ttf", StringComparison.OrdinalIgnoreCase) ||
+                            extension.Equals(".otf", StringComparison.OrdinalIgnoreCase) ||
+                            extension.Equals(".ttc", StringComparison.OrdinalIgnoreCase)))
+            .FirstOrDefault(path =>
+                string.Equals(Path.GetFileName(path), name, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Path.GetFileNameWithoutExtension(path), name, StringComparison.OrdinalIgnoreCase));
     }
 
     private void InitializeTrayIcon()
