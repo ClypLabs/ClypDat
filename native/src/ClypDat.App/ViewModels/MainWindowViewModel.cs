@@ -1010,6 +1010,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 ReplayQualityRestartRequired = false;
             }
+            UpdateDiscordPresence();
         }
     }
 
@@ -6110,8 +6111,36 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         string kind;
         string details;
         var state = clipLine;
+        var statusDisplayType = DiscordStatusDisplayType.Details;
 
-        if (IsSettingsVisible)
+        // A running game is the user's primary activity regardless of which
+        // ClypDat page is open. Settings/editor navigation must not replace it.
+        if (ActiveGameDetection.IsDetected && !string.IsNullOrWhiteSpace(ActiveGameDetection.DisplayName))
+        {
+            var recording = IsReplayRecording;
+            // Game name is part of the kind, so the elapsed timer Discord shows
+            // is "how long on THIS game" rather than "how long recording
+            // anything". Without it, alt-tabbing from one game straight into
+            // another kept the first game's start time and the timer read as a
+            // session that never happened.
+            kind = recording
+                ? $"recording:{ActiveGameDetection.DisplayName}"
+                : $"playing:{ActiveGameDetection.DisplayName}";
+            details = $"Playing {ActiveGameDetection.DisplayName}";
+            // The library total says nothing about what is happening right
+            // now, which is the whole point of the line while a game is up.
+            // What the buffer is holding does, and a session tally does once
+            // there is one to report.
+            state = recording
+                ? $"Recording {ActiveGameDetection.DisplayName}"
+                : RecordingStateLine(false);
+            // Keep Playing and Recording as separate lines. While recording,
+            // select the state line for Discord's one-line compact status.
+            statusDisplayType = recording
+                ? DiscordStatusDisplayType.State
+                : DiscordStatusDisplayType.Details;
+        }
+        else if (IsSettingsVisible)
         {
             kind = "settings";
             details = "Adjusting settings";
@@ -6124,26 +6153,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // the editor is open.
             var game = AllClips.FirstOrDefault(clip => string.Equals(clip.Path, SelectedVideoPath, StringComparison.OrdinalIgnoreCase))?.GameNameLabel;
             if (!string.IsNullOrWhiteSpace(game)) state = game;
-        }
-        else if (ActiveGameDetection.IsDetected && !string.IsNullOrWhiteSpace(ActiveGameDetection.DisplayName))
-        {
-            var armed = Settings.ReplayBufferEnabled && IsRecordingEnabledForActiveGame;
-            // Game name is part of the kind, so the elapsed timer Discord shows
-            // is "how long on THIS game" rather than "how long recording
-            // anything". Without it, alt-tabbing from one game straight into
-            // another kept the first game's start time and the timer read as a
-            // session that never happened.
-            kind = armed
-                ? $"recording:{ActiveGameDetection.DisplayName}"
-                : $"playing:{ActiveGameDetection.DisplayName}";
-            details = $"Playing {ActiveGameDetection.DisplayName}";
-            // The library total says nothing about what is happening right
-            // now, which is the whole point of the line while a game is up.
-            // What the buffer is holding does, and a session tally does once
-            // there is one to report.
-            state = armed
-                ? $"Recording {ActiveGameDetection.DisplayName}"
-                : RecordingStateLine(false);
         }
         else if (IsGameFilterActive || IsClipTypeFilterActive)
         {
@@ -6169,7 +6178,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _discordActivityStartedUtc = DateTime.UtcNow;
         }
 
-        DiscordRichPresenceService.SetPresence(new DiscordPresence(details, state, _discordActivityStartedUtc));
+        DiscordRichPresenceService.SetPresence(new DiscordPresence(details, state, _discordActivityStartedUtc, statusDisplayType));
     }
 
     // Clips added to the library since launch. Not persisted: it describes
