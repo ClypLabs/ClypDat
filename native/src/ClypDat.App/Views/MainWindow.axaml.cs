@@ -3319,6 +3319,11 @@ public sealed partial class MainWindow : Window
             Stretch = Avalonia.Media.Stretch.UniformToFill,
             Height = largePreview ? 266 : 169
         };
+        var preview = new ClipPreviewPresenter
+        {
+            IsHitTestVisible = false,
+            ZIndex = 1
+        };
         // The decode is asynchronous, so a card built before it finishes has to
         // pick the bitmap up when it lands.
         entry.Clip.PropertyChanged += (_, args) =>
@@ -3329,9 +3334,9 @@ public sealed partial class MainWindow : Window
         var duration = new Border
         {
             Background = AppThemeService.Brush("Surface_CC0B1116", "#CC0B1116"),
-            CornerRadius = new CornerRadius(6),
-            Padding = new Thickness(8, 3, 8, 4),
-            Margin = new Thickness(10),
+            CornerRadius = new CornerRadius(18),
+            Padding = new Thickness(10, 6),
+            Margin = new Thickness(12),
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top,
             Child = new TextBlock
@@ -3360,7 +3365,7 @@ public sealed partial class MainWindow : Window
         var picture = new Panel
         {
             Background = AppThemeService.Brush("Surface_0B1116", "#0B1116"),
-            Children = { thumbnail, duration, check }
+            Children = { thumbnail, preview, duration, check }
         };
 
         var timeRow = new StackPanel
@@ -3425,7 +3430,12 @@ public sealed partial class MainWindow : Window
             ClipToBounds = true,
             BorderThickness = new Thickness(1),
             BorderBrush = AppThemeService.Brush("Surface_232F3A", "#232F3A"),
-            Child = layout
+            Child = new Border
+            {
+                CornerRadius = new CornerRadius(12),
+                ClipToBounds = true,
+                Child = layout
+            }
         };
 
         void SyncCardState()
@@ -3439,8 +3449,19 @@ public sealed partial class MainWindow : Window
 
         entry.PropertyChanged += (_, _) => SyncCardState();
         card.Cursor = new Cursor(StandardCursorType.Hand);
-        card.PointerEntered += (_, _) => entry.IsHovered = true;
-        card.PointerExited += (_, _) => entry.IsHovered = false;
+        card.PointerEntered += (_, _) =>
+        {
+            entry.IsHovered = true;
+            var previewSize = ClipHoverPreviewController.ResolvePreviewSize(preview.Bounds.Size, RenderScaling);
+            _clipHoverPreview.Request(entry.Clip, ViewModel?.EnableClipHoverPreview == true, preview, previewSize);
+            StartEditorHoverWarmup(entry.Clip);
+        };
+        card.PointerExited += (_, _) =>
+        {
+            entry.IsHovered = false;
+            _clipHoverPreview.PointerLeft(entry.Clip);
+            CancelEditorHoverWarmup(entry.Clip.Path);
+        };
         // Card body opens the clip; the checkbox above marks it for the Delete
         // button instead, and swallows its own click so the two don't collide.
         card.PointerPressed += async (_, _) =>
