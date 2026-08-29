@@ -129,7 +129,6 @@ public sealed partial class MainWindow : Window
     private EditorHoverWarmup? _claimedEditorHoverWarmup;
     private EditorHoverWarmup? _adoptingEditorHoverWarmup;
     private Task? _editorHoverStopTask;
-    private static readonly TimeSpan EditorHoverWarmupDelay = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan EditorHoverWarmupMaximumDecode = TimeSpan.FromSeconds(2);
     // Closing the window (the X button) hides to the tray instead of quitting,
     // so the replay buffer/Full Session keeps recording - matches the tray
@@ -4852,7 +4851,6 @@ public sealed partial class MainWindow : Window
         PlaybackSession? session = null;
         try
         {
-            await Task.Delay(EditorHoverWarmupDelay, warmup.Cancellation.Token).ConfigureAwait(false);
             // Keep the native target attached until Stop has completely unwound.
             // Reusing or replacing the player earlier lets libvlc set Hwnd to zero
             // while its old vout is still active, which creates VLC's fallback window.
