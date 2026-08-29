@@ -107,8 +107,9 @@ Section "ClypDat" SecMain
   ; copying a partial update over it.
   SetOutPath "$PLUGINSDIR"
   File /oname=ClypDatInstallerShutdown.ps1 "ClypDatInstallerShutdown.ps1"
-  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\ClypDatInstallerShutdown.ps1"'
-  Pop $0
+  ; Use NSIS's built-in ExecWait so the child exit code is captured reliably
+  ; on both interactive installs and WinGet's silent /S installs.
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\ClypDatInstallerShutdown.ps1"' $0
   ${If} $0 != "0"
     ; WinGet runs the installer with /S. A MessageBox in that path blocks its
     ; unattended validation until timeout, so return a failure code instead.
