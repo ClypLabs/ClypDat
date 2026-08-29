@@ -615,7 +615,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var pendingRemux = remuxTask;
             if (pendingRemux is not null && !pendingRemux.IsCompleted)
             {
-                pendingRemux.ContinueWith(_ => ReleaseBorrowedWindow(), TaskScheduler.Default);
+                _ = pendingRemux.ContinueWith(_ => ReleaseBorrowedWindow(), TaskScheduler.Default);
             }
             else
             {

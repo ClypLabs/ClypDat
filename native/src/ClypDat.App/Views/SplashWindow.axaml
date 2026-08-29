@@ -5,7 +5,7 @@
         Width="380" Height="240"
         CanResize="False"
         ShowInTaskbar="True"
-        SystemDecorations="None"
+        WindowDecorations="None"
         WindowStartupLocation="CenterScreen"
         Topmost="True"
         Background="{StaticResource AppBgBrush}"

@@ -70,7 +70,7 @@ public static class CropMaskImage
                 Fill(frame, crop, sourceWidth, sourceHeight, outline);
             }
 
-            bitmap.Save(path);
+            bitmap.Save(path, PngBitmapEncoderOptions.Default);
             return path;
         }
         catch (Exception error)
