@@ -99,7 +99,7 @@ internal static class AppThemeService
         {
             ["System"] = Color.Parse("#5864E8"),
             ["ClypDat Blue"] = Color.Parse("#5864E8"),
-            ["Berry"] = Color.Parse("#8B5CF6"),
+            ["Berry"] = Color.Parse("#570cb9"),
             ["Emerald"] = Color.Parse("#10B981"),
             ["Rose"] = Color.Parse("#F43F5E"),
             ["Amber"] = Color.Parse("#F59E0B"),

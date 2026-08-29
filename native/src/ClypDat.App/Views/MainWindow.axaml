@@ -844,7 +844,7 @@
                a while), and without this the window looked idle/frozen the
                whole time instead of showing what it's doing. -->
           <Border DockPanel.Dock="Top"
-                  Margin="0,14,0,0"
+                  Margin="0,14,24,0"
                   Padding="14,10"
                   CornerRadius="8"
                   Background="{StaticResource Surface_182029}"
