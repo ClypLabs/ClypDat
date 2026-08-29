@@ -6085,6 +6085,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // every time anything in the app moved.
     private string _discordActivityKind = string.Empty;
     private DateTime _discordActivityStartedUtc = DateTime.UtcNow;
+    private int _discordClipsSaved;
 
     public void ApplyDiscordSettings()
     {
@@ -6125,7 +6126,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             details = recording
                 ? $"Recording {ActiveGameDetection.DisplayName}"
                 : $"Playing {ActiveGameDetection.DisplayName}";
-            state = string.Empty;
+            state = _discordClipsSaved == 1
+                ? "1 clip saved"
+                : $"{_discordClipsSaved:N0} clips saved";
         }
         else if (IsSettingsVisible)
         {
@@ -6166,6 +6169,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         DiscordRichPresenceService.SetPresence(new DiscordPresence(details, state, _discordActivityStartedUtc));
+    }
+
+    public void RecordDiscordClipSaved()
+    {
+        _discordClipsSaved++;
+        UpdateDiscordPresence();
     }
 
     public bool DiscordRichPresenceEnabled

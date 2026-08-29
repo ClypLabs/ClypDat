@@ -845,7 +845,11 @@ public sealed partial class MainWindow : Window
             if (ViewModel?.IsSavingReplayClip == true) return;
             RememberSessionClip(completed.Path);
             ShowClipSavedNotification();
-            if (ViewModel is not null) await ViewModel.AddOrUpdateLibraryClipAsync(completed.Path);
+            if (ViewModel is not null)
+            {
+                ViewModel.RecordDiscordClipSaved();
+                await ViewModel.AddOrUpdateLibraryClipAsync(completed.Path);
+            }
         });
     }
 
@@ -2907,6 +2911,7 @@ public sealed partial class MainWindow : Window
                 var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder, titleOverride: autoClipLabel, clipWindow: clipWindow));
                 AppLog.Info($"Replay clip saved: {outputPath}");
                 RememberSessionClip(outputPath);
+                ViewModel.RecordDiscordClipSaved();
                 // The save itself succeeded, but if the capture source had
                 // stopped delivering frames the video is a single frozen frame -
                 // say so now rather than let it be discovered on playback later.
