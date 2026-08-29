@@ -20,6 +20,7 @@ dist/
 dist-portable/
 out/
 release/
+docs/research/
 
 # Local app/cache data
 .cache/
